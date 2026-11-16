@@ -1,0 +1,26 @@
+Filetype: IR signals file
+Version: 1
+#
+name: Power
+type: parsed
+protocol: NEC
+address: 04 00 00 00
+command: 08 00 00 00
+#
+name: Vol_up
+type: parsed
+protocol: NECext
+address: 87 7C 00 00
+command: CA 00 00 00
+#
+name: Raw_key
+type: raw
+frequency: 38000
+duty_cycle: 0.330000
+data: 9000 4500 560 560 560 1690 560
+#
+name: Mute
+type: parsed
+protocol: SIRC15
+address: 01 00 00 00
+command: 14 00 00 00
