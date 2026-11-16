@@ -333,6 +333,23 @@ async def test_device_command_refused_during_transition(hub_process):
         await until(ws)
 
 
+async def test_device_command_queue_full_is_not_reported_as_a_transition(hub_process):
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
+        await hello(ws)
+        await cfg(ws, CONFIG)
+        args = {"device": "tv", "command": "input_hdmi1"}  # discrete: always sent
+        msg = {"device": "hub", "command": "device_command", "args": args}
+        for i in range(10):  # no pause: the 3-slot deferred IR queue overflows
+            await ws.send_str(json.dumps({"v": 1, "id": 100 + i, "t": "command", "d": msg}))
+        replies = {}
+        while len(replies) < 10:
+            m = await recv(ws)
+            if m["t"] == "command_result":
+                replies[m["id"]] = m["d"]
+        msgs = {r.get("message") for r in replies.values() if not r["ok"]}
+        assert msgs == {"IR line busy, queue full"}, replies
+
+
 async def test_set_config_reports_the_current_activity_to_every_client(hub_process):
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
         await hello(ws)
