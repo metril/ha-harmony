@@ -32,6 +32,12 @@ Exactly one of (plus optional `"port_mask"` 1..255, default 255 = all ports):
 
 Zero or several of the three forms is a load error.
 
+Per-protocol ranges (addr max / cmd max); out of range is a load error:
+`nec` 0xFF/0xFF (inverse bytes computed), `necext` 0xFFFF/0xFFFF (16-bit addr and 16-bit cmd sent
+as given, no inverse), `samsung32` 0xFF/0xFF, `rc5` 0x1F/0x7F (cmd bit 6 set = RC5X, field bit 0),
+`rc6` 0xFF/0xFF, `sirc12` 0x1F/0x7F, `sirc15` 0xFF/0x7F, `sirc20` 0x1FFF/0x7F.
+Raw: even, non-zero count of durations, each 1..65535 us; `hz` 1000..1000000.
+
 ## Key maps
 - Key code is the decimal string of 0..255: physical keys 0-127, soft keys 128-255 (touch widgets).
 - Lookup order: current activity `keys`, then top-level `keys`; no match = forward to HA only.

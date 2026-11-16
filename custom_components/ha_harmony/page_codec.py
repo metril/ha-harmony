@@ -45,8 +45,8 @@ def _validate(page: Page) -> None:
             raise ValueError(f"unknown widget kind {w.kind!r}")
         if not 0 <= w.id <= 127:
             raise ValueError(f"widget id {w.id} out of range 0..127")
-        if w.w < 1 or w.h < 1:
-            raise ValueError(f"widget {w.id} has zero size")
+        if not (1 <= w.w <= 15 and 1 <= w.h <= 15):
+            raise ValueError(f"widget {w.id} size {w.w}x{w.h} out of range 1..15")
         if not (0 <= w.x and 0 <= w.y and w.x + w.w <= page.cols and w.y + w.h <= page.rows):
             raise ValueError(f"widget {w.id} lies outside the {page.cols}x{page.rows} grid")
         if len(w.label.encode()) > MAX_LABEL:

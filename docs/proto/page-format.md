@@ -20,7 +20,7 @@ golden vectors: `tests/vectors/pages.json`.
 | 0   | kind  | 0 button, 1 tile, 2 label                                 |
 | 1   | id    | 0..127, unique within the page                            |
 | 2   | x,y   | high nibble x, low nibble y (grid cells, 0-based)         |
-| 3   | w,h   | high nibble w, low nibble h (cells, each >= 1)            |
+| 3   | w,h   | high nibble w, low nibble h (cells, each 1..15, 4-bit)    |
 | 4   | len   | label byte length, 0..24                                  |
 | 5.. | label | UTF-8, no NUL                                             |
 
@@ -28,7 +28,7 @@ golden vectors: `tests/vectors/pages.json`.
 - Widgets must lie inside the grid (x+w <= cols, y+h <= rows) and must not
   overlap each other (all kinds, labels included).
 - Total length must equal header + widgets exactly. Trailing bytes, truncation,
-  bad version/kind/UTF-8, zero-size, out-of-grid, overlap, duplicate id:
+  bad version/kind/UTF-8, size outside 1..15 (zero or >15), out-of-grid, overlap, duplicate id:
   rejected (`HP_E_INVAL`). More than 32 widgets, a label over 24 bytes, or
   data over 255 bytes: `HP_E_TOOBIG`. The Python encoder raises `ValueError`
   for the same cases. Nothing is ever silently truncated.

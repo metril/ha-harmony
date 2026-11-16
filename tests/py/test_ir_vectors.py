@@ -36,6 +36,16 @@ def test_hand_checked_nec():
     assert sum(once) == 108000 - 39970 + 39970 and once[-1] == 39970 and rep == [9000, 2250, 562, 65535]
 
 
+def test_hand_checked_necext():
+    # Flipper NECext "addr 87 7C 00 00, cmd 15 EA 00 00" -> addr 0x7C87, cmd 0xEA15.
+    # Wire bytes (each LSB first): 87 7C 15 EA, no computed inverse.
+    _, once, _ = ir_ref.encode({"proto": "necext", "addr": 0x7C87, "cmd": 0xEA15})
+    bits = [1 if once[3 + 2 * i] > 1000 else 0 for i in range(32)]
+    assert sum(b << i for i, b in enumerate(bits)) == 0xEA15_7C87
+    with pytest.raises(ValueError):
+        ir_ref.encode({"proto": "necext", "addr": 0, "cmd": 0x10000})
+
+
 def test_hand_checked_rc5_toggle_differs():
     a = ir_ref.encode({"proto": "rc5", "addr": 5, "cmd": 35}, 0)[1]
     b = ir_ref.encode({"proto": "rc5", "addr": 5, "cmd": 35}, 1)[1]

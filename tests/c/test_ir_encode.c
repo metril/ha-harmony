@@ -97,7 +97,7 @@ static hp_ir_code_t pcode(hp_ir_proto_t p, uint32_t a, uint32_t m)
 static void test_range_errors(void)
 {
     static const struct { hp_ir_proto_t p; uint32_t amax, cmax; } r[] = {
-        {HP_IR_NEC, 0xFF, 0xFF},     {HP_IR_NECEXT, 0xFFFF, 0xFF}, {HP_IR_SAMSUNG32, 0xFF, 0xFF},
+        {HP_IR_NEC, 0xFF, 0xFF},     {HP_IR_NECEXT, 0xFFFF, 0xFFFF}, {HP_IR_SAMSUNG32, 0xFF, 0xFF},
         {HP_IR_RC5, 0x1F, 0x7F},     {HP_IR_RC6, 0xFF, 0xFF},      {HP_IR_SIRC12, 0x1F, 0x7F},
         {HP_IR_SIRC15, 0xFF, 0x7F},  {HP_IR_SIRC20, 0x1FFF, 0x7F},
     };

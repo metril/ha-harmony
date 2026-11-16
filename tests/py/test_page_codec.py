@@ -47,8 +47,10 @@ def b(i, x=0, y=0, w=1, h=1, label="", kind="button"):
     [
         ([b(1, x=4)], {}, "outside"),
         ([b(1, y=5, h=2)], {}, "outside"),
-        ([b(1, w=0)], {}, "zero size"),
-        ([b(1, h=0)], {}, "zero size"),
+        ([b(1, w=0)], {}, "size"),
+        ([b(1, h=0)], {}, "size"),
+        ([b(1, w=16)], {"cols": 16, "rows": 16}, "size"),
+        ([b(1, h=16)], {"cols": 16, "rows": 16}, "size"),
         ([b(1, w=2, h=2), b(2, x=1, y=1, w=2, h=2)], {}, "overlap"),
         ([b(1), b(1, x=1)], {}, "duplicate"),
         ([b(128)], {}, "id"),

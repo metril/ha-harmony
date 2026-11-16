@@ -9,7 +9,7 @@ PROTOCOLS = ("nec", "necext", "samsung32", "rc5", "rc6", "sirc12", "sirc15", "si
 # Max (addr, cmd) per protocol.
 _LIMITS = {
     "nec": (0xFF, 0xFF),
-    "necext": (0xFFFF, 0xFF),
+    "necext": (0xFFFF, 0xFFFF),
     "samsung32": (0xFF, 0xFF),
     "rc5": (0x1F, 0x7F),
     "rc6": (0xFF, 0xFF),
@@ -22,8 +22,28 @@ _LIMITS = {
 DEFAULT_MAX_RAW_US = 512
 
 
+MAX_US = 65535  # hub stores durations as u16
+
+
 class IrImportError(ValueError):
     """Invalid, malformed or too-large IR data."""
+
+
+def normalise_raw(us: list[int]) -> list[int]:
+    """Make imported mark/space timings hub-ready.
+
+    Spaces (odd indices) longer than 65535 us are clamped; an odd count (capture ended on a
+    mark) gets a trailing 65535 us space. A mark longer than 65535 us is an error.
+    """
+    out = list(us)
+    for i, v in enumerate(out):
+        if v > MAX_US:
+            if i % 2 == 0:
+                raise IrImportError(f"raw mark of {v} us exceeds {MAX_US} us")
+            out[i] = MAX_US
+    if len(out) % 2:
+        out.append(MAX_US)
+    return out
 
 
 class UnsupportedProtocolError(IrImportError):
@@ -69,12 +89,14 @@ class IrCode:
     def _check_raw(self) -> None:
         if self.hz is None or self.us is None:
             raise IrImportError("raw code needs both hz and us")
-        if not 1 <= self.hz <= 1_000_000:
-            raise IrImportError(f"carrier {self.hz} Hz out of range")
+        if not 1000 <= self.hz <= 1_000_000:
+            raise IrImportError(f"carrier {self.hz} Hz out of range 1000..1000000")
         if not self.us:
             raise IrImportError("raw code has no timings")
-        if any(not isinstance(v, int) or v <= 0 for v in self.us):
-            raise IrImportError("raw timings must be positive integers (microseconds)")
+        if any(not isinstance(v, int) or not 0 < v <= MAX_US for v in self.us):
+            raise IrImportError(f"raw timings must be integers in 1..{MAX_US} microseconds")
+        if len(self.us) % 2:
+            raise IrImportError("raw timings need an even count (mark/space pairs)")
 
     def raw_length(self) -> int:
         """Mark/space entries the hub must store (0 for protocol codes)."""

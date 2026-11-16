@@ -9,14 +9,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .model import IrCode, IrImportError, UnsupportedProtocolError
+from .model import IrCode, IrImportError, UnsupportedProtocolError, normalise_raw
 
 FLIPPER_PROTOCOLS = {
     "NEC": "nec",
     "NECEXT": "necext",
     "SAMSUNG32": "samsung32",
     "RC5": "rc5",
-    "RC5X": "rc5",  # 7-bit command (extended bit is the top bit of cmd)
+    "RC5X": "rc5",  # 6-bit file command; our rc5 cmd gets bit 6 set (field bit = 0)
     "RC6": "rc6",
     "SIRC": "sirc12",
     "SIRC15": "sirc15",
@@ -51,16 +51,20 @@ def _build(fields: dict[str, str]) -> IrCode:
             raise UnsupportedProtocolError(
                 f"signal {name!r}: protocol {proto!r} is not supported by the hub"
             )
-        return IrCode(
-            proto=ours, addr=_le_int(addr, "address", name), cmd=_le_int(cmd, "command", name)
-        )
+        a, c = _le_int(addr, "address", name), _le_int(cmd, "command", name)
+        if ours == "rc5":
+            if c > 0x3F:
+                raise IrImportError(f"signal {name!r}: {proto} command {c} outside 0..63")
+            if proto.upper() == "RC5X":
+                c |= 0x40  # RC5X: field bit = 0, i.e. our rc5 cmd bit 6 set
+        return IrCode(proto=ours, addr=a, cmd=c)
     if kind == "raw":
         try:
             hz = int(_need(fields, "frequency", name))
             us = [int(t) for t in _need(fields, "data", name).split()]
         except ValueError as e:
             raise IrImportError(f"signal {name!r}: bad raw number ({e})") from None
-        return IrCode(hz=hz, us=us)
+        return IrCode(hz=hz, us=normalise_raw(us))
     raise IrImportError(f"signal {name!r}: unknown type {kind!r}")
 
 

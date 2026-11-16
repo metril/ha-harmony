@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .model import IrCode, IrImportError
+from .model import MAX_US, IrCode, IrImportError, normalise_raw
 from .pronto import normalise_pronto
 
 _TICK_US = 8192 / 269  # Broadlink tick length in microseconds
@@ -37,7 +37,7 @@ def decode_broadlink(packet: bytes) -> list[int]:
         else:
             ticks = b
             i += 1
-        us.append(max(1, round(ticks * _TICK_US)))
+        us.append(min(MAX_US, max(1, round(ticks * _TICK_US))))
     if not us:
         raise IrImportError("broadlink: packet has no pulses")
     return us
@@ -51,7 +51,7 @@ def _raw_leaf(value: Any) -> IrCode:
             hz = int(head)
             value = rest
         value = value.replace(",", " ").split()
-    return IrCode(hz=hz, us=[abs(int(v)) for v in value])
+    return IrCode(hz=hz, us=normalise_raw([abs(int(v)) for v in value]))
 
 
 def _leaf(enc: str, value: Any) -> IrCode:
@@ -62,7 +62,7 @@ def _leaf(enc: str, value: Any) -> IrCode:
             packet = base64.b64decode(value, validate=True)
         except (binascii.Error, ValueError):
             raise IrImportError("invalid base64") from None
-        return IrCode(hz=_DEFAULT_HZ, us=decode_broadlink(packet))
+        return IrCode(hz=_DEFAULT_HZ, us=normalise_raw(decode_broadlink(packet)))
     if enc == "pronto":
         return IrCode(pronto=normalise_pronto(value))
     if not isinstance(value, (str, list)):

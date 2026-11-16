@@ -98,7 +98,7 @@ def test_flipper_sample():
     assert list(sigs) == ["Power", "Vol_up", "Raw_key", "Mute"]
     assert sigs["Power"] == IrCode(proto="nec", addr=4, cmd=8)
     assert sigs["Vol_up"] == IrCode(proto="necext", addr=0x7C87, cmd=0xCA)
-    assert sigs["Raw_key"] == IrCode(hz=38000, us=(9000, 4500, 560, 560, 560, 1690, 560))
+    assert sigs["Raw_key"] == IrCode(hz=38000, us=(9000, 4500, 560, 560, 560, 1690, 560, 65535))
     assert sigs["Mute"] == IrCode(proto="sirc15", addr=1, cmd=0x14)
 
 
@@ -112,7 +112,7 @@ def test_flipper_library_duplicates_and_protocols():
 
 @pytest.mark.parametrize("name,proto,addr,cmd", [
     ("NEC", "nec", 1, 2), ("NECext", "necext", 0x1234, 2), ("Samsung32", "samsung32", 1, 2),
-    ("RC5", "rc5", 1, 2), ("RC5X", "rc5", 1, 0x42), ("RC6", "rc6", 1, 2),
+    ("RC5", "rc5", 1, 2), ("RC6", "rc6", 1, 2),
     ("SIRC", "sirc12", 1, 2), ("SIRC15", "sirc15", 1, 2), ("SIRC20", "sirc20", 0x123, 2),
 ])
 def test_flipper_protocol_mapping(name, proto, addr, cmd):
@@ -168,7 +168,7 @@ def test_broadlink_errors():
 def test_smartir_base64():
     codes = parse_smartir_file(FIX / "smartir_base64.json")
     assert list(codes) == ["off", "cool.low.22"]
-    assert codes["off"] == IrCode(hz=38000, us=(487, 975, 7796))
+    assert codes["off"] == IrCode(hz=38000, us=(487, 975, 7796, 65535))
     assert codes["cool.low.22"] == codes["off"]
 
 
@@ -177,7 +177,7 @@ def test_smartir_pronto_and_raw():
     assert codes["power"] == IrCode(pronto="0000 006D 0000 0002 0010 0020 0010 0020")
     codes = parse_smartir_file(FIX / "smartir_raw.json")
     assert codes["a"] == IrCode(hz=38000, us=(500, 600, 500, 700))
-    assert codes["b"] == IrCode(hz=38000, us=(400, 300, 400))
+    assert codes["b"] == IrCode(hz=38000, us=(400, 300, 400, 65535))  # odd: trailing space added
 
 
 def test_smartir_errors(tmp_path):
@@ -200,3 +200,46 @@ def test_smartir_errors(tmp_path):
 def test_broadlink_roundtrip_b64():
     pkt = base64.b64decode("JgAFABAgAAEADQU=")
     assert decode_broadlink(pkt) == [487, 975, 7796]
+
+
+# ---- review fixes ----
+def _flip(proto, cmd):
+    return ("Filetype: IR signals file\nVersion: 1\n#\nname: K\ntype: parsed\n"
+            f"protocol: {proto}\naddress: 00 00 00 00\ncommand: {cmd}\n")
+
+
+def test_flipper_necext_16bit_command():
+    text = _flip("NECext", "15 EA 00 00").replace("00 00 00 00\ncommand", "87 7C 00 00\ncommand")
+    assert parse_flipper(text)["K"] == IrCode(proto="necext", addr=0x7C87, cmd=0xEA15)
+
+
+def test_flipper_rc5x_sets_bit6():
+    assert parse_flipper(_flip("RC5X", "0C 00 00 00"))["K"] == IrCode(proto="rc5", addr=0, cmd=76)
+    assert parse_flipper(_flip("RC5", "3F 00 00 00"))["K"].cmd == 63
+    with pytest.raises(IrImportError, match="0..63"):
+        parse_flipper(_flip("RC5", "40 00 00 00"))
+
+
+def test_broadlink_clamps_long_gap():
+    # trailing 00 0D 05 = 3333 ticks ~ 101 ms -> clamped to 65535
+    assert decode_broadlink(bytes.fromhex("2600 0500 10 20 00 0D05".replace(" ", ""))) == [487, 975, 65535]
+
+
+def test_raw_validation():
+    with pytest.raises(IrImportError):
+        IrCode(hz=38000, us=(1, 65536))
+    with pytest.raises(IrImportError):
+        IrCode(hz=38000, us=(1, 0))
+    with pytest.raises(IrImportError, match="even"):
+        IrCode(hz=38000, us=(1, 2, 3))
+    with pytest.raises(IrImportError, match="carrier"):
+        IrCode(hz=999, us=(1, 2))
+    assert IrCode(hz=1000, us=(1, 65535)).hz == 1000
+
+
+def test_flipper_raw_odd_and_long_space():
+    base = "Filetype: IR signals file\nVersion: 1\n#\nname: K\ntype: raw\nfrequency: 38000\ndata: "
+    assert parse_flipper(base + "100 200 300\n")["K"].us == (100, 200, 300, 65535)
+    assert parse_flipper(base + "100 200000\n")["K"].us == (100, 65535)
+    with pytest.raises(IrImportError, match="mark"):
+        parse_flipper(base + "200000 100\n")

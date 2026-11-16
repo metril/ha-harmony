@@ -194,7 +194,7 @@ static int encode_proto(const hp_ir_code_t *c, uint8_t toggle, hp_ir_signal_t *o
     int abits = 0;
     switch (p) {
     case HP_IR_NEC: case HP_IR_SAMSUNG32: case HP_IR_RC6: amax = 0xFF; cmax = 0xFF; break;
-    case HP_IR_NECEXT: amax = 0xFFFF; cmax = 0xFF; break;
+    case HP_IR_NECEXT: amax = 0xFFFF; cmax = 0xFFFF; break;
     case HP_IR_RC5: amax = 0x1F; cmax = 0x7F; break;
     case HP_IR_SIRC12: amax = 0x1F; cmax = 0x7F; abits = 5; break;
     case HP_IR_SIRC15: amax = 0xFF; cmax = 0x7F; abits = 8; break;
@@ -206,7 +206,8 @@ static int encode_proto(const hp_ir_code_t *c, uint8_t toggle, hp_ir_signal_t *o
     bld_t b = {.s = o};
     if (p == HP_IR_NEC || p == HP_IR_NECEXT) {
         o->carrier_hz = 38000;
-        nec_frame(&b, p == HP_IR_NEC ? (a | ((~a & 0xFFu) << 8)) : a, m | ((~m & 0xFFu) << 8));
+        if (p == HP_IR_NEC) nec_frame(&b, a | ((~a & 0xFFu) << 8), m | ((~m & 0xFFu) << 8));
+        else nec_frame(&b, a, m); /* NECext: 16-bit addr and cmd sent as given */
         o->once_n = (uint16_t)b.n;
         nec_repeat(&b);
     } else {

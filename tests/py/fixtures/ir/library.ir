@@ -11,7 +11,7 @@ name: Power
 type: parsed
 protocol: RC5X
 address: 05 00 00 00
-command: 41 00 00 00
+command: 01 00 00 00
 #
 name: Power
 type: parsed
