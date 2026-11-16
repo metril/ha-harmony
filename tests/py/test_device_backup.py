@@ -28,8 +28,21 @@ def mtd_text(parts=PARTS) -> str:
 
 class FakeSsh:
     def __init__(self, parts=PARTS, utils=("dd", "cat", "sha256sum", "md5sum"), mtd=True,
-                 corrupt_hash=(), truncate=(), proc_partitions="", char=True):  # fmt: skip
+                 corrupt_hash=(), truncate=(), proc_partitions="", char=True,
+                 devmap=None, command_v=True, hash_fail=None, explode=None,
+                 stream_err=b""):  # fmt: skip
         self.parts, self.utils, self.mtd = parts, utils, mtd
+        self.devmap = (
+            devmap
+            if devmap is not None
+            else {
+                f"/dev/{kind}{i}{sfx}": d
+                for i, (_, d) in parts.items()
+                for kind, sfx in (("mtdblock", ""), ("mtd", ""), ("mtd", "ro"))
+            }
+        )
+        self.command_v, self.hash_fail = command_v, dict(hash_fail or {})
+        self.explode, self.stream_err = dict(explode or {}), stream_err
         self.corrupt_hash, self.truncate = set(corrupt_hash), dict(truncate)
         self.proc_partitions, self.char = proc_partitions, char
         self.streams: list[str] = []
@@ -37,8 +50,7 @@ class FakeSsh:
         self.calls: list[list[str]] = []
 
     def data(self, dev: str) -> bytes:
-        i = int(re.search(r"(\d+)(?:ro)?$", dev)[1]) if "mtd" in dev else int(dev[-1])
-        return self.parts[i][1]
+        return self.devmap[dev]  # exact lookup: an unknown node is a test failure, not wrong data
 
     def run(self, argv):
         self.calls.append(argv)
@@ -50,18 +62,34 @@ class FakeSsh:
         if argv[0] == "uname":
             return 0, b"Linux fake 2.6.31 mips\n", b""
         if "command -v" in cmd:
+            if not self.command_v:
+                return 127, b"", b"sh: command: not found"
             return 0, "".join(u + "\n" for u in self.utils).encode(), b""
+        for u, probe in db.PROBES.items():
+            if argv[-1] == probe:
+                return (0 if u in self.utils else 1), b"", b""
         if argv[-1].startswith("test -c"):
             node = shlex.split(argv[-1])[-1]
             ok = self.char if isinstance(self.char, bool) else node in self.char
             return (0 if ok else 1), b"", b""
-        m = re.search(r"(?:dd if=(\S+) bs=\d+|cat (\S+)) 2>/dev/null \| (\w+)", argv[-1])
+        m = re.fullmatch(
+            r'\{ (?:dd if=(\S+) bs=(\d+)|cat (\S+)); echo "rc=\$\?" >&2; \} \| (\w+)', argv[-1]
+        )
         if m:
-            dev, tool = m[1] or m[2], m[3]
-            h = hashlib.new("sha256" if tool == "sha256sum" else "md5", self.data(dev)).hexdigest()
+            dev, tool = m[1] or m[3], m[4]
+            data, bs = self.data(dev), int(m[2] or 0)
+            fail = self.hash_fail.get(dev)
+            if fail:
+                data = data[: len(data) // 2]
+            h = hashlib.new("sha256" if tool == "sha256sum" else "md5", data).hexdigest()
             if dev in self.corrupt_hash:
                 h = "0" * len(h)
-            return 0, f"{h}  -\n".encode(), b""
+            err = b""
+            if bs:
+                recs = f"{len(data) // bs}+{1 if len(data) % bs else 0}"
+                err = f"{recs} records in\n{recs} records out\n".encode()
+            err += b"rc=1\n" if fail == "rc" else b"rc=0\n"
+            return 0, f"{h}  -\n".encode(), err
         raise AssertionError(f"unexpected {argv}")
 
     def run_stream(self, argv, sink):
@@ -69,12 +97,14 @@ class FakeSsh:
         self.stream_argvs.append(argv)
         dev = argv[1].removeprefix("if=")
         self.streams.append(dev)
+        if dev in self.explode:
+            raise self.explode[dev]
         data = self.data(dev)
         if dev in self.truncate:
             data = data[: self.truncate[dev]]
         for i in range(0, len(data), 1000):
             sink(data[i : i + 1000])
-        return 0, b""
+        return 0, self.stream_err
 
 
 def run(tmp_path, fake, *extra, target="hub"):
@@ -186,8 +216,8 @@ def test_only_filter(tmp_path):
 def test_remote_fallback_to_proc_partitions(tmp_path):
     parts = {0: ("nand0", b"R" * 2048), 1: ("nand1", b"S" * 1024)}
     text = "major minor #blocks name\n 8 0 2 nand0\n 8 1 1 nand1\n"
-    fake = FakeSsh(parts=parts, mtd=False, proc_partitions=text, char=False)
-    # device path ends in index digit: /dev/nand0 -> 0
+    devmap = {"/dev/nand0": parts[0][1], "/dev/nand1": parts[1][1]}
+    fake = FakeSsh(parts=parts, mtd=False, proc_partitions=text, char=False, devmap=devmap)
     rc, m = run(tmp_path, fake, target="remote")
     assert rc == 0 and m["discovery_source"] == "/proc/partitions"
     assert [p["device_path"] for p in m["partitions"]] == ["/dev/nand0", "/dev/nand1"]
@@ -220,14 +250,22 @@ def test_ssh_argv_has_timeouts():
 def test_ssh_timeout_cli_knob(tmp_path, monkeypatch):
     seen = {}
 
-    def factory(host, user, key, timeout):
-        seen["timeout"] = timeout
+    def factory(host, user, key, timeout, idle_timeout):
+        seen.update(timeout=timeout, idle=idle_timeout)
         return FakeSsh()
 
     monkeypatch.setattr(db, "SshRunner", factory)
     assert db.main(["--host", "h", "--target", "hub", "--out-dir", str(tmp_path / "o"),
                     "--ssh-timeout", "9", "--dry-run"]) == 0  # fmt: skip
-    assert seen["timeout"] == 9
+    assert seen == {"timeout": 9, "idle": None}
+    assert db.main(["--host", "h", "--target", "hub", "--out-dir", str(tmp_path / "o"),
+                    "--idle-timeout", "300", "--dry-run"]) == 0  # fmt: skip
+    assert seen["idle"] == 300
+
+
+def test_idle_timeout_defaults_to_4x_ssh_timeout():
+    assert db.SshRunner("h", timeout=9).idle_timeout == 36
+    assert db.SshRunner("h", timeout=9, idle_timeout=300).idle_timeout == 300
 
 
 def _python_child(code):
@@ -285,7 +323,7 @@ def test_cat_with_ro_node_when_dd_missing(tmp_path):
         assert p["device_hash"] == p["local_hash"] == hashlib.sha256(data).hexdigest()
         assert Path(p["file"]).read_bytes() == data
     hash_cmds = [c[-1] for c in fake.calls if "| sha256sum" in c[-1]]
-    assert hash_cmds and all(c.startswith("cat /dev/mtd") for c in hash_cmds)
+    assert hash_cmds and all(c.startswith("{ cat /dev/mtd") for c in hash_cmds)
 
 
 def test_cat_block_device_without_ro_node(tmp_path):
@@ -306,13 +344,39 @@ def test_neither_dd_nor_cat_fails_early(tmp_path):
 
 # --- brick safety -------------------------------------------------------------------------
 
-FORBIDDEN = ("of=", "nandwrite", "flash_erase", "mtd_debug write", "ubiupdatevol")
-MTD_REDIRECT = re.compile(r">\s*/dev/mtd")
+ALLOWED_PROGRAMS = {"sh", "cat", "dd", "test", "uname", "sha256sum", "md5sum", "command"}
+DEV = r"/dev/[A-Za-z0-9_.-]+"
+SH_SHAPES = tuple(
+    re.compile(x)
+    for x in (
+        re.escape(db.DETECT_SCRIPT),
+        *(re.escape(p) for p in db.PROBES.values()),
+        rf"test -[cb] {DEV}",
+        rf'\{{ (?:dd if={DEV} bs=\d+|cat {DEV}); echo "rc=\$\?" >&2; \}} \| (?:sha256sum|md5sum)',
+    )
+)
+ARG_OK = {
+    "cat": re.compile(rf"/proc/mtd|/proc/partitions|{DEV}"),
+    "dd": re.compile(rf"if={DEV}|bs=\d+"),
+    "uname": re.compile(r"-a"),
+}
 
 
-def forbidden_in(cmd: str) -> list[str]:
-    hits = [f for f in FORBIDDEN if f in cmd]
-    return hits + (["redirect into /dev/mtd*"] if MTD_REDIRECT.search(cmd) else [])
+def violations(remote: str) -> list[str]:
+    """Allow-list check of one remote command line; empty list means permitted."""
+    try:
+        argv = shlex.split(remote)
+    except ValueError:
+        return [f"unparseable: {remote!r}"]
+    if not argv or argv[0] not in ALLOWED_PROGRAMS:
+        return [f"program not allowed: {remote!r}"]
+    if argv[0] == "sh":
+        ok = len(argv) == 3 and argv[1] == "-c" and any(r.fullmatch(argv[2]) for r in SH_SHAPES)
+        return [] if ok else [f"sh script not a permitted shape: {remote!r}"]
+    if argv[0] in ARG_OK:
+        bad = [a for a in argv[1:] if not ARG_OK[argv[0]].fullmatch(a)]
+        return [f"{argv[0]} arg not allowed: {bad}"] if bad else []
+    return []  # test/sha256sum/md5sum/command only ever reached via the sh shapes above
 
 
 class RecordingSsh(db.SshRunner):
@@ -331,12 +395,34 @@ class RecordingSsh(db.SshRunner):
         return self.fake.run_stream(argv, sink)
 
 
-def test_scanner_detects_writes():
-    for bad in ("dd if=/dev/zero of=/dev/mtd3", "nandwrite -p /dev/mtd3 x", "flash_erase /dev/mtd1",
-                "mtd_debug write /dev/mtd1 0 4 x", "ubiupdatevol /dev/ubi0_0 x",
-                "cat x >/dev/mtd2", "cat x > /dev/mtdblock2"):  # fmt: skip
-        assert forbidden_in(bad), bad
-    assert not forbidden_in("dd if=/dev/mtd0 bs=4096 2>/dev/null | sha256sum")
+def sh(script: str) -> str:
+    return shlex.join(["sh", "-c", script])
+
+
+KNOWN_BAD = (
+    "dd if=/dev/zero of=/dev/mtd3", "nandwrite -p /dev/mtd3 x", "flash_erase /dev/mtd1",
+    "mtd_debug write /dev/mtd1 0 4 x", "ubiupdatevol /dev/ubi0_0 x", "flashcp x /dev/mtd0",
+    "ubiformat /dev/mtd1", "ubimkvol /dev/ubi0 -N x", "mtd write x boot", "sysupgrade x.bin",
+    "cp img /dev/mtd0", "rm /mnt/data/x", "mv a b", "sed -i s/a/b/ /etc/x", "tee /dev/mtd0",
+    sh("cat x >/dev/mtd2"), sh("cat x > /dev/mtdblock2"), sh("tee /dev/mtd0 < x"),
+    sh("cat img >$DEV"), sh("echo hi > /etc/passwd"), sh("rm -rf /mnt/data"),
+    sh("sed -i s/a/b/ /etc/x"), sh("dd if=/dev/mtd0 bs=4096 of=/dev/mtd1"),
+    sh('{ dd if=/dev/mtd0 bs=4096; echo "rc=$?" >&2; } | sha256sum; rm /x'),
+)  # fmt: skip
+
+
+def test_checker_rejects_known_bad_and_new_writes():
+    for bad in KNOWN_BAD:
+        assert violations(bad), bad
+    # a write command newly introduced into the tool must fail the allow-list
+    for new in ("flashcp img /dev/mtd0", sh("tee /dev/mtd0"), sh("cat img | tee /dev/mtd0")):
+        assert violations(new), new
+    for good in (
+        "cat /proc/mtd", "dd if=/dev/mtd0 bs=4096", "uname -a", "cat /dev/mtd0ro",
+        sh('{ dd if=/dev/mtd0 bs=4096; echo "rc=$?" >&2; } | sha256sum'),
+        sh("test -c /dev/mtd0"), sh(db.DETECT_SCRIPT), sh(db.PROBES["dd"]),
+    ):  # fmt: skip
+        assert not violations(good), good
 
 
 def test_commands_are_read_only_by_construction(tmp_path):
@@ -351,6 +437,8 @@ def test_commands_are_read_only_by_construction(tmp_path):
         ({"utils": ("sha256sum",)}, ()),
         ({"utils": ("dd",)}, ()),
         ({"mtd": False}, ()),
+        ({"command_v": False}, ()),  # direct-probe fallback
+        ({"hash_fail": {"/dev/mtdblock0": "rc"}}, ()),  # device hash pass failure
     ]
     for i, (kw, extra) in enumerate(scenarios):
         out = tmp_path / str(i)
@@ -364,8 +452,7 @@ def test_commands_are_read_only_by_construction(tmp_path):
                     runner=RecordingSsh(FakeSsh(), log))  # fmt: skip
     assert len(log) > 40 and all(c[0] == "ssh" for c in log)
     for argv in log:
-        assert not forbidden_in(shlex.join(argv)), argv
-        assert not forbidden_in(argv[-1]), argv  # the remote command itself
+        assert not violations(argv[-1]), argv  # the remote command itself, allow-listed
 
 
 # --- --verify -----------------------------------------------------------------------------
@@ -465,3 +552,83 @@ def test_verify_json_shape_and_magics(tmp_path, capsys):
     assert verify(d, "--json") == 1
     res = json.loads(capsys.readouterr().out)
     assert res["ok"] is False and any("misc" in e for e in res["errors"])
+
+
+# --- review fixes -------------------------------------------------------------------------
+
+
+def test_zero_size_partition_is_error_not_ok(tmp_path):
+    parts = {0: ("empty", b""), 1: ("boot", b"B" * 4096)}
+    fake = FakeSsh(parts=parts)
+    rc, m = run(tmp_path, fake)
+    p = m["partitions"][0]
+    assert rc == 1 and m["status"] == "failed" and p["status"] == "error"
+    assert "size" in p["error"] and p["file"] is None
+    assert not list((tmp_path / "out").glob("00_empty*")) and "/dev/mtdblock0" not in fake.streams
+    assert m["partitions"][1]["status"] == "ok"
+
+
+def test_verify_rejects_zero_size_image(tmp_path, capsys):
+    d, m = make_tree(tmp_path)
+    empty = d / "00_boot.img"
+    empty.write_bytes(b"")
+    e = hashlib.sha256(b"").hexdigest()
+    m["partitions"][0].update(size_bytes=0, local_hash=e, device_hash=e)
+    m["partitions"][0].pop("raw")
+    (d / "manifest.json").write_text(json.dumps(m))
+    assert verify(d) == 1
+    assert "00_boot.img" in capsys.readouterr().err
+
+
+def test_device_hash_read_failure_is_not_corrupt(tmp_path):
+    fake = FakeSsh(hash_fail={"/dev/mtdblock1": "rc"})
+    rc, m = run(tmp_path, fake)
+    p = m["partitions"][1]
+    assert rc == 1 and p["status"] == "hash_failed" and "may be intact" in p["error"]
+    assert p["local_hash"] and p["device_hash"] is None
+    assert not list((tmp_path / "out").glob("*.CORRUPT"))
+    assert not (tmp_path / "out" / "01_kernel_loader.img").exists()  # never promoted unverified
+    assert Path(p["file"]).name == "01_kernel_loader.img.part"
+
+
+def test_device_hash_short_dd_records_detected(tmp_path):
+    rc, m = run(tmp_path, FakeSsh(hash_fail={"/dev/mtdblock0": "short"}))
+    p = m["partitions"][0]
+    assert rc == 1 and p["status"] == "hash_failed" and "records" in p["error"]
+
+
+def test_existing_image_hash_failure_is_not_conflict(tmp_path):
+    run(tmp_path, FakeSsh())
+    rc, m = run(tmp_path, FakeSsh(hash_fail={"/dev/mtdblock0": "rc"}))
+    assert rc == 1 and m["partitions"][0]["status"] == "hash_failed"
+    assert (tmp_path / "out" / "00_boot.img").read_bytes() == PARTS[0][1]
+
+
+def test_stream_stderr_recorded(tmp_path):
+    rc, m = run(tmp_path, FakeSsh(stream_err=b"2+0 records in\n2+0 records out\n"))
+    assert rc == 0 and "2+0 records out" in m["partitions"][0]["device_stderr"]
+
+
+def test_manifest_written_incrementally_on_midrun_exception(tmp_path):
+    for exc in (RuntimeError("link dropped"), ZeroDivisionError("boom"), KeyboardInterrupt()):
+        out = tmp_path / type(exc).__name__
+        fake = FakeSsh(explode={"/dev/mtdblock1": exc})
+        argv = ["--host", "h", "--target", "hub", "--out-dir", str(out)]
+        try:
+            db.main(argv, runner=fake)
+        except KeyboardInterrupt:
+            assert isinstance(exc, KeyboardInterrupt)
+        m = json.loads((out / "manifest.json").read_text())
+        assert m["status"] == "failed" and [p["name"] for p in m["partitions"]] == ["boot"]
+        assert m["partitions"][0]["status"] == "ok" and m["partitions"][0]["device_hash"]
+        assert (out / "00_boot.img").exists()
+        assert db.main(["--verify", str(out)]) == 1  # unfinished run never verifies as OK
+
+
+def test_detect_falls_back_to_direct_probes(tmp_path):
+    fake = FakeSsh(command_v=False)
+    rc, m = run(tmp_path, fake)
+    assert rc == 0 and m["utilities"]["dd"] and m["utilities"]["sha256sum"]
+    assert not m["utilities"]["find"]
+    rc, m = run(tmp_path / "x", FakeSsh(command_v=False, utils=("sha256sum",)))
+    assert rc == 1 and any("dd" in e for e in m["errors"])  # probes also say "absent"

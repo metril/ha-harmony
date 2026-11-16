@@ -33,6 +33,17 @@ IGNORED_PREFIXES = ("ram", "loop", "zram", "nbd", "sr", "fd")
 DETECT_SCRIPT = (
     "for u in " + " ".join(UTILITIES) + "; do command -v $u >/dev/null 2>&1 && echo $u; done"
 )
+# Used only when `command -v` found nothing (BusyBox without ASH_CMDCMD): run each tool harmlessly.
+PROBES = {
+    "dd": "dd if=/dev/null bs=1 >/dev/null 2>&1 || which dd >/dev/null 2>&1",
+    "cat": "cat /dev/null >/dev/null 2>&1 || which cat >/dev/null 2>&1",
+    "sha256sum": "sha256sum </dev/null >/dev/null 2>&1 || which sha256sum >/dev/null 2>&1",
+    "md5sum": "md5sum </dev/null >/dev/null 2>&1 || which md5sum >/dev/null 2>&1",
+    "find": "which find >/dev/null 2>&1",
+    "tar": "which tar >/dev/null 2>&1",
+}
+RC_RE = re.compile(rb"(?m)^rc=(\d+)\s*$")
+RECORDS_RE = re.compile(rb"(?m)^(\d+)\+(\d+) records (in|out)\s*$")
 
 
 class SshRunner:
@@ -206,6 +217,8 @@ class Backup:
     def detect_utils(self) -> dict[str, bool]:
         _, out, _ = self.sh(DETECT_SCRIPT)
         have = set(out.decode().split())
+        if not have:  # no `command -v` builtin? probe the tools directly before giving up
+            have = {u for u, probe in PROBES.items() if self.sh(probe)[0] == 0}
         return {u: u in have for u in UTILITIES}
 
     def has_char(self, p: Partition) -> bool:
@@ -228,10 +241,27 @@ class Backup:
         stem = f"{p.index:02d}_{safe_name(p.name)}" if p.char_device else safe_name(p.name)
         return self.out / f"{stem}{'.raw' if raw else ''}.img"
 
-    def device_hash(self, dev: str, bs: int, tool: str) -> str | None:
+    def device_hash(self, dev: str, size: int, bs: int, tool: str) -> tuple[str | None, str]:
+        """(hash, "") on a verified-complete device read, else (None, reason).
+
+        The reader's own exit status is echoed to stderr (a plain pipeline reports only the hash
+        tool's status) and, for dd, its record counts must cover exactly `size` bytes.
+        """
         src = shlex.join(self.read_argv(dev, bs))
-        rc, out, _ = self.sh(f"{src} 2>/dev/null | {tool}")
-        return parse_hash(out, "sha256" if tool == "sha256sum" else "md5") if rc == 0 else None
+        rc, out, err = self.sh(f'{{ {src}; echo "rc=$?" >&2; }} | {tool}')
+        tail = err.decode("utf-8", "replace")[-200:]
+        if rc != 0:
+            return None, f"hash command exited {rc}: {tail}"
+        m = RC_RE.search(err)
+        if not m or int(m[1]) != 0:
+            return None, f"device read did not exit 0 during hash pass: {tail}"
+        if self.read_method == "dd":
+            want = (size // bs, 1 if size % bs else 0)
+            counts = {k: (int(a), int(b)) for a, b, k in RECORDS_RE.findall(err)}
+            if counts.get(b"in") != want or counts.get(b"out") != want:
+                return None, f"dd records {counts} != expected {want} in hash pass: {tail}"
+        h = parse_hash(out, "sha256" if tool == "sha256sum" else "md5")
+        return (h, "") if h else (None, "device hash output unparseable")
 
     def image(self, dev: str, size: int, bs: int, tool: str, final: Path) -> dict[str, Any]:
         algo = "sha256" if tool == "sha256sum" else "md5"
@@ -242,6 +272,10 @@ class Backup:
             "read_method": self.read_method, "read_node": dev,
         }  # fmt: skip
         part = final.with_name(final.name + ".part")
+        if size <= 0:
+            rec["error"] = f"declared size {size} is not positive; refusing to record an image"
+            rec["file"] = None
+            return rec
         try:
             if final.exists():
                 return self._existing(rec, final, dev, size, bs, tool, algo)
@@ -256,6 +290,8 @@ class Backup:
 
                 rc, err = self.r.run_stream(self.read_argv(dev, bs), sink)
             rec["bytes_received"], rec["local_hash"] = count, h.hexdigest()
+            if rc == 0 and err:
+                rec["device_stderr"] = err.decode("utf-8", "replace")[-500:]
             if rc != 0:
                 rec["status"] = "error"
                 rec["error"] = (
@@ -265,9 +301,10 @@ class Backup:
                 rec["status"] = "short_read"
                 rec["error"] = f"received {count} bytes, expected {size}"
             else:
-                rec["device_hash"] = self.device_hash(dev, bs, tool)
+                rec["device_hash"], why = self.device_hash(dev, size, bs, tool)
                 if rec["device_hash"] is None:
-                    rec["error"] = "could not obtain device hash"
+                    rec["status"] = "hash_failed"
+                    rec["error"] = f"device hash pass failed (image may be intact): {why}"
                 elif rec["device_hash"] != rec["local_hash"]:
                     rec["status"] = "corrupt"
                     rec["error"] = "device and local hashes differ"
@@ -279,7 +316,7 @@ class Backup:
                     rec["status"] = "ok"
         except OSError as e:
             rec["error"] = f"{type(e).__name__}: {e}"
-        if rec["status"] != "ok" and rec["status"] != "corrupt":
+        if rec["status"] not in ("ok", "corrupt"):
             rec["file"] = str(part) if part.exists() else None
         return rec
 
@@ -289,7 +326,11 @@ class Backup:
         rec["bytes_received"] = final.stat().st_size
         if rec["bytes_received"] == size:
             rec["local_hash"] = file_hash(final, algo)
-            rec["device_hash"] = self.device_hash(dev, bs, tool)
+            rec["device_hash"], why = self.device_hash(dev, size, bs, tool)
+            if rec["device_hash"] is None:
+                rec["status"] = "hash_failed"
+                rec["error"] = f"device hash pass failed (stored image may be intact): {why}"
+                return rec
             if rec["device_hash"] == rec["local_hash"]:
                 rec["status"] = "skipped"
                 return rec
@@ -351,6 +392,7 @@ class Backup:
             self.out.mkdir(parents=True, exist_ok=True)
             for p in parts:
                 m["partitions"].append(self.run_partition(p, tool))
+                self.write_manifest()  # keep device hashes if the run dies mid-way
             bad = [x for x in m["partitions"] if x["status"] not in ("ok", "skipped")]
             for x in bad:
                 self.errors.append(f"{x['name']}: {x['status']}")
@@ -359,7 +401,20 @@ class Backup:
             self.errors.append(str(e))
         except OSError as e:
             self.errors.append(f"{type(e).__name__}: {e}")
+        except BaseException as e:  # incl. KeyboardInterrupt: never lose finished partitions
+            self.errors.append(f"interrupted by {type(e).__name__}: {e}")
+            self._flush(dry_run)
+            if not isinstance(e, Exception):
+                raise
         return 0 if m["status"] in ("ok", "dry-run") else 1
+
+    def _flush(self, dry_run: bool) -> None:
+        if dry_run:
+            return
+        try:
+            self.write_manifest()
+        except OSError as e:
+            self.errors.append(f"could not write manifest: {e}")
 
     def _pick_reader(self, utils: dict[str, bool]) -> str:
         if utils["dd"]:
@@ -440,6 +495,8 @@ def _check_image(
         return fail(f"image {name} is missing", "missing")
     size, want = path.stat().st_size, rec.get("size_bytes")
     out.update(size=size, expected_size=want)
+    if not isinstance(want, int) or want <= 0 or size == 0:
+        return fail(f"{name} has zero/invalid size (manifest {want}, file {size})", "size_mismatch")
     with path.open("rb") as f:
         out["magic"] = detect_magic(f.read(64))
     if size != want:
@@ -496,6 +553,8 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
     ap.add_argument("--out-dir", type=Path)
     ap.add_argument("--ssh-timeout", type=int, default=DEFAULT_SSH_TIMEOUT, metavar="SEC",
                     help="ssh ConnectTimeout/ServerAliveInterval (default %(default)s)")  # fmt: skip
+    ap.add_argument("--idle-timeout", type=float, default=None, metavar="SEC",
+                    help="kill a stream with no data for SEC (default 4 x --ssh-timeout)")  # fmt: skip
     ap.add_argument("--verify", type=Path, metavar="DIR", help="offline re-check of a backup dir")
     ap.add_argument("--json", action="store_true", help="with --verify: machine-readable output")
     ap.add_argument("--dry-run", action="store_true")
@@ -510,7 +569,9 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
         return 0 if res["ok"] else 1
     if not (a.host and a.target and a.out_dir):
         ap.error("--host, --target and --out-dir are required unless --verify is given")
-    ssh = runner or SshRunner(a.host, a.user, a.key, timeout=a.ssh_timeout)
+    ssh = runner or SshRunner(
+        a.host, a.user, a.key, timeout=a.ssh_timeout, idle_timeout=a.idle_timeout
+    )
     b = Backup(ssh, a.target, a.host, a.out_dir)
     rc = b.execute(a.only, a.dry_run)
     if a.dry_run:
