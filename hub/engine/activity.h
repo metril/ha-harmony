@@ -1,0 +1,122 @@
+#ifndef HP_ENGINE_ACTIVITY_H
+#define HP_ENGINE_ACTIVITY_H
+
+/* Hub-executed activities (config format 2): per-device power/input tracking and a non-blocking
+ * transition planner on the hp_sched queue, so activities work while Home Assistant is down.
+ * Format 1 (flat steps, no devices) keeps the immediate hp_activity_set/off behaviour.
+ *
+ * Transition = a plan of timed IR sends, built from the TRACKED state when the request arrives:
+ *   start B:  1. power OFF every device that is on and not used by B
+ *             2. power ON every B device that is off (never a toggle to a device already in the
+ *                wanted state; devices without power codes are only tracked)
+ *             3. input select, in device order, where the tracked input differs or is unknown;
+ *                it waits until the device's settle_ms (from its power-on / last input) elapsed
+ *             4. B's extra `steps` (wait for all settle times)
+ *   off:      1. power OFF everything that is on   2. the current activity's `off` steps
+ * Powering a device off marks its input unknown. Every send updates the tracked state when it
+ * goes out; steps re-check the tracked state at execution time (a set_device_state correction
+ * during a transition skips what became redundant).
+ *
+ * Sequencing: one step per timer; the next step is not before (previous frame time incl. SIRC
+ * copies + HP_ACT_GUARD_MS), so frames never overlap. The bus-free time persists across plans.
+ *
+ * Interruption rule: a new start/off while a transition runs cancels the remaining plan steps
+ * (frames already sent stay applied in the tracked state), then plans from the tracked state.
+ * Pending settle times survive, so a half-powered device is not sent an input too early.
+ * Key presses (other than activity keys) and the ir_send verb are refused while busy.
+ *
+ * Reporting: the current activity (map->current) switches to the target when the request is
+ * accepted (key lookup uses it); the REPORTED activity (state_update, hello state) changes only
+ * when the transition completes. device_state is reported whenever a device's tracked state
+ * changes (each send, set_device_state, reload). A failed send aborts the plan and reverts the
+ * current activity to the reported one.
+ *
+ * Persistence (--state): see hp_actsm_save_state. Writes are debounced to one per
+ * HP_ACT_PERSIST_MS; hp_actsm_flush_state forces one (clean shutdown). */
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "hub/engine/mapping.h"
+#include "hub/engine/sched.h"
+
+#define HP_ACT_GUARD_MS 50
+#define HP_ACT_PERSIST_MS 2000
+#define HP_ACT_STATE_VER 1
+#define HP_ACT_PLAN_MAX 72
+
+typedef enum { HP_ACTSM_EVT_DEVICE = 1, HP_ACTSM_EVT_ACTIVITY = 2 } hp_actsm_evt_t;
+/* DEVICE: idx = device index; ACTIVITY: idx = reported activity (-1 none). */
+typedef void (*hp_actsm_notify_fn)(void *ctx, hp_actsm_evt_t evt, int idx);
+
+typedef enum { HP_STEP_PWR_OFF = 1, HP_STEP_PWR_ON, HP_STEP_INPUT, HP_STEP_EXTRA, HP_STEP_OFFX } hp_stepkind_t;
+
+typedef struct {
+    uint8_t kind, dev;
+    int16_t input;          /* HP_STEP_INPUT: index into map.inputs */
+    const hp_action_t *act; /* EXTRA/OFFX action */
+} hp_actstep_t;
+
+typedef struct {
+    char id[HP_MAP_NAME_MAX];
+    uint8_t power;
+    char input[HP_MAP_NAME_MAX]; /* "" = unknown */
+    bool settling;
+    uint32_t settle_until;
+} hp_devstate_t;
+
+typedef struct {
+    hp_map_t *map;
+    hp_sched_t *sched;
+    const hp_sinks_t *sinks;
+    hp_actsm_notify_fn notify;
+    void *notify_ctx;
+    hp_devstate_t dev[HP_MAP_MAX_DEVICES];
+    uint8_t ndev;
+    int reported; /* last completed activity, -1 none */
+    hp_actstep_t plan[HP_ACT_PLAN_MAX];
+    uint8_t nplan, pos;
+    bool running;
+    int target;   /* activity being started, -1 = off */
+    hp_sched_handle timer;
+    bool bus_busy;
+    uint32_t bus_free;
+    const char *state_path;
+    bool dirty, wrote;
+    uint32_t last_write;
+    hp_sched_handle persist_h;
+    unsigned writes; /* state file writes so far (tests/diagnostics) */
+} hp_actsm_t;
+
+void hp_actsm_init(hp_actsm_t *, hp_map_t *, hp_sched_t *, const hp_sinks_t *, hp_actsm_notify_fn, void *);
+/* Call after every successful hp_map_load: cancels a running transition, re-keys the tracked
+ * device state by device id (new devices start off/unknown), takes map->current as the reported
+ * activity and notifies every device (and the activity if it changed). */
+void hp_actsm_reloaded(hp_actsm_t *);
+
+/* Start the named activity / a power-down. Return the activity index (off: the activity that was
+ * current, 0 when only stray devices were on), -HP_E_INVAL (unknown activity / nothing to turn
+ * off), or the error of a synchronous first send. */
+int hp_actsm_start(hp_actsm_t *, const char *name);
+int hp_actsm_start_idx(hp_actsm_t *, int idx);
+int hp_actsm_off(hp_actsm_t *);
+bool hp_actsm_busy(const hp_actsm_t *);
+/* Reported (last completed) activity, -1 none. */
+int hp_actsm_reported(const hp_actsm_t *);
+
+/* Correct the tracked state without sending IR. power: -1 keep, 0/1. input: NULL keep, ""
+ * unknown, else an input name of that device. -HP_E_INVAL for an unknown device/input. */
+int hp_actsm_set_device(hp_actsm_t *, const char *device, int power, const char *input);
+const hp_devstate_t *hp_actsm_device(const hp_actsm_t *, size_t idx); /* NULL if out of range */
+
+/* State file: "HPST" | ver u8 | config hash u32 BE | activity id (u8 len + bytes, len 0 = none)
+ * | ndev u8 | per device: id (u8 len + bytes), power u8, input (u8 len + bytes) | CRC-32 u32 BE
+ * over everything before. Written with hp_atomic_write. */
+void hp_actsm_set_state_path(hp_actsm_t *, const char *path);
+/* Restores from the file; a missing/corrupt/other-version/other-config file leaves the state as is
+ * (all off/unknown) and returns a negative error (-HP_E_NOENT missing, -HP_E_INVAL otherwise). */
+int hp_actsm_load_state(hp_actsm_t *);
+/* Writes the state file now (no-op without a path). 0 or -HP_E_IO. */
+int hp_actsm_flush_state(hp_actsm_t *);
+
+#endif
