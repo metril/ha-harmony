@@ -258,7 +258,9 @@ struct hp_ws_conn {
     size_t mlen;
     uint8_t *out;
     size_t ocap, olen, ooff;
-    int64_t deadline; /* 0 = none */
+    int64_t deadline; /* 0 = none: handshake / close flush */
+    int64_t auth_dl;  /* 0 = none: hello must complete by then (open conns) */
+    int64_t idle_dl;  /* 0 = none: next inbound frame must arrive by then */
     void *user;
 };
 
@@ -268,6 +270,7 @@ struct hp_ws_server {
     char *token;
     hp_ws_cb_t cb;
     void *user;
+    int auth_ms, idle_ms;
     hp_ws_conn_t conns[HP_WS_MAX_CONNS];
 };
 
@@ -290,6 +293,8 @@ hp_ws_server_t *hp_ws_listen(uint16_t port, const char *token, const hp_ws_cb_t 
     if (!s) return NULL;
     s->cb = *cb;
     s->user = user;
+    s->auth_ms = HP_WS_AUTH_MS;
+    s->idle_ms = HP_WS_IDLE_MS;
     s->token = token ? strdup(token) : NULL;
     s->lfd = socket(AF_INET, SOCK_STREAM, 0);
     if (s->lfd < 0) goto fail;
@@ -319,6 +324,17 @@ fail:
 
 uint16_t hp_ws_port(const hp_ws_server_t *s) { return s->port; }
 const char *hp_ws_token(const hp_ws_server_t *s) { return s->token; }
+int hp_ws_set_timeouts(hp_ws_server_t *s, int auth_ms, int idle_ms) {
+    if (!s || auth_ms <= 0 || idle_ms <= 0) return -HP_E_INVAL;
+    s->auth_ms = auth_ms;
+    s->idle_ms = idle_ms;
+    return 0;
+}
+void hp_ws_conn_set_authed(hp_ws_conn_t *c) { c->auth_dl = 0; }
+void hp_ws_foreach(hp_ws_server_t *s, void (*fn)(hp_ws_conn_t *, void *), void *arg) {
+    for (int i = 0; i < HP_WS_MAX_CONNS; i++)
+        if (s->conns[i].state == ST_OPEN && s->conns[i].upgraded && !s->conns[i].dead) fn(&s->conns[i], arg);
+}
 void hp_ws_conn_set_user(hp_ws_conn_t *c, void *u) { c->user = u; }
 void *hp_ws_conn_user(const hp_ws_conn_t *c) { return c->user; }
 
@@ -435,6 +451,7 @@ static void deliver(hp_ws_conn_t *c, const uint8_t *p, size_t n) {
 
 static void handle_frame(hp_ws_conn_t *c, const hp_ws_frame_hdr_t *h, uint8_t *p) {
     size_t n = (size_t)h->payload_len;
+    c->idle_dl = now_ms() + c->srv->idle_ms; /* any inbound frame counts */
     for (size_t i = 0; i < n; i++) p[i] ^= h->mask[i & 3];
     switch (h->opcode) {
     case 0:
@@ -494,6 +511,8 @@ static void process_input(hp_ws_conn_t *c) {
             c->state = ST_OPEN;
             c->upgraded = true;
             c->deadline = 0;
+            c->auth_dl = now_ms() + c->srv->auth_ms;
+            c->idle_dl = now_ms() + c->srv->idle_ms;
             out_append(c, (const uint8_t *)resp, (size_t)rl);
             flush_out(c);
             memmove(c->rbuf, c->rbuf + used, c->rlen - used);
@@ -575,6 +594,15 @@ int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
             if (d < 0) d = 0;
             if (d < wait) wait = d;
         }
+        if (c->state == ST_OPEN) {
+            int64_t dl[2] = {c->auth_dl, c->idle_dl};
+            for (int k = 0; k < 2; k++) {
+                if (!dl[k]) continue;
+                int64_t d = dl[k] - now;
+                if (d < 0) d = 0;
+                if (d < wait) wait = d;
+            }
+        }
     }
     int r = poll(fds, (nfds_t)nf, (int)wait);
     if (r < 0) return errno == EINTR ? 0 : -HP_E_INVAL;
@@ -599,6 +627,10 @@ int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
         hp_ws_conn_t *c = &s->conns[i];
         if (c->state == ST_FREE) continue;
         if (c->deadline && now >= c->deadline) c->dead = true;
+        if (c->state == ST_OPEN && !c->dead) {
+            if (c->auth_dl && now >= c->auth_dl) hp_ws_conn_close(c, 1008);
+            else if (c->idle_dl && now >= c->idle_dl) hp_ws_conn_close(c, 1001);
+        }
         if (c->dead) conn_free(c);
     }
     return r;

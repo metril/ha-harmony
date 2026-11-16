@@ -26,6 +26,9 @@ add_library(hp_hub STATIC
   hub/rf/framing.c
   hub/net/ws.c
   hub/net/jsonrpc.c
+  hub/engine/mapping.c
+  hub/io/sim_sinks.c
+  hub/hub_handlers.c
 )
 target_include_directories(hp_hub PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(hp_hub PUBLIC cjson m)

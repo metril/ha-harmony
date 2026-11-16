@@ -175,6 +175,10 @@ int hp_dispatch(const char *json, size_t len, const hp_handler_tbl_t *tbl, void 
         }
         cJSON_AddStringToObject(ack, "hub_id", tbl->hub_id ? tbl->hub_id : "");
         if (tbl->fw_version) cJSON_AddStringToObject(ack, "fw_version", tbl->fw_version);
+        if (tbl->activities) {
+            cJSON *acts = tbl->activities(tbl->ctx);
+            if (acts) cJSON_AddItemToObject(ack, "activities", acts);
+        }
         rc = hp_make_reply(id, "hello_ack", ack, reply, reply_cap, reply_len);
         goto out;
     }

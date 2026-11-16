@@ -32,6 +32,9 @@ typedef struct {
     const char *hub_id;      /* reported in hello_ack */
     const char *fw_version;  /* optional, reported in hello_ack */
     void *ctx;               /* passed to handlers */
+    /* Optional: returns a new cJSON value (caller-owned, handed to hello_ack)
+     * for hello_ack.activities, or NULL to omit the field. */
+    cJSON *(*activities)(void *ctx);
     /* Indexed by hp_msg_type_t. hello is handled internally; ping has a
      * built-in pong when handler[HP_MSG_PING] is NULL. NULL otherwise =>
      * error/unknown_type. */

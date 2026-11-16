@@ -13,6 +13,8 @@
 #define HP_WS_MAX_CONNS 16
 #define HP_WS_MAX_OUT (256 * 1024)  /* per-connection unsent-bytes cap; exceeded => drop */
 #define HP_WS_HANDSHAKE_MS 5000     /* time allowed to finish the HTTP upgrade */
+#define HP_WS_AUTH_MS 10000         /* upgraded conn must be marked authed within this (default) */
+#define HP_WS_IDLE_MS 90000         /* max silence (no inbound frame of any kind) (default) */
 #define HP_WS_CLOSE_MS 2000         /* time allowed to flush a close frame */
 
 typedef struct hp_ws_server hp_ws_server_t;
@@ -39,6 +41,14 @@ int hp_ws_poll(hp_ws_server_t *, int timeout_ms);
 int hp_ws_send(hp_ws_conn_t *, const char *text, size_t len);
 /* Sends a close frame with `code` (e.g. 1008) and closes once flushed. */
 void hp_ws_conn_close(hp_ws_conn_t *, uint16_t code);
+/* Overrides the auth/idle deadlines (ms, >0) for connections upgraded from now on. */
+int hp_ws_set_timeouts(hp_ws_server_t *, int auth_ms, int idle_ms);
+/* The owner calls this once the peer authenticated (hello ok); until then an
+ * upgraded connection is closed (1008) after the auth deadline. */
+void hp_ws_conn_set_authed(hp_ws_conn_t *);
+/* Calls fn for every upgraded, open connection (e.g. to broadcast). fn must
+ * not close connections other than via hp_ws_conn_close/hp_ws_send. */
+void hp_ws_foreach(hp_ws_server_t *, void (*fn)(hp_ws_conn_t *, void *), void *arg);
 /* Per-connection opaque pointer (owner frees it in on_close). */
 void hp_ws_conn_set_user(hp_ws_conn_t *, void *);
 void *hp_ws_conn_user(const hp_ws_conn_t *);
