@@ -287,6 +287,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             _LOGGER.error("The hub rejected the config: %s", msg)
             self.last_error = msg
             self._set_issue(ISSUE_REJECTED, msg)
+            self._warn_unknown_index()  # no new list is coming: the reported index stays unknown
             return False
         self.last_error = None
         self._clear_issue(ISSUE_REJECTED)
@@ -297,6 +298,16 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
 
     def _set_activities(self, names: list[str]) -> None:
         self.activities = list(names)
+        self._warn_unknown_index()
+
+    def _warn_unknown_index(self) -> None:
+        if self._current_idx is not None and self._current_idx >= len(self.activities):
+            _LOGGER.warning(
+                "The hub reports activity index %s but only %s activities are known (%s)",
+                self._current_idx,
+                len(self.activities),
+                self.activities,
+            )
         self.async_update_listeners()
 
     async def async_push_pages(self) -> None:
@@ -426,15 +437,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 self._current_idx = None
                 self.async_update_listeners()
                 return
-            if idx >= len(self.activities):
-                _LOGGER.warning(
-                    "state_update for activity index %s but only %s activities are known"
-                    " (%s); ignoring it",
-                    idx,
-                    len(self.activities),
-                    self.activities,
-                )
-                return
+            # Stored even when beyond the activity list we know: after a reload that inserts an
+            # activity the hub's re-report can precede the new list (_activity_name range-checks).
             self._last_idx = self._current_idx = idx
             self.async_update_listeners()
         elif mtype is MsgType.KEY_EVENT:
