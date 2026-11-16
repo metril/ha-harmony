@@ -71,6 +71,11 @@ actually sent. An IR send failure aborts the plan and reverts to the reported ac
   tracked off; discrete codes (`on`/`off`, inputs, commands) are always sent. `power_off` makes the
   input unknown. Refused with `{ok:false, message}`: `args need device and command`, `unknown device`,
   `unknown command for this device`, `transition in progress` (same as `ir_send`), `IR send failed`.
+* `config_ack {ok, message?, config_hash?}`: after a successful `set_config`, `config_hash` is the
+  hash the hub now holds (same as `hello_ack.config_hash`); clients store it instead of computing.
+* `remote_attached {}` goes to all authenticated clients when a remote attaches on the RF link
+  (not on the sim without `--rf`). It has no fields: the link knows no remote id before the remote's
+  first message. Clients push pages and tile texts for the remotes they manage.
 * `start_activity`/`power_off` reply `command_result {ok:true}` when the request is accepted.
 
 ## State file (`hub --state PATH`, separate from `--cache`)

@@ -33,6 +33,8 @@ typedef struct hp_rf_transport {
     int (*recv)(void *self, uint8_t *frame, size_t cap, int timeout_ms);
     /* Single-owner rule: first claim returns 0, any later one -HP_E_BUSY. */
     int (*claim)(void *self);
+    /* Optional (NULL = unknown): is a remote attached right now? */
+    bool (*attached)(void *self);
 } hp_rf_transport;
 
 typedef struct {

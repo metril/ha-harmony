@@ -77,6 +77,20 @@ async def test_push_then_dump_layout(hub_rf, start_remote):
     assert code == 0 and json.loads(out) == LAYOUT
 
 
+async def test_remote_attach_is_announced_to_ws_clients(hub_rf):
+    from conftest import rf_attach
+
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_rf.url) as ws:
+        await hello(ws)
+        sock = rf_attach(hub_rf.rf)
+        msg = await recv(ws, keep_attached=True)
+        assert msg["t"] == "remote_attached" and msg["d"] == {}
+        sock.close()
+        sock2 = rf_attach(hub_rf.rf)  # a re-attach is announced again
+        assert (await recv(ws, keep_attached=True))["t"] == "remote_attached"
+        sock2.close()
+
+
 async def test_tap_button_sends_soft_key_press_release(hub_rf, start_remote):
     r = start_remote(hub_rf.rf, "--tap", "70,10")
     r.wait_attached()

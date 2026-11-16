@@ -175,8 +175,15 @@ def test_real_schema_has_phase2_messages():
     assert names == {
         "hello", "hello_ack", "error", "ping", "pong", "set_config", "config_ack",
         "command", "command_result", "key_event", "state_update", "page_push", "battery",
-        "device_state", "tile_update", "activity_list",
+        "device_state", "tile_update", "activity_list", "remote_attached",
     }  # fmt: skip
+
+
+def test_config_ack_hash_and_remote_attached_in_schema():
+    msgs = {m.name: m for m in load_schema(REAL_SCHEMA).messages}
+    ack = {f.name: f for f in msgs["config_ack"].fields}
+    assert ack["config_hash"].type == "str" and ack["config_hash"].optional
+    assert msgs["remote_attached"].transport == "ws" and not msgs["remote_attached"].fields
 
 
 def test_committed_generated_files_are_fresh(tmp_path):

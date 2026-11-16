@@ -46,6 +46,7 @@ messages:
     fields:
       - {name: ok, type: bool}
       - {name: message, type: str, optional: true}
+      - {name: config_hash, type: str, optional: true}  # hash the hub holds after a successful load
 
   - name: command
     code: 8
@@ -119,3 +120,8 @@ messages:
     fields:
       - {name: activities, type: json}
       - {name: config_hash, type: str, optional: true}
+
+  # A remote attached on the RF link (pushed to every authenticated client). The link carries no
+  # remote id until the remote's first message, so there are no fields: clients (re)push pages
+  # and tile texts for every remote they manage.
+  - {name: remote_attached, code: 17, transport: ws, fields: []}

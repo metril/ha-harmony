@@ -4,7 +4,7 @@
 /* Hub-side wiring of the engine to the WebSocket protocol.
  *
  * Message handling:
- *   set_config     -> hp_map_load; reply config_ack {ok, message?}. On success
+ *   set_config     -> hp_map_load; reply config_ack {ok, message?, config_hash?}. On success
  *                     the cache (if a path is set) is rewritten and
  *                     hello_ack.activities reflects the new config. On
  *                     failure ok=false + message and the old map is intact.
@@ -79,6 +79,7 @@ typedef struct {
     hp_sched_t sched;       /* timers: key repeat, SIRC copies, activity transitions, state writes */
     hp_irout_t irout;
     hp_actsm_t act;         /* activity state machine (docs/proto/activity-state.md) */
+    bool rf_attached;       /* last seen RF link state: announce remote_attached on a new attach */
     uint32_t pending_dev;   /* bit n: device n's device_state is to be broadcast */
 } hub_ctx_t;
 
