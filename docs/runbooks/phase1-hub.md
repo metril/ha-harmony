@@ -39,9 +39,13 @@ partition itself — no partition is ever flashed.
 
 ## Before you start
 
-- [ ] UART adapter plugged in and **confirmed 3.3 V TTL** (never 5 V on J2: pin 2 RX, pin 4 TX, pin 8
-      GND, 115200 8N1). Nothing is on `/dev/ttyUSB*` until it is plugged in. Install a terminal:
-      `sudo apt install picocom`.
+- [ ] UART adapter **on hand, not wired up**. It is not a prerequisite for this runbook: every write
+      below lands in the area the hardware factory reset wipes, no partition is flashed, and the hub's
+      boot-failure counter enters an emergency Wi-Fi+SSH mode on its own after repeated failed boots.
+      Reaching J2 means opening the hub, which for Phase 1 is more risk than it removes. It becomes
+      necessary in Phase 3+, when we deploy our own boot scripts and a bad one can boot-loop past the
+      reset. When that time comes: **confirm 3.3 V TTL** (never 5 V), J2 pin 2 RX, pin 4 TX, pin 8 GND,
+      115200 8N1, and `sudo apt install picocom`.
 - [ ] Hub blocked from WAN (MAC filter or offline SSID) so it cannot pull a stock update mid-run.
       It is already at the latest version, so this is belt-and-braces.
 - [ ] Do not open MyHarmony or the Harmony phone app for the rest of Phase 1.
@@ -60,7 +64,7 @@ we already run, so `--skip-fw-check` below skips nothing we want.
 
 ## Step 2 `[WRITE]` — root the hub
 
-Needs an explicit go-ahead. Keep the UART adapter within reach.
+Needs an explicit go-ahead. Recovery for this step is the hardware factory reset, not UART.
 
 ```sh
 cd /home/user/projects/upstream-ref/harmony-ng

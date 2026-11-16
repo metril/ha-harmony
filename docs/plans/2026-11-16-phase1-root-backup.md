@@ -213,8 +213,12 @@ removes `/data/remote_ui`, writes `/etc/nowatchdog`. All in the writable layer �
 1. **WAN isolation** — confirm the hub can be blocked from the internet (MAC filter / offline SSID)
    for the duration of Phase 1 so it cannot pull a stock update. It is already at the latest
    version, so this is belt-and-braces, not a gate.
-2. **UART adapter** — confirm it is true 3.3 V TTL (never 5 V on hub J2), and plug it in before
-   Task 4: nothing is on `/dev/ttyUSB*` yet and no terminal emulator (`picocom`) is installed.
+2. **UART adapter** — *not* needed for Phase 1, correcting the earlier call. Every Phase 1 write
+   lands in the factory-reset-wiped area, no partition is flashed, and the hub self-enters an
+   emergency Wi-Fi+SSH mode after repeated failed boots; reaching J2 means opening the case, which is
+   more risk than it removes here. It does become necessary in Phase 3+ (our own boot scripts can
+   boot-loop past the reset) and in Phase 5 (new kernel). Then: confirm true 3.3 V TTL, never 5 V.
+   The remote has no documented UART path at all, so its only fallback is Menu+Off either way.
 3. **Second backup copy** — the images will live only on this host's disk; decide where a second
    copy goes before Phase 3 writes to hardware.
 
