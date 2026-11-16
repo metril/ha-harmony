@@ -21,6 +21,7 @@ static const hp_field_desc_t hp_fields_hello_ack[] = {
     {"hub_id", HP_T_STR, false, NULL},
     {"fw_version", HP_T_STR, true, NULL},
     {"activities", HP_T_JSON, true, NULL},
+    {"config_hash", HP_T_STR, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_error[] = {
@@ -72,9 +73,22 @@ static const hp_field_desc_t hp_fields_battery[] = {
     {"millivolts", HP_T_U16, false, NULL},
 };
 
+static const hp_field_desc_t hp_fields_device_state[] = {
+    {"device", HP_T_STR, false, NULL},
+    {"power", HP_T_BOOL, false, NULL},
+    {"input", HP_T_STR, true, NULL},
+};
+
+static const hp_field_desc_t hp_fields_tile_update[] = {
+    {"remote", HP_T_U8, false, NULL},
+    {"page", HP_T_U8, false, NULL},
+    {"tile", HP_T_U8, false, NULL},
+    {"text", HP_T_STR, false, NULL},
+};
+
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
-    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 3, hp_fields_hello_ack},
+    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 4, hp_fields_hello_ack},
     {"error", HP_MSG_ERROR, HP_TRANSPORT_WS, 3, hp_fields_error},
     {"ping", HP_MSG_PING, HP_TRANSPORT_WS, 0, NULL},
     {"pong", HP_MSG_PONG, HP_TRANSPORT_WS, 0, NULL},
@@ -86,6 +100,8 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"state_update", HP_MSG_STATE_UPDATE, HP_TRANSPORT_BOTH, 2, hp_fields_state_update},
     {"page_push", HP_MSG_PAGE_PUSH, HP_TRANSPORT_BOTH, 3, hp_fields_page_push},
     {"battery", HP_MSG_BATTERY, HP_TRANSPORT_BOTH, 3, hp_fields_battery},
+    {"device_state", HP_MSG_DEVICE_STATE, HP_TRANSPORT_WS, 3, hp_fields_device_state},
+    {"tile_update", HP_MSG_TILE_UPDATE, HP_TRANSPORT_RF, 4, hp_fields_tile_update},
 };
 
 const hp_msg_desc_t *hp_msg_desc(hp_msg_type_t type)

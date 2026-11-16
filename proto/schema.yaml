@@ -21,6 +21,7 @@ messages:
       - {name: hub_id, type: str}
       - {name: fw_version, type: str, optional: true}
       - {name: activities, type: json, optional: true}
+      - {name: config_hash, type: str, optional: true}
 
   - name: error
     code: 3
@@ -91,3 +92,20 @@ messages:
       - {name: remote, type: u8}
       - {name: percent, type: u8}
       - {name: millivolts, type: u16}
+
+  - name: device_state
+    code: 14
+    transport: ws
+    fields:
+      - {name: device, type: str}
+      - {name: power, type: bool}
+      - {name: input, type: str, optional: true}
+
+  - name: tile_update
+    code: 15
+    transport: rf
+    fields:
+      - {name: remote, type: u8}
+      - {name: page, type: u8}
+      - {name: tile, type: u8}
+      - {name: text, type: str}

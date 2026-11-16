@@ -21,10 +21,12 @@ typedef enum {
     HP_MSG_KEY_EVENT = 10,
     HP_MSG_STATE_UPDATE = 11,
     HP_MSG_PAGE_PUSH = 12,
-    HP_MSG_BATTERY = 13
+    HP_MSG_BATTERY = 13,
+    HP_MSG_DEVICE_STATE = 14,
+    HP_MSG_TILE_UPDATE = 15
 } hp_msg_type_t;
 
-#define HP_MSG_COUNT 13
+#define HP_MSG_COUNT 15
 
 typedef enum {
     HP_KEY_ACTION_PRESS = 0,

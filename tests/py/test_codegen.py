@@ -175,6 +175,7 @@ def test_real_schema_has_phase2_messages():
     assert names == {
         "hello", "hello_ack", "error", "ping", "pong", "set_config", "config_ack",
         "command", "command_result", "key_event", "state_update", "page_push", "battery",
+        "device_state", "tile_update",
     }  # fmt: skip
 
 
@@ -193,3 +194,43 @@ def test_vendored_ha_copy_is_fresh(tmp_path):
     assert (ha / "harmony_proto.py").read_text() == vendored.read_text(), (
         "vendored harmony_proto.py stale: run `uv run python -m proto.codegen`"
     )
+
+
+def _real_py():
+    ns = {"__name__": "real_proto"}
+    src = (GEN_DIR / "harmony_proto.py").read_text()
+    exec(compile(src, "gen", "exec"), ns)  # noqa: S102
+    return ns
+
+
+def test_hello_ack_config_hash_optional():
+    ns = _real_py()
+    T = ns["MsgType"]
+    base = {"hub_id": "h"}
+    assert ns["decode_ws"](ns["encode_ws"](T.HELLO_ACK, base)) == (T.HELLO_ACK, base)
+    withh = {"hub_id": "h", "config_hash": "abcd1234"}
+    assert ns["decode_ws"](ns["encode_ws"](T.HELLO_ACK, withh)) == (T.HELLO_ACK, withh)
+    with pytest.raises(ns["ProtoError"]):
+        ns["encode_ws"](T.HELLO_ACK, {"hub_id": "h", "config_hash": 5})
+
+
+def test_device_state_round_trip():
+    ns = _real_py()
+    T = ns["MsgType"]
+    d = {"device": "tv", "power": True, "input": "hdmi1"}
+    assert ns["decode_ws"](ns["encode_ws"](T.DEVICE_STATE, d)) == (T.DEVICE_STATE, d)
+    d = {"device": "tv", "power": False}
+    assert ns["decode_ws"](ns["encode_ws"](T.DEVICE_STATE, d)) == (T.DEVICE_STATE, d)
+    with pytest.raises(ns["ProtoError"]):
+        ns["encode_ws"](T.DEVICE_STATE, {"device": "tv"})
+
+
+def test_tile_update_is_rf_only():
+    ns = _real_py()
+    assert ns["MESSAGES"]["tile_update"][1:] == (
+        "rf",
+        (("remote", "u8", False), ("page", "u8", False), ("tile", "u8", False),
+         ("text", "str", False)),
+    )  # fmt: skip
+    with pytest.raises(ns["ProtoError"]):
+        ns["encode_ws"](ns["MsgType"].TILE_UPDATE, {"remote": 1, "page": 0, "tile": 2, "text": "x"})
