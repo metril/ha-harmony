@@ -32,10 +32,15 @@ typedef struct {
     struct sockaddr_in dest;
     int have_dest, multicast;
     uint16_t port; /* actually bound */
+    uint32_t mask; /* netmask of the mDNS interface (host order); 0xFFFFFFFF if unknown */
     int announced;
     hp_sched_handle timer;
     char err[96];
 } hp_mdns_srv_t;
+
+/* True when `src` (host order) may be answered: same subnet as the receiving
+ * interface (`if_addr`/`mask`) or loopback. Pure; anything else is off-link. */
+int hp_mdns_on_link(uint32_t src, uint32_t if_addr, uint32_t mask);
 
 /* 0 on success, -HP_E_* on failure (srv->err set, fd stays -1). */
 int hp_mdns_srv_start(hp_mdns_srv_t *, hp_sched_t *, const hp_mdns_opts_t *, const char *hub_id,
