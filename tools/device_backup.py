@@ -61,8 +61,10 @@ class SshRunner:
         timeout: int = DEFAULT_SSH_TIMEOUT,
         idle_timeout: float | None = None,
         run_timeout: float = DEFAULT_RUN_TIMEOUT,
+        port: int | None = None,
     ) -> None:
         self.host, self.user, self.key, self.timeout = host, user, key, timeout
+        self.port = port
         self.idle_timeout = idle_timeout if idle_timeout is not None else timeout * 4
         self.run_timeout = run_timeout
 
@@ -75,6 +77,8 @@ class SshRunner:
         ]  # fmt: skip
         if self.key:
             cmd += ["-i", os.path.expanduser(self.key)]
+        if self.port:
+            cmd += ["-p", str(self.port)]
         return [*cmd, f"{self.user}@{self.host}", shlex.join(argv)]
 
     def run(self, argv: list[str]) -> tuple[int, bytes, bytes]:
@@ -369,7 +373,11 @@ class Backup:
             dry_run=dry_run,
         )  # fmt: skip
         try:
-            _, out, _ = self.r.run(["uname", "-a"])
+            rc, out, err = self.r.run(["uname", "-a"])
+            if rc == 255:  # ssh itself failed (refused, timeout, auth, host key): say so
+                raise RuntimeError(
+                    f"ssh connection failed: {err.decode('utf-8', 'replace').strip()}"
+                )
             m["uname"] = out.decode("utf-8", "replace").strip()
             source, parts = self.discover()
             m["discovery_source"] = source
@@ -547,6 +555,7 @@ def print_verify(res: dict[str, Any]) -> None:
 def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host")
+    ap.add_argument("--port", type=int, default=None, help="ssh port (default: ssh's own)")
     ap.add_argument("--user", default="root")
     ap.add_argument("--key", default="~/.ssh/harmony_owner_ed25519")
     ap.add_argument("--target", choices=["hub", "remote"])
@@ -570,10 +579,20 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
     if not (a.host and a.target and a.out_dir):
         ap.error("--host, --target and --out-dir are required unless --verify is given")
     ssh = runner or SshRunner(
-        a.host, a.user, a.key, timeout=a.ssh_timeout, idle_timeout=a.idle_timeout
+        a.host,
+        a.user,
+        a.key,
+        timeout=a.ssh_timeout,
+        idle_timeout=a.idle_timeout,
+        port=a.port,
     )
     b = Backup(ssh, a.target, a.host, a.out_dir)
-    rc = b.execute(a.only, a.dry_run)
+    try:
+        rc = b.execute(a.only, a.dry_run)
+    except KeyboardInterrupt:  # execute() already flushed the manifest
+        print("interrupted: partial *.part files left; re-run or inspect with --verify",
+              file=sys.stderr)  # fmt: skip
+        return 130
     if a.dry_run:
         print_plan(b.manifest)
         return rc

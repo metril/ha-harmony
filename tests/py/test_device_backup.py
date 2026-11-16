@@ -247,10 +247,29 @@ def test_ssh_argv_has_timeouts():
     assert {"ConnectTimeout=7", "ServerAliveInterval=7", "ServerAliveCountMax=3"} <= opts
 
 
+def test_ssh_port_flag():
+    assert "-p" not in db.SshRunner("h")._ssh(["true"])
+    argv = db.SshRunner("h", port=2222)._ssh(["true"])
+    assert argv[argv.index("-p") + 1] == "2222"
+
+
+def test_port_cli_knob(tmp_path, monkeypatch):
+    seen = {}
+
+    def factory(host, user, key, timeout, idle_timeout, port=None):
+        seen["port"] = port
+        return FakeSsh()
+
+    monkeypatch.setattr(db, "SshRunner", factory)
+    assert db.main(["--host", "h", "--port", "2222", "--target", "hub",
+                    "--out-dir", str(tmp_path / "o"), "--dry-run"]) == 0  # fmt: skip
+    assert seen == {"port": 2222}
+
+
 def test_ssh_timeout_cli_knob(tmp_path, monkeypatch):
     seen = {}
 
-    def factory(host, user, key, timeout, idle_timeout):
+    def factory(host, user, key, timeout, idle_timeout, port=None):
         seen.update(timeout=timeout, idle=idle_timeout)
         return FakeSsh()
 
@@ -632,3 +651,24 @@ def test_detect_falls_back_to_direct_probes(tmp_path):
     assert not m["utilities"]["find"]
     rc, m = run(tmp_path / "x", FakeSsh(command_v=False, utils=("sha256sum",)))
     assert rc == 1 and any("dd" in e for e in m["errors"])  # probes also say "absent"
+
+
+def test_ssh_failure_reported_as_connection_error(tmp_path):
+    class Down(FakeSsh):
+        def run(self, argv):
+            return 255, b"", b"ssh: connect to host h port 22: Connection refused\n"
+
+    b = db.Backup(Down(), "hub", "h", tmp_path / "o")
+    assert b.execute([], True) == 1
+    assert b.errors == ["ssh connection failed: ssh: connect to host h port 22: Connection refused"]
+
+
+def test_keyboard_interrupt_exits_130_without_traceback(tmp_path, monkeypatch, capsys):
+    class Boom(FakeSsh):
+        def run_stream(self, argv, sink):
+            raise KeyboardInterrupt
+
+    out = tmp_path / "o"
+    assert db.main(["--host", "h", "--target", "hub", "--out-dir", str(out)], runner=Boom()) == 130
+    assert "interrupted" in capsys.readouterr().err
+    assert json.loads((out / "manifest.json").read_text())["status"] == "failed"
