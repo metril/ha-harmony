@@ -13,9 +13,11 @@
 static char g_text[70000];
 static size_t g_len;
 static int g_texts, g_closes;
+static hp_ws_conn_t *g_conn;
 
 static void on_text(hp_ws_conn_t *c, const char *m, size_t n, void *u) {
-    (void)c; (void)u;
+    (void)u;
+    g_conn = c;
     memcpy(g_text, m, n);
     g_len = n;
     g_texts++;
@@ -312,6 +314,30 @@ static void test_http_garbage_and_slow_handshake(void) {
     pump(3);
 }
 
+static void test_send_max_frame(void) {
+    int fd = cl_upgrade();
+    send_frame(fd, 1, true, (const uint8_t *)"x", 1);
+    pump(4);
+    static char payload[HP_WS_MAX_FRAME];
+    memset(payload, 'q', sizeof payload);
+    CT_EQ(hp_ws_send(g_conn, payload, sizeof payload), 0);
+    CT_EQ(hp_ws_send(g_conn, payload, sizeof payload + 1), -2);
+    static uint8_t rx[HP_WS_MAX_FRAME + 64];
+    size_t tot = 0;
+    for (int i = 0; i < 200 && tot < 10 + HP_WS_MAX_FRAME; i++) {
+        pump(1);
+        ssize_t n = recv(fd, rx + tot, sizeof rx - tot, MSG_DONTWAIT);
+        if (n > 0) tot += (size_t)n;
+    }
+    CT_EQ(tot, 10 + HP_WS_MAX_FRAME);
+    CT_EQ(rx[0], 0x81); CT_EQ(rx[1], 127);
+    CT_EQ(rx[7], 0x01); CT_EQ(rx[8], 0x00); CT_EQ(rx[9], 0x00); /* 65536 as 8 bytes big-endian */
+    CT_CHECK(rx[2] == 0 && rx[3] == 0 && rx[4] == 0 && rx[5] == 0 && rx[6] == 0);
+    CT_MEM_EQ(rx + 10, payload, HP_WS_MAX_FRAME);
+    close(fd);
+    pump(3);
+}
+
 static void test_sigpipe_safe(void) {
     int fd = cl_upgrade();
     send_frame(fd, 9, true, (const uint8_t *)"x", 1);
@@ -334,6 +360,7 @@ int main(void) {
     CT_RUN(test_bad_frames);
     CT_RUN(test_close_echo_and_midframe_disconnect);
     CT_RUN(test_http_garbage_and_slow_handshake);
+    CT_RUN(test_send_max_frame);
     CT_RUN(test_sigpipe_safe);
     hp_ws_close(srv);
     return CT_DONE();

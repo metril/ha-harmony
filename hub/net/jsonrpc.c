@@ -133,7 +133,7 @@ int hp_dispatch(const char *json, size_t len, const hp_handler_tbl_t *tbl, void 
         rc = ERR(id, "bad_request", "v must be an integer");
         goto out;
     }
-    if ((int)jv->valuedouble != HP_PROTO_VERSION) {
+    if (jv->valuedouble != (double)HP_PROTO_VERSION) {
         rc = ERR(id, "version", "unsupported protocol version");
         goto out;
     }

@@ -27,6 +27,8 @@ static void test_errors(void) {
     CT_CHECK(has("\"unknown_type\""));
     run(&s, "{\"v\":2,\"id\":7,\"t\":\"ping\",\"d\":{}}");
     CT_CHECK(has("\"version\"") && has("\"id\":7"));
+    run(&s, "{\"v\":4294967295,\"id\":4294967295,\"t\":\"ping\",\"d\":{}}");
+    CT_CHECK(has("\"version\"") && has("\"id\":4294967295"));
     run(&s, "{\"id\":7,\"t\":\"ping\",\"d\":{}}");
     CT_CHECK(has("\"bad_request\""));
     run(&s, "{\"v\":1,\"id\":8,\"t\":\"set_config\",\"d\":{}}"); /* missing required */

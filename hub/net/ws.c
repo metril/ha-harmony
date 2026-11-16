@@ -375,16 +375,20 @@ static void flush_out(hp_ws_conn_t *c) {
 
 static int send_frame(hp_ws_conn_t *c, uint8_t opcode, const uint8_t *p, size_t n) {
     if (c->state != ST_OPEN) return -HP_E_BUSY;
-    uint8_t hdr[4];
+    uint8_t hdr[10];
     size_t hl = 2;
     hdr[0] = (uint8_t)(0x80 | opcode);
     if (n < 126) {
         hdr[1] = (uint8_t)n;
-    } else {
+    } else if (n <= 0xFFFF) {
         hdr[1] = 126;
         hdr[2] = (uint8_t)(n >> 8);
         hdr[3] = (uint8_t)n;
         hl = 4;
+    } else {
+        hdr[1] = 127;
+        for (int i = 0; i < 8; i++) hdr[2 + i] = (uint8_t)((uint64_t)n >> (8 * (7 - i)));
+        hl = 10;
     }
     int r = out_append(c, hdr, hl);
     if (!r && n) r = out_append(c, p, n);

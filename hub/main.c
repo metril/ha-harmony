@@ -10,7 +10,7 @@
 #include "hub/net/jsonrpc.h"
 #include "hub/net/ws.h"
 
-#define REPLY_CAP (HP_WS_MAX_FRAME + 1024)
+#define REPLY_CAP HP_WS_MAX_FRAME /* a reply that fits is always sendable */
 
 static volatile sig_atomic_t g_stop;
 static void on_signal(int sig) { (void)sig; g_stop = 1; }
@@ -29,7 +29,7 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     size_t rl = 0;
     int r = hp_dispatch(msg, len, &g_tbl, sess, reply, sizeof reply, &rl);
     if (r < 0) { hp_ws_conn_close(c, 1011); return; }
-    if (rl) hp_ws_send(c, reply, rl);
+    if (rl && hp_ws_send(c, reply, rl) < 0) { hp_ws_conn_close(c, 1011); return; }
     if (r == HP_DISPATCH_CLOSE) hp_ws_conn_close(c, 1008);
 }
 
