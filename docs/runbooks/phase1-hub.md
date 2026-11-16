@@ -70,10 +70,16 @@ Needs an explicit go-ahead. Recovery for this step is the hardware factory reset
 cd /home/user/projects/upstream-ref/harmony-ng
 uv run --no-project --python 3.13 python tools/root_hub_usb.py \
     --hub-ip 192.0.2.11 \
-    --skip-fw-check \
     --pubkey ~/.ssh/harmony_owner_ed25519.pub
 ```
 
+- **`--skip-fw-check` is deliberately omitted.** No standalone read-only hub HID query exists, so the
+  tool's own first step — reading `/sys/sysinfo` and comparing to Logitech's latest — is our only
+  proof that the hub's HID channel works, and it happens *before* anything is written. It cannot
+  trigger an update here because the installed firmware already **is** the latest (verified: hub
+  4.15.600, skin 97). If it offers a firmware flash anyway, **decline it** and re-run with
+  `--skip-fw-check`; something about the version comparison is then wrong and worth understanding
+  before writing.
 - `--hub-ip` is passed so the tool does not subnet-scan (the hub is on another subnet, already routed).
 - **Do not** pass `--no-backup` — we want its stock tar.
 - **Do not** pass `--wifi-ssid`/`--wifi-pass`: reachability already works, so there is no reason to
@@ -173,3 +179,5 @@ In order, least invasive first:
 |---|---|---|
 | 2026-11-16 | pre-root config fetch `[RO]` | 6 devices, 3 activities, 133 commands, no raw IR present |
 | 2026-11-16 | firmware check `[RO]` | latest = installed (hub 4.15.600, remote 4.15.330) |
+| 2026-11-16 | host HID access | `usbhid` no-ignore quirk works: hidraw3 = hub `c129`, hidraw4 = remote `c12b`, both `0660 plugdev` |
+| 2026-11-16 | remote HID read `[RO]` | first real HID contact succeeded — skin 111, FW 4.15.330, up to date. Hub-side HID read still unproven (no read-only query exists) |
