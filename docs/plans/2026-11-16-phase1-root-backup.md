@@ -40,12 +40,12 @@ on the user's go-ahead at the moment it runs.**
 | `tools/host_setup.sh` | done | installs the rule + `usbhid` `HID_QUIRK_NO_IGNORE`, rebinds |
 | `tools/device_backup.py` | done (`phase1-backup-tool`) | discover partitions, stream images, dual hash, manifest |
 | `tools/device_backup.py --verify` | todo | offline re-hash of an image set against its manifest |
-| `tools/hubfind.py` | todo | hub IP discovery + TCP 8088/22 reachability report |
 | `tools/extract_stock.py` | todo | stock backup → `devices.json`, `activities.json`, `ir_codes.json` |
 | `docs/runbooks/phase1-hub.md`, `phase1-remote.md` | todo | by-hand procedure, abort points, recovery |
 
-Backups live outside git: `backups/phase1/<device>/<utc-timestamp>/` (gitignored), `*.img` +
-`manifest.json`.
+Backups live in-tree but gitignored (user's choice): `backups/phase1/<device>/<utc-timestamp>/`,
+holding `*.img` + `manifest.json`. `backups/` is in `.gitignore`. Note this keeps the only copy on
+this host's disk — worth a second copy elsewhere before Phase 3 starts writing to hardware.
 
 ---
 
@@ -65,21 +65,19 @@ the `HID_QUIRK_NO_IGNORE` (`0x40000000`) override is available.
       root, and if that also fails, **stop and report** — do not improvise kernel patches.
 - [ ] Rollback: `sudo tools/host_setup.sh --undo`. Nothing on the devices changed.
 
-### Task 2 `[RO]` — Hub discovery and reachability
+### Task 2 `[RO]` — Hub reachability — **DONE, no writes needed**
 
 The external root tool aborts if the host cannot reach the hub on 8088/22 *after* rooting — which
-would cost us the rooting window, not the device. Known: host is `198.51.100.126/24` on `enp5s0`; a
-sweep of 8088 across `198.51.100.0/24` found nothing, so the hub is on another subnet/VLAN. HA reaches
-it (entry `c421d657ea8e44d7a66510b46f4dbd8c`, unique_id `REDACTED-HUB-ID`, sw 4.15.600) but HA diagnostics do
-not expose the IP — it lives in HA's `.storage/core.config_entries`, or the router's ARP/DHCP table.
+would cost us the rooting window, not the device.
 
-- [ ] `tools/hubfind.py`: parse `ip neigh`/`arp -an` for Logitech OUIs, optional mDNS/SSDP, rank
-      candidates, probe 8088/22 via an injected `probe(host, port)` (tests use no real sockets).
-- [ ] **User supplies** the hub IP, then one of: **(a)** routing — VLAN id, subnet, gateway, and
-      whether inter-VLAN ACLs permit 8088/22 from this host (preferred: no device writes); **(b)**
-      re-point the hub's Wi-Fi via the tool's `--wifi-ssid/--wifi-pass` — this is a **`[WRITE]`** that
-      reboots the hub and discards its stock Wi-Fi config; **(c)** run the external tool from a host
-      already on the hub's subnet (needs moving the USB cable) — only if (a) and (b) fail.
+- [x] **Hub is `192.0.2.11`** (user-supplied). Host is `198.51.100.126/24` on `enp5s0`; the hub is on
+      another subnet but **already routed** via `198.51.100.1` — no VLAN work, no Wi-Fi re-point, so
+      reachability costs zero device writes. Verified read-only, 2026-11-16: ping 2/2, **8088 open**,
+      **5222 open** (stock XMPP), **22 closed** (expected pre-root). A `setup.account?getProvisionInfo`
+      POST to 8088 returned `activeRemoteId REDACTED-HUB-ID`, matching HA's `harmony` entry unique_id — so
+      `192.0.2.11` is confirmed as this hub, not another device.
+- [x] `tools/hubfind.py` **dropped** — the IP is known and routing works; a discovery tool would be
+      dead code. Re-add only if the hub's address changes.
 - [ ] **Isolate the hub from WAN** for the rest of Phase 1 (MAC block or offline SSID) so it cannot
       pull a stock update. Belt-and-braces: it is already at the latest version.
 - [ ] Gate: from this host, 8088 open and 22 closed (stock). Do not start Task 4 otherwise.
@@ -178,25 +176,31 @@ removes `/data/remote_ui`, writes `/etc/nowatchdog`. All in the writable layer �
 
 ---
 
-## Open questions for the user
+## Decisions recorded (2026-11-16)
 
-1. **Hub IP + reachability** — the IP, and option (a) routing (VLAN id, subnet, gateway, ACLs) or
-   (b) Wi-Fi re-point (SSID, PSK, encryption)? Also: confirm the hub can be blocked from WAN during
-   Phase 1.
-2. **NAND imaging fidelity (remote)** — `cat`/`dd` of `/dev/mtdN` gives main-area data only: no
-   OOB/ECC spare, bad-block info lost. Accept main-area-only, or require `nanddump --oob` (and accept
-   staging a tool if stock BusyBox lacks it)? We never write NAND in v1, so this only matters for
-   worst-case restore fidelity.
-3. **Remote `/data` purity** — step 2 backs up and then installs upstream's runtime in one shot.
-   Accept a `/data` image containing upstream files (the tar holds stock content), interrupt the tool
-   after its backup (risky), or factory-reset + re-root afterwards to image a pristine `/data`?
-4. **Off-host backup destination** — hub ~16 MB, remote ~112 MB plus manifests.
-5. **UART adapter** — confirm it is true 3.3 V TTL (never 5 V on J2).
+- **Hub reachability:** `192.0.2.11`, already routed — Task 2 done, no device writes. ✓
+- **NAND imaging (remote):** main-area only is accepted. No `nanddump --oob`, nothing staged onto the
+  remote to achieve it. Bad-block/OOB info is therefore not captured; acceptable because v1 never
+  writes NAND and the hardware reset is the real recovery path. ✓
+- **Remote `/data` purity:** accept a `/data` image containing the external tool's runtime; its tar
+  holds the stock `/data` content, and rootfs//opt images stay pristine. No interrupt, no
+  reset-and-re-image cycle. ✓
+- **Backup location:** in-tree, gitignored `backups/phase1/...`. ✓
+
+## Still open
+
+1. **WAN isolation** — confirm the hub can be blocked from the internet (MAC filter / offline SSID)
+   for the duration of Phase 1 so it cannot pull a stock update. It is already at the latest
+   version, so this is belt-and-braces, not a gate.
+2. **UART adapter** — confirm it is true 3.3 V TTL (never 5 V on hub J2), and plug it in before
+   Task 4: nothing is on `/dev/ttyUSB*` yet and no terminal emulator (`picocom`) is installed.
+3. **Second backup copy** — the images will live only on this host's disk; decide where a second
+   copy goes before Phase 3 writes to hardware.
 
 ## Testable without hardware
 
-All of Task 3 and the parsers in Tasks 2 and 6: fake-SSH transport, `/proc/mtd` and
-`/proc/partitions` parsing, capability probing, dump + dual hashing + manifest, truncated streams,
-the brick-safety command-log assertion, offline verify (byte flip, missing/extra image, filesystem
-magic), candidate ranking with an injected port probe, and stock-config extraction against fixtures
-cross-checked with HA's live stock integration view.
+All of Task 3 and the parsers in Task 6: fake-SSH transport, `/proc/mtd` and `/proc/partitions`
+parsing, capability probing, dump + dual hashing + manifest, truncated streams, the brick-safety
+command-log assertion, offline verify (byte flip, size mismatch, missing/extra image, leftover
+`.part`/`.CORRUPT`, filesystem magic), and stock-config extraction against fixtures cross-checked
+with HA's live stock integration view. 429 tests green as of 2b6b21c.
