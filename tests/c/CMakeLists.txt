@@ -14,3 +14,6 @@ add_hp_test(rf_pair)
 
 add_executable(gen_rf_vectors gen_rf_vectors.c)
 target_link_libraries(gen_rf_vectors PRIVATE hp_hub)
+
+add_hp_test(page)
+target_compile_definitions(test_page PRIVATE HP_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json")

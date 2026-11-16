@@ -32,6 +32,7 @@ add_library(hp_core STATIC
   proto/gen/harmony_proto.c
   hub/rf/framing.c
   hub/rf/rf_payload.c
+  remote/page/page.c
 )
 target_include_directories(hp_core PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(hp_core PUBLIC m)
