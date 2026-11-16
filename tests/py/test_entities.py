@@ -242,11 +242,12 @@ async def test_runtime_version_mismatch_reloads_into_setup_error(hass, fake_hub,
     hub = await fake_hub(handler)
     entry = make_entry("127.0.0.1", hub.port)
     entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    client = entry.runtime_data.client
+    # the bad push may land mid-setup; either way the entry must end in SETUP_ERROR
+    await hass.config_entries.async_setup(entry.entry_id)
     await _until(hass, lambda: entry.state is ConfigEntryState.SETUP_ERROR)
     assert "incompatible protocol" in entry.reason
-    assert not client.connected and client._task is None
+    leaked = [t for t in asyncio.all_tasks() if "ha_harmony" in t.get_name() and not t.done()]
+    assert not leaked
     n = hub.connections
     await asyncio.sleep(0.4)
     assert hub.connections == n == 2  # initial + the reload's setup; no retry loop
