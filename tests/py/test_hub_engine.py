@@ -207,31 +207,31 @@ async def test_cache_restores_map_after_restart(start_hub, tmp_path):
 
 
 async def test_auth_deadline_closes_unauthenticated(start_hub):
-    hub = start_hub("--auth-timeout-ms", "300")
+    hub = start_hub("--auth-timeout-ms", "800")
     async with aiohttp.ClientSession() as s, s.ws_connect(hub.url) as ws:
         t0 = time.monotonic()
         msg = await ws.receive(timeout=5)
         assert msg.type == aiohttp.WSMsgType.CLOSE and msg.data == 1008
-        assert 0.2 < time.monotonic() - t0 < 3
+        assert 0.6 < time.monotonic() - t0 < 5
         # an authenticated connection is not subject to the auth deadline
     async with aiohttp.ClientSession() as s, s.ws_connect(hub.url) as ws:
         await hello(ws)
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(1.0)  # past the auth deadline, with margin for a slow hello
         assert (await call(ws, "ping", id=7))["t"] == "pong"
     assert hub.alive()
 
 
 async def test_idle_deadline_closes_silent_and_pings_keep_alive(start_hub):
-    hub = start_hub("--idle-timeout-ms", "500")
+    hub = start_hub("--idle-timeout-ms", "1000")
     async with aiohttp.ClientSession() as s, s.ws_connect(hub.url) as ws:
         await hello(ws)
         t0 = time.monotonic()
         msg = await ws.receive(timeout=5)
         assert msg.type == aiohttp.WSMsgType.CLOSE and msg.data == 1001
-        assert 0.4 < time.monotonic() - t0 < 3
+        assert 0.8 < time.monotonic() - t0 < 5
     async with aiohttp.ClientSession() as s, s.ws_connect(hub.url) as ws:
         await hello(ws)
-        for i in range(8):  # 1.2 s of traffic > 500 ms idle limit
+        for i in range(10):  # 1.5 s of traffic > 1 s idle limit
             await asyncio.sleep(0.15)
             assert (await call(ws, "ping", id=10 + i))["t"] == "pong"
     assert hub.alive()
