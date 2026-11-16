@@ -49,6 +49,9 @@ void hp_ws_conn_set_authed(hp_ws_conn_t *);
 /* Calls fn for every upgraded, open connection (e.g. to broadcast). fn must
  * not close connections other than via hp_ws_conn_close/hp_ws_send. */
 void hp_ws_foreach(hp_ws_server_t *, void (*fn)(hp_ws_conn_t *, void *), void *arg);
+/* Optional: fn(arg, out) fills up to 2 extra fds polled for readability each
+ * hp_ws_poll; they only wake the poll (the owner services them). */
+void hp_ws_set_extra_fds(hp_ws_server_t *, int (*fn)(void *arg, int out[2]), void *arg);
 /* Per-connection opaque pointer (owner frees it in on_close). */
 void hp_ws_conn_set_user(hp_ws_conn_t *, void *);
 void *hp_ws_conn_user(const hp_ws_conn_t *);
@@ -59,6 +62,8 @@ void hp_ws_close(hp_ws_server_t *);
 void hp_sha1(const uint8_t *data, size_t len, uint8_t out[20]);
 /* Writes len4/3 rounded up *4 chars + NUL; returns chars written. out must hold 4*((len+2)/3)+1. */
 size_t hp_base64_encode(const uint8_t *in, size_t len, char *out);
+/* Decodes strictly valid base64; returns the byte count, or (size_t)-1 if invalid or > cap. */
+size_t hp_base64_decode(const char *s, size_t len, uint8_t *out, size_t cap);
 /* Strict base64 (padded, standard alphabet) validity check. */
 bool hp_base64_valid(const char *s, size_t len);
 /* out must hold 29 bytes. */

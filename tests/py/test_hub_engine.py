@@ -134,7 +134,8 @@ async def test_state_update_reaches_other_clients_only_when_authed(hub_process):
         assert err["d"]["code"] == "unauthorized"
 
 
-async def test_malformed_config_keeps_old_map(hub_process):
+async def test_malformed_config_keeps_old_map(hub_rf, run_remote):
+    hub_process = hub_rf
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
         await hello(ws)
         assert (await call(ws, "set_config", {"config": CONFIG}, id=2))["d"]["ok"] is True
@@ -155,42 +156,20 @@ async def test_malformed_config_keeps_old_map(hub_process):
         )
         await recv(ws)  # state_update
         read_lines(hub_process, 4)
-        await call(
-            ws,
-            "command",
-            {
-                "device": "sim",
-                "command": "inject_key",
-                "args": {"remote": 1, "key": 2, "action": 0},
-            },
-            id=5,
-        )
+        assert run_remote(hub_rf.rf, "--press", "2", "--remote", "1").returncode == 0
         ke = await recv(ws)
         assert ke["t"] == "key_event" and ke["d"] == {"remote": 1, "key": 2, "action": 0}
         assert read_lines(hub_process, 1) == ["ir port=3 n=4 pronto=0000 006d 0000 0000"]
 
 
-async def test_scripted_key_unmapped_still_emits(hub_process):
-    async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
+async def test_unmapped_key_still_emits(hub_rf, run_remote):
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_rf.url) as ws:
         await hello(ws)
         await call(ws, "set_config", {"config": CONFIG}, id=2)
-        r = await call(
-            ws,
-            "command",
-            {
-                "device": "sim",
-                "command": "inject_key",
-                "args": {"remote": 2, "key": 200, "action": 1},
-            },
-            id=3,
-        )
-        assert r["d"]["ok"] is True
+        res = run_remote(hub_rf.rf, "--press", "200", "--remote", "2", "--action", "1")
+        assert res.returncode == 0, res.stderr
         ke = await recv(ws)
         assert ke["d"] == {"remote": 2, "key": 200, "action": 1}
-        r = await call(
-            ws, "command", {"device": "sim", "command": "inject_key", "args": {"remote": 2}}, id=4
-        )
-        assert r["d"]["ok"] is False
 
 
 async def test_cache_restores_map_after_restart(start_hub, tmp_path):

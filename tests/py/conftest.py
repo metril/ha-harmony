@@ -7,7 +7,9 @@ import re
 import select
 import shutil
 import signal
+import socket
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -34,17 +36,29 @@ def built_binaries() -> Path:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             _run(["cmake", "-S", ".", "-B", "build"])
-            _run(["cmake", "--build", "build", "-j", str(os.cpu_count() or 2), "--target", "hub"])
+            _run(
+                [
+                    "cmake",
+                    "--build",
+                    "build",
+                    "-j",
+                    str(os.cpu_count() or 2),
+                    "--target",
+                    "hub",
+                    "remote_sim",
+                ]
+            )
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
     return BUILD
 
 
 class HubProcess:
-    def __init__(self, proc: subprocess.Popen, port: int, token: str):
+    def __init__(self, proc: subprocess.Popen, port: int, token: str, rf: str | None = None):
         self.proc = proc
         self.port = port
         self.token = token
+        self.rf = rf  # RF socket path when started with --rf
 
     @property
     def url(self) -> str:
@@ -80,6 +94,7 @@ def start_hub(built_binaries, tmp_path):
     procs: list[subprocess.Popen] = []
 
     def _start(*extra: str, token: str = TOKEN) -> HubProcess:
+        rf = extra[extra.index("--rf") + 1] if "--rf" in extra else None
         proc = subprocess.Popen(
             [str(built_binaries / "hub"), "--sim", "--port", "0", "--token", token, *extra],
             stdout=subprocess.PIPE,
@@ -87,7 +102,7 @@ def start_hub(built_binaries, tmp_path):
             cwd=tmp_path,
         )
         procs.append(proc)
-        return HubProcess(proc, _read_port(proc), token)
+        return HubProcess(proc, _read_port(proc), token, rf)
 
     yield _start
     for proc in procs:
@@ -105,3 +120,95 @@ def start_hub(built_binaries, tmp_path):
 @pytest.fixture
 def hub_process(start_hub) -> HubProcess:
     return start_hub()
+
+
+@pytest.fixture
+def rf_path():
+    """Short per-test RF socket path (sun_path is limited to ~107 bytes, tmp_path can exceed it)."""
+    d = tempfile.mkdtemp(prefix="hprf")
+    yield os.path.join(d, "rf.sock")
+    shutil.rmtree(d, ignore_errors=True)
+
+
+@pytest.fixture
+def hub_rf(start_hub, rf_path) -> HubProcess:
+    """hub --sim --rf <rf_path> on an ephemeral ws port; `.rf` is the socket path."""
+    return start_hub("--rf", rf_path)
+
+
+@pytest.fixture
+def run_remote(built_binaries):
+    """run_remote(rf, *args, timeout=10) -> CompletedProcess (text stdout/stderr) of remote_sim."""
+
+    def _run(rf: str, *args: str, timeout: float = 10.0) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [str(built_binaries / "remote_sim"), "--rf", rf, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+
+    return _run
+
+
+class RemoteDump:
+    """A running `remote_sim --dump-page`: wait_attached() then result()."""
+
+    def __init__(self, proc: subprocess.Popen):
+        self.proc = proc
+
+    def wait_attached(self, timeout: float = 5.0) -> None:
+        assert self.proc.stderr is not None
+        fd = self.proc.stderr.fileno()
+        deadline = time.monotonic() + timeout
+        buf = b""
+        while b"attached" not in buf:
+            left = deadline - time.monotonic()
+            assert left > 0, f"remote_sim never attached; stderr={buf!r}"
+            if select.select([fd], [], [], min(left, 0.1))[0]:
+                chunk = os.read(fd, 256)
+                assert chunk, f"remote_sim exited early; stderr={buf!r}"
+                buf += chunk
+
+    def result(self, timeout: float = 10.0) -> tuple[int, str]:
+        """(exit code, stdout) once the process exits."""
+        out, _ = self.proc.communicate(timeout=timeout)
+        return self.proc.returncode, out.decode()
+
+
+@pytest.fixture
+def start_remote_dump(built_binaries):
+    """start_remote_dump(rf, timeout_ms=5000) -> RemoteDump (not yet attached-checked)."""
+    procs: list[subprocess.Popen] = []
+
+    def _start(rf: str, timeout_ms: int = 5000) -> RemoteDump:
+        proc = subprocess.Popen(
+            [
+                str(built_binaries / "remote_sim"),
+                "--rf",
+                rf,
+                "--dump-page",
+                "--timeout-ms",
+                str(timeout_ms),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        procs.append(proc)
+        return RemoteDump(proc)
+
+    yield _start
+    for proc in procs:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+
+def rf_attach(rf: str, timeout: float = 5.0) -> socket.socket:
+    """Raw RF peer for tests: connects and consumes the hub's 1-byte 'A' handshake."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    sock.settimeout(timeout)
+    sock.connect(rf)
+    assert sock.recv(8) == b"A", "hub refused the RF connection"
+    return sock

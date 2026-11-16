@@ -9,6 +9,8 @@ add_hp_test(framing)
 add_hp_test(ws)
 add_hp_test(jsonrpc)
 add_hp_test(mapping)
+add_hp_test(rf_payload)
+add_hp_test(rf_pair)
 
 add_executable(gen_rf_vectors gen_rf_vectors.c)
 target_link_libraries(gen_rf_vectors PRIVATE hp_hub)

@@ -85,6 +85,27 @@ size_t hp_base64_encode(const uint8_t *in, size_t len, char *out) {
     return o;
 }
 
+size_t hp_base64_decode(const char *s, size_t len, uint8_t *out, size_t cap) {
+    if (!hp_base64_valid(s, len)) return (size_t)-1;
+    size_t pad = len && s[len - 1] == '=' ? (len > 1 && s[len - 2] == '=' ? 2 : 1) : 0;
+    size_t n = len / 4 * 3 - pad;
+    if (n > cap) return (size_t)-1;
+    size_t o = 0;
+    for (size_t i = 0; i < len; i += 4) {
+        uint32_t v = 0;
+        for (int k = 0; k < 4; k++) {
+            char c = s[i + (size_t)k];
+            uint32_t d = c >= 'A' && c <= 'Z' ? (uint32_t)(c - 'A')
+                       : c >= 'a' && c <= 'z' ? (uint32_t)(c - 'a' + 26)
+                       : c >= '0' && c <= '9' ? (uint32_t)(c - '0' + 52)
+                       : c == '+' ? 62u : c == '/' ? 63u : 0u;
+            v = (v << 6) | d;
+        }
+        for (int k = 0; k < 3 && o < n; k++) out[o++] = (uint8_t)(v >> (16 - 8 * k));
+    }
+    return n;
+}
+
 bool hp_base64_valid(const char *s, size_t len) {
     if (len % 4) return false;
     for (size_t i = 0; i < len; i++) {
@@ -271,6 +292,8 @@ struct hp_ws_server {
     hp_ws_cb_t cb;
     void *user;
     int auth_ms, idle_ms;
+    int (*extra_fds)(void *arg, int out[2]);
+    void *extra_arg;
     hp_ws_conn_t conns[HP_WS_MAX_CONNS];
 };
 
@@ -574,10 +597,16 @@ static void accept_one(hp_ws_server_t *s) {
     c->deadline = now_ms() + HP_WS_HANDSHAKE_MS;
 }
 
+void hp_ws_set_extra_fds(hp_ws_server_t *s, int (*fn)(void *arg, int out[2]), void *arg) {
+    if (!s) return;
+    s->extra_fds = fn;
+    s->extra_arg = arg;
+}
+
 int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
     if (!s) return -HP_E_INVAL;
-    struct pollfd fds[1 + HP_WS_MAX_CONNS];
-    int map[1 + HP_WS_MAX_CONNS];
+    struct pollfd fds[3 + HP_WS_MAX_CONNS];
+    int map[3 + HP_WS_MAX_CONNS];
     int nf = 0;
     int64_t now = now_ms();
     int64_t wait = timeout_ms < 0 ? INT32_MAX : timeout_ms;
@@ -604,10 +633,18 @@ int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
             }
         }
     }
+    if (s->extra_fds) { /* wake-only: the owner services these fds itself */
+        int ef[2] = {-1, -1};
+        int ne = s->extra_fds(s->extra_arg, ef);
+        for (int k = 0; k < ne && k < 2; k++) {
+            fds[nf].fd = ef[k]; fds[nf].events = POLLIN; fds[nf].revents = 0; map[nf++] = -2;
+        }
+    }
     int r = poll(fds, (nfds_t)nf, (int)wait);
     if (r < 0) return errno == EINTR ? 0 : -HP_E_INVAL;
     for (int k = 0; k < nf; k++) {
         if (!fds[k].revents) continue;
+        if (map[k] == -2) continue;
         if (map[k] < 0) {
             accept_one(s);
             continue;

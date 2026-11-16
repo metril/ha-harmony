@@ -5,10 +5,32 @@
 #include <string.h>
 
 #include "hub/hp_errors.h"
+#include "hub/rf/rf_payload.h"
 
 void hub_ctx_init(hub_ctx_t *c) {
     memset(c, 0, sizeof *c);
     hp_map_init(&c->map);
+    hp_rf_asm_init(&c->rf_asm);
+}
+
+#define HUB_RF_CAP 30 /* hub->remote total frame size */
+
+/* Packs, splits and sends one RF message. 0, -HP_E_TOOBIG (nothing sent),
+ * -HP_E_NOENT (no remote; nothing sent), other negative: link failed. */
+static int rf_send_msg(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, size_t nv) {
+    uint8_t payload[HP_RF_MSG_MAX];
+    hp_rf_frame_t fr[HP_RF_MAX_FRAGS];
+    size_t plen = 0, nf = 0;
+    if (!h->sinks.rf) return -HP_E_NOENT;
+    int rc = hp_rf_pack(t, v, nv, payload, sizeof payload, &plen);
+    if (rc < 0) return rc;
+    rc = hp_rf_split(t, h->rf_seq++, payload, plen, HUB_RF_CAP, fr, HP_RF_MAX_FRAGS, &nf);
+    if (rc < 0) return rc;
+    for (size_t i = 0; i < nf; i++) {
+        rc = h->sinks.rf->send(h->sinks.rf->self, fr[i].data, fr[i].len);
+        if (rc < 0) return (i == 0 || rc == -HP_E_NOENT) ? rc : -HP_E_IO;
+    }
+    return 0;
 }
 
 /* ------------------------------------------------------------ broadcast */
@@ -41,6 +63,8 @@ void hub_flush_pending(hub_ctx_t *h) {
     cJSON_AddNumberToObject(d, "activity", h->pending_activity);
     cJSON_AddBoolToObject(d, "power", h->pending_power);
     hub_broadcast(h, "state_update", d);
+    hp_rf_val_t v[2] = {{.u = (uint32_t)h->pending_activity & 0xFF}, {.u = h->pending_power ? 1u : 0u}};
+    (void)rf_send_msg(h, HP_MSG_STATE_UPDATE, v, 2); /* best effort: remote may be absent */
 }
 
 /* ------------------------------------------------------------- handlers */
@@ -77,13 +101,6 @@ static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
     return reply_ok(id, "config_ack", true, msg, reply, cap, len);
 }
 
-static int get_u8(const cJSON *d, const char *k, int hi) {
-    const cJSON *v = cJSON_GetObjectItemCaseSensitive((cJSON *)d, k);
-    if (!cJSON_IsNumber(v) || v->valuedouble != (double)(int)v->valuedouble) return -1;
-    int i = (int)v->valuedouble;
-    return i >= 0 && i <= hi ? i : -1;
-}
-
 static int on_command(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply,
                       size_t cap, size_t *len) {
     (void)sess;
@@ -114,16 +131,29 @@ static int on_command(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *
         h->pending_power = false;
         return reply_ok(id, "command_result", true, NULL, reply, cap, len);
     }
-    if (h->sim && !strcmp(dev, "sim") && !strcmp(cmd, "inject_key")) {
-        int r = cJSON_IsObject(args) ? get_u8(args, "remote", 255) : -1;
-        int k = cJSON_IsObject(args) ? get_u8(args, "key", 255) : -1;
-        int a = cJSON_IsObject(args) ? get_u8(args, "action", 2) : -1;
-        if (r < 0 || k < 0 || a < 0) return reply_ok(id, "command_result", false, "bad args", reply, cap, len);
-        uint8_t fr[3] = {(uint8_t)r, (uint8_t)k, (uint8_t)a};
-        rc = hp_sim_rf_script(h->sim, fr, sizeof fr);
-        return reply_ok(id, "command_result", rc == 0, rc ? "rf queue full" : NULL, reply, cap, len);
-    }
     return reply_ok(id, "command_result", false, "unknown command", reply, cap, len);
+}
+
+static int reply_err(uint32_t id, const char *code, const char *msg, char *reply, size_t cap, size_t *len) {
+    return hp_make_error(id, code, msg, reply, cap, len);
+}
+
+static int on_page_push(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply,
+                        size_t cap, size_t *len) {
+    (void)sess;
+    hub_ctx_t *h = vctx;
+    const cJSON *r = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "remote");
+    const cJSON *pg = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "page");
+    const cJSON *b64 = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "data");
+    uint8_t data[256];
+    size_t n = hp_base64_decode(b64->valuestring, strlen(b64->valuestring), data, sizeof data);
+    if (n == (size_t)-1 || n > 255) return reply_err(id, "too_big", "page data exceeds 255 bytes", reply, cap, len);
+    hp_rf_val_t v[3] = {{.u = (uint32_t)r->valuedouble}, {.u = (uint32_t)pg->valuedouble}, {.p = data, .len = n}};
+    int rc = rf_send_msg(h, HP_MSG_PAGE_PUSH, v, 3);
+    if (rc == -HP_E_TOOBIG) return reply_err(id, "too_big", "page does not fit the RF budget", reply, cap, len);
+    if (rc == -HP_E_NOENT) return reply_err(id, "no_remote", "no remote attached", reply, cap, len);
+    if (rc < 0) return reply_err(id, "rf_error", "RF send failed", reply, cap, len);
+    return reply_ok(id, "command_result", true, NULL, reply, cap, len);
 }
 
 static cJSON *on_activities(void *vctx) {
@@ -140,6 +170,7 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->activities = on_activities;
     tbl->handler[HP_MSG_SET_CONFIG] = on_set_config;
     tbl->handler[HP_MSG_COMMAND] = on_command;
+    tbl->handler[HP_MSG_PAGE_PUSH] = on_page_push;
 }
 
 /* ------------------------------------------------------------------ rf */
@@ -153,13 +184,33 @@ static void emit_key(void *vctx, uint8_t remote, uint8_t key, hp_key_action_t ac
     hub_broadcast(vctx, "key_event", d);
 }
 
+static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
+    hp_rf_val_t v[3];
+    if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
+        int rc = hp_key_handle(&h->map, &h->sinks, (uint8_t)v[0].u, (uint8_t)v[1].u, (hp_key_action_t)v[2].u,
+                               emit_key, h);
+        if (rc < 0) fprintf(stderr, "hub: key %u action failed (%d)\n", (unsigned)v[1].u, rc);
+    } else if (m->type == HP_MSG_BATTERY && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
+        cJSON *d = cJSON_CreateObject();
+        if (!d) return;
+        cJSON_AddNumberToObject(d, "remote", v[0].u);
+        cJSON_AddNumberToObject(d, "percent", v[1].u);
+        cJSON_AddNumberToObject(d, "millivolts", v[2].u);
+        hub_broadcast(h, "battery", d);
+    } /* anything else from a remote is dropped */
+}
+
 void hub_pump_rf(hub_ctx_t *h) {
     if (!h->sinks.rf) return;
-    uint8_t fr[HP_SIM_RF_MAX];
+    uint8_t fr[HP_RF_FRAME_MAX + 1];
+    hp_rf_msg_t msg;
     int n;
-    while ((n = h->sinks.rf->recv(h->sinks.rf->self, fr, sizeof fr, 0)) > 0) {
-        if (n != 3 || fr[2] > HP_KEY_ACTION_HOLD) continue; /* malformed: drop */
-        int rc = hp_key_handle(&h->map, &h->sinks, fr[0], fr[1], (hp_key_action_t)fr[2], emit_key, h);
-        if (rc < 0) fprintf(stderr, "hub: key %u action failed (%d)\n", (unsigned)fr[1], rc);
+    while ((n = h->sinks.rf->recv(h->sinks.rf->self, fr, sizeof fr, 0)) != 0) {
+        if (n < 0) { /* link event (remote gone) or error: drop partial reassembly */
+            hp_rf_asm_init(&h->rf_asm);
+            break;
+        }
+        if (n > HP_RF_FRAME_MAX) continue;
+        if (hp_rf_asm_push(&h->rf_asm, fr, (size_t)n, &msg) == HP_ASM_COMPLETE) handle_rf_msg(h, &msg);
     }
 }

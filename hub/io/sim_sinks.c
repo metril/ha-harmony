@@ -42,7 +42,7 @@ static int sim_bt_key(void *self, uint16_t usage, bool down) {
 
 static int sim_rf_send(void *self, const uint8_t *frame, size_t len) {
     (void)self; (void)frame; (void)len;
-    return 0; /* sim RF has no peer yet */
+    return -HP_E_NOENT; /* scripted sim RF has no peer */
 }
 
 static int sim_rf_recv(void *self, uint8_t *frame, size_t cap, int timeout_ms) {

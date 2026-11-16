@@ -24,10 +24,12 @@ target_link_libraries(cjson PRIVATE m)
 add_library(hp_hub STATIC
   proto/gen/harmony_proto.c
   hub/rf/framing.c
+  hub/rf/rf_payload.c
   hub/net/ws.c
   hub/net/jsonrpc.c
   hub/engine/mapping.c
   hub/io/sim_sinks.c
+  hub/io/rf_pair.c
   hub/hub_handlers.c
 )
 target_include_directories(hp_hub PUBLIC ${CMAKE_SOURCE_DIR})
@@ -35,6 +37,9 @@ target_link_libraries(hp_hub PUBLIC cjson m)
 
 add_executable(hub hub/main.c)
 target_link_libraries(hub PRIVATE hp_hub)
+
+add_executable(remote_sim remote/sim/remote_sim.c)
+target_link_libraries(remote_sim PRIVATE hp_hub)
 
 enable_testing()
 add_subdirectory(tests/c)
