@@ -38,12 +38,16 @@ class HarmonyDeviceInput(HarmonyEntity, SensorEntity):
     def __init__(self, coordinator: HarmonyCoordinator, device: str) -> None:
         super().__init__(coordinator, f"dev_{device}_input", device=device)
         self._device = device
-        self._attr_options = list(coordinator.compiled.devices[device].inputs)
+
+    @property
+    def options(self) -> list[str]:  # read live: a reload can add inputs to this device
+        dev = self.coordinator.compiled.devices.get(self._device)
+        return list(dev.inputs) if dev else []
 
     @property
     def native_value(self) -> str | None:
         st = self.coordinator.device_states.get(self._device)
-        return st.input if st and st.input in self._attr_options else None
+        return st.input if st and st.input in self.options else None
 
 
 class HarmonyRemoteBattery(HarmonyEntity, SensorEntity):
