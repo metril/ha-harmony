@@ -51,6 +51,7 @@ add_library(hp_hub STATIC
   hub/engine/mapping.c
   hub/io/sim_sinks.c
   hub/io/rf_pair.c
+  hub/ir/encode.c
   hub/hub_handlers.c
 )
 target_link_libraries(hp_hub PUBLIC hp_core cjson m)

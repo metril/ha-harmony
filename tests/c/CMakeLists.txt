@@ -17,3 +17,8 @@ target_link_libraries(gen_rf_vectors PRIVATE hp_hub)
 
 add_hp_test(page)
 target_compile_definitions(test_page PRIVATE HP_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json")
+
+# IR encoder: vectors dir passed as argv[1] (shared with tests/py/test_ir_vectors.py).
+add_executable(test_ir_encode test_ir_encode.c)
+target_link_libraries(test_ir_encode PRIVATE hp_hub)
+add_test(NAME ir_encode COMMAND test_ir_encode ${CMAKE_SOURCE_DIR}/tests/vectors/ir)
