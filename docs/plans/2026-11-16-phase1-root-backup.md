@@ -91,12 +91,12 @@ not expose the IP — it lives in HA's `.storage/core.config_entries`, or the ro
       host-side hash compared (`sha256sum`, `md5sum` with a loud warning), manifest on success *and*
       failure, skip-complete, `--only`, `--dry-run`. 13 tests, all against a fake SSH transport.
 - [ ] Harden before hardware (gaps found in review of the first cut):
-  - [ ] SSH timeouts (`ConnectTimeout`, `ServerAliveInterval`/`CountMax`) so a hung hub cannot hang a run.
-  - [ ] `cat /dev/mtdNro` read path for a BusyBox without `dd` — the remote's stock BusyBox is
+  - [x] SSH timeouts (`ConnectTimeout`, `ServerAliveInterval`/`CountMax`) so a hung hub cannot hang a run.
+  - [x] `cat /dev/mtdNro` read path for a BusyBox without `dd` — the remote's stock BusyBox is
         reported to lack it, and today a missing `dd` is a hard failure.
-  - [ ] Brick-safety test: no emitted command may contain `of=`, `nandwrite`, `flash_erase`, or a
+  - [x] Brick-safety test: no emitted command may contain `of=`, `nandwrite`, `flash_erase`, or a
         redirect into `/dev/mtd*`.
-  - [ ] `--verify <dir>`: offline re-hash of every image against both manifest hashes, size check,
+  - [x] `--verify <dir>`: offline re-hash of every image against both manifest hashes, size check,
         and filesystem-magic report (squashfs/jffs2/ubi); non-zero on any mismatch, missing or extra image.
 - [ ] Gate: full suite green (397 pre-existing + new), `ruff check` clean.
 
