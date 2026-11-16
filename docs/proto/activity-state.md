@@ -32,7 +32,9 @@ settle times are kept (a device powered on 20 ms ago is not sent an input yet). 
 whose `off` steps run is the last requested one (the interrupted target counts as current).
 While a transition runs, non-activity key presses are dropped and the `ir_send` verb answers
 `{ok:false,"transition in progress"}`; HOLD/RELEASE are harmless. A reload (`set_config`)
-cancels the plan. An IR send failure aborts the plan and reverts to the reported activity.
+cancels the plan; the interrupted target is never reported or persisted: the last *completed*
+activity stays (re-found by id, none if it no longer exists) and device state stays what was
+actually sent. An IR send failure aborts the plan and reverts to the reported activity.
 
 ## What is reported
 * `state_update {activity, power}` is sent when a transition **completes** (also over RF). While

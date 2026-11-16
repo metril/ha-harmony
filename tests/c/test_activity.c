@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 /* Activity state machine: transition tables, settle delays, interruption, persistence (fake clock). */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -504,6 +505,55 @@ static void test_idle_clock_wrap(void) {
     idle_clock_case(0xFFFFFFFFu - 499u); /* 2^32 - 500 */
 }
 
+/* A reload while a transition runs must not report (or persist) the unfinished target. */
+static void test_reload_mid_transition_keeps_reported(void) {
+    setup();
+    tmp_path();
+    hp_actsm_set_state_path(&sm, path);
+    CT_EQ(hp_actsm_start(&sm, "watch"), 0);
+    settle_all();
+    CT_EQ(hp_actsm_reported(&sm), 0);
+    advance(g_now + 3000); /* clear the debounce window */
+    hp_actsm_start(&sm, "movie");
+    advance(g_now + 20);
+    CT_CHECK(hp_actsm_busy(&sm));
+    CT_EQ(map.current, 1);
+    nev = 0;
+    CT_EQ(hp_map_load(&map, CFG, strlen(CFG)), 0);
+    hp_actsm_reloaded(&sm);
+    CT_CHECK(!hp_actsm_busy(&sm));
+    CT_EQ(hp_actsm_reported(&sm), 0); /* still the last completed activity */
+    CT_EQ(map.current, 0);
+    for (size_t i = 0; i < nev; i++) CT_CHECK(!(evs[i].kind == HP_ACTSM_EVT_ACTIVITY && evs[i].idx == 1));
+    CT_EQ(hp_actsm_flush_state(&sm), 0);
+    setup();
+    hp_actsm_set_state_path(&sm, path);
+    CT_EQ(hp_actsm_load_state(&sm), 0);
+    CT_EQ(hp_actsm_reported(&sm), 0); /* the state file never shows the interrupted target */
+    /* from "none": interrupted start must not become current */
+    setup();
+    hp_actsm_start(&sm, "movie");
+    advance(g_now + 20);
+    CT_EQ(hp_map_load(&map, CFG, strlen(CFG)), 0);
+    hp_actsm_reloaded(&sm);
+    CT_EQ(hp_actsm_reported(&sm), -1);
+    CT_EQ(map.current, -1);
+    CT_EQ(count_ev(HP_ACTSM_EVT_ACTIVITY), 0);
+    /* the completed activity vanished in the new config: none */
+    setup();
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    hp_actsm_start(&sm, "movie");
+    advance(g_now + 20);
+    const char *nw = "{\"format\":2,\"devices\":[{\"id\":\"tv\"}],\"activities\":[{\"id\":\"movie\",\"devices\":[{\"device\":\"tv\"}]}]}";
+    CT_EQ(hp_map_load(&map, nw, strlen(nw)), 0);
+    hp_actsm_reloaded(&sm);
+    CT_EQ(hp_actsm_reported(&sm), -1);
+    CT_EQ(map.current, -1);
+    unlink(path);
+}
+
+
 int main(void) {
     CT_RUN(test_start_from_off);
     CT_RUN(test_a_to_b_shared_devices);
@@ -523,6 +573,7 @@ int main(void) {
     CT_RUN(test_state_bad_files);
     CT_RUN(test_state_debounce);
     CT_RUN(test_idle_clock_wrap);
+    CT_RUN(test_reload_mid_transition_keeps_reported);
     hp_map_free(&map);
     return CT_DONE();
 }

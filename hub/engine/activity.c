@@ -24,6 +24,23 @@ static void emit(hp_actsm_t *e, hp_actsm_evt_t ev, int idx) {
     if (e->notify) e->notify(e->notify_ctx, ev, idx);
 }
 
+/* The reported activity is remembered by identity (id for format 2, name for format 1) so a reload
+ * can re-resolve it in the new map whatever its index/name became. */
+static void set_reported(hp_actsm_t *e, int idx) {
+    const hp_map_t *m = e->map;
+    e->reported = idx;
+    e->rep_key[0] = 0;
+    if (idx >= 0 && idx < m->nacts)
+        snprintf(e->rep_key, sizeof e->rep_key, "%s", m->format == 2 ? m->acts[idx].id : m->acts[idx].name);
+}
+
+static int resolve_reported(const hp_actsm_t *e) {
+    const hp_map_t *m = e->map;
+    for (int i = 0; e->rep_key[0] && i < m->nacts; i++)
+        if (!strcmp(e->rep_key, m->format == 2 ? m->acts[i].id : m->acts[i].name)) return i;
+    return -1;
+}
+
 /* ------------------------------------------------------------ persistence */
 
 #define STATE_HDR 9 /* magic(4) ver(1) hash(4) */
@@ -155,7 +172,7 @@ int hp_actsm_load_state(hp_actsm_t *e) {
             e->dev[d].input[0] = 0;
             if (st[i].power && input_index(e->map, d, st[i].input) >= 0) strcpy(e->dev[d].input, st[i].input);
         }
-    e->reported = idx;
+    set_reported(e, idx);
     e->target = idx;
     e->map->current = idx;
     e->saved_hash = e->map->hash;
@@ -211,7 +228,7 @@ static void arm(hp_actsm_t *e, uint32_t delay);
 static void finish(hp_actsm_t *e) {
     e->running = false;
     e->nplan = e->pos = 0;
-    e->reported = e->target;
+    set_reported(e, e->target);
     e->map->current = e->target;
     emit(e, HP_ACTSM_EVT_ACTIVITY, e->reported);
     mark_dirty(e);
@@ -316,7 +333,7 @@ int hp_actsm_start_idx(hp_actsm_t *e, int idx) {
     if (m->format != 2) {
         int rc = hp_activity_set(m, m->acts[idx].name, e->sinks);
         if (rc < 0) return rc;
-        e->reported = rc;
+        set_reported(e, rc);
         emit(e, HP_ACTSM_EVT_ACTIVITY, rc);
         mark_dirty(e);
         return rc;
@@ -346,7 +363,7 @@ int hp_actsm_off(hp_actsm_t *e) {
     if (m->format != 2) {
         int rc = hp_activity_off(m, e->sinks);
         if (rc < 0) return rc;
-        e->reported = -1;
+        set_reported(e, -1);
         emit(e, HP_ACTSM_EVT_ACTIVITY, -1);
         mark_dirty(e);
         return rc;
@@ -409,9 +426,12 @@ void hp_actsm_reloaded(hp_actsm_t *e) {
         changed = changed || push[i];
     }
     changed = changed || nold != e->ndev;
+    /* The last COMPLETED activity survives (re-resolved by identity); a transition cut short by
+     * this reload is never reported: map->current already holds its unfinished target. */
     int prev = e->reported;
-    e->reported = m->current;
-    e->target = m->current;
+    set_reported(e, resolve_reported(e));
+    m->current = e->reported;
+    e->target = e->reported;
     for (uint8_t i = 0; i < e->ndev; i++)
         if (push[i]) emit(e, HP_ACTSM_EVT_DEVICE, i);
     if (prev != e->reported) emit(e, HP_ACTSM_EVT_ACTIVITY, e->reported);
@@ -430,7 +450,7 @@ void hp_actsm_init(hp_actsm_t *e, hp_map_t *m, hp_sched_t *s, const hp_sinks_t *
     e->sinks = sinks;
     e->notify = fn;
     e->notify_ctx = ctx;
-    e->reported = m->current;
+    set_reported(e, m->current);
     e->target = m->current;
     hp_map_set_actops(m, &(hp_map_actops_t){e, op_start, op_off, op_busy});
 }

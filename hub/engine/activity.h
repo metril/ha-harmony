@@ -74,6 +74,7 @@ typedef struct {
     hp_devstate_t dev[HP_MAP_MAX_DEVICES];
     uint8_t ndev;
     int reported; /* last completed activity, -1 none */
+    char rep_key[HP_MAP_NAME_MAX]; /* its identity (id; name in format 1), to re-find it on reload */
     hp_actstep_t plan[HP_ACT_PLAN_MAX];
     uint8_t nplan, pos;
     bool running;
@@ -91,8 +92,10 @@ typedef struct {
 
 void hp_actsm_init(hp_actsm_t *, hp_map_t *, hp_sched_t *, const hp_sinks_t *, hp_actsm_notify_fn, void *);
 /* Call after every successful hp_map_load: cancels a running transition, re-keys the tracked
- * device state by device id (new devices start off/unknown), takes map->current as the reported
- * activity and notifies every device (and the activity if it changed). */
+ * device state by device id (new devices start off/unknown), re-resolves the last COMPLETED
+ * activity in the new map by id (name in format 1; none if gone; a transition cut short by the
+ * reload is never reported, even though map->current carried its target over) and notifies every
+ * device (and the activity if it changed). */
 void hp_actsm_reloaded(hp_actsm_t *);
 
 /* Start the named activity / a power-down. Return the activity index (off: the activity that was
