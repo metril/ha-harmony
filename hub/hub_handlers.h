@@ -11,9 +11,18 @@
  *   command        -> command_result {ok, message?}. Vocabulary:
  *                       device "hub", command "start_activity", args {"name": "<activity>"}
  *                       device "hub", command "power_off"        (current activity's "off" steps)
- *                     start_activity / power_off broadcast state_update
- *                     {activity: <index>, power: true|false} (id 0) to every
- *                     authenticated client AFTER the command_result.
+ *                     The command_result only says the request was accepted. For format-2 configs
+ *                     the transition then runs on timers (hub/engine/activity.h); when it completes
+ *                     every authenticated client gets state_update {activity: <index>, power:
+ *                     true|false} (id 0). Format 1 completes inside the command, so the
+ *                     state_update follows the command_result at once. Per-device changes are
+ *                     pushed as device_state {device, power, input?} (input omitted = unknown)
+ *                     whenever the tracked state changes, and the full set after hello_ack.
+ *                       device "hub", command "set_device_state",
+ *                         args {"device": "<id>", "power"?: bool, "input"?: "<name>"|null}
+ *                                   corrects the tracked state WITHOUT sending IR (a device was
+ *                                   switched by hand); input null/"" = unknown. Unknown device or
+ *                                   input -> command_result {ok:false, message}.
  *   hello_ack      -> activities = JSON array of activity names; the array
  *                     index is the `activity` value used in state_update.
  *   page_push      -> (ws, data = base64) packed with rf_payload, split at the
@@ -47,6 +56,7 @@
 
 #include <stdbool.h>
 
+#include "hub/engine/activity.h"
 #include "hub/engine/irout.h"
 #include "hub/engine/mapping.h"
 #include "hub/engine/sched.h"
@@ -66,24 +76,30 @@ typedef struct {
     uint8_t rf_seq;         /* hub->remote message sequence */
     bool pending_list;      /* an activity_list to broadcast after the reply */
     const hp_session_t *list_skip; /* ...to everyone but the set_config sender */
-    hp_sched_t sched;       /* timers: key repeat, SIRC copies */
+    hp_sched_t sched;       /* timers: key repeat, SIRC copies, activity transitions, state writes */
     hp_irout_t irout;
+    hp_actsm_t act;         /* activity state machine (docs/proto/activity-state.md) */
+    uint32_t pending_dev;   /* bit n: device n's device_state is to be broadcast */
 } hub_ctx_t;
 
 /* Initialises the context with a CLOCK_MONOTONIC millisecond clock for the timers. */
 void hub_ctx_init(hub_ctx_t *);
 /* Replaces the timer clock (tests). Call before any timer is scheduled. */
 void hub_set_clock(hub_ctx_t *, hp_clock_fn, void *);
-/* Poll-loop helpers: ms until the next timer (-1 none), and run whatever is due. Never block. */
+/* Poll-loop helpers: ms until the next timer (-1 none), and run whatever is due (then broadcasts
+ * whatever the timers changed). Never block. */
 int hub_next_timeout_ms(const hub_ctx_t *);
 void hub_run_timers(hub_ctx_t *);
 /* Fills tbl->ctx and the handler/activities hooks (token etc. left to caller). */
 void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx);
-/* Sends the current state_update (id 0) to one connection; used right after a successful hello so
- * a (re)connecting client learns the live state. No activity running -> {activity:0, power:false}. */
+/* Sends the current state_update (id 0, the last COMPLETED activity) and then one device_state per
+ * tracked device to one connection; used right after a successful hello so a (re)connecting client
+ * learns the live state. No activity running -> {activity:0, power:false}. */
 void hub_send_state(hub_ctx_t *, hp_ws_conn_t *);
-/* Sends any queued state_update to all authenticated clients. */
+/* Flushes the engine's queued activity_list / device_state / state_update broadcasts. */
 void hub_flush_pending(hub_ctx_t *);
+/* Clean shutdown: writes the state file if a change is still pending. */
+void hub_shutdown(hub_ctx_t *);
 /* Drains the RF transport, applying keys and broadcasting key_event. */
 void hub_pump_rf(hub_ctx_t *);
 /* Sends {v,id:0,t:type,d} to every authenticated connection; takes ownership of d. */

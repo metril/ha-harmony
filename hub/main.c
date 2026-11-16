@@ -62,6 +62,7 @@ int main(int argc, char **argv) {
     long port = 8099;
     const char *token = NULL;
     const char *cache = NULL;
+    const char *state = NULL;
     const char *rf_path = NULL;
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
     for (int i = 1; i < argc; i++) {
@@ -69,11 +70,12 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) { if (hp_parse_num(argv[++i], 0, 65535, &port)) return bad_num("--port", argv[i]); }
         else if (!strcmp(argv[i], "--token") && i + 1 < argc) token = argv[++i];
         else if (!strcmp(argv[i], "--cache") && i + 1 < argc) cache = argv[++i];
+        else if (!strcmp(argv[i], "--state") && i + 1 < argc) state = argv[++i];
         else if (!strcmp(argv[i], "--rf") && i + 1 < argc) rf_path = argv[++i];
         else if (!strcmp(argv[i], "--auth-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &auth_ms)) return bad_num("--auth-timeout-ms", argv[i]); }
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
-            fprintf(stderr, "usage: hub --sim [--port N] --token T [--cache PATH] [--rf PATH] "
+            fprintf(stderr, "usage: hub --sim [--port N] --token T [--cache PATH] [--state PATH] [--rf PATH] "
                             "[--auth-timeout-ms N] [--idle-timeout-ms N]\n");
             return 2;
         }
@@ -120,6 +122,14 @@ int main(int argc, char **argv) {
         int cr = hp_map_load_cache(&g_hub.map, cache);
         if (cr < 0 && cr != -HP_E_NOENT) fprintf(stderr, "hub: ignoring unusable cache %s (%d)\n", cache, cr);
     }
+    hp_actsm_reloaded(&g_hub.act); /* device tracking for the cached config */
+    if (state) {
+        hp_actsm_set_state_path(&g_hub.act, state);
+        int sr = hp_actsm_load_state(&g_hub.act);
+        if (sr == -HP_E_NOENT) fprintf(stderr, "hub: no state file %s, starting all off/unknown\n", state);
+        else if (sr < 0) fprintf(stderr, "hub: ignoring unusable state file %s (%d), starting all off/unknown\n", state, sr);
+        else fprintf(stderr, "hub: restored state from %s\n", state);
+    }
     hub_install(&g_tbl, &g_hub);
     g_tbl.token = token;
     g_tbl.hub_id = "sim-hub";
@@ -142,6 +152,7 @@ int main(int argc, char **argv) {
         hub_pump_rf(&g_hub);
         hub_run_timers(&g_hub);
     }
+    hub_shutdown(&g_hub);
     hp_ws_close(srv);
     hp_rf_pair_destroy(rf);
     hp_map_free(&g_hub.map);

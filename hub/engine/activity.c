@@ -67,6 +67,7 @@ static int write_state(hp_actsm_t *e) {
     }
     e->writes++;
     e->dirty = false;
+    e->saved_hash = e->map->hash;
     return 0;
 }
 
@@ -149,7 +150,10 @@ int hp_actsm_load_state(hp_actsm_t *e) {
             if (st[i].power && input_index(e->map, d, st[i].input) >= 0) strcpy(e->dev[d].input, st[i].input);
         }
     e->reported = idx;
+    e->target = idx;
     e->map->current = idx;
+    e->saved_hash = e->map->hash;
+    e->dirty = false;
     return 0;
 }
 
@@ -387,24 +391,31 @@ void hp_actsm_reloaded(hp_actsm_t *e) {
     hp_devstate_t old[HP_MAP_MAX_DEVICES];
     memcpy(old, e->dev, sizeof old);
     uint8_t nold = e->ndev;
+    bool changed = e->map->hash != e->saved_hash;
     memset(e->dev, 0, sizeof e->dev);
     e->ndev = m->format == 2 ? m->ndevs : 0;
+    bool push[HP_MAP_MAX_DEVICES] = {false};
     for (uint8_t i = 0; i < e->ndev; i++) {
         snprintf(e->dev[i].id, sizeof e->dev[i].id, "%s", m->devs[i].id);
+        push[i] = true; /* new to the tracker: clients need its state; unchanged devices stay quiet */
         for (uint8_t j = 0; j < nold; j++) {
             if (strcmp(old[j].id, e->dev[i].id)) continue;
             e->dev[i].power = old[j].power;
             e->dev[i].settling = old[j].settling;
             e->dev[i].settle_until = old[j].settle_until;
             if (input_index(m, i, old[j].input) >= 0) strcpy(e->dev[i].input, old[j].input);
+            push[i] = e->dev[i].power != old[j].power || strcmp(e->dev[i].input, old[j].input);
         }
+        changed = changed || push[i];
     }
+    changed = changed || nold != e->ndev;
     int prev = e->reported;
     e->reported = m->current;
     e->target = m->current;
-    for (uint8_t i = 0; i < e->ndev; i++) emit(e, HP_ACTSM_EVT_DEVICE, i);
+    for (uint8_t i = 0; i < e->ndev; i++)
+        if (push[i]) emit(e, HP_ACTSM_EVT_DEVICE, i);
     if (prev != e->reported) emit(e, HP_ACTSM_EVT_ACTIVITY, e->reported);
-    mark_dirty(e);
+    if (changed || prev != e->reported) mark_dirty(e);
 }
 
 static int op_start(void *c, int idx) { return hp_actsm_start_idx(c, idx); }

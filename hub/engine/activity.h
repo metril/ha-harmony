@@ -83,6 +83,7 @@ typedef struct {
     uint32_t bus_free;
     const char *state_path;
     bool dirty, wrote;
+    uint32_t saved_hash; /* config hash of the last state written/restored */
     uint32_t last_write;
     hp_sched_handle persist_h;
     unsigned writes; /* state file writes so far (tests/diagnostics) */

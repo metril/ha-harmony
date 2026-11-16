@@ -16,6 +16,17 @@ static uint32_t mono_ms(void *ctx) {
     return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
 }
 
+static void hub_notify(void *vctx, hp_actsm_evt_t evt, int idx) {
+    hub_ctx_t *h = vctx;
+    if (evt == HP_ACTSM_EVT_DEVICE) {
+        h->pending_dev |= 1u << idx;
+    } else {
+        h->pending_state = true;
+        h->pending_activity = idx < 0 ? 0 : idx;
+        h->pending_power = idx >= 0;
+    }
+}
+
 void hub_ctx_init(hub_ctx_t *c) {
     memset(c, 0, sizeof *c);
     hp_map_init(&c->map);
@@ -23,6 +34,7 @@ void hub_ctx_init(hub_ctx_t *c) {
     hp_sched_init(&c->sched, mono_ms, NULL);
     hp_irout_init(&c->irout, &c->sched);
     hp_map_set_out(&c->map, &c->irout);
+    hp_actsm_init(&c->act, &c->map, &c->sched, &c->sinks, hub_notify, c);
 }
 
 void hub_set_clock(hub_ctx_t *c, hp_clock_fn fn, void *ctx) {
@@ -31,7 +43,14 @@ void hub_set_clock(hub_ctx_t *c, hp_clock_fn fn, void *ctx) {
 }
 
 int hub_next_timeout_ms(const hub_ctx_t *c) { return hp_sched_next_timeout_ms(&c->sched); }
-void hub_run_timers(hub_ctx_t *c) { hp_sched_run(&c->sched, hp_sched_now(&c->sched)); }
+void hub_run_timers(hub_ctx_t *c) {
+    hp_sched_run(&c->sched, hp_sched_now(&c->sched));
+    hub_flush_pending(c); /* a transition may have completed / changed device state */
+}
+
+void hub_shutdown(hub_ctx_t *c) {
+    if (hp_actsm_flush_state(&c->act) < 0) fprintf(stderr, "hub: final state write failed\n");
+}
 
 #define HUB_RF_CAP 30 /* hub->remote total frame size */
 
@@ -88,15 +107,29 @@ static cJSON *activities_json(const hub_ctx_t *h) {
     return a;
 }
 
+static cJSON *device_json(const hub_ctx_t *h, size_t i) {
+    const hp_devstate_t *d = hp_actsm_device(&h->act, i);
+    cJSON *o = d ? cJSON_CreateObject() : NULL;
+    if (!o) return NULL;
+    cJSON_AddStringToObject(o, "device", d->id);
+    cJSON_AddBoolToObject(o, "power", d->power != 0);
+    if (d->input[0]) cJSON_AddStringToObject(o, "input", d->input);
+    return o;
+}
+
 void hub_send_state(hub_ctx_t *h, hp_ws_conn_t *c) {
-    int cur = hp_map_current(&h->map);
+    int cur = hp_actsm_reported(&h->act);
     cJSON *d = cJSON_CreateObject();
     if (!d) return;
     cJSON_AddNumberToObject(d, "activity", cur < 0 ? 0 : cur);
     cJSON_AddBoolToObject(d, "power", cur >= 0);
-    char buf[128];
+    char buf[256];
     size_t n = 0;
     if (hp_make_reply(0, "state_update", d, buf, sizeof buf, &n) == 0) (void)hp_ws_send(c, buf, n);
+    for (size_t i = 0; hp_actsm_device(&h->act, i); i++) {
+        cJSON *o = device_json(h, i);
+        if (o && hp_make_reply(0, "device_state", o, buf, sizeof buf, &n) == 0) (void)hp_ws_send(c, buf, n);
+    }
 }
 
 void hub_flush_pending(hub_ctx_t *h) {
@@ -114,6 +147,12 @@ void hub_flush_pending(hub_ctx_t *h) {
             cJSON_Delete(acts);
         }
         h->list_skip = NULL;
+    }
+    if (h->pending_dev) {
+        uint32_t mask = h->pending_dev;
+        h->pending_dev = 0;
+        for (size_t i = 0; i < HP_MAP_MAX_DEVICES; i++)
+            if ((mask & (1u << i)) && hp_actsm_device(&h->act, i)) hub_broadcast(h, "device_state", device_json(h, i));
     }
     if (!h->pending_state) return;
     h->pending_state = false;
@@ -145,22 +184,12 @@ static const char *load_err(int rc) {
     }
 }
 
-/* Queues a state_update if the running activity differs from `before` (a reload can drop it). */
-static void note_activity_change(hub_ctx_t *h, int before) {
-    int cur = hp_map_current(&h->map);
-    if (cur == before) return;
-    h->pending_state = true;
-    h->pending_activity = cur < 0 ? 0 : cur;
-    h->pending_power = cur >= 0;
-}
-
 static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply,
                          size_t cap, size_t *len) {
     hub_ctx_t *h = vctx;
     const cJSON *cfg = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "config");
     char *text = cJSON_PrintUnformatted(cfg);
     if (!text) return reply_ok(id, "config_ack", false, "out of memory", reply, cap, len);
-    int before = hp_map_current(&h->map);
     int rc = hp_map_load(&h->map, text, strlen(text));
     free(text);
     if (rc < 0) {
@@ -169,7 +198,7 @@ static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
     }
     h->pending_list = true;
     h->list_skip = sess;
-    note_activity_change(h, before);
+    hp_actsm_reloaded(&h->act); /* cancels a transition, re-keys device state, queues device_state/state_update */
     const char *msg = NULL;
     if (h->cache_path && hp_map_save_cache(&h->map, h->cache_path) < 0) msg = "applied; cache write failed";
     return reply_ok(id, "config_ack", true, msg, reply, cap, len);
@@ -179,6 +208,7 @@ static int reply_err(uint32_t id, const char *code, const char *msg, char *reply
 
 static int cmd_ir_send(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply, size_t cap, size_t *len) {
     if (!cJSON_IsObject(args)) return reply_ok(id, "command_result", false, "args must be an IR action", reply, cap, len);
+    if (hp_actsm_busy(&h->act)) return reply_ok(id, "command_result", false, "transition in progress", reply, cap, len);
     hp_map_t *sc = calloc(1, sizeof *sc); /* scratch pool for the action's IR data */
     if (!sc) return reply_ok(id, "command_result", false, "out of memory", reply, cap, len);
     hp_map_set_out(sc, &h->irout);
@@ -218,6 +248,18 @@ static int cmd_tile_update(hub_ctx_t *h, uint32_t id, const cJSON *args, char *r
     return reply_ok(id, "command_result", true, NULL, reply, cap, len);
 }
 
+static int cmd_set_device_state(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply, size_t cap, size_t *len) {
+    const cJSON *dv = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "device") : NULL;
+    const cJSON *pw = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "power") : NULL;
+    const cJSON *in = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "input") : NULL;
+    if (!cJSON_IsString(dv) || (pw && !cJSON_IsBool(pw)) || (in && !cJSON_IsString(in) && !cJSON_IsNull(in)) || (!pw && !in))
+        return reply_ok(id, "command_result", false, "args need device and power and/or input", reply, cap, len);
+    const char *input = !in ? NULL : cJSON_IsNull(in) ? "" : in->valuestring;
+    int rc = hp_actsm_set_device(&h->act, dv->valuestring, pw ? (cJSON_IsTrue(pw) ? 1 : 0) : -1, input);
+    if (rc < 0) return reply_ok(id, "command_result", false, "unknown device or input", reply, cap, len);
+    return reply_ok(id, "command_result", true, NULL, reply, cap, len);
+}
+
 static int on_command(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply,
                       size_t cap, size_t *len) {
     (void)sess;
@@ -229,25 +271,20 @@ static int on_command(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *
     if (!strcmp(dev, "hub") && !strcmp(cmd, "start_activity")) {
         const cJSON *n = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "name") : NULL;
         if (!cJSON_IsString(n)) return reply_ok(id, "command_result", false, "args.name required", reply, cap, len);
-        rc = hp_activity_set(&h->map, n->valuestring, &h->sinks);
+        rc = hp_actsm_start(&h->act, n->valuestring);
         if (rc < 0)
             return reply_ok(id, "command_result", false,
                             rc == -HP_E_INVAL ? "unknown activity" : "activity step failed", reply, cap, len);
-        h->pending_state = true;
-        h->pending_activity = rc;
-        h->pending_power = true;
         return reply_ok(id, "command_result", true, NULL, reply, cap, len);
     }
     if (!strcmp(dev, "hub") && !strcmp(cmd, "power_off")) {
-        rc = hp_activity_off(&h->map, &h->sinks);
+        rc = hp_actsm_off(&h->act);
         if (rc < 0)
             return reply_ok(id, "command_result", false,
                             rc == -HP_E_INVAL ? "no activity running" : "off step failed", reply, cap, len);
-        h->pending_state = true;
-        h->pending_activity = rc;
-        h->pending_power = false;
         return reply_ok(id, "command_result", true, NULL, reply, cap, len);
     }
+    if (!strcmp(dev, "hub") && !strcmp(cmd, "set_device_state")) return cmd_set_device_state(h, id, args, reply, cap, len);
     if (!strcmp(dev, "hub") && !strcmp(cmd, "ir_send")) return cmd_ir_send(h, id, args, reply, cap, len);
     if (!strcmp(dev, "hub") && !strcmp(cmd, "tile_update")) return cmd_tile_update(h, id, args, reply, cap, len);
     return reply_ok(id, "command_result", false, "unknown command", reply, cap, len);
@@ -305,11 +342,9 @@ static void emit_key(void *vctx, uint8_t remote, uint8_t key, hp_key_action_t ac
 static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
     hp_rf_val_t v[3];
     if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
-        int before = hp_map_current(&h->map);
         int rc = hp_key_handle(&h->map, &h->sinks, (uint8_t)v[0].u, (uint8_t)v[1].u, (hp_key_action_t)v[2].u,
                                emit_key, h);
         if (rc < 0) fprintf(stderr, "hub: key %u action failed (%d)\n", (unsigned)v[1].u, rc);
-        note_activity_change(h, before); /* a key can start/stop an activity */
     } else if (m->type == HP_MSG_BATTERY && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
         cJSON *d = cJSON_CreateObject();
         if (!d) return;
