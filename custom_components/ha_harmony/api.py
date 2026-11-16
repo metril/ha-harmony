@@ -77,6 +77,7 @@ class HarmonyHubClient:
         self.hub_id: str | None = None
         self.fw_version: str | None = None
         self.activities: list[str] = []
+        self.config_hash: str | None = None  # hub's CRC-32 hex of its loaded config text
 
     @property
     def connected(self) -> bool:
@@ -151,6 +152,7 @@ class HarmonyHubClient:
                 raise HarmonyConnectionError(f"unexpected handshake reply {mtype.name}")
             self.hub_id = d["hub_id"]
             self.fw_version = d.get("fw_version")
+            self.config_hash = d.get("config_hash")
             acts = d.get("activities")
             self.activities = (
                 [a for a in acts if isinstance(a, str)] if isinstance(acts, list) else []

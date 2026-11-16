@@ -63,4 +63,4 @@ class HarmonyRemote(HarmonyEntity, RemoteEntity):
     async def async_send_command(self, command: Iterable[str], **kwargs: Any) -> None:
         device = kwargs.get(ATTR_DEVICE) or HUB_DEVICE
         for cmd in command:
-            await self.coordinator.async_command(device, cmd)
+            await self.coordinator.async_device_command(device, cmd)
