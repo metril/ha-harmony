@@ -96,6 +96,26 @@ static int parse_dest(const char *s, struct sockaddr_in *out) {
     return inet_pton(AF_INET, ip, &out->sin_addr) == 1 ? 0 : -1;
 }
 
+void hp_mdns_rl_init(hp_mdns_rl_t *r) { memset(r, 0, sizeof *r); }
+
+unsigned hp_mdns_rl_take(hp_mdns_rl_t *r, uint32_t now, unsigned want) {
+    unsigned ok = 0;
+    for (unsigned i = 0; i < 5; i++) {
+        unsigned b = 1u << i;
+        if (!(want & b)) continue;
+        if ((r->have & b) && (uint32_t)(now - r->t[i]) < HP_MDNS_HOLDOFF_MS) continue;
+        r->t[i] = now;
+        r->have |= b;
+        ok |= b;
+    }
+    return ok;
+}
+
+void hp_mdns_rl_sweep(hp_mdns_rl_t *r, uint32_t now) {
+    for (unsigned i = 0; i < 5; i++)
+        if ((r->have & (1u << i)) && (uint32_t)(now - r->t[i]) >= HP_MDNS_HOLDOFF_MS) r->have &= ~(1u << i);
+}
+
 static void send_to(hp_mdns_srv_t *s, const struct sockaddr_in *to, unsigned answers, unsigned flags,
                     uint16_t id, const hp_mdns_query_t *q) {
     uint8_t buf[PKT_CAP];
@@ -104,9 +124,9 @@ static void send_to(hp_mdns_srv_t *s, const struct sockaddr_in *to, unsigned ans
 }
 
 static void announce_cb(void *arg, uint32_t now) {
-    (void)now;
     hp_mdns_srv_t *s = arg;
     s->timer = 0;
+    (void)hp_mdns_rl_take(&s->rl, now, HP_MDNS_ALL); /* announcements count as multicasts */
     if (s->have_dest) send_to(s, &s->dest, HP_MDNS_ALL, 0, 0, NULL);
     if (++s->announced < ANNOUNCE_COUNT) s->timer = hp_sched_after(s->sched, ANNOUNCE_GAP_MS, announce_cb, s);
 }
@@ -211,7 +231,10 @@ void hp_mdns_srv_service(hp_mdns_srv_t *s) {
         int legacy = ntohs(from.sin_port) != HP_MDNS_PORT; /* RFC 6762 s6.7 */
         unsigned flags = legacy ? HP_MDNS_F_LEGACY : 0;
         if (legacy || q.unicast || !s->multicast || !s->have_dest) send_to(s, &from, q.want, flags, q.id, &q);
-        else send_to(s, &s->dest, q.want, 0, 0, NULL);
+        else {
+            unsigned w = hp_mdns_rl_take(&s->rl, hp_sched_now(s->sched), q.want);
+            if (w) send_to(s, &s->dest, w, 0, 0, NULL);
+        }
     }
 }
 

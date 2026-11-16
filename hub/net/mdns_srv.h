@@ -25,6 +25,19 @@ typedef struct {
                         * (default: the group on 5353; none for unicast-only mode). */
 } hp_mdns_opts_t;
 
+/* Per-record-set multicast holdoff (RFC 6762 s6: one multicast of a record
+ * per second). Stamps are valid only while (uint32_t)(now - then) < window. */
+#define HP_MDNS_HOLDOFF_MS 1000u
+typedef struct {
+    uint32_t t[5]; /* last multicast time per record set (bit order PTR..A) */
+    unsigned have; /* bitmask of record sets with a stamp */
+} hp_mdns_rl_t;
+void hp_mdns_rl_init(hp_mdns_rl_t *);
+/* Returns the subset of `want` (HP_MDNS_*) allowed now and stamps it. */
+unsigned hp_mdns_rl_take(hp_mdns_rl_t *, uint32_t now_ms, unsigned want);
+/* Drops stamps older than the window so they can never alias after wraparound. */
+void hp_mdns_rl_sweep(hp_mdns_rl_t *, uint32_t now_ms);
+
 typedef struct {
     int fd; /* -1 when not running */
     hp_mdns_svc_t svc;
@@ -35,6 +48,7 @@ typedef struct {
     uint32_t mask; /* netmask of the mDNS interface (host order); 0xFFFFFFFF if unknown */
     int announced;
     hp_sched_handle timer;
+    hp_mdns_rl_t rl;
     char err[96];
 } hp_mdns_srv_t;
 
