@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to your Harmony hub",
+        "description": "Enter the hub address and the access token.",
+        "data": {"host": "Host", "port": "Port", "token": "Token"}
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "The hub rejected the saved token. Enter the new token.",
+        "data": {"token": "Token"}
+      }
+    },
+    "error": {
+      "invalid_auth": "The token was rejected by the hub.",
+      "cannot_connect": "Could not connect to the hub.",
+      "unsupported_version": "The hub speaks an incompatible protocol version. Update the hub firmware or this integration so both use the same version.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This hub is already configured.",
+      "reauth_successful": "Re-authentication was successful.",
+      "wrong_hub": "The token belongs to a different hub."
+    }
+  }
+}
