@@ -185,6 +185,32 @@ def test_ir_file_refs():
     bad(text.replace("sample.ir", "bad_header.ir"), "bad_header.ir", base_dir=FIX)
 
 
+@pytest.mark.parametrize(
+    ("ref", "needle"),
+    [
+        ("{flipper: {file: missing.ir, signal: A}}", "cannot read flipper file 'missing.ir'"),
+        ("{flipper: {file: sample.ir, signal: Nope}}", "has no signal 'Nope'"),
+        ("{flipper: {file: ../x.ir, signal: A}}", "must stay inside"),
+        ("{flipper: {file: binary.ir, signal: A}}", "'binary.ir': not UTF-8 text"),
+        ("{smartir: {file: binary.ir, command: a}}", "'binary.ir': not UTF-8 text"),
+        ("{smartir: {file: smartir_pronto.json, command: nope}}", "nope"),
+        ("{smartir: {file: sub, command: a}}", "cannot read smartir file 'sub'"),
+    ],
+)
+def test_bad_ir_file_refs_carry_file_line_and_path(tmp_path, ref, needle):
+    (tmp_path / "binary.ir").write_bytes(b"\xff\xfe\x00")
+    (tmp_path / "sub").mkdir()
+    for f in ("sample.ir", "smartir_pronto.json"):
+        (tmp_path / f).write_bytes((FIX / f).read_bytes())
+    e = bad(
+        f"devices:\n  - id: a\n    commands:\n      x: {ref}\n",
+        "/cfg/hub.yaml:4: devices[0].commands.x",
+        needle,
+        base_dir=tmp_path,
+    )
+    assert e.line == 4 and e.path == ["devices", 0, "commands", "x"]
+
+
 # ------------------------------------------------------------------ limits
 def test_limits_match_mapping_h():
     src = (ROOT / "hub/engine/mapping.h").read_text()

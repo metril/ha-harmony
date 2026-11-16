@@ -91,6 +91,8 @@ class _Resolver:
                 self._cache[key] = parse(path)
             except OSError as exc:
                 raise vol.Invalid(f"cannot read {kind} file {name!r}: {exc.strerror}") from None
+            except UnicodeDecodeError:
+                raise vol.Invalid(f"{kind} file {name!r}: not UTF-8 text") from None
             except IrImportError as exc:
                 raise vol.Invalid(f"{kind} file {name!r}: {exc}") from None
         return self._cache[key]
