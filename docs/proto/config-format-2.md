@@ -54,4 +54,9 @@ Raw: even, non-zero count of durations, each 1..65535 us; `hz` 1000..1000000.
 - Added: `format`, `devices`, activity `id` and `devices` list.
 - Narrowed: key range 0..65535 -> 0..255 (the wire `key` is u8).
 - Activity index (`state_update.activity`) remains array order.
-- Limits are inherited from `mapping.h` (`HP_MAP_MAX_*`) until the engine task revises them.
+- Limits: see `hub/engine/mapping.h` (`HP_MAP_MAX_*`): 16 devices, 256 commands and 64 inputs in total,
+  16 activities, 128 keys per map, 16 steps per list, 8 devices per activity, 128 KiB config text.
+- Engine details: `{"type":"activity","activity":"<id>"|"off"}` is accepted in key maps only (not in
+  `steps`/`off`); activity `name` defaults to `id`, `"off"` is not a valid id; `power` is either `toggle`
+  or both `on` and `off`; for toggle devices `power_on`/`power_off` both resolve to the toggle code.
+  Every IR action is encoded at load time, so an out-of-range code fails `set_config`.
