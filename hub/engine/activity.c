@@ -11,7 +11,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static bool after(uint32_t a, uint32_t b) { return (int32_t)(a - b) > 0; }
+/* Ms left until `deadline`, or 0. A stored deadline is only trusted while it lies at most `len`
+ * (the span it was set with) ahead: a wraparound-style signed compare would see a deadline that
+ * went stale >= 2^31 ms ago (hub idle ~25 days) as being in the future. */
+static uint32_t remaining(uint32_t deadline, uint32_t now, uint32_t len) {
+    uint32_t d = deadline - now;
+    return d > 0 && d <= len ? d : 0;
+}
 static uint32_t now_of(const hp_actsm_t *e) { return hp_sched_now(e->sched); }
 
 static void emit(hp_actsm_t *e, hp_actsm_evt_t ev, int idx) {
@@ -83,12 +89,12 @@ static void persist_tick(void *arg, uint32_t now) {
 static void mark_dirty(hp_actsm_t *e) {
     e->dirty = true;
     if (!e->state_path || e->persist_h) return;
-    uint32_t now = now_of(e);
-    if (!e->wrote || !after(e->last_write + HP_ACT_PERSIST_MS, now)) {
+    uint32_t since = now_of(e) - e->last_write; /* unsigned: a stale last_write reads as "long ago" */
+    if (!e->wrote || since >= HP_ACT_PERSIST_MS) {
         (void)write_state(e);
         return;
     }
-    e->persist_h = hp_sched_after(e->sched, e->last_write + HP_ACT_PERSIST_MS - now, persist_tick, e);
+    e->persist_h = hp_sched_after(e->sched, HP_ACT_PERSIST_MS - since, persist_tick, e);
 }
 
 void hp_actsm_set_state_path(hp_actsm_t *e, const char *path) { e->state_path = path; }
@@ -171,12 +177,13 @@ static void add(hp_actsm_t *e, hp_stepkind_t k, int dev, int input, const hp_act
     e->plan[e->nplan++] = (hp_actstep_t){(uint8_t)k, (uint8_t)dev, (int16_t)input, act};
 }
 
-static bool settle_wait(const hp_actsm_t *e, int dev, uint32_t now, uint32_t *until) {
-    bool w = false;
+/* Ms until the (selected) devices have settled, 0 = none pending. */
+static uint32_t settle_wait(const hp_actsm_t *e, int dev, uint32_t now) {
+    uint32_t w = 0;
     for (int i = 0; i < e->ndev; i++) {
-        if ((dev >= 0 && i != dev) || !e->dev[i].settling || !after(e->dev[i].settle_until, now)) continue;
-        if (!w || after(e->dev[i].settle_until, *until)) *until = e->dev[i].settle_until;
-        w = true;
+        if ((dev >= 0 && i != dev) || !e->dev[i].settling) continue;
+        uint32_t r = remaining(e->dev[i].settle_until, now, e->map->devs[i].settle_ms);
+        if (r > w) w = r;
     }
     return w;
 }
@@ -237,21 +244,13 @@ static int run(hp_actsm_t *e) {
         else if (s->kind == HP_STEP_INPUT) act = &e->map->inputs[s->input].act;
         bool sends = act && (act->type == HP_ACT_IR || act->type == HP_ACT_BT);
 
-        uint32_t ready = now;
-        bool wait = false;
-        if (sends && e->bus_busy && after(e->bus_free, now)) {
-            ready = e->bus_free;
-            wait = true;
-        }
-        uint32_t until;
-        if (s->kind == HP_STEP_INPUT || s->kind == HP_STEP_EXTRA) {
-            if (settle_wait(e, s->kind == HP_STEP_INPUT ? s->dev : -1, now, &until) && (!wait || after(until, ready))) {
-                ready = until;
-                wait = true;
-            }
-        }
-        if (wait) {
-            arm(e, ready - now);
+        uint32_t delay = 0, w;
+        if (sends && e->bus_busy) delay = remaining(e->bus_free, now, e->bus_len);
+        if ((s->kind == HP_STEP_INPUT || s->kind == HP_STEP_EXTRA) &&
+            (w = settle_wait(e, s->kind == HP_STEP_INPUT ? s->dev : -1, now)) > delay)
+            delay = w;
+        if (delay) {
+            arm(e, delay);
             return 0;
         }
         if (act) {
@@ -262,7 +261,8 @@ static int run(hp_actsm_t *e) {
             }
             if (sends) {
                 uint32_t busy = act->type == HP_ACT_IR && e->map->out ? e->map->out->busy_ms : 0;
-                e->bus_free = now + busy + HP_ACT_GUARD_MS;
+                e->bus_len = busy + HP_ACT_GUARD_MS;
+                e->bus_free = now + e->bus_len;
                 e->bus_busy = true;
             }
         }

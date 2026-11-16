@@ -470,6 +470,40 @@ static void test_state_debounce(void) {
     unlink(path);
 }
 
+
+/* A hub idle for >= 2^31 ms must not see stale timestamps (bus_free, settle_until, last_write) as
+ * being in the future. */
+static void idle_clock_case(uint32_t idle) {
+    setup();
+    tmp_path();
+    hp_actsm_set_state_path(&sm, path);
+    CT_EQ(hp_actsm_start(&sm, "watch"), 0);
+    settle_all();
+    CT_CHECK(!hp_actsm_busy(&sm));
+    CT_EQ(hp_sched_pending(&sched), 0);
+    g_now += idle; /* the hub sat idle: no timers, the clock just moved on */
+    size_t n0 = nrec;
+    unsigned w0 = sm.writes;
+    uint32_t t0 = g_now;
+    CT_EQ(hp_actsm_start(&sm, "movie"), 1);
+    CT_EQ(nrec, n0 + 1); /* first step (amp off) goes out at once, not ~24 days from now */
+    CT_EQ(sm.writes, w0 + 1); /* and the state change is written within the debounce window */
+    settle_all();
+    CT_CHECK(!hp_actsm_busy(&sm));
+    CT_EQ(hp_actsm_reported(&sm), 1);
+    CT_EQ(nrec, n0 + 5); /* amp off, bd on (x3 SIRC), tv input */
+    CT_CHECK(recs[nrec - 1].t - t0 < 1000); /* stale tv settle_until did not delay the input select */
+    size_t n1 = nrec;
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, NULL, NULL), 0);
+    CT_EQ(nrec, n1 + 1); /* keys are not dropped */
+    unlink(path);
+}
+
+static void test_idle_clock_wrap(void) {
+    idle_clock_case(0x80000000u + 1000u);
+    idle_clock_case(0xFFFFFFFFu - 499u); /* 2^32 - 500 */
+}
+
 int main(void) {
     CT_RUN(test_start_from_off);
     CT_RUN(test_a_to_b_shared_devices);
@@ -488,6 +522,7 @@ int main(void) {
     CT_RUN(test_state_off_roundtrip);
     CT_RUN(test_state_bad_files);
     CT_RUN(test_state_debounce);
+    CT_RUN(test_idle_clock_wrap);
     hp_map_free(&map);
     return CT_DONE();
 }

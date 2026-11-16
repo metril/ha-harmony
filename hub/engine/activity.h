@@ -80,7 +80,7 @@ typedef struct {
     int target;   /* activity being started, -1 = off */
     hp_sched_handle timer;
     bool bus_busy;
-    uint32_t bus_free;
+    uint32_t bus_free, bus_len; /* deadline + the span it was set with (see remaining()) */
     const char *state_path;
     bool dirty, wrote;
     uint32_t saved_hash; /* config hash of the last state written/restored */
