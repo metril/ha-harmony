@@ -131,34 +131,132 @@ static void announce_cb(void *arg, uint32_t now) {
     if (++s->announced < ANNOUNCE_COUNT) s->timer = hp_sched_after(s->sched, ANNOUNCE_GAP_MS, announce_cb, s);
 }
 
+uint32_t hp_mdns_backoff_next(uint32_t cur) {
+    if (cur >= HP_MDNS_RETRY_MAX_MS / 2) return HP_MDNS_RETRY_MAX_MS;
+    return cur < HP_MDNS_RETRY_MIN_MS ? HP_MDNS_RETRY_MIN_MS : cur * 2;
+}
+
+static int detect_default(uint32_t *ip, uint32_t *mask) {
+    if (detect_ip(ip) < 0) return -1;
+    *mask = find_mask(*ip);
+    return 0;
+}
+
+static void log_state(hp_mdns_srv_t *s, int st) {
+    if (s->logged == st) return;
+    int first = s->logged == 0;
+    s->logged = st;
+    if (st == 2) {
+        fprintf(stderr, "hub: mdns disabled (%s); retrying\n", s->err);
+    } else if (!first) { /* first-time success is reported by the owner (port line) */
+        fprintf(stderr, "hub: mdns enabled ip=%u.%u.%u.%u port=%u\n", (unsigned)(s->svc.ipv4 >> 24),
+                (unsigned)((s->svc.ipv4 >> 16) & 255), (unsigned)((s->svc.ipv4 >> 8) & 255),
+                (unsigned)(s->svc.ipv4 & 255), (unsigned)s->port);
+    }
+}
+
+/* Opens, binds and joins on `ip`. 0 or -HP_E_IO (s->err set, fd -1). */
+static int attach(hp_mdns_srv_t *s, uint32_t ip, uint32_t mask) {
+    s->svc.ipv4 = ip;
+    s->mask = mask;
+    s->fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s->fd < 0) return fail(s, "socket");
+    int one = 1;
+    if (setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) < 0) return fail(s, "SO_REUSEADDR");
+#ifdef SO_REUSEPORT
+    if (s->multicast) (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one);
+#endif
+    struct sockaddr_in b;
+    memset(&b, 0, sizeof b);
+    b.sin_family = AF_INET;
+    b.sin_port = htons(s->port ? s->port : s->want_port); /* keep the port across rebinds */
+    b.sin_addr = s->bind_ip;
+    if (bind(s->fd, (struct sockaddr *)&b, sizeof b) < 0) return fail(s, "bind");
+    if (s->multicast) {
+        struct ip_mreq m;
+        m.imr_multiaddr = s->group;
+        m.imr_interface.s_addr = htonl(ip);
+        if (setsockopt(s->fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &m, sizeof m) < 0) return fail(s, "join group");
+        struct in_addr ifa;
+        ifa.s_addr = htonl(ip);
+        (void)setsockopt(s->fd, IPPROTO_IP, IP_MULTICAST_IF, &ifa, sizeof ifa);
+        unsigned char ttl = 255; /* RFC 6762 s11 */
+        (void)setsockopt(s->fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
+    }
+    socklen_t bl = sizeof b;
+    if (getsockname(s->fd, (struct sockaddr *)&b, &bl) < 0) return fail(s, "getsockname");
+    s->port = ntohs(b.sin_port);
+    int fl = fcntl(s->fd, F_GETFL, 0);
+    if (fl < 0 || fcntl(s->fd, F_SETFL, fl | O_NONBLOCK) < 0) return fail(s, "O_NONBLOCK");
+    (void)fcntl(s->fd, F_SETFD, FD_CLOEXEC);
+    s->announced = 0;
+    s->timer = hp_sched_after(s->sched, 0, announce_cb, s);
+    return 0;
+}
+
+static int probe(hp_mdns_srv_t *s, uint32_t *ip, uint32_t *mask) {
+    if (!s->multicast) {
+        *ip = ntohl(s->bind_ip.s_addr);
+        *mask = find_mask(*ip);
+        return 0;
+    }
+    return s->detect(ip, mask);
+}
+
+static void net_cb(void *arg, uint32_t now);
+
+/* One connect attempt; schedules the next check (recheck when up, backoff when not). */
+static void net_try(hp_mdns_srv_t *s, uint32_t now) {
+    uint32_t ip = 0, mask = 0;
+    s->net_timer = 0;
+    hp_mdns_rl_sweep(&s->rl, now); /* no stale stamp survives to alias after wraparound */
+    int ok = probe(s, &ip, &mask) == 0;
+    if (s->fd >= 0) {
+        if (ok && ip == s->svc.ipv4) { /* unchanged */
+            s->net_timer = hp_sched_after(s->sched, HP_MDNS_RECHECK_MS, net_cb, s);
+            return;
+        }
+        if (s->timer) hp_sched_cancel(s->sched, s->timer);
+        s->timer = 0;
+        close(s->fd); /* address changed or lost: leave the old membership */
+        s->fd = -1;
+        s->backoff = HP_MDNS_RETRY_MIN_MS;
+    }
+    if (!ok) snprintf(s->err, sizeof s->err, "no usable IPv4 interface");
+    if (ok && attach(s, ip, mask) == 0) {
+        s->backoff = HP_MDNS_RETRY_MIN_MS;
+        log_state(s, 1);
+        s->net_timer = hp_sched_after(s->sched, HP_MDNS_RECHECK_MS, net_cb, s);
+        return;
+    }
+    log_state(s, 2);
+    s->net_timer = hp_sched_after(s->sched, s->backoff, net_cb, s);
+    s->backoff = hp_mdns_backoff_next(s->backoff);
+}
+
+static void net_cb(void *arg, uint32_t now) { net_try(arg, now); }
+
 int hp_mdns_srv_start(hp_mdns_srv_t *s, hp_sched_t *sched, const hp_mdns_opts_t *o, const char *hub_id,
                       uint16_t service_port, unsigned proto_v) {
     memset(s, 0, sizeof *s);
     s->fd = -1;
     s->sched = sched;
-    struct in_addr bind_ip, group;
-    inet_pton(AF_INET, HP_MDNS_GROUP, &group);
+    s->want_port = o->port;
+    s->detect = o->detect ? o->detect : detect_default;
+    s->backoff = HP_MDNS_RETRY_MIN_MS;
+    inet_pton(AF_INET, HP_MDNS_GROUP, &s->group);
     s->multicast = 1;
-    bind_ip.s_addr = htonl(INADDR_ANY);
+    s->bind_ip.s_addr = htonl(INADDR_ANY);
     if (o->addr) {
         struct in_addr a;
         if (inet_pton(AF_INET, o->addr, &a) != 1) {
             snprintf(s->err, sizeof s->err, "bad --mdns-addr %s", o->addr);
             return -HP_E_INVAL;
         }
-        if (is_mcast(ntohl(a.s_addr))) group = a;
-        else { s->multicast = 0; bind_ip = a; }
+        if (is_mcast(ntohl(a.s_addr))) s->group = a;
+        else { s->multicast = 0; s->bind_ip = a; }
     }
-    uint32_t ip = 0;
-    if (s->multicast) {
-        if (detect_ip(&ip) < 0) {
-            snprintf(s->err, sizeof s->err, "no usable IPv4 interface");
-            return -HP_E_IO;
-        }
-    } else {
-        ip = ntohl(bind_ip.s_addr);
-    }
-    if (hp_mdns_svc_init(&s->svc, hub_id, service_port, ip, proto_v) < 0) {
+    if (hp_mdns_svc_init(&s->svc, hub_id, service_port, 0, proto_v) < 0) {
         snprintf(s->err, sizeof s->err, "invalid hub id for DNS label");
         return -HP_E_INVAL;
     }
@@ -172,42 +270,10 @@ int hp_mdns_srv_start(hp_mdns_srv_t *s, hp_sched_t *sched, const hp_mdns_opts_t 
         memset(&s->dest, 0, sizeof s->dest);
         s->dest.sin_family = AF_INET;
         s->dest.sin_port = htons(HP_MDNS_PORT);
-        s->dest.sin_addr = group;
+        s->dest.sin_addr = s->group;
         s->have_dest = 1;
     }
-
-    s->fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (s->fd < 0) return fail(s, "socket");
-    int one = 1;
-    if (setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) < 0) return fail(s, "SO_REUSEADDR");
-#ifdef SO_REUSEPORT
-    if (s->multicast) (void)setsockopt(s->fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one);
-#endif
-    struct sockaddr_in b;
-    memset(&b, 0, sizeof b);
-    b.sin_family = AF_INET;
-    b.sin_port = htons(o->port);
-    b.sin_addr = bind_ip;
-    if (bind(s->fd, (struct sockaddr *)&b, sizeof b) < 0) return fail(s, "bind");
-    if (s->multicast) {
-        struct ip_mreq m;
-        m.imr_multiaddr = group;
-        m.imr_interface.s_addr = htonl(ip);
-        if (setsockopt(s->fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &m, sizeof m) < 0) return fail(s, "join group");
-        struct in_addr ifa;
-        ifa.s_addr = htonl(ip);
-        (void)setsockopt(s->fd, IPPROTO_IP, IP_MULTICAST_IF, &ifa, sizeof ifa);
-        unsigned char ttl = 255; /* RFC 6762 s11 */
-        (void)setsockopt(s->fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
-    }
-    socklen_t bl = sizeof b;
-    if (getsockname(s->fd, (struct sockaddr *)&b, &bl) < 0) return fail(s, "getsockname");
-    s->port = ntohs(b.sin_port);
-    s->mask = find_mask(ip);
-    int fl = fcntl(s->fd, F_GETFL, 0);
-    if (fl < 0 || fcntl(s->fd, F_SETFL, fl | O_NONBLOCK) < 0) return fail(s, "O_NONBLOCK");
-    (void)fcntl(s->fd, F_SETFD, FD_CLOEXEC);
-    s->timer = hp_sched_after(sched, 0, announce_cb, s);
+    net_try(s, hp_sched_now(sched)); /* first attempt now; failures retry from the scheduler */
     return 0;
 }
 
@@ -239,9 +305,11 @@ void hp_mdns_srv_service(hp_mdns_srv_t *s) {
 }
 
 void hp_mdns_srv_stop(hp_mdns_srv_t *s) {
-    if (s->fd < 0) return;
+    if (!s->sched) return;
     if (s->timer) hp_sched_cancel(s->sched, s->timer);
-    s->timer = 0;
+    if (s->net_timer) hp_sched_cancel(s->sched, s->net_timer);
+    s->timer = s->net_timer = 0;
+    if (s->fd < 0) return;
     if (s->have_dest) send_to(s, &s->dest, HP_MDNS_ALL, HP_MDNS_F_GOODBYE, 0, NULL);
     close(s->fd);
     s->fd = -1;

@@ -198,3 +198,28 @@ def test_legacy_reply_echoes_question(mdns):
         assert len(msg.questions) == 1
         q = msg.questions[0]
         assert (q.name, q.type) == (name, qtype) and q.class_ == const._CLASS_IN
+
+
+def test_bind_failure_recovers(start_hub):
+    """A failed bind keeps retrying (backoff) and comes up once the port frees."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as blocker:
+        blocker.bind(("127.0.0.1", 0))
+        port = blocker.getsockname()[1]
+        hub = start_hub("--mdns", "--mdns-addr", "127.0.0.1", "--mdns-port", str(port))
+        deadline = time.monotonic() + 3
+        while b"mdns disabled" not in hub.err_path.read_bytes() and time.monotonic() < deadline:
+            time.sleep(0.02)
+    deadline = time.monotonic() + 8
+    while b"mdns enabled" not in hub.err_path.read_bytes() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    err = hub.err_path.read_text()
+    assert hub.alive() and err.count("mdns disabled") == 1 and err.count("mdns enabled") == 1
+    m = MdnsHub(hub, port, None)
+    assert by_type(m.ask(SVC, const._TYPE_PTR), DNSPointer)
+
+
+def test_default_multicast_start_is_soft(start_hub):
+    """Real interface detection / group join: whatever the host offers, the hub keeps serving."""
+    hub = start_hub("--mdns")
+    time.sleep(0.5)
+    assert hub.alive()

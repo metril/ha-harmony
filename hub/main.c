@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
     const char *rf_path = NULL;
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
     int mdns = -1; /* -1 = default: on for the real daemon, off under --sim */
-    hp_mdns_opts_t mo = {HP_MDNS_PORT, NULL, NULL};
+    hp_mdns_opts_t mo = {HP_MDNS_PORT, NULL, NULL, NULL};
     g_mdns.fd = -1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--sim")) sim = true;
