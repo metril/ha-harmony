@@ -52,7 +52,23 @@ pages:
 """
 BASE_UIDS = {
     f"{HUB_ID}_{k}"
-    for k in ["remote", "activity", "key_1", "battery_1", "voltage_1", "dev_tv_power", "dev_tv_input", "dev_amp_power", "dev_amp_input", "cmd_tv:vol_up", "cmd_tv:power_on", "cmd_tv:power_off", "cmd_amp:mute", "cmd_amp:power_on", "cmd_amp:power_off"]
+    for k in [
+        "remote",
+        "activity",
+        "key_1",
+        "battery_1",
+        "voltage_1",
+        "dev_tv_power",
+        "dev_tv_input",
+        "dev_amp_power",
+        "dev_amp_input",
+        "cmd_tv:vol_up",
+        "cmd_tv:power_on",
+        "cmd_tv:power_off",
+        "cmd_amp:mute",
+        "cmd_amp:power_on",
+        "cmd_amp:power_off",
+    ]
 }
 SELECT = f"select.harmony_hub_{HUB_ID.replace('-', '_')}_activity"
 
@@ -200,11 +216,32 @@ async def test_reload_refreshes_options_and_removes_stale_entities(hass, hub_rf,
     assert f"{HUB_ID}_cmd_amp:mute" not in got and f"{HUB_ID}_dev_amp_power" not in got
     assert {f"{HUB_ID}_cmd_zzz:mute2", f"{HUB_ID}_dev_zzz_input"} <= got
     assert got == coord.expected_unique_ids()
-    assert eid(hass, "button", "cmd_amp_mute") is None
+    assert eid(hass, "button", "cmd_amp:mute") is None
     # a second identical reload changes nothing and pushes nothing
     pushes = coord.config_pushes
     await hass.services.async_call(const.DOMAIN, "reload_config", {}, blocking=True)
     assert coord.config_pushes == pushes and uids(hass, entry) == got
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_reload_updates_input_options_and_device_names(hass, hub_rf, write_yaml):
+    path = write_yaml(BASE)
+    entry = await setup(hass, hub_rf)
+    coord = entry.runtime_data
+    assert hass.states.get(eid(hass, "sensor", "dev_tv_input")).attributes["options"] == ["hdmi1"]
+    new = BASE.replace("inputs: {hdmi1:", "inputs: {hdmi2: {proto: nec, addr: 4, cmd: 11}, hdmi1:")
+    new = new.replace("name: TV", "name: Television")
+    path.write_text(new, encoding="utf-8")
+    await hass.services.async_call(const.DOMAIN, "reload_config", {}, blocking=True)
+    await hass.async_block_till_done()
+    ent = hass.states.get(eid(hass, "sensor", "dev_tv_input"))
+    assert ent.attributes["options"] == ["hdmi2", "hdmi1"]
+    await coord.async_device_command("tv", "input_hdmi2")
+    await until(hass, lambda: hass.states.get(ent.entity_id).state == "hdmi2")
+    dev = dr.async_get(hass).async_get_device_by_identifier(
+        (const.DOMAIN, f"{HUB_ID}_dev_tv"), entry.entry_id
+    )
+    assert dev.name == "Television"
     await hass.config_entries.async_unload(entry.entry_id)
 
 

@@ -291,6 +291,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             if ent.unique_id not in want:
                 ereg.async_remove(ent.entity_id)
         dreg = dr.async_get(self.hass)
+        for cdev in self.compiled.devices.values():  # names come from the YAML
+            reg = dreg.async_get_device_by_identifier(
+                (DOMAIN, f"{self.hub_id}_dev_{cdev.id}"), entry_id
+            )
+            if reg and reg.name != cdev.name:
+                dreg.async_update_device(reg.id, name=cdev.name)
         keep = {f"{self.hub_id}_dev_{d}" for d in self.compiled.devices}
         for dev in dr.async_entries_for_config_entry(dreg, entry_id):
             ids = {i for dom, i in dev.identifiers if dom == DOMAIN}

@@ -30,7 +30,9 @@ async def async_setup_entry(
 
 class HarmonyCommandButton(HarmonyEntity, ButtonEntity):
     def __init__(self, coordinator: HarmonyCoordinator, device: str, command: str) -> None:
-        super().__init__(coordinator, f"cmd_{device}:{command}", device=device)  # ids never contain ":"
+        super().__init__(
+            coordinator, f"cmd_{device}:{command}", device=device
+        )  # ids never contain ":"
         self._device, self._command = device, command
         self._attr_name = command.replace("_", " ").capitalize()
 
