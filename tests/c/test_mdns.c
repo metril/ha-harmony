@@ -349,6 +349,34 @@ static void test_on_link(void) {
     CT_CHECK(!hp_mdns_on_link(0, me, m24));
 }
 
+static void test_holdoff(void) {
+    hp_mdns_rl_t rl; hp_mdns_rl_init(&rl);
+    CT_EQ(hp_mdns_rl_take(&rl, 5000, HP_MDNS_PTR | HP_MDNS_A), HP_MDNS_PTR | HP_MDNS_A);
+    CT_EQ(hp_mdns_rl_take(&rl, 5500, HP_MDNS_PTR | HP_MDNS_SRV), HP_MDNS_SRV); /* PTR held off */
+    CT_EQ(hp_mdns_rl_take(&rl, 5999, HP_MDNS_PTR), 0);
+    CT_EQ(hp_mdns_rl_take(&rl, 6000, HP_MDNS_PTR), HP_MDNS_PTR); /* exactly 1 s later */
+    CT_EQ(hp_mdns_rl_take(&rl, 6000, HP_MDNS_PTR), 0);
+    /* wraparound: sent just before 2^32, next just after */
+    hp_mdns_rl_init(&rl);
+    CT_EQ(hp_mdns_rl_take(&rl, 0xFFFFFF00u, HP_MDNS_TXT), HP_MDNS_TXT);
+    CT_EQ(hp_mdns_rl_take(&rl, 0x000000F0u, HP_MDNS_TXT), 0);            /* 496 ms later */
+    CT_EQ(hp_mdns_rl_take(&rl, 0x00000500u, HP_MDNS_TXT), HP_MDNS_TXT);  /* 1.5 s later */
+    /* a stale stamp (~2^31 ms old) must never block: diff is huge, not in the window */
+    hp_mdns_rl_init(&rl);
+    CT_EQ(hp_mdns_rl_take(&rl, 100, HP_MDNS_ENUM), HP_MDNS_ENUM);
+    CT_EQ(hp_mdns_rl_take(&rl, 100u + 0x80000000u, HP_MDNS_ENUM), HP_MDNS_ENUM);
+    /* clock stepping backwards: (now-then) wraps huge -> not held off */
+    hp_mdns_rl_init(&rl);
+    CT_EQ(hp_mdns_rl_take(&rl, 10000, HP_MDNS_A), HP_MDNS_A);
+    CT_EQ(hp_mdns_rl_take(&rl, 9000, HP_MDNS_A), HP_MDNS_A);
+    /* sweep drops expired stamps so a 49-day-old one cannot alias into the window */
+    hp_mdns_rl_init(&rl);
+    CT_EQ(hp_mdns_rl_take(&rl, 1000, HP_MDNS_A), HP_MDNS_A);
+    hp_mdns_rl_sweep(&rl, 3000);
+    CT_EQ(rl.have, 0);
+    CT_EQ(hp_mdns_rl_take(&rl, 1000u + 0xFFFFFFFFu, HP_MDNS_A), HP_MDNS_A);
+}
+
 int main(void) {
     CT_EQ(hp_mdns_svc_init(&S, "sim-hub", 8099, IP, 1), 0);
     CT_RUN(test_questions);
@@ -360,5 +388,6 @@ int main(void) {
     CT_RUN(test_max_name_build);
     CT_RUN(test_legacy_echo);
     CT_RUN(test_on_link);
+    CT_RUN(test_holdoff);
     return CT_DONE();
 }
