@@ -59,9 +59,71 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
 
+  cross-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mips
+            toolchain: mips32--uclibc--stable-2025.08-1
+            arch_dir: mips32
+            sha256: 0218bfa5ef4624350e48cc372632fb4bac60db54822a56f5565d4144c180f095
+            tc_file: hub-mips
+            binary: hub
+            expect: 'ELF 32-bit MSB.*MIPS.*statically linked'
+          - name: arm
+            toolchain: armv5-eabi--uclibc--stable-2025.08-1
+            arch_dir: armv5-eabi
+            sha256: e5415d32b39e94bf7b990ea4ead3619bf7055e338309d2cce2b6de2dd7307f12
+            tc_file: remote-arm
+            binary: remote
+            expect: 'ELF 32-bit LSB.*ARM.*statically linked'
+    env:
+      HP_TOOLCHAIN_ROOT: ${{ github.workspace }}/toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache toolchain
+        id: tc-cache
+        uses: actions/cache@v4
+        with:
+          path: toolchain
+          key: bootlin-${{ matrix.toolchain }}-${{ matrix.sha256 }}
+      - name: Download toolchain
+        if: steps.tc-cache.outputs.cache-hit != 'true'
+        run: |
+          url=https://toolchains.bootlin.com/downloads/releases/toolchains/${{ matrix.arch_dir }}/tarballs/${{ matrix.toolchain }}.tar.xz
+          curl -fsSL --retry 3 -o tc.tar.xz "$url"
+          echo "${{ matrix.sha256 }}  tc.tar.xz" | sha256sum -c -
+          mkdir toolchain
+          tar -xf tc.tar.xz -C toolchain --strip-components=1
+          rm tc.tar.xz
+      - name: Configure
+        run: >-
+          cmake -S . -B build-cross -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/${{ matrix.tc_file }}.cmake
+      - name: Build
+        run: cmake --build build-cross -j
+      - name: Assert static ${{ matrix.name }} binary
+        run: |
+          out=$(file build-cross/${{ matrix.binary }})
+          echo "$out"
+          echo "$out" | grep -E '${{ matrix.expect }}'
+      - name: Run C tests under qemu (big-endian check)
+        if: matrix.name == 'mips'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user-static
+          cmake -S . -B build-cross-test -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/hub-mips.cmake \
+            -DHP_BUILD_TESTS=ON -DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/qemu-mips-static
+          cmake --build build-cross-test -j
+          ctest --test-dir build-cross-test --output-on-failure -j
+
   ci:
     if: always()
-    needs: [c-tests, py-tests, lint]
+    needs: [c-tests, py-tests, lint, cross-build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
