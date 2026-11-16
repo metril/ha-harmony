@@ -3,6 +3,8 @@
 
 Read-only on the device: only `cat`, `dd if=...`, `sha256sum`/`md5sum`, `test`, `uname`.
 Every image is hashed on the device and locally over the received bytes; mismatch => `*.CORRUPT`.
+`dd` is preferred; a BusyBox without it is read with `cat` (read-only `/dev/mtdNro` if present).
+`--verify <dir>` re-checks a finished backup offline (no SSH).
 """
 
 import argparse
@@ -10,9 +12,11 @@ import hashlib
 import json
 import os
 import re
+import select
 import shlex
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,7 +24,10 @@ from pathlib import Path
 from typing import Any, Protocol
 
 DEFAULT_BS = 4096
-UTILITIES = ("dd", "sha256sum", "md5sum", "find", "tar")
+DEFAULT_SSH_TIMEOUT = 15  # seconds; ConnectTimeout and ServerAliveInterval
+SERVER_ALIVE_COUNT = 3
+DEFAULT_RUN_TIMEOUT = 3600.0  # hard cap for one non-streaming remote command (e.g. a device hash)
+UTILITIES = ("dd", "cat", "sha256sum", "md5sum", "find", "tar")
 MTD_RE = re.compile(r'^mtd(\d+):\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+"(.*)"\s*$')
 IGNORED_PREFIXES = ("ram", "loop", "zram", "nbd", "sr", "fd")
 DETECT_SCRIPT = (
@@ -29,28 +36,69 @@ DETECT_SCRIPT = (
 
 
 class SshRunner:
-    """Runs remote commands via the ssh binary. `argv` is the remote command."""
+    """Runs remote commands via the ssh binary. `argv` is the remote command.
 
-    def __init__(self, host: str, user: str = "root", key: str | None = None) -> None:
-        self.host, self.user, self.key = host, user, key
+    A dead link is caught by ssh itself (ConnectTimeout, ServerAlive*); a live link whose remote
+    command stops producing data is caught by `idle_timeout` (streams) / `run_timeout` (others).
+    """
+
+    def __init__(
+        self,
+        host: str,
+        user: str = "root",
+        key: str | None = None,
+        timeout: int = DEFAULT_SSH_TIMEOUT,
+        idle_timeout: float | None = None,
+        run_timeout: float = DEFAULT_RUN_TIMEOUT,
+    ) -> None:
+        self.host, self.user, self.key, self.timeout = host, user, key, timeout
+        self.idle_timeout = idle_timeout if idle_timeout is not None else timeout * 4
+        self.run_timeout = run_timeout
 
     def _ssh(self, argv: list[str]) -> list[str]:
-        cmd = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"]
+        cmd = [
+            "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+            "-o", f"ConnectTimeout={self.timeout}",
+            "-o", f"ServerAliveInterval={self.timeout}",
+            "-o", f"ServerAliveCountMax={SERVER_ALIVE_COUNT}",
+        ]  # fmt: skip
         if self.key:
             cmd += ["-i", os.path.expanduser(self.key)]
         return [*cmd, f"{self.user}@{self.host}", shlex.join(argv)]
 
     def run(self, argv: list[str]) -> tuple[int, bytes, bytes]:
-        p = subprocess.run(self._ssh(argv), capture_output=True, check=False)
+        try:
+            p = subprocess.run(
+                self._ssh(argv), capture_output=True, check=False, timeout=self.run_timeout
+            )
+        except subprocess.TimeoutExpired:
+            return 255, b"", f"timed out after {self.run_timeout:g}s".encode()
         return p.returncode, p.stdout, p.stderr
 
     def run_stream(self, argv: list[str], sink: Callable[[bytes], None]) -> tuple[int, bytes]:
-        with subprocess.Popen(self._ssh(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
-            assert p.stdout is not None and p.stderr is not None
-            while chunk := p.stdout.read(1 << 20):
-                sink(chunk)
-            err = p.stderr.read()
-            return p.wait(), err
+        with (
+            tempfile.TemporaryFile() as errf,
+            subprocess.Popen(self._ssh(argv), stdout=subprocess.PIPE, stderr=errf) as p,
+        ):
+            assert p.stdout is not None
+            try:
+                while True:
+                    if not select.select([p.stdout], [], [], self.idle_timeout)[0]:
+                        p.kill()
+                        return 255, f"stalled: no data for {self.idle_timeout:g}s".encode()
+                    if not (chunk := os.read(p.stdout.fileno(), 1 << 20)):
+                        break
+                    sink(chunk)
+                try:
+                    rc = p.wait(timeout=self.idle_timeout)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    return 255, b"stalled: no exit after EOF"
+                errf.seek(0)
+                return rc, errf.read()
+            finally:
+                if p.poll() is None:
+                    p.kill()
 
 
 class Runner(Protocol):
@@ -134,6 +182,7 @@ class Backup:
         self.errors: list[str] = []
         self.warnings: list[str] = []
         self.manifest: dict[str, Any] = {}
+        self.read_method = "dd"
 
     def sh(self, script: str) -> tuple[int, bytes, bytes]:
         return self.r.run(["sh", "-c", script])
@@ -164,12 +213,24 @@ class Backup:
             return False
         return self.sh(f"test -c {shlex.quote(p.char_device)}")[0] == 0
 
+    def read_argv(self, dev: str, bs: int) -> list[str]:
+        return ["dd", f"if={dev}", f"bs={bs}"] if self.read_method == "dd" else ["cat", dev]
+
+    def nodes(self, p: Partition) -> tuple[str, str | None]:
+        """(primary device, extra raw char device). `cat` mode prefers the read-only mtdNro node."""
+        if self.read_method == "cat" and p.char_device:
+            ro = f"{p.char_device}ro"
+            if self.sh(f"test -c {shlex.quote(ro)}")[0] == 0:
+                return ro, None
+        return p.device, (p.char_device if self.has_char(p) else None)
+
     def dest(self, p: Partition, raw: bool = False) -> Path:
         stem = f"{p.index:02d}_{safe_name(p.name)}" if p.char_device else safe_name(p.name)
         return self.out / f"{stem}{'.raw' if raw else ''}.img"
 
     def device_hash(self, dev: str, bs: int, tool: str) -> str | None:
-        rc, out, _ = self.sh(f"dd if={shlex.quote(dev)} bs={bs} 2>/dev/null | {tool}")
+        src = shlex.join(self.read_argv(dev, bs))
+        rc, out, _ = self.sh(f"{src} 2>/dev/null | {tool}")
         return parse_hash(out, "sha256" if tool == "sha256sum" else "md5") if rc == 0 else None
 
     def image(self, dev: str, size: int, bs: int, tool: str, final: Path) -> dict[str, Any]:
@@ -178,6 +239,7 @@ class Backup:
             "device_path": dev, "file": str(final), "size_bytes": size, "bytes_received": 0,
             "hash_algo": algo, "device_hash": None, "local_hash": None,
             "utility": tool, "status": "error",
+            "read_method": self.read_method, "read_node": dev,
         }  # fmt: skip
         part = final.with_name(final.name + ".part")
         try:
@@ -192,11 +254,13 @@ class Backup:
                     h.update(b)
                     count += len(b)
 
-                rc, err = self.r.run_stream(["dd", f"if={dev}", f"bs={bs}"], sink)
+                rc, err = self.r.run_stream(self.read_argv(dev, bs), sink)
             rec["bytes_received"], rec["local_hash"] = count, h.hexdigest()
             if rc != 0:
                 rec["status"] = "error"
-                rec["error"] = f"dd exited {rc}: {err.decode('utf-8', 'replace')[-200:]}"
+                rec["error"] = (
+                    f"{self.read_method} exited {rc}: {err.decode('utf-8', 'replace')[-200:]}"
+                )
             elif count != size:
                 rec["status"] = "short_read"
                 rec["error"] = f"received {count} bytes, expected {size}"
@@ -235,25 +299,26 @@ class Backup:
 
     def run_partition(self, p: Partition, tool: str) -> dict[str, Any]:
         entry: dict[str, Any] = {"name": p.name, "index": p.index, "erasesize": p.erasesize}
-        entry.update(self.image(p.device, p.size, p.bs, tool, self.dest(p)))
+        dev, raw_dev = self.nodes(p)
+        entry.update(self.image(dev, p.size, p.bs, tool, self.dest(p)))
         statuses = [entry["status"]]
-        if self.has_char(p):
-            assert p.char_device
-            entry["raw"] = self.image(p.char_device, p.size, p.bs, tool, self.dest(p, raw=True))
+        if raw_dev:
+            entry["raw"] = self.image(raw_dev, p.size, p.bs, tool, self.dest(p, raw=True))
             statuses.append(entry["raw"]["status"])
         bad = [s for s in statuses if s not in ("ok", "skipped")]
         entry["status"] = bad[0] if bad else ("skipped" if set(statuses) == {"skipped"} else "ok")
         return entry
 
     def plan(self, parts: list[Partition], utils: dict[str, bool]) -> list[dict[str, Any]]:
-        return [
-            {
-                "name": p.name, "index": p.index, "device_path": p.device, "size_bytes": p.size,
-                "bs": p.bs, "raw_device": p.char_device if self.has_char(p) else None,
+        plan = []
+        for p in parts:
+            dev, raw_dev = self.nodes(p)
+            plan.append({
+                "name": p.name, "index": p.index, "device_path": dev, "size_bytes": p.size,
+                "bs": p.bs, "raw_device": raw_dev, "read_method": self.read_method,
                 "file": str(self.dest(p)),
-            }
-            for p in parts
-        ]  # fmt: skip
+            })  # fmt: skip
+        return plan
 
     def execute(self, only: list[str], dry_run: bool) -> int:
         m = self.manifest
@@ -276,6 +341,7 @@ class Backup:
                 if missing:
                     raise RuntimeError(f"--only matched no partition: {sorted(missing)}")
                 parts = [p for p in parts if keep(p)]
+            self.read_method = m["read_method"] = self._pick_reader(utils)
             tool = self._pick_tool(utils)
             m["hash_utility"] = tool
             m["plan"] = self.plan(parts, utils)
@@ -295,9 +361,15 @@ class Backup:
             self.errors.append(f"{type(e).__name__}: {e}")
         return 0 if m["status"] in ("ok", "dry-run") else 1
 
+    def _pick_reader(self, utils: dict[str, bool]) -> str:
+        if utils["dd"]:
+            return "dd"
+        if utils["cat"]:
+            self.warnings.append("dd missing on device; reading partitions with cat")
+            return "cat"
+        raise RuntimeError("required utility missing on device: dd (and cat)")
+
     def _pick_tool(self, utils: dict[str, bool]) -> str:
-        if not utils["dd"]:
-            raise RuntimeError("required utility missing on device: dd")
         if utils["sha256sum"]:
             return "sha256sum"
         if utils["md5sum"]:
@@ -331,17 +403,115 @@ def print_plan(m: dict[str, Any]) -> None:
         print(f"ERROR: {e}", file=sys.stderr)
 
 
+MAGICS = (
+    (b"hsqs", "squashfs"), (b"sqsh", "squashfs"), (b"\x85\x19", "jffs2"),
+    (b"\x19\x85", "jffs2"), (b"UBI#", "ubi"), (b"\x27\x05\x19\x56", "uboot"),
+    (b"\x1f\x8b", "kernel"),
+)  # fmt: skip
+ZIMAGE_MAGIC = b"\x18\x28\x6f\x01"  # ARM zImage, little-endian, at offset 0x24
+
+
+def detect_magic(head: bytes) -> str:
+    """Best-effort filesystem/image type from the first bytes; never an error."""
+    for magic, name in MAGICS:
+        if head.startswith(magic):
+            return name
+    return "kernel" if head[0x24:0x28] == ZIMAGE_MAGIC else "unknown"
+
+
+def _check_image(
+    d: Path, rec: dict[str, Any], label: str, res: dict[str, Any], seen: set[str]
+) -> None:
+    """Verify one manifest image record (a partition or its `raw` twin) into `res`."""
+    out: dict[str, Any] = {"partition": label, "file": None, "status": "ok", "magic": None}
+    res["images"].append(out)
+
+    def fail(msg: str, status: str = "error") -> None:
+        out["status"] = status
+        res["errors"].append(f"{label}: {msg}")
+
+    if rec.get("status") not in ("ok", "skipped") or not rec.get("file"):
+        return fail(f"manifest records status {rec.get('status')!r}, no verified image")
+    name = Path(rec["file"]).name
+    out["file"] = name
+    seen.add(name)
+    path = d / name
+    if not path.is_file():
+        return fail(f"image {name} is missing", "missing")
+    size, want = path.stat().st_size, rec.get("size_bytes")
+    out.update(size=size, expected_size=want)
+    with path.open("rb") as f:
+        out["magic"] = detect_magic(f.read(64))
+    if size != want:
+        fail(f"{name} size {size} != manifest {want}", "size_mismatch")
+    got = file_hash(path, rec["hash_algo"])
+    out["hash"] = got
+    for key in ("local_hash", "device_hash"):
+        if got != rec.get(key):
+            fail(f"{name} {rec['hash_algo']} differs from manifest {key}", "hash_mismatch")
+
+
+def verify_dir(d: Path) -> dict[str, Any]:
+    """Offline re-check of a finished backup directory; `ok` is False on any error."""
+    res: dict[str, Any] = {"dir": str(d), "ok": False, "images": [], "errors": [], "warnings": []}
+    try:
+        manifest = json.loads((d / "manifest.json").read_text())
+        parts = manifest["partitions"]
+    except (OSError, ValueError, KeyError) as e:
+        res["errors"].append(f"cannot read manifest.json: {type(e).__name__}: {e}")
+        return res
+    if not parts:
+        res["errors"].append("manifest lists no partitions (dry-run or failed discovery?)")
+    seen: set[str] = set()
+    for p in parts:
+        _check_image(d, p, p.get("name", "?"), res, seen)
+        if "raw" in p:
+            _check_image(d, p["raw"], f"{p.get('name', '?')} (raw)", res, seen)
+    for leftover in sorted(d.glob("*.part")) + sorted(d.glob("*.CORRUPT")):
+        res["errors"].append(f"leftover {leftover.name}")
+    for extra in sorted(d.glob("*.img")):
+        if extra.name not in seen:
+            res["warnings"].append(f"extra image not in manifest: {extra.name}")
+    res["ok"] = not res["errors"]
+    return res
+
+
+def print_verify(res: dict[str, Any]) -> None:
+    print(f"verify {res['dir']}")
+    for i in res["images"]:
+        print(f"  {i['status'].upper():<13} {i['partition']}: {i['file']} magic={i['magic']}")
+    for w in res["warnings"]:
+        print(f"WARNING: {w}", file=sys.stderr)
+    for e in res["errors"]:
+        print(f"ERROR: {e}", file=sys.stderr)
+    print("RESULT: " + ("OK" if res["ok"] else "FAILED"))
+
+
 def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--host", required=True)
+    ap.add_argument("--host")
     ap.add_argument("--user", default="root")
     ap.add_argument("--key", default="~/.ssh/harmony_owner_ed25519")
-    ap.add_argument("--target", required=True, choices=["hub", "remote"])
-    ap.add_argument("--out-dir", required=True, type=Path)
+    ap.add_argument("--target", choices=["hub", "remote"])
+    ap.add_argument("--out-dir", type=Path)
+    ap.add_argument("--ssh-timeout", type=int, default=DEFAULT_SSH_TIMEOUT, metavar="SEC",
+                    help="ssh ConnectTimeout/ServerAliveInterval (default %(default)s)")  # fmt: skip
+    ap.add_argument("--verify", type=Path, metavar="DIR", help="offline re-check of a backup dir")
+    ap.add_argument("--json", action="store_true", help="with --verify: machine-readable output")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--only", action="append", default=[], help="partition name/index; repeatable")
     a = ap.parse_args(argv)
-    b = Backup(runner or SshRunner(a.host, a.user, a.key), a.target, a.host, a.out_dir)
+    if a.verify:
+        res = verify_dir(a.verify)
+        if a.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print_verify(res)
+        return 0 if res["ok"] else 1
+    if not (a.host and a.target and a.out_dir):
+        ap.error("--host, --target and --out-dir are required unless --verify is given")
+    ssh = runner or SshRunner(a.host, a.user, a.key, timeout=a.ssh_timeout)
+    b = Backup(ssh, a.target, a.host, a.out_dir)
     rc = b.execute(a.only, a.dry_run)
     if a.dry_run:
         print_plan(b.manifest)
