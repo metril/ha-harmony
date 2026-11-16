@@ -189,3 +189,12 @@ async def test_discovery_feeds_zeroconf_step(hass, mdns):
     assert res["type"] is FlowResultType.FORM and res["step_id"] == "user"
     schema = {str(k): k.default() for k in res["data_schema"].schema if callable(k.default)}
     assert schema["host"] == "127.0.0.1" and schema["port"] == mdns.hub.port
+
+
+def test_legacy_reply_echoes_question(mdns):
+    """RFC 6762 s6.7: legacy unicast replies MUST repeat the question (QDCOUNT=1)."""
+    for name, qtype in ((SVC, const._TYPE_PTR), (HOST, const._TYPE_A), (INST, const._TYPE_SRV)):
+        msg = mdns.ask(name, qtype)
+        assert len(msg.questions) == 1
+        q = msg.questions[0]
+        assert (q.name, q.type) == (name, qtype) and q.class_ == const._CLASS_IN

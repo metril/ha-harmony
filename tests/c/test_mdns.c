@@ -314,6 +314,28 @@ static void test_max_name_build(void) {
     CT_EQ(q.want, HP_MDNS_A);
 }
 
+static void test_legacy_echo(void) {
+    pk_t p = query1("_HaHarmony._tcp.local", 12, 1); /* mixed case, no QU */
+    hp_mdns_query_t q;
+    CT_EQ(hp_mdns_parse_query(&S, p.b, p.n, &q), 0);
+    CT_CHECK(q.have_q);
+    uint8_t buf[1500];
+    int n = hp_mdns_build_response_q(&S, q.want, HP_MDNS_F_LEGACY, q.id, &q, buf, sizeof buf);
+    CT_CHECK(n > 12);
+    CT_EQ(r16(buf), 0x1234); CT_EQ(r16(buf + 4), 1); CT_EQ(r16(buf + 6), 1);
+    size_t qlen = p.n - 12; /* the question bytes as sent */
+    CT_MEM_EQ(buf + 12, p.b + 12, qlen);
+    /* the answer follows the echoed question and decodes */
+    rr_t r; drr(buf, (size_t)n, 12 + qlen, &r);
+    CT_EQ(r.type, 12);
+    /* non-legacy / no question: QDCOUNT 0 */
+    CT_EQ(hp_mdns_parse_query(&S, p.b, p.n, &q), 0);
+    n = hp_mdns_build_response_q(&S, HP_MDNS_PTR, 0, 0, &q, buf, sizeof buf);
+    CT_EQ(r16(buf + 4), 0);
+    n = hp_mdns_build_response_q(&S, HP_MDNS_PTR, HP_MDNS_F_LEGACY, 7, NULL, buf, sizeof buf);
+    CT_EQ(r16(buf + 4), 0);
+}
+
 int main(void) {
     CT_EQ(hp_mdns_svc_init(&S, "sim-hub", 8099, IP, 1), 0);
     CT_RUN(test_questions);
@@ -323,5 +345,6 @@ int main(void) {
     CT_RUN(test_known_answers);
     CT_RUN(test_build);
     CT_RUN(test_max_name_build);
+    CT_RUN(test_legacy_echo);
     return CT_DONE();
 }

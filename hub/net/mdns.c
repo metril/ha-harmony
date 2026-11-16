@@ -25,7 +25,7 @@ static uint32_t rd32(const uint8_t *p) {
  * root) and advances *off past it in the original position (not following
  * pointers). Pointers must point strictly backwards and at most MAX_JUMPS are
  * followed. 0 ok, -1 malformed. */
-static int name_decode(const uint8_t *p, size_t len, size_t *off, char *out, size_t cap) {
+static int name_decode_ex(const uint8_t *p, size_t len, size_t *off, char *out, size_t cap, int fold) {
     size_t pos = *off, o = 0, end = 0;
     int jumps = 0;
     for (;;) {
@@ -48,7 +48,7 @@ static int name_decode(const uint8_t *p, size_t len, size_t *off, char *out, siz
         if (o + b + 2 > cap) return -1; /* name too long (label + dot + NUL) */
         for (unsigned i = 0; i < b; i++) {
             uint8_t c = p[pos + 1 + i];
-            out[o++] = (char)((c >= 'A' && c <= 'Z') ? c + 32 : c);
+            out[o++] = (char)((fold && c >= 'A' && c <= 'Z') ? c + 32 : c);
         }
         out[o++] = '.';
         pos += 1u + b;
@@ -57,6 +57,10 @@ static int name_decode(const uint8_t *p, size_t len, size_t *off, char *out, siz
     out[o] = 0;
     *off = end;
     return 0;
+}
+
+static int name_decode(const uint8_t *p, size_t len, size_t *off, char *out, size_t cap) {
+    return name_decode_ex(p, len, off, out, cap, 1);
 }
 
 static bool ieq(const char *a, const char *b) {
@@ -99,6 +103,7 @@ int hp_mdns_parse_query(const hp_mdns_svc_t *s, const uint8_t *p, size_t len, hp
     char name[HP_MDNS_NAME_MAX + 1];
     unsigned want = 0;
     for (unsigned i = 0; i < qd; i++) {
+        size_t qoff = off;
         if (name_decode(p, len, &off, name, sizeof name) < 0) return -HP_E_INVAL;
         if (off + 4 > len) return -HP_E_INVAL;
         unsigned type = rd16(p + off), cls = rd16(p + off + 2);
@@ -114,6 +119,14 @@ int hp_mdns_parse_query(const hp_mdns_svc_t *s, const uint8_t *p, size_t len, hp
         }
         if (ieq(name, s->host) && (type == T_A || type == T_ANY)) m |= HP_MDNS_A;
         if (m && (cls & 0x8000)) q->unicast = true;
+        if (m && !q->have_q) { /* keep the original case for the legacy echo */
+            size_t o2 = qoff;
+            if (name_decode_ex(p, len, &o2, q->qname, sizeof q->qname, 0) == 0) {
+                q->have_q = true;
+                q->qtype = (uint16_t)type;
+                q->qclass = (uint16_t)c;
+            }
+        }
         want |= m;
     }
     /* Known-answer suppression (PTR, enum PTR, A only). A truncated answer
@@ -247,23 +260,34 @@ static unsigned count5(unsigned v) {
     return n;
 }
 
-int hp_mdns_build_response(const hp_mdns_svc_t *s, unsigned answers, unsigned flags, uint16_t id,
-                           uint8_t *out, size_t cap) {
+int hp_mdns_build_response_q(const hp_mdns_svc_t *s, unsigned answers, unsigned flags, uint16_t id,
+                             const hp_mdns_query_t *q, uint8_t *out, size_t cap) {
     answers &= HP_MDNS_ALL;
     unsigned extra = 0;
     if (answers & HP_MDNS_PTR) extra |= HP_MDNS_SRV | HP_MDNS_TXT | HP_MDNS_A;
     if (answers & HP_MDNS_SRV) extra |= HP_MDNS_A;
     extra &= ~answers;
     wr_t w = {out, cap, 0, 0};
+    bool echo = (flags & HP_MDNS_F_LEGACY) && q && q->have_q;
     put16(&w, (flags & HP_MDNS_F_LEGACY) ? id : 0);
     put16(&w, 0x8400); /* QR | AA */
-    put16(&w, 0);
+    put16(&w, echo ? 1 : 0);
     put16(&w, count5(answers));
     put16(&w, 0);
     put16(&w, count5(extra));
+    if (echo) {
+        put_name(&w, q->qname);
+        put16(&w, q->qtype);
+        put16(&w, q->qclass);
+    }
     for (unsigned b = 1; b <= HP_MDNS_A; b <<= 1)
         if (answers & b) emit(&w, s, b, flags);
     for (unsigned b = 1; b <= HP_MDNS_A; b <<= 1)
         if (extra & b) emit(&w, s, b, flags);
     return w.err ? -HP_E_TOOBIG : (int)w.n;
+}
+
+int hp_mdns_build_response(const hp_mdns_svc_t *s, unsigned answers, unsigned flags, uint16_t id,
+                           uint8_t *out, size_t cap) {
+    return hp_mdns_build_response_q(s, answers, flags, id, NULL, out, cap);
 }

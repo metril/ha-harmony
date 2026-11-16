@@ -12,8 +12,7 @@
  * NOT implemented: probing / conflict resolution, IPv6 / AAAA, multiple
  * interfaces, TC-bit multi-packet known-answer lists, SRV/TXT known-answer
  * suppression (PTR and A only), NSEC, name compression in responses,
- * response rate limiting and the 20-120 ms random response delay,
- * question echo in legacy-unicast replies. */
+ * the 20-120 ms random response delay. */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -49,6 +48,9 @@ typedef struct {
     unsigned want; /* HP_MDNS_* answers the query asks for (after known-answer suppression) */
     bool unicast;  /* a matched question had the QU bit */
     uint16_t id;   /* query id (echoed in legacy replies) */
+    bool have_q;   /* qname/qtype/qclass hold the first matched question */
+    char qname[HP_MDNS_NAME_MAX + 1]; /* decompressed, original case, dotted, trailing '.' */
+    uint16_t qtype, qclass;           /* qclass without the QU bit */
 } hp_mdns_query_t;
 
 /* 0, or -HP_E_INVAL for an empty/over-long/non-printable/dotted hub_id. */
@@ -63,5 +65,9 @@ int hp_mdns_parse_query(const hp_mdns_svc_t *, const uint8_t *pkt, size_t len, h
  * LEGACY: id echoed, TTL capped to 10 s, no cache-flush bits. Otherwise id 0. */
 int hp_mdns_build_response(const hp_mdns_svc_t *, unsigned answers, unsigned flags, uint16_t id,
                            uint8_t *out, size_t cap);
+/* As above; with HP_MDNS_F_LEGACY and q->have_q the question is echoed
+ * (QDCOUNT=1, RFC 6762 s6.7). q may be NULL. */
+int hp_mdns_build_response_q(const hp_mdns_svc_t *, unsigned answers, unsigned flags, uint16_t id,
+                             const hp_mdns_query_t *q, uint8_t *out, size_t cap);
 
 #endif

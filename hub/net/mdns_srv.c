@@ -77,9 +77,9 @@ static int parse_dest(const char *s, struct sockaddr_in *out) {
 }
 
 static void send_to(hp_mdns_srv_t *s, const struct sockaddr_in *to, unsigned answers, unsigned flags,
-                    uint16_t id) {
+                    uint16_t id, const hp_mdns_query_t *q) {
     uint8_t buf[PKT_CAP];
-    int n = hp_mdns_build_response(&s->svc, answers, flags, id, buf, sizeof buf);
+    int n = hp_mdns_build_response_q(&s->svc, answers, flags, id, q, buf, sizeof buf);
     if (n > 0) (void)sendto(s->fd, buf, (size_t)n, 0, (const struct sockaddr *)to, sizeof *to);
 }
 
@@ -87,7 +87,7 @@ static void announce_cb(void *arg, uint32_t now) {
     (void)now;
     hp_mdns_srv_t *s = arg;
     s->timer = 0;
-    if (s->have_dest) send_to(s, &s->dest, HP_MDNS_ALL, 0, 0);
+    if (s->have_dest) send_to(s, &s->dest, HP_MDNS_ALL, 0, 0, NULL);
     if (++s->announced < ANNOUNCE_COUNT) s->timer = hp_sched_after(s->sched, ANNOUNCE_GAP_MS, announce_cb, s);
 }
 
@@ -185,8 +185,8 @@ void hp_mdns_srv_service(hp_mdns_srv_t *s) {
         if (hp_mdns_parse_query(&s->svc, buf, (size_t)n, &q) < 0 || !q.want) continue;
         int legacy = ntohs(from.sin_port) != HP_MDNS_PORT; /* RFC 6762 s6.7 */
         unsigned flags = legacy ? HP_MDNS_F_LEGACY : 0;
-        if (legacy || q.unicast || !s->multicast || !s->have_dest) send_to(s, &from, q.want, flags, q.id);
-        else send_to(s, &s->dest, q.want, 0, 0);
+        if (legacy || q.unicast || !s->multicast || !s->have_dest) send_to(s, &from, q.want, flags, q.id, &q);
+        else send_to(s, &s->dest, q.want, 0, 0, NULL);
     }
 }
 
@@ -194,7 +194,7 @@ void hp_mdns_srv_stop(hp_mdns_srv_t *s) {
     if (s->fd < 0) return;
     if (s->timer) hp_sched_cancel(s->sched, s->timer);
     s->timer = 0;
-    if (s->have_dest) send_to(s, &s->dest, HP_MDNS_ALL, HP_MDNS_F_GOODBYE, 0);
+    if (s->have_dest) send_to(s, &s->dest, HP_MDNS_ALL, HP_MDNS_F_GOODBYE, 0, NULL);
     close(s->fd);
     s->fd = -1;
 }
