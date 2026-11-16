@@ -17,6 +17,7 @@ HUB_DEVICE = "hub"
 CMD_START_ACTIVITY = "start_activity"
 CMD_POWER_OFF = "power_off"
 CMD_IR_SEND = "ir_send"
+CMD_DEVICE_COMMAND = "device_command"
 CMD_TILE_UPDATE = "tile_update"
 CMD_SET_DEVICE_STATE = "set_device_state"
 

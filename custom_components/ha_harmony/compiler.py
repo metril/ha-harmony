@@ -62,29 +62,6 @@ class Compiled:
     def config_hash(self) -> str:
         return config_hash(self.hub_json)
 
-    def resolve(self, device: str, command: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        """IR action + tracked-state patch for a device command, power_on/off or input_<name>.
-
-        Patch keys: "power" (bool), "toggle" (True: flip the tracked power), "input" (str).
-        Raises KeyError for an unknown device or command.
-        """
-        dev = self.hub_json_devices[device]
-        if command in dev.get("commands", {}):
-            return dev["commands"][command], {}
-        power = dev.get("power")
-        if power and command in ("power_on", "power_off"):
-            on = command == "power_on"
-            if "toggle" in power:
-                return power["toggle"], {"toggle": True}
-            return power["on" if on else "off"], {"power": on}
-        if command.startswith("input_") and command[6:] in dev.get("inputs", {}):
-            return dev["inputs"][command[6:]], {"input": command[6:], "power": True}
-        raise KeyError(command)
-
-    @property
-    def hub_json_devices(self) -> dict[str, dict[str, Any]]:
-        return {d["id"]: d for d in self.hub_json.get("devices", [])}
-
 
 def compact_json(obj: Any) -> str:
     """The text the hub reconstructs with cJSON_PrintUnformatted (and hashes)."""

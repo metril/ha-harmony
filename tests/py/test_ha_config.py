@@ -330,11 +330,30 @@ async def test_device_commands_buttons_and_send_command(hass, hub_rf, write_yaml
         "button", "press", {"entity_id": "button.amp_power_on"}, blocking=True
     )
     await until(hass, lambda: val(hass, "binary_sensor", "dev_amp_power") == "on")
-    with pytest.raises(HomeAssistantError, match="Unknown device command"):
+    with pytest.raises(HomeAssistantError, match="unknown command"):
         await hass.services.async_call(
             "remote", "send_command", {"entity_id": remote, "device": "tv", "command": ["nope"]},
             blocking=True,
         )  # fmt: skip
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_toggle_device_power_buttons_keep_direction(hass, hub_rf, write_yaml):
+    write_yaml(BASE)
+    entry = await setup(hass, hub_rf)
+    press = hass.services.async_call
+    # tracked off: "Power on" sends the toggle once and records on
+    await press("button", "press", {"entity_id": "button.amp_power_on"}, blocking=True)
+    assert read_lines(hub_rf, 1) == [ir_line(nec(9, 1))]
+    await until(hass, lambda: val(hass, "binary_sensor", "dev_amp_power") == "on")
+    # tracked on: "Power on" sends no IR and the state stays on
+    await press("button", "press", {"entity_id": "button.amp_power_on"}, blocking=True)
+    await asyncio.sleep(0.2)
+    assert read_lines(hub_rf, 0) == []
+    assert val(hass, "binary_sensor", "dev_amp_power") == "on"
+    await press("button", "press", {"entity_id": "button.amp_power_off"}, blocking=True)
+    assert read_lines(hub_rf, 1) == [ir_line(nec(9, 1))]
+    await until(hass, lambda: val(hass, "binary_sensor", "dev_amp_power") == "off")
     await hass.config_entries.async_unload(entry.entry_id)
 
 

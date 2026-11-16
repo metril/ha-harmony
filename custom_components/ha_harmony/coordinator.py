@@ -35,6 +35,7 @@ from .api import (
 from .compiler import Compiled, CompileError, compile_config
 from .config_model import ConfigError, load_file, parse_model
 from .const import (
+    CMD_DEVICE_COMMAND,
     CMD_IR_SEND,
     CMD_POWER_OFF,
     CMD_SET_DEVICE_STATE,
@@ -448,19 +449,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         await self.async_command(HUB_DEVICE, CMD_SET_DEVICE_STATE, args)
 
     async def async_device_command(self, device: str, command: str) -> None:
-        """`remote.send_command device=...`: send a device command's IR and track what it did."""
+        """`remote.send_command device=...` / device buttons: the hub sends the IR and tracks it."""
         if device == HUB_DEVICE:
             await self.async_command(device, command)
             return
-        try:
-            ir_action, patch = self.compiled.resolve(device, command)
-        except KeyError:
-            raise HomeAssistantError(f"Unknown device command {device}.{command}") from None
-        await self.async_send_ir(ir_action)
-        state = self.device_states.get(device, DeviceState())
-        if patch.get("toggle"):
-            await self.async_set_device_state(device, power=not state.power)
-        elif patch:
-            await self.async_set_device_state(
-                device, power=patch.get("power"), input=patch.get("input", False)
-            )
+        await self.async_command(
+            HUB_DEVICE, CMD_DEVICE_COMMAND, {"device": device, "command": command}
+        )

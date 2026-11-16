@@ -404,6 +404,54 @@ int hp_actsm_set_device(hp_actsm_t *e, const char *device, int power, const char
     return 0;
 }
 
+/* Device command from a client: sends through the deferrable (line-owner) path and updates the
+ * tracked state. A toggle code is never sent when the tracked state already is the wanted one. */
+int hp_actsm_device_command(hp_actsm_t *e, const char *device, const char *command) {
+    int d = -1;
+    for (int i = 0; device && i < e->ndev; i++)
+        if (!strcmp(e->dev[i].id, device)) d = i;
+    if (d < 0) return -HP_E_NOENT;
+    if (!command) return -HP_E_INVAL;
+    if (e->running) return -HP_E_BUSY;
+    const hp_map_t *m = e->map;
+    const hp_device_t *dv = &m->devs[d];
+    const hp_action_t *act = NULL;
+    int power = -1; /* new tracked power, -1 keep */
+    const char *input = NULL; /* NULL keep */
+    bool on = !strcmp(command, "power_on");
+    if (on || !strcmp(command, "power_off")) {
+        if (dv->pwr == HP_PWR_NONE) return -HP_E_INVAL;
+        if (dv->pwr == HP_PWR_TOGGLE && e->dev[d].power == (on ? 1 : 0)) return 0; /* already there */
+        act = dv->pwr == HP_PWR_ONOFF && !on ? &dv->pwr_off : &dv->pwr_on;
+        power = on ? 1 : 0;
+        if (!on) input = "";
+    } else if (!strncmp(command, "input_", 6)) {
+        int ii = input_index(m, d, command + 6);
+        if (ii < 0) return -HP_E_INVAL;
+        act = &m->inputs[ii].act;
+        power = 1;
+        input = m->inputs[ii].name;
+    } else {
+        for (uint16_t i = 0; i < m->ncmds; i++)
+            if (m->cmds[i].dev == d && !strcmp(m->cmds[i].name, command)) act = &m->cmds[i].act;
+        if (!act) return -HP_E_INVAL;
+    }
+    int rc = hp_map_apply_deferrable(m, act, e->sinks);
+    if (rc < 0) return rc;
+    uint32_t now = now_of(e);
+    if (power == 1 && dv->settle_ms) {
+        e->dev[d].settling = true;
+        e->dev[d].settle_until = now + dv->settle_ms;
+    }
+    if (power == 0) e->dev[d].settling = false;
+    if (power >= 0) {
+        char keep[HP_MAP_NAME_MAX];
+        snprintf(keep, sizeof keep, "%s", input ? input : (power ? e->dev[d].input : ""));
+        set_dev(e, d, power, keep);
+    }
+    return 0;
+}
+
 /* --------------------------------------------------------------- reload */
 
 void hp_actsm_reloaded(hp_actsm_t *e) {
