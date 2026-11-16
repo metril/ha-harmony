@@ -2,6 +2,7 @@
 #include "hub/hp_errors.h"
 #include "hub/net/mdns.h"
 #include "hub/net/mdns_srv.h"
+#include "hub/engine/sched.h"
 
 #define IP 0x0A010203u /* 10.1.2.3 */
 
@@ -377,6 +378,79 @@ static void test_holdoff(void) {
     CT_EQ(hp_mdns_rl_take(&rl, 1000u + 0xFFFFFFFFu, HP_MDNS_A), HP_MDNS_A);
 }
 
+static uint32_t g_now;
+static uint32_t fake_clock(void *c) { (void)c; return g_now; }
+static int g_detect_ok; static uint32_t g_ip, g_mask;
+static int fake_detect(uint32_t *ip, uint32_t *mask) {
+    if (!g_detect_ok) return -1;
+    *ip = g_ip; *mask = g_mask;
+    return 0;
+}
+/* Advances the fake clock to the next timer and runs it; returns the wait. */
+static int tick(hp_sched_t *sc) {
+    int w = hp_sched_next_timeout_ms(sc);
+    if (w < 0) return w;
+    g_now += (uint32_t)w;
+    hp_sched_run(sc, g_now);
+    return w;
+}
+
+static void test_backoff_fn(void) {
+    uint32_t d = HP_MDNS_RETRY_MIN_MS;
+    CT_EQ(d, 1000);
+    d = hp_mdns_backoff_next(d); CT_EQ(d, 2000);
+    d = hp_mdns_backoff_next(d); CT_EQ(d, 4000);
+    for (int i = 0; i < 10; i++) d = hp_mdns_backoff_next(d);
+    CT_EQ(d, HP_MDNS_RETRY_MAX_MS);
+    CT_EQ(hp_mdns_backoff_next(0xFFFFFFFFu), HP_MDNS_RETRY_MAX_MS);
+}
+
+static void test_retry_state_machine(void) {
+    hp_sched_t sc; g_now = 0xFFFFF000u; /* start near wraparound */
+    hp_sched_init(&sc, fake_clock, NULL);
+    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", fake_detect};
+    hp_mdns_srv_t m;
+    g_detect_ok = 0; g_mask = 0xFF000000u; g_ip = 0x7F000001u;
+    /* no address yet: start succeeds soft, no socket, retries with backoff */
+    CT_EQ(hp_mdns_srv_start(&m, &sc, &o, "sim-hub", 8099, 1), 0);
+    CT_EQ(m.fd, -1);
+    int expect[] = {1000,2000, 4000, 8000, 16000, 32000, 60000, 60000};
+    for (unsigned i = 0; i < sizeof expect / sizeof *expect; i++) {
+        int w = hp_sched_next_timeout_ms(&sc);
+        CT_CHECK(w >= 0 && w <= (int)HP_MDNS_RETRY_MAX_MS);
+        CT_EQ(w, expect[i]);
+        tick(&sc);
+        CT_EQ(m.fd, -1);
+    }
+    CT_EQ(hp_sched_pending(&sc), 1);
+    /* address appears: comes up, announces, then rechecks every 30 s */
+    g_detect_ok = 1;
+    tick(&sc);
+    if (m.fd < 0) { /* host cannot join on lo: state machine still retrying */
+        fprintf(stderr, "note: group join unavailable on lo, up-path skipped\n");
+        CT_EQ(hp_sched_pending(&sc), 1);
+        hp_mdns_srv_stop(&m);
+        return;
+    }
+    CT_EQ(m.svc.ipv4, 0x7F000001u);
+    while (hp_sched_pending(&sc) > 1) tick(&sc); /* drain announcements */
+    CT_EQ(hp_sched_next_timeout_ms(&sc) > 0 && hp_sched_next_timeout_ms(&sc) <= 30000, 1);
+    /* address changed: rebinds with the new A record */
+    g_ip = 0x7F000002u;
+    while (m.svc.ipv4 != 0x7F000002u) { if (tick(&sc) < 0) break; }
+    CT_EQ(m.svc.ipv4, 0x7F000002u);
+    CT_CHECK(m.fd >= 0);
+    CT_CHECK(hp_sched_pending(&sc) >= 1); /* re-announce and/or recheck */
+    /* address lost: socket closed, retry from 1 s */
+    g_detect_ok = 0;
+    for (int i = 0; i < 4 && m.fd >= 0; i++) tick(&sc);
+    CT_EQ(m.fd, -1);
+    while (hp_sched_pending(&sc) > 1) tick(&sc);
+    CT_EQ(hp_sched_next_timeout_ms(&sc), 1000);
+    hp_mdns_srv_stop(&m); /* stop while down cancels the retry timer */
+    CT_EQ(hp_sched_pending(&sc), 0);
+}
+
 int main(void) {
     CT_EQ(hp_mdns_svc_init(&S, "sim-hub", 8099, IP, 1), 0);
     CT_RUN(test_questions);
@@ -389,5 +463,7 @@ int main(void) {
     CT_RUN(test_legacy_echo);
     CT_RUN(test_on_link);
     CT_RUN(test_holdoff);
+    CT_RUN(test_backoff_fn);
+    CT_RUN(test_retry_state_machine);
     return CT_DONE();
 }
