@@ -232,7 +232,11 @@ static int cmd_ir_send(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply
     if (rc < 0) {
         r = reply_ok(id, "command_result", false, sc->err[0] ? sc->err : "invalid IR action", reply, cap, len);
     } else if ((rc = hp_map_apply_deferrable(sc, &a, &h->sinks)) < 0) {
-        r = reply_ok(id, "command_result", false, h->sinks.ir ? "IR send failed" : "no IR output", reply, cap, len);
+        r = reply_ok(id, "command_result", false,
+                     rc == -HP_E_BUSY ? "IR line busy, queue full"
+                     : h->sinks.ir    ? "IR send failed"
+                                      : "no IR output",
+                     reply, cap, len);
     } else {
         r = reply_ok(id, "command_result", true, NULL, reply, cap, len);
     }
@@ -283,7 +287,8 @@ static int cmd_device_command(hub_ctx_t *h, uint32_t id, const cJSON *args, char
     if (rc == 0) return reply_ok(id, "command_result", true, NULL, reply, cap, len);
     const char *why = rc == -HP_E_NOENT ? "unknown device"
                       : rc == -HP_E_INVAL ? "unknown command for this device"
-                      : rc == -HP_E_BUSY ? "transition in progress"
+                      : rc == -HP_E_BUSY ? (hp_actsm_busy(&h->act) ? "transition in progress"
+                                                                   : "IR line busy, queue full")
                       : h->sinks.ir ? "IR send failed" : "no IR output";
     return reply_ok(id, "command_result", false, why, reply, cap, len);
 }
