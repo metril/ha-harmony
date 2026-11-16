@@ -50,16 +50,21 @@ static int xsend(int fd, const uint8_t *frame, size_t len) {
     return 0;
 }
 
-/* Accepts every pending connection: the first becomes the peer (when none is
- * attached), others are closed immediately (refused). */
+/* True when the attached peer has hung up (it is no longer "attached"; recv() must still drain
+ * it and report its departure). */
+static bool peer_hung_up(const pair_t *p) {
+    struct pollfd f = {p->fd, 0, 0};
+    return poll(&f, 1, 0) == 1;
+}
+
+/* Accepts pending connections: the first becomes the peer (when none is attached), others are
+ * closed immediately (refused). The peer's state is re-checked before EVERY accept: a connection
+ * made after the peer hung up must stay queued for the next peer, not be refused as a "second
+ * remote" just because this drain already attached the (now dead) peer (an old peer attached and
+ * dropped while newcomers queued behind it was the RF reconnect flake). */
 static void accept_pending(pair_t *p) {
-    if (p->fd >= 0) {
-        /* A peer that has already hung up is not "attached": leave newcomers
-         * queued until recv() has drained it and reported its departure. */
-        struct pollfd f = {p->fd, 0, 0};
-        if (poll(&f, 1, 0) == 1) return;
-    }
     for (;;) {
+        if (p->fd >= 0 && peer_hung_up(p)) return;
         int c = accept(p->lfd, NULL, NULL);
         if (c < 0) return;
         if (p->fd >= 0 || set_nonblock_cloexec(c) < 0) {
@@ -143,6 +148,12 @@ static int pair_claim(void *self) {
     return 0;
 }
 
+static bool hub_attached(void *self) {
+    pair_t *p = self;
+    accept_pending(p);
+    return p->fd >= 0;
+}
+
 int hp_rf_pair_create(const char *path, hp_rf_transport **out) {
     struct sockaddr_un a;
     int rc = fill_addr(&a, path);
@@ -156,7 +167,7 @@ int hp_rf_pair_create(const char *path, hp_rf_transport **out) {
     unlink(path);
     if (bind(p->lfd, (struct sockaddr *)&a, sizeof a) < 0 || listen(p->lfd, 4) < 0) goto fail;
     strcpy(p->path, path);
-    p->t = (hp_rf_transport){p, hub_send, hub_recv, pair_claim};
+    p->t = (hp_rf_transport){p, hub_send, hub_recv, pair_claim, hub_attached};
     *out = &p->t;
     return 0;
 fail:
@@ -179,7 +190,7 @@ int hp_rf_pair_connect(const char *path, hp_rf_transport **out) {
         free(p);
         return -HP_E_IO;
     }
-    p->t = (hp_rf_transport){p, remote_send, remote_recv, pair_claim};
+    p->t = (hp_rf_transport){p, remote_send, remote_recv, pair_claim, NULL};
     *out = &p->t;
     return 0;
 }

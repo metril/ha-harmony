@@ -10,17 +10,19 @@ static hp_sim_rec_t *next_rec(hp_sim_t *s) {
     return r;
 }
 
-static int sim_ir_send(void *self, uint8_t port_mask, const uint16_t *pronto, size_t n) {
+static int sim_ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     hp_sim_t *s = self;
-    if (!pronto || n == 0 || n > HP_SIM_MAX_PRONTO) return -HP_E_INVAL;
+    if (!sig || sig->once_n == 0 || sig->once_n > HP_IR_MAX_DUR) return -HP_E_INVAL;
+    size_t n = sig->once_n;
     hp_sim_rec_t *r = next_rec(s);
     r->kind = HP_SIM_IR;
     r->port_mask = port_mask;
+    r->hz = sig->carrier_hz;
     r->n = n;
-    memcpy(r->pronto, pronto, n * sizeof *pronto);
+    memcpy(r->us, sig->us, (n < HP_SIM_MAX_US ? n : HP_SIM_MAX_US) * sizeof *sig->us);
     if (s->mirror) {
-        fprintf(s->mirror, "ir port=%u n=%zu pronto=", (unsigned)port_mask, n);
-        for (size_t i = 0; i < n; i++) fprintf(s->mirror, i ? " %04x" : "%04x", (unsigned)pronto[i]);
+        fprintf(s->mirror, "ir port=%u hz=%u n=%zu us=", (unsigned)port_mask, (unsigned)sig->carrier_hz, n);
+        for (size_t i = 0; i < n; i++) fprintf(s->mirror, i ? ",%u" : "%u", (unsigned)sig->us[i]);
         fputc('\n', s->mirror);
         fflush(s->mirror);
     }
@@ -70,7 +72,7 @@ void hp_sim_init(hp_sim_t *s, FILE *mirror) {
     s->mirror = mirror;
     s->ir = (hp_ir_sink){s, sim_ir_send};
     s->bt = (hp_bt_sink){s, sim_bt_key};
-    s->rf = (hp_rf_transport){s, sim_rf_send, sim_rf_recv, sim_rf_claim};
+    s->rf = (hp_rf_transport){s, sim_rf_send, sim_rf_recv, sim_rf_claim, NULL};
 }
 
 hp_sinks_t hp_sim_sinks(hp_sim_t *s) {

@@ -1,0 +1,8 @@
+Filetype: IR signals file
+Version: 1
+#
+name: Power
+type: parsed
+protocol: Kaseikyo
+address: 00 00 00 00
+command: 01 00 00 00

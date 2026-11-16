@@ -4,12 +4,18 @@
       "user": {
         "title": "Connect to your Harmony hub",
         "description": "Enter the hub address and the access token.",
-        "data": {"host": "Host", "port": "Port", "token": "Token"}
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "token": "Token"
+        }
       },
       "reauth_confirm": {
         "title": "Re-authenticate",
         "description": "The hub rejected the saved token. Enter the new token.",
-        "data": {"token": "Token"}
+        "data": {
+          "token": "Token"
+        }
       }
     },
     "error": {
@@ -22,6 +28,74 @@
       "already_configured": "This hub is already configured.",
       "reauth_successful": "Re-authentication was successful.",
       "wrong_hub": "The token belongs to a different hub."
+    }
+  },
+  "issues": {
+    "config_invalid": {
+      "title": "Harmony config file is invalid",
+      "description": "The YAML for hub {hub} could not be used and the previous config stays active: {error}"
+    },
+    "config_rejected": {
+      "title": "The hub rejected the Harmony config",
+      "description": "Hub {hub} refused the pushed config and keeps running its previous one: {error}"
+    }
+  },
+  "services": {
+    "reload_config": {
+      "name": "Reload config",
+      "description": "Re-read the hub's YAML file, recompile it and push it if it changed.",
+      "fields": {
+        "config_entry": {
+          "name": "Config entry",
+          "description": "Hub (entry id or hub id). Optional when only one hub is set up."
+        }
+      }
+    },
+    "push_pages": {
+      "name": "Push pages",
+      "description": "Send the compiled remote pages and tile texts to the remotes again.",
+      "fields": {
+        "config_entry": {
+          "name": "Config entry",
+          "description": "Hub (entry id or hub id). Optional when only one hub is set up."
+        }
+      }
+    },
+    "send_ir": {
+      "name": "Send IR",
+      "description": "Send one IR action through the hub.",
+      "fields": {
+        "config_entry": {
+          "name": "Config entry",
+          "description": "Hub (entry id or hub id). Optional when only one hub is set up."
+        },
+        "ir": {
+          "name": "IR action",
+          "description": "A config-format-2 IR action, e.g. {proto: nec, addr: 4, cmd: 8}, or a flipper/smartir reference."
+        }
+      }
+    },
+    "set_device_state": {
+      "name": "Set device state",
+      "description": "Tell the hub a device was switched by hand (no IR is sent).",
+      "fields": {
+        "config_entry": {
+          "name": "Config entry",
+          "description": "Hub (entry id or hub id). Optional when only one hub is set up."
+        },
+        "device": {
+          "name": "Device",
+          "description": "Device id from the YAML."
+        },
+        "power": {
+          "name": "Power",
+          "description": "Whether the device is on."
+        },
+        "input": {
+          "name": "Input",
+          "description": "Selected input name; empty for unknown."
+        }
+      }
     }
   }
 }

@@ -10,11 +10,11 @@
 static const char *CFG =
     "{\"keys\":{\"1\":{\"type\":\"ha\",\"event\":\"menu\"},\"2\":{\"type\":\"bt\",\"usage\":233}},"
     "\"activities\":["
-    "{\"name\":\"TV\",\"keys\":{\"2\":{\"type\":\"ir\",\"port_mask\":3,\"pronto\":[0,109,0,0]},"
+    "{\"name\":\"TV\",\"keys\":{\"2\":{\"type\":\"ir\",\"port_mask\":3,\"pronto\":[0,109,1,0,24,24]},"
     "\"5\":{\"type\":\"bt\",\"usage\":234}},"
-    "\"steps\":[{\"type\":\"ir\",\"port_mask\":1,\"pronto\":[0,1,2,3]},"
-    "{\"type\":\"bt\",\"usage\":48},{\"type\":\"ir\",\"port_mask\":4,\"pronto\":[0,9,9,9,9]}],"
-    "\"off\":[{\"type\":\"ir\",\"port_mask\":255,\"pronto\":[0,7,7,7]}]},"
+    "\"steps\":[{\"type\":\"ir\",\"port_mask\":1,\"pronto\":[0,109,1,0,10,20]},"
+    "{\"type\":\"bt\",\"usage\":48},{\"type\":\"ir\",\"port_mask\":4,\"pronto\":[0,109,1,0,30,40]}],"
+    "\"off\":[{\"type\":\"ir\",\"port_mask\":255,\"pronto\":[0,109,1,0,50,60]}]},"
     "{\"name\":\"Music\",\"steps\":[{\"type\":\"none\"}]}]}";
 
 static hp_sim_t sim;
@@ -59,8 +59,10 @@ static void test_apply(void) {
     const hp_sim_rec_t *r = hp_sim_rec(&sim, 0);
     CT_EQ(r->kind, HP_SIM_IR);
     CT_EQ(r->port_mask, 3);
-    CT_EQ(r->n, 4);
-    CT_EQ(r->pronto[1], 109);
+    CT_EQ(r->n, 2);
+    CT_EQ(r->hz, 38029);
+    CT_EQ(r->us[0], 631);
+    CT_EQ(r->us[1], 631);
     hp_map_lookup(&m, "Music", 2, &a);
     CT_EQ(hp_map_apply(&m, &a, &sinks), 0);
     CT_EQ(hp_sim_count(&sim), 3); /* BT tap = down + up */

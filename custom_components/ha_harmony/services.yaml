@@ -1,0 +1,35 @@
+reload_config:
+  fields:
+    config_entry: &entry
+      required: false
+      selector:
+        config_entry:
+          integration: ha_harmony
+push_pages:
+  fields:
+    config_entry: *entry
+send_ir:
+  fields:
+    config_entry: *entry
+    ir:
+      required: true
+      example: '{"proto": "nec", "addr": 4, "cmd": 8}'
+      selector:
+        object:
+set_device_state:
+  fields:
+    config_entry: *entry
+    device:
+      required: true
+      example: tv
+      selector:
+        text:
+    power:
+      required: false
+      selector:
+        boolean:
+    input:
+      required: false
+      example: hdmi1
+      selector:
+        text:

@@ -1,0 +1,105 @@
+# Hub-executed activities, device state and key hold
+
+Implemented in `hub/engine/activity.{h,c}` (config format 2 only; format 1 keeps the immediate
+`steps`/`off` behaviour). Works with Home Assistant down: the hub tracks every device itself.
+
+## Tracked state
+Per device: `power` (on/off) and `input` (a name from `devices[].inputs`, or unknown). A fresh
+hub, a missing/corrupt state file, or a new device starts as off / input unknown. Powering a
+device off makes its input unknown. Devices without power codes are only tracked.
+
+## Transition (start activity B)
+Planned from the tracked state at request time, executed one step per timer (never blocking):
+
+1. power OFF every device that is on and not used by B;
+2. power ON every B device that is off (a toggle code is never sent to a device already in the
+   wanted state; discrete codes are only sent when the tracked state differs);
+3. select inputs (device order) where the tracked input differs or is unknown; an input step waits
+   until the device's `settle_ms` after its power-on or last input select has elapsed;
+4. B's extra `steps` (wait for every device's settle time).
+
+`Off` powers down everything that is on, then runs the current activity's `off` steps.
+Tracked state is updated when each frame goes out. Steps re-check the tracked state when they
+run, so a `set_device_state` correction during a transition skips what became redundant.
+
+**No overlapping frames.** The next IR step starts no earlier than the previous frame's duration
+(for SIRC: all 3 copies, `2 * period + frame`) plus `HP_ACT_GUARD_MS` (50 ms). This line-busy
+time persists across plans.
+
+**One owner of the IR line.** `hp_irout` keeps a "line free at" time that every send pushes
+(key press, hold repeat, each SIRC copy, `ir_send`, plan step; SIRC counts all 3 copies). Plan steps
+wait for it plus `HP_IROUT_GUARD_MS` (50 ms), so a plan started within ~90 ms of a SIRC press, or
+a press right after the last plan frame, never interleaves with pending copies. A **key press or
+`ir_send` arriving while the line is busy is deferred** (not dropped) and sent as soon as it is
+free, in order, through a small FIFO (`HP_IROUT_PEND` = 3). **Policy: queue, and when the queue is
+full the newest is dropped** (logged; `ir_send` then answers `ir_send failed`): an `ir_send`
+burst from HA must not lose commands, and a human cannot fill the queue. A deferred press cannot
+become a hold (HOLD events come >= 400 ms later). Hold repeats are skipped while the line is busy, and `start_activity`/Off
+end any key hold. The line-free time (like `bus_free`, per-device settle and the persist
+debounce stamp) is only trusted within the span it was set with, so a hub idle for >= 2^31 ms
+(32-bit ms clock) never reads a stale stamp as a future deadline.
+
+**Interruption.** A new start/Off while a transition runs cancels its remaining steps. Frames
+already sent stay in the tracked state; the new plan is built from that state, and pending
+settle times are kept (a device powered on 20 ms ago is not sent an input yet). The activity
+whose `off` steps run is the last requested one (the interrupted target counts as current).
+While a transition runs, non-activity key presses are dropped and the `ir_send` verb answers
+`{ok:false,"transition in progress"}`; HOLD/RELEASE are harmless. A reload (`set_config`)
+cancels the plan; the interrupted target is never reported or persisted: the last *completed*
+activity stays (re-found by id, none if it no longer exists) and device state stays what was
+actually sent. An IR send failure aborts the plan and reverts to the reported activity.
+
+## What is reported
+* `state_update {activity, power}` is sent when a transition **completes** (also over RF). While
+  one is running, the last completed state is what `state_update` / the post-`hello_ack` state
+  shows. An interrupted transition is never reported; its successor is.
+  `Off` reports `{activity: 0, power: false}`.
+* `device_state {device, power, input?}` (`input` omitted = unknown) goes to all authenticated
+  clients whenever a tracked device changes: each executed step, `set_device_state`, and on
+  `set_config` for devices that are new or changed. After `hello_ack` a client receives
+  `state_update` and then one `device_state` per device.
+* `command` device `hub`, `set_device_state`, args `{"device": "<id>", "power"?: bool,
+  "input"?: "<name>" | null}` sets the tracked state **without sending IR** and pushes
+  `device_state`. `input: null` (or `""`) = unknown; `power: false` also makes the input unknown.
+  Unknown device/input, or none of power/input: `command_result {ok:false, message}`.
+* `command` device `hub`, `device_command`, args `{"device": "<id>", "command": "<name>"}`: sends
+  one device command and updates the tracked state itself (one round trip; `device_state` is
+  pushed on a change). `<name>` is a YAML command of that device (no state change), `power_on` /
+  `power_off` (needs `power:`) or `input_<name>` (an input of the device; also marks it on).
+  IR goes through the same deferrable line-owner path as key presses and `ir_send`. A **toggle**
+  device is sent nothing (reply `ok`) when `power_on` finds it tracked on or `power_off` finds it
+  tracked off; discrete codes (`on`/`off`, inputs, commands) are always sent. `power_off` makes the
+  input unknown. Refused with `{ok:false, message}`: `args need device and command`, `unknown device`,
+  `unknown command for this device`, `transition in progress` (same as `ir_send`), `IR send failed`.
+* After every successful `set_config` while an activity is running (reported), the hub sends
+  `state_update` for it to **all** clients including the sender (after the `config_ack`): a rename
+  keeps the index, a reorder or removal changes it. Clients track the activity by index, not name.
+* `config_ack {ok, message?, config_hash?}`: after a successful `set_config`, `config_hash` is the
+  hash the hub now holds (same as `hello_ack.config_hash`); clients store it instead of computing.
+* `remote_attached {}` goes to all authenticated clients when a remote attaches on the RF link
+  (not on the sim without `--rf`). It has no fields: the link knows no remote id before the remote's
+  first message. Clients push pages and tile texts for the remotes they manage.
+* `start_activity`/`power_off` reply `command_result {ok:true}` when the request is accepted.
+
+## State file (`hub --state PATH`, separate from `--cache`)
+`"HPST"` | version u8 (1) | config hash u32 BE (same CRC-32 as `hello_ack.config_hash`) |
+activity id (u8 length + bytes, length 0 = none) | device count u8 | per device: id (u8 len +
+bytes), power u8, input (u8 len + bytes, length 0 = unknown) | CRC-32 (IEEE) u32 BE over all
+preceding bytes. Written with `hp_atomic_write`.
+
+Debounced: the first change after >= 2 s of quiet is written immediately; further changes in
+that window coalesce into one trailing write at its end (at most one write per
+`HP_ACT_PERSIST_MS` = 2 s); a pending change is flushed on SIGTERM/SIGINT. The persisted activity
+is the last *completed* one. At startup (after `--cache` is loaded) a missing, corrupt,
+other-version or other-config-hash file is ignored with a log line and the hub starts all
+off/unknown; it never refuses to start. After a restart `hello_ack`'s state and `device_state`s
+show the restored state.
+
+## Key hold
+The remote sends `key_event` PRESS, then a HOLD **every 400 ms** (`HP_IROUT_HOLD_INTERVAL_MS`)
+while the key stays down, then RELEASE. The hub repeats the key's IR frame from the first HOLD
+until RELEASE. The 2 s safety cap (`HP_IROUT_HOLD_CAP_MS`) is measured from the **most recent**
+HOLD (each HOLD restarts it): a real long hold keeps repeating, a lost RELEASE (or a dead
+remote) stops the repeats within 2 s of the last HOLD, and later stray HOLDs do not resume them
+(a new PRESS is needed). `remote_sim --hold KEY_CODE,MS [--hold-interval-ms N]` (KEY_CODE is the numeric key code) emits exactly that
+sequence.
