@@ -1139,6 +1139,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-homeassistant-custom-component" },
+    { name = "pytest-shard" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
     { name = "ruff" },
@@ -1153,6 +1154,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-homeassistant-custom-component", specifier = ">=0.13" },
+    { name = "pytest-shard", specifier = ">=0.1.2" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
     { name = "ruff" },
@@ -2521,6 +2523,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ba/e4/51a54dd6638fd4a7c45bb20a737235fd92cbb4d24b5ff681d64ace5d02e9/pytest_picked-0.5.1.tar.gz", hash = "sha256:6634c4356a560a5dc3dba35471865e6eb06bbd356b56b69c540593e9d5620ded", size = 8401, upload-time = "2024-11-06T23:19:52.538Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c6/81/450c017746caab376c4b6700439de9f1cc7d8e1f22dec3c1eb235cd9ad3e/pytest_picked-0.5.1-py3-none-any.whl", hash = "sha256:af65c4763b51dc095ae4bc5073a962406902422ad9629c26d8b01122b677d998", size = 6608, upload-time = "2024-11-06T23:19:51.284Z" },
+]
+
+[[package]]
+name = "pytest-shard"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c6/ca/3efa6f3b84dab83220db45997e785be726684c2c2c4267bffb7d80101c7f/pytest-shard-0.1.2.tar.gz", hash = "sha256:b86a967fbfd1c8e50295095ccda031b7e890862ee06531d5142844f4c1d1cd67", size = 3579, upload-time = "2020-12-11T19:52:55.083Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/65/7a/dbeb4c54e9fc3b59622f410091365f354a69cda1af10c3b83ac0ca6e6f4f/pytest_shard-0.1.2-py3-none-any.whl", hash = "sha256:407a1df385cebe1feb9b4d2e7eeee8b044f8a24f0919421233159a17c59be2b9", size = 4608, upload-time = "2020-12-11T19:52:54.226Z" },
 ]
 
 [[package]]
