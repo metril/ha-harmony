@@ -13,12 +13,25 @@ if(HP_SANITIZE)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
+# Vendored cJSON: relaxed warnings (third-party code, unmodified).
+add_library(cjson STATIC vendor/cjson/cJSON.c)
+target_include_directories(cjson PUBLIC ${CMAKE_SOURCE_DIR}/vendor/cjson)
+target_compile_options(cjson PRIVATE -Wno-error -w)
+target_compile_definitions(cjson PRIVATE CJSON_NESTING_LIMIT=64)
+target_link_libraries(cjson PRIVATE m)
+
 # Hub code library; later tasks append sources here.
 add_library(hp_hub STATIC
   proto/gen/harmony_proto.c
   hub/rf/framing.c
+  hub/net/ws.c
+  hub/net/jsonrpc.c
 )
 target_include_directories(hp_hub PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(hp_hub PUBLIC cjson m)
+
+add_executable(hub hub/main.c)
+target_link_libraries(hub PRIVATE hp_hub)
 
 enable_testing()
 add_subdirectory(tests/c)
