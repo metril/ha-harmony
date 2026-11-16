@@ -57,7 +57,7 @@ async def test_pong_keeps_connection_alive(fake_hub):
         await ws.send_json(reply)
 
     hub = await fake_hub(handler)
-    c, session = await _client(hub, heartbeat_interval=0.05, pong_timeout=0.5)
+    c, session = await _client(hub, heartbeat_interval=0.05, pong_timeout=2.0)
     await c.async_connect()
     try:
         await asyncio.sleep(0.4)

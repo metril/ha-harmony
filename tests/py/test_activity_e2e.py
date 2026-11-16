@@ -244,11 +244,11 @@ async def test_remote_hold_sends_press_holds_release(hub_rf, run_remote):
         await hello(ws)
         await cfg(ws, CONFIG)
         t0 = time.monotonic()
-        res = run_remote(hub_rf.rf, "--hold", "6,600", "--hold-interval-ms", "200")
+        res = run_remote(hub_rf.rf, "--hold", "6,1200", "--hold-interval-ms", "400")
         assert res.returncode == 0, res.stderr
-        assert time.monotonic() - t0 >= 0.55
+        assert time.monotonic() - t0 >= 1.15  # a lower bound load cannot miss
         actions = []
-        while len(actions) < 5:  # press, holds at 200/400, release (+ any extra hold)
+        while len(actions) < 5:  # press, holds at 400/800, release (+ any extra hold)
             m = await recv(ws)
             assert m["t"] == "key_event" and m["d"]["key"] == 6
             actions.append(m["d"]["action"])
@@ -256,8 +256,8 @@ async def test_remote_hold_sends_press_holds_release(hub_rf, run_remote):
                 break
         assert actions[0] == 0 and actions[-1] == 1 and actions[1:-1] == [2] * (len(actions) - 2)
         assert len(actions) >= 4
-        await asyncio.sleep(0.3)
-        lines = read_lines(hub_rf, pending_lines(hub_rf))
+        lines = read_lines(hub_rf, 3)  # waits for them: the hub repeated for >1 s
+        lines += read_lines(hub_rf, pending_lines(hub_rf))
         assert len(lines) >= 3 and " n=68 " in lines[0]
         assert all(" n=4 " in ln for ln in lines[1:])  # NEC repeat codes while held
         await asyncio.sleep(0.4)
@@ -320,17 +320,19 @@ async def test_device_command_tracks_state_and_skips_redundant_toggle(hub_proces
 
 
 async def test_device_command_refused_during_transition(hub_process):
+    slow_tv = {**CONFIG["devices"][0], "settle_ms": 5000}  # the input step waits out the settle
+    slow = {**CONFIG, "devices": [slow_tv, CONFIG["devices"][1]]}
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
         await hello(ws)
-        await cfg(ws, CONFIG)
-        await start(ws, "Watch")  # tv/amp settle times keep it running for a while
+        await cfg(ws, slow)
+        await start(ws, "Watch")  # still running for ~5 s: far longer than this request
         args = {"device": "tv", "command": "power_off"}
         msg = {"device": "hub", "command": "device_command", "args": args}
         await ws.send_str(json.dumps({"v": 1, "id": 7, "t": "command", "d": msg}))
         while (r := await recv(ws))["id"] != 7:  # device_state pushes may come first
             pass
         assert r["d"] == {"ok": False, "message": "transition in progress"}
-        await until(ws)
+        # no waiting for the transition: closing the socket and stopping the hub cancels it
 
 
 async def test_device_command_queue_full_is_not_reported_as_a_transition(hub_process):
