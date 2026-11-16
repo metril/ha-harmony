@@ -188,6 +188,17 @@ def _name(v: Any) -> str:
     return v
 
 
+def _cmd_name(v: Any) -> str:
+    """A device command name: free text, but not one the hub resolves itself."""
+    v = _name(v)
+    if v in ("power_on", "power_off") or v.startswith("input_"):
+        raise vol.Invalid(
+            f"command name {v!r} is reserved (power_on, power_off and input_<name>"
+            " are built in); pick another name"
+        )
+    return v
+
+
 def _int(lo: int, hi: int):
     def check(v: Any) -> int:
         if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
@@ -221,7 +232,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("power"): power,
         vol.Optional("inputs", default=dict): {_name: ir},
         vol.Optional("settle_ms"): _int(0, 60000),
-        vol.Optional("commands", default=dict): {_name: ir},
+        vol.Optional("commands", default=dict): {_cmd_name: ir},
     }
     activity = {
         vol.Required("id"): vol.All(_slug, vol.NotIn(["off"], msg="`off` is reserved")),

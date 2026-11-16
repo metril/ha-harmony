@@ -151,7 +151,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}"}
         for dev in self.compiled.devices.values():
             ids |= {f"{h}_dev_{dev.id}_power", f"{h}_dev_{dev.id}_input"}
-            ids |= {f"{h}_cmd_{dev.id}_{c}" for c in self.device_commands(dev.id)}
+            ids |= {f"{h}_cmd_{dev.id}:{c}" for c in self.device_commands(dev.id)}
         return ids
 
     def device_commands(self, device: str) -> list[str]:

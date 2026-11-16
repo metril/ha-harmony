@@ -241,6 +241,17 @@ def test_oversize_is_a_clean_error(text, needle):
     assert "hub allows" in str(ei.value) or "pool holds" in str(ei.value)
 
 
+@pytest.mark.parametrize("name", ["power_on", "power_off", "input_x", "input_"])
+def test_reserved_command_names_rejected(name):
+    bad(
+        f"devices: [{{id: tv, commands: {{{name}: {NEC}}}}}]",
+        "devices[0].commands",
+        name,
+        "reserved",
+    )
+    model(f"devices: [{{id: tv, commands: {{my_{name}: {NEC}}}}}]")  # only the exact names/prefix
+
+
 def test_pronto_too_long_for_hub():
     with pytest.raises(ConfigError, match="too long for hub|520"):
         model("devices: [{id: a, commands: {x: {pronto: " + pronto(530) + "}}}]")

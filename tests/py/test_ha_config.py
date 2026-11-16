@@ -52,7 +52,7 @@ pages:
 """
 BASE_UIDS = {
     f"{HUB_ID}_{k}"
-    for k in ["remote", "activity", "key_1", "battery_1", "voltage_1", "dev_tv_power", "dev_tv_input", "dev_amp_power", "dev_amp_input", "cmd_tv_vol_up", "cmd_tv_power_on", "cmd_tv_power_off", "cmd_amp_mute", "cmd_amp_power_on", "cmd_amp_power_off"]
+    for k in ["remote", "activity", "key_1", "battery_1", "voltage_1", "dev_tv_power", "dev_tv_input", "dev_amp_power", "dev_amp_input", "cmd_tv:vol_up", "cmd_tv:power_on", "cmd_tv:power_off", "cmd_amp:mute", "cmd_amp:power_on", "cmd_amp:power_off"]
 }
 SELECT = f"select.harmony_hub_{HUB_ID.replace('-', '_')}_activity"
 
@@ -197,8 +197,8 @@ async def test_reload_refreshes_options_and_removes_stale_entities(hass, hub_rf,
     assert coord.client._ws is ws_before and coord.client.connected  # no reconnect
     assert hass.states.get(SELECT).attributes["options"] == ["Télé", "Music2", "Off"]
     got = uids(hass, entry)
-    assert f"{HUB_ID}_cmd_amp_mute" not in got and f"{HUB_ID}_dev_amp_power" not in got
-    assert {f"{HUB_ID}_cmd_zzz_mute2", f"{HUB_ID}_dev_zzz_input"} <= got
+    assert f"{HUB_ID}_cmd_amp:mute" not in got and f"{HUB_ID}_dev_amp_power" not in got
+    assert {f"{HUB_ID}_cmd_zzz:mute2", f"{HUB_ID}_dev_zzz_input"} <= got
     assert got == coord.expected_unique_ids()
     assert eid(hass, "button", "cmd_amp_mute") is None
     # a second identical reload changes nothing and pushes nothing
@@ -354,6 +354,20 @@ async def test_toggle_device_power_buttons_keep_direction(hass, hub_rf, write_ya
     await press("button", "press", {"entity_id": "button.amp_power_off"}, blocking=True)
     assert read_lines(hub_rf, 1) == [ir_line(nec(9, 1))]
     await until(hass, lambda: val(hass, "binary_sensor", "dev_amp_power") == "off")
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_command_unique_ids_do_not_collide(hass, hub_rf, write_yaml):
+    code = "{proto: nec, addr: 1, cmd: 1}"
+    write_yaml(
+        f"devices:\n  - {{id: tv, commands: {{a_b: {code}}}}}\n"
+        f"  - {{id: tv_a, commands: {{b: {code}}}}}\n"
+    )
+    entry = await setup(hass, hub_rf)
+    ereg = er.async_get(hass)
+    ids = [e.unique_id for e in er.async_entries_for_config_entry(ereg, entry.entry_id)]
+    cmd = [u for u in ids if "_cmd_" in u]
+    assert len(cmd) == 2 and len(set(cmd)) == 2
     await hass.config_entries.async_unload(entry.entry_id)
 
 
