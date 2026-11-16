@@ -245,6 +245,48 @@ async def test_reload_updates_input_options_and_device_names(hass, hub_rf, write
     await hass.config_entries.async_unload(entry.entry_id)
 
 
+async def _running_activity_survives(hass, hub_rf, write_yaml, edit, options, running):
+    path = write_yaml(BASE)
+    entry = await setup(hass, hub_rf)
+    coord = entry.runtime_data
+    await coord.async_start_activity("Télé")
+    await until(hass, lambda: hass.states.get(SELECT).state == "Télé")
+    path.write_text(edit(BASE), encoding="utf-8")
+    await hass.services.async_call(const.DOMAIN, "reload_config", {}, blocking=True)
+    await hass.async_block_till_done()
+    await asyncio.sleep(0.3)  # the hub's state_update after the reload
+    await hass.async_block_till_done()
+    assert hass.states.get(SELECT).attributes["options"] == options
+    assert hass.states.get(SELECT).state == running
+    remote = hass.states.get("remote.harmony_hub_sim_hub")
+    assert remote.state == "on" and remote.attributes["current_activity"] == running
+    assert val(hass, "binary_sensor", "dev_tv_power") == "on"  # the hub still runs it
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_rename_running_activity_keeps_it_current(hass, hub_rf, write_yaml):
+    await _running_activity_survives(
+        hass,
+        hub_rf,
+        write_yaml,
+        lambda t: t.replace("name: Télé", "name: Cinema"),
+        ["Cinema", "Music", "Off"],
+        "Cinema",
+    )
+
+
+async def test_reorder_and_rename_running_activity_keeps_it_current(hass, hub_rf, write_yaml):
+    def edit(t):
+        a = "  - {id: watch, name: Télé, devices: [{device: tv, input: hdmi1}]}\n"
+        b = "  - {id: music, name: Music, devices: [{device: amp}]}\n"
+        assert a + b in t
+        return t.replace(a + b, b + a.replace("Télé", "Cinema"))
+
+    await _running_activity_survives(
+        hass, hub_rf, write_yaml, edit, ["Music", "Cinema", "Off"], "Cinema"
+    )
+
+
 async def test_external_config_change_refreshes_select(hass, hub_rf, write_yaml):
     """activity_list pushed by the hub after someone else's set_config (the stale-options bug)."""
     assert write_yaml  # sets the per-test config dir; no file = unmanaged, hub config is shown

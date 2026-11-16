@@ -199,6 +199,14 @@ static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
     h->pending_list = true;
     h->list_skip = sess;
     hp_actsm_reloaded(&h->act); /* cancels a transition, re-keys device state, queues device_state/state_update */
+    /* A running activity is re-reported (to the sender too): a rename keeps its index, so clients
+     * that map index -> name would otherwise never learn the new name. */
+    int cur = hp_actsm_reported(&h->act);
+    if (cur >= 0) {
+        h->pending_state = true;
+        h->pending_activity = cur;
+        h->pending_power = true;
+    }
     const char *msg = NULL;
     if (h->cache_path && hp_map_save_cache(&h->map, h->cache_path) < 0) msg = "applied; cache write failed";
     cJSON *a = cJSON_CreateObject();
