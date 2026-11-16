@@ -54,6 +54,9 @@ typedef struct {
 void hub_ctx_init(hub_ctx_t *);
 /* Fills tbl->ctx and the handler/activities hooks (token etc. left to caller). */
 void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx);
+/* Sends the current state_update (id 0) to one connection; used right after a successful hello so
+ * a (re)connecting client learns the live state. No activity running -> {activity:0, power:false}. */
+void hub_send_state(hub_ctx_t *, hp_ws_conn_t *);
 /* Sends any queued state_update to all authenticated clients. */
 void hub_flush_pending(hub_ctx_t *);
 /* Drains the RF transport, applying keys and broadcasting key_event. */

@@ -88,18 +88,24 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self.config_entry.async_start_reauth(self.hass)
         elif isinstance(err, HarmonyVersionError):
             _LOGGER.error("Hub protocol version mismatch, not reconnecting: %s", err)
+            # Reload so setup surfaces the explicit ConfigEntryError (SETUP_ERROR, no retry loop).
+            self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
         self.async_update_listeners()
 
     @callback
     def _on_push(self, mtype: MsgType, data: dict[str, Any]) -> None:
         if mtype is MsgType.STATE_UPDATE:
             idx = data["activity"]
+            if not data["power"]:
+                self.current_activity = None
+                self.async_update_listeners()
+                return
             if idx >= len(self.activities):
                 _LOGGER.debug("state_update for unknown activity index %s", idx)
                 return
             name = self.activities[idx]
             self.last_activity = name
-            self.current_activity = name if data["power"] else None
+            self.current_activity = name
             self.async_update_listeners()
         elif mtype is MsgType.KEY_EVENT:
             action = KEY_ACTIONS.get(data["action"], "press")

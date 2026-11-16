@@ -16,9 +16,6 @@ from pathlib import Path
 import pytest
 import pytest_socket
 
-# Imported first so the repo's `custom_components` wins over the one bundled with the HA test plugin.
-from custom_components.ha_harmony.const import CLIENT_KWARGS
-
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "build"
 TOKEN = "test-token"
@@ -28,11 +25,6 @@ TOKEN = "test-token"
 def _loopback_sockets(socket_enabled):
     """pytest-homeassistant blocks sockets by default; these tests talk to the real hub."""
     pytest_socket.socket_allow_hosts(["127.0.0.1", "localhost"], allow_unix_socket=True)
-    yield
-
-
-@pytest.fixture(autouse=True)
-def _enable_custom_integrations(enable_custom_integrations):
     yield
 
 
@@ -258,6 +250,8 @@ ACTIVITY_CONFIG = {
 @pytest.fixture
 def fast_client(monkeypatch):
     """Short reconnect/heartbeat timings so the HA tests stay quick."""
+    from custom_components.ha_harmony.const import CLIENT_KWARGS
+
     monkeypatch.setitem(CLIENT_KWARGS, "backoff_min", 0.05)
     monkeypatch.setitem(CLIENT_KWARGS, "backoff_max", 0.2)
     monkeypatch.setitem(CLIENT_KWARGS, "heartbeat_interval", 5.0)
@@ -271,6 +265,7 @@ async def push_config(url: str, token: str = TOKEN, config: dict | None = None) 
     async with aiohttp.ClientSession() as s, s.ws_connect(url) as ws:
         await ws.send_json({"v": 1, "id": 1, "t": "hello", "d": {"token": token}})
         assert (await ws.receive_json())["t"] == "hello_ack"
+        assert (await ws.receive_json())["t"] == "state_update"
         cfg = ACTIVITY_CONFIG if config is None else config
         await ws.send_json({"v": 1, "id": 2, "t": "set_config", "d": {"config": cfg}})
         assert (await ws.receive_json())["d"]["ok"] is True

@@ -55,6 +55,17 @@ void hub_broadcast(hub_ctx_t *h, const char *type, cJSON *d) {
     }
 }
 
+void hub_send_state(hub_ctx_t *h, hp_ws_conn_t *c) {
+    int cur = hp_map_current(&h->map);
+    cJSON *d = cJSON_CreateObject();
+    if (!d) return;
+    cJSON_AddNumberToObject(d, "activity", cur < 0 ? 0 : cur);
+    cJSON_AddBoolToObject(d, "power", cur >= 0);
+    char buf[128];
+    size_t n = 0;
+    if (hp_make_reply(0, "state_update", d, buf, sizeof buf, &n) == 0) (void)hp_ws_send(c, buf, n);
+}
+
 void hub_flush_pending(hub_ctx_t *h) {
     if (!h->pending_state) return;
     h->pending_state = false;

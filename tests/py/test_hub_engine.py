@@ -46,6 +46,8 @@ async def recv(ws, timeout=5):
 async def hello(ws):
     ack = await call(ws, "hello", {"token": TOKEN})
     assert ack["t"] == "hello_ack"
+    su = await recv(ws)  # live state pushed right after hello_ack
+    assert su["t"] == "state_update" and su["id"] == 0
     return ack
 
 

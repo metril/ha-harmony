@@ -33,10 +33,12 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     }
     static char reply[REPLY_CAP];
     size_t rl = 0;
+    bool was_authed = sess->authed;
     int r = hp_dispatch(msg, len, &g_tbl, sess, reply, sizeof reply, &rl);
     if (r < 0) { hp_ws_conn_close(c, 1011); return; }
     if (rl && hp_ws_send(c, reply, rl) < 0) { hp_ws_conn_close(c, 1011); return; }
     if (sess->authed) hp_ws_conn_set_authed(c);
+    if (!was_authed && sess->authed) hub_send_state(&g_hub, c); /* live state right after hello_ack */
     if (r == HP_DISPATCH_CLOSE) hp_ws_conn_close(c, 1008);
     hub_flush_pending(&g_hub); /* after the reply, so clients see it first */
 }

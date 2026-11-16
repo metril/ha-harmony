@@ -187,6 +187,8 @@ class HarmonyHubClient:
                 await self._drop(ws)
                 self._notify_state(False, exc)
                 return
+            except Exception:  # a bug must look like a dropped link, never a silent dead task
+                _LOGGER.exception("hub connection handler failed; reconnecting")
             await self._drop(ws)
             self._notify_state(False)
             while True:
@@ -196,7 +198,7 @@ class HarmonyHubClient:
                 except (HarmonyAuthError, HarmonyVersionError) as exc:
                     self._notify_state(False, exc)
                     return
-                except HarmonyConnectionError as exc:
+                except Exception as exc:
                     _LOGGER.debug("reconnect failed: %s", exc)
                     delay = min(delay * 2, self._backoff[1])
                     continue
@@ -228,6 +230,16 @@ class HarmonyHubClient:
             await asyncio.gather(beat, return_exceptions=True)
 
     def _dispatch(self, env: Any) -> None:
+        if isinstance(env, dict) and env.get("t") == "error" and isinstance(env.get("d"), dict):
+            # Tolerate error replies missing fields: still fail the waiting request.
+            fut = self._pending.pop(env.get("id"), None) if env.get("id") else None
+            if fut is not None:
+                if not fut.done():
+                    d = env["d"]
+                    fut.set_exception(
+                        HarmonyCommandError(str(d.get("code", "error")), str(d.get("message", "")))
+                    )
+                return
         try:
             msg_id, mtype, data = decode_ws_full(env)
         except ProtoError as exc:
@@ -253,7 +265,7 @@ class HarmonyHubClient:
             await asyncio.sleep(self._hb_interval)
             try:
                 await asyncio.wait_for(self._request(MsgType.PING, {}), self._pong_timeout)
-            except (TimeoutError, HarmonyError):
+            except TimeoutError, HarmonyError:
                 _LOGGER.debug("no pong from hub; dropping connection")
                 await ws.close()
                 return

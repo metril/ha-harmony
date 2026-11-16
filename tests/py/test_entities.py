@@ -10,6 +10,10 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import async_fire_time_changed  # noqa: F401
 
+import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
+
+pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
+
 REMOTE = "remote.harmony_hub_sim_hub"
 SELECT = "select.harmony_hub_sim_hub_activity"
 EVENT = "event.harmony_hub_sim_hub_remote_1_keys"
@@ -216,3 +220,33 @@ async def test_unload_closes_client_and_tasks(hass, hub_cfg, fast_client):
     reg = er.async_get(hass)
     assert len(er.async_entries_for_config_entry(reg, entry.entry_id)) == 3
     await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_runtime_version_mismatch_reloads_into_setup_error(hass, fake_hub, fast_client):
+    async def handler(ws, env):
+        if hub.connections == 1:
+            await ws.send_json(
+                {
+                    "v": 1,
+                    "id": env["id"],
+                    "t": "hello_ack",
+                    "d": {"hub_id": HUB_ID, "activities": []},
+                }
+            )
+            await ws.send_json({"v": 2, "id": 0, "t": "state_update", "d": {}})
+        else:
+            await ws.send_json(
+                {"v": 1, "id": env["id"], "t": "error", "d": {"code": "version", "message": "v2"}}
+            )
+
+    hub = await fake_hub(handler)
+    entry = make_entry("127.0.0.1", hub.port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    client = entry.runtime_data.client
+    await _until(hass, lambda: entry.state is ConfigEntryState.SETUP_ERROR)
+    assert "incompatible protocol" in entry.reason
+    assert not client.connected and client._task is None
+    n = hub.connections
+    await asyncio.sleep(0.4)
+    assert hub.connections == n == 2  # initial + the reload's setup; no retry loop

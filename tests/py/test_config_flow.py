@@ -1,5 +1,6 @@
 """Config flow against the real sim hub and an in-test hub that speaks another protocol version."""
 
+import pytest
 from conftest import HUB_ID, TOKEN
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
@@ -8,6 +9,10 @@ from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from custom_components.ha_harmony.const import DOMAIN
 
 from conftest import make_entry  # isort: skip
+
+import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
+
+pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
 
 async def _start(hass, source=config_entries.SOURCE_USER):

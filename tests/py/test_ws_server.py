@@ -16,7 +16,20 @@ def env(t, d=None, id=1, v=1):
 
 async def hello(ws, token=TOKEN, id=1):
     await ws.send_str(env("hello", {"token": token, "client": "pytest"}, id=id))
-    return json.loads((await ws.receive(timeout=5)).data)
+    ack = json.loads((await ws.receive(timeout=5)).data)
+    if ack["t"] == "hello_ack":  # the hub pushes the live state right after the ack
+        su = json.loads((await ws.receive(timeout=5)).data)
+        assert su["t"] == "state_update"
+    return ack
+
+
+async def test_hello_pushes_live_state_right_after_ack(hub_process):
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
+        await ws.send_str(env("hello", {"token": TOKEN}, id=4))
+        ack = json.loads((await ws.receive(timeout=5)).data)
+        su = json.loads((await ws.receive(timeout=5)).data)
+        assert ack["t"] == "hello_ack" and ack["id"] == 4
+        assert su == {"v": 1, "id": 0, "t": "state_update", "d": {"activity": 0, "power": False}}
 
 
 async def test_hello_ack_and_ping(hub_process):

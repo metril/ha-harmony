@@ -1,7 +1,7 @@
 [project]
 name = "ha-harmony"
 version = "0.1.0"
-requires-python = ">=3.13"
+requires-python = ">=3.14.2"
 dependencies = ["pyyaml"]
 
 [dependency-groups]
@@ -12,7 +12,7 @@ dev = [
     "ruff",
     "pyyaml",
     "aiohttp>=3.14.5",
-    "pytest-homeassistant-custom-component>=0.13; python_full_version >= '3.14.2'",
+    "pytest-homeassistant-custom-component>=0.13",
 ]
 
 [tool.uv]
