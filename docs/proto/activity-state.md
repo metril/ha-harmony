@@ -26,6 +26,18 @@ run, so a `set_device_state` correction during a transition skips what became re
 (for SIRC: all 3 copies, `2 * period + frame`) plus `HP_ACT_GUARD_MS` (50 ms). This line-busy
 time persists across plans.
 
+**One owner of the IR line.** `hp_irout` keeps a "line free at" time that every send pushes
+(key press, hold repeat, each SIRC copy, `ir_send`, plan step; SIRC counts all 3 copies). Plan steps
+wait for it plus `HP_IROUT_GUARD_MS` (50 ms), so a plan started within ~90 ms of a SIRC press, or
+a press right after the last plan frame, never interleaves with pending copies. A **key press or
+`ir_send` arriving while the line is busy is deferred** (not dropped) and sent as soon as it is
+free; there is a single slot and **the newest wins** (an older still-deferred send is dropped,
+logged nowhere: it is a sub-150 ms double tap). A deferred press cannot become a hold (HOLD events
+come >= 400 ms later). Hold repeats are skipped while the line is busy, and `start_activity`/Off
+end any key hold. The line-free time (like `bus_free`, per-device settle and the persist
+debounce stamp) is only trusted within the span it was set with, so a hub idle for >= 2^31 ms
+(32-bit ms clock) never reads a stale stamp as a future deadline.
+
 **Interruption.** A new start/Off while a transition runs cancels its remaining steps. Frames
 already sent stay in the tracked state; the new plan is built from that state, and pending
 settle times are kept (a device powered on 20 ms ago is not sent an input yet). The activity

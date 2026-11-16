@@ -176,7 +176,7 @@ static void test_sirc_three_frames(void) {
     key(1, HP_KEY_ACTION_PRESS);
     key(1, HP_KEY_ACTION_HOLD);
     uint32_t t1 = g_now;
-    advance(t1 + 100);
+    advance(t1 + 150);
     CT_CHECK(nrec >= 6 + 1); /* 3 + 3 + at least one repeat */
     CT_EQ(recs[nrec - 1].n, 26);
     key(1, HP_KEY_ACTION_RELEASE);
@@ -209,6 +209,7 @@ static void test_rc5_toggle(void) {
     key(1, HP_KEY_ACTION_PRESS);
     CT_EQ(recs[0].h, h0);
     key(1, HP_KEY_ACTION_RELEASE);
+    advance(g_now + 300); /* let the line go quiet: a press during a frame is deferred */
     key(1, HP_KEY_ACTION_PRESS); /* new press flips */
     CT_EQ(recs[1].h, h1);
     key(1, HP_KEY_ACTION_HOLD); /* constant during the hold */
@@ -216,9 +217,11 @@ static void test_rc5_toggle(void) {
     CT_CHECK(nrec >= 4);
     for (size_t i = 2; i < nrec; i++) CT_EQ(recs[i].h, h1);
     key(1, HP_KEY_ACTION_RELEASE);
+    advance(g_now + 300); /* let the line go quiet: a press during a frame is deferred */
     key(1, HP_KEY_ACTION_PRESS); /* and flips back */
     CT_EQ(recs[nrec - 1].h, h0);
     key(1, HP_KEY_ACTION_RELEASE);
+    advance(g_now + 300); /* let the line go quiet: a press during a frame is deferred */
     /* a different address has its own toggle: first press is 0 again */
     size_t n = nrec;
     key(2, HP_KEY_ACTION_PRESS);
@@ -227,6 +230,7 @@ static void test_rc5_toggle(void) {
     CT_EQ(hp_ir_encode(&c6, 0, &t6), 0);
     CT_EQ(recs[n].h, hash_us(t6.us, t6.once_n));
     key(2, HP_KEY_ACTION_RELEASE);
+    advance(g_now + 300);
     /* RC6 at the same address is independent of RC5 */
     n = nrec;
     key(3, HP_KEY_ACTION_PRESS);
@@ -248,6 +252,7 @@ static void test_raw_default_period_and_pronto_repeat(void) {
     CT_EQ(nrec, 2);
     CT_EQ(recs[1].n, 4);
     key(1, HP_KEY_ACTION_RELEASE);
+    advance(g_now + 300); /* let the line go quiet: a press during a frame is deferred */
     size_t n = nrec;
     key(2, HP_KEY_ACTION_PRESS);
     CT_EQ(recs[n].n, 2);
@@ -268,6 +273,68 @@ static void test_non_key_sends_do_not_repeat(void) {
     CT_EQ(nrec, 1);
 }
 
+/* A press while the line is busy (SIRC copies pending) is deferred, never interleaved; the newest
+ * deferred press wins. */
+static void test_press_deferred_while_line_busy(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21},"
+              "\"2\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8},"
+              "\"3\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":9}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    uint32_t t0 = g_now;
+    advance(t0 + 10);
+    key(2, HP_KEY_ACTION_PRESS); /* mid-burst */
+    key(3, HP_KEY_ACTION_PRESS); /* replaces the deferred one */
+    advance(t0 + 60);
+    CT_EQ(nrec, 2); /* sirc copies 1,2 only */
+    advance(t0 + 2000);
+    CT_EQ(nrec, 4); /* sirc x3, then only the newest press */
+    CT_EQ(recs[0].n, 26);
+    CT_EQ(recs[1].n, 26);
+    CT_EQ(recs[2].n, 26);
+    CT_EQ(recs[3].n, 68);
+    CT_CHECK(recs[3].t - recs[2].t >= 25 + HP_IROUT_GUARD_MS - 1); /* after the last copy + guard */
+    CT_EQ(hp_sched_pending(&sched), 0);
+    CT_CHECK(hp_irout_wait_ms(&out, g_now) == 0);
+    /* an idle line sends at once */
+    size_t n = nrec;
+    key(2, HP_KEY_ACTION_PRESS);
+    CT_EQ(nrec, n + 1);
+}
+
+/* a stale line-free time (idle >= 2^31 ms) must not look busy */
+static void test_line_stale_after_idle(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21},"
+              "\"2\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    advance(g_now + 200);
+    uint32_t idles[] = {0x80000000u + 1000u, 0xFFFFFFFFu - 499u};
+    for (int i = 0; i < 2; i++) {
+        g_now += idles[i];
+        size_t n = nrec;
+        key(2, HP_KEY_ACTION_PRESS);
+        CT_EQ(nrec, n + 1);
+        advance(g_now + 200);
+    }
+}
+
+/* ir_send (KEY_SEND) defers while the line is busy; plan/format-1 sends (KEY_NONE) never do */
+static void test_send_modes(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21}"));
+    hp_ir_code_t c = {.kind = HP_IR_CODE_PROTO, .u.p = {HP_IR_NEC, 4, 8}};
+    key(1, HP_KEY_ACTION_PRESS);
+    CT_EQ(hp_irout_send(&out, &ir, &c, 0xFF, HP_IROUT_KEY_SEND), 0);
+    CT_EQ(nrec, 1); /* deferred behind the SIRC copies */
+    CT_CHECK(hp_irout_wait_ms(&out, g_now) >= 1);
+    advance(g_now + 2000);
+    CT_EQ(nrec, 4);
+    CT_EQ(recs[3].n, 68);
+    key(1, HP_KEY_ACTION_PRESS);
+    CT_EQ(hp_irout_send(&out, &ir, &c, 0xFF, HP_IROUT_KEY_NONE), 0);
+    CT_EQ(nrec, 6); /* immediate (the caller already waited on hp_irout_wait_ms) */
+    advance(g_now + 2000);
+    CT_EQ(nrec, 8); /* the remaining SIRC copies */
+}
+
 int main(void) {
     CT_RUN(test_nec_hold_repeat_and_cap);
     CT_RUN(test_periodic_hold_extends_cap);
@@ -278,6 +345,9 @@ int main(void) {
     CT_RUN(test_rc5_toggle);
     CT_RUN(test_raw_default_period_and_pronto_repeat);
     CT_RUN(test_non_key_sends_do_not_repeat);
+    CT_RUN(test_press_deferred_while_line_busy);
+    CT_RUN(test_line_stale_after_idle);
+    CT_RUN(test_send_modes);
     hp_map_free(&map);
     return CT_DONE();
 }

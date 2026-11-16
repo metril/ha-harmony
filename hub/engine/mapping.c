@@ -602,6 +602,10 @@ int hp_map_apply(const hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s) {
     return apply_action(m, a, s, -1);
 }
 
+int hp_map_apply_deferrable(const hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s) {
+    return apply_action(m, a, s, HP_IROUT_KEY_SEND);
+}
+
 size_t hp_map_activity_count(const hp_map_t *m) { return m->nacts; }
 const char *hp_map_activity_name(const hp_map_t *m, size_t i) { return i < m->nacts ? m->acts[i].name : NULL; }
 const char *hp_map_activity_id(const hp_map_t *m, size_t i) { return i < m->nacts ? m->acts[i].id : NULL; }

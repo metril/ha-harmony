@@ -263,6 +263,8 @@ static int run(hp_actsm_t *e) {
 
         uint32_t delay = 0, w;
         if (sends && e->bus_busy) delay = remaining(e->bus_free, now, e->bus_len);
+        if (act && act->type == HP_ACT_IR && e->map->out && (w = hp_irout_wait_ms(e->map->out, now)) > delay)
+            delay = w; /* a key press / ir_send / SIRC copies still own the line */
         if ((s->kind == HP_STEP_INPUT || s->kind == HP_STEP_EXTRA) &&
             (w = settle_wait(e, s->kind == HP_STEP_INPUT ? s->dev : -1, now)) > delay)
             delay = w;
@@ -339,6 +341,7 @@ int hp_actsm_start_idx(hp_actsm_t *e, int idx) {
         return rc;
     }
     cancel_plan(e);
+    hp_irout_cancel(m->out); /* a key hold must not repeat into the plan's frames */
     const hp_activity_t *a = &m->acts[idx];
     bool used[HP_MAP_MAX_DEVICES] = {false};
     for (uint8_t i = 0; i < a->ndevs; i++) used[a->devs[i].dev] = true;
@@ -373,6 +376,7 @@ int hp_actsm_off(hp_actsm_t *e) {
     for (int d = 0; d < e->ndev; d++) anyon = anyon || e->dev[d].power;
     if (prev < 0 && !anyon) return -HP_E_INVAL;
     cancel_plan(e);
+    hp_irout_cancel(m->out);
     for (int d = 0; d < e->ndev; d++) add(e, HP_STEP_PWR_OFF, d, -1, NULL);
     if (prev >= 0 && prev < m->nacts)
         for (uint8_t i = 0; i < m->acts[prev].noff; i++) add(e, HP_STEP_OFFX, 0, -1, &m->acts[prev].off[i]);

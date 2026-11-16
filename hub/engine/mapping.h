@@ -204,6 +204,9 @@ int hp_map_ir_code(const hp_map_t *, const hp_action_t *, uint32_t *raw, hp_ir_c
  * no sink call. ACTIVITY is only valid from hp_key_handle (-HP_E_INVAL here). Returns 0 or a
  * negative error; -HP_E_INVAL if a needed sink is NULL. */
 int hp_map_apply(const hp_map_t *, const hp_action_t *, const hp_sinks_t *);
+/* Same for an externally requested one-off send (the ir_send verb): if the IR line is busy the
+ * frame is deferred until it is free (see irout.h) instead of interleaving. */
+int hp_map_apply_deferrable(const hp_map_t *, const hp_action_t *, const hp_sinks_t *);
 
 size_t hp_map_activity_count(const hp_map_t *);
 const char *hp_map_activity_name(const hp_map_t *, size_t index); /* NULL if out of range */

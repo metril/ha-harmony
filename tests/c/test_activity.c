@@ -554,6 +554,70 @@ static void test_reload_mid_transition_keeps_reported(void) {
 }
 
 
+/* ------------------------------------------------- IR line interleaving */
+
+static const char *CFG3 =
+    "{\"format\":2,\"devices\":["
+    "{\"id\":\"tv\",\"power\":{\"on\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":1},\"off\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":2}}},"
+    "{\"id\":\"bd\",\"power\":{\"on\":{\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21},\"off\":{\"proto\":\"sirc12\",\"addr\":1,\"cmd\":22}}}],"
+    "\"activities\":[{\"id\":\"a\",\"devices\":[{\"device\":\"tv\"}]},{\"id\":\"b\",\"devices\":[{\"device\":\"bd\"}]}],"
+    "\"keys\":{\"5\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":2},"
+    "\"6\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":5,\"cmd\":5}}}";
+
+static void press(uint8_t k) { CT_EQ(hp_key_handle(&map, &sinks, 1, k, HP_KEY_ACTION_PRESS, NULL, NULL), 0); }
+
+/* no frame may start before its predecessor ended */
+static void check_frames_dont_overlap(void) {
+    for (size_t i = 1; i < nrec; i++)
+        if (recs[i].t - recs[i - 1].t < recs[i - 1].dur_ms) {
+            fprintf(stderr, "frames %zu and %zu overlap (%u ms apart, %u ms long)\n", i - 1, i,
+                    (unsigned)(recs[i].t - recs[i - 1].t), (unsigned)recs[i - 1].dur_ms);
+            ct_failures++;
+        }
+}
+
+/* (A) copies 2 and 3 of a SIRC press are pending when a plan starts */
+static void test_plan_waits_for_sirc_copies(void) {
+    setup_cfg(CFG3);
+    press(5);
+    uint32_t t0 = g_now;
+    advance(t0 + 10);
+    CT_EQ(hp_actsm_start(&sm, "a"), 0);
+    settle_all();
+    EXPECT(SIRC(1, 2), SIRC(1, 2), SIRC(1, 2), NEC(4, 1));
+    CT_CHECK(recs[3].t - t0 >= 90 + recs[2].dur_ms + HP_ACT_GUARD_MS);
+    check_frames_dont_overlap();
+}
+
+/* (B) finish() hands off the last step; a press inside that frame's busy time is deferred */
+static void test_press_after_finish_deferred(void) {
+    setup_cfg(CFG3);
+    CT_EQ(hp_actsm_start(&sm, "b"), 1);
+    CT_CHECK(!hp_actsm_busy(&sm)); /* the only step went out, plan finished */
+    uint32_t t0 = recs[0].t;
+    advance(g_now + 10);
+    press(6);
+    settle_all();
+    EXPECT(SIRC(1, 21), SIRC(1, 21), SIRC(1, 21), NEC(5, 5));
+    CT_CHECK(recs[3].t - t0 >= 90 + recs[2].dur_ms + HP_ACT_GUARD_MS - 1);
+    check_frames_dont_overlap();
+}
+
+/* a hold repeat racing a plan start (HA-issued, so no key press cancels the hold) */
+static void test_hold_repeat_vs_plan_start(void) {
+    setup_cfg(CFG3);
+    press(6);
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 6, HP_KEY_ACTION_HOLD, NULL, NULL), 0);
+    advance(g_now + 105); /* first repeat due at +110 */
+    CT_EQ(hp_actsm_start(&sm, "a"), 0);
+    advance(g_now + 600);
+    check_frames_dont_overlap();
+    size_t n = nrec;
+    advance(g_now + 1500);
+    CT_EQ(nrec, n); /* the hold ended with the new plan: no repeats keep firing */
+    CT_EQ(recs[nrec - 1].h, NEC(4, 1));
+}
+
 int main(void) {
     CT_RUN(test_start_from_off);
     CT_RUN(test_a_to_b_shared_devices);
@@ -574,6 +638,9 @@ int main(void) {
     CT_RUN(test_state_debounce);
     CT_RUN(test_idle_clock_wrap);
     CT_RUN(test_reload_mid_transition_keeps_reported);
+    CT_RUN(test_plan_waits_for_sirc_copies);
+    CT_RUN(test_press_after_finish_deferred);
+    CT_RUN(test_hold_repeat_vs_plan_start);
     hp_map_free(&map);
     return CT_DONE();
 }

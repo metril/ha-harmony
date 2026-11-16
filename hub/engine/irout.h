@@ -15,8 +15,13 @@
  *    HP_IROUT_HOLD_CAP_MS safety cap, so a real long hold keeps repeating and a lost RELEASE stops
  *    the repeats within the cap of the last HOLD. The first repeat is one period after the first
  *    HOLD. Repeat ticks are skipped while SIRC copies are still pending.
+ * Line ownership: hp_irout owns a "line free at" time (frame + SIRC copies + HP_IROUT_GUARD_MS) pushed
+ * by every send. A send arriving while the line is busy is deferred until it frees (single slot,
+ * newest wins, the older one is dropped), never interleaved with pending copies; plan steps wait
+ * (hp_irout_wait_ms). Hold repeats are skipped while the line is busy.
  * One hold at a time: a new send or another key's press ends the previous hold. */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "hub/engine/sched.h"
@@ -26,6 +31,9 @@
 #define HP_IROUT_DEFAULT_PERIOD_MS 110
 #define HP_IROUT_HOLD_CAP_MS 2000
 #define HP_IROUT_HOLD_INTERVAL_MS 400 /* remote -> hub HOLD event period while a key is held */
+#define HP_IROUT_GUARD_MS 50 /* quiet time after a frame before the next one may start */
+#define HP_IROUT_KEY_NONE (-1) /* hp_irout_send key: send now (plan/activity steps, which wait on the line) */
+#define HP_IROUT_KEY_SEND (-2) /* ... an ir_send: deferred while the line is busy, no hold candidate */
 #define HP_IROUT_BURSTS 4
 #define HP_IROUT_TOGGLES 8
 
@@ -58,11 +66,28 @@ struct hp_irout {
     hp_sched_handle tick_h, cap_h;
     hp_ir_signal_t rep;
     uint32_t busy_ms; /* how long the latest hp_irout_send occupies the IR line, SIRC copies included */
+    /* Line-free time: every frame (press, hold repeat, SIRC copies, ir_send, plan step) pushes it.
+     * Trusted only while it lies at most line_len ahead of now, so a stale value from a long idle
+     * never looks like the future (32-bit ms clock). */
+    uint32_t line_free, line_len;
+    /* A press/ir_send that arrived while the line was busy: sent when it frees. One slot, the
+     * newest wins. */
+    bool pend;
+    uint8_t pend_port;
+    int pend_key;
+    bool pend_sirc;
+    hp_ir_sink *pend_ir;
+    hp_sched_handle pend_h;
+    hp_ir_signal_t pend_sig;
 };
 
+/* Ms until the IR line is free for a new frame (0 = free now; >= 1 while a deferred send is
+ * still queued). Plan steps wait this long instead of interleaving. */
+uint32_t hp_irout_wait_ms(const hp_irout_t *, uint32_t now);
 void hp_irout_init(hp_irout_t *, hp_sched_t *);
 /* Encodes (flipping the toggle for RC5/RC6) and sends `code` on `port_mask`, ends any hold, and
- * schedules the extra SIRC copies. key >= 0 makes it the hold candidate. Returns the encoder's or
+ * schedules the extra SIRC copies. key >= 0 (a key press) makes it the hold candidate and, like
+ * HP_IROUT_KEY_SEND, defers the send while the line is busy; HP_IROUT_KEY_NONE (-1) sends at once. Returns the encoder's or
  * sink's negative error; a failed first send schedules nothing. */
 int hp_irout_send(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key);
 /* Starts repeating the last frame sent for `key`; if `key` is already repeating this only extends

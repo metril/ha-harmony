@@ -217,7 +217,7 @@ static int cmd_ir_send(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply
     int r;
     if (rc < 0) {
         r = reply_ok(id, "command_result", false, sc->err[0] ? sc->err : "invalid IR action", reply, cap, len);
-    } else if ((rc = hp_map_apply(sc, &a, &h->sinks)) < 0) {
+    } else if ((rc = hp_map_apply_deferrable(sc, &a, &h->sinks)) < 0) {
         r = reply_ok(id, "command_result", false, h->sinks.ir ? "IR send failed" : "no IR output", reply, cap, len);
     } else {
         r = reply_ok(id, "command_result", true, NULL, reply, cap, len);
