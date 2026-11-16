@@ -100,10 +100,23 @@ static void test_broadcast_without_server_frees(void) {
     hub_broadcast(&h, "state_update", cJSON_CreateObject());
 }
 
+/* Device pushes follow the order the changes happened in, not the device index: two steps that
+ * run in one poll pass must not be re-sorted. */
+static void test_device_push_order(void) {
+    hub_ctx_t h;
+    hub_ctx_init(&h);
+    h.act.notify(h.act.notify_ctx, HP_ACTSM_EVT_DEVICE, 1);
+    h.act.notify(h.act.notify_ctx, HP_ACTSM_EVT_DEVICE, 0);
+    CT_CHECK(h.npending_dev == 2 && h.pending_dev[0] == 1 && h.pending_dev[1] == 0);
+    h.act.notify(h.act.notify_ctx, HP_ACTSM_EVT_DEVICE, 1); /* changed again: now the latest */
+    CT_CHECK(h.npending_dev == 2 && h.pending_dev[0] == 0 && h.pending_dev[1] == 1);
+}
+
 int main(void) {
     CT_RUN(test_errors);
     CT_RUN(test_auth);
     CT_RUN(test_handler);
     CT_RUN(test_broadcast_without_server_frees);
+    CT_RUN(test_device_push_order);
     return CT_DONE();
 }
