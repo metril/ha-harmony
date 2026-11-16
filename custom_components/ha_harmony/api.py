@@ -198,8 +198,12 @@ class HarmonyHubClient:
                 except (HarmonyAuthError, HarmonyVersionError) as exc:
                     self._notify_state(False, exc)
                     return
-                except Exception as exc:
+                except HarmonyConnectionError as exc:
                     _LOGGER.debug("reconnect failed: %s", exc)
+                    delay = min(delay * 2, self._backoff[1])
+                    continue
+                except Exception:
+                    _LOGGER.exception("unexpected error while reconnecting")
                     delay = min(delay * 2, self._backoff[1])
                     continue
                 self._ws = ws
