@@ -81,6 +81,7 @@ pages:
   wrong way.
 - **Keys** use the symbolic names in `KEY_CODES` (`custom_components/ha_harmony/const.py`, provisional) or
   `key_<0..127>`. Event entities report that name; page widgets report `tap_<widget id>`.
+  The `remote_sim` test tool's `--press`/`--hold` take the numeric key **code** (a value from `KEY_CODES`), not the name.
 - **Page widgets**: `button` (needs `action`), `tile` (shows the state of `entity`, updated on change),
   `label`. Grid up to 16x16, 32 widgets per page, 128 widgets over all pages, labels up to 24 bytes.
   A page's id on the remote is its position in `pages`.
