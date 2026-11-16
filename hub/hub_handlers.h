@@ -80,7 +80,8 @@ typedef struct {
     hp_irout_t irout;
     hp_actsm_t act;         /* activity state machine (docs/proto/activity-state.md) */
     bool rf_attached;       /* last seen RF link state: announce remote_attached on a new attach */
-    uint32_t pending_dev;   /* bit n: device n's device_state is to be broadcast */
+    uint8_t pending_dev[HP_MAP_MAX_DEVICES]; /* devices whose device_state is to be broadcast, in change order */
+    uint8_t npending_dev;
 } hub_ctx_t;
 
 /* Initialises the context with a CLOCK_MONOTONIC millisecond clock for the timers. */

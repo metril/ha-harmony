@@ -19,7 +19,12 @@ static uint32_t mono_ms(void *ctx) {
 static void hub_notify(void *vctx, hp_actsm_evt_t evt, int idx) {
     hub_ctx_t *h = vctx;
     if (evt == HP_ACTSM_EVT_DEVICE) {
-        h->pending_dev |= 1u << idx;
+        /* queue in the order the changes happened (a later change of the same device moves it last) */
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < h->npending_dev; i++)
+            if (h->pending_dev[i] != idx) h->pending_dev[n++] = h->pending_dev[i];
+        h->pending_dev[n++] = (uint8_t)idx;
+        h->npending_dev = n;
     } else {
         h->pending_state = true;
         h->pending_activity = idx < 0 ? 0 : idx;
@@ -148,11 +153,12 @@ void hub_flush_pending(hub_ctx_t *h) {
         }
         h->list_skip = NULL;
     }
-    if (h->pending_dev) {
-        uint32_t mask = h->pending_dev;
-        h->pending_dev = 0;
-        for (size_t i = 0; i < HP_MAP_MAX_DEVICES; i++)
-            if ((mask & (1u << i)) && hp_actsm_device(&h->act, i)) hub_broadcast(h, "device_state", device_json(h, i));
+    if (h->npending_dev) {
+        uint8_t q[HP_MAP_MAX_DEVICES], n = h->npending_dev;
+        memcpy(q, h->pending_dev, n);
+        h->npending_dev = 0;
+        for (uint8_t i = 0; i < n; i++)
+            if (hp_actsm_device(&h->act, q[i])) hub_broadcast(h, "device_state", device_json(h, q[i]));
     }
     if (!h->pending_state) return;
     h->pending_state = false;
