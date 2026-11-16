@@ -21,6 +21,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import EventStateChangedData, async_track_state_change_event
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from . import const
@@ -99,6 +100,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.available = True
         self.compiled: Compiled = _empty_compiled()
         self.managed = False  # a YAML file exists for this hub
+        # last good model, so a startup with a broken YAML still has a config to run
+        self._store: Store[dict[str, Any]] = Store(hass, 1, f"{DOMAIN}.config.{self.hub_id}")
+        self._saved_model: dict[str, Any] | None = None
+        self._loaded_once = False
         self.last_error: str | None = None
         self.config_pushes = 0  # set_config requests sent (observable by tests)
         self.tile_updates = 0
@@ -195,17 +200,25 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             model = await self.hass.async_add_executor_job(load_file, path)
             compiled = compile_config(model) if model is not None else _empty_compiled()
         except ConfigError as exc:
-            return self._load_failed(str(exc))
+            return await self._load_failed(str(exc))
         except CompileError as exc:
-            return self._load_failed(f"{path}: {exc}")
+            return await self._load_failed(f"{path}: {exc}")
         self._clear_issue(ISSUE_INVALID)
         self.last_error = None
+        self._loaded_once = True
         self.managed = model is not None
+        if model is not None and model != self._saved_model:
+            self._saved_model = model
+            await self._store.async_save({"model": model})
         if not self.managed:
             _LOGGER.info(
                 "No config file at %s: using an empty config, the hub's own config is untouched",
                 path,
             )
+        self._apply_compiled(compiled)
+        return True
+
+    def _apply_compiled(self, compiled: Compiled) -> None:
         changed = compiled != self.compiled
         self.compiled = compiled
         if changed:
@@ -214,13 +227,29 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             for cb in list(self._config_listeners):
                 cb()
             self.async_update_listeners()
-        return True
 
-    def _load_failed(self, message: str) -> bool:
+    async def _load_failed(self, message: str) -> bool:
         _LOGGER.error("Invalid ha_harmony config, keeping the previous one: %s", message)
         self.last_error = message
         self._set_issue(ISSUE_INVALID, message)
+        if not self._loaded_once:  # nothing to keep yet (startup): use the last good config
+            await self._restore_last_good()
         return False
+
+    async def _restore_last_good(self) -> None:
+        try:
+            data = await self._store.async_load()
+            if not data:
+                return
+            compiled = compile_config(data["model"])
+        except (CompileError, KeyError, TypeError, ValueError, OSError) as exc:
+            _LOGGER.warning("The saved last-good config is unusable: %s", exc)
+            return
+        _LOGGER.warning("Using the last good config until the YAML is fixed")
+        self._loaded_once = True
+        self._saved_model = data["model"]
+        self.managed = True
+        self._apply_compiled(compiled)
 
     async def async_reload_config(self) -> None:
         """Service entry point: re-read the YAML, push what changed; raises on a bad config."""
