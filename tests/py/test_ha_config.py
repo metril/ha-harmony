@@ -539,6 +539,24 @@ async def test_reload_service_rejects_bad_yaml_and_keeps_previous(hass, hub_rf, 
 
 
 # ------------------------------------------------------------------ failure modes
+async def test_invalid_yaml_at_startup_falls_back_to_last_good_config(hass, hub_rf, write_yaml):
+    path = write_yaml(BASE)
+    entry = await setup(hass, hub_rf)
+    assert uids(hass, entry) == BASE_UIDS
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    path.write_text("devices: [oops", encoding="utf-8")  # HA restarts with a broken file
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    assert coord.managed and coord.last_error and "sim-hub.yaml" in coord.last_error
+    assert ir.async_get(hass).async_get_issue(const.DOMAIN, f"config_invalid_{HUB_ID}")  # kept
+    assert uids(hass, entry) == BASE_UIDS and coord.config_pushes == 0  # hub keeps its config
+    assert hass.states.get(SELECT).attributes["options"] == ["Télé", "Music", "Off"]
+    assert hass.states.get("button.tv_vol_up").state != "unavailable"
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_missing_yaml_loads_with_empty_config(hass, hub_rf, write_yaml, caplog):
     caplog.set_level(logging.INFO)
     await push_config(hub_rf.url)
