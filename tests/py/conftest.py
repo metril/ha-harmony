@@ -69,8 +69,19 @@ def built_binaries() -> Path:
 
 
 class HubProcess:
-    def __init__(self, proc: subprocess.Popen, port: int, token: str, rf: str | None = None):
+    def __init__(
+        self,
+        proc: subprocess.Popen,
+        port: int,
+        token: str,
+        rf: str | None = None,
+        out_path: Path | None = None,
+        err_path: Path | None = None,
+    ):
         self.proc = proc
+        self.out_path = out_path  # stdout/stderr go to files so the pipes never fill
+        self.err_path = err_path
+        self.out_pos = 0  # read cursor into out_path (after the port line)
         self.port = port
         self.token = token
         self.rf = rf  # RF socket path when started with --rf
@@ -89,22 +100,18 @@ class HubProcess:
         self.proc.wait(timeout=5)
 
 
-def _read_port(proc: subprocess.Popen, timeout: float = 10.0) -> int:
+def _read_port(proc: subprocess.Popen, out_path: Path, timeout: float = 10.0) -> int:
+    """Poll the hub's stdout file for the port line (the file keeps draining the pipe)."""
     deadline = time.monotonic() + timeout
-    assert proc.stdout is not None
-    fd = proc.stdout.fileno()
     buf = b""
     while time.monotonic() < deadline:
-        if select.select([fd], [], [], 0.1)[0]:
-            chunk = os.read(fd, 256)
-            if not chunk:
-                break
-            buf += chunk
-            m = re.search(rb"listening port=(\d+)\n", buf)
-            if m:
-                return int(m.group(1))
-        elif proc.poll() is not None:
+        buf = out_path.read_bytes()
+        m = re.search(rb"listening port=(\d+)\n", buf)
+        if m:
+            return int(m.group(1))
+        if proc.poll() is not None:
             break
+        time.sleep(0.01)
     proc.kill()
     raise AssertionError(f"hub did not report a listening port; output={buf!r}")
 
@@ -112,21 +119,26 @@ def _read_port(proc: subprocess.Popen, timeout: float = 10.0) -> int:
 @pytest.fixture
 def start_hub(built_binaries, tmp_path):
     """Factory: start_hub(*extra_args, token=TOKEN, port=0) -> HubProcess."""
-    procs: list[subprocess.Popen] = []
+    procs: list[tuple[subprocess.Popen, Path]] = []
 
     def _start(*extra: str, token: str = TOKEN, port: int = 0) -> HubProcess:
         rf = extra[extra.index("--rf") + 1] if "--rf" in extra else None
-        proc = subprocess.Popen(
-            [str(built_binaries / "hub"), "--sim", "--port", str(port), "--token", token, *extra],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=tmp_path,
-        )
-        procs.append(proc)
-        return HubProcess(proc, _read_port(proc), token, rf)
+        n = len(procs)
+        out_path, err_path = tmp_path / f"hub{n}.out", tmp_path / f"hub{n}.err"
+        with open(out_path, "wb") as out, open(err_path, "wb") as err:
+            proc = subprocess.Popen(
+                [str(built_binaries / "hub"), "--sim", "--port", str(port), "--token", token, *extra],
+                stdout=out,
+                stderr=err,
+                cwd=tmp_path,
+            )
+        procs.append((proc, err_path))
+        hub = HubProcess(proc, _read_port(proc, out_path), token, rf, out_path, err_path)
+        hub.out_pos = out_path.read_bytes().index(b"\n") + 1  # skip the port line
+        return hub
 
     yield _start
-    for proc in procs:
+    for proc, err_path in procs:
         if proc.poll() is None:
             proc.send_signal(signal.SIGTERM)
         try:
@@ -134,7 +146,7 @@ def start_hub(built_binaries, tmp_path):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-        err = proc.stderr.read().decode() if proc.stderr else ""
+        err = err_path.read_text(errors="replace")
         assert "Sanitizer" not in err, err
 
 

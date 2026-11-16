@@ -28,15 +28,22 @@ class HarmonyActivitySelect(HarmonyEntity, SelectEntity):
         super().__init__(coordinator, "activity")
 
     @property
+    def _off_label(self) -> str:
+        """The power-off option; relabelled when an activity is itself named "Off"."""
+        if OFF_OPTION in self.coordinator.activities:
+            return f"{OFF_OPTION} (power off)"
+        return OFF_OPTION
+
+    @property
     def options(self) -> list[str]:
-        return [*self.coordinator.activities, OFF_OPTION]
+        return [*self.coordinator.activities, self._off_label]
 
     @property
     def current_option(self) -> str | None:
-        return self.coordinator.current_activity or OFF_OPTION
+        return self.coordinator.current_activity or self._off_label
 
     async def async_select_option(self, option: str) -> None:
-        if option == OFF_OPTION:
+        if option == self._off_label:
             await self.coordinator.async_power_off()
         else:
             await self.coordinator.async_start_activity(option)

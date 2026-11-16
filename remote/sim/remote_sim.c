@@ -27,6 +27,7 @@
 #include "hub/hp_errors.h"
 #include "hub/io/rf_pair.h"
 #include "hub/net/ws.h"
+#include "hub/parse_num.h"
 #include "hub/rf/framing.h"
 #include "hub/rf/rf_payload.h"
 
@@ -36,14 +37,6 @@ static int usage(void) {
     fprintf(stderr, "usage: remote_sim --rf PATH (--press KEY | --dump-page) [--remote ID] "
                     "[--action 0|1|2] [--timeout-ms N]\n");
     return 2;
-}
-
-static int parse_num(const char *s, long lo, long hi, long *out) {
-    char *end;
-    long v = strtol(s, &end, 10);
-    if (!*s || *end || v < lo || v > hi) return -1;
-    *out = v;
-    return 0;
 }
 
 static long now_ms(void) {
@@ -107,10 +100,10 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         int more = i + 1 < argc;
         if (!strcmp(argv[i], "--rf") && more) path = argv[++i];
-        else if (!strcmp(argv[i], "--press") && more) { if (parse_num(argv[++i], 0, 255, &key)) return usage(); }
-        else if (!strcmp(argv[i], "--remote") && more) { if (parse_num(argv[++i], 0, 255, &remote)) return usage(); }
-        else if (!strcmp(argv[i], "--action") && more) { if (parse_num(argv[++i], 0, 2, &action)) return usage(); }
-        else if (!strcmp(argv[i], "--timeout-ms") && more) { if (parse_num(argv[++i], 1, 3600000, &timeout_ms)) return usage(); }
+        else if (!strcmp(argv[i], "--press") && more) { if (hp_parse_num(argv[++i], 0, 255, &key)) return usage(); }
+        else if (!strcmp(argv[i], "--remote") && more) { if (hp_parse_num(argv[++i], 0, 255, &remote)) return usage(); }
+        else if (!strcmp(argv[i], "--action") && more) { if (hp_parse_num(argv[++i], 0, 2, &action)) return usage(); }
+        else if (!strcmp(argv[i], "--timeout-ms") && more) { if (hp_parse_num(argv[++i], 1, 3600000, &timeout_ms)) return usage(); }
         else if (!strcmp(argv[i], "--dump-page")) dump = 1;
         else return usage();
     }

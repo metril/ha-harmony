@@ -6,6 +6,7 @@ import struct
 import subprocess
 
 import aiohttp
+import pytest
 
 TOKEN = "test-token"  # matches conftest default
 
@@ -156,3 +157,21 @@ def test_no_hardware_backend_exits_nonzero(built_binaries):
         [str(built_binaries / "hub")], check=False, capture_output=True, text=True, timeout=5
     )
     assert res.returncode != 0 and "no hardware backend built" in res.stderr
+
+
+@pytest.mark.parametrize(
+    ("flag", "val"),
+    [
+        ("--port", "abc"),
+        ("--port", "70000"),
+        ("--port", "-1"),
+        ("--port", "80x"),
+        ("--auth-timeout-ms", "abc"),
+        ("--idle-timeout-ms", "0"),
+        ("--idle-timeout-ms", "9999999999"),
+    ],
+)
+def test_bad_numeric_flag_exits_2(built_binaries, flag, val):
+    args = [str(built_binaries / "hub"), "--sim", "--token", "t", flag, val]
+    res = subprocess.run(args, check=False, capture_output=True, text=True, timeout=5)
+    assert res.returncode == 2 and flag in res.stderr and val in res.stderr

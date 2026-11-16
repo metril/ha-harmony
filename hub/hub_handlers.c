@@ -52,6 +52,8 @@ void hub_broadcast(hub_ctx_t *h, const char *type, cJSON *d) {
     if (h->srv && hp_make_reply(0, type, d, buf, sizeof buf, &n) == 0) {
         bcast_t b = {buf, n};
         hp_ws_foreach(h->srv, bcast_one, &b);
+    } else if (!h->srv) {
+        cJSON_Delete(d); /* hp_make_reply not reached: we still own d */
     }
 }
 

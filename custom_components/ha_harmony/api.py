@@ -236,7 +236,9 @@ class HarmonyHubClient:
     def _dispatch(self, env: Any) -> None:
         if isinstance(env, dict) and env.get("t") == "error" and isinstance(env.get("d"), dict):
             # Tolerate error replies missing fields: still fail the waiting request.
-            fut = self._pending.pop(env.get("id"), None) if env.get("id") else None
+            rid = env.get("id")
+            valid = isinstance(rid, int) and not isinstance(rid, bool) and rid
+            fut = self._pending.pop(rid, None) if valid else None
             if fut is not None:
                 if not fut.done():
                     d = env["d"]

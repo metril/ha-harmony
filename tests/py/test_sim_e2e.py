@@ -7,6 +7,7 @@ from conftest import rf_attach
 from test_hub_engine import CONFIG, call, hello, read_lines, recv
 
 from proto import rf_codec
+from proto.gen.harmony_proto import MsgType, decode_ws_full
 
 KEY_EVENT, STATE_UPDATE, PAGE_PUSH, BATTERY = 10, 11, 12, 13
 
@@ -166,3 +167,5 @@ async def test_state_update_forwarded_and_battery_relayed(hub_rf):
             sock.send(fr)
         b = await recv(ws)
         assert b["t"] == "battery" and b["d"] == {"remote": 1, "percent": 77, "millivolts": 3800}
+        # the generated decoder (what HA uses) must accept the hub's battery push
+        assert decode_ws_full(b) == (0, MsgType.BATTERY, b["d"])

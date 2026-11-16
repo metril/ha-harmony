@@ -85,7 +85,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"key_event", HP_MSG_KEY_EVENT, HP_TRANSPORT_BOTH, 3, hp_fields_key_event},
     {"state_update", HP_MSG_STATE_UPDATE, HP_TRANSPORT_BOTH, 2, hp_fields_state_update},
     {"page_push", HP_MSG_PAGE_PUSH, HP_TRANSPORT_BOTH, 3, hp_fields_page_push},
-    {"battery", HP_MSG_BATTERY, HP_TRANSPORT_RF, 3, hp_fields_battery},
+    {"battery", HP_MSG_BATTERY, HP_TRANSPORT_BOTH, 3, hp_fields_battery},
 };
 
 const hp_msg_desc_t *hp_msg_desc(hp_msg_type_t type)

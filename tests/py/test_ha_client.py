@@ -195,3 +195,31 @@ async def test_error_reply_without_message_fails_request_not_supervisor(fake_hub
     finally:
         await c.async_close()
         await session.close()
+
+
+async def test_battery_push_reaches_subscribers(fake_hub):
+    async def handler(ws, env):
+        if env["t"] == "hello":
+            await ws.send_json(_ack(env))
+            body = {"remote": 1, "percent": 77, "millivolts": 3800}
+            await ws.send_json({"v": 1, "id": 0, "t": "battery", "d": body})
+
+    hub = await fake_hub(handler)
+    c, session = await _client(hub)
+    got = []
+    c.async_subscribe(lambda t, d: got.append((t, d)))
+    await c.async_connect()
+    try:
+        async with asyncio.timeout(5):
+            while not got:
+                await asyncio.sleep(0.02)
+        assert got == [(MsgType.BATTERY, {"remote": 1, "percent": 77, "millivolts": 3800})]
+    finally:
+        await c.async_close()
+        await session.close()
+
+
+async def test_error_envelope_with_unhashable_id_is_ignored():
+    c = HarmonyHubClient("127.0.0.1", 1, TOKEN, None)
+    c._dispatch({"v": 1, "id": [1], "t": "error", "d": {"code": "x", "message": "y"}})
+    c._dispatch({"v": 1, "id": True, "t": "error", "d": {"code": "x", "message": "y"}})

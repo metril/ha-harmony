@@ -255,3 +255,28 @@ async def test_runtime_version_mismatch_reloads_into_setup_error(hass, fake_hub,
     n = hub.connections
     await asyncio.sleep(0.4)
     assert hub.connections == n == 2  # initial + the reload's setup; no retry loop
+
+
+async def test_activity_named_off_is_selectable(hass, hub_rf, fast_client):
+    cfg = {
+        "keys": {},
+        "activities": [
+            {"name": "Off", "steps": [{"type": "none"}], "off": [{"type": "none"}]},
+            {"name": "TV", "steps": [{"type": "none"}], "off": [{"type": "none"}]},
+        ],
+    }
+    await push_config(hub_rf.url, config=cfg)
+    entry = await _setup(hass, hub_rf)
+    opts = hass.states.get(SELECT).attributes["options"]
+    assert len(opts) == len(set(opts)) == 3 and opts[:2] == ["Off", "TV"]
+    off_label = opts[2]
+    await hass.services.async_call(
+        "select", "select_option", {"entity_id": SELECT, "option": "Off"}, blocking=True
+    )
+    await _until(hass, lambda: _state(hass, REMOTE) == STATE_ON)  # started, not powered off
+    assert hass.states.get(REMOTE).attributes["current_activity"] == "Off"
+    await hass.services.async_call(
+        "select", "select_option", {"entity_id": SELECT, "option": off_label}, blocking=True
+    )
+    await _until(hass, lambda: _state(hass, REMOTE) == STATE_OFF)
+    await hass.config_entries.async_unload(entry.entry_id)

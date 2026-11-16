@@ -11,6 +11,7 @@
 #include "hub/hub_handlers.h"
 #include "hub/io/rf_pair.h"
 #include "hub/io/sim_sinks.h"
+#include "hub/parse_num.h"
 #include "hub/net/jsonrpc.h"
 #include "hub/net/ws.h"
 
@@ -50,6 +51,11 @@ static void on_close(hp_ws_conn_t *c, void *user) {
     free(hp_ws_conn_user(c));
 }
 
+static int bad_num(const char *flag, const char *val) {
+    fprintf(stderr, "hub: invalid value for %s: '%s'\n", flag, val);
+    return 2;
+}
+
 int main(int argc, char **argv) {
     bool sim = false;
     long port = 8099;
@@ -59,12 +65,12 @@ int main(int argc, char **argv) {
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--sim")) sim = true;
-        else if (!strcmp(argv[i], "--port") && i + 1 < argc) port = strtol(argv[++i], NULL, 10);
+        else if (!strcmp(argv[i], "--port") && i + 1 < argc) { if (hp_parse_num(argv[++i], 0, 65535, &port)) return bad_num("--port", argv[i]); }
         else if (!strcmp(argv[i], "--token") && i + 1 < argc) token = argv[++i];
         else if (!strcmp(argv[i], "--cache") && i + 1 < argc) cache = argv[++i];
         else if (!strcmp(argv[i], "--rf") && i + 1 < argc) rf_path = argv[++i];
-        else if (!strcmp(argv[i], "--auth-timeout-ms") && i + 1 < argc) auth_ms = strtol(argv[++i], NULL, 10);
-        else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) idle_ms = strtol(argv[++i], NULL, 10);
+        else if (!strcmp(argv[i], "--auth-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &auth_ms)) return bad_num("--auth-timeout-ms", argv[i]); }
+        else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
             fprintf(stderr, "usage: hub --sim [--port N] --token T [--cache PATH] [--rf PATH] "
                             "[--auth-timeout-ms N] [--idle-timeout-ms N]\n");

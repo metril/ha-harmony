@@ -1,5 +1,6 @@
 #include "ctest_assert.h"
 #include "hub/hp_errors.h"
+#include "hub/hub_handlers.h"
 #include "hub/net/jsonrpc.h"
 
 static hp_handler_tbl_t tbl = {.token = "secret", .hub_id = "hub-1", .fw_version = "9"};
@@ -23,8 +24,6 @@ static void test_errors(void) {
     hp_session_t s = {.authed = true};
     CT_EQ(run(&s, "{\"v\":1,\"id\":5,\"t\":\"nope\",\"d\":{}}"), HP_DISPATCH_OK);
     CT_CHECK(has("\"unknown_type\"") && has("\"id\":5") && has("\"t\":\"error\""));
-    run(&s, "{\"v\":1,\"id\":6,\"t\":\"battery\",\"d\":{}}"); /* rf-only */
-    CT_CHECK(has("\"unknown_type\""));
     run(&s, "{\"v\":2,\"id\":7,\"t\":\"ping\",\"d\":{}}");
     CT_CHECK(has("\"version\"") && has("\"id\":7"));
     run(&s, "{\"v\":4294967295,\"id\":4294967295,\"t\":\"ping\",\"d\":{}}");
@@ -95,9 +94,16 @@ static void test_handler(void) {
     tbl.handler[HP_MSG_COMMAND] = NULL;
 }
 
+static void test_broadcast_without_server_frees(void) {
+    hub_ctx_t h;
+    memset(&h, 0, sizeof h); /* srv == NULL: LSan flags a leaked d */
+    hub_broadcast(&h, "state_update", cJSON_CreateObject());
+}
+
 int main(void) {
     CT_RUN(test_errors);
     CT_RUN(test_auth);
     CT_RUN(test_handler);
+    CT_RUN(test_broadcast_without_server_frees);
     return CT_DONE();
 }

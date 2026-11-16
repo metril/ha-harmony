@@ -86,7 +86,7 @@ messages:
 
   - name: battery
     code: 13
-    transport: rf
+    transport: both
     fields:
       - {name: remote, type: u8}
       - {name: percent, type: u8}

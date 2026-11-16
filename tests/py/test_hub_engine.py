@@ -3,7 +3,6 @@
 import asyncio
 import json
 import os
-import select
 import signal
 import time
 from pathlib import Path
@@ -52,18 +51,15 @@ async def hello(ws):
 
 
 def read_lines(hub, n, timeout=5.0):
-    """Reads n stdout lines (sink mirror) from the hub process."""
-    fd = hub.proc.stdout.fileno()
-    buf = getattr(hub, "_buf", b"")
+    """Reads n stdout lines (sink mirror) from the hub's stdout file."""
     deadline = time.monotonic() + timeout
-    while buf.count(b"\n") < n and time.monotonic() < deadline:
-        if select.select([fd], [], [], 0.1)[0]:
-            chunk = os.read(fd, 4096)
-            if not chunk:
-                break
-            buf += chunk
-    lines = buf.split(b"\n")
-    hub._buf = b"\n".join(lines[n:])
+    while True:
+        data = hub.out_path.read_bytes()[hub.out_pos :]
+        if data.count(b"\n") >= n or time.monotonic() >= deadline:
+            break
+        time.sleep(0.02)
+    lines = data.split(b"\n")
+    hub.out_pos += sum(len(ln) + 1 for ln in lines[:n])
     return [ln.decode() for ln in lines[:n]]
 
 
