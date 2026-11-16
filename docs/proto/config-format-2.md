@@ -60,3 +60,5 @@ Raw: even, non-zero count of durations, each 1..65535 us; `hz` 1000..1000000.
   `steps`/`off`); activity `name` defaults to `id`, `"off"` is not a valid id; `power` is either `toggle`
   or both `on` and `off`; for toggle devices `power_on`/`power_off` both resolve to the toggle code.
   Every IR action is encoded at load time, so an out-of-range code fails `set_config`.
+- Activity execution (device power/input tracking, transitions, `device_state`, `set_device_state`,
+  the `--state` file and key HOLD timing) is specified in `docs/proto/activity-state.md`.

@@ -59,9 +59,25 @@ def pending_lines(hub):
     return hub.out_path.read_bytes()[hub.out_pos :].count(b"\n")
 
 
-async def cfg(ws, config=CONFIG2, id=2):
+async def cfg(ws, config=CONFIG2, id=2, new_devices=None):
+    """set_config, then swallow the device_state pushes for devices that are new to the hub."""
     r = await call(ws, "set_config", {"config": config}, id=id)
     assert r["t"] == "config_ack" and r["d"] == {"ok": True}, r
+    await drain_devices(ws, len(config.get("devices", [])) if new_devices is None else new_devices)
+
+
+async def drain_devices(ws, n):
+    for _ in range(n):
+        assert (await recv(ws))["t"] == "device_state"
+
+
+async def until(ws, t="state_update", timeout=5):
+    """Messages up to and including the first of type t."""
+    msgs = []
+    while True:
+        msgs.append(await recv(ws, timeout))
+        if msgs[-1]["t"] == t:
+            return msgs
 
 
 async def ir_send(ws, args, id=9):
@@ -125,15 +141,26 @@ async def test_format2_activity_and_device_commands(hub_process):
             id=3,
         )
         assert r["d"]["ok"] is True
-        assert (await recv(ws))["d"] == {"activity": 0, "power": True}
-        assert read_lines(hub_process, 1) == [BLIP]
+        msgs = await until(
+            ws
+        )  # the transition runs after the reply: tv on, tv input, then the step
+        assert msgs[-1]["d"] == {"activity": 0, "power": True}
+        assert [m["d"] for m in msgs[:-1]] == [
+            {"device": "tv", "power": True},
+            {"device": "tv", "power": True, "input": "hdmi1"},
+        ]
+        on, inp, blip = read_lines(hub_process, 3)
+        assert on.startswith("ir port=255 hz=38000 n=68 ") and inp.startswith(
+            "ir port=255 hz=38000 n=68 "
+        )
+        assert on != inp and blip == BLIP
         r = await call(ws, "command", {"device": "hub", "command": "power_off"}, id=4)
         assert r["d"]["ok"] is True
-        await recv(ws)
-        (off,) = read_lines(hub_process, 1)
-        assert off.startswith(
-            "ir port=255 hz=38000 n=68 us=9000,4500,562,562,562,562,562,1687"
-        )  # nec 4/3
+        msgs = await until(ws)
+        assert msgs[-1]["d"] == {"activity": 0, "power": False}
+        assert [m["d"] for m in msgs[:-1]] == [{"device": "tv", "power": False}]
+        off1, off2 = read_lines(hub_process, 2)  # power-down, then the activity's own off step
+        assert off1 == off2 and off1.startswith("ir port=255 hz=38000 n=68 ")
 
 
 async def test_format2_bad_configs_are_rejected_with_reason(hub_process):
@@ -174,21 +201,22 @@ async def test_activity_from_key_starts_and_powers_down(hub_rf, run_remote):
         assert run_remote(hub_rf.rf, "--press", "1").returncode == 0
         ke = await recv(ws)
         assert ke["t"] == "key_event" and ke["d"]["key"] == 1
-        assert (await recv(ws)) == {
+        msgs = await until(ws)
+        assert msgs[-1] == {
             "v": 1,
             "id": 0,
             "t": "state_update",
             "d": {"activity": 0, "power": True},
         }
-        assert read_lines(hub_rf, 1) == [BLIP]
+        assert read_lines(hub_rf, 3)[2] == BLIP
         # per-activity key layer: key 7 only exists in "watch"
         assert run_remote(hub_rf.rf, "--press", "7").returncode == 0
         assert (await recv(ws))["t"] == "key_event"
         assert read_lines(hub_rf, 1) == [PR]
         assert run_remote(hub_rf.rf, "--press", "2").returncode == 0
         assert (await recv(ws))["t"] == "key_event"
-        assert (await recv(ws))["d"] == {"activity": 0, "power": False}
-        assert read_lines(hub_rf, 1)[0].startswith("ir port=255 hz=38000 n=68")
+        assert (await until(ws))[-1]["d"] == {"activity": 0, "power": False}
+        assert read_lines(hub_rf, 2)[0].startswith("ir port=255 hz=38000 n=68")
         # key 7 is no longer mapped now that no activity runs
         assert run_remote(hub_rf.rf, "--press", "7").returncode == 0
         assert (await recv(ws))["t"] == "key_event"
@@ -254,9 +282,12 @@ async def test_config_hash_stable_and_distinct(start_hub):
             ack = await hello(ws)
             if hub is h1 and not hashes:
                 assert "config_hash" not in ack["d"]  # nothing loaded yet
-            await cfg(ws, config)
+            if len(hashes) >= 2:
+                await drain_devices(ws, 2)  # h1 already holds CONFIG2's devices
+            await cfg(ws, config, new_devices=None if len(hashes) < 2 else 0)
         async with aiohttp.ClientSession() as s, s.ws_connect(hub.url) as ws:
             ack = await hello(ws)
+            await drain_devices(ws, 2)  # the full device set follows the state_update
             assert re.fullmatch(r"[0-9a-f]{8}", ack["d"]["config_hash"])
             hashes.append(ack["d"]["config_hash"])
     assert hashes[0] == hashes[1]
@@ -289,6 +320,7 @@ async def test_activity_list_pushed_to_other_clients(hub_process):
         await hello(b)
         await cfg(a)
         push = await recv(b)
+        await drain_devices(b, 2)
         assert push["t"] == "activity_list" and push["id"] == 0
         assert push["d"]["activities"] == ["Watch TV", "Music"]
         assert re.fullmatch(r"[0-9a-f]{8}", push["d"]["config_hash"])
@@ -314,6 +346,7 @@ async def test_reload_dropping_running_activity_pushes_state(hub_process):
         await hello(b)
         await cfg(a)
         assert (await recv(b))["t"] == "activity_list"
+        await drain_devices(b, 2)
         await a.send_str(
             '{"v":1,"id":3,"t":"command","d":{"device":"hub","command":"start_activity","args":{"name":"Music"}}}'
         )

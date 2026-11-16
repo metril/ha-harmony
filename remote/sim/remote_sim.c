@@ -1,12 +1,16 @@
 /* Headless remote simulator: the remote end of the simulated RF link.
  *
- * usage: remote_sim --rf PATH (--press KEY | --dump-page | --dump-layout | --tap X,Y)
+ * usage: remote_sim --rf PATH (--press KEY | --hold KEY,MS | --dump-page | --dump-layout | --tap X,Y)
  *                   [--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N]
+ *                   [--hold-interval-ms N]
  *
  *   --rf PATH        Unix SOCK_SEQPACKET socket of `hub --sim --rf PATH` (required).
  *   --press KEY      Connect, send one key_event {remote, key, action} (remote
  *                    default 1, action default 0 = press), exit 0. KEY is a
  *                    key code 0..255.
+ *   --hold KEY,MS    Connect, send key_event PRESS, then a HOLD every --hold-interval-ms
+ *                    (default HP_IROUT_HOLD_INTERVAL_MS = 400, the real remote's period) for
+ *                    MS milliseconds of holding, then RELEASE; exit 0. MS 0 = PRESS + RELEASE.
  *   --dump-page      Connect, print "remote_sim: attached" to stderr, wait for
  *                    the next page_push (up to --timeout-ms, default 5000),
  *                    print it as ONE JSON line on stdout
@@ -37,6 +41,7 @@
 #include <time.h>
 
 #include "cJSON.h"
+#include "hub/engine/irout.h"
 #include "hub/hp_errors.h"
 #include "hub/io/rf_pair.h"
 #include "hub/net/ws.h"
@@ -48,8 +53,8 @@
 #define REMOTE_RF_CAP 32 /* remote->hub total frame size */
 
 static int usage(void) {
-    fprintf(stderr, "usage: remote_sim --rf PATH (--press KEY | --dump-page | --dump-layout | --tap X,Y) "
-                    "[--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N]\n");
+    fprintf(stderr, "usage: remote_sim --rf PATH (--press KEY | --hold KEY,MS | --dump-page | --dump-layout | --tap X,Y) "
+                    "[--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N] [--hold-interval-ms N]\n");
     return 2;
 }
 
@@ -79,6 +84,26 @@ static int send_key(hp_rf_transport *rf, uint8_t seq, long remote, long key, lon
 
 static int press(hp_rf_transport *rf, long remote, long key, long action) {
     return send_key(rf, 1, remote, key, action);
+}
+
+static int hold(hp_rf_transport *rf, long remote, long key, long total_ms, long interval_ms) {
+    uint8_t seq = 1;
+    if (send_key(rf, seq++, remote, key, HP_KEY_ACTION_PRESS)) return 1;
+    long start = now_ms();
+    for (long next = interval_ms; next < total_ms; next += interval_ms) {
+        long wait = start + next - now_ms();
+        if (wait > 0) {
+            struct timespec ts = {wait / 1000, (wait % 1000) * 1000000L};
+            nanosleep(&ts, NULL);
+        }
+        if (send_key(rf, seq++, remote, key, HP_KEY_ACTION_HOLD)) return 1;
+    }
+    long wait = start + total_ms - now_ms();
+    if (wait > 0) {
+        struct timespec ts = {wait / 1000, (wait % 1000) * 1000000L};
+        nanosleep(&ts, NULL);
+    }
+    return send_key(rf, seq, remote, key, HP_KEY_ACTION_RELEASE);
 }
 
 static int dump_page(hp_rf_transport *rf, long timeout_ms) {
@@ -238,12 +263,21 @@ static int tap(hp_rf_transport *rf, long remote, long x, long y, long timeout_ms
 
 int main(int argc, char **argv) {
     const char *path = NULL;
+    long hold_key = -1, hold_ms = 0, hold_iv = HP_IROUT_HOLD_INTERVAL_MS;
     long key = -1, remote = 1, action = 0, timeout_ms = 5000, settle_ms = 150, tx = -1, ty = -1;
     int dump = 0, layout = 0, do_tap = 0;
     for (int i = 1; i < argc; i++) {
         int more = i + 1 < argc;
         if (!strcmp(argv[i], "--rf") && more) path = argv[++i];
         else if (!strcmp(argv[i], "--press") && more) { if (hp_parse_num(argv[++i], 0, 255, &key)) return usage(); }
+        else if (!strcmp(argv[i], "--hold") && more) {
+            char buf[32], *comma;
+            snprintf(buf, sizeof buf, "%s", argv[++i]);
+            if (!(comma = strchr(buf, ',')) || strlen(argv[i]) >= sizeof buf) return usage();
+            *comma = 0;
+            if (hp_parse_num(buf, 0, 255, &hold_key) || hp_parse_num(comma + 1, 0, 600000, &hold_ms)) return usage();
+        }
+        else if (!strcmp(argv[i], "--hold-interval-ms") && more) { if (hp_parse_num(argv[++i], 1, 60000, &hold_iv)) return usage(); }
         else if (!strcmp(argv[i], "--remote") && more) { if (hp_parse_num(argv[++i], 0, 255, &remote)) return usage(); }
         else if (!strcmp(argv[i], "--action") && more) { if (hp_parse_num(argv[++i], 0, 2, &action)) return usage(); }
         else if (!strcmp(argv[i], "--timeout-ms") && more) { if (hp_parse_num(argv[++i], 1, 3600000, &timeout_ms)) return usage(); }
@@ -260,7 +294,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--dump-page")) dump = 1;
         else return usage();
     }
-    if (!path || (key >= 0) + dump + layout + do_tap != 1) return usage(); /* exactly one mode */
+    if (!path || (key >= 0) + (hold_key >= 0) + dump + layout + do_tap != 1) return usage(); /* exactly one mode */
 
     hp_rf_transport *rf = NULL;
     if (hp_rf_pair_connect(path, &rf) < 0) {
@@ -280,6 +314,7 @@ int main(int argc, char **argv) {
     rc = dump     ? dump_page(rf, timeout_ms)
          : layout ? dump_layout(rf, timeout_ms, settle_ms)
          : do_tap ? tap(rf, remote, tx, ty, timeout_ms, settle_ms)
+         : hold_key >= 0 ? hold(rf, remote, hold_key, hold_ms, hold_iv)
                   : press(rf, remote, key, action);
     hp_rf_pair_destroy(rf);
     return rc;
