@@ -40,7 +40,8 @@ on the user's go-ahead at the moment it runs.**
 | `tools/host_setup.sh` | done | installs the rule + `usbhid` `HID_QUIRK_NO_IGNORE`, rebinds |
 | `tools/device_backup.py` | done (`phase1-backup-tool`) | discover partitions, stream images, dual hash, manifest |
 | `tools/device_backup.py --verify` | todo | offline re-hash of an image set against its manifest |
-| `tools/extract_stock.py` | todo | stock backup → `devices.json`, `activities.json`, `ir_codes.json` |
+| `tools/fetch_stock_config.py` | done | stock config off the un-rooted hub over its local WS API |
+| `tools/extract_stock.py` | todo | mine IR waveforms out of the `/data` flash image (needs root) |
 | `docs/runbooks/phase1-hub.md`, `phase1-remote.md` | todo | by-hand procedure, abort points, recovery |
 
 Backups live in-tree but gitignored (user's choice): `backups/phase1/<device>/<utc-timestamp>/`,
@@ -80,7 +81,7 @@ would cost us the rooting window, not the device.
       dead code. Re-add only if the hub's address changes.
 - [ ] **Isolate the hub from WAN** for the rest of Phase 1 (MAC block or offline SSID) so it cannot
       pull a stock update. Belt-and-braces: it is already at the latest version.
-- [ ] Gate: from this host, 8088 open and 22 closed (stock). Do not start Task 4 otherwise.
+- [x] Gate met: from this host, 8088 open and 22 closed (stock).
 
 ### Task 3 `[RO]` — Backup + verify tooling (no hardware needed)
 
@@ -126,6 +127,26 @@ empties the root password, writes `/etc/nowatchdog`, reboots.
 - [ ] A partition that cannot be read is recorded explicitly — never a silent gap.
 
 ### Task 6 `[RO]` — Extract stock config and IR codes
+
+**Partly done pre-root, 2026-11-16.** `tools/fetch_stock_config.py` pulls the stock config straight
+off the un-rooted hub over its local WebSocket API —
+`ws://192.0.2.11:8088/?domain=svcs.myharmony.com&hubId=REDACTED-HUB-ID`, envelope
+`{"hubId","timeout","hbus":{"cmd","id","params"}}` — using only read-only queries (`engine?config`,
+`engine?getCurrentActivity`, `statedigest?get`, `setup.account?getProvisionInfo`). Output in
+`backups/phase1/hub/pre-root-config/` (gitignored): `devices.json`, `activities.json`,
+`ir_codes.json`, `manifest.json`, plus verbatim replies in `raw/`.
+
+- [x] Matches HA's ground truth exactly: 6 devices with the expected ids, 3 activities
+      (`42831432` SHIELD TV, `52417136` Watch Roku, `-1` PowerOff), 133 commands, all `IRCommand`,
+      zero warnings. Per-device command counts: Samsung TV 66, NVIDIA 32, KVM 1 6, J-Tech 9, Roku 16,
+      Audioengine 4. Firmware 4.15.600 confirmed from `statedigest.hubSwVersion`.
+- [x] **Key finding: the local config contains no raw IR.** Zero pronto/frequency/duty-cycle fields —
+      each function is only `{"command","type":"IRCommand","deviceId"}` plus a `deviceProfileUri`. The
+      physical IR timings live on hub flash (and in Logitech's cloud), so **the IR extraction below
+      depends on the Task 5 flash dump** — it cannot be done pre-root. Also captured for later phases:
+      `powerFeatures`, `controlGroup`, `sequence`, `Transport`/`DongleRFID` per device.
+- [ ] Remaining: mine the `/data` (mtd4) image from Task 5 for the IR waveform database and emit
+      `ir_codes.json` with real payloads, keyed by the command names already captured above.
 
 - [ ] `tools/extract_stock.py`: stock tar / loop-mounted image → `devices.json`, `activities.json`,
       `ir_codes.json` under `backups/phase1/hub/<ts>/extracted/`. Unknown IR encoding is recorded raw

@@ -28,16 +28,38 @@ fi
 cp "$HERE/udev/99-ha-harmony.rules" "$RULES"
 printf 'options usbhid quirks=%s\n' "$QUIRKS" >"$MODCONF"
 
-# Apply the quirks to the running kernel too, so no reboot is needed. Writing the
-# parameter only affects devices probed after the write, hence the rebind below.
-if [ -w /sys/module/usbhid/parameters/quirks ]; then
-	printf '%s' "$QUIRKS" >/sys/module/usbhid/parameters/quirks
-else
-	echo "warning: usbhid not loaded; quirks will apply when it loads" >&2
-fi
-
 udevadm control --reload
 udevadm trigger
+
+# usbhid's `quirks` parameter is 0444: it can only be set as the module loads, so
+# apply it by reloading usbhid. Any USB keyboard or mouse it drives drops out for
+# about a second. The reload is made atomic with a trap, so usbhid comes back even
+# if this script is interrupted. If usbhid is built into the kernel instead, say so
+# and leave the boot-time options file as the way in.
+if grep -q '^usbhid ' /proc/modules; then
+	echo "reloading usbhid with the no-ignore quirks (USB input drops out briefly)..."
+	trap 'modprobe usbhid 2>/dev/null || true' EXIT HUP INT TERM
+	if modprobe -r usbhid; then
+		modprobe usbhid "quirks=$QUIRKS"
+	else
+		echo "error: could not unload usbhid (a device may be holding it open)." >&2
+		echo "       reboot to pick up $MODCONF, or close whatever holds it and retry." >&2
+	fi
+	trap - EXIT HUP INT TERM
+	# Give usb core a moment to re-probe the devices it just lost.
+	i=0
+	while [ $i -lt 20 ] && [ ! -e /sys/bus/usb/drivers/usbhid/module ]; do
+		i=$((i + 1))
+		sleep 0.1
+	done
+	udevadm settle 2>/dev/null || true
+elif [ -e /sys/module/usbhid ]; then
+	echo "note: usbhid is built into the kernel, so it cannot be reloaded." >&2
+	echo "      add this to the kernel command line and reboot:" >&2
+	echo "      usbhid.quirks=$QUIRKS" >&2
+else
+	echo "note: usbhid is not loaded; $MODCONF applies when it loads." >&2
+fi
 
 # Rebind by unbinding/rebinding the USB interface, so usbhid re-probes with the
 # new quirks. Harmless if the device is already bound.
