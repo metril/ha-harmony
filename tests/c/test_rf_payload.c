@@ -72,6 +72,24 @@ static void test_page_push(void) {
     CT_EQ(n, 3);
 }
 
+static void test_tile_update(void) {
+    const char *txt = "Vol 12";
+    hp_rf_val_t v[4] = {{.u = 2}, {.u = 1}, {.u = 5}, {.p = (const uint8_t *)txt, .len = 6}}, o[4];
+    uint8_t buf[HP_RF_MSG_MAX];
+    size_t n = 0;
+    CT_EQ(hp_rf_pack(HP_MSG_TILE_UPDATE, v, 4, buf, sizeof buf, &n), 0);
+    const uint8_t want[] = {2, 1, 5, 6, 'V', 'o', 'l', ' ', '1', '2'};
+    CT_EQ(n, sizeof want);
+    CT_MEM_EQ(buf, want, sizeof want);
+    CT_EQ(hp_rf_unpack(HP_MSG_TILE_UPDATE, buf, n, o, 4), 0);
+    CT_EQ(o[2].u, 5);
+    CT_EQ(o[3].len, 6);
+    CT_MEM_EQ(o[3].p, txt, 6);
+    CT_EQ(hp_rf_unpack(HP_MSG_TILE_UPDATE, buf, n - 1, o, 4), -HP_E_INVAL); /* truncated text */
+    hp_rf_val_t w[3] = {{.p = (const uint8_t *)"tv", .len = 2}, {.u = 1}, {.p = NULL, .len = 0}};
+    CT_EQ(hp_rf_pack(HP_MSG_DEVICE_STATE, w, 3, buf, sizeof buf, &n), -HP_E_INVAL); /* ws-only */
+}
+
 static void test_rejects(void) {
     hp_rf_val_t v[3] = {{0}};
     uint8_t buf[8];
@@ -100,6 +118,7 @@ int main(void) {
     CT_RUN(test_battery_big_endian);
     CT_RUN(test_state_update_bool);
     CT_RUN(test_page_push);
+    CT_RUN(test_tile_update);
     CT_RUN(test_rejects);
     CT_RUN(test_split_budget);
     return CT_DONE();

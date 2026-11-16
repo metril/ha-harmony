@@ -8,7 +8,6 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
-from .const import EVENT_TYPES, KEY_NAMES, UNKNOWN_KEY
 from .coordinator import HarmonyCoordinator
 
 
@@ -22,12 +21,14 @@ async def async_setup_entry(
 
 
 class HarmonyKeyEvent(HarmonyEntity, EventEntity):
-    _attr_event_types = EVENT_TYPES
-
     def __init__(self, coordinator: HarmonyCoordinator, remote: int) -> None:
         super().__init__(coordinator, f"key_{remote}")
         self._remote = remote
         self._attr_name = f"Remote {remote} keys"
+
+    @property
+    def event_types(self) -> list[str]:
+        return self.coordinator.event_types
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -38,6 +39,6 @@ class HarmonyKeyEvent(HarmonyEntity, EventEntity):
         if remote != self._remote:
             return
         self._trigger_event(
-            KEY_NAMES.get(key, UNKNOWN_KEY), {"key": key, "action": action, "remote": remote}
+            self.coordinator.key_name(key), {"key": key, "action": action, "remote": remote}
         )
         self.async_write_ha_state()
