@@ -10,10 +10,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "hub/ir/encode.h"
+
 typedef struct hp_ir_sink {
     void *self;
-    /* Emit one Pronto code on the ports in port_mask (bit n = port n). */
-    int (*send)(void *self, uint8_t port_mask, const uint16_t *pronto, size_t n);
+    /* Emit sig->us[0 .. sig->once_n) (mark/space, mark first) modulated at sig->carrier_hz on
+     * the ports in port_mask (bit n = port n). The repeat part of sig is the caller's business;
+     * the engine passes a signal whose once-part is exactly what must go out. Must not block. */
+    int (*send)(void *self, uint8_t port_mask, const hp_ir_signal_t *sig);
 } hp_ir_sink;
 
 typedef struct hp_bt_sink {

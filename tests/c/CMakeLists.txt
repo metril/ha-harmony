@@ -10,6 +10,8 @@ add_hp_test(ws)
 add_hp_test(jsonrpc)
 add_hp_test(mapping)
 add_hp_test(sched)
+add_hp_test(irout)
+add_hp_test(config2)
 add_hp_test(rf_payload)
 add_hp_test(rf_pair)
 

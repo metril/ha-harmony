@@ -9,11 +9,11 @@
  * given, printed as one line and flushed. Line formats (stable; parsed by
  * Python tests):
  *
- *   ir port=<port_mask decimal> n=<word count> pronto=<w0> <w1> ...
- *       words are 4-digit lowercase hex, single-space separated
+ *   ir port=<port_mask decimal> hz=<carrier> n=<duration count> us=<d0>,<d1>,...
+ *       durations are decimal microseconds (the once-part of the signal only)
  *   bt usage=<4-digit lowercase hex> down=<0|1>
  *
- * Example:  ir port=3 n=4 pronto=0000 006d 0000 0000
+ * Example:  ir port=3 hz=38029 n=2 us=631,631
  *           bt usage=00e9 down=1
  */
 
@@ -22,7 +22,7 @@
 #include "hub/io/sinks.h"
 
 #define HP_SIM_RING 64
-#define HP_SIM_MAX_PRONTO 256
+#define HP_SIM_MAX_US 128 /* durations kept per ring record (the mirror line is never cut) */
 #define HP_SIM_RF_QUEUE 16
 #define HP_SIM_RF_MAX 64
 
@@ -31,8 +31,9 @@ typedef enum { HP_SIM_IR = 1, HP_SIM_BT = 2 } hp_sim_kind_t;
 typedef struct {
     hp_sim_kind_t kind;
     uint8_t port_mask;
-    size_t n; /* pronto words recorded (<= HP_SIM_MAX_PRONTO) */
-    uint16_t pronto[HP_SIM_MAX_PRONTO];
+    uint32_t hz;
+    size_t n;                   /* durations sent */
+    uint16_t us[HP_SIM_MAX_US]; /* first min(n, HP_SIM_MAX_US) durations */
     uint16_t usage;
     int down;
 } hp_sim_rec_t;

@@ -50,6 +50,8 @@ add_library(hp_hub STATIC
   hub/net/jsonrpc.c
   hub/engine/mapping.c
   hub/engine/sched.c
+  hub/engine/irout.c
+  hub/engine/atomic_file.c
   hub/io/sim_sinks.c
   hub/io/rf_pair.c
   hub/ir/encode.c

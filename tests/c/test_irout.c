@@ -1,0 +1,254 @@
+/* IR output runtime: key hold/repeat, 2 s cap, SIRC x3, RC5/RC6 toggle, driven by a fake clock. */
+#include "ctest_assert.h"
+#include "hub/engine/irout.h"
+#include "hub/engine/mapping.h"
+#include "hub/hp_errors.h"
+
+static uint32_t g_now;
+static uint32_t clk(void *c) { (void)c; return g_now; }
+
+typedef struct {
+    uint32_t t;
+    uint8_t port;
+    uint16_t n;
+    uint32_t hz;
+    uint16_t us0, us1;
+    uint32_t h; /* FNV-1a over the once-part */
+} rec_t;
+
+static rec_t recs[256];
+static size_t nrec;
+
+static uint32_t hash_us(const uint16_t *us, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) h = (h ^ us[i]) * 16777619u;
+    return h;
+}
+
+static int rec_send(void *self, uint8_t port, const hp_ir_signal_t *sig) {
+    (void)self;
+    CT_CHECK(nrec < 256);
+    rec_t *r = &recs[nrec++ % 256];
+    r->t = g_now;
+    r->port = port;
+    r->n = sig->once_n;
+    r->hz = sig->carrier_hz;
+    r->us0 = sig->us[0];
+    r->us1 = sig->us[1];
+    r->h = hash_us(sig->us, sig->once_n);
+    return 0;
+}
+
+static hp_ir_sink ir = {NULL, rec_send};
+static hp_sinks_t sinks = {&ir, NULL, NULL};
+static hp_sched_t sched;
+static hp_irout_t out;
+static hp_map_t map;
+
+/* advance the clock to `to`, running timers in 1 ms steps like a poll loop would */
+static void advance(uint32_t to) {
+    while (g_now < to) {
+        g_now++;
+        hp_sched_run(&sched, g_now);
+    }
+}
+
+static void setup(const char *cfg) {
+    hp_map_free(&map);
+    g_now = 10000;
+    nrec = 0;
+    hp_sched_init(&sched, clk, NULL);
+    hp_irout_init(&out, &sched);
+    hp_map_init(&map);
+    hp_map_set_out(&map, &out);
+    int r = hp_map_load(&map, cfg, strlen(cfg));
+    if (r < 0) fprintf(stderr, "load: %s\n", hp_map_last_error(&map));
+    CT_EQ(r, 0);
+}
+
+static void key(uint8_t k, hp_key_action_t a) { CT_EQ(hp_key_handle(&map, &sinks, 1, k, a, NULL, NULL), 0); }
+
+#define CFG(...) "{\"format\":2,\"keys\":{" __VA_ARGS__ "}}"
+
+static void test_nec_hold_repeat_and_cap(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    CT_EQ(nrec, 1);
+    CT_EQ(recs[0].n, 68);
+    CT_EQ(recs[0].hz, 38000);
+    advance(g_now + 400); /* nothing repeats before HOLD */
+    CT_EQ(nrec, 1);
+    uint32_t t0 = g_now;
+    key(1, HP_KEY_ACTION_HOLD);
+    advance(t0 + 107);
+    CT_EQ(nrec, 1);
+    advance(t0 + 108);
+    CT_EQ(nrec, 2);
+    CT_EQ(recs[1].n, 4); /* NEC repeat code, not the full frame */
+    CT_EQ(recs[1].t, t0 + 108);
+    advance(t0 + 216);
+    CT_EQ(nrec, 3);
+    CT_EQ(recs[2].t, t0 + 216);
+    key(1, HP_KEY_ACTION_HOLD); /* a second HOLD does not double the rate */
+    advance(t0 + 324);
+    CT_EQ(nrec, 4);
+    /* lost RELEASE: repeats stop at the 2 s cap */
+    advance(t0 + 5000);
+    size_t n = nrec;
+    CT_EQ(n, 1 + 18); /* repeats at 108 .. 1944 */
+    CT_CHECK(recs[n - 1].t <= t0 + HP_IROUT_HOLD_CAP_MS);
+    CT_EQ(hp_sched_pending(&sched), 0);
+    advance(t0 + 8000);
+    CT_EQ(nrec, n);
+}
+
+static void test_release_stops_repeat(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    uint32_t t0 = g_now;
+    key(1, HP_KEY_ACTION_HOLD);
+    advance(t0 + 230);
+    CT_EQ(nrec, 3);
+    key(1, HP_KEY_ACTION_RELEASE);
+    advance(t0 + 2500);
+    CT_EQ(nrec, 3);
+    CT_EQ(hp_sched_pending(&sched), 0);
+    key(1, HP_KEY_ACTION_HOLD); /* HOLD after RELEASE (no press) repeats nothing */
+    advance(g_now + 500);
+    CT_EQ(nrec, 3);
+}
+
+static void test_new_press_ends_hold(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8},"
+              "\"2\":{\"type\":\"ha\",\"event\":\"x\"}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    key(1, HP_KEY_ACTION_HOLD);
+    advance(g_now + 120);
+    CT_EQ(nrec, 2);
+    key(2, HP_KEY_ACTION_PRESS); /* any other press ends the repeat */
+    advance(g_now + 1000);
+    CT_EQ(nrec, 2);
+    CT_EQ(hp_sched_pending(&sched), 0);
+}
+
+static void test_sirc_three_frames(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    uint32_t t0 = g_now;
+    CT_EQ(nrec, 1);
+    CT_EQ(recs[0].n, 26);
+    CT_EQ(recs[0].hz, 40000);
+    advance(t0 + 200);
+    CT_EQ(nrec, 3); /* a single press = 3 frames */
+    CT_EQ(recs[1].t, t0 + 45);
+    CT_EQ(recs[2].t, t0 + 90);
+    CT_EQ(recs[1].us0, recs[0].us0);
+    CT_EQ(hp_sched_pending(&sched), 0);
+    /* hold: the full frame repeats every 45 ms after the three */
+    key(1, HP_KEY_ACTION_PRESS);
+    key(1, HP_KEY_ACTION_HOLD);
+    uint32_t t1 = g_now;
+    advance(t1 + 100);
+    CT_CHECK(nrec >= 6 + 1); /* 3 + 3 + at least one repeat */
+    CT_EQ(recs[nrec - 1].n, 26);
+    key(1, HP_KEY_ACTION_RELEASE);
+    size_t n = nrec;
+    advance(t1 + 1000);
+    CT_EQ(nrec, n);
+}
+
+static void test_samsung_repeats_full_frame(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"samsung32\",\"addr\":7,\"cmd\":2}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    key(1, HP_KEY_ACTION_HOLD);
+    advance(g_now + 110);
+    CT_EQ(nrec, 2);
+    CT_EQ(recs[1].n, 68);
+}
+
+static void test_rc5_toggle(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"rc5\",\"addr\":5,\"cmd\":12},"
+              "\"2\":{\"type\":\"ir\",\"proto\":\"rc5\",\"addr\":6,\"cmd\":12},"
+              "\"3\":{\"type\":\"ir\",\"proto\":\"rc6\",\"addr\":5,\"cmd\":12}"));
+    hp_ir_signal_t s0, s1;
+    hp_ir_code_t c = {.kind = HP_IR_CODE_PROTO, .u.p = {HP_IR_RC5, 5, 12}};
+    CT_EQ(hp_ir_encode(&c, 0, &s0), 0);
+    CT_EQ(hp_ir_encode(&c, 1, &s1), 0);
+    CT_CHECK(memcmp(s0.us, s1.us, s0.once_n * 2u) != 0); /* toggle changes the waveform */
+
+    uint32_t h0 = hash_us(s0.us, s0.once_n), h1 = hash_us(s1.us, s1.once_n);
+    CT_CHECK(h0 != h1);
+    key(1, HP_KEY_ACTION_PRESS);
+    CT_EQ(recs[0].h, h0);
+    key(1, HP_KEY_ACTION_RELEASE);
+    key(1, HP_KEY_ACTION_PRESS); /* new press flips */
+    CT_EQ(recs[1].h, h1);
+    key(1, HP_KEY_ACTION_HOLD); /* constant during the hold */
+    advance(g_now + 350);
+    CT_CHECK(nrec >= 4);
+    for (size_t i = 2; i < nrec; i++) CT_EQ(recs[i].h, h1);
+    key(1, HP_KEY_ACTION_RELEASE);
+    key(1, HP_KEY_ACTION_PRESS); /* and flips back */
+    CT_EQ(recs[nrec - 1].h, h0);
+    key(1, HP_KEY_ACTION_RELEASE);
+    /* a different address has its own toggle: first press is 0 again */
+    size_t n = nrec;
+    key(2, HP_KEY_ACTION_PRESS);
+    hp_ir_code_t c6 = {.kind = HP_IR_CODE_PROTO, .u.p = {HP_IR_RC5, 6, 12}};
+    hp_ir_signal_t t6;
+    CT_EQ(hp_ir_encode(&c6, 0, &t6), 0);
+    CT_EQ(recs[n].h, hash_us(t6.us, t6.once_n));
+    key(2, HP_KEY_ACTION_RELEASE);
+    /* RC6 at the same address is independent of RC5 */
+    n = nrec;
+    key(3, HP_KEY_ACTION_PRESS);
+    hp_ir_code_t c7 = {.kind = HP_IR_CODE_PROTO, .u.p = {HP_IR_RC6, 5, 12}};
+    hp_ir_signal_t t7;
+    CT_EQ(hp_ir_encode(&c7, 0, &t7), 0);
+    CT_EQ(recs[n].h, hash_us(t7.us, t7.once_n));
+}
+
+static void test_raw_default_period_and_pronto_repeat(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"raw\":{\"hz\":38000,\"us\":[9000,4500,560,560]}},"
+              "\"2\":{\"type\":\"ir\",\"pronto\":\"0000 006d 0001 0001 0018 0018 0030 0030\"}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    uint32_t t0 = g_now;
+    key(1, HP_KEY_ACTION_HOLD);
+    advance(t0 + 109);
+    CT_EQ(nrec, 1);
+    advance(t0 + 110); /* no period known: ~110 ms */
+    CT_EQ(nrec, 2);
+    CT_EQ(recs[1].n, 4);
+    key(1, HP_KEY_ACTION_RELEASE);
+    size_t n = nrec;
+    key(2, HP_KEY_ACTION_PRESS);
+    CT_EQ(recs[n].n, 2);
+    CT_EQ(recs[n].us0, 631);
+    key(2, HP_KEY_ACTION_HOLD);
+    advance(g_now + 110);
+    CT_EQ(recs[n + 1].n, 2); /* the Pronto repeat part (0x30 periods), not the once part */
+    CT_EQ(recs[n + 1].us0, 1262);
+}
+
+static void test_non_key_sends_do_not_repeat(void) {
+    setup("{\"format\":2,\"devices\":[{\"id\":\"tv\",\"commands\":{\"ok\":{\"proto\":\"nec\",\"addr\":1,\"cmd\":2}}}],"
+          "\"activities\":[{\"id\":\"a\",\"steps\":[{\"type\":\"device\",\"device\":\"tv\",\"command\":\"ok\"}]}]}");
+    CT_EQ(hp_activity_set(&map, "a", &sinks), 0);
+    CT_EQ(nrec, 1);
+    key(9, HP_KEY_ACTION_HOLD);
+    advance(g_now + 500);
+    CT_EQ(nrec, 1);
+}
+
+int main(void) {
+    CT_RUN(test_nec_hold_repeat_and_cap);
+    CT_RUN(test_release_stops_repeat);
+    CT_RUN(test_new_press_ends_hold);
+    CT_RUN(test_sirc_three_frames);
+    CT_RUN(test_samsung_repeats_full_frame);
+    CT_RUN(test_rc5_toggle);
+    CT_RUN(test_raw_default_period_and_pronto_repeat);
+    CT_RUN(test_non_key_sends_do_not_repeat);
+    hp_map_free(&map);
+    return CT_DONE();
+}
