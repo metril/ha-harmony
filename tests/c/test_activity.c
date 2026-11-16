@@ -618,6 +618,25 @@ static void test_hold_repeat_vs_plan_start(void) {
     CT_EQ(recs[nrec - 1].h, NEC(4, 1));
 }
 
+/* Renaming an activity (same id) keeps it current: identity is the id. */
+static void test_reload_rename_keeps_current(void) {
+    setup();
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    nev = 0;
+    char *cfg = strdup(CFG);
+    char *p = strstr(cfg, "\"name\":\"watch\"");
+    CT_CHECK(p != NULL);
+    memcpy(p, "\"name\":\"WATCH\"", 14);
+    CT_EQ(hp_map_load(&map, cfg, strlen(cfg)), 0);
+    CT_EQ(map.current, 0);
+    hp_actsm_reloaded(&sm);
+    CT_EQ(hp_actsm_reported(&sm), 0);
+    CT_EQ(map.current, 0);
+    CT_EQ(count_ev(HP_ACTSM_EVT_ACTIVITY), 0);
+    free(cfg);
+}
+
 int main(void) {
     CT_RUN(test_start_from_off);
     CT_RUN(test_a_to_b_shared_devices);
@@ -638,6 +657,7 @@ int main(void) {
     CT_RUN(test_state_debounce);
     CT_RUN(test_idle_clock_wrap);
     CT_RUN(test_reload_mid_transition_keeps_reported);
+    CT_RUN(test_reload_rename_keeps_current);
     CT_RUN(test_plan_waits_for_sirc_copies);
     CT_RUN(test_press_after_finish_deferred);
     CT_RUN(test_hold_repeat_vs_plan_start);

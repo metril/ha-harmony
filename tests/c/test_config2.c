@@ -290,6 +290,23 @@ static void test_cache_and_hash(void) {
     hp_map_free(&m2);
 }
 
+/* Reload keeps the current activity by id (format 2), so a rename does not drop it. */
+static void test_reload_matches_by_id(void) {
+    const char *v1 = "{\"format\":2,\"devices\":[],\"activities\":[{\"id\":\"x\",\"name\":\"Old\"},{\"id\":\"y\",\"name\":\"Other\"}]}";
+    const char *v2 = "{\"format\":2,\"devices\":[],\"activities\":[{\"id\":\"y\",\"name\":\"Old\"},{\"id\":\"x\",\"name\":\"Renamed\"}]}";
+    const char *v3 = "{\"format\":2,\"devices\":[],\"activities\":[{\"id\":\"z\",\"name\":\"Old\"}]}";
+    hp_map_t m;
+    hp_map_init(&m);
+    hp_sinks_t sinks = {0};
+    CT_EQ(hp_map_load(&m, v1, strlen(v1)), 0);
+    CT_EQ(hp_activity_set(&m, "Old", &sinks), 0);
+    CT_EQ(hp_map_load(&m, v2, strlen(v2)), 0);
+    CT_EQ(hp_map_current(&m), 1); /* id x, now named Renamed; NOT the other activity now called Old */
+    CT_EQ(hp_map_load(&m, v3, strlen(v3)), 0);
+    CT_EQ(hp_map_current(&m), -1); /* id gone, even though the name "Old" exists */
+    hp_map_free(&m);
+}
+
 int main(void) {
     CT_RUN(test_load_and_resolve);
     CT_RUN(test_each_ir_form_encodes);
@@ -297,5 +314,6 @@ int main(void) {
     CT_RUN(test_limits);
     CT_RUN(test_format1_int_pronto_via_encoder);
     CT_RUN(test_cache_and_hash);
+    CT_RUN(test_reload_matches_by_id);
     return CT_DONE();
 }

@@ -494,10 +494,14 @@ int hp_map_load(hp_map_t *m, const char *json, size_t len) {
     }
     memcpy(src, json, len);
     src[len] = '\0';
-    /* keep the running activity if it survives the reload */
+    /* keep the running activity if it survives the reload: format 2 identity is the activity id
+     * (a rename keeps it), format 1 has only names */
     if (m->current >= 0 && (size_t)m->current < m->nacts) {
+        bool by_id = m->format == 2 && scratch->format == 2;
+        const hp_activity_t *cur = &m->acts[m->current];
         for (uint8_t i = 0; i < scratch->nacts; i++)
-            if (!strcmp(scratch->acts[i].name, m->acts[m->current].name)) scratch->current = i;
+            if (!strcmp(by_id ? scratch->acts[i].id : scratch->acts[i].name, by_id ? cur->id : cur->name))
+                scratch->current = i;
     }
     hp_irout_t *outrt = m->out;
     hp_map_actops_t ops = m->actops;
