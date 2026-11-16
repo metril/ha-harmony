@@ -1,5 +1,6 @@
 #include "hub/engine/irout.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "hub/hp_errors.h"
@@ -58,7 +59,7 @@ static void line_busy(hp_irout_t *o, uint32_t now, uint32_t len) {
 
 uint32_t hp_irout_wait_ms(const hp_irout_t *o, uint32_t now) {
     uint32_t w = line_wait(o, now, HP_IROUT_GUARD_MS);
-    return o->pend && w == 0 ? 1 : w;
+    return o->pend_n && w == 0 ? 1 : w;
 }
 
 static bool bursts_pending(const hp_irout_t *o) {
@@ -124,19 +125,40 @@ static int emit_cand(hp_irout_t *o, hp_ir_sink *ir, uint8_t port_mask, int key, 
     return 0;
 }
 
+static void pend_arm(hp_irout_t *o, uint32_t delay);
+
 static void pend_cb(void *arg, uint32_t now) {
     hp_irout_t *o = arg;
     o->pend_h = 0;
-    if (!o->pend) return;
+    if (!o->pend_n) return;
     uint32_t w = line_wait(o, now, HP_IROUT_GUARD_MS);
     if (w > 0) { /* a hold repeat or another frame took the line meanwhile */
-        o->pend_h = hp_sched_after(o->sched, w, pend_cb, o);
-        if (o->pend_h) return;
+        pend_arm(o, w);
+        return;
     }
-    o->pend = false;
+    hp_irout_pend_t *p = &o->pend[o->pend_head];
     o->cand_key = -1;
-    memcpy(&o->cand, &o->pend_sig, sizeof o->cand);
-    (void)emit_cand(o, o->pend_ir, o->pend_port, o->pend_key, o->pend_sirc);
+    memcpy(&o->cand, &p->sig, sizeof o->cand);
+    (void)emit_cand(o, p->ir, p->port, p->key, p->sirc);
+    o->pend_head = (uint8_t)((o->pend_head + 1) % HP_IROUT_PEND);
+    o->pend_n--;
+    if (o->pend_n) {
+        uint32_t nw = line_wait(o, hp_sched_now(o->sched), HP_IROUT_GUARD_MS);
+        pend_arm(o, nw ? nw : 1);
+    }
+}
+
+/* On a full timer queue the queue is flushed back-to-back (the sink paces). */
+static void pend_arm(hp_irout_t *o, uint32_t delay) {
+    o->pend_h = hp_sched_after(o->sched, delay, pend_cb, o);
+    if (o->pend_h) return;
+    while (o->pend_n) {
+        hp_irout_pend_t *p = &o->pend[o->pend_head];
+        memcpy(&o->cand, &p->sig, sizeof o->cand);
+        (void)emit_cand(o, p->ir, p->port, p->key, p->sirc);
+        o->pend_head = (uint8_t)((o->pend_head + 1) % HP_IROUT_PEND);
+        o->pend_n--;
+    }
 }
 
 int hp_irout_send(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key) {
@@ -145,24 +167,24 @@ int hp_irout_send(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8
     o->cand_key = -1;
     uint32_t now = hp_sched_now(o->sched);
     uint32_t w = line_wait(o, now, HP_IROUT_GUARD_MS);
-    bool defer = key != HP_IROUT_KEY_NONE && (w > 0 || o->pend);
-    hp_ir_signal_t *sig = defer ? &o->pend_sig : &o->cand; /* encode straight into its slot */
+    bool defer = key != HP_IROUT_KEY_NONE && (w > 0 || o->pend_n);
+    if (defer && o->pend_n >= HP_IROUT_PEND) {
+        fprintf(stderr, "hub: IR line busy, send dropped (queue full)\n");
+        return -HP_E_BUSY;
+    }
+    uint8_t slot = (uint8_t)((o->pend_head + o->pend_n) % HP_IROUT_PEND);
+    hp_ir_signal_t *sig = defer ? &o->pend[slot].sig : &o->cand; /* encode straight into its slot */
     uint8_t t = toggle_for(o, code);
     int rc = hp_ir_encode(code, t, sig);
     if (rc < 0) return rc;
-    if (!defer) return emit_cand(o, ir, port_mask, key < 0 ? -1 : key, is_sirc(code));
-    hp_sched_cancel(o->sched, o->pend_h); /* newest wins: the older deferred send is dropped */
-    o->pend = true;
-    o->pend_ir = ir;
-    o->pend_port = port_mask;
-    o->pend_key = key < 0 ? -1 : key;
-    o->pend_sirc = is_sirc(code);
-    o->pend_h = hp_sched_after(o->sched, w ? w : 1, pend_cb, o);
-    if (!o->pend_h) { /* no timer: degrade to sending now */
-        o->pend = false;
-        memcpy(&o->cand, &o->pend_sig, sizeof o->cand);
-        return emit_cand(o, ir, port_mask, key < 0 ? -1 : key, o->pend_sirc);
-    }
+    int k = key < 0 ? -1 : key;
+    if (!defer) return emit_cand(o, ir, port_mask, k, is_sirc(code));
+    o->pend[slot].ir = ir;
+    o->pend[slot].port = port_mask;
+    o->pend[slot].key = k;
+    o->pend[slot].sirc = is_sirc(code);
+    o->pend_n++;
+    if (!o->pend_h) pend_arm(o, w ? w : 1);
     return 0;
 }
 
@@ -172,7 +194,7 @@ static void tick_cb(void *arg, uint32_t now) {
     o->tick_h = 0;
     if (o->hold_key < 0 || !o->ir) return;
     uint32_t t = hp_sched_now(o->sched);
-    if (!bursts_pending(o) && line_wait(o, t, 0) == 0 && !o->pend) { /* else skip this repeat */
+    if (!bursts_pending(o) && line_wait(o, t, 0) == 0 && !o->pend_n) { /* else skip this repeat */
         if (o->ir->send(o->ir->self, o->hold_port, &o->rep) < 0) {
             stop_hold(o);
             return;

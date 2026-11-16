@@ -273,8 +273,8 @@ static void test_non_key_sends_do_not_repeat(void) {
     CT_EQ(nrec, 1);
 }
 
-/* A press while the line is busy (SIRC copies pending) is deferred, never interleaved; the newest
- * deferred press wins. */
+/* A press while the line is busy (SIRC copies pending) is deferred, never interleaved; deferred
+ * sends go out in order, and a full queue drops the newest. */
 static void test_press_deferred_while_line_busy(void) {
     setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21},"
               "\"2\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8},"
@@ -283,15 +283,18 @@ static void test_press_deferred_while_line_busy(void) {
     uint32_t t0 = g_now;
     advance(t0 + 10);
     key(2, HP_KEY_ACTION_PRESS); /* mid-burst */
-    key(3, HP_KEY_ACTION_PRESS); /* replaces the deferred one */
+    key(3, HP_KEY_ACTION_PRESS); /* queued behind it */
     advance(t0 + 60);
     CT_EQ(nrec, 2); /* sirc copies 1,2 only */
     advance(t0 + 2000);
-    CT_EQ(nrec, 4); /* sirc x3, then only the newest press */
+    CT_EQ(nrec, 5); /* sirc x3, then both presses in order */
     CT_EQ(recs[0].n, 26);
     CT_EQ(recs[1].n, 26);
     CT_EQ(recs[2].n, 26);
     CT_EQ(recs[3].n, 68);
+    CT_EQ(recs[4].n, 68);
+    CT_CHECK(recs[3].h != recs[4].h);
+    CT_CHECK(recs[4].t - recs[3].t >= 60 + HP_IROUT_GUARD_MS);
     CT_CHECK(recs[3].t - recs[2].t >= 25 + HP_IROUT_GUARD_MS - 1); /* after the last copy + guard */
     CT_EQ(hp_sched_pending(&sched), 0);
     CT_CHECK(hp_irout_wait_ms(&out, g_now) == 0);
@@ -328,6 +331,13 @@ static void test_send_modes(void) {
     advance(g_now + 2000);
     CT_EQ(nrec, 4);
     CT_EQ(recs[3].n, 68);
+    /* queue bound: HP_IROUT_PEND deferred sends, the next one is refused */
+    key(1, HP_KEY_ACTION_PRESS);
+    for (int i = 0; i < HP_IROUT_PEND; i++) CT_EQ(hp_irout_send(&out, &ir, &c, 0xFF, HP_IROUT_KEY_SEND), 0);
+    CT_EQ(hp_irout_send(&out, &ir, &c, 0xFF, HP_IROUT_KEY_SEND), -HP_E_BUSY);
+    advance(g_now + 3000);
+    CT_EQ(nrec, 4 + 3 + HP_IROUT_PEND);
+    nrec = 4;
     key(1, HP_KEY_ACTION_PRESS);
     CT_EQ(hp_irout_send(&out, &ir, &c, 0xFF, HP_IROUT_KEY_NONE), 0);
     CT_EQ(nrec, 6); /* immediate (the caller already waited on hp_irout_wait_ms) */

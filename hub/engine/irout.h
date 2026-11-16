@@ -16,8 +16,8 @@
  *    the repeats within the cap of the last HOLD. The first repeat is one period after the first
  *    HOLD. Repeat ticks are skipped while SIRC copies are still pending.
  * Line ownership: hp_irout owns a "line free at" time (frame + SIRC copies + HP_IROUT_GUARD_MS) pushed
- * by every send. A send arriving while the line is busy is deferred until it frees (single slot,
- * newest wins, the older one is dropped), never interleaved with pending copies; plan steps wait
+ * by every send. A send arriving while the line is busy is deferred until it frees (small FIFO of
+ * HP_IROUT_PEND, sent in order; when full the newest is dropped), never interleaved with pending copies; plan steps wait
  * (hp_irout_wait_ms). Hold repeats are skipped while the line is busy.
  * One hold at a time: a new send or another key's press ends the previous hold. */
 
@@ -34,6 +34,7 @@
 #define HP_IROUT_GUARD_MS 50 /* quiet time after a frame before the next one may start */
 #define HP_IROUT_KEY_NONE (-1) /* hp_irout_send key: send now (plan/activity steps, which wait on the line) */
 #define HP_IROUT_KEY_SEND (-2) /* ... an ir_send: deferred while the line is busy, no hold candidate */
+#define HP_IROUT_PEND 3 /* deferred sends queued while the line is busy */
 #define HP_IROUT_BURSTS 4
 #define HP_IROUT_TOGGLES 8
 
@@ -47,6 +48,14 @@ typedef struct {
     hp_irout_t *o;
     hp_ir_signal_t sig;
 } hp_irout_burst_t;
+
+typedef struct {
+    uint8_t port;
+    int key;
+    bool sirc;
+    hp_ir_sink *ir;
+    hp_ir_signal_t sig;
+} hp_irout_pend_t;
 
 struct hp_irout {
     hp_sched_t *sched;
@@ -70,15 +79,11 @@ struct hp_irout {
      * Trusted only while it lies at most line_len ahead of now, so a stale value from a long idle
      * never looks like the future (32-bit ms clock). */
     uint32_t line_free, line_len;
-    /* A press/ir_send that arrived while the line was busy: sent when it frees. One slot, the
-     * newest wins. */
-    bool pend;
-    uint8_t pend_port;
-    int pend_key;
-    bool pend_sirc;
-    hp_ir_sink *pend_ir;
+    /* Presses / ir_sends that arrived while the line was busy: a small FIFO, sent in order as the
+     * line frees. Full: the newest is dropped (logged). */
+    hp_irout_pend_t pend[HP_IROUT_PEND];
+    uint8_t pend_head, pend_n;
     hp_sched_handle pend_h;
-    hp_ir_signal_t pend_sig;
 };
 
 /* Ms until the IR line is free for a new frame (0 = free now; >= 1 while a deferred send is
