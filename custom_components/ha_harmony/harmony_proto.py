@@ -31,6 +31,7 @@ class MsgType(IntEnum):
     DEVICE_STATE = 14
     TILE_UPDATE = 15
     ACTIVITY_LIST = 16
+    REMOTE_ATTACHED = 17
 
 
 ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'hold': 2}}
@@ -43,7 +44,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'ping': (4, 'ws', ()),
     'pong': (5, 'ws', ()),
     'set_config': (6, 'ws', (('config', 'json', False), )),
-    'config_ack': (7, 'ws', (('ok', 'bool', False), ('message', 'str', True), )),
+    'config_ack': (7, 'ws', (('ok', 'bool', False), ('message', 'str', True), ('config_hash', 'str', True), )),
     'command': (8, 'ws', (('device', 'str', False), ('command', 'str', False), ('args', 'json', True), )),
     'command_result': (9, 'ws', (('ok', 'bool', False), ('message', 'str', True), )),
     'key_event': (10, 'both', (('remote', 'u8', False), ('key', 'u8', False), ('action', 'enum:key_action', False), )),
@@ -53,6 +54,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'device_state': (14, 'ws', (('device', 'str', False), ('power', 'bool', False), ('input', 'str', True), )),
     'tile_update': (15, 'rf', (('remote', 'u8', False), ('page', 'u8', False), ('tile', 'u8', False), ('text', 'str', False), )),
     'activity_list': (16, 'ws', (('activities', 'json', False), ('config_hash', 'str', True), )),
+    'remote_attached': (17, 'ws', ()),
 }
 
 _INT_RANGES = {

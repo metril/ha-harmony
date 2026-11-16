@@ -38,8 +38,12 @@ async def call(ws, t, d=None, id=1):
     return await recv(ws)
 
 
-async def recv(ws, timeout=5):
-    return json.loads((await ws.receive(timeout=timeout)).data)
+async def recv(ws, timeout=5, keep_attached=False):
+    """Next message; `remote_attached` pushes (an RF remote showing up) are skipped by default."""
+    while True:
+        msg = json.loads((await ws.receive(timeout=timeout)).data)
+        if keep_attached or msg.get("t") != "remote_attached":
+            return msg
 
 
 async def hello(ws):

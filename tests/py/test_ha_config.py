@@ -324,6 +324,41 @@ async def test_tile_update_follows_bound_entity(hass, hub_rf, write_yaml, built_
     await hass.config_entries.async_unload(entry.entry_id)
 
 
+async def test_remote_attach_pushes_pages_and_tiles_immediately(
+    hass, hub_rf, write_yaml, built_binaries
+):
+    write_yaml(BASE)
+    hass.states.async_set("sensor.temp", "21.5", {"unit_of_measurement": "°C"})
+    entry = await setup(hass, hub_rf)  # no remote yet: pages could not be delivered
+    r = start_remote(built_binaries, hub_rf.rf, "--dump-layout", "--settle-ms", "800")
+    # no key or battery event is sent: the attach itself triggers the push
+    code, out = await asyncio.to_thread(r.result)
+    layout = json.loads(out)
+    assert code == 0 and [w["kind"] for w in layout["widgets"]] == ["label", "button", "tile"]
+    assert layout["widgets"][2]["text"] == "21.5 °C"
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_config_hash_is_what_the_hub_acks(hass, hub_rf, write_yaml):
+    write_yaml(BASE)
+    entry = await setup(hass, hub_rf)
+    coord = entry.runtime_data
+    assert coord.client.config_hash == coord.compiled.config_hash == await hub_hash(hub_rf.url)
+    real = coord.client.async_send
+
+    async def fake(msg_type, data):
+        res = await real(msg_type, data)
+        if "config" in data:
+            res = {**res, "config_hash": "deadbeef"}
+        return res
+
+    coord.client.async_send = fake
+    coord.client.config_hash = None
+    await coord.async_sync_config()
+    assert coord.client.config_hash == "deadbeef"  # stored as reported, not assumed
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
 def test_tile_text_truncates_on_utf8_boundary():
     class S:
         def __init__(self, state, unit=None):

@@ -248,7 +248,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return False
         self.last_error = None
         self._clear_issue(ISSUE_REJECTED)
-        self.client.config_hash = want
+        self.client.config_hash = ack.get("config_hash")  # as the hub reports it
         # activity_list is not echoed to the sender: apply it ourselves
         self._set_activities(compiled.activities)
         return True
@@ -413,6 +413,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         elif mtype is MsgType.DEVICE_STATE:
             self.device_states[data["device"]] = DeviceState(data["power"], data.get("input"))
             self.async_update_listeners()
+        elif mtype is MsgType.REMOTE_ATTACHED:
+            # a fresh remote knows no pages: push them and the tile texts now
+            self._pages_pending = False
+            self.config_entry.async_create_background_task(
+                self.hass, self.async_push_pages(), name=f"{DOMAIN} pages"
+            )
         elif mtype is MsgType.BATTERY:
             self._remote_alive()
             self.battery[data["remote"]] = (data["percent"], data["millivolts"])

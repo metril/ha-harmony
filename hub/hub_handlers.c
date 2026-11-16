@@ -201,7 +201,13 @@ static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
     hp_actsm_reloaded(&h->act); /* cancels a transition, re-keys device state, queues device_state/state_update */
     const char *msg = NULL;
     if (h->cache_path && hp_map_save_cache(&h->map, h->cache_path) < 0) msg = "applied; cache write failed";
-    return reply_ok(id, "config_ack", true, msg, reply, cap, len);
+    cJSON *a = cJSON_CreateObject();
+    if (!a) return -HP_E_INVAL;
+    cJSON_AddBoolToObject(a, "ok", true);
+    if (msg) cJSON_AddStringToObject(a, "message", msg);
+    char hash[9];
+    if (hp_map_hash_hex(&h->map, hash)) cJSON_AddStringToObject(a, "config_hash", hash);
+    return hp_make_reply(id, "config_ack", a, reply, cap, len);
 }
 
 static int reply_err(uint32_t id, const char *code, const char *msg, char *reply, size_t cap, size_t *len);
@@ -378,10 +384,19 @@ void hub_pump_rf(hub_ctx_t *h) {
     while ((n = h->sinks.rf->recv(h->sinks.rf->self, fr, sizeof fr, 0)) != 0) {
         if (n < 0) { /* link event (remote gone) or error: drop partial reassembly */
             hp_rf_asm_init(&h->rf_asm);
+            h->rf_attached = false;
             break;
         }
         if (n > HP_RF_FRAME_MAX) continue;
         if (hp_rf_asm_push(&h->rf_asm, fr, (size_t)n, &msg) == HP_ASM_COMPLETE) handle_rf_msg(h, &msg);
+    }
+    if (h->sinks.rf->attached) {
+        bool now = h->sinks.rf->attached(h->sinks.rf->self);
+        if (now && !h->rf_attached) {
+            cJSON *d = cJSON_CreateObject();
+            if (d) hub_broadcast(h, "remote_attached", d);
+        }
+        h->rf_attached = now;
     }
     hub_flush_pending(h); /* a key may have started/stopped an activity */
 }

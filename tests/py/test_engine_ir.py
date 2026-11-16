@@ -62,7 +62,7 @@ def pending_lines(hub):
 async def cfg(ws, config=CONFIG2, id=2, new_devices=None):
     """set_config, then swallow the device_state pushes for devices that are new to the hub."""
     r = await call(ws, "set_config", {"config": config}, id=id)
-    assert r["t"] == "config_ack" and r["d"] == {"ok": True}, r
+    assert r["t"] == "config_ack" and r["d"]["ok"] is True, r
     await drain_devices(ws, len(config.get("devices", [])) if new_devices is None else new_devices)
 
 
@@ -292,6 +292,21 @@ async def test_config_hash_stable_and_distinct(start_hub):
             hashes.append(ack["d"]["config_hash"])
     assert hashes[0] == hashes[1]
     assert hashes[2] != hashes[0]
+
+
+async def test_config_ack_carries_the_resulting_hash(hub_process):
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
+        await hello(ws)
+        ack = await call(ws, "set_config", {"config": CONFIG2}, id=2)
+        assert ack["t"] == "config_ack" and ack["d"]["ok"] is True
+        assert re.fullmatch(r"[0-9a-f]{8}", ack["d"]["config_hash"])
+        await drain_devices(ws, len(CONFIG2.get("devices", [])))
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
+        assert (await hello(ws))["d"]["config_hash"] == ack["d"]["config_hash"]
+        await drain_devices(ws, len(CONFIG2.get("devices", [])))
+        dup = {"activities": [{"name": "A"}, {"name": "A"}]}
+        bad = await call(ws, "set_config", {"config": dup}, id=3)
+        assert bad["d"]["ok"] is False and "config_hash" not in bad["d"]
 
 
 async def test_config_hash_survives_restart_via_cache(start_hub, tmp_path):

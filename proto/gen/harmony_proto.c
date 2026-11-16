@@ -37,6 +37,7 @@ static const hp_field_desc_t hp_fields_set_config[] = {
 static const hp_field_desc_t hp_fields_config_ack[] = {
     {"ok", HP_T_BOOL, false, NULL},
     {"message", HP_T_STR, true, NULL},
+    {"config_hash", HP_T_STR, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_command[] = {
@@ -98,7 +99,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"ping", HP_MSG_PING, HP_TRANSPORT_WS, 0, NULL},
     {"pong", HP_MSG_PONG, HP_TRANSPORT_WS, 0, NULL},
     {"set_config", HP_MSG_SET_CONFIG, HP_TRANSPORT_WS, 1, hp_fields_set_config},
-    {"config_ack", HP_MSG_CONFIG_ACK, HP_TRANSPORT_WS, 2, hp_fields_config_ack},
+    {"config_ack", HP_MSG_CONFIG_ACK, HP_TRANSPORT_WS, 3, hp_fields_config_ack},
     {"command", HP_MSG_COMMAND, HP_TRANSPORT_WS, 3, hp_fields_command},
     {"command_result", HP_MSG_COMMAND_RESULT, HP_TRANSPORT_WS, 2, hp_fields_command_result},
     {"key_event", HP_MSG_KEY_EVENT, HP_TRANSPORT_BOTH, 3, hp_fields_key_event},
@@ -108,6 +109,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"device_state", HP_MSG_DEVICE_STATE, HP_TRANSPORT_WS, 3, hp_fields_device_state},
     {"tile_update", HP_MSG_TILE_UPDATE, HP_TRANSPORT_RF, 4, hp_fields_tile_update},
     {"activity_list", HP_MSG_ACTIVITY_LIST, HP_TRANSPORT_WS, 2, hp_fields_activity_list},
+    {"remote_attached", HP_MSG_REMOTE_ATTACHED, HP_TRANSPORT_WS, 0, NULL},
 };
 
 const hp_msg_desc_t *hp_msg_desc(hp_msg_type_t type)
