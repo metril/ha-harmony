@@ -9,6 +9,7 @@ add_hp_test(framing)
 add_hp_test(ws)
 add_hp_test(jsonrpc)
 add_hp_test(mapping)
+add_hp_test(sched)
 add_hp_test(rf_payload)
 add_hp_test(rf_pair)
 
