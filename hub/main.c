@@ -14,6 +14,7 @@
 #include "hub/io/sim_sinks.h"
 #include "hub/parse_num.h"
 #include "hub/net/jsonrpc.h"
+#include "hub/net/mdns_srv.h"
 #include "hub/net/ws.h"
 
 #define REPLY_CAP HP_WS_MAX_FRAME /* a reply that fits is always sendable */
@@ -45,7 +46,15 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     hub_flush_pending(&g_hub); /* after the reply, so clients see it first */
 }
 
-static int rf_fds(void *arg, int out[2]) { return hp_rf_pair_fds(arg, out); }
+static hp_mdns_srv_t g_mdns; /* fd < 0 until started */
+
+/* The ws poll's (max 4) extra wake-only fds: RF pair socket(s) + mDNS. */
+static int rf_fds(void *arg, int out[4]) {
+    int n = arg ? hp_rf_pair_fds(arg, out) : 0;
+    if (n < 0) n = 0;
+    if (n < 4 && g_mdns.fd >= 0) out[n++] = g_mdns.fd;
+    return n;
+}
 
 static void on_close(hp_ws_conn_t *c, void *user) {
     (void)user;
@@ -65,6 +74,9 @@ int main(int argc, char **argv) {
     const char *state = NULL;
     const char *rf_path = NULL;
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
+    int mdns = -1; /* -1 = default: on for the real daemon, off under --sim */
+    hp_mdns_opts_t mo = {HP_MDNS_PORT, NULL, NULL};
+    g_mdns.fd = -1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--sim")) sim = true;
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) { if (hp_parse_num(argv[++i], 0, 65535, &port)) return bad_num("--port", argv[i]); }
@@ -72,11 +84,17 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--cache") && i + 1 < argc) cache = argv[++i];
         else if (!strcmp(argv[i], "--state") && i + 1 < argc) state = argv[++i];
         else if (!strcmp(argv[i], "--rf") && i + 1 < argc) rf_path = argv[++i];
+        else if (!strcmp(argv[i], "--mdns")) mdns = 1;
+        else if (!strcmp(argv[i], "--no-mdns")) mdns = 0;
+        else if (!strcmp(argv[i], "--mdns-port") && i + 1 < argc) { long mp; if (hp_parse_num(argv[++i], 0, 65535, &mp)) return bad_num("--mdns-port", argv[i]); mo.port = (uint16_t)mp; }
+        else if (!strcmp(argv[i], "--mdns-addr") && i + 1 < argc) mo.addr = argv[++i];
+        else if (!strcmp(argv[i], "--mdns-dest") && i + 1 < argc) mo.dest = argv[++i];
         else if (!strcmp(argv[i], "--auth-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &auth_ms)) return bad_num("--auth-timeout-ms", argv[i]); }
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
             fprintf(stderr, "usage: hub --sim [--port N] --token T [--cache PATH] [--state PATH] [--rf PATH] "
-                            "[--auth-timeout-ms N] [--idle-timeout-ms N]\n");
+                            "[--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
+                            "[--mdns-addr A] [--mdns-dest A:P]\n");
             return 2;
         }
     }
@@ -141,17 +159,25 @@ int main(int argc, char **argv) {
         return 1;
     }
     g_hub.srv = srv;
-    if (rf) hp_ws_set_extra_fds(srv, rf_fds, rf);
+    if (mdns < 0) mdns = !sim;
+    if (mdns) {
+        if (hp_mdns_srv_start(&g_mdns, &g_hub.sched, &mo, g_tbl.hub_id, hp_ws_port(srv), HP_PROTO_VERSION) < 0)
+            fprintf(stderr, "hub: mdns disabled (%s)\n", g_mdns.err);
+    }
+    hp_ws_set_extra_fds(srv, rf_fds, rf);
     hp_ws_set_timeouts(srv, (int)auth_ms, (int)idle_ms);
     printf("listening port=%u\n", hp_ws_port(srv));
+    if (g_mdns.fd >= 0) printf("mdns port=%u\n", hp_mdns_srv_port(&g_mdns));
     fflush(stdout);
     while (!g_stop) {
         int wait = hub_next_timeout_ms(&g_hub); /* timers never sleep: they shorten the poll */
         if (wait < 0 || wait > 200) wait = 200;
         hp_ws_poll(srv, wait);
         hub_pump_rf(&g_hub);
+        hp_mdns_srv_service(&g_mdns);
         hub_run_timers(&g_hub);
     }
+    hp_mdns_srv_stop(&g_mdns); /* goodbye (TTL 0) */
     hub_shutdown(&g_hub);
     hp_ws_close(srv);
     hp_rf_pair_destroy(rf);
