@@ -175,7 +175,7 @@ def test_real_schema_has_phase2_messages():
     assert names == {
         "hello", "hello_ack", "error", "ping", "pong", "set_config", "config_ack",
         "command", "command_result", "key_event", "state_update", "page_push", "battery",
-        "device_state", "tile_update",
+        "device_state", "tile_update", "activity_list",
     }  # fmt: skip
 
 
@@ -212,6 +212,21 @@ def test_hello_ack_config_hash_optional():
     assert ns["decode_ws"](ns["encode_ws"](T.HELLO_ACK, withh)) == (T.HELLO_ACK, withh)
     with pytest.raises(ns["ProtoError"]):
         ns["encode_ws"](T.HELLO_ACK, {"hub_id": "h", "config_hash": 5})
+
+
+def test_activity_list_is_ws_only_with_optional_hash():
+    ns = _real_py()
+    T = ns["MsgType"]
+    assert ns["MESSAGES"]["activity_list"][1:] == (
+        "ws",
+        (("activities", "json", False), ("config_hash", "str", True)),
+    )  # fmt: skip
+    d = {"activities": ["TV", "Music"], "config_hash": "9198e550"}
+    assert ns["decode_ws"](ns["encode_ws"](T.ACTIVITY_LIST, d)) == (T.ACTIVITY_LIST, d)
+    d = {"activities": []}
+    assert ns["decode_ws"](ns["encode_ws"](T.ACTIVITY_LIST, d)) == (T.ACTIVITY_LIST, d)
+    with pytest.raises(ns["ProtoError"]):
+        ns["encode_ws"](T.ACTIVITY_LIST, {"config_hash": "x"})
 
 
 def test_device_state_round_trip():

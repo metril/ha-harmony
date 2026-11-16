@@ -164,3 +164,18 @@ def test_tile_update_shows_in_layout(rf_path, start_remote):
     tile = json.loads(out)["widgets"][1]
     assert tile["text"] == "é" * 15
     assert err.count("ignored tile_update") == 1 and "unknown page 8" in err
+
+
+async def test_tile_update_via_hub_command(hub_rf, start_remote):
+    """Real hub: command hub/tile_update is forwarded over RF and lands on the remote's tile."""
+    r = start_remote(hub_rf.rf, "--dump-layout", "--settle-ms", "400")
+    r.wait_attached()
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_rf.url) as ws:
+        await hello(ws)
+        await push(ws, PAGE)
+        args = {"remote": 1, "page": 9, "tile": 3, "text": "21.5\u00b0C"}
+        res = await call(ws, "command", {"device": "hub", "command": "tile_update", "args": args}, id=6)
+        assert res["t"] == "command_result" and res["d"]["ok"] is True and res["id"] == 6
+    code, out, err = finish(r)
+    assert code == 0, err
+    assert json.loads(out)["widgets"][1]["text"] == "21.5\u00b0C"

@@ -29,7 +29,7 @@ async def test_mapped_key_hits_ir_sink_and_ws(hub_rf, run_remote):
         assert res.returncode == 0, res.stderr
         ke = await recv(ws)
         assert ke["t"] == "key_event" and ke["d"] == {"remote": 1, "key": 2, "action": 0}
-        assert read_lines(hub_rf, 1) == ["ir port=3 n=4 pronto=0000 006d 0000 0000"]
+        assert read_lines(hub_rf, 1) == ["ir port=3 hz=38029 n=2 us=631,631"]
 
 
 async def test_unmapped_key_emits_only_key_event(hub_rf, run_remote):
@@ -43,7 +43,7 @@ async def test_unmapped_key_emits_only_key_event(hub_rf, run_remote):
         # no sink call for key 99: the next sink line belongs to the following (mapped) press
         assert run_remote(hub_rf.rf, "--press", "2").returncode == 0
         assert (await recv(ws))["d"]["key"] == 2
-        assert read_lines(hub_rf, 1) == ["ir port=3 n=4 pronto=0000 006d 0000 0000"]
+        assert read_lines(hub_rf, 1) == ["ir port=3 hz=38029 n=2 us=631,631"]
 
 
 async def test_page_push_roundtrip(hub_rf, start_remote_dump):

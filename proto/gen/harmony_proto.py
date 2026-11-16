@@ -30,6 +30,7 @@ class MsgType(IntEnum):
     BATTERY = 13
     DEVICE_STATE = 14
     TILE_UPDATE = 15
+    ACTIVITY_LIST = 16
 
 
 ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'hold': 2}}
@@ -51,6 +52,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'battery': (13, 'both', (('remote', 'u8', False), ('percent', 'u8', False), ('millivolts', 'u16', False), )),
     'device_state': (14, 'ws', (('device', 'str', False), ('power', 'bool', False), ('input', 'str', True), )),
     'tile_update': (15, 'rf', (('remote', 'u8', False), ('page', 'u8', False), ('tile', 'u8', False), ('text', 'str', False), )),
+    'activity_list': (16, 'ws', (('activities', 'json', False), ('config_hash', 'str', True), )),
 }
 
 _INT_RANGES = {

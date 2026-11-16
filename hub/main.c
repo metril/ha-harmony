@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/un.h>
 
 #include "hub/hp_errors.h"
 #include "hub/hub_handlers.h"
@@ -99,6 +100,11 @@ int main(int argc, char **argv) {
     g_hub.sinks = hp_sim_sinks(&g_sim);
     g_hub.cache_path = cache;
     hp_rf_transport *rf = NULL;
+    if (rf_path && strlen(rf_path) >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
+        fprintf(stderr, "hub: --rf path is %zu bytes; a unix socket path must be shorter than %zu bytes (sun_path)\n",
+                strlen(rf_path), sizeof(((struct sockaddr_un *)0)->sun_path));
+        return 2;
+    }
     if (rf_path) {
         if (hp_rf_pair_create(rf_path, &rf) < 0) {
             fprintf(stderr, "hub: cannot listen on RF socket %s\n", rf_path);
@@ -130,8 +136,11 @@ int main(int argc, char **argv) {
     printf("listening port=%u\n", hp_ws_port(srv));
     fflush(stdout);
     while (!g_stop) {
-        hp_ws_poll(srv, 200);
+        int wait = hub_next_timeout_ms(&g_hub); /* timers never sleep: they shorten the poll */
+        if (wait < 0 || wait > 200) wait = 200;
+        hp_ws_poll(srv, wait);
         hub_pump_rf(&g_hub);
+        hub_run_timers(&g_hub);
     }
     hp_ws_close(srv);
     hp_rf_pair_destroy(rf);

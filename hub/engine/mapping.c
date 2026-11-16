@@ -176,6 +176,15 @@ static int parse_ir_v2(hp_map_t *m, const cJSON *j, hp_action_t *a) {
     return check_ir(m, a, "action");
 }
 
+int hp_map_parse_ir(hp_map_t *m, const cJSON *j, hp_action_t *a) {
+    if (!m || !j || !a) return INVAL;
+    m->format = 2;
+    m->current = -1;
+    m->err[0] = '\0';
+    memset(a, 0, sizeof *a);
+    return parse_ir_v2(m, j, a);
+}
+
 static const hp_device_t *find_dev(const hp_map_t *m, const char *id, int *idx) {
     for (int i = 0; i < m->ndevs; i++)
         if (!strcmp(m->devs[i].id, id)) {

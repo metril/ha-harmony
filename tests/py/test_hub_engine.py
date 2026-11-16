@@ -16,13 +16,13 @@ CONFIG = {
     "activities": [
         {
             "name": "TV",
-            "keys": {"2": {"type": "ir", "port_mask": 3, "pronto": [0, 109, 0, 0]}},
+            "keys": {"2": {"type": "ir", "port_mask": 3, "pronto": [0, 109, 1, 0, 24, 24]}},
             "steps": [
-                {"type": "ir", "port_mask": 1, "pronto": [0, 1, 2, 3]},
+                {"type": "ir", "port_mask": 1, "pronto": [0, 109, 1, 0, 10, 20]},
                 {"type": "bt", "usage": 233},
-                {"type": "ir", "port_mask": 4, "pronto": [0, 9, 9, 9, 9]},
+                {"type": "ir", "port_mask": 4, "pronto": [0, 109, 1, 0, 30, 40]},
             ],
-            "off": [{"type": "ir", "port_mask": 255, "pronto": [0, 7, 7, 7]}],
+            "off": [{"type": "ir", "port_mask": 255, "pronto": [0, 109, 1, 0, 50, 60]}],
         },
         {"name": "Music", "steps": [{"type": "none"}]},
     ],
@@ -84,16 +84,16 @@ async def test_config_activity_and_sink_order(hub_process):
         st = await recv(ws)
         assert st["t"] == "state_update" and st["d"] == {"activity": 0, "power": True}
         assert read_lines(hub_process, 4) == [
-            "ir port=1 n=4 pronto=0000 0001 0002 0003",
+            "ir port=1 hz=38029 n=2 us=263,526",
             "bt usage=00e9 down=1",
             "bt usage=00e9 down=0",
-            "ir port=4 n=5 pronto=0000 0009 0009 0009 0009",
+            "ir port=4 hz=38029 n=2 us=789,1052",
         ]
         r = await call(ws, "command", {"device": "hub", "command": "power_off"}, id=4)
         assert r["d"]["ok"] is True
         st = await recv(ws)
         assert st["d"] == {"activity": 0, "power": False}
-        assert read_lines(hub_process, 1) == ["ir port=255 n=4 pronto=0000 0007 0007 0007"]
+        assert read_lines(hub_process, 1) == ["ir port=255 hz=38029 n=2 us=1315,1578"]
         r = await call(
             ws,
             "command",
@@ -125,6 +125,7 @@ async def test_state_update_reaches_other_clients_only_when_authed(hub_process):
         )
         assert (await recv(a))["t"] == "command_result"
         assert (await recv(a))["d"] == {"activity": 1, "power": True}
+        assert (await recv(b))["t"] == "activity_list"  # pushed to the other clients after set_config
         assert (await recv(b))["d"] == {"activity": 1, "power": True}
         await asyncio.sleep(0.2)
         await lurker.send_str(env("ping", id=9))  # not authenticated: never received a broadcast
@@ -157,7 +158,7 @@ async def test_malformed_config_keeps_old_map(hub_rf, run_remote):
         assert run_remote(hub_rf.rf, "--press", "2", "--remote", "1").returncode == 0
         ke = await recv(ws)
         assert ke["t"] == "key_event" and ke["d"] == {"remote": 1, "key": 2, "action": 0}
-        assert read_lines(hub_process, 1) == ["ir port=3 n=4 pronto=0000 006d 0000 0000"]
+        assert read_lines(hub_process, 1) == ["ir port=3 hz=38029 n=2 us=631,631"]
 
 
 async def test_unmapped_key_still_emits(hub_rf, run_remote):

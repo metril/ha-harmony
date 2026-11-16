@@ -86,6 +86,11 @@ static const hp_field_desc_t hp_fields_tile_update[] = {
     {"text", HP_T_STR, false, NULL},
 };
 
+static const hp_field_desc_t hp_fields_activity_list[] = {
+    {"activities", HP_T_JSON, false, NULL},
+    {"config_hash", HP_T_STR, true, NULL},
+};
+
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
     {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 4, hp_fields_hello_ack},
@@ -102,6 +107,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"battery", HP_MSG_BATTERY, HP_TRANSPORT_BOTH, 3, hp_fields_battery},
     {"device_state", HP_MSG_DEVICE_STATE, HP_TRANSPORT_WS, 3, hp_fields_device_state},
     {"tile_update", HP_MSG_TILE_UPDATE, HP_TRANSPORT_RF, 4, hp_fields_tile_update},
+    {"activity_list", HP_MSG_ACTIVITY_LIST, HP_TRANSPORT_WS, 2, hp_fields_activity_list},
 };
 
 const hp_msg_desc_t *hp_msg_desc(hp_msg_type_t type)

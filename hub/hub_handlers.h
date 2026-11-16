@@ -23,6 +23,19 @@
  *                     than 15 fragments; nothing is sent), "no_remote" (no
  *                     remote attached; nothing is sent) or "rf_error" (the link
  *                     failed mid-message). Always exactly one reply.
+ *   command        -> more verbs (device "hub"):
+ *                       ir_send     args = IR action object, same forms/validation as format-2
+ *                                   config ({proto,addr,cmd} | {raw:{hz,us}} | {pronto:"hex"},
+ *                                   optional port_mask); sends it once. Bad action ->
+ *                                   command_result {ok:false, message}.
+ *                       tile_update args {remote,page,tile,text} (u8,u8,u8,str<=255) -> forwarded
+ *                                   to the remote over RF as tile_update. Replies like page_push
+ *                                   (command_result ok / error no_remote | rf_error | too_big).
+ *   hello_ack      -> also config_hash (8 lowercase hex chars, CRC-32 of the loaded config text;
+ *                     omitted when no config is loaded).
+ *   set_config     -> after the config_ack, every OTHER authenticated client gets
+ *                     activity_list {activities:[names], config_hash?}; if the running activity
+ *                     changed by the reload, everyone gets a state_update.
  *   state_update   -> also sent over RF (best effort) whenever the activity
  *                     changes, if a remote is attached.
  *   from RF        -> hub_pump_rf: frames (cap 32) are reassembled; key_event
@@ -34,7 +47,9 @@
 
 #include <stdbool.h>
 
+#include "hub/engine/irout.h"
 #include "hub/engine/mapping.h"
+#include "hub/engine/sched.h"
 #include "hub/rf/framing.h"
 #include "hub/net/jsonrpc.h"
 #include "hub/net/ws.h"
@@ -49,9 +64,19 @@ typedef struct {
     bool pending_power;
     hp_rf_asm_t rf_asm;     /* remote->hub reassembly */
     uint8_t rf_seq;         /* hub->remote message sequence */
+    bool pending_list;      /* an activity_list to broadcast after the reply */
+    const hp_session_t *list_skip; /* ...to everyone but the set_config sender */
+    hp_sched_t sched;       /* timers: key repeat, SIRC copies */
+    hp_irout_t irout;
 } hub_ctx_t;
 
+/* Initialises the context with a CLOCK_MONOTONIC millisecond clock for the timers. */
 void hub_ctx_init(hub_ctx_t *);
+/* Replaces the timer clock (tests). Call before any timer is scheduled. */
+void hub_set_clock(hub_ctx_t *, hp_clock_fn, void *);
+/* Poll-loop helpers: ms until the next timer (-1 none), and run whatever is due. Never block. */
+int hub_next_timeout_ms(const hub_ctx_t *);
+void hub_run_timers(hub_ctx_t *);
 /* Fills tbl->ctx and the handler/activities hooks (token etc. left to caller). */
 void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx);
 /* Sends the current state_update (id 0) to one connection; used right after a successful hello so

@@ -109,3 +109,13 @@ messages:
       - {name: page, type: u8}
       - {name: tile, type: u8}
       - {name: text, type: str}
+
+  # Pushed to every authenticated client except the set_config sender after a successful
+  # set_config, so clients learn the new activity list without reconnecting. Same content as
+  # hello_ack.activities / hello_ack.config_hash (array index == state_update.activity).
+  - name: activity_list
+    code: 16
+    transport: ws
+    fields:
+      - {name: activities, type: json}
+      - {name: config_hash, type: str, optional: true}

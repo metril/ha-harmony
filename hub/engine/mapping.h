@@ -68,6 +68,7 @@
 #include "hub/engine/irout.h"
 #include "hub/io/sinks.h"
 #include "proto/gen/harmony_proto.h"
+#include "vendor/cjson/cJSON.h"
 
 #define HP_MAP_MAX_JSON 131072
 #define HP_MAP_MAX_DEVICES 16
@@ -168,6 +169,12 @@ int hp_map_load(hp_map_t *, const char *json, size_t len);
 const char *hp_map_last_error(const hp_map_t *);
 /* Lowercase hex CRC-32 of the loaded config text into out[9]; false (out = "") if none loaded. */
 bool hp_map_hash_hex(const hp_map_t *, char out[9]);
+
+/* Parses one ad-hoc format-2 IR action object ({proto,addr,cmd} | {raw} | {pronto}, optional
+ * port_mask) into *a, storing its data in `scratch`'s pool (a zeroed hp_map_t; reuse of one
+ * scratch across calls is not supported) and validating it with the encoder. 0 or a negative
+ * error with the reason in hp_map_last_error(scratch). Apply it with hp_map_apply(scratch, ..). */
+int hp_map_parse_ir(hp_map_t *scratch, const cJSON *j, hp_action_t *a);
 
 /* Looks `key_code` up in activity `activity` first (NULL = skip), then the
  * global map. Returns 1 and fills *out if mapped; 0 and *out = {HP_ACT_NONE}
