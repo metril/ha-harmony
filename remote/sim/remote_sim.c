@@ -1,14 +1,15 @@
 /* Headless remote simulator: the remote end of the simulated RF link.
  *
- * usage: remote_sim --rf PATH (--press KEY | --hold KEY,MS | --dump-page | --dump-layout | --tap X,Y)
+ * usage: remote_sim --rf PATH (--press KEY_CODE | --hold KEY_CODE,MS | --dump-page | --dump-layout | --tap X,Y)
  *                   [--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N]
  *                   [--hold-interval-ms N]
  *
  *   --rf PATH        Unix SOCK_SEQPACKET socket of `hub --sim --rf PATH` (required).
- *   --press KEY      Connect, send one key_event {remote, key, action} (remote
- *                    default 1, action default 0 = press), exit 0. KEY is a
- *                    key code 0..255.
- *   --hold KEY,MS    Connect, send key_event PRESS, then a HOLD every --hold-interval-ms
+ *   --press KEY_CODE Connect, send one key_event {remote, key, action} (remote
+ *                    default 1, action default 0 = press), exit 0. KEY_CODE is a
+ *                    NUMERIC key code 0..255 (not a name: see KEY_CODES in
+ *                    custom_components/ha_harmony/const.py; vol_up is its number).
+ *   --hold KEY_CODE,MS Connect, send key_event PRESS, then a HOLD every --hold-interval-ms
  *                    (default HP_IROUT_HOLD_INTERVAL_MS = 400, the real remote's period) for
  *                    MS milliseconds of holding, then RELEASE; exit 0. MS 0 = PRESS + RELEASE.
  *   --dump-page      Connect, print "remote_sim: attached" to stderr, wait for
@@ -53,8 +54,9 @@
 #define REMOTE_RF_CAP 32 /* remote->hub total frame size */
 
 static int usage(void) {
-    fprintf(stderr, "usage: remote_sim --rf PATH (--press KEY | --hold KEY,MS | --dump-page | --dump-layout | --tap X,Y) "
-                    "[--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N] [--hold-interval-ms N]\n");
+    fprintf(stderr, "usage: remote_sim --rf PATH (--press KEY_CODE | --hold KEY_CODE,MS | --dump-page | --dump-layout | --tap X,Y) "
+                    "[--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N] [--hold-interval-ms N]\n"
+                    "KEY_CODE is a number 0..255 (see KEY_CODES in custom_components/ha_harmony/const.py), not a key name\n");
     return 2;
 }
 

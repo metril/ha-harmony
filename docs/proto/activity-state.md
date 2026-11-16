@@ -101,5 +101,5 @@ while the key stays down, then RELEASE. The hub repeats the key's IR frame from 
 until RELEASE. The 2 s safety cap (`HP_IROUT_HOLD_CAP_MS`) is measured from the **most recent**
 HOLD (each HOLD restarts it): a real long hold keeps repeating, a lost RELEASE (or a dead
 remote) stops the repeats within 2 s of the last HOLD, and later stray HOLDs do not resume them
-(a new PRESS is needed). `remote_sim --hold KEY,MS [--hold-interval-ms N]` emits exactly that
+(a new PRESS is needed). `remote_sim --hold KEY_CODE,MS [--hold-interval-ms N]` (KEY_CODE is the numeric key code) emits exactly that
 sequence.
