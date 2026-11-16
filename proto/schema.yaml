@@ -1,0 +1,93 @@
+# Single source of truth for hub <-> HA (ws) and hub <-> remote (rf) messages.
+# Wire types: u8 u16 u32 i32 bool str bytes enum:<name> json (json: ws-only).
+# ws envelope: {"v": 1, "id": <u32>, "t": "<name>", "d": {...}}
+version: 1
+
+enums:
+  key_action: {press: 0, release: 1, hold: 2}
+
+messages:
+  - name: hello
+    code: 1
+    transport: ws
+    fields:
+      - {name: token, type: str}
+      - {name: client, type: str, optional: true}
+
+  - name: hello_ack
+    code: 2
+    transport: ws
+    fields:
+      - {name: hub_id, type: str}
+      - {name: fw_version, type: str, optional: true}
+      - {name: activities, type: json, optional: true}
+
+  - name: error
+    code: 3
+    transport: ws
+    fields:
+      - {name: code, type: str}
+      - {name: message, type: str}
+      - {name: ref_id, type: u32, optional: true}
+
+  - {name: ping, code: 4, transport: ws, fields: []}
+  - {name: pong, code: 5, transport: ws, fields: []}
+
+  - name: set_config
+    code: 6
+    transport: ws
+    fields:
+      - {name: config, type: json}
+
+  - name: config_ack
+    code: 7
+    transport: ws
+    fields:
+      - {name: ok, type: bool}
+      - {name: message, type: str, optional: true}
+
+  - name: command
+    code: 8
+    transport: ws
+    fields:
+      - {name: device, type: str}
+      - {name: command, type: str}
+      - {name: args, type: json, optional: true}
+
+  - name: command_result
+    code: 9
+    transport: ws
+    fields:
+      - {name: ok, type: bool}
+      - {name: message, type: str, optional: true}
+
+  - name: key_event
+    code: 10
+    transport: both
+    fields:
+      - {name: remote, type: u8}
+      - {name: key, type: u8}
+      - {name: action, type: "enum:key_action"}
+
+  - name: state_update
+    code: 11
+    transport: both
+    fields:
+      - {name: activity, type: u8}
+      - {name: power, type: bool}
+
+  - name: page_push
+    code: 12
+    transport: both
+    fields:
+      - {name: remote, type: u8}
+      - {name: page, type: u8}
+      - {name: data, type: bytes}
+
+  - name: battery
+    code: 13
+    transport: rf
+    fields:
+      - {name: remote, type: u8}
+      - {name: percent, type: u8}
+      - {name: millivolts, type: u16}
