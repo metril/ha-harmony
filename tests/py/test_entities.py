@@ -11,6 +11,7 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import async_fire_time_changed  # noqa: F401
 
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
+from custom_components.ha_harmony.const import OFF_OPTION
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
@@ -137,7 +138,10 @@ async def test_hub_restart_recovers_without_duplicates(hass, start_hub, fast_cli
 
     start_hub("--cache", cache, port=port)  # restart on the same port; config restored from cache
     await _until(hass, lambda: _state(hass, SELECT) not in (STATE_UNAVAILABLE, None))
-    assert hass.states.get(SELECT).attributes["options"] == ["TV", "Music", "Off"]
+    # the restarted hub runs nothing: the stale "TV" must be replaced by the pushed live state
+    await _until(hass, lambda: _state(hass, SELECT) == OFF_OPTION)
+    assert _state(hass, REMOTE) == STATE_OFF
+    assert hass.states.get(SELECT).attributes["options"] == ["TV", "Music", OFF_OPTION]
     after = {
         e.entity_id: e.unique_id for e in er.async_entries_for_config_entry(reg, entry.entry_id)
     }
