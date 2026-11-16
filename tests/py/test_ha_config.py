@@ -19,6 +19,7 @@ from test_hub_engine import read_lines
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
 from custom_components.ha_harmony import const
 from custom_components.ha_harmony.coordinator import tile_text
+from custom_components.ha_harmony.harmony_proto import MsgType
 from proto import rf_codec
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
@@ -245,22 +246,23 @@ async def test_reload_updates_input_options_and_device_names(hass, hub_rf, write
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def _running_activity_survives(hass, hub_rf, write_yaml, edit, options, running):
+async def _running_activity_survives(
+    hass, hub_rf, write_yaml, edit, options, running, start="Télé", power="dev_tv_power"
+):
     path = write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
-    await coord.async_start_activity("Télé")
-    await until(hass, lambda: hass.states.get(SELECT).state == "Télé")
+    await coord.async_start_activity(start)
+    await until(hass, lambda: hass.states.get(SELECT).state == start)
     path.write_text(edit(BASE), encoding="utf-8")
     await hass.services.async_call(const.DOMAIN, "reload_config", {}, blocking=True)
-    await hass.async_block_till_done()
-    await asyncio.sleep(0.3)  # the hub's state_update after the reload
-    await hass.async_block_till_done()
+    # the hub's state_update after the reload: wait for the options, then for the state to settle
+    await until(hass, lambda: hass.states.get(SELECT).attributes["options"] == options)
+    await until(hass, lambda: hass.states.get(SELECT).state == running)
     assert hass.states.get(SELECT).attributes["options"] == options
-    assert hass.states.get(SELECT).state == running
     remote = hass.states.get("remote.harmony_hub_sim_hub")
     assert remote.state == "on" and remote.attributes["current_activity"] == running
-    assert val(hass, "binary_sensor", "dev_tv_power") == "on"  # the hub still runs it
+    assert val(hass, "binary_sensor", power) == "on"  # the hub still runs it
     await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -284,6 +286,55 @@ async def test_reorder_and_rename_running_activity_keeps_it_current(hass, hub_rf
 
     await _running_activity_survives(
         hass, hub_rf, write_yaml, edit, ["Music", "Cinema", "Off"], "Cinema"
+    )
+
+
+async def test_state_update_before_activity_list_is_kept(hass, hub_rf, write_yaml):
+    """The hub's re-report may beat the new activity list: the index is kept, not dropped."""
+    write_yaml(BASE)
+    entry = await setup(hass, hub_rf)
+    coord = entry.runtime_data
+    old = list(coord.activities)
+    coord._on_push(
+        MsgType.STATE_UPDATE,
+        {"activity": len(old) + 1, "power": True},
+    )
+    assert coord.current_activity is None  # unknown yet, never a wrong name
+    coord._set_activities([*old, "X", "Y"])
+    assert coord.current_activity == "Y"
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+_EXTRA = "  - {id: extra, name: Extra, devices: [{device: tv}]}\n"
+_EXTRA2 = "  - {id: extra2, name: Extra2, devices: [{device: tv}]}\n"
+_MUSIC = "  - {id: music, name: Music, devices: [{device: amp}]}\n"
+
+
+# two inserted: the re-reported index (3) is out of range of the OLD list (Télé, Music, Off)
+async def test_insert_activities_before_running_one_keeps_it_current(hass, hub_rf, write_yaml):
+    await _running_activity_survives(
+        hass,
+        hub_rf,
+        write_yaml,
+        lambda t: t.replace(_MUSIC, _EXTRA + _EXTRA2 + _MUSIC),
+        ["Télé", "Extra", "Extra2", "Music", "Off"],
+        "Music",
+        start="Music",
+        power="dev_amp_power",
+    )
+
+
+async def test_remove_activity_before_running_one_keeps_it_current(hass, hub_rf, write_yaml):
+    gone = "  - {id: watch, name: Télé, devices: [{device: tv, input: hdmi1}]}\n"
+    await _running_activity_survives(
+        hass,
+        hub_rf,
+        write_yaml,
+        lambda t: t.replace(gone, ""),
+        ["Music", "Off"],
+        "Music",
+        start="Music",
+        power="dev_amp_power",
     )
 
 
@@ -606,7 +657,7 @@ async def test_hub_rejection_raises_repair_issue(hass, fake_hub, write_yaml, cap
     assert entry.runtime_data.last_error == "bad thing"
     assert ir.async_get(hass).async_get_issue(const.DOMAIN, f"config_rejected_{HUB_ID}")
     assert "rejected the config: bad thing" in caplog.text
-    assert "state_update for activity index 7" in caplog.text  # not silently dropped
+    assert "hub reports activity index 7" in caplog.text  # not silently dropped
     assert hass.states.get(SELECT).state == "Off"
     await hass.config_entries.async_unload(entry.entry_id)
 
