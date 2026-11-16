@@ -75,6 +75,10 @@ pages:
 - **Action** in `keys`, `steps`, `off` and page buttons: an IR action; `{device, command}` (a command,
   `power_on`/`power_off`); `{device, input}`; `{activity: <id>|"off"}` (not in `steps`/`off`);
   `{event: name}` (HA only); `{bt: usage}`; `{none: true}`.
+- **Device command names** are free text (max 31 bytes) but `power_on`, `power_off` and names starting with
+  `input_` are reserved for the built-ins and rejected. Home Assistant's device buttons and
+  `remote.send_command` use the hub's `device_command` verb, so a toggle device is never toggled the
+  wrong way.
 - **Keys** use the symbolic names in `KEY_CODES` (`custom_components/ha_harmony/const.py`, provisional) or
   `key_<0..127>`. Event entities report that name; page widgets report `tap_<widget id>`.
 - **Page widgets**: `button` (needs `action`), `tile` (shows the state of `entity`, updated on change),
