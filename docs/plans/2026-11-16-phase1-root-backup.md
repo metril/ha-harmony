@@ -145,8 +145,30 @@ off the un-rooted hub over its local WebSocket API —
       physical IR timings live on hub flash (and in Logitech's cloud), so **the IR extraction below
       depends on the Task 5 flash dump** — it cannot be done pre-root. Also captured for later phases:
       `powerFeatures`, `controlGroup`, `sequence`, `Transport`/`DongleRFID` per device.
-- [ ] Remaining: mine the `/data` (mtd4) image from Task 5 for the IR waveform database and emit
-      `ir_codes.json` with real payloads, keyed by the command names already captured above.
+- [x] **Done 2026-11-16.** `tools/extract_stock.py` mines the images. The database is in mtd4
+      (`04_data.img`, jffs2, unpacked with `jefferson`) at `data/resources/` —
+      `/mnt/data/data/resources/` on the hub: `DeviceList.json` (146 commands as symbolic key codes)
+      plus `ProtocolList.json` (the protocol templates those expand with: carrier, header, bit-0/bit-1
+      mark/space pairs, trailer, `TotalLength`). 4 IR protocols: Toshiba 32 Bit, GoVideoO1 32 Bit,
+      MemorexO1 32 Bit, Saitek 11 Bit. `CD_<id>.json` and `index.json` hold only profile URIs/etags.
+      mtd5 (`cache`) holds only `ota-update.log`.
+- [x] **Coverage: 133 commands → 85 real IR, 48 non-IR, 0 missing.** Samsung TV 66/66 IR,
+      Audioengine 4/4, J-Tech 9/9, KVM 1 6/6; **NVIDIA's 32 are USB HID usage codes** (e.g.
+      `07000027`, protocol `HID 16 Bit`) needing the Bluetooth HID path, and **Roku's 16 are ECP key
+      names over IP** (`G:Roku IP:(Key)(Home):3`) — no Roku IR exists on this hub at all. This
+      confirms the design's split: BT HID for Shield, network devices via HA.
+- [x] Decoder cross-checked independently against `tests/py/ir_ref.py`: Samsung `PowerToggle`
+      (`0xE0E040BF`, GoVideoO1 32 Bit) decodes **bit-for-bit identical** to `ir_ref.samsung32(0x07,
+      0x02)`. Audioengine `Mute` (`0x00BFC03F`, Toshiba 32 Bit) has an **identical bit pattern** to
+      `ir_ref.nec_like("necext", 0xFD00, 0xFC03)` but the hub's own timing constants
+      (8990/4490/568/552/1662 vs the textbook 9000/4500/562/562/1687), and the hub gives 37900 Hz
+      where our encoder assumed 38000. **Take carrier and timings from the hub's `ProtocolList`, not
+      from textbook constants** — these are what the real devices were trained against.
+- [x] Output: `backups/phase1/hub/<ts>/extracted/{ir_codes.json,coverage.json}` (gitignored). 0
+      warnings, nothing undecoded. `Raw` is null for every command, so nothing was learned-raw.
+- [ ] Not decoded: the squashfs in `03_root.img` (LZMA variant the host `unsquashfs` and `7z` both
+      refuse). Not needed — the IR data is wholly in mtd4 — but it may hold default copies of the same
+      resources, and it is the one partition we cannot yet read inside.
 
 - [ ] `tools/extract_stock.py`: stock tar / loop-mounted image → `devices.json`, `activities.json`,
       `ir_codes.json` under `backups/phase1/hub/<ts>/extracted/`. Unknown IR encoding is recorded raw
