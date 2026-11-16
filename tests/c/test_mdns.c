@@ -1,6 +1,7 @@
 #include "ctest_assert.h"
 #include "hub/hp_errors.h"
 #include "hub/net/mdns.h"
+#include "hub/net/mdns_srv.h"
 
 #define IP 0x0A010203u /* 10.1.2.3 */
 
@@ -336,6 +337,18 @@ static void test_legacy_echo(void) {
     CT_EQ(r16(buf + 4), 0);
 }
 
+static void test_on_link(void) {
+    uint32_t me = 0x0A0A4D7E, m24 = 0xFFFFFF00; /* 198.51.100.126/24 */
+    CT_CHECK(hp_mdns_on_link(0x0A0A4D01, me, m24));
+    CT_CHECK(hp_mdns_on_link(me, me, m24));
+    CT_CHECK(!hp_mdns_on_link(0x0A0A4E01, me, m24)); /* neighbouring /24 */
+    CT_CHECK(!hp_mdns_on_link(0x08080808, me, m24)); /* off-link / spoofed */
+    CT_CHECK(hp_mdns_on_link(0x7F000001, me, m24));  /* loopback always */
+    CT_CHECK(hp_mdns_on_link(0x7F010203, me, m24));
+    CT_CHECK(!hp_mdns_on_link(0x08080808, me, 0xFFFFFFFFu)); /* unknown mask: fail closed */
+    CT_CHECK(!hp_mdns_on_link(0, me, m24));
+}
+
 int main(void) {
     CT_EQ(hp_mdns_svc_init(&S, "sim-hub", 8099, IP, 1), 0);
     CT_RUN(test_questions);
@@ -346,5 +359,6 @@ int main(void) {
     CT_RUN(test_build);
     CT_RUN(test_max_name_build);
     CT_RUN(test_legacy_echo);
+    CT_RUN(test_on_link);
     return CT_DONE();
 }

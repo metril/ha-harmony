@@ -61,6 +61,26 @@ static int detect_ip(uint32_t *out) {
     return rc;
 }
 
+int hp_mdns_on_link(uint32_t src, uint32_t if_addr, uint32_t mask) {
+    if ((src >> 24) == 127) return 1;
+    return src != 0 && (src & mask) == (if_addr & mask);
+}
+
+/* Netmask (host order) of the interface owning `ip`; all-ones (fail closed) if not found. */
+static uint32_t find_mask(uint32_t ip) {
+    uint32_t m = 0xFFFFFFFFu;
+    struct ifaddrs *ifa, *p;
+    if (getifaddrs(&ifa) < 0) return m;
+    for (p = ifa; p; p = p->ifa_next) {
+        if (!p->ifa_addr || !p->ifa_netmask || p->ifa_addr->sa_family != AF_INET) continue;
+        if (ntohl(((struct sockaddr_in *)p->ifa_addr)->sin_addr.s_addr) != ip) continue;
+        m = ntohl(((struct sockaddr_in *)p->ifa_netmask)->sin_addr.s_addr);
+        break;
+    }
+    freeifaddrs(ifa);
+    return m;
+}
+
 static int parse_dest(const char *s, struct sockaddr_in *out) {
     char ip[32];
     const char *c = strchr(s, ':');
@@ -163,6 +183,7 @@ int hp_mdns_srv_start(hp_mdns_srv_t *s, hp_sched_t *sched, const hp_mdns_opts_t 
     socklen_t bl = sizeof b;
     if (getsockname(s->fd, (struct sockaddr *)&b, &bl) < 0) return fail(s, "getsockname");
     s->port = ntohs(b.sin_port);
+    s->mask = find_mask(ip);
     int fl = fcntl(s->fd, F_GETFL, 0);
     if (fl < 0 || fcntl(s->fd, F_SETFL, fl | O_NONBLOCK) < 0) return fail(s, "O_NONBLOCK");
     (void)fcntl(s->fd, F_SETFD, FD_CLOEXEC);
@@ -181,6 +202,10 @@ void hp_mdns_srv_service(hp_mdns_srv_t *s) {
         socklen_t fl = sizeof from;
         ssize_t n = recvfrom(s->fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
         if (n < 0) return; /* EAGAIN / EINTR / error: nothing more now */
+        /* Off-link sources (spoofed reflection victims) get nothing, RFC 6762 s11. */
+        if (fl < sizeof from || from.sin_family != AF_INET ||
+            !hp_mdns_on_link(ntohl(from.sin_addr.s_addr), s->svc.ipv4, s->mask))
+            continue;
         hp_mdns_query_t q;
         if (hp_mdns_parse_query(&s->svc, buf, (size_t)n, &q) < 0 || !q.want) continue;
         int legacy = ntohs(from.sin_port) != HP_MDNS_PORT; /* RFC 6762 s6.7 */
