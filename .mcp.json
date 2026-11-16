@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "home-assistant": {
+      "type": "http",
+      "url": "${HA_MCP_URL}"
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "chrome-devtools-mcp@latest",
+        "--headless=false",
+        "--isolated=false",
+        "--browser-url=http://127.0.0.1:9222"
+      ],
+      "env": {}
+    }
+  }
+}
