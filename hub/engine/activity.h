@@ -111,6 +111,13 @@ int hp_actsm_reported(const hp_actsm_t *);
 /* Correct the tracked state without sending IR. power: -1 keep, 0/1. input: NULL keep, ""
  * unknown, else an input name of that device. -HP_E_INVAL for an unknown device/input. */
 int hp_actsm_set_device(hp_actsm_t *, const char *device, int power, const char *input);
+/* Sends a device command of the config through the deferrable (line-owner) path and updates the
+ * tracked state itself. command: a YAML command (no state change), "power_on"/"power_off" (a
+ * toggle device is sent NOTHING when already in that state; discrete codes are always sent) or
+ * "input_<name>" (also marks the device on). -HP_E_NOENT unknown device, -HP_E_INVAL unknown
+ * command/input or power without power codes, -HP_E_BUSY while a transition runs, else the
+ * send error (state untouched). */
+int hp_actsm_device_command(hp_actsm_t *, const char *device, const char *command);
 const hp_devstate_t *hp_actsm_device(const hp_actsm_t *, size_t idx); /* NULL if out of range */
 
 /* State file: "HPST" | ver u8 | config hash u32 BE | activity id (u8 len + bytes, len 0 = none)

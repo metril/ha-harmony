@@ -260,6 +260,20 @@ static int cmd_set_device_state(hub_ctx_t *h, uint32_t id, const cJSON *args, ch
     return reply_ok(id, "command_result", true, NULL, reply, cap, len);
 }
 
+static int cmd_device_command(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply, size_t cap, size_t *len) {
+    const cJSON *dv = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "device") : NULL;
+    const cJSON *cm = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "command") : NULL;
+    if (!cJSON_IsString(dv) || !cJSON_IsString(cm))
+        return reply_ok(id, "command_result", false, "args need device and command", reply, cap, len);
+    int rc = hp_actsm_device_command(&h->act, dv->valuestring, cm->valuestring);
+    if (rc == 0) return reply_ok(id, "command_result", true, NULL, reply, cap, len);
+    const char *why = rc == -HP_E_NOENT ? "unknown device"
+                      : rc == -HP_E_INVAL ? "unknown command for this device"
+                      : rc == -HP_E_BUSY ? "transition in progress"
+                      : h->sinks.ir ? "IR send failed" : "no IR output";
+    return reply_ok(id, "command_result", false, why, reply, cap, len);
+}
+
 static int on_command(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply,
                       size_t cap, size_t *len) {
     (void)sess;
@@ -285,6 +299,7 @@ static int on_command(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *
         return reply_ok(id, "command_result", true, NULL, reply, cap, len);
     }
     if (!strcmp(dev, "hub") && !strcmp(cmd, "set_device_state")) return cmd_set_device_state(h, id, args, reply, cap, len);
+    if (!strcmp(dev, "hub") && !strcmp(cmd, "device_command")) return cmd_device_command(h, id, args, reply, cap, len);
     if (!strcmp(dev, "hub") && !strcmp(cmd, "ir_send")) return cmd_ir_send(h, id, args, reply, cap, len);
     if (!strcmp(dev, "hub") && !strcmp(cmd, "tile_update")) return cmd_tile_update(h, id, args, reply, cap, len);
     return reply_ok(id, "command_result", false, "unknown command", reply, cap, len);

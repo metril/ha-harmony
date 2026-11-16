@@ -62,6 +62,15 @@ actually sent. An IR send failure aborts the plan and reverts to the reported ac
   "input"?: "<name>" | null}` sets the tracked state **without sending IR** and pushes
   `device_state`. `input: null` (or `""`) = unknown; `power: false` also makes the input unknown.
   Unknown device/input, or none of power/input: `command_result {ok:false, message}`.
+* `command` device `hub`, `device_command`, args `{"device": "<id>", "command": "<name>"}`: sends
+  one device command and updates the tracked state itself (one round trip; `device_state` is
+  pushed on a change). `<name>` is a YAML command of that device (no state change), `power_on` /
+  `power_off` (needs `power:`) or `input_<name>` (an input of the device; also marks it on).
+  IR goes through the same deferrable line-owner path as key presses and `ir_send`. A **toggle**
+  device is sent nothing (reply `ok`) when `power_on` finds it tracked on or `power_off` finds it
+  tracked off; discrete codes (`on`/`off`, inputs, commands) are always sent. `power_off` makes the
+  input unknown. Refused with `{ok:false, message}`: `args need device and command`, `unknown device`,
+  `unknown command for this device`, `transition in progress` (same as `ir_send`), `IR send failed`.
 * `start_activity`/`power_off` reply `command_result {ok:true}` when the request is accepted.
 
 ## State file (`hub --state PATH`, separate from `--cache`)

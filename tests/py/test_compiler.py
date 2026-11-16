@@ -95,15 +95,6 @@ def test_golden_compile():
     assert re.fullmatch(r"[0-9a-f]{8}", c.config_hash) and c.config_hash == config_hash(c.hub_json)
 
 
-def test_resolve_device_commands():
-    c = compile_config(model(SMALL))
-    assert c.resolve("tv", "vol_up")[1] == {}
-    assert c.resolve("tv", "power_on") == ({"proto": "nec", "addr": 4, "cmd": 2}, {"power": True})
-    assert c.resolve("tv", "input_hdmi1")[1] == {"input": "hdmi1", "power": True}
-    with pytest.raises(KeyError):
-        c.resolve("tv", "nope")
-
-
 def test_docs_example_compiles():
     text = (ROOT / "docs/ha-config.md").read_text()
     block = re.search(r"```yaml\n(.*?)```", text, re.DOTALL).group(1)

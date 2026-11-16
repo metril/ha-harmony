@@ -637,7 +637,72 @@ static void test_reload_rename_keeps_current(void) {
     free(cfg);
 }
 
+static void test_device_command(void) {
+    setup();
+    /* toggle device (amp): the direction is honoured against the tracked state */
+    CT_EQ(hp_actsm_device_command(&sm, "amp", "power_off"), 0); /* tracked off: no IR */
+    CT_EQ(nrec, 0);
+    CT_EQ(hp_actsm_device_command(&sm, "amp", "power_on"), 0);
+    EXPECT(NEC(9, 1));
+    CT_CHECK(!strcmp(pw(1), "on"));
+    CT_EQ(hp_actsm_device_command(&sm, "amp", "power_on"), 0); /* tracked on: no IR */
+    CT_EQ(nrec, 1);
+    CT_CHECK(!strcmp(pw(1), "on"));
+    advance(g_now + 500);
+    CT_EQ(hp_actsm_device_command(&sm, "amp", "input_opt"), 0); /* discrete: always sent */
+    advance(g_now + 500);
+    CT_EQ(hp_actsm_device_command(&sm, "amp", "input_opt"), 0);
+    advance(g_now + 500);
+    EXPECT(NEC(9, 1), NEC(9, 5), NEC(9, 5));
+    CT_CHECK(!strcmp(in(1), "opt"));
+    CT_EQ(hp_actsm_device_command(&sm, "amp", "power_off"), 0);
+    advance(g_now + 500);
+    EXPECT(NEC(9, 1), NEC(9, 5), NEC(9, 5), NEC(9, 1));
+    CT_CHECK(!strcmp(pw(1), "off") && !strcmp(in(1), ""));
+    /* on/off device (tv): discrete codes always sent; input implies power on */
+    nrec = nev = 0;
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "power_on"), 0);
+    advance(g_now + 500);
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "power_on"), 0);
+    advance(g_now + 500);
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "input_hdmi2"), 0);
+    advance(g_now + 500);
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "vol_up"), 0); /* plain command: no state change */
+    advance(g_now + 500);
+    EXPECT(NEC(4, 1), NEC(4, 1), NEC(4, 11), NEC(4, 20));
+    CT_CHECK(!strcmp(pw(0), "on") && !strcmp(in(0), "hdmi2"));
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "power_off"), 0);
+    advance(g_now + 500);
+    CT_CHECK(!strcmp(pw(0), "off") && !strcmp(in(0), ""));
+    CT_EQ(count_ev(HP_ACTSM_EVT_DEVICE), 3); /* tv: on, input, off (power_on twice = one change) */
+}
+
+static void test_device_command_errors_and_busy(void) {
+    setup();
+    CT_EQ(hp_actsm_device_command(&sm, "ghost", "power_on"), -HP_E_NOENT);
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "nope"), -HP_E_INVAL);
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "input_nope"), -HP_E_INVAL);
+    CT_EQ(hp_actsm_device_command(&sm, "bd", "input_x"), -HP_E_INVAL);
+    CT_EQ(nrec, 0);
+    hp_actsm_start(&sm, "watch");
+    CT_CHECK(hp_actsm_busy(&sm));
+    size_t n = nrec;
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "vol_up"), -HP_E_BUSY);
+    CT_EQ(nrec, n);
+    settle_all();
+    /* line owner: behind SIRC copies the send is deferred, not dropped or interleaved */
+    nrec = 0;
+    CT_EQ(hp_actsm_device_command(&sm, "bd", "power_on"), 0);
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "vol_up"), 0);
+    CT_EQ(nrec, 1);
+    settle_all();
+    EXPECT(SIRC(1, 21), SIRC(1, 21), SIRC(1, 21), NEC(4, 20));
+    check_no_overlap();
+}
+
 int main(void) {
+    CT_RUN(test_device_command);
+    CT_RUN(test_device_command_errors_and_busy);
     CT_RUN(test_start_from_off);
     CT_RUN(test_a_to_b_shared_devices);
     CT_RUN(test_toggle_never_sent_when_in_wanted_state);

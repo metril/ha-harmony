@@ -286,3 +286,48 @@ async def test_rf_reattach_cycles_do_not_lose_the_next_remote(hub_rf):
             b.send(bytes([10, 1, 0x01, 3, 1, 2, 0]))
             assert (await recv(ws))["d"] == {"remote": 1, "key": 2, "action": 0}, i
             b.close()
+
+
+async def test_device_command_tracks_state_and_skips_redundant_toggle(hub_process):
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
+        await hello(ws)
+        await cfg(ws, CONFIG)
+
+        async def dc(device, command, id=5):
+            args = {"device": device, "command": command}
+            msg = {"device": "hub", "command": "device_command", "args": args}
+            return await call(ws, "command", msg, id=id)
+
+        # toggle amp, tracked off: power_off sends nothing and is ok
+        assert (await dc("amp", "power_off"))["d"] == {"ok": True}
+        await asyncio.sleep(0.2)
+        assert read_lines(hub_process, 0) == []
+        assert (await dc("amp", "power_on"))["d"] == {"ok": True}
+        assert (await recv(ws))["d"] == dev("amp", True)
+        assert read_lines(hub_process, 1) == [ir_line(AMP_TOGGLE)]
+        assert (await dc("amp", "power_on"))["d"] == {"ok": True}  # tracked on: no IR
+        await asyncio.sleep(0.2)
+        assert read_lines(hub_process, 0) == []
+        # discrete tv: input implies on; unknown device/command are refused
+        assert (await dc("tv", "input_hdmi2"))["d"] == {"ok": True}
+        assert (await recv(ws))["d"] == dev("tv", True, "hdmi2")
+        assert read_lines(hub_process, 1) == [ir_line(TV_H2)]
+        for bad in (("ghost", "power_on"), ("tv", "nope"), ("tv", "input_vga")):
+            r = (await dc(*bad))["d"]
+            assert r["ok"] is False and r["message"], bad
+        msg = {"device": "hub", "command": "device_command", "args": {}}
+        assert (await call(ws, "command", msg, id=6))["d"]["ok"] is False
+
+
+async def test_device_command_refused_during_transition(hub_process):
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
+        await hello(ws)
+        await cfg(ws, CONFIG)
+        await start(ws, "Watch")  # tv/amp settle times keep it running for a while
+        args = {"device": "tv", "command": "power_off"}
+        msg = {"device": "hub", "command": "device_command", "args": args}
+        await ws.send_str(json.dumps({"v": 1, "id": 7, "t": "command", "d": msg}))
+        while (r := await recv(ws))["id"] != 7:  # device_state pushes may come first
+            pass
+        assert r["d"] == {"ok": False, "message": "transition in progress"}
+        await until(ws)
