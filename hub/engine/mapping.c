@@ -28,9 +28,10 @@ void hp_map_free(hp_map_t *m) {
 }
 
 void hp_map_set_out(hp_map_t *m, hp_irout_t *out) { m->out = out; }
+void hp_map_set_actops(hp_map_t *m, const hp_map_actops_t *ops) { m->actops = ops ? *ops : (hp_map_actops_t){0}; }
 const char *hp_map_last_error(const hp_map_t *m) { return m->err; }
 
-static uint32_t crc32_ieee(const uint8_t *p, size_t n) {
+uint32_t hp_map_crc32(const uint8_t *p, size_t n) {
     uint32_t c = 0xFFFFFFFFu;
     for (size_t i = 0; i < n; i++) {
         c ^= p[i];
@@ -499,12 +500,14 @@ int hp_map_load(hp_map_t *m, const char *json, size_t len) {
             if (!strcmp(scratch->acts[i].name, m->acts[m->current].name)) scratch->current = i;
     }
     hp_irout_t *outrt = m->out;
+    hp_map_actops_t ops = m->actops;
     free(m->src);
     *m = *scratch;
     m->out = outrt;
+    m->actops = ops;
     m->src = src;
     m->src_len = len;
-    m->hash = crc32_ieee((const uint8_t *)src, len);
+    m->hash = hp_map_crc32((const uint8_t *)src, len);
     src = NULL;
     r = 0;
 out:
@@ -636,6 +639,17 @@ int hp_activity_off(hp_map_t *m, const hp_sinks_t *s) {
 static int apply_key_action(hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s, uint8_t key) {
     if (a->type != HP_ACT_ACTIVITY) return apply_action(m, a, s, key);
     int r;
+    if (m->actops.start) {
+        if (a->target == HP_TARGET_OFF) {
+            r = m->actops.off(m->actops.ctx);
+            if (r == -HP_E_INVAL) r = 0; /* nothing on: fine */
+        } else if (a->target < m->nacts) {
+            r = m->actops.start(m->actops.ctx, a->target);
+        } else {
+            r = -HP_E_INVAL;
+        }
+        return r < 0 ? r : 0;
+    }
     if (a->target == HP_TARGET_OFF) r = m->current < 0 ? 0 : hp_activity_off(m, s);
     else if (a->target < m->nacts) r = hp_activity_set(m, m->acts[a->target].name, s);
     else r = -HP_E_INVAL;
@@ -650,7 +664,11 @@ int hp_key_handle(hp_map_t *m, const hp_sinks_t *s, uint8_t remote, uint8_t key,
         hp_irout_cancel(m->out); /* a new press ends any hold */
         const char *cur = m->current >= 0 && m->current < m->nacts ? m->acts[m->current].name : NULL;
         hp_action_t a;
-        if (hp_map_lookup(m, cur, key, &a) == 1) rc = apply_key_action(m, &a, s, key);
+        if (hp_map_lookup(m, cur, key, &a) == 1) {
+            if (a.type != HP_ACT_ACTIVITY && m->actops.busy && m->actops.busy(m->actops.ctx))
+                rc = 0; /* mid-transition: the key would overlap the planned frames */
+            else rc = apply_key_action(m, &a, s, key);
+        }
     } else if (action == HP_KEY_ACTION_HOLD) {
         hp_irout_hold(m->out, key);
     } else if (action == HP_KEY_ACTION_RELEASE) {
@@ -681,7 +699,7 @@ int hp_map_save_cache(const hp_map_t *m, const char *path) {
     buf[4] = CACHE_VER;
     put32(buf + 5, (uint32_t)m->src_len);
     memcpy(buf + CACHE_HDR, m->src, m->src_len);
-    put32(buf + CACHE_HDR + m->src_len, crc32_ieee(buf, CACHE_HDR + m->src_len));
+    put32(buf + CACHE_HDR + m->src_len, hp_map_crc32(buf, CACHE_HDR + m->src_len));
     int rc = hp_atomic_write(path, buf, total);
     free(buf);
     return rc;
@@ -716,7 +734,7 @@ int hp_map_load_cache(hp_map_t *m, const char *path) {
     int rc = -HP_E_INVAL;
     if (got == total && !memcmp(buf, "HPMC", 4) && buf[4] == CACHE_VER) {
         size_t len = get32(buf + 5);
-        if (len == total - CACHE_HDR - 4 && get32(buf + CACHE_HDR + len) == crc32_ieee(buf, CACHE_HDR + len))
+        if (len == total - CACHE_HDR - 4 && get32(buf + CACHE_HDR + len) == hp_map_crc32(buf, CACHE_HDR + len))
             rc = hp_map_load(m, (const char *)buf + CACHE_HDR, len);
     }
     free(buf);

@@ -10,9 +10,11 @@
  *  - Hold/repeat: a send tagged with a key id may be repeated while the key is held. hold(key)
  *    starts a timer at the signal's period (HP_IROUT_DEFAULT_PERIOD_MS when 0) that sends the
  *    repeat sequence: the NEC repeat code, the Pronto repeat part, or the full frame for
- *    protocols without one. release(key) stops it; a hard HP_IROUT_HOLD_CAP_MS cap measured from
- *    the start of the hold stops it if the release is lost. The first repeat is one period after
- *    the hold started. Repeat ticks are skipped while SIRC copies are still pending.
+ *    protocols without one. release(key) stops it. The remote sends a HOLD event every
+ *    HP_IROUT_HOLD_INTERVAL_MS while the key is held; each HOLD (re)starts the
+ *    HP_IROUT_HOLD_CAP_MS safety cap, so a real long hold keeps repeating and a lost RELEASE stops
+ *    the repeats within the cap of the last HOLD. The first repeat is one period after the first
+ *    HOLD. Repeat ticks are skipped while SIRC copies are still pending.
  * One hold at a time: a new send or another key's press ends the previous hold. */
 
 #include <stdint.h>
@@ -23,6 +25,7 @@
 #define HP_IROUT_SIRC_COPIES 3
 #define HP_IROUT_DEFAULT_PERIOD_MS 110
 #define HP_IROUT_HOLD_CAP_MS 2000
+#define HP_IROUT_HOLD_INTERVAL_MS 400 /* remote -> hub HOLD event period while a key is held */
 #define HP_IROUT_BURSTS 4
 #define HP_IROUT_TOGGLES 8
 
@@ -54,6 +57,7 @@ struct hp_irout {
     uint32_t hold_period_ms;
     hp_sched_handle tick_h, cap_h;
     hp_ir_signal_t rep;
+    uint32_t busy_ms; /* how long the latest hp_irout_send occupies the IR line, SIRC copies included */
 };
 
 void hp_irout_init(hp_irout_t *, hp_sched_t *);
@@ -61,7 +65,8 @@ void hp_irout_init(hp_irout_t *, hp_sched_t *);
  * schedules the extra SIRC copies. key >= 0 makes it the hold candidate. Returns the encoder's or
  * sink's negative error; a failed first send schedules nothing. */
 int hp_irout_send(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key);
-/* Starts repeating the last frame sent for `key` (no-op otherwise or if already holding). */
+/* Starts repeating the last frame sent for `key`; if `key` is already repeating this only extends
+ * the safety cap (no-op when `key` has no candidate frame). */
 void hp_irout_hold(hp_irout_t *, int key);
 /* Stops the hold of `key` (key < 0: any). */
 void hp_irout_release(hp_irout_t *, int key);

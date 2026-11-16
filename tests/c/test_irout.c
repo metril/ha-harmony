@@ -95,10 +95,38 @@ static void test_nec_hold_repeat_and_cap(void) {
     /* lost RELEASE: repeats stop at the 2 s cap */
     advance(t0 + 5000);
     size_t n = nrec;
-    CT_EQ(n, 1 + 18); /* repeats at 108 .. 1944 */
-    CT_CHECK(recs[n - 1].t <= t0 + HP_IROUT_HOLD_CAP_MS);
+    CT_EQ(n, 1 + 20); /* repeats at 108 .. 2160: the cap runs from the latest HOLD (t0 + 216) */
+    CT_CHECK(recs[n - 1].t <= t0 + 216 + HP_IROUT_HOLD_CAP_MS);
     CT_EQ(hp_sched_pending(&sched), 0);
     advance(t0 + 8000);
+    CT_EQ(nrec, n);
+}
+
+static void test_periodic_hold_extends_cap(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    uint32_t t0 = g_now;
+    /* a genuine long hold: HOLD every HP_IROUT_HOLD_INTERVAL_MS keeps repeating well past the cap */
+    for (uint32_t t = 0; t < 6000; t += HP_IROUT_HOLD_INTERVAL_MS) {
+        advance(t0 + t);
+        key(1, HP_KEY_ACTION_HOLD);
+    }
+    size_t n = nrec;
+    CT_CHECK(n > 40); /* ~108 ms period over 6 s */
+    advance(g_now + 300);
+    CT_CHECK(nrec > n); /* still repeating */
+    /* the remote dies / RELEASE is lost: the repeats stop within the cap of the last HOLD */
+    uint32_t last_hold = g_now - 300;
+    advance(last_hold + HP_IROUT_HOLD_CAP_MS + 200);
+    n = nrec;
+    CT_CHECK(recs[n - 1].t <= last_hold + HP_IROUT_HOLD_CAP_MS);
+    CT_CHECK(recs[n - 1].t > last_hold + HP_IROUT_HOLD_CAP_MS - 150);
+    CT_EQ(hp_sched_pending(&sched), 0);
+    advance(g_now + 3000);
+    CT_EQ(nrec, n);
+    /* HOLD without a candidate frame (after the stop) is still ignored */
+    key(1, HP_KEY_ACTION_HOLD);
+    advance(g_now + 500);
     CT_EQ(nrec, n);
 }
 
@@ -242,6 +270,7 @@ static void test_non_key_sends_do_not_repeat(void) {
 
 int main(void) {
     CT_RUN(test_nec_hold_repeat_and_cap);
+    CT_RUN(test_periodic_hold_extends_cap);
     CT_RUN(test_release_stops_repeat);
     CT_RUN(test_new_press_ends_hold);
     CT_RUN(test_sirc_three_frames);

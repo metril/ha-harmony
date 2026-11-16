@@ -97,7 +97,13 @@ int hp_irout_send(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8
     o->ir = ir;
     rc = ir->send(ir->self, port_mask, sig);
     if (rc < 0) return rc;
-    if (is_sirc(code)) start_burst(o, sig, port_mask);
+    uint32_t dur_us = 0;
+    for (size_t i = 0; i < sig->once_n; i++) dur_us += sig->us[i];
+    o->busy_ms = (dur_us + 999u) / 1000u;
+    if (is_sirc(code)) {
+        start_burst(o, sig, port_mask);
+        o->busy_ms += (uint32_t)(HP_IROUT_SIRC_COPIES - 1) * period_ms(sig);
+    }
     if (key >= 0) {
         o->cand_key = key;
         o->cand_port = port_mask;
@@ -123,10 +129,18 @@ static void cap_cb(void *arg, uint32_t now) {
     hp_irout_t *o = arg;
     o->cap_h = 0;
     stop_hold(o);
+    o->cand_key = -1; /* the key is considered released: a late HOLD must not resume the repeats */
 }
 
 void hp_irout_hold(hp_irout_t *o, int key) {
-    if (!o || key < 0 || o->hold_key >= 0 || o->cand_key != key) return;
+    if (!o || key < 0) return;
+    if (o->hold_key == key) { /* another HOLD of the same key: the cap restarts from here */
+        hp_sched_cancel(o->sched, o->cap_h);
+        o->cap_h = hp_sched_after(o->sched, HP_IROUT_HOLD_CAP_MS, cap_cb, o);
+        if (!o->cap_h) stop_hold(o);
+        return;
+    }
+    if (o->hold_key >= 0 || o->cand_key != key) return;
     const hp_ir_signal_t *c = &o->cand;
     o->rep = *c;
     if (c->rep_n > 0) { /* repeat sequence: shift it to the front */

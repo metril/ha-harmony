@@ -139,6 +139,16 @@ typedef struct {
     hp_action_t off[HP_MAP_MAX_STEPS];
 } hp_activity_t;
 
+/* Activity hooks installed by the activity state machine (hub/engine/activity.h); when set,
+ * "activity" key actions go through it instead of hp_activity_set/off, and while busy() holds,
+ * non-activity key actions are dropped (their frames would overlap the transition). */
+typedef struct {
+    void *ctx;
+    int (*start)(void *ctx, int idx);
+    int (*off)(void *ctx);
+    bool (*busy)(void *ctx);
+} hp_map_actops_t;
+
 typedef struct {
     int format;
     uint8_t nkeys, nacts, ndevs;
@@ -156,12 +166,16 @@ typedef struct {
     uint32_t hash;    /* CRC-32 of src */
     char err[HP_MAP_ERR_MAX]; /* first problem of the last failed load */
     hp_irout_t *out;  /* IR output runtime (hold/repeat/toggle); optional, survives reloads */
+    hp_map_actops_t actops; /* optional, survives reloads */
 } hp_map_t;
 
 void hp_map_init(hp_map_t *);
 void hp_map_free(hp_map_t *);
 /* Attaches the IR output runtime (NULL = send every IR action once, no timers). */
 void hp_map_set_out(hp_map_t *, hp_irout_t *);
+void hp_map_set_actops(hp_map_t *, const hp_map_actops_t *);
+/* CRC-32 (IEEE) as used for the config hash, the cache and the state file. */
+uint32_t hp_map_crc32(const uint8_t *p, size_t n);
 
 /* 0 on success; -HP_E_INVAL (malformed/invalid), -HP_E_TOOBIG (limit). */
 int hp_map_load(hp_map_t *, const char *json, size_t len);
@@ -207,8 +221,8 @@ int hp_activity_off(hp_map_t *, const hp_sinks_t *);
 
 /* Incoming key from a remote: PRESS looks the key up in the current activity (then global) and
  * applies it (an "activity" action starts that activity / powers down; callers detect the change
- * through hp_map_current()); HOLD starts repeating the last IR frame sent for this key; RELEASE
- * stops it. `emit` (may be NULL) is always called afterwards so HA sees every key, mapped or not.
+ * through hp_map_current()); HOLD starts repeating the last IR frame sent for this key (a further HOLD for the same key
+ * extends the safety cap, see irout.h); RELEASE stops it. `emit` (may be NULL) is always called afterwards so HA sees every key, mapped or not.
  * Returns the apply result (0 when nothing to apply). */
 typedef void (*hp_key_emit_fn)(void *ctx, uint8_t remote, uint8_t key, hp_key_action_t action);
 int hp_key_handle(hp_map_t *, const hp_sinks_t *, uint8_t remote, uint8_t key,
