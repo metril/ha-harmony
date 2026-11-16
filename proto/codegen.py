@@ -380,20 +380,27 @@ def _emit_c(s: Schema) -> str:
     return "\n".join(out)
 
 
-def generate(schema: Path, out_dir: Path) -> None:
+HA_DIR = HERE.parent / "custom_components" / "ha_harmony"
+
+
+def generate(schema: Path, out_dir: Path, ha_dir: Path | None = None) -> None:
     s = load_schema(schema)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "harmony_proto.h").write_text(_emit_h(s))
     (out_dir / "harmony_proto.c").write_text(_emit_c(s))
-    (out_dir / "harmony_proto.py").write_text(_emit_py(s))
+    py = _emit_py(s)
+    (out_dir / "harmony_proto.py").write_text(py)
+    if ha_dir is not None:  # vendored copy: HA can't import the repo-level `proto` package
+        Path(ha_dir).mkdir(parents=True, exist_ok=True)
+        (Path(ha_dir) / "harmony_proto.py").write_text(py)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     schema = Path(args[0]) if args else HERE / "schema.yaml"
     out = Path(args[1]) if len(args) > 1 else HERE / "gen"
-    generate(schema, out)
+    generate(schema, out, HA_DIR if not args else None)
     return 0
 
 

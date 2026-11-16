@@ -14,10 +14,33 @@ import time
 from pathlib import Path
 
 import pytest
+import pytest_socket
+
+# Imported first so the repo's `custom_components` wins over the one bundled with the HA test plugin.
+from custom_components.ha_harmony.const import CLIENT_KWARGS
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "build"
 TOKEN = "test-token"
+
+
+@pytest.fixture(autouse=True)
+def _loopback_sockets(socket_enabled):
+    """pytest-homeassistant blocks sockets by default; these tests talk to the real hub."""
+    pytest_socket.socket_allow_hosts(["127.0.0.1", "localhost"], allow_unix_socket=True)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _enable_custom_integrations(enable_custom_integrations):
+    yield
+
+
+def free_port() -> int:
+    """A currently free TCP port on loopback (for restart-on-same-port tests)."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def _run(cmd: list[str]) -> None:
@@ -67,6 +90,12 @@ class HubProcess:
     def alive(self) -> bool:
         return self.proc.poll() is None
 
+    def stop(self) -> None:
+        """SIGTERM the hub and wait for it to exit (port is free again afterwards)."""
+        if self.proc.poll() is None:
+            self.proc.send_signal(signal.SIGTERM)
+        self.proc.wait(timeout=5)
+
 
 def _read_port(proc: subprocess.Popen, timeout: float = 10.0) -> int:
     deadline = time.monotonic() + timeout
@@ -90,13 +119,13 @@ def _read_port(proc: subprocess.Popen, timeout: float = 10.0) -> int:
 
 @pytest.fixture
 def start_hub(built_binaries, tmp_path):
-    """Factory: start_hub(*extra_args, token=TOKEN) -> HubProcess (port 0)."""
+    """Factory: start_hub(*extra_args, token=TOKEN, port=0) -> HubProcess."""
     procs: list[subprocess.Popen] = []
 
-    def _start(*extra: str, token: str = TOKEN) -> HubProcess:
+    def _start(*extra: str, token: str = TOKEN, port: int = 0) -> HubProcess:
         rf = extra[extra.index("--rf") + 1] if "--rf" in extra else None
         proc = subprocess.Popen(
-            [str(built_binaries / "hub"), "--sim", "--port", "0", "--token", token, *extra],
+            [str(built_binaries / "hub"), "--sim", "--port", str(port), "--token", token, *extra],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=tmp_path,
@@ -212,3 +241,95 @@ def rf_attach(rf: str, timeout: float = 5.0) -> socket.socket:
     sock.connect(rf)
     assert sock.recv(8) == b"A", "hub refused the RF connection"
     return sock
+
+
+# ---------------------------------------------------------------- Home Assistant helpers
+
+HUB_ID = "sim-hub"
+ACTIVITY_CONFIG = {
+    "keys": {"1": {"type": "ha", "event": "menu"}},
+    "activities": [
+        {"name": "TV", "steps": [{"type": "none"}], "off": [{"type": "none"}]},
+        {"name": "Music", "steps": [{"type": "none"}], "off": [{"type": "none"}]},
+    ],
+}
+
+
+@pytest.fixture
+def fast_client(monkeypatch):
+    """Short reconnect/heartbeat timings so the HA tests stay quick."""
+    monkeypatch.setitem(CLIENT_KWARGS, "backoff_min", 0.05)
+    monkeypatch.setitem(CLIENT_KWARGS, "backoff_max", 0.2)
+    monkeypatch.setitem(CLIENT_KWARGS, "heartbeat_interval", 5.0)
+    monkeypatch.setitem(CLIENT_KWARGS, "request_timeout", 3.0)
+
+
+async def push_config(url: str, token: str = TOKEN, config: dict | None = None) -> None:
+    """Send set_config to a hub over a throwaway ws client."""
+    import aiohttp
+
+    async with aiohttp.ClientSession() as s, s.ws_connect(url) as ws:
+        await ws.send_json({"v": 1, "id": 1, "t": "hello", "d": {"token": token}})
+        assert (await ws.receive_json())["t"] == "hello_ack"
+        cfg = ACTIVITY_CONFIG if config is None else config
+        await ws.send_json({"v": 1, "id": 2, "t": "set_config", "d": {"config": cfg}})
+        assert (await ws.receive_json())["d"]["ok"] is True
+
+
+def make_entry(host: str, port: int, token: str = TOKEN):
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    return MockConfigEntry(
+        domain="ha_harmony",
+        unique_id=HUB_ID,
+        data={"host": host, "port": port, "token": token},
+    )
+
+
+class FakeHub:
+    """In-test aiohttp ws server. `handler(ws, env)` answers each received envelope."""
+
+    def __init__(self, handler):
+        self.handler = handler
+        self.connections = 0
+        self.port = 0
+        self._runner = None
+
+    async def _ws(self, request):
+        from aiohttp import web
+
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        self.connections += 1
+        async for msg in ws:
+            await self.handler(ws, msg.json())
+        return ws
+
+    async def start(self):
+        from aiohttp import web
+
+        app = web.Application()
+        app.router.add_get("/", self._ws)
+        self._runner = web.AppRunner(app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, "127.0.0.1", 0)
+        await site.start()
+        self.port = site._server.sockets[0].getsockname()[1]
+
+    async def stop(self):
+        await self._runner.cleanup()
+
+
+@pytest.fixture
+async def fake_hub():
+    hubs: list[FakeHub] = []
+
+    async def _make(handler) -> FakeHub:
+        hub = FakeHub(handler)
+        await hub.start()
+        hubs.append(hub)
+        return hub
+
+    yield _make
+    for hub in hubs:
+        await hub.stop()

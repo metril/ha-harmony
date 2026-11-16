@@ -184,3 +184,12 @@ def test_committed_generated_files_are_fresh(tmp_path):
         assert (tmp_path / n).read_text() == (GEN_DIR / n).read_text(), (
             f"{n} stale: run `uv run python -m proto.codegen`"
         )
+
+
+def test_vendored_ha_copy_is_fresh(tmp_path):
+    ha = tmp_path / "ha"
+    generate(REAL_SCHEMA, tmp_path / "gen", ha)
+    vendored = GEN_DIR.parents[1] / "custom_components" / "ha_harmony" / "harmony_proto.py"
+    assert (ha / "harmony_proto.py").read_text() == vendored.read_text(), (
+        "vendored harmony_proto.py stale: run `uv run python -m proto.codegen`"
+    )

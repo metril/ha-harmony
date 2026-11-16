@@ -12,6 +12,7 @@ dev = [
     "ruff",
     "pyyaml",
     "aiohttp>=3.14.5",
+    "pytest-homeassistant-custom-component>=0.13; python_full_version >= '3.14.2'",
 ]
 
 [tool.uv]
@@ -25,4 +26,4 @@ asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["proto/gen"]
+extend-exclude = ["proto/gen", "custom_components/ha_harmony/harmony_proto.py"]
