@@ -71,6 +71,9 @@ actually sent. An IR send failure aborts the plan and reverts to the reported ac
   tracked off; discrete codes (`on`/`off`, inputs, commands) are always sent. `power_off` makes the
   input unknown. Refused with `{ok:false, message}`: `args need device and command`, `unknown device`,
   `unknown command for this device`, `transition in progress` (same as `ir_send`), `IR send failed`.
+* After every successful `set_config` while an activity is running (reported), the hub sends
+  `state_update` for it to **all** clients including the sender (after the `config_ack`): a rename
+  keeps the index, a reorder or removal changes it. Clients track the activity by index, not name.
 * `config_ack {ok, message?, config_hash?}`: after a successful `set_config`, `config_hash` is the
   hash the hub now holds (same as `hello_ack.config_hash`); clients store it instead of computing.
 * `remote_attached {}` goes to all authenticated clients when a remote attaches on the RF link

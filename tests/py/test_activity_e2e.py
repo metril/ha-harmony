@@ -331,3 +331,19 @@ async def test_device_command_refused_during_transition(hub_process):
             pass
         assert r["d"] == {"ok": False, "message": "transition in progress"}
         await until(ws)
+
+
+async def test_set_config_reports_the_current_activity_to_every_client(hub_process):
+    async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
+        await hello(ws)
+        await cfg(ws, CONFIG)
+        await start(ws, "Movie")
+        await until(ws)
+        read_lines(hub_process, 2)
+        # rename the running activity (same id, same index)
+        acts = [dict(a) for a in CONFIG["activities"]]
+        acts[1]["name"] = "Cinema"
+        r = await call(ws, "set_config", {"config": {**CONFIG, "activities": acts}}, id=4)
+        assert r["t"] == "config_ack" and r["d"]["ok"] is True
+        su = await until(ws)  # the state_update follows the ack, even to the sender
+        assert su[-1]["d"] == {"activity": 1, "power": True}

@@ -92,8 +92,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.device_states: dict[str, DeviceState] = {}
         self.battery: dict[int, tuple[int, int]] = {}  # remote -> (percent, millivolts)
         self.remotes: tuple[int, ...] = DEFAULT_REMOTE_IDS
-        self.current_activity: str | None = None
-        self.last_activity: str | None = None
+        # tracked by hub index, never by name: a rename keeps the index, a reorder gets a new
+        # state_update from the hub
+        self._current_idx: int | None = None
+        self._last_idx: int | None = None
         self.available = True
         self.compiled: Compiled = _empty_compiled()
         self.managed = False  # a YAML file exists for this hub
@@ -127,6 +129,17 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     @property
     def config_path(self) -> Path:
         return Path(self.hass.config.path(const.CONFIG_SUBDIR, f"{self.hub_id}.yaml"))
+
+    def _activity_name(self, idx: int | None) -> str | None:
+        return self.activities[idx] if idx is not None and 0 <= idx < len(self.activities) else None
+
+    @property
+    def current_activity(self) -> str | None:
+        return self._activity_name(self._current_idx)
+
+    @property
+    def last_activity(self) -> str | None:
+        return self._activity_name(self._last_idx)
 
     def key_name(self, code: int) -> str:
         return self.compiled.key_names.get(code) or KEY_NAMES.get(code, UNKNOWN_KEY)
@@ -255,10 +268,6 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
 
     def _set_activities(self, names: list[str]) -> None:
         self.activities = list(names)
-        if self.current_activity not in self.activities:
-            self.current_activity = None
-        if self.last_activity not in self.activities:
-            self.last_activity = None
         self.async_update_listeners()
 
     async def async_push_pages(self) -> None:
@@ -385,7 +394,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if mtype is MsgType.STATE_UPDATE:
             idx = data["activity"]
             if not data["power"]:
-                self.current_activity = None
+                self._current_idx = None
                 self.async_update_listeners()
                 return
             if idx >= len(self.activities):
@@ -397,9 +406,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     self.activities,
                 )
                 return
-            name = self.activities[idx]
-            self.last_activity = name
-            self.current_activity = name
+            self._last_idx = self._current_idx = idx
             self.async_update_listeners()
         elif mtype is MsgType.KEY_EVENT:
             self._remote_alive()
