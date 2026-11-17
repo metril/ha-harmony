@@ -111,7 +111,21 @@ emitter — ties to open question 4); the mode bit; idle level and underrun beha
 `hal` really holds the node for its lifetime or reopens per send (the code suggests per-send, which
 conflicts with the observed persistent fd).
 
-- [x] **DONE — real IR emitted and proven, 2026-11-16 19:29 EST (`fffb1cd`).** `tools/ir_bench.c`
+> **RETRACTED 2026-11-17.** The "proven" claim below rested on a single TV state change at
+> 19:29:59, and that evidence does not hold. In session 2 the same tool and arguments produced no
+> effect across ~10 emissions, including one fired seconds after a *successful stock* send had
+> primed the hardware, and with the user watching the screen directly. The TV is also known to
+> change state unprompted — it went `off` 19:34:26 → `on` 19:34:45 while the hub was mid-reboot with
+> nothing emitting. So 19:29:59 was most likely coincidence.
+> **Nothing below is confirmed: not `ports` bit 17, not the byte-swap direction, not the mark
+> polarity, not the bit time.** `hub/io/hw_sinks.c` was built against these values and is therefore
+> also unverified on hardware (its host tests only prove it matches `ir_bench` byte-for-byte, which
+> is agreement, not correctness). What IS established: every ioctl returns 0, `DRAIN` blocks for the
+> full predicted waveform (so the DMA consumes the bitstream), and **stock firmware drives the same
+> emitter successfully** via `remote.send_command`.
+> **Next step must be an oracle independent of the TV** — see "Session 3 plan" below.
+
+- [x] ~~**DONE — real IR emitted and proven, 2026-11-16 19:29 EST (`fffb1cd`).**~~ *(retracted)* `tools/ir_bench.c`
       (separate CMake target, never linked into `hub`) emitted a Samsung `PowerToggle` from the hub's
       built-in emitter and **`media_player.un55js9000` went `off` → `on`** — an automated oracle, no
       human watching needed. Succeeded on attempt 5 of a capped ladder, one variable per attempt.
@@ -286,6 +300,30 @@ turn the TV on**. So the emitter has line of sight from the hub's new position, 
 - **(d) An IR receive path exists** (`/dev/i2s` implements `read`, and the mic slot is separate from
   the speaker slot), so the hub may be able to **capture its own stock emission and ours and diff
   them** — the strongest possible evidence, and worth the effort if (a)–(c) do not settle it.
+
+### Session 3 plan — get an oracle that does not depend on the TV
+
+The TV is a bad oracle: HA's `media_player` state lags by minutes, and the set itself wakes on its
+own (CEC from the Shield, or a network wake). Two sessions were spent partly chasing that. Fix the
+oracle before touching parameters again.
+
+- [ ] **(1) Phone camera on the hub's emitter — 20 seconds, splits the problem in half.** CMOS
+      sensors see 940 nm as a pale violet flicker. Sweep `--ports 1..7` one value at a time while the
+      camera watches. **Any flicker** → the LED is driven and the fault is framing/timing, and we have
+      found the real emitter bit. **No flicker on any mask** → nothing reaches the LED, so `ports`
+      bit 17 is wrong and the START arg's meaning needs rethinking. Everything else is guesswork until
+      this is known.
+- [ ] **(2) Capture ground truth from stock.** `/dev/i2s` implements `read` and the mic slot is
+      separate from the speaker slot, so the hub may be able to record while stock emits (triggered
+      over HA, no quiesce needed) and again while we emit, then diff the two. This replaces inference
+      with the actual waveform stock puts on the wire. Highest value if (1) is ambiguous.
+- [ ] **(3) Failing that, trace stock's own syscalls and bytes** and replay them verbatim: if stock's
+      exact byte stream works from our process, our framing is wrong; if it does not, our call
+      sequence or device state is wrong. The device has no `strace`, so this needs a staged
+      `strace` build or a `ptrace` helper — more work, but it is conclusive.
+- [ ] Also fix `ir_bench --duty`: it is a **no-op**. Setting 25 or 50 produced a byte-identical
+      stream to the default (the N=12 pattern hardcodes 4 ones / 8 zeros), so "duty swept" in session
+      2 tested nothing. Either implement it or remove the flag.
 
 ### Task 6 `[RO]` — Verification ladder: did IR actually fire?
 
