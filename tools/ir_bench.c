@@ -37,6 +37,7 @@ static int rc_ioctl(int fd, const char *name, unsigned cmd, unsigned long arg) {
 static void usage(void) {
   fprintf(stderr,
           "usage: ir_bench [--dry-run|--probe] --carrier HZ --durations a,b,c,... "
+          "\n  --probe: write-open /dev/i2s and close, to see if stock hal holds it"
           "[--repeat N] [--ports M] [--duty PCT] [--swap 0|1] [--invert 0|1] "
           "[--n BITS] [--bit-ns NS] [--presilence-us US] [--out FILE]\n"
           "  durations alternate mark,space,... in us; the list is one repeat\n");
@@ -81,10 +82,27 @@ int main(int argc, char **argv) {
     else { usage(); return 2; }
   }
   if (probe) {
-    int fd = open("/dev/i2s", O_RDONLY);
-    printf("open /dev/i2s O_RDONLY -> %d%s%s\n", fd, fd < 0 ? " errno=" : "",
+    /* Speaker slot (O_WRONLY) only, and deliberately so.
+     *
+     * An O_RDONLY open takes the *mic* slot, and ath_i2s_close only clears the RX
+     * descriptor owner bits if RX DMA has already started -- which only the first
+     * read() does. Close a mic fd that was never read and the kernel waits forever
+     * for descriptors that can never complete, in a loop that ignores signals: the
+     * process is unkillable (SIGKILL included) and only a reboot recovers the hub.
+     * This probe used to do exactly that. See docs/hardware/hub-ir-i2s.md sections
+     * 9 and 11; any future receive probe must read() at least once before closing.
+     *
+     * Write-open + close is the safe availability test, and is what the daemon's
+     * own startup probe does (hp_hw_sinks_open), verified on hardware. */
+    int fd = open("/dev/i2s", O_WRONLY);
+    printf("open /dev/i2s O_WRONLY -> %d%s%s\n", fd, fd < 0 ? " errno=" : "",
            fd < 0 ? strerror(errno) : "");
-    if (fd >= 0) close(fd);
+    if (fd >= 0) {
+      close(fd);
+      printf("device is free (stock hal is not holding it)\n");
+    } else if (errno == EBUSY || errno == EACCES) {
+      printf("device is held -- stock hal still has it; quiesce first\n");
+    }
     return fd < 0;
   }
   if (carrier < 9000 || carrier > 500000 || !dur_s || repeat < 1 || duty < 1) {
