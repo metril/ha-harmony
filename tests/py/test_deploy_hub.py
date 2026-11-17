@@ -63,6 +63,7 @@ class FakeHub:
         self.free_kb, self.df, self.corrupt, self.stuck = free_kb, df, set(corrupt), set(stuck)
         self.up_after, self.reboot_fires = up_after, reboot_fires
         self.stock_after_ps, self.upload_rc, self.sim_rc = stock_after_ps, upload_rc, sim_rc
+        self.uptime_s = 3600.0  # seconds since boot; drops when a reboot fires
         self.down = 0  # remaining uname polls that fail (ssh unavailable)
         self.booting_ps = 0  # remaining ps polls that show only init
         self.log: list[list[str]] = []
@@ -137,9 +138,12 @@ class FakeHub:
             return (0 if a[2] in self.files else 1), b"", b""
         if a[0] == dh.REMOTE_SIM:
             return self.sim_rc, b"sent key\n", b"" if self.sim_rc == 0 else b"connect failed"
+        if a == ["cat", "/proc/uptime"]:
+            return 0, f"{self.uptime_s:.2f} 0.30\n".encode(), b""
         if a == ["reboot"]:
             if self.reboot_fires:
                 self.down = self.up_after
+                self.uptime_s = 12.0  # a restarted hub reports a fresh uptime
             return 255, b"", b""
         raise AssertionError(f"unexpected command: {a}")
 
@@ -442,9 +446,26 @@ def test_restore_cannot_confirm_stock():
 
 
 def test_restore_reboot_that_never_fires():
+    """Stayed reachable AND uptime did not drop: that is a reboot that did not happen."""
     d, _hub, _ = make(FakeHub(reboot_fires=False))
-    with pytest.raises(dh.DeployError, match="never went offline"):
+    with pytest.raises(dh.DeployError, match="cannot confirm the reboot"):
         d.restore(down_timeout=20)
+
+
+def test_restore_accepts_a_reboot_with_no_visible_offline_window():
+    """The real hub came back before the first poll, which must not read as a failed reboot."""
+    hub = FakeHub(reboot_fires=False)  # ssh never appears to drop...
+    d, _h, lines = make(hub)
+    original = hub.run
+
+    def run(argv):  # ...but the uptime drops, which is positive proof it restarted
+        if argv == ["reboot"]:
+            hub.uptime_s = 9.0
+        return original(argv)
+
+    hub.run = run
+    assert d.restore(down_timeout=5) == 0
+    assert any("without a visible gap" in ln for ln in lines)
 
 
 # --- cli ------------------------------------------------------------------------------------
@@ -508,7 +529,7 @@ def violations(remote: str) -> list[str]:
     if not a:
         return bad
     prog, rest = a[0], a[1:]
-    if a in (["uname", "-a"], ["ps"], ["reboot"]):
+    if a in (["uname", "-a"], ["ps"], ["reboot"], ["cat", "/proc/uptime"]):
         return []
     if prog == "ls" and rest[:1] == ["-l"] and len(rest) == 2:
         return [] if rest[1] in (dh.REMOTE_DIR, dh.REMOTE_BUSYBOX) else bad

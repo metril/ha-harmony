@@ -32,7 +32,9 @@ REMOTE_DIR = "/data/ha-harmony"
 REMOTE_HUB = f"{REMOTE_DIR}/hub"
 REMOTE_SIM = f"{REMOTE_DIR}/remote_sim"
 REMOTE_CONFIG = f"{REMOTE_DIR}/config.json"
-REMOTE_BUSYBOX = "/tmp/ha-harmony-busybox"  # tmpfs: gone after reboot
+# tmpfs: gone after reboot. The basename MUST be "busybox": this build dispatches on argv[0] and
+# does not fall back to argv[1], so any other name fails with "applet not found".
+REMOTE_BUSYBOX = "/tmp/busybox"
 RF_SOCKET = "/tmp/ha-harmony-rf.sock"
 WRITE_ROOTS = (REMOTE_DIR, "/tmp")  # the only places this tool may write
 DATA_MOUNT = "/data"
@@ -195,6 +197,16 @@ class Deployer:
             if self.clock() >= deadline:
                 return False
             self.sleep(interval)
+
+    def uptime(self) -> float | None:
+        """Seconds since boot, or None when it cannot be read (ssh down, odd /proc)."""
+        rc, out, _ = self.r.run(["cat", "/proc/uptime"])
+        if rc != 0:
+            return None
+        try:
+            return float(out.decode("utf-8", "replace").split()[0])
+        except ValueError, IndexError:
+            return None
 
     def procs(self) -> list[Proc]:
         rc, out, err = self.r.run(["ps"])
@@ -385,13 +397,26 @@ class Deployer:
     ) -> int:
         self.connect()
         t0 = self.clock()
+        before = self.uptime()
         self.out(f"rebooting hub at {self.now().isoformat(timespec='seconds')} (expect ~4-5 min)")
         rc, _, err = self.r.run(["reboot"])
         if rc not in (0, 255):
             raise DeployError(f"reboot failed (rc={rc}): {err.decode('utf-8', 'replace')[-200:]}")
-        if not self.wait(lambda: self.r.run(["uname", "-a"])[0] != 0, down_timeout, interval):
-            raise DeployError("hub never went offline; the reboot may not have fired")
-        self.out("hub is down; waiting for ssh to return")
+        # Observing the offline window is unreliable: the hub can stay answerable for a few seconds
+        # and be back before the next poll, which falsely looked like "the reboot never fired".
+        # A dropped uptime is positive proof it restarted, so that is the real check; going offline
+        # is merely the common case.
+        if self.wait(lambda: self.r.run(["uname", "-a"])[0] != 0, down_timeout, interval):
+            self.out("hub is down; waiting for ssh to return")
+        else:
+            now = self.uptime()
+            if now is not None and before is not None and now < before:
+                self.out(f"hub rebooted (uptime {before:g}s -> {now:g}s) without a visible gap")
+            else:
+                raise DeployError(
+                    "cannot confirm the reboot: the hub stayed reachable and its uptime did not "
+                    "drop. Power-cycle it; nothing is armed at boot so it comes up stock."
+                )
         if not self.wait(lambda: self.r.run(["uname", "-a"])[0] == 0, up_timeout, interval):
             raise DeployError(
                 f"ssh did not return within {up_timeout:g}s. Power-cycle the hub; nothing is armed "
