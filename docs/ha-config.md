@@ -79,6 +79,12 @@ pages:
   `input_` are reserved for the built-ins and rejected. Home Assistant's device buttons and
   `remote.send_command` use the hub's `device_command` verb, so a toggle device is never toggled the
   wrong way.
+- **Device `aliases`** (optional list of names, max 31 bytes each): other names the device answers to
+  in `remote.send_command` and `ha_harmony.set_device_state`. Resolved in Home Assistant and never
+  sent to the hub. Meant for migration: `tools/stock_to_ha_config.py --device-list` sets each
+  device's stock numeric id and stock name as aliases, so an automation written for the stock
+  integration (`device: "51887071"`) needs only its `entity_id` changed. An alias may not equal
+  another device's id or be shared by two devices.
 - **Keys** use the symbolic names in `KEY_CODES` (`custom_components/ha_harmony/const.py`, provisional) or
   `key_<0..127>`. Event entities report that name; page widgets report `tap_<widget id>`.
   The `remote_sim` test tool's `--press`/`--hold` take the numeric key **code** (a value from `KEY_CODES`), not the name.

@@ -47,6 +47,7 @@ class CompiledDevice:
     power: dict[str, Any] | None
     inputs: tuple[str, ...]
     commands: tuple[str, ...]
+    aliases: tuple[str, ...] = ()  # HA-side only: resolved by the coordinator, never sent
 
 
 @dataclass(frozen=True)
@@ -211,6 +212,7 @@ def compile_config(model: Model) -> Compiled:
             d.get("power"),
             tuple(d["inputs"]),
             tuple(d["commands"]),
+            tuple(d.get("aliases", ())),
         )
         for d in model["devices"]
     }

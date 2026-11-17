@@ -441,3 +441,10 @@ def test_slugify():
     assert tool._slugify("Watch  Roku!") == "watch_roku"
     assert tool._slugify("***") == "activity"
     assert len(tool._slugify("x" * 50)) == 31
+
+
+def test_stock_id_and_stock_name_become_aliases(ext, tmp_path):
+    """So `remote.send_command device: "51886472"` from a stock-era automation keeps working."""
+    _, cfg = run_ext(ext, tmp_path)
+    assert dev(cfg, "samsung_tv")["aliases"] == ["51886472", "Samsung TV"]
+    assert dev(cfg, "jtech_switch")["aliases"] == ["64694265", "J-Tech"]

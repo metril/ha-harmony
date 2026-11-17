@@ -419,6 +419,11 @@ def apply_device_features(
             conv.warnings.append(f"{d['name']}: input {why}")
 
         out: dict[str, Any] = {"id": d["id"], "name": d["name"]}
+        # Stock's numeric id and stock's own device name, so automations written against the
+        # stock integration (`remote.send_command device: "51887071"`) work after an entity swap.
+        aliases = [a for a in dict.fromkeys((sd.id, sd.name)) if a != d["id"] and _label_ok(a)]
+        if aliases:
+            out["aliases"] = aliases
         if power and sd.power_on_delay_ms:
             out["settle_ms"] = min(sd.power_on_delay_ms, MAX_SETTLE_MS)
         if power:
