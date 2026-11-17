@@ -158,7 +158,7 @@ static __attribute__((unused)) int fk_wait(void *c, const int *fds, int n, unsig
   (void)ms;
   int r = 0;
   for (int i = 0; i < n; i++) {
-    int d = f->fds[fds[i]].dev;
+    int d = fds[i] >= 0 && fds[i] < 32 ? f->fds[fds[i]].dev : -1; /* fds beyond the table: the link's */
     ready[i] = d >= 0 && f->qh[d] < f->qn[d];
     r += ready[i];
   }

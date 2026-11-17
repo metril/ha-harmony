@@ -42,4 +42,8 @@ uint32_t ra_power_next_ms(const ra_power_t *p, uint64_t now);
  * and a battcharge current <= 0. Any parse failure is 0. */
 int ra_battery_should_poweroff(const char *soc, const char *powersource, const char *battcharge);
 
+/* The gauge's state of charge as a rounded percent 0..100 (one RA_PATH_SOC read, same parser as the
+ * guard), or -1 when the read fails or is unparsable / out of range. */
+int ra_battery_percent(ra_sys_t *s);
+
 #endif

@@ -29,13 +29,18 @@ typedef struct {
   char text[HP_PAGE_MAX_TEXT + 1];
 } app_link_event_t;
 
-/* The RF side. Task 3 supplies the real one; the default is a no-op. */
+/* The RF side (remote/app/rf_link.h supplies the real one); the default is a no-op. */
 typedef struct {
   void *ctx;
   /* Queue a key event; 0 ok. Delivery failure after retries comes back later as APP_LINK_EV_FAILED. */
   int (*send_key)(void *ctx, uint8_t code, uint8_t action);
   /* Next pending event into *ev (returns 1), or 0. Called repeatedly each loop iteration. */
   int (*poll)(void *ctx, uint64_t now, app_link_event_t *ev);
+  /* Optional (NULL = none). An fd that is readable when poll() has work: the loop select()s on it. */
+  int (*get_fd)(void *ctx);
+  /* Optional. Milliseconds until the link next needs a poll (retry deadline, heartbeat), 0 = now,
+   * UINT32_MAX = nothing scheduled. Bounds the loop's wait. */
+  uint32_t (*next_ms)(void *ctx, uint64_t now);
 } app_link_t;
 
 extern const app_link_t app_link_null;
@@ -58,6 +63,10 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
 /* One loop iteration: wait for input up to max_wait_ms (less when a timer is due), then process
  * input, holds, power, link events and LVGL timers. */
 void app_step(app_t *a, unsigned max_wait_ms);
+
+/* Cap on the wait when the link has an fd to wake on (it is woken by a frame, and by the link's
+ * own deadline): idle wakeups are rare. Without an fd the cap stays 100 ms (polling). */
+#define APP_LINK_IDLE_WAIT_MS 10000
 void app_destroy(app_t *a);
 
 #endif

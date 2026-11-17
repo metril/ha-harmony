@@ -5,7 +5,7 @@
 
 #include "hub/hp_errors.h"
 
-#define LINK_POLL_MS 100 /* upper bound on the select() timeout: the link has no fd to wait on yet */
+#define LINK_POLL_MS 100 /* select() timeout cap for a link with no fd to wait on */
 #define LINK_EVENTS_PER_STEP 8
 
 static int null_send(void *ctx, uint8_t code, uint8_t action) {
@@ -93,12 +93,18 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev) {
 void app_step(app_t *a, unsigned max_wait_ms) {
   uint64_t now = a->sys.ops.now_ms(a->sys.ops.ctx);
   uint32_t lv_ms = lv_timer_handler();
-  uint32_t t = max_wait_ms < LINK_POLL_MS ? max_wait_ms : LINK_POLL_MS;
-  uint32_t d[3] = {lv_ms, ra_power_next_ms(&a->power, now), ra_input_next_ms(&a->input, now)};
-  for (int i = 0; i < 3; i++)
+  int fds[3] = {a->input.fd[0], a->input.fd[1], -1};
+  int nfd = 2;
+  int lfd = a->link.get_fd ? a->link.get_fd(a->link.ctx) : -1;
+  if (lfd >= 0) fds[nfd++] = lfd;
+  uint32_t cap = lfd >= 0 ? APP_LINK_IDLE_WAIT_MS : LINK_POLL_MS;
+  uint32_t t = max_wait_ms < cap ? max_wait_ms : cap;
+  uint32_t d[4] = {lv_ms, ra_power_next_ms(&a->power, now), ra_input_next_ms(&a->input, now),
+                   a->link.next_ms ? a->link.next_ms(a->link.ctx, now) : UINT32_MAX};
+  for (int i = 0; i < 4; i++)
     if (d[i] < t) t = d[i];
-  int ready[2] = {0, 0};
-  int w = a->sys.ops.wait(a->sys.ops.ctx, a->input.fd, 2, t, ready);
+  int ready[3] = {0, 0, 0};
+  int w = a->sys.ops.wait(a->sys.ops.ctx, fds, nfd, t, ready);
   now = a->sys.ops.now_ms(a->sys.ops.ctx);
   if (w > 0)
     for (int i = 0; i < 2; i++)

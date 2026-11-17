@@ -62,8 +62,13 @@ if(NOT CMAKE_CROSSCOMPILING OR HP_TARGET STREQUAL "remote")
     remote/app/input.c
     remote/app/power.c
     remote/app/app.c
+    remote/app/cli.c
+    remote/app/rf_link.c
   )
   target_link_libraries(hp_remote_app PUBLIC hp_core lvgl)
+  if(CMAKE_CROSSCOMPILING)
+    target_compile_definitions(hp_remote_app PRIVATE HP_REMOTE_DEVICE=1)  # --rf defaults to spi
+  endif()
   if(NOT CMAKE_CROSSCOMPILING)
     # Host build only to keep main.c under -Werror/ASan; it needs a real 240x320 /dev/fb0 to run.
     add_executable(harmony_remote remote/app/main.c)

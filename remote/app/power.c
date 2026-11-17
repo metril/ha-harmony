@@ -76,6 +76,13 @@ int ra_battery_should_poweroff(const char *soc, const char *powersource, const c
   return s <= RA_BATT_SOC_MAX && c <= 0.0;
 }
 
+int ra_battery_percent(ra_sys_t *s) {
+  char b[32];
+  double d;
+  if (ra_sysfs_read(s, RA_PATH_SOC, b, sizeof b) < 0 || !first_number(b, &d) || d < 0.0 || d > 100.0) return -1;
+  return (int)(d + 0.5);
+}
+
 static void battery_poll(ra_power_t *p) {
   char soc[32], src[32], chg[48];
   /* All three in this one poll: a reading is never reused from an earlier poll. */
