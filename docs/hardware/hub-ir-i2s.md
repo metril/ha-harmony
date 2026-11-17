@@ -1,9 +1,14 @@
 # Hub IR output via `/dev/i2s`
 
 Our own description of how the stock Harmony Hub emits IR, derived from static
-analysis of the stock `ath_i2s.ko` and `/usr/bin/hal`, then **exercised on the
-device** (section 9: our own `tools/ir_bench.c` turned the Samsung TV on). Every claim carries evidence; **[INFERRED]** marks
-conclusions not directly visible in code, **UNKNOWN** marks gaps.
+analysis of the stock `ath_i2s.ko` and `/usr/bin/hal`. **Nothing here has been
+shown to make light come out of the hub from our own code**: the one apparent
+on-device success (section 9) was retracted, and ~10 later emissions reached no
+device. Static pass 2 (this revision) found that our `START` argument model was
+wrong where it mattered (section 3, section 12).
+
+Tags: **[CODE]** = read directly from disassembly (offset given);
+**[INFERRED]** = conclusion not visible in code; **UNKNOWN** = gap.
 
 Binaries analysed (read-only copies, md5 verified against the device, not
 committed):
@@ -77,9 +82,9 @@ Numbers are `cmd` values compared in `ath_i2s_ioctl`: the high half is
 | `0x80044e20` | `I2S_VOLUME` | int | maps arg to 0..31 style gain code and writes `code \| code<<8` to `0xb80b0004`. arg `<0`->15; `0..14` -> `(~arg & 0xf) \| 0x10`; `15` -> 0; `16..22` -> arg-15; `>=23` -> 7. `hal` passes **15** (-> 0). | ioctl @0xec8-0xf10; hal @0x4072f4 (`li a2,15`) |
 | `0x80044e21` | `I2S_FREQ` | u32 divider (see section 5) | if different from current `0xb80b001c`: pause active TX/RX DMA, write arg to `0xb80b001c`, `i2s_reset`, resume. This is the **bit-clock divider**. | ioctl @0xf1c-0xfc4; hal @0x4076a4 |
 | `0x80044e22` | `I2S_DSIZE` | 8, 16, 24 or 32 | writes STEREO config `0xb80b0000` = `0x00a00302` (8), `0x00a01302` (16), `0x00a22b02` (24), `0x00a23b02` (32), then `i2s_reset`. Other values: `printk("Data size %d not supported")`, return `-524`. `hal` passes **16**. | ioctl @0xfc8-0x1058; hal @0x4072c0 (`li a2,16`) |
-| `0x80044e23` | `I2S_MODE` | int | arg==2: clear bit 14 (`0x4000`) of `0xb80b0000`; any other: set it. Meaning of the bit **UNKNOWN** [INFERRED mono/stereo or MCLK source]. `hal` passes **2**. | ioctl @0x105c-0x1090; hal @0x4072dc |
-| `0x80044e24` | (unused) | - | no-op, returns 0 | @0xeb8 |
-| `0xc0044e25` | (unused) | - | no-op, returns 0 | @0xe84 |
+| `0x80044e23` | `I2S_MODE` | int | arg==2: clear bit 14 (`0x4000`) of `0xb80b0000`; any other: set it. [CODE] Bit meaning [INFERRED]: stereo/mono select (Atheros SDK `STEREO_CONFIG` layout, recalled not verified). `hal` passes **2** = bit clear = stereo. It does not touch GPIO or any clock mux. | ioctl @0x105c-0x1090; hal @0x4072dc |
+| `0x80044e24` | (unused) | - | [CODE] no-op, returns 0, touches nothing (`move v0,zero` @0xeb8). Not issued by `hal` (its I2S wrappers use only `0x4e20..23,30,31`). | @0xeb8 |
+| `0xc0044e25` | (unused) | - | [CODE] no-op, returns 0 (`beq`->@0xeb8 @0xe84). Not referenced by `hal`. | @0xe84 |
 | `0xc0044e26` | `I2S_PAUSE` | 0 = TX, else RX | `ath_i2s_dma_pause`: writes 1 to TX ctrl `0xb80a001c` (RX: `0xb80a0024`), sets state 2 | ioctl @0xea8; `dma_pause` @0xdc4. Not used by `hal`. |
 | `0xc0044e27` | `I2S_RESUME` | 0 = TX, else RX | `ath_i2s_dma_resume`: writes 4 to ctrl reg, sets state 1 | ioctl @0xec0; @0x70c. Not used by `hal`. |
 | `0x80044e30` | `I2S_START` | `(ports<<16) \| (n & 0xffff)` | see below | ioctl @0x1094-0x1158; hal write-start @0x4079dc (`sll a2,a2,16; or`) |
@@ -89,20 +94,59 @@ Anything else returns `-524` (-ENOTSUPP-ish).
 
 ### `I2S_START` (0x80044e30) detail
 
-- Bits 16..18 of the arg are an **output-port/GPIO mask**; the code does
-  read-modify-write on `0xb8040008` (AR7240-family GPIO output register
-  [INFERRED from the SoC memory map; not confirmed on this device]):
-  bit16 -> GPIO16, bit17 -> GPIO28, bit18 -> GPIO13. **Bit set = that GPIO is
-  driven low; bit clear = driven high** (@0x1098-0x10f8). `hal` forwards a
-  per-request `ports` value here (see section 6; the Lua layer has a `ports`
-  field). The mapping of GPIOs to the physical emitters (internal/mini-blaster
-  jacks) is **UNKNOWN**.
-- If the low 16 bits (`n`) are 0: queue start index `4124 := producer index`
-  (@0x1104-0x1118).
-- Then starts the DMA: if the one-shot flag `sc_buf_var+8292` (set in
-  speaker `open`) is set, program TX descriptor base `0xb80a0018` = ring phys
-  address and start DMA (`0xb80a001c = 2`), clear the flag; otherwise just
-  resume (`0xb80a001c = 4`) (@0x1120-0x1158).
+Decoded from `ath_i2s_ioctl` @0x1094-0x1158 [CODE]. Arg (`a3`) layout:
+
+| arg bits | consumed as |
+|----------|-------------|
+| 0..15 (`n`) | only tested for `== 0` (@0x1100 `andi s2,s2,0xffff; bnez`). If 0: `sc_buf_var[4124] := sc_buf_var[4116]` (queue start index := producer). Any other value just skips that store. **Not a sample count or buffer index.** |
+| 16 | `GPIO16` level in `GPIO_OUT` |
+| 17 | `GPIO28` level in `GPIO_OUT` |
+| 18 | `GPIO13` level in `GPIO_OUT` |
+| 19..31 | ignored |
+
+GPIO write: `a2 = *(0xb8040008)` (AR933x `GPIO_OUT`; `GPIO_OE`=+0, `IN`=+4, `OUT`=+8,
+`FUNC`=+0x28; register map from memory of the ath79 headers, **[INFERRED]** but
+corroborated by `init_module` below), then one read-modify-write of three bits and
+`*(0xb8040008) = a1` + readback (@0x1094-0x1100):
+
+- bit16 `0x10000`: arg bit **set** -> `and ~0x10000` (GPIO16 **low**); clear -> `or` (GPIO16 **high**) (@0x10a0-0x10bc)
+- bit17 `0x10000000`: set -> `and 0xefffffff` (GPIO28 **low**); clear -> `or` (**high**) (@0x10c0-0x10dc)
+- bit18 `0x2000`: set -> `and ~0x2000` (GPIO13 **low**); clear -> `or` (**high**) (@0x10e0-0x10f4)
+
+So **a set bit drives that GPIO low; `ports = 0` drives all three high**. No other
+register is written by START's GPIO part. Because the write is a whole-word RMW of
+`GPIO_OUT`, **START always rewrites all three lines**, and the pins keep the last value
+until the next START (nothing restores them on `DRAIN` or `close`; [CODE] `ath_i2s_close`
+@0x758-0x8f0 and the DMA helpers never touch `0xb804xxxx`).
+
+Direction/mux are configured **once at module load**, not in START or open
+(`init_module` @0x12a8) [CODE]:
+
+- `*(0xb8040028) |= 0x24000000` (@0x1374-0x1388): `GPIO_FUNC` bits 26 and 29 [INFERRED: I2S pin-mux enables; not verified].
+- `*(0xb8040000) |= 0x10012000` (@0x1390-0x13a0): `GPIO_OE` bits **28, 16, 13** set (output), exactly the three
+  START-controlled lines. This is what makes the mapping bit16->GPIO16, bit17->GPIO28, bit18->GPIO13 solid.
+- `ar7240_reset(1)`, 1 ms delay, default divider `0xb80b001c = 0x00215999`, `STEREO_CONFIG = 0x00a21302`, `i2s_reset`.
+
+**What the three lines physically select is UNKNOWN.** Active-low and the three-line
+width fit "one gate per emitter group" (built-in vs two mini-blaster jacks) but nothing in
+the binaries names them. Earlier text claiming "bit 17 = built-in emitter" was **never
+established**; it came from the retracted run.
+
+**What stock sends** [CODE]: `hal`'s `ir_send` RPC handler (@0x424430, json format
+`{enable:b, keyLatency?:i, ports?:i}`, strings @0x44a140/0x44a150/0x44a15c) initialises
+`ports = 7` (`li t3,7` @0x42445c, stored @0x424480), overwrites it only if the key is
+present, then passes `ports & 7` (@0x424504). `ir_loopback_test` (@0x423e78) and the
+`/ir/ir_test` RPC (@0x424c40, default 7, `& 7` @0x424c8c) also use 7. The value is stored at
+request+4 (`ir_send` @0x423d08), read back in `ir_send_thread` (`lw a2,4(s3)` @0x42298c) and
+passed with `n=0` to ops+0x30 = `hornet_i2s_write_start` (@0x4079dc: `a2<<16 | (a1&0xffff)`).
+Every device in our hub backup has `controlPort: null` (`backups/phase1/hub/pre-root-config/devices.json`),
+so stock sends with the default **ports = 7, START arg `0x70000`: GPIO16, GPIO28 and GPIO13 all low**
+[INFERRED that the Lua layer omits `ports` for these devices; the `null` is the only evidence].
+The values logged in section 9 are 0, 1, 2; **7 has never been tried**, and the daemon default is `0x02` (section 10).
+
+- If the DMA is not yet running (one-shot flag `sc_buf_var+8292`, set by speaker `open`):
+  program TX descriptor base `0xb80a0018` = ring phys address (`ath_i2s_dma_desc` @0x0) and start
+  (`0xb80a001c = 2`), clear the flag; otherwise just resume (`0xb80a001c = 4`) (@0x1120-0x1158).
 - `write()` alone never starts the DMA (it only fills descriptors and enables
   the TX-complete IRQ, `0xb80a004c |= 0x400`); **`I2S_START` must be issued
   after the data is queued.** Evidence: no DMA start in `ath_i2s_write`
@@ -137,12 +181,15 @@ Anything else returns `-524` (-ENOTSUPP-ish).
 
 ### Byte order on the wire [INFERRED]
 
-`hal`'s write wrapper (ops +0x2c @0x407728): rounds length **up to even**, then
-swaps every adjacent byte pair (`lbu 0/1 ... sb 1/0`) before calling `write()`
+`hal`'s write wrapper (ops +0x2c @0x407728) [CODE]: rounds length **up to even**, then
+swaps every adjacent byte pair in place (`lbu 0/1 ... sb 1/0` @0x407774-0x407798) before calling `write()`
 in a short-write retry loop. So the bytes handed to `write()` are `B1 B0 B3 B2...`
 where `B0 B1 B2 B3...` is the order the bits were packed (section 6). Taken with
 the fact that `hal` is correct on real hardware, the I2S/DMA shifts out the
-**original packed order, MSB of `B0` first**. Verify on device (section 8).
+**original packed order, MSB of `B0` first** [INFERRED; unverified physically].
+Note the boot-time `STEREO_CONFIG` default `0x00a21302` has bit 17 set while every
+`DSIZE` value (`0x00a01302`...) has it clear; `hal` always issues DSIZE, so the
+post-open state is identical for stock and our tool as long as we also issue DSIZE (we do).
 
 ## 5. Clock / carrier programming
 
@@ -168,6 +215,13 @@ reference and the 4x MCLK:BCLK ratio come from the constants; the register
 semantics are [INFERRED] from the arithmetic. Not yet confirmed: that the
 hardware really yields a bit time of `b` ns for this `D` (cross-check with a
 scope or the I2S read-back loopback).
+
+Independent corroboration of `D = b/40` [CODE]: the driver's own boot default divider is
+`0x00215999` (`init_module` @0x13cc-0x13d8) = 33.35 -> `b = 1334 ns`, and `hal`'s ops-table
+header word at +0x08 is `0x536 = 1334` (the capture bit time, section 11). Three
+unrelated places agree on the units. Also `DRAIN` blocking for the predicted
+`bits * b` (section 9) shows 16-bit DSIZE serialises one bit per bit-clock with no slot padding
+(the 32-bit `I2S_WORD_SIZE` bit 11 is clear in the 16-bit config value).
 
 How `hal` picks `b` for a carrier of period `X` ns (`ir_send_thread`, the large
 unnamed function @0x42226c-0x422b04, labelled `MD5Update` by the disassembler):
@@ -195,6 +249,27 @@ the first bit). Buffer starts 8192 bytes, grows by 8192; when a byte-filled
 chunk is complete and a flush callback is set it calls it (the callback is the
 byte-swapping `write()` wrapper). `bitbuf_flush` pads with zero bits to a byte
 boundary, writes out, and zeroes the buffer.
+
+Verification of the model against `hal` (pass 2) [CODE unless noted]:
+
+| claim | verdict | evidence |
+|-------|---------|----------|
+| 1 bit per bit-clock, carrier baked in | confirmed | emitter @0x422104-0x422258: per carrier cycle `bitbuf_add(all-ones,pulse_bits)` then `add(0,space_bits)` |
+| mark = 1-bits, space = 0-bits, no inversion in `hal` | confirmed | mark: `s1=s0=-1` (@0x422184-0x422188); space: 0; no `nor` on the write path (only the read wrapper @0x407938 inverts) |
+| MSB-first | confirmed | `bitbuf_add` mask starts `0x80` and shifts right (@0x440630-0x44068c) |
+| byte-pair swap, even length | confirmed (code); physical direction unverified | @0x407728-0x407798 |
+| `N` table | confirmed | @0x407230-0x407270 (`<2251:2, <2501:4, <3000:8, <12000:10, else 12`) |
+| `b = ceil(X/N)` | confirmed | `(X-1+N)/N` @0x4225f8-0x422604 |
+| duty = `min(duty,50)`, `pulse = (duty*N+99)/100`, `space = N-pulse` | confirmed | `sltiu 51 / movn 50` @0x422460-0x42246c; @0x422638-0x422660 |
+| `ir_bench --duty` is a no-op | **refuted for the current source**: `--dry-run --out` at duty 25/33/50 gives 3/9, 4/8, 6/6 pulse/space bits and three different md5s | `tools/ir_bench.c` L95-98, run on host; the plan's "no-op" claim does not reproduce (it may have described an older on-device binary) |
+| tail | 32 zero bits then flush | `li s8,32` @0x422948 |
+| stereo / channel interleave matters? | no [INFERRED] | 16-bit slots, no padding, SD is continuous across L/R; DRAIN time matches `bits*b`. No code selects a channel for IR. |
+
+Our `ir_bench` stream construction matches `hal`'s except: it aligns each repeat to 16 bits
+(`hal` flushes to a byte boundary and the wrapper rounds each chunk to even), and `hal` writes in
+chunks as its 8192-byte buffer fills while we issue one `write()`. Neither changes the bit sequence.
+**No difference in bit content, order, polarity, carrier or call sequence between `ir_bench` and `hal`
+was found; the only difference found is the START `ports` value (section 3).**
 
 Section emitter (@0x422104). A section is a big-endian `u16 count` followed by
 `count` big-endian `u16` entries; entry bit 15 = **mark (1)** / **space (0)**,
@@ -238,10 +313,14 @@ ioctl(fd, I2S_START, (ports<<16)|0)          # ops+0x30
 ioctl(fd, I2S_DRAIN, 0)                      # ops+0x34, blocks until played
 ```
 
-Whether `hal` keeps one fd open across sends or reopens per send is
-**UNKNOWN**; the ops table suggests it opens on demand (`ir_send_thread`
-calls ops+0x18 each time @0x4222c4 and ops+0x1c on error paths) but the task
-brief says it holds the fd for its lifetime. Stock log strings name the
+`hal` ops table [CODE] (data @0x4525d0, file offset 0x525d0; `ir_init` @0x424244 stores its address):
+`+0x00=0xc0 +0x04=1500 +0x08=1334 +0x0c=768 +0x10=192`, `+0x14`=@0x407230 (period->N),
+`+0x18`=@0x407274 open, `+0x1c`=@0x40742c close, `+0x20`=`+0x28`=@0x407440 clock, `+0x24`=NULL,
+`+0x2c`=@0x407728 write, `+0x30`=@0x4079dc start, `+0x34`=@0x40797c complete (DRAIN),
+`+0x38`=@0x407858 read, `+0x3c`=NULL (no pre-send hook). `ir_send_thread` opens **once**
+(ops+0x18 @0x4222c4, fd kept at `100(sp)`), and the per-request loop (back-edge @0x422764 ->
+@0x4223b8) never closes it; ops+0x1c is only reached on error (@0x4227b8). So stock does
+DSIZE/MODE/VOLUME once per process life and `FREQ` + `write` + `START` + `DRAIN` per send. Stock log strings name the
 mic-side read path (`ir_read`, learning) which uses the byte-inverting read
 wrapper @0x407858 (`nor`), i.e. received bits are active-low.
 
@@ -249,33 +328,31 @@ wrapper @0x407858 (`nor`), i.e. received bits are active-low.
 
 | item | confidence | basis |
 |------|-----------|-------|
-| node `/dev/i2s`, major 253, write-only open, EBUSY when held | high | module strings + code, task facts |
-| ioctl numbers `0x80044e20..24,30,31`, `0xc0044e25..27`, by-value args | high | direct compare in `ath_i2s_ioctl`, same constants in `hal` |
+| node `/dev/i2s`, major 253, write-only open, EBUSY when held | high | module strings + code |
+| ioctl numbers `0x80044e20..23,30,31`, by-value args; `0x4e24`, `0xc0044e25` are no-ops | high | `ath_i2s_ioctl` compares, same constants in `hal` |
 | sample size 16-bit, MODE 2, VOLUME 15 as used by `hal` | high | `hal` @0x4072c0-0x4072fc |
 | ring geometry (512 x 768 B), write blocks when full, DMA not started by write | high | `ath_i2s_open`/`write` disassembly |
-| bitstream-with-carrier model (1 bit per bclk, MSB-first, marks=1) | high for structure, medium for polarity | `bitbuf_add`, emitter @0x422104 |
-| 16.16 divider formula for `I2S_FREQ` | medium-high arithmetic; unverified physically | constants + FP call chain |
-| byte-pair swap needed before `write()` | medium | `hal` write wrapper; direction not hardware-verified |
-| GPIO meaning of `ports` bits | low | register map is [INFERRED] |
+| bitstream structure: 1 bit/bclk, carrier baked in, MSB-first, mark=1, N/duty/b formulas | high | section 6 table |
+| `START` arg: bits 16/17/18 -> GPIO16/GPIO28/GPIO13 `OUT` level, set = low; bits 0-15 only `n==0` test | high (decode); high that these GPIOs are outputs | @0x1094-0x1100; `init_module` OE `0x10012000` |
+| stock default `ports = 7` (`START` arg `0x70000`) | high for the code default; medium that stock actually sends 7 for our devices | @0x42445c/0x424504; `controlPort: null` in backup |
+| what each GPIO physically gates | **unknown** | no binary evidence |
+| 16.16 divider `D = b/40` | high | boot default 0x215999 = 1334 ns = hal +0x08; DRAIN duration matched |
+| byte-pair swap direction (physical) | medium | `hal` wrapper; same code path as stock |
 | `I2S_MODE` bit meaning, line idle level, underrun behaviour | unknown | |
 
-## 8. Unknowns and cheapest experiment
+## 8. Unknowns and cheapest experiments
 
-Unknowns: physical bit time vs `D`; wire bit order (swap direction); mark
-polarity; whether the `ports` mask is mandatory to light the LED; idle level.
+Superseded by section 12 (ranked list with experiments). Remaining unknowns: what the three
+START GPIOs gate; idle level; underrun behaviour; whether the emitter also needs state set by the
+Lua layer or another process (section 12, item 4).
 
-Cheapest on-device experiment (requires user sign-off; do **not** run before
-that): with the stock stack paused only for the duration of the test, have our
-tool `open(O_WRONLY)`, set DSIZE=16/MODE=2/VOLUME=15, program a divider for a
-known `b`, queue a short 32-bit-ish pattern (e.g. `0xAAAA` repeated) and
-`I2S_START` with ports=0, while observing the emitter with a phone camera or
-IR-capable receiver and, better, the hub's own mic-side read loopback
-(`ir_loopback_test` path) or a logic probe. That one run fixes bit time, order
-and polarity together. Because stopping `hal` is disruptive, prefer a
-read-only `open(O_RDONLY)` of `/dev/i2s` first (independent mic slot, does not
-touch the speaker slot) only to confirm the node and ioctl plumbing.
+## 9. Bench result (2026-11-16, live hub) - SUCCESS CLAIM RETRACTED
 
-## 9. Bench result (2026-11-16, live hub)
+> **Retracted 2026-11-17** (see `docs/plans/2026-11-17-phase3-hardware-slice.md`). The row-5 "off -> on"
+> was almost certainly a coincidence (the TV wakes unprompted; later ~10 emissions, including one right
+> after a stock send, reached no device). The table below is kept as a **log of what was run**, not
+> as evidence. The only facts it supports: every ioctl returned 0, `write` returned in full, and `DRAIN`
+> blocked for the predicted duration. Nothing in it shows IR leaving the hub.
 
 Tool: `tools/ir_bench.c` (soft-float MIPS build, all parameters are arguments).
 Target: Samsung `PowerToggle` (NEC-like `0xE0E040BF`, 37900 Hz, 4500/4500 header,
@@ -295,36 +372,39 @@ duty 33 % (4 ones + 8 zeros per cycle), bit time 2199 ns, divider `0x0036f999`
 
 Stopped at the first success.
 
-Confirmed:
-- **ports = 2 (`START` arg `0x20000`, bit 17, the GPIO28 line) drives the
-  built-in emitter.** ports 0 and 1 emit nothing visible; bit 17 is required.
-  Only one `ports` value was tried after 1, so bits 16 and 18 (and combinations)
-  remain unmapped, and whether bit 17 is "emitter select" or "enable" is unknown.
-- **Bit time**: `DRAIN` blocked 323.5 ms for a stream computed at 324.1 ms, so
-  divider `D = ceil(X/N)/40` yields the intended 2199 ns/bit to within 0.2 %
-  (as far as the DMA clock; the optical carrier was not scoped, but the TV
-  decoded a 37.9 kHz NEC frame, so it is right to within receiver tolerance).
-- **Byte order**: swapping adjacent byte pairs (`swap=1`, as `hal` does) with
-  MSB-first packing works. The un-swapped stream (attempt 2) was only tried with
-  ports 0, so it is not disproved independently of the ports result.
-- **Polarity**: mark = 1 (not inverted) works. Inverted was tried only with
-  ports 0, so not disproved independently either.
-- Call sequence `open(O_WRONLY)`, DSIZE 16, MODE 2, VOLUME 15, FREQ, write,
-  START, DRAIN, close works as described; every call returned 0 and the single
-  18,424-byte write returned in full (0.2 ms, DMA not started until START).
-- `N=12` / carrier-period/12 rounding is sufficient for a Samsung TV.
+Established by this run (and nothing else):
+- Call sequence `open(O_WRONLY)`, DSIZE 16, MODE 2, VOLUME 15, FREQ, write, START, DRAIN, close
+  completes with rc 0 everywhere; the single 18,424-byte write returned in full (0.2 ms; DMA not started until START).
+- `DRAIN` blocked 323.5 ms against a predicted 324.1 ms: the divider formula gives the intended bit time
+  to ~0.2 % **as seen by the DMA clock**. (Also independently corroborated by the boot default divider, section 5.)
+
+**Retracted / not established:** "ports = 2 / bit 17 drives the built-in emitter", "byte order works",
+"mark polarity works", "N=12 is sufficient for a Samsung TV". None of these was observed. Static analysis
+(section 3) shows ports 0, 1 and 2 only ever drive subsets of the three select GPIOs that stock sets
+together (default 7).
 
 Hazard found: a **read-only open of `/dev/i2s` (mic slot) followed by `close()`
 hung in the kernel** (`ath_i2s_close`, process spinning in state R, SIGKILL had no
 effect) while `hal` held the speaker slot. Afterwards a restarted `hal` died
 immediately (zombie `[hal]` children) and only a `reboot` restored the stock
-stack. Do not `--probe` while `hal` runs; a plain reboot cleared it.
+stack. **Root cause found statically [CODE]** (`ath_i2s_close` @0x758-0x860): for the mic slot,
+close tests `sc_buf_var[8268] == 1` (RX DMA running). `ath_i2s_open` sets that to 0 and only the first
+`read()` starts RX DMA (`ath_i2s_read` @0xd20-0xd5c) and sets it to 1. If it is not 1, close skips
+the "clear all owner bits + resume" branch (@0x7d4-0x800) and goes straight to the wait loop
+@0x818-0x830, which sleeps `schedule_timeout_interruptible(250)` per descriptor until the DMA clears
+each descriptor's owner bit (set at open for RX, @0x2e0-0x2f4). With no DMA running that never
+happens, and since the loop ignores signals SIGKILL cannot stop it. **Always `read()` at least once
+before closing a mic fd** (section 11). `ir_bench --probe` does open+close with no read and therefore
+hangs by construction: remove or fix it.
 
-Still unknown: meaning of ports bits 16 and 18 and whether bit 17 only selects
-the emitter; whether 0/1 would work with other ports values; the I2S_MODE bit;
-idle level and underrun behaviour; mic-slot close hang root cause.
+Still unknown: what each of the three START GPIOs gates (section 3); the I2S_MODE bit; idle level and
+underrun behaviour.
 
 ## 10. Daemon backend (`hub/io/hw_sinks.c`)
+
+> **Status: unverified on hardware, and its default is probably wrong.** `--ir-ports` defaults to `0x02`
+> (bit 17 only) on the strength of the retracted section 9 result, whereas stock's default is `0x07`
+> (section 3). Do not change it until the section 12 ports sweep identifies a working value.
 
 Implements the section 9 sequence behind `hp_ir_sink`; host-tested with injected syscalls and
 diffed byte-for-byte against `tools/ir_bench.c --out`. Engine `port_mask` bit n maps to START bit
@@ -333,3 +413,97 @@ an empty result is `-HP_E_INVAL`). `send` ends after START and leaves DRAIN+clos
 `hp_hw_service()` (or the next send), so the daemon loop never blocks. Not yet verified on the
 device: the deferred-DRAIN flow, startup write-open/close probe, hold-open-after-START, any
 carrier other than 37900 Hz.
+
+## 11. Capture (receive) path
+
+Static analysis only; **never run**. All [CODE] unless tagged.
+
+**What it is.** The hub's IR *receiver* is read through the same device: `hal`'s learning thread
+(`ir_read_thread`, @0x423428), `ir_cap` and `ir_loopback_test`/`ir_loopback_thread` (@0x423dd8/@0x4239a0)
+open `/dev/i2s` with flags 0 (ops+0x18 with `a0=0`, @0x4234b8 and @0x423a00), i.e. the **mic slot**, and
+`read()` it through ops+0x38 (@0x407858). The data are raw one-bit-per-bit-clock samples of the receiver
+line (the learner measures carrier frequency, strings `loopback frequency %d`), so a process can capture
+ambient IR or the hub's own emission if the receiver sees it.
+
+**Driver side** (`ath_i2s_open` @0x90, `ath_i2s_read` @0xacc):
+- Mic slot = 128 descriptors x 768 B (`li s2,128` @0x178) = 98,304 B = 786,432 bits. That is 1.05 s of
+  history at 1334 ns/bit, 1.73 s at 2199 ns/bit. EBUSY (`"I2S mic busy"`) only if the mic slot is
+  already open; **independent of the speaker slot**, so it can be opened while `hal` holds the speaker.
+- No ioctl is needed to start capture. The first `read()` returns **0** and starts the RX DMA
+  (`dma_desc` + `dma_start(1)` @0xd20-0xd5c; `0xb80a0020`/`0xb80a0024 = 2`); later `read()`s block
+  (interruptibly) until a descriptor completes and return **768 B per completed descriptor**.
+- **Always pass a buffer >= 768 B and a count that is a multiple of 768.** The copy length is hard-coded
+  768 (`li a2,768` @0xcb8) while the descriptor length is re-armed to `min(count,768)` (@0xc34-0xc3c);
+  `hal` passes 192 into a 776-byte stack buffer (ops+0x10, buffer size `(192*4+14)&~7`) and relies on that.
+- **Never `close()` a mic fd that has not been `read()` at least once** (section 9 hazard): close then spins
+  forever. After at least one read RX state is 1 and close clears the owner bits and returns.
+- Bit clock and `STEREO_CONFIG` are **shared with TX** (`0xb80b001c`, `0xb80b0000`). `I2S_FREQ` with a value
+  different from the register pauses *both* DMAs, runs `i2s_reset` (MBOX reset `0xb80a0058 = 0xff`) and
+  resumes them (@0xf1c-0xfc4), and the resume of RX (`0xb80a0024 = 4`) does **not** reprogram the RX
+  descriptor base [INFERRED risk: a capture can die when a FREQ change lands mid-capture]. `FREQ` with the
+  value already in the register returns immediately (`beq v1,a3` @0xf24), so **set the capturer's divider to
+  exactly the divider the emitter will use and the emitter's own FREQ becomes a no-op.**
+
+**Setup `hal` itself uses.** Learning (`ir_read_thread`): no clock ioctl (ops+0x24 is NULL, @0x4234d4
+skips), so samples at whatever divider is current; the boot default is `0x00215999` = **1334 ns/bit**
+(749.6 kHz, ~20 samples per 38 kHz cycle), and hal's ops+0x08 is the same 1334. Loopback
+(`ir_loopback_thread`): ops+0x20 = clock with ops+0x04 = **1500 ns** first (@0x423a94, divider 37.5 =
+`0x00258000`), then reads. `ir_loopback_test` then emits a canned 22-byte signal with `ports = 7`
+(@0x423e78-0x423e90): hal's own self-test is "emit on all ports while the receiver listens", which suggests
+the receiver does see the emitter [INFERRED].
+
+**Data format.** `hal`'s read wrapper (@0x407858; loop @0x407924-0x407950) reads until its count is met,
+then for every byte pair does `nor` (bitwise invert) **and** swaps the two bytes: so the raw bytes from
+`read()` are the *active-low, pair-swapped* mirror of the TX format. After undoing both, bits are MSB-first,
+one per bit-clock; carrier-present reads as 1 after inversion [INFERRED from the inversion + learner].
+`hal`'s run-length decoder (@0x423250, caps at 1022 transitions) is the reference.
+
+**Proposed capture experiment (describe only).** A tiny `ir_capture` tool:
+`open(O_RDONLY)`; `ioctl(FREQ, D)` with the divider that will be used (stock Samsung 37.9 kHz -> X=26385 ns,
+N=12, b=2199 ns, `D=0x0036f999`; compute per carrier); `read(768)` once (returns 0); loop `read(768)` into a file,
+logging a monotonic timestamp per chunk, for ~3 s; **drain and close cleanly**. Trigger in order:
+1. **Calibration**: press the TV's own remote at the hub. This proves the receiver works and shows a known
+   frame's polarity, bit order and carrier in our decoder before trusting anything else.
+2. Stock emission via HA `remote.send_command` (no quiesce needed; mic slot is independent).
+3. Our emission with `hal` quiesced, capturer started first, same divider.
+Diff in the run-length domain (mark/space durations, carrier period, repeat structure), not raw bytes.
+If the receiver sees stock but not ours, the problem is upstream of the bit stream (section 12).
+
+## 12. Why our emission is inert: ranked hypotheses and experiments (pass 2, static)
+
+1. **We never drove the select lines stock drives (`ports` != 7). Likelihood: high.** START rewrites
+   GPIO16/GPIO28/GPIO13 together, active-low. Stock sends `ports=7` (all three low) by default; we tried
+   0, 1, 2 only (bench default 0, daemon default 2). If the emitter path needs GPIO16 and/or GPIO13 low in
+   addition to or instead of GPIO28, ports=2 emits nothing. The earlier "prime with a stock send, then
+   quiesce and run ir_bench" test was also **invalid**: our START with ports=2 overwrote GPIO16/GPIO13
+   back to high, undoing the primed state.
+   *Experiment:* with `hal` quiesced and a phone camera on the emitter (940 nm shows as a violet flicker),
+   run the same 324 ms stream with `--ports 7`, then 0 through 6. First run 7. ~0.35 s each. Any flicker
+   identifies the mask; then repeat with the TV.
+   *Even cheaper, no emission by us:* read `GPIO_OUT` (`0x18040008`) and `GPIO_OE` (`0x18040000`)
+   (e.g. a read-only `/dev/mem` mmap, if present) before and after one stock `remote.send_command`.
+   Bits 16/28/13 of OUT after the send show stock's ports directly (expected all 0 for 7), and OE should
+   read bits 28/16/13 = 1.
+2. **Something outside this driver also gates the emitter. Likelihood: medium.** The kernel exposes
+   `AR7240_GPIOC` (major 77) and `hal` holds nothing, so a GPIO-driven enable (IR power, mux, or one of
+   these three pins shared with an LED) could be set by another process (e.g. the Lua layer, `input0`
+   driver sysfs) and left set; our quiesce may have changed it, or it may be reset by whatever restarts.
+   *Experiment:* snapshot OE/OUT/FUNC (`0x18040000/08/28`) idle (stock running), after a stock send, after
+   quiesce, and after our emission, and diff; also `grep -l AR7240_GPIOC` over the device's binaries and scripts.
+   (The squashfs root in the local backup does not extract with `unsquashfs` here, lzma error 9, so
+   the root filesystem was not searched.)
+3. **Bit content or clock differs in some way static analysis cannot see. Likelihood: low-medium.** No
+   difference was found between `ir_bench` and `hal` (section 6), `DRAIN` timing matches, but physical bit
+   order/polarity/carrier are still unverified.
+   *Experiment:* the capture of section 11 (calibrate with the real remote, then compare stock vs ours).
+4. **I2S SD is not muxed to the emitter. Likelihood: low.** `GPIO_FUNC |= 0x24000000` is set once at module
+   load [CODE]; stock and ours share it. *Experiment:* register snapshot as in item 2 (expect bits 26 and 29 set).
+5. **Carrier or duty marginal for the receiver. Likelihood: low.** Cannot explain "nothing visible on the
+   camera"; only relevant once something flickers.
+
+**What was wrong in the old model:** (a) `START` bit 17 as an "emitter select/enable" was never evidenced;
+the code only shows three independent, active-low GPIO levels and stock sets all three by default;
+(b) the "stock priming" test could not work; (c) the claim that `ir_bench --duty` is a no-op does not hold for the
+current source; (d) the `--probe` hang is a driver quirk with a known cause, not an unexplained fault.
+**What survives:** the ioctl set, the 512x768 ring, the divider formula, and the whole bitstream recipe
+(section 6 table).
