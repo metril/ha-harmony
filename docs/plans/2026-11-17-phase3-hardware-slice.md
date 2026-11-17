@@ -301,7 +301,41 @@ turn the TV on**. So the emitter has line of sight from the hub's new position, 
   the speaker slot), so the hub may be able to **capture its own stock emission and ours and diff
   them** — the strongest possible evidence, and worth the effort if (a)–(c) do not settle it.
 
-### Session 3 plan — get an oracle that does not depend on the TV
+### Session 3 (2026-11-16 20:35–20:50 EST) — **SLICE GATE MET.** Root cause: the wrong emitter bit
+
+**The bug was one bit.** The built-in emitter is **START bit 16 (`ports=1`, arg `0x10000`)**, not
+bit 17. `hub/io/hw_sinks.c` shipped with `HP_HW_DEFAULT_IR_PORTS = 0x02`, so it built a correct
+waveform and fired it at an output with nothing attached — every ioctl returning 0 and `DRAIN`
+blocking the full duration, which is exactly what we saw. Fixed in `cdfcda6`.
+
+**How it was found, and why the earlier method failed.** The oracle was a **phone camera on the
+emitter plus the TV's on-screen volume bar**, sweeping `ports` 1..7 one value at a time with long
+2.7 s bursts (25 repeats) so a human could see them. Short 324 ms bursts and a laggy HA
+`media_player` state had made every previous attempt unreadable. `ports=1` reacted; bit 17 did
+nothing when re-tested.
+
+**Confirmed by replication, not a single observation:**
+- `ports=1`, 25 repeats (2.7 s) → volume bar.
+- `ports=1`, **3 repeats (324 ms)** → volume bar.
+- `ports=1`, **1 frame (108 ms)** → volume bar, replicated twice.
+- So **one frame per press is sufficient** for this TV: the `raw: {hz, us}` config form is adequate
+  as it stands, and Task 4b's repeat fidelity drops from blocking to a refinement (other devices may
+  still want it; the J-Tech/KVM/Audioengine sets are untested).
+
+**Slice gate, end to end on real hardware:** `deploy_hub push` (md5 both ends) → `quiesce` → the
+daemon in its **non-sim hardware path** (`hub_id=ha-harmony-pimentoblue`, `fw=ha-harmony-hub`) →
+**HA's own `HarmonyHubClient` connected** → `ir_send` with the extracted Samsung `VolumeUp`
+(37900 Hz) → `{'ok': True}` → **the TV's volume increased** → `remote_sim --press 2` on the hub →
+**`key_event {remote: 1, key: 2, action: 0}` received by that client** → `restore` (reboot) → stock
+stack back, user's remote and HA's stock integration working.
+
+**Process lesson, recorded because it cost two sessions.** A subagent reported bit 17 as "proven"
+from **one** TV state change, and that single observation was written into the hardware doc and built
+upon — even though the same report noted its other attempts "don't independently rule out the
+alternatives", and the TV was later shown to wake unprompted. One unreplicated observation on a
+self-triggering oracle is not evidence. Replicate, or use an oracle that cannot fire by itself.
+
+### Session 3 plan (superseded by the result above) — get an oracle that does not depend on the TV
 
 The TV is a bad oracle: HA's `media_player` state lags by minutes, and the set itself wakes on its
 own (CEC from the Shield, or a network wake). Two sessions were spent partly chasing that. Fix the
