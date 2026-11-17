@@ -44,7 +44,7 @@ gone, with Home Assistant as the source of truth for devices, activities and rem
 ## Installing the integration
 
 1. HACS → ⋮ → *Custom repositories* → add this repository as an **Integration**.
-2. Download *Harmony Hub (custom firmware)* and restart Home Assistant.
+2. Download *Harmony* and restart Home Assistant.
 3. *Settings → Devices & services → Add integration*, then enter the hub's host, port (default
    `8099`) and the token the daemon was started with.
 4. Put the device config at `<config>/ha_harmony/<hub_id>.yaml`; the format is in
