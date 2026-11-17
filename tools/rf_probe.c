@@ -45,6 +45,8 @@ typedef struct rfp_ops {
   ssize_t (*read)(void *ctx, int fd, void *buf, size_t cap);
   int (*close)(void *ctx, int fd);
   void (*alarm)(void *ctx, unsigned secs);
+  /* 1 = a process named `hal` is alive, 0 = not, -1 = could not tell. See rfp_hal_alive(). */
+  int (*hal_alive)(void *ctx);
 } rfp_ops_t;
 
 /* Frame length the chip clocks back, chosen by the first byte it returns; 0 = none/unknown. */
@@ -285,6 +287,22 @@ static int rfp_run(const rfp_ops_t *o, int argc, char **argv, FILE *out, FILE *e
     } else { rfp_usage(err); return 2; }
   }
   if (mode == NONE) { rfp_usage(err); return 2; } /* safe no-op */
+  /* Unlike /dev/i2s, the cc2544 driver's open() is NOT exclusive: it only bumps a counter, so it
+   * never returns EBUSY and the errno check below can never catch stock hal holding the node. We
+   * would simply open it and then contend with hal on the SPI bus the radio shares with NOR flash,
+   * which is the documented way to hang that bus. So refuse up front, and refuse too when the
+   * check itself cannot answer -- on this device there is no safe way to find out afterwards. */
+  int halive = o->hal_alive ? o->hal_alive(o->ctx) : -1;
+  if (halive != 0) {
+    const char *why = halive > 0 ? "stock hal is alive" : "could not determine whether stock hal is alive";
+    if (json)
+      fprintf(out, "{\"cmd\":\"preflight\",\"ok\":false,\"hal_alive\":%s,\"reason\":\"%s\"}\n",
+              halive > 0 ? "true" : "null", why);
+    else
+      fprintf(err, "refusing to open %s: %s.\nRun `tools/deploy_hub.py quiesce --yes` first; opening the\n"
+                   "radio while hal holds it can hang the shared flash SPI bus.\n", RFP_DEV, why);
+    return 1;
+  }
   int fd = o->open(o->ctx, RFP_DEV, 2 /* O_RDWR */);
   if (fd < 0) {
     int e = errno;
@@ -305,6 +323,7 @@ static int rfp_run(const rfp_ops_t *o, int argc, char **argv, FILE *out, FILE *e
 }
 
 #ifndef RFP_TEST
+#include <dirent.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
@@ -317,13 +336,46 @@ static ssize_t r_read(void *c, int fd, void *b, size_t n) { (void)c; return read
 static int r_close(void *c, int fd) { (void)c; return close(fd); }
 static void r_alarm(void *c, unsigned s) { (void)c; alarm(s); }
 
+/* Is a process named exactly `hal` alive? Walk /proc/<pid>/stat and read the name between the
+ * first '(' and the last ')' -- the hub's 2.6.31 kernel has no /proc/<pid>/comm (added in 2.6.33),
+ * and its BusyBox has no pgrep. Returns 1 yes, 0 no, -1 if /proc could not be read at all; an
+ * unreadable individual entry is skipped, since a pid can exit mid-walk. Matches the name
+ * deploy_hub.py's named_alive("hal") uses. */
+static int r_hal_alive(void *c) {
+  (void)c;
+  DIR *d = opendir("/proc");
+  if (!d) return -1;
+  int found = 0;
+  struct dirent *e;
+  while (!found && (e = readdir(d))) {
+    const char *n = e->d_name;
+    size_t i = 0;
+    while (n[i] >= '0' && n[i] <= '9') i++;
+    if (i == 0 || n[i] != 0) continue; /* not a pid directory */
+    char path[64], buf[256];
+    if (snprintf(path, sizeof path, "/proc/%s/stat", n) >= (int)sizeof path) continue;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) continue;
+    ssize_t got = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (got <= 0) continue;
+    buf[got] = 0;
+    char *a = strchr(buf, '('), *b = strrchr(buf, ')');
+    if (!a || !b || b <= a + 1) continue;
+    *b = 0;
+    found = strcmp(a + 1, "hal") == 0;
+  }
+  closedir(d);
+  return found;
+}
+
 int main(int argc, char **argv) {
   struct sigaction sa;
   memset(&sa, 0, sizeof sa);
   sa.sa_handler = on_sig; /* no SA_RESTART: read() must return EINTR */
   sigaction(SIGALRM, &sa, NULL);
   sigaction(SIGINT, &sa, NULL);
-  rfp_ops_t ops = {NULL, r_open, r_write, r_read, r_close, r_alarm};
+  rfp_ops_t ops = {NULL, r_open, r_write, r_read, r_close, r_alarm, r_hal_alive};
   return rfp_run(&ops, argc, argv, stdout, stderr);
 }
 #endif
