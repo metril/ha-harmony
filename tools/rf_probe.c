@@ -28,6 +28,13 @@
 #define RFP_RXMAX 64
 #define RFP_CANARY 0xAA
 #define RFP_CMD_LEN 7
+#define RFP_VERFILE "/lib/firmware/cc2544.version"
+/* Hard cap on any write() length. The REMOTE's cc2544 driver memcpys `count` bytes into a 32-byte
+ * slab with no bounds check (kernel heap overflow), so nothing longer may ever reach write(), on
+ * either device. Enforced at compile time for every command here and again at run time in
+ * rfp_write(), the only place this tool calls write(). Short writes are zero-padded and fine. */
+#define RFP_WRITE_MAX 32
+_Static_assert(RFP_CMD_LEN <= RFP_WRITE_MAX, "command frames must fit the remote's 32-byte slab");
 
 static const uint8_t RFP_INIT[RFP_CMD_LEN] = {0x10, 0xFF, 0x80, 0x00, 0x00, 0x01, 0x00};
 static const uint8_t RFP_VER1[RFP_CMD_LEN] = {0x10, 0xFF, 0x81, 0xF1, 0x01, 0x00, 0x00};
@@ -47,6 +54,8 @@ typedef struct rfp_ops {
   void (*alarm)(void *ctx, unsigned secs);
   /* 1 = a process named `hal` is alive, 0 = not, -1 = could not tell. See rfp_hal_alive(). */
   int (*hal_alive)(void *ctx);
+  /* Read up to cap bytes of a small regular file; returns the length, or -1 if unreadable. */
+  ssize_t (*read_file)(void *ctx, const char *path, void *buf, size_t cap);
 } rfp_ops_t;
 
 /* Frame length the chip clocks back, chosen by the first byte it returns; 0 = none/unknown. */
@@ -80,6 +89,29 @@ static int rfp_cmd_allowed(const uint8_t *c, size_t n) {
   return 0;
 }
 
+/* The only write() call site. Refuses anything over RFP_WRITE_MAX before it reaches the driver. */
+static ssize_t rfp_write(const rfp_ops_t *o, int fd, const void *buf, size_t n) {
+  if (n > RFP_WRITE_MAX) { errno = EMSGSIZE; return -1; }
+  return o->write(o->ctx, fd, buf, n);
+}
+
+/* Version string from the stock version file, via the seam; "unavailable" if it cannot be read or
+ * holds anything but [0-9A-Za-z.] (it ends up inside JSON). */
+static void rfp_stock_version(const rfp_ops_t *o, char out[32]) {
+  char b[32];
+  ssize_t n = o->read_file ? o->read_file(o->ctx, RFP_VERFILE, b, sizeof b - 1) : -1;
+  size_t k = 0;
+  if (n > 0)
+    for (; k < (size_t)n; k++) {
+      char c = b[k];
+      if (c == '\n' || c == '\r' || c == ' ' || c == 0) break;
+      if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '.')) { k = 0; break; }
+      out[k] = c;
+    }
+  if (k == 0) { strcpy(out, "unavailable"); return; }
+  out[k] = 0;
+}
+
 /* Number of bytes at or beyond `len` that no longer hold the canary (kernel overran the reply). */
 static size_t rfp_canary_dirty(const uint8_t *buf, size_t cap, size_t len) {
   size_t d = 0;
@@ -110,7 +142,7 @@ static void rfp_xfer(const rfp_ops_t *o, int fd, const uint8_t *cmd, size_t from
   x->wret = -1;
   if (!rfp_cmd_allowed(cmd, RFP_CMD_LEN)) { x->status = -HP_E_INVAL; return; }
   memcpy(x->tx, cmd, RFP_CMD_LEN);
-  x->wret = (int)o->write(o->ctx, fd, cmd, RFP_CMD_LEN); /* NOT a bytes-written count */
+  x->wret = (int)rfp_write(o, fd, cmd, RFP_CMD_LEN); /* NOT a bytes-written count */
   if (x->wret < 0) { x->status = -HP_E_IO; return; }
   if (!wait) return;
   x->status = -HP_E_NOENT;
@@ -168,6 +200,8 @@ static int rfp_cmd_version(const rfp_ops_t *o, int fd, FILE *out, int json) {
   rfp_xfer(o, fd, RFP_VER2, 0, 1, &x2);
   int ok = x1.status == 0 && x2.status == 0 && x1.rxlen >= 7 && x2.rxlen >= 7;
   unsigned maj = ok ? x1.rx[5] : 0, min = ok ? x1.rx[6] : 0;
+  char sv[32];
+  rfp_stock_version(o, sv);
   unsigned bbe = ok ? (unsigned)(x2.rx[5] << 8 | x2.rx[6]) : 0, ble = ok ? (unsigned)(x2.rx[6] << 8 | x2.rx[5]) : 0;
   if (json) {
     fprintf(out, "{\"cmd\":\"version\",\"xfers\":[");
@@ -176,7 +210,7 @@ static int rfp_cmd_version(const rfp_ops_t *o, int fd, FILE *out, int json) {
     rfp_print_xfer(out, "ver2", &x2, 1);
     fprintf(out, "],\"decoded\":%s", ok ? "true" : "false");
     if (ok) fprintf(out, ",\"major\":%u,\"minor\":%u,\"build_be\":\"%04X\",\"build_le\":\"%04X\"", maj, min, bbe, ble);
-    fprintf(out, ",\"stock_version_file\":\"39.00.0010\"}\n");
+    fprintf(out, ",\"stock_version_file\":\"%s\"}\n", sv);
   } else {
     rfp_print_xfer(out, "init", &xi, 0);
     rfp_print_xfer(out, "ver1", &x1, 0);
@@ -187,7 +221,7 @@ static int rfp_cmd_version(const rfp_ops_t *o, int fd, FILE *out, int json) {
      * version mismatch, so this is a misreading worth avoiding. */
     if (ok) fprintf(out, "decoded: %02u.%02u.%04X (build hex, big-endian; little-endian %04X)\n", maj, min, bbe, ble);
     else fprintf(out, "decoded: unavailable (a version query got no matching reply)\n");
-    fprintf(out, "stock /lib/firmware/cc2544.version: 39.00.0010 (compare)\n");
+    fprintf(out, "stock " RFP_VERFILE ": %s (compare)\n", sv);
   }
   return ok ? 0 : 1;
 }
@@ -265,7 +299,7 @@ static void rfp_usage(FILE *e) {
   fprintf(e, "usage: rf_probe (--probe | --version | --pipes | --listen [SECONDS]) [--json]\n"
              "  read-only: queries the CC2544 via /dev/rfspi; never touches /dev/rffw, never pairs\n"
              "  --probe    open /dev/rfspi and close (is stock hal holding it?); sends nothing\n"
-             "  --version  init + version queries; compare with 39.00.0010\n"
+             "  --version  init + version queries; compare with the stock version file (hub 39.00.0010, remote 72.00.0007)\n"
              "  --pipes    dump the pairing table (query only)\n"
              "  --listen   passively read frames (default 60 s), tally report ids, check overruns\n");
 }
@@ -340,6 +374,15 @@ static ssize_t r_read(void *c, int fd, void *b, size_t n) { (void)c; return read
 static int r_close(void *c, int fd) { (void)c; return close(fd); }
 static void r_alarm(void *c, unsigned s) { (void)c; alarm(s); }
 
+static ssize_t r_read_file(void *c, const char *p, void *b, size_t cap) {
+  (void)c;
+  int fd = open(p, O_RDONLY);
+  if (fd < 0) return -1;
+  ssize_t n = read(fd, b, cap);
+  close(fd);
+  return n;
+}
+
 /* Is a process named exactly `hal` alive? Walk /proc/<pid>/stat and read the name between the
  * first '(' and the last ')' -- the hub's 2.6.31 kernel has no /proc/<pid>/comm (added in 2.6.33),
  * and its BusyBox has no pgrep. Returns 1 yes, 0 no, -1 if /proc could not be read at all; an
@@ -379,7 +422,7 @@ int main(int argc, char **argv) {
   sa.sa_handler = on_sig; /* no SA_RESTART: read() must return EINTR */
   sigaction(SIGALRM, &sa, NULL);
   sigaction(SIGINT, &sa, NULL);
-  rfp_ops_t ops = {NULL, r_open, r_write, r_read, r_close, r_alarm, r_hal_alive};
+  rfp_ops_t ops = {NULL, r_open, r_write, r_read, r_close, r_alarm, r_hal_alive, r_read_file};
   return rfp_run(&ops, argc, argv, stdout, stderr);
 }
 #endif

@@ -13,6 +13,8 @@ typedef struct {
   int wret[MAXLOG], nw, wi;     /* write() return script; exhausted = 0 (no frame back) */
   struct { uint8_t d[RFP_BUF]; int n; int overrun_to; } rd[MAXRD]; /* n<0: EINTR; overrun_to>n: scribble */
   int nrd, ri;
+  int no_verfile;      /* 1: the version file is unreadable */
+  const char *verfile; /* read_file() content; NULL = unreadable */
   int hal; /* what hal_alive() reports: 0 not alive (the default), 1 alive, -1 cannot tell */
 } fake_t;
 
@@ -49,8 +51,19 @@ static ssize_t f_read(void *c, int fd, void *b, size_t cap) {
 static int f_close(void *c, int fd) { (void)c; (void)fd; return 0; }
 static void f_alarm(void *c, unsigned s) { lg(c, 'a', NULL, NULL, (int)s); }
 static int f_hal_alive(void *c) { return ((fake_t *)c)->hal; }
+static ssize_t f_read_file(void *c, const char *p, void *b, size_t cap) {
+  fake_t *f = c;
+  lg(f, 'f', p, NULL, 0);
+  if (!f->verfile) { errno = ENOENT; return -1; }
+  size_t n = strlen(f->verfile);
+  if (n > cap) n = cap;
+  memcpy(b, f->verfile, n);
+  return (ssize_t)n;
+}
+static const char *const STOCK_FILE = "39.00.0010\n"; /* the hub's file; the default for fakes */
 static rfp_ops_t mk(fake_t *f) {
-  return (rfp_ops_t){f, f_open, f_write, f_read, f_close, f_alarm, f_hal_alive};
+  if (!f->verfile && !f->no_verfile) f->verfile = STOCK_FILE;
+  return (rfp_ops_t){f, f_open, f_write, f_read, f_close, f_alarm, f_hal_alive, f_read_file};
 }
 
 /* Like run_cmd but returns stderr, where the preflight refusal is written. */
@@ -341,6 +354,7 @@ static void test_version_build_is_hex(void) {
 static void check_log_safe(const fake_t *f) {
   for (int i = 0; i < f->nlog; i++) {
     if (f->log[i].op == 'o') CT_CHECK(!strcmp(f->log[i].path, "/dev/rfspi"));
+    if (f->log[i].op == 'f') CT_CHECK(!strcmp(f->log[i].path, "/lib/firmware/cc2544.version"));
     if (f->log[i].op != 'w') continue;
     const uint8_t *d = f->log[i].data;
     CT_EQ(f->log[i].n, 7);
@@ -375,6 +389,63 @@ static void test_brick_safety(void) {
   }
 }
 
+/* The remote's driver memcpys `count` into a 32-byte slab: nothing over 32 may reach write(). */
+static void test_write_cap(void) {
+  CT_EQ(RFP_WRITE_MAX, 32);
+  CT_CHECK(RFP_CMD_LEN <= RFP_WRITE_MAX);
+  fake_t f = {0};
+  rfp_ops_t o = mk(&f);
+  uint8_t buf[64] = {0};
+  errno = 0;
+  CT_EQ(rfp_write(&o, 5, buf, 33), -1);
+  CT_EQ(errno, EMSGSIZE);
+  CT_EQ(rfp_write(&o, 5, buf, 64), -1);
+  CT_EQ(rfp_write(&o, 5, buf, (size_t)-1), -1);
+  CT_EQ(f.nlog, 0); /* refused before the driver saw anything */
+  CT_EQ(rfp_write(&o, 5, buf, 32), 0);
+  CT_EQ(rfp_write(&o, 5, buf, 7), 0);
+  CT_EQ(f.nlog, 2);
+  for (int i = 0; i < f.nlog; i++) CT_CHECK(f.log[i].n <= 32);
+  /* and every command any subcommand sends is within the cap */
+  const char *modes[][3] = {{"--probe"}, {"--version"}, {"--pipes"}, {"--listen", "1"}};
+  for (int m = 0; m < 4; m++) {
+    fake_t g = {0};
+    rfp_ops_t og = mk(&g);
+    char *argv[] = {"rf_probe", (char *)modes[m][0], (char *)modes[m][1]};
+    int rc;
+    free(run_cmd(&og, modes[m][1] ? 3 : 2, argv, &rc));
+    for (int i = 0; i < g.nlog; i++) if (g.log[i].op == 'w') CT_CHECK(g.log[i].n <= RFP_WRITE_MAX);
+  }
+}
+
+/* The remote's chip is 72.00.0007: the stock version comes from the file, not a constant. */
+static void test_stock_version_from_file(void) {
+  uint8_t i0[7] = {0x10, 0xFF, 0x80, 0, 0, 0, 0}, v1[7] = {0x10, 0xFF, 0x81, 0xF1, 0x01, 72, 0};
+  uint8_t v2[7] = {0x10, 0xFF, 0x81, 0xF1, 0x02, 0x00, 0x07};
+  const char *files[] = {"72.00.0007\n", NULL, "bad\"quote\n", "\n"};
+  const char *want[] = {"72.00.0007", "unavailable", "unavailable", "unavailable"};
+  for (int i = 0; i < 4; i++) {
+    for (int json = 0; json < 2; json++) {
+      fake_t f = {0};
+      f.verfile = files[i];
+      f.no_verfile = files[i] == NULL;
+      rfp_ops_t o = mk(&f);
+      push_rd(&f, i0, 7); push_rd(&f, v1, 7); push_rd(&f, v2, 7);
+      char *argv[] = {"rf_probe", "--version", "--json"};
+      int rc;
+      char *txt = run_cmd(&o, json ? 3 : 2, argv, &rc);
+      CT_EQ(rc, 0);
+      if (!json) CT_CHECK(strstr(txt, "decoded: 72.00.0007"));
+      char pat[64];
+      snprintf(pat, sizeof pat, json ? "\"stock_version_file\":\"%s\"" : "%s (compare)", want[i]);
+      CT_CHECK(strstr(txt, pat));
+      CT_CHECK(!strstr(txt, "39.00.0010")); /* no hard-coded hub version */
+      free(txt);
+      check_log_safe(&f);
+    }
+  }
+}
+
 int main(void) {
   CT_RUN(test_preflight_refuses_when_hal_alive);
   CT_RUN(test_preflight_fails_closed_without_probe_fn);
@@ -390,5 +461,7 @@ int main(void) {
   CT_RUN(test_version);
   CT_RUN(test_version_build_is_hex);
   CT_RUN(test_brick_safety);
+  CT_RUN(test_write_cap);
+  CT_RUN(test_stock_version_from_file);
   return CT_DONE();
 }
