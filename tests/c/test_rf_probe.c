@@ -304,14 +304,35 @@ static void test_version(void) {
   rfp_ops_t o = mk(&f);
   uint8_t i0[7] = {0x10, 0xFF, 0x80, 0x00, 0x00, 0, 0};
   uint8_t v1[7] = {0x10, 0xFF, 0x81, 0xF1, 0x01, 39, 0};
-  uint8_t v2[7] = {0x10, 0xFF, 0x81, 0xF1, 0x02, 0x00, 0x0A};
+  /* The real chip answered with these bytes on 2026-11-17. The build field is HEX -- stock parses
+   * its version file with "%d.%d.%x" -- so 00 10 is build 0x0010 and matches the file's "0010".
+   * The earlier expectation here was 00 0A printed in decimal, which only looked right because
+   * 0x000A renders as "0010" in decimal; that fitted the assertion to a formatting bug. */
+  uint8_t v2[7] = {0x10, 0xFF, 0x81, 0xF1, 0x02, 0x00, 0x10};
   push_rd(&f, i0, 7); push_rd(&f, v1, 7); push_rd(&f, v2, 7);
   char *argv[] = {"rf_probe", "--version"};
   int rc;
   char *txt = run_cmd(&o, 2, argv, &rc);
   CT_EQ(rc, 0);
-  CT_CHECK(strstr(txt, "decoded: 39.00.0010")); /* build bytes 00 0A as 16-bit BE = 10 */
+  CT_CHECK(strstr(txt, "decoded: 39.00.0010"));
   CT_CHECK(strstr(txt, "39.00.0010 (compare)"));
+  CT_CHECK(!strstr(txt, "39.00.0016")); /* the decimal rendering must not come back */
+  free(txt);
+}
+
+/* A build field whose hex and decimal renderings differ visibly, so the format is pinned. */
+static void test_version_build_is_hex(void) {
+  fake_t f = {0};
+  rfp_ops_t o = mk(&f);
+  uint8_t i0[7] = {0x10, 0xFF, 0x80, 0x00, 0x00, 0, 0};
+  uint8_t v1[7] = {0x10, 0xFF, 0x81, 0xF1, 0x01, 39, 0};
+  uint8_t v2[7] = {0x10, 0xFF, 0x81, 0xF1, 0x02, 0x00, 0xAB};
+  push_rd(&f, i0, 7); push_rd(&f, v1, 7); push_rd(&f, v2, 7);
+  char *argv[] = {"rf_probe", "--version"};
+  int rc;
+  char *txt = run_cmd(&o, 2, argv, &rc);
+  CT_EQ(rc, 0);
+  CT_CHECK(strstr(txt, "decoded: 39.00.00AB")); /* not 00171 */
   free(txt);
 }
 
@@ -367,6 +388,7 @@ int main(void) {
   CT_RUN(test_listen_len_beyond_entry_buffer);
   CT_RUN(test_open_and_cli);
   CT_RUN(test_version);
+  CT_RUN(test_version_build_is_hex);
   CT_RUN(test_brick_safety);
   return CT_DONE();
 }

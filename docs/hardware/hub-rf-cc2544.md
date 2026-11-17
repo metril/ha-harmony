@@ -249,6 +249,62 @@ opener of `/dev/rfspi`, and no concurrent flash imaging (section 3).
 running its RF stack. The remote is now rooted, so its stock app is gone and it
 generates no traffic; these wait for our own remote firmware.
 
+## 8a. Results from the device, 2026-11-17 **[MEASURED]**
+
+Stock stack quiesced, `rf_probe` run over SSH, hub restored afterwards
+(129 s outage). This is the first time any of our code has driven the radio.
+
+**`write()` returns 0 for a 7-byte command, not the frame length.** Every
+command — init, both version queries, all 19 pipe queries — returned exactly
+`0`. The chip clocks back `rx0 = 0` during the transaction (no frame), and the
+reply arrives later through the IRQ/`read()` path. So `0` is the **normal,
+successful** return for a short command, not a failure, and the section-4 table
+describes what *can* come back, not what usually does. A driver must therefore
+treat only a negative return as an error, and must not wait for a non-zero
+`write()` before reading.
+
+**The reply does arrive on `read()`, at the table's length.** Every successful
+reply was 7 bytes for a `0x10` command and 20 bytes for a pipe query, matching
+the table exactly.
+
+| query | reply |
+|---|---|
+| init `10 FF 80 00 00 01 00` | `10 FF 80 00 00 00 00` |
+| version major/minor | `10 FF 81 F1 01 27 00` → `0x27` = 39, minor 0 |
+| version build | `10 FF 81 F1 02 00 10` → build `0x0010` |
+
+Chip firmware is **39.00.0010**, matching `/lib/firmware/cc2544.version`
+exactly — the build field is hex, as stock's `"%d.%d.%x"` parse implies. (Our
+first run printed it in decimal as `39.00.0016`, which read as a mismatch; since
+`hal` reflashes on a version mismatch, that formatting is now pinned by a test.)
+
+**Pairing table — only slot 1 is populated**, confirming one paired remote:
+
+| pipe | reply payload | reading |
+|---|---|---|
+| `0x03` | `A1 B7 95 EE 17 06 08` | hub RF address `A1B795EE` |
+| `0x21` | `08 28 40 21 04 02 07 04` | EquadID **`4021`**, the Juniper family ✓ |
+| `0x31` | `75 BB 13 86 0A 00 00 00 0F` | remote RF address `75BB1386` |
+| `0x41` | `03 31 31 31` | remote name, length 3: **"111"** |
+
+Pipes `0x20`, `0x22-0x25`, `0x30`, `0x32-0x35`, `0x40`, `0x42-0x45` all timed
+out — empty slots answer nothing rather than returning zeros, so a timeout is
+how an unused slot presents. The section-7 layout is confirmed, as is the Elite
+being slot 1 with EquadID `0x4021`.
+
+**No `read()` overrun observed** (probe 6): across every reply, no byte beyond
+the returned length had been written. Not proof of a bounds check — there is
+none in the driver — but no misbehaviour in practice.
+
+**`--listen` for 20 s saw 0 frames**, as expected: the Elite is rooted, its
+stock RF app is gone, and nothing on the link transmits. Probes 2, 4, 5 and 7
+remain blocked on Stage D.
+
+**Still UNKNOWN:** whether `write()` ever returns non-zero in practice (nothing
+provoked it); the meaning of the trailing bytes in the `0x03`, `0x21` and `0x31`
+replies; and whether the `0x21` layout is `08 28` + EquadID or something else
+framing it.
+
 ## 9. What this means for our code
 
 `hub/rf/framing.h` defines a 4-byte header `type, seq, (idx<<4|total), len`

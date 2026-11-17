@@ -175,13 +175,17 @@ static int rfp_cmd_version(const rfp_ops_t *o, int fd, FILE *out, int json) {
     rfp_print_xfer(out, "ver1", &x1, 1); fputc(',', out);
     rfp_print_xfer(out, "ver2", &x2, 1);
     fprintf(out, "],\"decoded\":%s", ok ? "true" : "false");
-    if (ok) fprintf(out, ",\"major\":%u,\"minor\":%u,\"build_be\":%u,\"build_le\":%u", maj, min, bbe, ble);
+    if (ok) fprintf(out, ",\"major\":%u,\"minor\":%u,\"build_be\":\"%04X\",\"build_le\":\"%04X\"", maj, min, bbe, ble);
     fprintf(out, ",\"stock_version_file\":\"39.00.0010\"}\n");
   } else {
     rfp_print_xfer(out, "init", &xi, 0);
     rfp_print_xfer(out, "ver1", &x1, 0);
     rfp_print_xfer(out, "ver2", &x2, 0);
-    if (ok) fprintf(out, "decoded: %02u.%02u.%04u (build big-endian; little-endian %04u)\n", maj, min, bbe, ble);
+    /* The build field is HEX: stock parses its version file with "%d.%d.%x", so a chip reporting
+     * bytes 00 10 is build 0x0010 and the file's "0010" is the same value. Printing it in decimal
+     * showed 0016 against the file's 0010 and read as a mismatch -- and hal reflashes the chip on a
+     * version mismatch, so this is a misreading worth avoiding. */
+    if (ok) fprintf(out, "decoded: %02u.%02u.%04X (build hex, big-endian; little-endian %04X)\n", maj, min, bbe, ble);
     else fprintf(out, "decoded: unavailable (a version query got no matching reply)\n");
     fprintf(out, "stock /lib/firmware/cc2544.version: 39.00.0010 (compare)\n");
   }
