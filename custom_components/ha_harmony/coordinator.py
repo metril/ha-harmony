@@ -489,11 +489,25 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     async def async_send_ir(self, action: dict[str, Any]) -> None:
         await self.async_command(HUB_DEVICE, CMD_IR_SEND, action)
 
+    def resolve_device(self, device: str) -> str:
+        """A device id, or one of a device's configured `aliases`, -> the device id.
+
+        Lets automations written for the stock integration (`device: "51887071"`, the stock
+        hub's numeric id) keep working after an entity swap. Anything unknown passes through
+        unchanged, so the hub still rejects it with its own message.
+        """
+        if device == HUB_DEVICE or device in self.compiled.devices:
+            return device
+        for dev in self.compiled.devices.values():
+            if device in dev.aliases:
+                return dev.id
+        return device
+
     async def async_set_device_state(
         self, device: str, power: bool | None = None, input: str | None | bool = False
     ) -> None:
         """Tell the hub a device changed by hand (no IR). `input=None` = unknown, False = leave."""
-        args: dict[str, Any] = {"device": device}
+        args: dict[str, Any] = {"device": self.resolve_device(device)}
         if power is not None:
             args["power"] = power
         if input is not False:
@@ -502,6 +516,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
 
     async def async_device_command(self, device: str, command: str) -> None:
         """`remote.send_command device=...` / device buttons: the hub sends the IR and tracks it."""
+        device = self.resolve_device(device)
         if device == HUB_DEVICE:
             await self.async_command(device, command)
             return
