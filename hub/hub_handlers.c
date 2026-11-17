@@ -8,6 +8,10 @@
 
 #include "hub/hp_errors.h"
 #include "hub/rf/rf_payload.h"
+#include "remote/page/page.h"
+
+/* page_push = 3-byte header + page data, and must fit one RF object body. */
+_Static_assert(HP_PAGE_MAX_BYTES + 3 <= HP_RF_BODY_MAX, "page_push no longer fits one RF object");
 
 static uint32_t mono_ms(void *ctx) {
     (void)ctx;
@@ -347,7 +351,7 @@ static int on_page_push(void *vctx, hp_session_t *sess, uint32_t id, const cJSON
     const cJSON *b64 = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "data");
     uint8_t data[256];
     size_t n = hp_base64_decode(b64->valuestring, strlen(b64->valuestring), data, sizeof data);
-    if (n == (size_t)-1 || n > 255) return reply_err(id, "too_big", "page data exceeds 255 bytes", reply, cap, len);
+    if (n == (size_t)-1 || n > HP_PAGE_MAX_BYTES) return reply_err(id, "too_big", "page data exceeds 251 bytes", reply, cap, len);
     hp_rf_val_t v[3] = {{.u = (uint32_t)r->valuedouble}, {.u = (uint32_t)pg->valuedouble}, {.p = data, .len = n}};
     int rc = rf_send_msg(h, HP_MSG_PAGE_PUSH, v, 3);
     if (rc == -HP_E_TOOBIG) return reply_err(id, "too_big", "page does not fit the RF budget", reply, cap, len);

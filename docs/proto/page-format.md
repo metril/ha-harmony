@@ -1,6 +1,6 @@
 # Remote page format (version 1)
 
-Carried as the `data` bytes of `page_push` (<= 255 bytes; one page per push,
+Carried as the `data` bytes of `page_push` (<= 251 bytes; one page per push,
 page id also in the RF message). Screen 240x320 px; all integers are bytes.
 Decoders: `remote/page/page.c`, `custom_components/ha_harmony/page_codec.py`;
 golden vectors: `tests/vectors/pages.json`.
@@ -30,7 +30,8 @@ golden vectors: `tests/vectors/pages.json`.
 - Total length must equal header + widgets exactly. Trailing bytes, truncation,
   bad version/kind/UTF-8, size outside 1..15 (zero or >15), out-of-grid, overlap, duplicate id:
   rejected (`HP_E_INVAL`). More than 32 widgets, a label over 24 bytes, or
-  data over 255 bytes: `HP_E_TOOBIG`. The Python encoder raises `ValueError`
+  data over 251 bytes: `HP_E_TOOBIG` (one RF object body is 254 bytes and
+  `page_push` spends 3 on its header). The Python encoder raises `ValueError`
   for the same cases. Nothing is ever silently truncated.
 - Pixels: a cell spans (240/cols) x (320/rows) px; pixel (px,py) is in cell
   (px*cols/240, py*rows/320), integer division. Hit-testing is by cell.

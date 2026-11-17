@@ -7,7 +7,9 @@ from dataclasses import dataclass
 VERSION = 1
 MAX_WIDGETS = 32
 MAX_LABEL = 24
-MAX_BYTES = 255
+# Must match HP_PAGE_MAX_BYTES in remote/page/page.h: one RF object carries at most 254 body
+# bytes and page_push uses 3 for its header, so a 252..255-byte page compiles but cannot be sent.
+MAX_BYTES = 251
 MAX_GRID = 16
 KINDS = {"button": 0, "tile": 1, "label": 2}
 _KIND_NAMES = {v: k for k, v in KINDS.items()}

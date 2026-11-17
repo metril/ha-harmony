@@ -75,11 +75,22 @@ def test_encode_page_id_range():
 
 def test_total_size_limit():
     ws = [Widget("label", i, i % 16, i // 16, 1, 1, "x" * MAX_LABEL) for i in range(9)]
-    with pytest.raises(ValueError, match="255"):  # 5 + 9 * 29 = 266
+    with pytest.raises(ValueError, match="251"):  # 5 + 9 * 29 = 266
         encode_page(1, 16, 2, ws)
     assert len(encode_page(1, 16, 2, ws[:8])) == 5 + 8 * 29
-    with pytest.raises(ValueError, match="255"):
+    with pytest.raises(ValueError, match="251"):
         decode_page(bytes([1, 0, 16, 16, 0]) + bytes(251))
+
+
+def test_page_limit_is_the_rf_budget_exactly():
+    """251 = one RF object body (254) minus page_push's 3-byte header. A page of exactly 251
+    bytes must encode; 252 must not, or HA compiles a page the hub can never send."""
+    full = [Widget("label", i, i % 16, i // 16, 1, 1, "x" * MAX_LABEL) for i in range(8)]
+    assert len(encode_page(1, 16, 2, [*full, Widget("label", 8, 8, 0, 1, 1, "x" * 9)])) == 251
+    with pytest.raises(ValueError, match="251"):
+        encode_page(1, 16, 2, [*full, Widget("label", 8, 8, 0, 1, 1, "x" * 10)])
+    with pytest.raises(ValueError, match="251"):
+        decode_page(bytes(252))
 
 
 def test_decode_utf8_label_roundtrip():

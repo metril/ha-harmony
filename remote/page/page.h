@@ -9,7 +9,10 @@
 #define HP_PAGE_MAX_WIDGETS 32
 #define HP_PAGE_MAX_LABEL 24
 #define HP_PAGE_MAX_TEXT 31
-#define HP_PAGE_MAX_BYTES 255
+/* 251, not 255: a page travels in one RF object, whose body is at most 254 bytes
+ * (HP_RF_BODY_MAX), and page_push spends 3 of them on its own header. Asserted in
+ * hub_handlers.c so the two cannot drift apart. */
+#define HP_PAGE_MAX_BYTES 251
 #define HP_PAGE_MAX_GRID 16
 #define HP_PAGE_SCREEN_W 240
 #define HP_PAGE_SCREEN_H 320
@@ -29,7 +32,7 @@ typedef struct {
 
 /* 0 ok; -HP_E_INVAL malformed (version, truncated/trailing, kind, UTF-8, bounds,
  * zero size, overlap, duplicate id); -HP_E_TOOBIG too many widgets, long label
- * or len > 255. *out is only written on success. */
+ * or len > HP_PAGE_MAX_BYTES (251). *out is only written on success. */
 int hp_page_decode(const uint8_t *data, size_t len, hp_page_t *out);
 
 /* Widget under pixel (x,y), or NULL (also for pixels outside the screen). */
