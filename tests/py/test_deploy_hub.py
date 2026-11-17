@@ -543,6 +543,54 @@ def sh(script: str) -> str:
     return shlex.join(["sh", "-c", script])
 
 
+# The hub's stock BusyBox lacks these outright, or lacks the flag. `grep -E` in particular once
+# made the fd scan fail on every process and report "not held" while `hal` held both devices --
+# a false negative that would let `quiesce` pass and `run` open /dev/i2s against a live `hal`,
+# which wedges unkillably in ath_i2s_close. Anything on-device must stay inside this floor.
+MISSING_APPLETS = (
+    r"grep\s+-[A-DF-Za-z]*E",  # no extended regex
+    r"\bhead\b",
+    r"\bsort\b",
+    r"\buniq\b",
+    r"\breadlink\b",
+    r"\bbasename\b",
+    r"\bxargs\b",
+    r"\bseq\b",
+    r"\bsync\b",
+    r"\btar\b",
+    r"\bsha256sum\b",
+    r"\bfind\b",
+    r"\bcommand -v\b",
+    r"\blsof\b",
+    r"\bfuser\b",
+)
+
+
+def missing_applets(remote: str) -> list[str]:
+    """Report any use of an applet or flag the hub's stock BusyBox does not have.
+
+    A bare `df` is allowed: the tool probes it and falls back to the staged BusyBox when it is
+    absent, and an absent-applet probe is harmless. What is *not* allowed is depending on an
+    applet's output without a fallback -- which is what `grep -E` did.
+    """
+    return [p for p in MISSING_APPLETS if re.search(p, remote)]
+
+
+def test_fd_scan_avoids_applets_the_hub_lacks() -> None:
+    assert missing_applets(dh.FD_SCAN) == []
+    assert "grep -e" in dh.FD_SCAN  # basic grep with repeated -e, not -E
+
+
+def test_missing_applet_checker_catches_regressions() -> None:
+    assert missing_applets('grep -E " -> /dev/(i2s|rfspi)$"')
+    assert missing_applets("ls -l /proc/1/fd | head -5")
+    assert missing_applets("readlink /proc/1/fd/3")
+    assert missing_applets("command -v dd")
+    assert missing_applets("ls /data | sort")
+    assert missing_applets("ps") == []
+    assert missing_applets("df -k /data") == []  # probed with a fallback; see the docstring
+
+
 KNOWN_BAD = (
     "dd if=/data/x of=/dev/mtd3", "nandwrite -p /dev/mtd3 x", "flash_erase /dev/mtd1",
     "mtd_debug write /dev/mtd1 0 4 x", "flashcp x /dev/mtd0", "ubiformat /dev/mtd1",
@@ -639,6 +687,10 @@ def test_every_emitted_command_is_allow_listed(artifacts):
     assert any(c[1] == "-tt" for c in log)  # the foreground run gets a tty
     bad = [(c[-1], v) for c in log if (v := violations(c[-1]))]
     assert not bad, bad
+    # Every command must also stay within the stock BusyBox's applet floor; validated against the
+    # real hub, where `grep -E` silently broke device-holder detection.
+    unsupported = [(c[-1], m) for c in log if (m := missing_applets(c[-1]))]
+    assert not unsupported, unsupported
     assert all(c[0] == "ssh" and "BatchMode=yes" in c for c in log)
 
 
