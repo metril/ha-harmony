@@ -34,6 +34,27 @@ Known hardware (from harmony-ng docs):
   `readlink`, and no `command` builtin.** `cat`, `md5sum`, `which`, `lua`, `sed`, `grep`, `cp` exist.
 - Elite: DM365 ARM926, Linux 2.6.37, 240×320 RGB565 fb, Synaptics touch, MSP430 power/RTC, CC2544 RF, NAND (/ squashfs, /data, /opt).
 - RF: HID++-style frames, hub→remote 30B (0x12), remote→hub 32B (0x20); CC2544 FW closed, no RSSI.
+
+**Corrections from the rooted Elite and static analysis of the stock RF stack (2026-11-17):**
+- **The Elite has 11 mtd partitions**, not the assumed "squashfs root + /data + /opt": mtd0 `u-boot
+  env`, mtd1 `ubl`, mtd2 `u-boot`, mtd3 `ubi` (126M), mtd4/5 `kernel`/`kernel2`, mtd6 `root`, mtd7
+  `data`, mtd8 `cache`, mtd9 `mfg`, mtd10 `log`. **mtd4–mtd10 are gluebi volumes inside mtd3**
+  (erasesize `0x1f000` = the UBI LEB size), so mtd3 is the superset. Root is unionfs, as on the hub:
+  squashfs `/mnt/root` under ubifs `/mnt/data`. See `docs/runbooks/phase1-remote.md`.
+- **The 30/32 RF frame split is not directional.** 30 B is the `0x12` report on the *hub's* SPI in
+  both directions (the hub's CC2544 runs host mode); 32 B is the `0x20` report on the *remote's* own
+  SPI. Both carry the same 28-byte inner block, which is the real application budget.
+- **`/dev/rfspi` has no ioctls at all** — only open/read/write/release. `write()` returns the
+  *received* frame length rather than the bytes written, `read()` ignores its `count` argument, and
+  `read()` blocks with no timeout (a signal is the only way out). Pairing state lives inside the
+  CC2544, not in a hub file. The SPI bus is shared with NOR flash, so imaging flash contends with
+  RF. Full analysis and the on-device probe set: `docs/hardware/hub-rf-cc2544.md`.
+- **Decision: our RF inner layout follows stock's** (`hdr(kind|flags|seq), type, flags,
+  payload[25]`) instead of the invented header in `hub/rf/framing.h`, for stock-remote interop and
+  so captured stock frames can validate our codec. Payload budget is 24–25 B, not 28.
+- **Remote UI is LVGL as planned, but the stock UI is gone**: rooting removes `/data/remote_ui`, so
+  the Elite's screen stays blank until our own app is deployed. The remote is out of service for the
+  living room from Phase 4 Stage A until Stage D.
 - Root: USB HID path (no soldering), stock root untouched, factory reset restores.
 
 ## Current setup (verified 2026-11-16, read-only)
