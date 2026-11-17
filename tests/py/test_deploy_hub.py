@@ -194,7 +194,13 @@ def artifacts(tmp_path):
 
 
 def push_all(d, art, **kw):
-    return d.push(art["hub"], art["remote_sim"], art["config.json"], art["busybox"], **kw)
+    return d.push(
+        art["hub"],
+        remote_sim=art["remote_sim"],
+        config=art["config.json"],
+        busybox=art["busybox"],
+        **kw,
+    )
 
 
 # --- parsers (real BusyBox shapes) ----------------------------------------------------------
@@ -258,6 +264,26 @@ def test_push_happy_path(artifacts):
     assert hub.files[dh.REMOTE_BUSYBOX] == b"B" * 2000
     assert any("push complete" in ln for ln in lines)
     assert ["chmod", "755", dh.REMOTE_HUB] in hub.log
+
+
+def test_push_rf_probe_is_md5_verified_and_executable(artifacts, tmp_path):
+    """rf_probe rides the same verified path as the other binaries, not a hand scp."""
+    probe = tmp_path / "rf_probe"
+    probe.write_bytes(b"P" * 1500)
+    d, hub, lines = make()
+    assert d.push(artifacts["hub"], rf_probe=probe, busybox=artifacts["busybox"]) == 0
+    assert hub.files[dh.REMOTE_RF_PROBE] == b"P" * 1500
+    assert ["chmod", "755", dh.REMOTE_RF_PROBE] in hub.log
+    assert any(dh.REMOTE_RF_PROBE in ln and "md5" in ln for ln in lines)
+
+
+def test_push_rf_probe_md5_mismatch_fails(artifacts, tmp_path):
+    probe = tmp_path / "rf_probe"
+    probe.write_bytes(b"P" * 1500)
+    d, hub, _ = make(FakeHub(corrupt={dh.REMOTE_RF_PROBE}))
+    with pytest.raises(dh.DeployError):
+        d.push(artifacts["hub"], rf_probe=probe, busybox=artifacts["busybox"])
+    assert dh.REMOTE_RF_PROBE not in hub.files
 
 
 def test_push_md5_mismatch_fails_and_removes(artifacts):
