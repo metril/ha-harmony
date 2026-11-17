@@ -31,7 +31,7 @@ activities:
   - id: watch
     name: Watch
     devices: [{{device: tv, input: hdmi1}}]
-    keys: {{ok: {{device: tv, command: vol_up}}}}
+    keys: {{select: {{device: tv, command: vol_up}}}}
 keys:
   menu: {{activity: watch}}
   key_77: {{event: custom}}
@@ -50,8 +50,22 @@ def model(text, **kw):
 
 
 def test_key_table_sane():
+    assert len(KEY_CODES) == 35
     assert len(set(KEY_CODES.values())) == len(KEY_CODES)
-    assert all(0 <= c < SOFT_KEY_BASE for c in KEY_CODES.values())
+    assert all(0 < c < SOFT_KEY_BASE for c in KEY_CODES.values())
+    assert not {"back", "ok", "vol_up", "num_0", "num_9"} & set(KEY_CODES)
+
+
+def test_unknown_key_name_rejected_with_valid_names():
+    for bad in ("num_0", "back", "vol_up"):
+        with pytest.raises(ConfigError) as e:
+            model(f"keys: {{{bad}: {{activity: \"off\"}}}}")
+        assert "unknown key" in str(e.value) and "volume_up" in str(e.value)
+
+
+def test_stock_spelling_is_accepted():
+    c = compile_config(model("keys: {VolumeUp: {activity: \"off\"}}"))
+    assert c.key_names == {KEY_CODES["volume_up"]: "volume_up"}
 
 
 def test_golden_compile():
@@ -76,16 +90,16 @@ def test_golden_compile():
                 "id": "watch",
                 "name": "Watch",
                 "devices": [{"device": "tv", "input": "hdmi1"}],
-                "keys": {"2": {"type": "device", "device": "tv", "command": "vol_up"}},
+                "keys": {"5": {"type": "device", "device": "tv", "command": "vol_up"}},
             }
         ],
         "keys": {
-            "1": {"type": "activity", "activity": "watch"},
+            "6": {"type": "activity", "activity": "watch"},
             "77": {"type": "ha", "event": "custom"},
             "128": {"type": "activity", "activity": "off"},
         },
     }
-    assert c.key_names == {2: "ok", 1: "menu", 77: "key_77", 128: "tap_b", 129: "tap_t"}
+    assert c.key_names == {5: "select", 6: "menu", 77: "key_77", 128: "tap_b", 129: "tap_t"}
     assert c.activities == ["Watch"]
     (page,) = c.pages
     dec = decode_page(page)
@@ -101,7 +115,7 @@ def test_docs_example_compiles():
     c = compile_config(model(block))
     assert c.activities == ["Watch TV", "Stream"]
     assert len(c.pages) == 1 and len(c.tiles) == 1
-    assert {"vol_up", "home", "tap_mute", "tap_off", "tap_temp"} <= set(c.key_names.values())
+    assert {"volume_up", "home", "tap_mute", "tap_off", "tap_temp"} <= set(c.key_names.values())
     assert len(text.splitlines()) < 120
 
 

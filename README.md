@@ -45,7 +45,7 @@ gone, with Home Assistant as the source of truth for devices, activities and rem
   automation on the activity select.
 - **Boot persistence** is in progress. Today the daemon is started by hand and a reboot returns
   the hub to stock.
-- **The Elite remote.** Its key codes in `const.py` are provisional.
+- **The Elite remote.** Key names are the real Elite ones (`volume_up`, `select`, ...); the remote firmware itself is in progress.
 - **Zeroconf discovery** only works when Home Assistant listens on the same subnet as the hub;
   manual host/port entry always works.
 

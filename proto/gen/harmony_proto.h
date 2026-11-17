@@ -77,4 +77,26 @@ typedef struct {
 const hp_msg_desc_t *hp_msg_desc(hp_msg_type_t type);
 const hp_msg_desc_t *hp_msg_desc_by_name(const char *name);
 
+/* Physical keys: logical id (the u8 in key_event.key, < 128) <-> evdev code <-> names. */
+#define HP_KEY_COUNT 35
+#define HP_KEY_NONE 0xFF /* sentinel: no such key */
+#define HP_SOFT_KEY_BASE 128 /* ids >= this are page soft keys */
+
+typedef struct {
+    uint8_t id;
+    uint16_t evdev;
+    const char *name;  /* stock name, e.g. "VolumeUp" */
+    const char *event; /* snake_case HA event type, e.g. "volume_up" */
+} hp_hwkey_t;
+
+extern const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT];
+
+/* NULL for an unknown id / evdev code / name (names match the stock or event form, ASCII
+ * case-insensitive). */
+const hp_hwkey_t *hp_hwkey_by_id(uint8_t id);
+const hp_hwkey_t *hp_hwkey_by_evdev(uint16_t evdev);
+const hp_hwkey_t *hp_hwkey_by_name(const char *name);
+/* evdev code -> logical id, or HP_KEY_NONE for a code that is not a Harmony key. */
+uint8_t hp_key_from_evdev(uint16_t evdev);
+
 #endif /* HARMONY_PROTO_H */

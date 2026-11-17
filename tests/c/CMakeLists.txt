@@ -15,6 +15,7 @@ add_hp_test(config2)
 add_hp_test(rf_payload)
 add_hp_test(rf_pair)
 add_hp_test(mdns)
+add_hp_test(hwkeys)
 
 # RF object codec: golden vectors shared with the remote build (argv[1] = frames.json).
 add_executable(test_framing test_framing.c)

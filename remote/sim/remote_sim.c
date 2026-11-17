@@ -1,15 +1,15 @@
 /* Headless remote simulator: the remote end of the simulated RF link.
  *
- * usage: remote_sim --rf PATH (--press KEY_CODE | --hold KEY_CODE,MS | --dump-page | --dump-layout | --tap X,Y)
+ * usage: remote_sim --rf PATH (--press KEY | --hold KEY,MS | --dump-page | --dump-layout | --tap X,Y)
  *                   [--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N]
  *                   [--hold-interval-ms N]
  *
  *   --rf PATH        Unix SOCK_SEQPACKET socket of `hub --sim --rf PATH` (required).
- *   --press KEY_CODE Connect, send one key_event {remote, key, action} (remote
- *                    default 1, action default 0 = press), exit 0. KEY_CODE is a
- *                    NUMERIC key code 0..255 (not a name: see KEY_CODES in
- *                    custom_components/ha_harmony/const.py; vol_up is its number).
- *   --hold KEY_CODE,MS Connect, send key_event PRESS, then a HOLD every --hold-interval-ms
+ *   --press KEY      Connect, send one key_event {remote, key, action} (remote
+ *                    default 1, action default 0 = press), exit 0. KEY is a key name
+ *                    (VolumeUp or volume_up, case-insensitive; the `keys:` table in
+ *                    proto/schema.yaml) or a numeric logical code 0..255.
+ *   --hold KEY,MS Connect, send key_event PRESS, then a HOLD every --hold-interval-ms
  *                    (default HP_IROUT_HOLD_INTERVAL_MS = 400, the real remote's period) for
  *                    MS milliseconds of holding, then RELEASE; exit 0. MS 0 = PRESS + RELEASE.
  *   --dump-page      Connect, print "remote_sim: attached" to stderr, wait for
@@ -54,9 +54,9 @@
 #define SIM_RF_SLOT 1 /* the sim socket carries hub-mode (30 B) frames both ways */
 
 static int usage(void) {
-    fprintf(stderr, "usage: remote_sim --rf PATH (--press KEY_CODE | --hold KEY_CODE,MS | --dump-page | --dump-layout | --tap X,Y) "
+    fprintf(stderr, "usage: remote_sim --rf PATH (--press KEY | --hold KEY,MS | --dump-page | --dump-layout | --tap X,Y) "
                     "[--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N] [--hold-interval-ms N]\n"
-                    "KEY_CODE is a number 0..255 (see KEY_CODES in custom_components/ha_harmony/const.py), not a key name\n");
+                    "KEY is a key name (VolumeUp or volume_up; keys: in proto/schema.yaml) or a logical code 0..255\n");
     return 2;
 }
 
@@ -72,6 +72,15 @@ static int rx_complete(hp_rf_asm_t *as, const uint8_t *f, size_t n, hp_rf_msg_t 
     uint8_t slot;
     if (hp_rf_unwrap_hub(f, n, &slot, &in) < 0) return 0;
     return hp_rf_asm_push(as, &in, msg, &ack) == HP_ASM_COMPLETE;
+}
+
+/* KEY is a numeric logical code 0..255 or a key name (VolumeUp / volume_up, case-insensitive). */
+static int parse_key(const char *s, long *out) {
+    if (!hp_parse_num(s, 0, 255, out)) return 0;
+    const hp_hwkey_t *k = hp_hwkey_by_name(s);
+    if (!k) return -1;
+    *out = k->id;
+    return 0;
 }
 
 static int send_key(hp_rf_transport *rf, uint8_t seq, long remote, long key, long action) {
@@ -281,13 +290,13 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         int more = i + 1 < argc;
         if (!strcmp(argv[i], "--rf") && more) path = argv[++i];
-        else if (!strcmp(argv[i], "--press") && more) { if (hp_parse_num(argv[++i], 0, 255, &key)) return usage(); }
+        else if (!strcmp(argv[i], "--press") && more) { if (parse_key(argv[++i], &key)) return usage(); }
         else if (!strcmp(argv[i], "--hold") && more) {
             char buf[32], *comma;
             snprintf(buf, sizeof buf, "%s", argv[++i]);
             if (!(comma = strchr(buf, ',')) || strlen(argv[i]) >= sizeof buf) return usage();
             *comma = 0;
-            if (hp_parse_num(buf, 0, 255, &hold_key) || hp_parse_num(comma + 1, 0, 600000, &hold_ms)) return usage();
+            if (parse_key(buf, &hold_key) || hp_parse_num(comma + 1, 0, 600000, &hold_ms)) return usage();
         }
         else if (!strcmp(argv[i], "--hold-interval-ms") && more) { if (hp_parse_num(argv[++i], 1, 60000, &hold_iv)) return usage(); }
         else if (!strcmp(argv[i], "--remote") && more) { if (hp_parse_num(argv[++i], 0, 255, &remote)) return usage(); }

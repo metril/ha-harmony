@@ -383,7 +383,7 @@ class Deployer:
         return any(p.alive and p.name == name for p in self.procs())
 
     # -- press [WRITE] ------------------------------------------------------------------
-    def press(self, key: int, sock: str = RF_SOCKET) -> int:
+    def press(self, key: int | str, sock: str = RF_SOCKET) -> int:
         _need_write_path(sock)
         rc, out, err = self.r.run([REMOTE_SIM, "--rf", sock, "--press", str(key)])
         self.out(out.decode("utf-8", "replace").rstrip())
@@ -491,8 +491,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=20.0)
     p = add("run", "[WRITE] run the hub in the foreground over ssh (args after --)")
     p.add_argument("hub_args", nargs=argparse.REMAINDER)
-    p = add("press", "[WRITE] run remote_sim --rf SOCK --press KEY (numeric key code)")
-    p.add_argument("key", type=int)
+    p = add("press", "[WRITE] run remote_sim --rf SOCK --press KEY (key name like VolumeUp, or a numeric logical code 0..255)")
+    p.add_argument("key")
     p.add_argument("--sock", default=RF_SOCKET)
     p = add("restore", "[WRITE] reboot the hub back to stock; wait; verify hal + lua")
     p.add_argument("--up-timeout", type=float, default=600.0)
@@ -509,8 +509,10 @@ def main(
         print(f"{a.cmd} is a WRITE step on the real hub; re-run with --yes to confirm",
               file=sys.stderr)  # fmt: skip
         return 2
-    if a.cmd == "press" and not 0 <= a.key <= 255:
-        ap.error("key must be 0..255")
+    if a.cmd == "press" and a.key.isdecimal() and not 0 <= int(a.key) <= 255:
+        ap.error("numeric key must be 0..255")
+    if a.cmd == "press" and not a.key.isdecimal() and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", a.key):
+        ap.error("key must be a key name or a number")
     d = deployer or Deployer(
         runner
         or HubSsh(

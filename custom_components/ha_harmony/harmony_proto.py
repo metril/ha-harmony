@@ -65,6 +65,50 @@ _INT_RANGES = {
 }
 _BY_CODE = {code: name for name, (code, _t, _f) in MESSAGES.items()}
 
+SOFT_KEY_BASE = 128  # logical ids >= this are page soft keys (128 + widget id)
+# (logical id, evdev code, stock name, snake_case event type)
+KEYS: tuple[tuple[int, int, str, str], ...] = (
+    (1, 103, 'Up', 'up'),
+    (2, 108, 'Down', 'down'),
+    (3, 105, 'Left', 'left'),
+    (4, 106, 'Right', 'right'),
+    (5, 352, 'Select', 'select'),
+    (6, 139, 'Menu', 'menu'),
+    (7, 174, 'Exit', 'exit'),
+    (8, 115, 'VolumeUp', 'volume_up'),
+    (9, 114, 'VolumeDown', 'volume_down'),
+    (10, 113, 'VolumeMute', 'volume_mute'),
+    (11, 402, 'ChannelUp', 'channel_up'),
+    (12, 403, 'ChannelDown', 'channel_down'),
+    (13, 412, 'PrevChannel', 'prev_channel'),
+    (14, 207, 'Play', 'play'),
+    (15, 119, 'Pause', 'pause'),
+    (16, 128, 'Stop', 'stop'),
+    (17, 167, 'Record', 'record'),
+    (18, 168, 'Rewind', 'rewind'),
+    (19, 159, 'FastForward', 'fast_forward'),
+    (20, 389, 'DVR', 'dvr'),
+    (21, 395, 'Guide', 'guide'),
+    (22, 358, 'Info', 'info'),
+    (23, 398, 'Red', 'red'),
+    (24, 399, 'Green', 'green'),
+    (25, 400, 'Yellow', 'yellow'),
+    (26, 401, 'Blue', 'blue'),
+    (27, 148, 'HomeControl1', 'home_control_1'),
+    (28, 202, 'HomeControl2', 'home_control_2'),
+    (29, 149, 'HomeControl3', 'home_control_3'),
+    (30, 203, 'HomeControl4', 'home_control_4'),
+    (31, 78, 'HomeControlPlus', 'home_control_plus'),
+    (32, 74, 'HomeControlMinus', 'home_control_minus'),
+    (33, 116, 'PowerOffActivity', 'power_off_activity'),
+    (34, 102, 'Home', 'home'),
+    (35, 364, 'Favorites', 'favorites'),
+)
+KEY_BY_ID = {k[0]: k for k in KEYS}
+KEY_BY_EVDEV = {k[1]: k for k in KEYS}
+KEY_BY_NAME = {k[2]: k for k in KEYS}
+KEY_BY_EVENT = {k[3]: k for k in KEYS}
+
 
 def _check(msg: str, fname: str, ftype: str, value: Any) -> None:
     where = f"{msg}.{fname}"

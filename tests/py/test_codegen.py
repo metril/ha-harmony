@@ -256,3 +256,39 @@ def test_tile_update_is_rf_only():
     )  # fmt: skip
     with pytest.raises(ns["ProtoError"]):
         ns["encode_ws"](ns["MsgType"].TILE_UPDATE, {"remote": 1, "page": 0, "tile": 2, "text": "x"})
+
+
+STOCK_KEYS = ["Up", "Down", "Left", "Right", "Select", "Menu", "Exit", "VolumeUp", "VolumeDown", "VolumeMute", "ChannelUp", "ChannelDown", "PrevChannel", "Play", "Pause", "Stop", "Record", "Rewind", "FastForward", "DVR", "Guide", "Info", "Red", "Green", "Yellow", "Blue", "HomeControl1", "HomeControl2", "HomeControl3", "HomeControl4", "HomeControlPlus", "HomeControlMinus", "PowerOffActivity", "Home", "Favorites"]
+
+
+def test_key_table_is_the_35_confirmed_keys():
+    keys = load_schema(REAL_SCHEMA).keys
+    assert [k.name for k in keys] == STOCK_KEYS
+    assert len({k.id for k in keys}) == len({k.evdev for k in keys}) == 35
+    assert all(0 < k.id < 128 for k in keys)  # 128+ is reserved for page soft keys
+    by = {k.name: k for k in keys}
+    assert (by["VolumeUp"].evdev, by["Home"].evdev, by["Favorites"].evdev) == (115, 102, 364)
+    assert by["HomeControl1"].event == "home_control_1" and by["DVR"].event == "dvr"
+    assert by["PowerOffActivity"].event == "power_off_activity"
+
+
+def test_python_key_table_round_trips():
+    ns = _real_py()
+    for kid, evdev, name, event in ns["KEYS"]:
+        assert ns["KEY_BY_ID"][kid] == ns["KEY_BY_EVDEV"][evdev] == ns["KEY_BY_NAME"][name]
+        assert ns["KEY_BY_EVENT"][event][0] == kid
+    assert len(ns["KEYS"]) == 35 and 9999 not in ns["KEY_BY_EVDEV"]
+
+
+@pytest.mark.parametrize(
+    "keys, msg",
+    [
+        ("[{id: 1, evdev: 5, name: A}, {id: 1, evdev: 6, name: B}]", "duplicate"),
+        ("[{id: 1, evdev: 5, name: A}, {id: 2, evdev: 5, name: B}]", "duplicate"),
+        ("[{id: 128, evdev: 5, name: A}]", "id must be"),
+        ("[{id: 1, evdev: 5, name: a}]", "bad key name"),
+    ],
+)
+def test_bad_key_tables_rejected(tmp_path, keys, msg):
+    with pytest.raises(SchemaError, match=msg):
+        load_schema(write(tmp_path, f"version: 1\nkeys: {keys}\n"))

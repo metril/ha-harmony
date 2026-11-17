@@ -107,11 +107,11 @@ async def test_remote_services(hass, hub_cfg, fast_client):
 
 async def test_key_event_fires_event_entity(hass, hub_cfg, fast_client, run_remote):
     entry = await _setup(hass, hub_cfg)
-    assert run_remote(hub_cfg.rf, "--press", "1", "--action", "2").returncode == 0
+    assert run_remote(hub_cfg.rf, "--press", "Menu", "--action", "2").returncode == 0
     await _until(hass, lambda: _state(hass, EVENT) not in (None, "unknown"))
     st = hass.states.get(EVENT)
     assert st.attributes["event_type"] == "menu"
-    assert st.attributes["key"] == 1 and st.attributes["action"] == "hold"
+    assert st.attributes["key"] == 6 and st.attributes["action"] == "hold"
     # unknown key code must not raise
     assert run_remote(hub_cfg.rf, "--press", "99").returncode == 0
     await _until(hass, lambda: hass.states.get(EVENT).attributes["event_type"] == "unknown")

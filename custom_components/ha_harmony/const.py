@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .harmony_proto import KEY_BY_NAME, KEYS, SOFT_KEY_BASE
+
 DOMAIN = "ha_harmony"
 DEFAULT_PORT = 8099
 CONF_TOKEN = "token"
@@ -24,45 +26,22 @@ CMD_SET_DEVICE_STATE = "set_device_state"
 # Remotes assumed paired until the hub reports its pairing table.
 DEFAULT_REMOTE_IDS: tuple[int, ...] = (1,)
 
-# PROVISIONAL: symbolic key name -> physical key code (0..127). The Elite's real key codes are not
-# known yet; this is the ONE table to fix. YAML key names, event types and event names are all
-# derived from it. Codes must be unique and in 0..127 (128+ are page soft keys).
-KEY_CODES: dict[str, int] = {
-    "menu": 1,
-    "ok": 2,
-    "back": 3,
-    "up": 4,
-    "down": 5,
-    "left": 6,
-    "right": 7,
-    "home": 8,
-    "vol_up": 9,
-    "vol_down": 10,
-    "mute": 11,
-    "ch_up": 12,
-    "ch_down": 13,
-    "play": 14,
-    "pause": 15,
-    "stop": 16,
-    "rewind": 17,
-    "forward": 18,
-    "red": 19,
-    "green": 20,
-    "yellow": 21,
-    "blue": 22,
-    **{f"num_{n}": 30 + n for n in range(10)},
-}
+# The Elite's 35 physical keys come from the one table in proto/schema.yaml (generated into
+# harmony_proto.KEYS). A key's YAML name and HA event type is its snake_case form (`volume_up`);
+# the wire carries the logical id (< 128; 128+ are page soft keys).
+KEY_CODES: dict[str, int] = {k[3]: k[0] for k in KEYS}
 KEY_NAMES: dict[int, str] = {code: name for name, code in KEY_CODES.items()}
-SOFT_KEY_BASE = 128  # page widget wire id w -> key code 128 + w
 UNKNOWN_KEY = "unknown"
 EVENT_TYPES: list[str] = [*KEY_NAMES.values(), UNKNOWN_KEY]
 KEY_ACTIONS = {0: "press", 1: "release", 2: "hold"}
 
 
 def key_code(name: str) -> int | None:
-    """Code for a symbolic key name, or for the generic `key_<n>` form (n in 0..127)."""
+    """Code for a key's event name (`volume_up`) or stock name (`VolumeUp`), or `key_<n>` (n < 128)."""
     if name in KEY_CODES:
         return KEY_CODES[name]
+    if name in KEY_BY_NAME:
+        return KEY_BY_NAME[name][0]
     if name.startswith("key_") and name[4:].isdecimal() and int(name[4:]) < SOFT_KEY_BASE:
         return int(name[4:])
     return None

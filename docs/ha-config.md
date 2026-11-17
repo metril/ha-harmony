@@ -46,13 +46,13 @@ activities:
     steps: [{device: box, command: ok}]            # extra steps after power/inputs
     off: [{device: box, command: play_pause}]      # extra steps on power-off
     keys:                                          # per-activity layer
-      ok: {device: box, command: ok}
+      select: {device: box, command: ok}
       play: {device: box, command: play_pause}
 
 keys:                                              # default layer, by symbolic key name
-  vol_up: {device: avr, command: vol_up}
-  vol_down: {device: avr, command: vol_down}
-  mute: {device: avr, command: mute}
+  volume_up: {device: avr, command: vol_up}
+  volume_down: {device: avr, command: vol_down}
+  volume_mute: {device: avr, command: mute}
   home: {activity: "off"}
   menu: {device: tv, command: menu}
 
@@ -85,9 +85,16 @@ pages:
   device's stock numeric id and stock name as aliases, so an automation written for the stock
   integration (`device: "51887071"`) needs only its `entity_id` changed. An alias may not equal
   another device's id or be shared by two devices.
-- **Keys** use the symbolic names in `KEY_CODES` (`custom_components/ha_harmony/const.py`, provisional) or
-  `key_<0..127>`. Event entities report that name; page widgets report `tap_<widget id>`.
-  The `remote_sim` test tool's `--press`/`--hold` take the numeric key **code** (a value from `KEY_CODES`), not the name.
+- **Keys** are the Elite's 35 physical keys, written as the snake_case form of stock's name
+  (`volume_up`, `select`, `home_control_1`, ...; the stock spelling `VolumeUp` is accepted too) or
+  `key_<0..127>` for a raw logical code. The table is `proto/schema.yaml` (`keys:`): up, down, left,
+  right, select, menu, exit, volume_up, volume_down, volume_mute, channel_up, channel_down,
+  prev_channel, play, pause, stop, record, rewind, fast_forward, dvr, guide, info, red, green,
+  yellow, blue, home_control_1..4, home_control_plus, home_control_minus, power_off_activity, home,
+  favorites. There are no number keys and no back key (it is `exit`). An unknown name is rejected
+  and the error lists the valid ones. Event entities report that name; page widgets report
+  `tap_<widget id>`. The `remote_sim` test tool's `--press`/`--hold` take a key **name**
+  (`VolumeUp` or `volume_up`) or the numeric logical code.
 - **Page widgets**: `button` (needs `action`), `tile` (shows the state of `entity`, updated on change),
   `label`. Grid up to 16x16, 32 widgets per page, 128 widgets over all pages, labels up to 24 bytes.
   A page's id on the remote is its position in `pages`.

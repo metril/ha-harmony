@@ -125,3 +125,44 @@ messages:
   # remote id until the remote's first message, so there are no fields: clients (re)push pages
   # and tile texts for every remote they manage.
   - {name: remote_attached, code: 17, transport: ws, fields: []}
+
+# The 35 physical keys of the Harmony Elite remote (docs/hardware/remote-elite.md, "Input").
+# `id` is the logical key code carried in key_event.key (u8): stable, unique, < 128 (128+ are page
+# soft keys). `evdev` is the Linux input code (event0; Home/Favorites come from event2). `name` is
+# stock's name; the HA event type / YAML key name is its snake_case form.
+keys:
+  - {id: 1, evdev: 103, name: Up}
+  - {id: 2, evdev: 108, name: Down}
+  - {id: 3, evdev: 105, name: Left}
+  - {id: 4, evdev: 106, name: Right}
+  - {id: 5, evdev: 352, name: Select}
+  - {id: 6, evdev: 139, name: Menu}
+  - {id: 7, evdev: 174, name: Exit}
+  - {id: 8, evdev: 115, name: VolumeUp}
+  - {id: 9, evdev: 114, name: VolumeDown}
+  - {id: 10, evdev: 113, name: VolumeMute}
+  - {id: 11, evdev: 402, name: ChannelUp}
+  - {id: 12, evdev: 403, name: ChannelDown}
+  - {id: 13, evdev: 412, name: PrevChannel}
+  - {id: 14, evdev: 207, name: Play}
+  - {id: 15, evdev: 119, name: Pause}
+  - {id: 16, evdev: 128, name: Stop}
+  - {id: 17, evdev: 167, name: Record}
+  - {id: 18, evdev: 168, name: Rewind}
+  - {id: 19, evdev: 159, name: FastForward}
+  - {id: 20, evdev: 389, name: DVR}
+  - {id: 21, evdev: 395, name: Guide}
+  - {id: 22, evdev: 358, name: Info}
+  - {id: 23, evdev: 398, name: Red}
+  - {id: 24, evdev: 399, name: Green}
+  - {id: 25, evdev: 400, name: Yellow}
+  - {id: 26, evdev: 401, name: Blue}
+  - {id: 27, evdev: 148, name: HomeControl1}
+  - {id: 28, evdev: 202, name: HomeControl2}
+  - {id: 29, evdev: 149, name: HomeControl3}
+  - {id: 30, evdev: 203, name: HomeControl4}
+  - {id: 31, evdev: 78, name: HomeControlPlus}
+  - {id: 32, evdev: 74, name: HomeControlMinus}
+  - {id: 33, evdev: 116, name: PowerOffActivity}
+  - {id: 34, evdev: 102, name: Home}
+  - {id: 35, evdev: 364, name: Favorites}

@@ -41,7 +41,7 @@ activities:
   - {id: watch, name: Télé, devices: [{device: tv, input: hdmi1}]}
   - {id: music, name: Music, devices: [{device: amp}]}
 keys:
-  vol_up: {device: tv, command: vol_up}
+  volume_up: {device: tv, command: vol_up}
 pages:
   - id: main
     cols: 4
@@ -187,9 +187,10 @@ async def test_entities_for_worked_example(hass, hub_rf, write_yaml):
     assert reg.async_get("sensor.tv_input") and reg.async_get("sensor.remote_1_battery")
     assert reg.async_get("sensor.remote_1_battery").original_device_class == "battery"
     assert reg.async_get("sensor.remote_1_voltage").entity_category.value == "diagnostic"
-    assert {"vol_up", "tap_mute", "tap_temp"} <= set(
+    assert set(
         hass.states.get("event.harmony_hub_sim_hub_remote_1_keys").attributes["event_types"]
-    )
+    ) == {*const.KEY_CODES, "unknown", "tap_mute", "tap_temp"}
+    assert len(const.KEY_CODES) == 35 and "num_0" not in const.KEY_CODES
     assert dr.async_get(hass).async_get_device_by_identifier(
         (const.DOMAIN, f"{HUB_ID}_dev_tv"), entry.entry_id
     )
@@ -368,9 +369,9 @@ async def test_activity_start_sends_expected_ir_and_updates_devices(hass, hub_rf
 async def test_key_press_fires_symbolic_event(hass, hub_rf, write_yaml, run_remote):
     write_yaml(BASE)
     entry = await setup(hass, hub_rf)
-    assert run_remote(hub_rf.rf, "--press", str(const.KEY_CODES["vol_up"])).returncode == 0
+    assert run_remote(hub_rf.rf, "--press", "VolumeUp").returncode == 0
     ev = "event.harmony_hub_sim_hub_remote_1_keys"
-    await until(hass, lambda: hass.states.get(ev).attributes.get("event_type") == "vol_up")
+    await until(hass, lambda: hass.states.get(ev).attributes.get("event_type") == "volume_up")
     assert read_lines(hub_rf, 1) == [ir_line(nec(4, 16))]  # the key map ran on the hub
     await hass.config_entries.async_unload(entry.entry_id)
 

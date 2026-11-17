@@ -39,7 +39,7 @@ as given, no inverse), `samsung32` 0xFF/0xFF, `rc5` 0x1F/0x7F (cmd bit 6 set = R
 Raw: even, non-zero count of durations, each 1..65535 us; `hz` 1000..1000000.
 
 ## Key maps
-- Key code is the decimal string of 0..255: physical keys 0-127, soft keys 128-255 (touch widgets).
+- Key code is the decimal string of 0..255: the logical id of a physical key (1-35, `keys:` in `proto/schema.yaml`; not the evdev code), soft keys 128-255 (touch widgets).
 - Lookup order: current activity `keys`, then top-level `keys`; no match = forward to HA only.
 - `<action>` is a format-1 action (`ir`, `bt`, `ha`, `none`) tagged by `"type"`; an `ir` action
   carries the IR action fields inline: `{"type":"ir", "proto":"nec", "addr":4, "cmd":8}`.

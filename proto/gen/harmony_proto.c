@@ -112,6 +112,95 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"remote_attached", HP_MSG_REMOTE_ATTACHED, HP_TRANSPORT_WS, 0, NULL},
 };
 
+const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT] = {
+    {1, 103, "Up", "up"},
+    {2, 108, "Down", "down"},
+    {3, 105, "Left", "left"},
+    {4, 106, "Right", "right"},
+    {5, 352, "Select", "select"},
+    {6, 139, "Menu", "menu"},
+    {7, 174, "Exit", "exit"},
+    {8, 115, "VolumeUp", "volume_up"},
+    {9, 114, "VolumeDown", "volume_down"},
+    {10, 113, "VolumeMute", "volume_mute"},
+    {11, 402, "ChannelUp", "channel_up"},
+    {12, 403, "ChannelDown", "channel_down"},
+    {13, 412, "PrevChannel", "prev_channel"},
+    {14, 207, "Play", "play"},
+    {15, 119, "Pause", "pause"},
+    {16, 128, "Stop", "stop"},
+    {17, 167, "Record", "record"},
+    {18, 168, "Rewind", "rewind"},
+    {19, 159, "FastForward", "fast_forward"},
+    {20, 389, "DVR", "dvr"},
+    {21, 395, "Guide", "guide"},
+    {22, 358, "Info", "info"},
+    {23, 398, "Red", "red"},
+    {24, 399, "Green", "green"},
+    {25, 400, "Yellow", "yellow"},
+    {26, 401, "Blue", "blue"},
+    {27, 148, "HomeControl1", "home_control_1"},
+    {28, 202, "HomeControl2", "home_control_2"},
+    {29, 149, "HomeControl3", "home_control_3"},
+    {30, 203, "HomeControl4", "home_control_4"},
+    {31, 78, "HomeControlPlus", "home_control_plus"},
+    {32, 74, "HomeControlMinus", "home_control_minus"},
+    {33, 116, "PowerOffActivity", "power_off_activity"},
+    {34, 102, "Home", "home"},
+    {35, 364, "Favorites", "favorites"},
+};
+
+const hp_hwkey_t *hp_hwkey_by_id(uint8_t id)
+{
+    for (size_t i = 0; i < HP_KEY_COUNT; i++) {
+        if (hp_hwkeys[i].id == id) {
+            return &hp_hwkeys[i];
+        }
+    }
+    return NULL;
+}
+
+const hp_hwkey_t *hp_hwkey_by_evdev(uint16_t evdev)
+{
+    for (size_t i = 0; i < HP_KEY_COUNT; i++) {
+        if (hp_hwkeys[i].evdev == evdev) {
+            return &hp_hwkeys[i];
+        }
+    }
+    return NULL;
+}
+
+static bool hp_ieq(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++) {
+        char x = (*a >= 'A' && *a <= 'Z') ? (char)(*a + 32) : *a;
+        char y = (*b >= 'A' && *b <= 'Z') ? (char)(*b + 32) : *b;
+        if (x != y) {
+            return false;
+        }
+    }
+    return *a == *b;
+}
+
+const hp_hwkey_t *hp_hwkey_by_name(const char *name)
+{
+    if (name == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < HP_KEY_COUNT; i++) {
+        if (hp_ieq(hp_hwkeys[i].name, name) || hp_ieq(hp_hwkeys[i].event, name)) {
+            return &hp_hwkeys[i];
+        }
+    }
+    return NULL;
+}
+
+uint8_t hp_key_from_evdev(uint16_t evdev)
+{
+    const hp_hwkey_t *k = hp_hwkey_by_evdev(evdev);
+    return k ? k->id : HP_KEY_NONE;
+}
+
 const hp_msg_desc_t *hp_msg_desc(hp_msg_type_t type)
 {
     for (size_t i = 0; i < sizeof hp_msgs / sizeof hp_msgs[0]; i++) {

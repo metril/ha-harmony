@@ -35,11 +35,29 @@ class Message:
     fields: tuple[Field, ...]
 
 
+SOFT_KEY_BASE = 128  # logical ids >= this are page soft keys (128 + widget id)
+_KEY_NAME = re.compile(r"^[A-Z][A-Za-z0-9]*$")
+
+
+@dataclass(frozen=True)
+class Key:
+    id: int  # logical code on the wire (u8, < SOFT_KEY_BASE)
+    evdev: int  # Linux input code
+    name: str  # stock name, e.g. VolumeUp
+    event: str  # snake_case HA event type / YAML key name, e.g. volume_up
+
+
+def snake(name: str) -> str:
+    """VolumeUp -> volume_up, HomeControl1 -> home_control_1, DVR -> dvr."""
+    return re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Za-z])(?=[0-9])", "_", name).lower()
+
+
 @dataclass(frozen=True)
 class Schema:
     version: int
     messages: tuple[Message, ...]
     enums: tuple[tuple[str, tuple[tuple[str, int], ...]], ...] = ()
+    keys: tuple[Key, ...] = ()
 
 
 def _ident(kind: str, v: object) -> str:
@@ -96,7 +114,28 @@ def load_schema(path: Path) -> Schema:
                 raise SchemaError(f"{name}.{fname}: json is only legal in ws messages")
             fields.append(Field(fname, ftype, bool(f.get("optional", False))))
         msgs.append(Message(name, code, transport, tuple(fields)))
-    return Schema(raw["version"], tuple(msgs), tuple(enums.items()))
+    keys: list[Key] = []
+    kids: set[int] = set()
+    kcodes: set[int] = set()
+    knames: set[str] = set()
+    kev: set[str] = set()
+    for k in raw.get("keys") or []:
+        kid, evdev, kname = k.get("id"), k.get("evdev"), k.get("name")
+        if not isinstance(kid, int) or isinstance(kid, bool) or not 1 <= kid < SOFT_KEY_BASE:
+            raise SchemaError(f"key {kname!r}: id must be 1..{SOFT_KEY_BASE - 1}")
+        if not isinstance(evdev, int) or isinstance(evdev, bool) or not 1 <= evdev <= 0xFFFF:
+            raise SchemaError(f"key {kname!r}: evdev must be 1..65535")
+        if not isinstance(kname, str) or not _KEY_NAME.match(kname):
+            raise SchemaError(f"bad key name: {kname!r}")
+        event = snake(kname)
+        if kid in kids or evdev in kcodes or kname in knames or event in kev:
+            raise SchemaError(f"key {kname}: duplicate id, evdev code or name")
+        kids.add(kid)
+        kcodes.add(evdev)
+        knames.add(kname)
+        kev.add(event)
+        keys.append(Key(kid, evdev, kname, event))
+    return Schema(raw["version"], tuple(msgs), tuple(enums.items()), tuple(keys))
 
 
 # ---------------------------------------------------------------- Python emitter
@@ -136,6 +175,16 @@ _INT_RANGES = {
     "i32": (-(2**31), 2**31 - 1),
 }
 _BY_CODE = {code: name for name, (code, _t, _f) in MESSAGES.items()}
+
+SOFT_KEY_BASE = 128  # logical ids >= this are page soft keys (128 + widget id)
+# (logical id, evdev code, stock name, snake_case event type)
+KEYS: tuple[tuple[int, int, str, str], ...] = (
+%(keys)s
+)
+KEY_BY_ID = {k[0]: k for k in KEYS}
+KEY_BY_EVDEV = {k[1]: k for k in KEYS}
+KEY_BY_NAME = {k[2]: k for k in KEYS}
+KEY_BY_EVENT = {k[3]: k for k in KEYS}
 '''
 
 _PY_TAIL = '''
@@ -228,7 +277,14 @@ def _emit_py(s: Schema) -> str:
         for m in s.messages
     )
     enums = {n: dict(p) for n, p in s.enums}
-    head = _PY_HEAD % {"version": s.version, "members": members, "enums": enums, "messages": msgs}
+    keys = "\n".join(f"    ({k.id}, {k.evdev}, {k.name!r}, {k.event!r})," for k in s.keys)
+    head = _PY_HEAD % {
+        "version": s.version,
+        "members": members,
+        "enums": enums,
+        "messages": msgs,
+        "keys": keys,
+    }
     return head + _PY_TAIL
 
 
@@ -299,6 +355,28 @@ typedef struct {
 const hp_msg_desc_t *hp_msg_desc(hp_msg_type_t type);
 const hp_msg_desc_t *hp_msg_desc_by_name(const char *name);
 
+/* Physical keys: logical id (the u8 in key_event.key, < 128) <-> evdev code <-> names. */
+#define HP_KEY_COUNT %(key_count)d
+#define HP_KEY_NONE 0xFF /* sentinel: no such key */
+#define HP_SOFT_KEY_BASE 128 /* ids >= this are page soft keys */
+
+typedef struct {
+    uint8_t id;
+    uint16_t evdev;
+    const char *name;  /* stock name, e.g. "VolumeUp" */
+    const char *event; /* snake_case HA event type, e.g. "volume_up" */
+} hp_hwkey_t;
+
+extern const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT];
+
+/* NULL for an unknown id / evdev code / name (names match the stock or event form, ASCII
+ * case-insensitive). */
+const hp_hwkey_t *hp_hwkey_by_id(uint8_t id);
+const hp_hwkey_t *hp_hwkey_by_evdev(uint16_t evdev);
+const hp_hwkey_t *hp_hwkey_by_name(const char *name);
+/* evdev code -> logical id, or HP_KEY_NONE for a code that is not a Harmony key. */
+uint8_t hp_key_from_evdev(uint16_t evdev);
+
 #endif /* HARMONY_PROTO_H */
 """
 
@@ -314,7 +392,64 @@ def _emit_h(s: Schema) -> str:
         "msg_enum": msg_enum,
         "count": len(s.messages),
         "schema_enums": "\n".join(parts),
+        "key_count": len(s.keys),
     }
+
+
+def _emit_c_keys(s: Schema) -> list[str]:
+    out = ["const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT] = {"]
+    out += [f'    {{{k.id}, {k.evdev}, "{k.name}", "{k.event}"}},' for k in s.keys]
+    out += ["};", ""]
+    for fn, arg, field in (
+        ("hp_hwkey_by_id", "uint8_t id", "id"),
+        ("hp_hwkey_by_evdev", "uint16_t evdev", "evdev"),
+    ):
+        out += [
+            f"const hp_hwkey_t *{fn}({arg})",
+            "{",
+            "    for (size_t i = 0; i < HP_KEY_COUNT; i++) {",
+            f"        if (hp_hwkeys[i].{field} == {field}) {{",
+            "            return &hp_hwkeys[i];",
+            "        }",
+            "    }",
+            "    return NULL;",
+            "}",
+            "",
+        ]
+    out += [
+        "static bool hp_ieq(const char *a, const char *b)",
+        "{",
+        "    for (; *a && *b; a++, b++) {",
+        "        char x = (*a >= 'A' && *a <= 'Z') ? (char)(*a + 32) : *a;",
+        "        char y = (*b >= 'A' && *b <= 'Z') ? (char)(*b + 32) : *b;",
+        "        if (x != y) {",
+        "            return false;",
+        "        }",
+        "    }",
+        "    return *a == *b;",
+        "}",
+        "",
+        "const hp_hwkey_t *hp_hwkey_by_name(const char *name)",
+        "{",
+        "    if (name == NULL) {",
+        "        return NULL;",
+        "    }",
+        "    for (size_t i = 0; i < HP_KEY_COUNT; i++) {",
+        "        if (hp_ieq(hp_hwkeys[i].name, name) || hp_ieq(hp_hwkeys[i].event, name)) {",
+        "            return &hp_hwkeys[i];",
+        "        }",
+        "    }",
+        "    return NULL;",
+        "}",
+        "",
+        "uint8_t hp_key_from_evdev(uint16_t evdev)",
+        "{",
+        "    const hp_hwkey_t *k = hp_hwkey_by_evdev(evdev);",
+        "    return k ? k->id : HP_KEY_NONE;",
+        "}",
+        "",
+    ]
+    return out
 
 
 def _emit_c(s: Schema) -> str:
@@ -353,6 +488,7 @@ def _emit_c(s: Schema) -> str:
     out += [
         "};",
         "",
+        *_emit_c_keys(s),
         "const hp_msg_desc_t *hp_msg_desc(hp_msg_type_t type)",
         "{",
         "    for (size_t i = 0; i < sizeof hp_msgs / sizeof hp_msgs[0]; i++) {",
