@@ -1,0 +1,118 @@
+# shellcheck shell=sh
+# ha-harmony boot hook. Installed as /etc/init.d/rcS.harmony and **sourced** from
+# /etc/init.d/rcS.local, which stock /etc/init.d/rcS sources at line 43.
+#
+# WHY SOURCED, AND WHAT THAT COSTS. We must set DEMO_MODE=1 in the shell that runs
+# rcS, because rcS:84 starts stock `hal` only when DEMO_MODE != 1 and `hal` holds
+# /dev/i2s and /dev/rfspi for its lifetime. A child process cannot set it. So:
+#   * NEVER use `exit` here -- it would terminate rcS and leave the hub with no
+#     dropbear (rcS:47), no hal and no luaworks. Use `return` only.
+#   * A syntax error here aborts rcS the same way. `sh -n` is a test, not a habit.
+#   * Variables leak into rcS's shell, so every name is prefixed hah_ and unset
+#     at the end. DEMO_MODE is the one deliberate leak.
+#
+# WHY THE SYNCHRONOUS PART IS PURE FILE I/O. We are sourced at rcS:43, four lines
+# before dropbear starts at rcS:47. Anything that blocks here happens *before there
+# is any way to log in*, and a hang would mean no SSH, no stock stack, and recovery
+# only by UART or factory reset. So the synchronous path does nothing but read and
+# write small files in /cache and /etc: no network, no ioctl, no exec of our daemon,
+# no waiting on anything. The daemon and its health watcher are backgrounded. That
+# is what guarantees rcS reaches line 47 -- it is a load-bearing property, not a
+# style preference, and tests/py/test_boot_hook.py enforces it.
+#
+# SELF-DISABLE. /cache/ha-harmony-boot.n counts boots that started our daemon but
+# were never confirmed healthy. Three strikes and we remove our own marker so the
+# next boot is pure stock. This is the shape stock itself uses for its memtester
+# mode (rcS.local: /cache/memtester.run present => "previous test crashed" => stop,
+# do not retry). The counter lives in /cache (mtd5), a different partition from the
+# binaries in /data (mtd4), so wiping either one independently is a recovery path.
+#
+# BusyBox 1.13.4 floor: no timeout, no nohup, no setsid, no wc, no head, no find,
+# no `command` builtin, no `grep -E`. Nothing here may use them.
+
+hah_root="${HAH_ROOT:-}"
+hah_marker="$hah_root/etc/ha-harmony-enable"
+hah_counter="$hah_root/cache/ha-harmony-boot.n"
+hah_log="$hah_root/cache/ha-harmony.log"
+hah_pidfile="$hah_root/cache/ha-harmony.pid"
+hah_dir="$hah_root/data/ha-harmony"
+hah_daemon="$hah_dir/hub"
+hah_conf="$hah_dir/hub.conf"
+hah_limit="${HAH_MAX_UNCLEAN:-3}"
+hah_healthy="${HAH_HEALTHY_SECS:-120}"
+
+hah_say() {
+	echo "ha-harmony: $1" >>"$hah_log" 2>/dev/null
+	echo "ha-harmony: $1"
+}
+
+# Refuse to suppress stock unless everything we need is actually present. A missing
+# binary or config must leave the hub fully stock, never inert.
+if [ ! -x "$hah_daemon" ] || [ ! -r "$hah_conf" ]; then
+	hah_say "daemon or config missing ($hah_daemon / $hah_conf) - leaving stock alone"
+else
+	# --- strike counter -------------------------------------------------------
+	hah_n=$(cat "$hah_counter" 2>/dev/null)
+	case "$hah_n" in
+	'' | *[!0-9]*) hah_n=0 ;; # absent or corrupt counts as clean
+	esac
+	hah_n=$((hah_n + 1))
+
+	if [ "$hah_n" -ge "$hah_limit" ]; then
+		# Three unclean boots. Disable ourselves and let stock have this boot:
+		# DEMO_MODE is deliberately NOT set below, so rcS:84 starts hal normally.
+		rm -f "$hah_marker"
+		rm -f "$hah_counter"
+		hah_say "DISABLED after $hah_n unclean boots - removed $hah_marker, booting stock"
+	else
+		echo "$hah_n" >"$hah_counter" 2>/dev/null
+
+		# Read config without sourcing it: a stray command in a config file would
+		# run in rcS's shell. Only these three keys are honoured.
+		hah_token=''
+		hah_port=''
+		hah_id=''
+		while IFS='=' read -r hah_k hah_v; do
+			case "$hah_k" in
+			token) hah_token="$hah_v" ;;
+			port) hah_port="$hah_v" ;;
+			hub_id) hah_id="$hah_v" ;;
+			esac
+		done <"$hah_conf"
+
+		if [ -z "$hah_token" ]; then
+			hah_say "no token in $hah_conf - leaving stock alone"
+		else
+			# Past this point we own the radios: stock hal must not start.
+			DEMO_MODE=1
+			export DEMO_MODE
+
+			: >"$hah_log" 2>/dev/null
+			hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099})"
+
+			"$hah_daemon" --token "$hah_token" \
+				--port "${hah_port:-8099}" \
+				${hah_id:+--hub-id "$hah_id"} \
+				>>"$hah_log" 2>&1 </dev/null &
+			hah_pid=$!
+			echo "$hah_pid" >"$hah_pidfile" 2>/dev/null
+
+			# Health watcher: if the daemon is still alive after the settle window,
+			# this boot counts as clean and the strike counter is cleared. No
+			# `timeout` applet exists, hence a backgrounded sleep.
+			(
+				sleep "$hah_healthy"
+				if kill -0 "$hah_pid" 2>/dev/null; then
+					rm -f "$hah_counter"
+					echo "ha-harmony: healthy after ${hah_healthy}s - strikes cleared" >>"$hah_log" 2>/dev/null
+				else
+					echo "ha-harmony: died within ${hah_healthy}s - strike $hah_n stands" >>"$hah_log" 2>/dev/null
+				fi
+			) >/dev/null 2>&1 &
+		fi
+	fi
+fi
+
+unset hah_root hah_marker hah_counter hah_log hah_pidfile hah_dir hah_daemon hah_conf
+unset hah_limit hah_healthy hah_n hah_token hah_port hah_id hah_pid hah_k hah_v
+unset -f hah_say 2>/dev/null

@@ -95,11 +95,26 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
       Rejected: replacing `rcS.local` (loses Bluetooth and the memory policy); editing `rcS`
       (`DEMO_MODE` must be set before `rcS:84`, and the fewer stock files we touch the better);
       appending to the end of `rcS` (runs after `hal` has already claimed `/dev/i2s`).
-- [ ] **First actions of `rcS.harmony`, in this order, before anything of ours runs:**
-      1. start dropbear (same wrapper stock uses; idempotent — stock's later attempt is harmless),
-      2. bump the boot counter and apply the self-disable guard,
-      3. only then `export DEMO_MODE=1` and launch our daemon in the background.
-      Rationale: steps 1–2 guarantee a way in and a way out even if step 3 is broken.
+- [x] **The hook must be *sourced*, and that dictates its shape.** `DEMO_MODE` has to be set in the
+      shell that runs `rcS`, so a child process cannot do it. Consequences, all now enforced by tests:
+      `exit` is forbidden (it would terminate `rcS` — no dropbear, no `hal`, no luaworks); a syntax
+      error aborts `rcS` the same way; and every variable is `hah_`-prefixed and unset at the end,
+      because they leak into `rcS`'s shell.
+- [x] **~~Start dropbear first~~ — not needed, and better not to.** The stronger guarantee is that the
+      synchronous path **does nothing but read and write small files**: no network, no device, no exec
+      of our daemon, no waiting. Then `rcS` provably reaches line 47 and stock starts dropbear itself.
+      Starting a second dropbear would be redundant (two instances already run normally) and would put
+      an exec on the one path that must not be able to block. `tests/py/test_boot_hook.py` enforces the
+      no-blocking rule directly, so it is a checked property rather than an intention.
+- [x] **Order inside the hook:** refuse unless daemon *and* config are present → bump the strike
+      counter and apply the guard → parse the config → only then `export DEMO_MODE=1` and launch the
+      daemon and its watcher in the background.
+- [x] **Refuse to go inert.** If the daemon is missing, not executable, or its config has no token, the
+      hook leaves `DEMO_MODE` unset so stock `hal` starts normally — and does *not* spend a strike. A
+      half-installed hub must be a stock hub, never a dead one.
+- [x] **Parse the config, never source it.** `hub.conf` is read with `while IFS='=' read`, honouring
+      only `token`, `port`, `hub_id`. Sourcing it would execute arbitrary commands in `rcS`'s shell at
+      boot; a test asserts a command planted in the config file does not run.
 - [ ] **Self-disable guard** (the `memtester.run` pattern). Keep a counter in `/cache` — not `/data`,
       so a `cache` wipe clears it and it is on a different partition from our binaries. Increment on
       entry; the daemon clears it once it has run healthily for N seconds (propose 120). At
@@ -124,11 +139,17 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
 
 ## 4. Tasks and gates
 
-- [ ] **T1 `[RO]` — rehearse the whole hook on the host.** `rcS.harmony` is a BusyBox-1.13.4 shell
-      script; run it under a fake root (chroot or a prefix variable) with the applet floor enforced,
-      and unit-test the guard's state machine directly: clean boot, 1 unclean, 2 unclean, 3 unclean →
-      self-disabled, then recovery. This is cheap and it is where the guard gets proven.
-      **Gate:** guard tests pass; `tests/py` asserts the script uses no applet the hub lacks.
+- [x] **T1 `[RO]` — rehearse the whole hook on the host. DONE.** `tools/boot/rcS.harmony` plus
+      `tests/py/test_boot_hook.py` (16 tests): the guard state machine (clean boot, strikes 1 and 2,
+      third boot hands the boot back to stock and removes the marker), a corrupt counter treated as
+      clean, the four incomplete-install cases, and the blast-radius rules (`sh -n` parses, no `exit`,
+      no applet the hub lacks, nothing blocking on the synchronous path, config parsed not sourced).
+      Runs against a temp tree via `HAH_ROOT`, with one case under a PATH holding only hub applets.
+      **Gate met:** 16/16 pass, `shellcheck -s sh` clean.
+      **Verified by mutation**, because 16 first-try passes prove nothing on their own: making the
+      guard never trip, replacing a refusal with `exit`, and sourcing the config instead of parsing it
+      each fail the tests that exist to catch them — the config mutation is caught both statically and
+      behaviourally (the planted command really does run).
 - [ ] **T2 `[WRITE, go-ahead needed]` — install with the daemon deliberately broken.** Install the
       hook pointing at a binary that exits non-zero immediately, then power-cycle **three times**.
       Expected: each boot leaves SSH up, and the third removes the marker so boot four is pure stock.
