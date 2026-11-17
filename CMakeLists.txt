@@ -69,7 +69,11 @@ target_link_libraries(hub PRIVATE hp_hub)
 # Bench-only IR emitter experiment (not shipped in the hub binary).
 add_executable(ir_bench tools/ir_bench.c)
 
-if(NOT CMAKE_CROSSCOMPILING)
+# remote_sim drives the hub's RF link, which is a Unix socket *on the hub*, so the hub target
+# needs it too: with the physical remote deliberately unrooted, a simulated press has to
+# originate on the device. It links only hp_hub and plain sockets, so there is nothing
+# host-specific about it. The remote (ARM) target still skips it.
+if(NOT CMAKE_CROSSCOMPILING OR HP_TARGET STREQUAL "hub")
   add_executable(remote_sim remote/sim/remote_sim.c)
   target_link_libraries(remote_sim PRIVATE hp_hub)
 endif()
