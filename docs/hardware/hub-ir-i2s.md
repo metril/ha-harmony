@@ -406,8 +406,9 @@ the "clear all owner bits + resume" branch (@0x7d4-0x800) and goes straight to t
 @0x818-0x830, which sleeps `schedule_timeout_interruptible(250)` per descriptor until the DMA clears
 each descriptor's owner bit (set at open for RX, @0x2e0-0x2f4). With no DMA running that never
 happens, and since the loop ignores signals SIGKILL cannot stop it. **Always `read()` at least once
-before closing a mic fd** (section 11). `ir_bench --probe` does open+close with no read and therefore
-hangs by construction: remove or fix it.
+before closing a mic fd** (section 11). `ir_bench --probe` used to do open+close with no read and so
+hung by construction; it now write-opens the **speaker** slot instead (the same safe availability test
+the daemon's startup probe uses), and carries this hazard in a comment so it is not reintroduced.
 
 Still unknown: what GPIO28 and GPIO13 gate (section 3); the I2S_MODE bit; idle level and
 underrun behaviour.
@@ -476,7 +477,9 @@ ambient IR or the hub's own emission if the receiver sees it.
   768 (`li a2,768` @0xcb8) while the descriptor length is re-armed to `min(count,768)` (@0xc34-0xc3c);
   `hal` passes 192 into a 776-byte stack buffer (ops+0x10, buffer size `(192*4+14)&~7`) and relies on that.
 - **Never `close()` a mic fd that has not been `read()` at least once** (section 9 hazard): close then spins
-  forever. After at least one read RX state is 1 and close clears the owner bits and returns.
+  forever, ignoring signals, and only a reboot recovers. After at least one read RX state is 1 and close
+  clears the owner bits and returns. Any capture tool must therefore `read()` before any error path that
+  closes - including the failure paths, which is the easy one to get wrong.
 - Bit clock and `STEREO_CONFIG` are **shared with TX** (`0xb80b001c`, `0xb80b0000`). `I2S_FREQ` with a value
   different from the register pauses *both* DMAs, runs `i2s_reset` (MBOX reset `0xb80a0058 = 0xff`) and
   resumes them (@0xf1c-0xfc4), and the resume of RX (`0xb80a0024 = 4`) does **not** reprogram the RX
