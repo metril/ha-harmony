@@ -1,9 +1,22 @@
-build/
+# Build trees. One pattern for every CMake build dir we use: build/, build-host/,
+# build-cross/ (hub MIPS), build-cross-test/ (MIPS unit tests under qemu).
+build*/
+
+# Python tooling
 .venv/
 __pycache__/
-.superpowers/
 .ruff_cache/
 .pytest_cache/
+
+# Agent / assistant local state: session settings and the per-agent git worktrees
+# it creates under .claude/worktrees/. Never committed; a worktree here is a second
+# checkout of this same repo.
+.claude/
+.superpowers/
+
+# Device images, stock config dumps and extracted IR databases. These contain the
+# hub's own identifiers and network details, so they stay out of a public repo.
 backups/
+
+# Pinned cross toolchains (hundreds of MB, fetched by tools/fetch_toolchains.sh)
 vendor/toolchains/
-build-cross/
