@@ -42,8 +42,15 @@ DEFAULT_MARGIN_KB = 512  # headroom to leave on the 5 MB jffs2 that also holds t
 
 # `ls -l` of a /proc/PID/fd directory only readlink()s the symlinks; it never opens the device
 # node, so this is safe against a live `hal` (unlike any open() of /dev/i2s).
+#
+# The hub's BusyBox `grep` has NO `-E`: it exits 2 with "invalid option -- E" on every
+# iteration, which silently reported "not held" while `hal` was in fact holding both devices.
+# That false negative would let `quiesce` pass and `run` proceed, and opening /dev/i2s against a
+# live `hal` wedges unkillably in `ath_i2s_close`. Basic `grep -e` only, therefore — and likewise
+# no `head`, `sort`, `uniq`, `readlink`, `df`, `basename`, `xargs` or `seq` anywhere on-device.
 FD_SCAN = (
-    'for p in /proc/[0-9]*; do ls -l $p/fd 2>/dev/null | grep -E " -> /dev/(i2s|rfspi)$"'
+    "for p in /proc/[0-9]*; do ls -l $p/fd 2>/dev/null"
+    ' | grep -e " -> /dev/i2s" -e " -> /dev/rfspi"'
     ' | sed "s|^|$p |"; done'
 )
 PS_RE = re.compile(r"^\s*(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.*?)\s*$")
