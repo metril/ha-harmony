@@ -74,10 +74,10 @@ def main() -> None:
     (HERE / "logo.svg").write_text(logo)
 
     for name, svg, kw in [
-        ("icon.png", icon, dict(output_width=256, output_height=256)),
-        ("icon@2x.png", icon, dict(output_width=512, output_height=512)),
-        ("logo.png", logo, dict(output_height=160)),
-        ("logo@2x.png", logo, dict(output_height=320)),
+        ("icon.png", icon, {"output_width": 256, "output_height": 256}),
+        ("icon@2x.png", icon, {"output_width": 512, "output_height": 512}),
+        ("logo.png", logo, {"output_height": 160}),
+        ("logo@2x.png", logo, {"output_height": 320}),
     ]:
         cairosvg.svg2png(bytestring=svg.encode(), write_to=str(OUT / name), **kw)
     print(f"logo width {width} (INTEGRATION right {r1:.1f}, Harmony right {r2:.1f})")
