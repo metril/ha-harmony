@@ -160,6 +160,40 @@ Caveats to remember when it is for real:
   **Always restore from the dated or `golden_` tar.**
 - A factory-reset hub has no BusyBox with `tar`, so a restore has to stage one again.
 
+## Post-root results (2026-11-17)
+
+- **MIPS BusyBox built** — `./build/build_busybox.sh mips` in the external clone, after extracting the
+  documented Bootlin `mips32--uclibc--stable-2017.05` toolchain into its `build/toolchains/` (sha256
+  checked against its README). Produces `payload/bin/busybox`: static MIPS32 BE, BusyBox 1.36.1,
+  1,513,024 B, sha256 `8d1ddbf3f00956f8cc020d210d75b9c59c5d7fe582333a01c4c1360126847cbc`. This is what
+  the rooting run lacked, and `restore_stock.py` needs it on the device.
+- **Stock tar taken** — `backups/phase1/hub/stock-tar/` (copied out of the external clone):
+  `golden_hub_backup_000420f644d4.tar` and a byte-identical dated copy, 231,936 B each, sha256
+  `8b519388d78628ae458326bbcc5c72a586edf9350fb59c05bcdcf6f4cd816c05`, 28 entries —
+  `data/resources/*.json`, `etc/passwd`, `etc/network/*`. It is a **config** backup, not a flash image.
+  There is no `_latest` file; the tool names the golden tar after the hub id.
+- **Integrity upgraded to sha256 device-side.** With that BusyBox staged in `/tmp` (tmpfs, removed
+  afterwards) the hub gains `sha256sum`/`tar`/`dd`/`head`/`sync`. Device sha256 of each `mtdblockN`
+  against our images: **mtd0, mtd1, mtd2, mtd3, mtd5, mtd6 all MATCH** — those six are now
+  sha256-grade, not just md5. **mtd4 (`data`) differs, as expected**: it is the live mounted jffs2 the
+  hub writes to continuously, so our image is a point-in-time snapshot, not a stale one. Evidence it
+  is a sound snapshot: the tool's two independent reads agreed at imaging time, `jefferson` parsed the
+  whole IR database out of it, and a second snapshot taken 13 minutes later
+  (`backups/phase1/hub/20261117T000203Z/`) differs by only **1153 bytes of 5,242,880 (0.02 %)**,
+  confined to one 471 KB span — ordinary jffs2 log-structured appends. `cache` was byte-identical
+  across both snapshots.
+- **`/dev/mtdrN` confirmed** — the hub exposes `mtdr0..mtdr9` (char, major 90, odd minors) and each
+  reads identically to its `mtdblockN`. Our tool now probes `/dev/mtdNro` then `/dev/mtdrN`
+  (`09c163f`), which likely matters for the remote too.
+- **Restore rehearsal passed, aborted at the prompt.** `restore_stock.py --skip-usb-root --hub-ip
+  192.0.2.11 --backup <golden tar>` accepted the tar (0.22 MB, 28 entries, contains `/data`) and
+  printed "Confirmation string mismatch. Aborting restoration." without changing anything. What it
+  *would* do: gain root SSH, kill all background processes except Dropbear, `rm -rf /cache/*`, then
+  `tar -xf - -C /` to overwrite matching files under `/data`, `sync` twice, reboot. It writes **files
+  into jffs2 — it never re-flashes a partition**, and never touches u-boot, kernel, root or mfg. It
+  needs a BusyBox with `tar` on the device, looked for at `/cache/bin/busybox`,
+  `/data/harmony/bin/busybox`, `/tmp/busybox`, else staged from `payload/bin/busybox`.
+
 ## Recovery
 
 In order, least invasive first:
