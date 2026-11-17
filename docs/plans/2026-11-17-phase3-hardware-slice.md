@@ -119,7 +119,9 @@ conflicts with the observed persistent fd).
       (4 one-bits then 8 zero-bits per cycle), bit time **2199 ns**, `FREQ` divider **`0x0036f999`**
       (54.975 = bit_ns/40), byte-pair **swap on**, mark **not inverted**, **`ports=2`** →
       `START` arg `0x20000`, i.e. **bit 17 = the built-in emitter** (bits 16/18 are GPIO16/GPIO13 and
-      emitted nothing). Stream: 147,392 bits / 18,424 bytes / 324.1 ms; a single `write()` took 0.2 ms
+      emitted nothing). Stream: 147,392 bits / 18,424 bytes / 324.1 ms — that is **three repeats**
+      (`min_repeats: 3`); **one** frame is ~108 ms / 49,152 bits / 6,144 bytes, so do not read 324 ms
+      as a per-frame figure. A single `write()` took 0.2 ms
       and `DRAIN` blocked 323.5 ms against a predicted 324.1 ms — so the divider formula yields the
       intended bit time. Sequence exactly as documented: open `O_WRONLY` → `DSIZE` 16 → `MODE` 2 →
       `VOLUME` 15 → `FREQ` → `write` → `START` → `DRAIN` → close, every call returning 0.
@@ -161,7 +163,7 @@ fw_version are literals at `:153-154`.
 - [ ] Without `--sim`: wire `hp_hw_sinks_open()`; default `--cache /data/ha-harmony/cache.json`,
       `--state /data/ha-harmony/state.json` (atomic via `hub/engine/atomic_file.c`), and `--rf
       /tmp/ha-harmony-rf.sock` so the socket never persists.
-- [ ] Real identity: stable `hub_id` (the stock hub id `REDACTED-HUB-ID` keeps HA's unique_id recognisable —
+- [ ] Real identity: stable `hub_id` (the stock hub id (recorded locally) keeps HA's unique_id recognisable —
       see open question 5) and a real `fw_version` from our build plus the stock FW, not a literal.
 - [ ] Fail loudly and specifically when `/dev/i2s` is busy: "stock hal still holds /dev/i2s — run
       tools/deploy_hub.py quiesce first". A vague error here is the likeliest bench time-waster.
@@ -194,6 +196,31 @@ The step that temporarily breaks the living room: the physical remote stops work
       work again, **before** any IR is attempted.
 - [ ] Rollback: `restore`, then `clean`. If restore fails: **reboot** (nothing is armed at boot, so it
       comes up stock). If that fails: hardware factory reset, then re-root per the Phase 1 runbook.
+
+### Task 4b — Repeat fidelity: the config schema cannot express how stock actually sends IR
+
+Found while building the converter (2026-11-17). **Decide before the E2E slice is judged.**
+
+The schema's `raw: {hz, us}` is a single mark/space sequence; `hub/engine/irout.c`'s `encode_raw`
+sets `rep_n = 0`, so the hub sends it once per press and re-sends the whole sequence while held. But
+the stock hub sends **every one of the 85 commands with `min_repeats` ≥ 1** (3 for the Samsung
+protocol), and the 18 NEC/Toshiba-style commands use a **separate short repeat frame**
+(8990/2230/568/96077) rather than resending the full frame. Converted output therefore carries
+`min_repeats_not_expressed` on all 85 and `repeat_frame_not_expressible` on 18.
+`pronto` is not an escape: it quantises durations to carrier periods and derives the carrier from a
+frequency word, so 37900 Hz and 568/552 µs would not survive.
+
+Options:
+- `--repeats expand` (exists, works): pre-multiplies `once + repeat × min_repeats + finish` inline.
+  Costs **15,108 of the hub's 16,384 pool words** for this device set alone — almost the whole budget,
+  leaving no room for pages or more devices — and must clamp the 96077 µs inter-frame gap to 65535
+  (u16 storage).
+- **Extend the config/proto with `min_repeats` and an optional repeat frame** (preferred): a small
+  change to a format we own, keeps the pool cost at 5,780 words, and matches what the hardware does.
+- Ship single-frame and see which devices tolerate it. Cheapest, but some IR receivers require the
+  repeats, so this may be what decides whether real presses feel reliable.
+
+- [ ] Pick one. If the slice's IR works but feels flaky, this is the first suspect.
 
 ### Task 5 `[WRITE — go-ahead needed]` — The E2E slice
 
@@ -257,7 +284,7 @@ reboot is always an escape hatch. It becomes a real prerequisite the moment we a
    the LAN, or run this slice `--no-mdns` with a manual HA entry?
 4. **IR port mapping** — the hub has a built-in emitter plus wired blaster ports. Does the living-room
    setup use blasters, and which port faces which device? `port_mask` needs a real mapping.
-5. **Hub id** — reuse the stock `REDACTED-HUB-ID` (keeps HA unique_ids stable and recognisable) or mint our own?
+5. **Hub id** — reuse the stock hub id (keeps HA unique_ids stable and recognisable) or mint our own?
 6. **Second backup copy** — still open from Phase 1. Phase 3 is the first phase that writes to hub
    flash, so decide before Task 4 runs.
 
