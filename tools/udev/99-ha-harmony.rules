@@ -1,0 +1,11 @@
+# ha-harmony: give the plugdev group libusb access to the Harmony Hub and remote.
+# The kernel HID ignore-list leaves these unbound, so userspace owns the interface.
+# Install: sudo cp tools/udev/99-ha-harmony.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+# Hub (Harmony Hub)
+SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="c129", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+# Remote (Harmony Touch/Ultimate/Elite)
+SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="c12b", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+# hidraw nodes for the same two devices (usbhid binds them once the
+# HID_QUIRK_NO_IGNORE quirk from tools/host_setup.sh is in effect).
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c129", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="c12b", MODE="0660", GROUP="plugdev", TAG+="uaccess"
