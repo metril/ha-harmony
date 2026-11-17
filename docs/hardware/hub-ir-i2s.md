@@ -323,3 +323,13 @@ stack. Do not `--probe` while `hal` runs; a plain reboot cleared it.
 Still unknown: meaning of ports bits 16 and 18 and whether bit 17 only selects
 the emitter; whether 0/1 would work with other ports values; the I2S_MODE bit;
 idle level and underrun behaviour; mic-slot close hang root cause.
+
+## 10. Daemon backend (`hub/io/hw_sinks.c`)
+
+Implements the section 9 sequence behind `hp_ir_sink`; host-tested with injected syscalls and
+diffed byte-for-byte against `tools/ir_bench.c --out`. Engine `port_mask` bit n maps to START bit
+16+n (`--ir-ports`, default `0x02` = bit 17, the built-in emitter; mask 0 = all configured ports;
+an empty result is `-HP_E_INVAL`). `send` ends after START and leaves DRAIN+close to
+`hp_hw_service()` (or the next send), so the daemon loop never blocks. Not yet verified on the
+device: the deferred-DRAIN flow, startup write-open/close probe, hold-open-after-START, any
+carrier other than 37900 Hz.

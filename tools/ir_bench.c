@@ -38,7 +38,7 @@ static void usage(void) {
   fprintf(stderr,
           "usage: ir_bench [--dry-run|--probe] --carrier HZ --durations a,b,c,... "
           "[--repeat N] [--ports M] [--duty PCT] [--swap 0|1] [--invert 0|1] "
-          "[--n BITS] [--bit-ns NS] [--presilence-us US]\n"
+          "[--n BITS] [--bit-ns NS] [--presilence-us US] [--out FILE]\n"
           "  durations alternate mark,space,... in us; the list is one repeat\n");
 }
 
@@ -60,7 +60,7 @@ int main(int argc, char **argv) {
   long carrier = 0, repeat = 1, ports = 0, duty = 33, swap = 1, invert = 0;
   long n_over = 0, bit_ns_over = 0, presil = 0;
   int dry = 0, probe = 0;
-  const char *dur_s = NULL;
+  const char *dur_s = NULL, *out_path = NULL;
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
     const char *v = i + 1 < argc ? argv[i + 1] : NULL;
@@ -68,6 +68,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(a, "--probe")) probe = 1;
     else if (!v) { usage(); return 2; }
     else if (!strcmp(a, "--carrier")) carrier = atol(v), i++;
+    else if (!strcmp(a, "--out")) out_path = v, i++;
     else if (!strcmp(a, "--durations")) dur_s = v, i++;
     else if (!strcmp(a, "--repeat")) repeat = atol(v), i++;
     else if (!strcmp(a, "--ports")) ports = strtol(v, NULL, 0), i++;
@@ -136,6 +137,10 @@ int main(int argc, char **argv) {
          b, div, D, bs.nbits, nbytes, (double)bs.nbits * b / 1e6,
          100.0 * nbytes / 393216.0, swap, invert, ports, repeat);
   if (nbytes > 393216) { fprintf(stderr, "stream exceeds ring\n"); return 2; }
+  if (out_path) { /* dump the final (swapped) stream: tests diff hub/io/hw_sinks.c against it */
+    FILE *f = fopen(out_path, "wb");
+    if (!f || fwrite(bs.buf, 1, nbytes, f) != nbytes || fclose(f)) { fprintf(stderr, "--out failed\n"); return 2; }
+  }
   if (dry) return 0;
 
   int fd = open("/dev/i2s", O_WRONLY);
