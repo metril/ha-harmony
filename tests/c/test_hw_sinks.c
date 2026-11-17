@@ -168,7 +168,7 @@ static void test_sequence(void) {
     CHECK(F.log[0].op == 'o');
     for (int i = 0; i < 4; i++) CHECK(F.log[1 + i].op == 'i' && F.log[1 + i].req == exp[i][0] && F.log[1 + i].arg == exp[i][1]);
     CHECK(F.log[5].op == 'w' && F.log[5].req == w.nbytes);
-    CHECK(F.log[6].op == 'i' && F.log[6].req == HP_I2S_START && F.log[6].arg == 0x20000);
+    CHECK(F.log[6].op == 'i' && F.log[6].req == HP_I2S_START && F.log[6].arg == 0x10000);
     CHECK(F.nlog == 7 && F.closes == 0); /* send returns before DRAIN: it must not block */
     CHECK(F.wlen == w.nbytes && memcmp(F.wbuf, ref, w.nbytes) == 0);
     /* not yet reaped before the predicted end + margin; reaped after */
@@ -195,10 +195,11 @@ static void test_ports(void) {
     CHECK(open_hw(0) == 0);
     hp_ir_signal_t *s = mk(SYN100, LEN(SYN100), 100000);
     CHECK(send_ir(255, s) == 0); /* engine default mask -> emitter only */
-    CHECK(F.log[F.nlog - 1].arg == 0x20000);
+    /* START bit 16 is the built-in emitter, proven on hardware 2026-11-17 (camera + TV). */
+    CHECK(F.log[F.nlog - 1].arg == 0x10000);
     hp_hw_sinks_close(g_h);
     F.nlog = 0;
-    CHECK(send_ir(1, s) == -HP_E_INVAL && F.nlog == 0); /* port 0 is not wired: never emit to nothing */
+    CHECK(send_ir(2, s) == -HP_E_INVAL && F.nlog == 0); /* port 1 is not wired: never emit to nothing */
     setup();
     CHECK(open_hw(0x06) == 0); /* --ir-ports 6: bits 1 and 2 wired */
     CHECK(send_ir(0, s) == 0 && F.log[F.nlog - 1].arg == 0x60000);
