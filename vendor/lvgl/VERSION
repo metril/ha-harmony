@@ -1,0 +1,10 @@
+LVGL v9.2.2
+url: https://github.com/lvgl/lvgl/archive/refs/tags/v9.2.2.tar.gz
+sha256: 129b4e00e06639fa79d7e8a6cab3c1ecce2445b1a246652ccd34f22e7b17ad6f
+licence: MIT (LICENCE.txt)
+
+Pruned copy of the release tarball: only src/, lvgl.h, lv_version.h and LICENCE.txt are kept.
+In src/ the .c files (headers stay, lvgl.h includes them) were removed for: font data other than
+Montserrat 14/20, libs/{ffmpeg,freetype,libjpeg_turbo,libpng,rlottie,thorvg,tiny_ttf,tjpgd,gif,
+barcode,qrcode,lodepng,bmp}, others/{file_explorer,ime,monkey,vg_lite_tvg}, draw/{nxp,renesas,vg_lite,sdl}. Nothing else is modified.
+Built by the `lvgl` target in the top-level CMakeLists.txt with remote/lv_conf.h.
