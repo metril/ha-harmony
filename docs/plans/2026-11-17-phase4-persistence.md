@@ -155,6 +155,24 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
       Expected: each boot leaves SSH up, and the third removes the marker so boot four is pure stock.
       **This proves the guard on the real device before the guard ever has to matter.**
       **Gate:** SSH survives all four boots; `remote.harmony` healthy on boot four.
+      Use `--allow-missing-daemon`, which exists for exactly this rehearsal and is otherwise refused.
+      - [x] **Installer written and tested: `tools/install_boot_hook.py`** (`status`/`install`/
+            `uninstall`, every write behind `--yes`), 26 tests. **Nothing has been run against the
+            device.** Kept separate from `deploy_hub.py` on purpose: that tool has a test asserting it
+            never writes `/etc/init.d`, `/etc/inittab`, `/etc/rc*` or any `/dev/mtd*`, and weakening
+            that invariant to fit this one job would be a bad trade. This tool is the only one allowed
+            in `/etc/init.d`, and is narrow: two files there, one marker, nothing else.
+      - [x] **Ordering is the safety property, and it is asserted, not just intended.** The marker is
+            created **last** and removed **first**, and the appended block is inert without it — so
+            every intermediate state, including every way the tool can fail halfway, is a hub that
+            boots pure stock. After editing `rcS.local` it runs **`sh -n` on the device**; if that
+            fails it restores the backup and never arms, because a syntax error there aborts `rcS` at
+            line 43, before dropbear at line 47. Tests cover: marker last, disarm first, backup before
+            edit, abort+restore on a broken edit, refusal when `rcS.local` was already broken,
+            idempotent re-install, byte-for-byte restore on uninstall, and a truncated write caught by
+            read-back verification.
+            Also **mutation-verified**: arming the marker first, skipping the restore, and retargeting
+            stock `rcS` each fail the test written to catch them.
 - [ ] **T3 `[WRITE]` — install for real.** Marker on, real daemon, `DEMO_MODE=1`, single-shot.
       **Gate:** after a cold power cycle with no host attached: our daemon is listening, `/dev/i2s` is
       ours (no `hal`), an `ir_send` reaches a real device, and the hub survives ≥1 h idle. Record RSS.
