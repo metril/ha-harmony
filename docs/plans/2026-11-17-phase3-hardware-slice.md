@@ -111,11 +111,32 @@ emitter — ties to open question 4); the mode bit; idle level and underrun beha
 `hal` really holds the node for its lifetime or reopens per send (the code suggests per-send, which
 conflicts with the observed persistent fd).
 
-- [ ] **Cheapest decisive experiment (needs a quiesce window):** open `/dev/i2s` `O_WRONLY`, set size
-      16 / mode 2 / volume 15, set a divider for a known bit time, queue a repeated `0xAAAA` pattern,
-      start with `ports=0`, drain — watched with a phone camera or an IR receiver. That single run fixes
-      bit time, bit order and polarity together. Do a read-only open first to check plumbing without
-      taking the speaker slot.
+- [x] **DONE — real IR emitted and proven, 2026-11-16 19:29 EST (`fffb1cd`).** `tools/ir_bench.c`
+      (separate CMake target, never linked into `hub`) emitted a Samsung `PowerToggle` from the hub's
+      built-in emitter and **`media_player.un55js9000` went `off` → `on`** — an automated oracle, no
+      human watching needed. Succeeded on attempt 5 of a capped ladder, one variable per attempt.
+      **Confirmed working parameters:** carrier 37900 Hz → period 26385 ns, **N=12**, duty 33 %
+      (4 one-bits then 8 zero-bits per cycle), bit time **2199 ns**, `FREQ` divider **`0x0036f999`**
+      (54.975 = bit_ns/40), byte-pair **swap on**, mark **not inverted**, **`ports=2`** →
+      `START` arg `0x20000`, i.e. **bit 17 = the built-in emitter** (bits 16/18 are GPIO16/GPIO13 and
+      emitted nothing). Stream: 147,392 bits / 18,424 bytes / 324.1 ms; a single `write()` took 0.2 ms
+      and `DRAIN` blocked 323.5 ms against a predicted 324.1 ms — so the divider formula yields the
+      intended bit time. Sequence exactly as documented: open `O_WRONLY` → `DSIZE` 16 → `MODE` 2 →
+      `VOLUME` 15 → `FREQ` → `write` → `START` → `DRAIN` → close, every call returning 0.
+- [x] **Two hazards found, both now load-bearing for Task 4:**
+      1. **Never open `/dev/i2s` while stock `hal` is running — not even read-only.** A read-only
+         open followed by `close()` **hung in the kernel in `ath_i2s_close`**, spinning in state R and
+         **immune to `kill -9`**. `tools/ir_bench --probe` must only be used after quiescing.
+      2. **Restarting `hal` by hand does not work.** Re-running `/usr/bin/hal -f -s` after the kill made
+         it die immediately leaving zombie `[hal]` children, and luaworks would not stay up, so
+         `remote.harmony` stayed `unavailable`. **A reboot is the reliable restore** (~4–5 min total
+         outage measured, including reboot) and it is safe precisely because nothing is armed at boot.
+         Task 4's `restore` should therefore **reboot by default** rather than attempt a hand restart.
+- [ ] Remaining unknowns: what `ports` bits 16/18 actually drive and whether bit 17 only selects or also
+      enables; whether swap and polarity matter independently (attempts 2–3 used `ports=0`, which
+      emitted nothing, so they do not independently rule out the alternatives); the `I2S_MODE` bit; idle
+      level and underrun behaviour; the root cause of the close-hang; and whether codes at other
+      carriers (other N values) work — the next bench round should sweep one code per distinct carrier.
 
 - [ ] `hub/io/hw_sinks.{c,h}`: `hp_hw_sinks_open()` returning `hp_sinks_t`. The IR sink translates
       `hp_ir_signal_t` (alternating mark/space, mark first) into that wire format. **Injectable fd and
@@ -158,10 +179,13 @@ The step that temporarily breaks the living room: the physical remote stops work
 - [ ] `tools/deploy_hub.py` over the `harmony-hub` SSH alias, subcommands: `push` `[WRITE]` (create
       `/data/ha-harmony/`, copy `hub`, `remote_sim`, config, busybox; verify each with `md5sum` both
       ends, then `sha256sum` once the staged busybox is there; refuse below a free-space margin);
-      `quiesce` `[WRITE]` (stop `lua` then `hal`, confirm `/dev/i2s` and `/dev/rfspi` are unheld, print
-      a loud banner + timer); `run` `[WRITE]` (**foreground over SSH**, streaming output — never
-      `nohup`/`&`/`setsid`, none of which the device even has); `press KEY` `[WRITE]`; `restore`
-      `[WRITE]`; `clean` `[WRITE]`.
+      `quiesce` `[WRITE]` (stop `lua`/`luaworks`/`luadraws` then `hal`, confirm `/dev/i2s` and
+      `/dev/rfspi` are unheld, print a loud banner + timer); `run` `[WRITE]` (**foreground over SSH**,
+      streaming output — never `nohup`/`&`/`setsid`, none of which the device even has); `press KEY`
+      `[WRITE]`; `restore` `[WRITE]` — **reboots the hub by default**, because a hand restart of `hal`
+      was measured not to work (see Task 2); `clean` `[WRITE]`.
+- [ ] `quiesce` must refuse to run anything that opens `/dev/i2s` until it has confirmed no process
+      holds it — a read-only open against a live `hal` wedges unkillably in `ath_i2s_close`.
 - [ ] Safety asserted by a command-log test: nothing writes `/etc/init.d`, `/etc/inittab`,
       `/etc/tdeenable`, `/etc/rc*`, crontabs or any `/dev/mtd*`; no backgrounding; every written path is
       under `/data/ha-harmony` or `/tmp`.
