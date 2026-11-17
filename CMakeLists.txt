@@ -41,6 +41,11 @@ if(CMAKE_CROSSCOMPILING AND HP_TARGET STREQUAL "remote")
   # Remote firmware: shared core + entry stub; no host-only tools/tests.
   add_executable(remote remote/main.c)
   target_link_libraries(remote PRIVATE hp_core)
+  # Bring-up probes run on the remote itself (static ARM): the radio probe with its 32-byte write
+  # cap, and the read-only framebuffer/input probe.
+  add_executable(rf_probe tools/rf_probe.c)
+  target_include_directories(rf_probe PRIVATE ${CMAKE_SOURCE_DIR})
+  add_executable(remote_probe tools/remote_probe.c)
   return()
 endif()
 
@@ -73,6 +78,11 @@ add_executable(ir_bench tools/ir_bench.c)
 if(NOT CMAKE_CROSSCOMPILING OR HP_TARGET STREQUAL "hub")
   add_executable(rf_probe tools/rf_probe.c)
   target_include_directories(rf_probe PRIVATE ${CMAKE_SOURCE_DIR})
+endif()
+
+# Host build of the remote probe (for its tests); it ships only in the remote (ARM) target above.
+if(NOT CMAKE_CROSSCOMPILING)
+  add_executable(remote_probe tools/remote_probe.c)
 endif()
 
 # remote_sim drives the hub's RF link, which is a Unix socket *on the hub*, so the hub target

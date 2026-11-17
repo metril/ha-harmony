@@ -128,6 +128,14 @@ jobs:
           out=$(file build-cross/rf_probe)
           echo "$out"
           echo "$out" | grep -E 'ELF 32-bit MSB.*MIPS.*statically linked'
+      - name: Assert remote probes are static ARM ELFs
+        if: matrix.name == 'arm'
+        run: |
+          for b in remote_probe rf_probe; do
+            out=$(file build-cross/$b)
+            echo "$out"
+            echo "$out" | grep -E 'ELF 32-bit LSB.*ARM.*statically linked'
+          done
       - name: Run C tests under qemu (big-endian, soft-float)
         if: matrix.name == 'mips'
         run: |

@@ -38,3 +38,8 @@ add_test(NAME hw_sinks COMMAND test_hw_sinks $<TARGET_FILE:ir_bench>)
 add_executable(test_rf_probe test_rf_probe.c)
 target_include_directories(test_rf_probe PRIVATE ${CMAKE_SOURCE_DIR})
 add_test(NAME rf_probe COMMAND test_rf_probe)
+
+# remote_probe (read-only fb/input probe): host-only via injected syscalls; the source is #included.
+add_executable(test_remote_probe test_remote_probe.c)
+target_include_directories(test_remote_probe PRIVATE ${CMAKE_SOURCE_DIR})
+add_test(NAME remote_probe COMMAND test_remote_probe)
