@@ -1,7 +1,7 @@
 """Python mirror of hub/rf/framing.c: RF object framing in hub mode (30-byte frames).
 
-Fire-and-forget helpers for the sim link (which is reliable, so no acks or retries);
-the C codec owns stop-and-wait. Vectors: tests/vectors/rf/frames.json.
+Raw-frame helpers for tests that play a remote by hand: frames are sent without waiting for acks;
+the C link (hub/rf/link.c) owns stop-and-wait. Vectors: tests/vectors/rf/frames.json.
 """
 
 CHUNK = 25

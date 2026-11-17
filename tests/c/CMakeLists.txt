@@ -14,6 +14,7 @@ add_hp_test(activity)
 add_hp_test(config2)
 add_hp_test(rf_payload)
 add_hp_test(rf_pair)
+add_hp_test(link)
 add_hp_test(mdns)
 add_hp_test(hwkeys)
 

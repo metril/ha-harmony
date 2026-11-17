@@ -48,6 +48,7 @@
 #include "hub/net/ws.h"
 #include "hub/parse_num.h"
 #include "hub/rf/framing.h"
+#include "hub/rf/link.h"
 #include "hub/rf/rf_payload.h"
 #include "remote/page/page.h"
 
@@ -66,12 +67,17 @@ static long now_ms(void) {
     return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* One received frame through unwrap + reassembly: 1 when it completed a new object. */
-static int rx_complete(hp_rf_asm_t *as, const uint8_t *f, size_t n, hp_rf_msg_t *msg) {
-    hp_rf_inner_t in, ack;
-    uint8_t slot;
-    if (hp_rf_unwrap_hub(f, n, &slot, &in) < 0) return 0;
-    return hp_rf_asm_push(as, &in, msg, &ack) == HP_ASM_COMPLETE;
+/* The simulated remote speaks the same object link as the hub (acks, retries, duplicate
+ * suppression); completed objects land in a small ring that the callers drain. */
+#define SIM_INBOX 8
+static hp_rf_link_t g_link;
+static hp_rf_msg_t g_inbox[SIM_INBOX];
+static unsigned g_in_head, g_in_n;
+
+static void on_deliver(void *ctx, const hp_rf_msg_t *m) {
+    (void)ctx;
+    if (g_in_n == SIM_INBOX) return; /* callers drain every pump; a flood past that is dropped */
+    g_inbox[(g_in_head + g_in_n++) % SIM_INBOX] = *m;
 }
 
 /* KEY is a numeric logical code 0..255 or a key name (VolumeUp / volume_up, case-insensitive). */
@@ -83,77 +89,86 @@ static int parse_key(const char *s, long *out) {
     return 0;
 }
 
-static int send_key(hp_rf_transport *rf, uint8_t seq, long remote, long key, long action) {
+static void nap_ms(long ms) {
+    struct timespec ts = {ms / 1000, (ms % 1000) * 1000000L};
+    nanosleep(&ts, NULL);
+}
+
+/* Pumps the link once. 0 ok, -1 hub gone. */
+static int link_step(void) { return hp_rf_link_pump(&g_link, (uint32_t)now_ms()) < 0 ? -1 : 0; }
+
+/* Pops one received object. */
+static int inbox_pop(hp_rf_msg_t *m) {
+    if (!g_in_n) return 0;
+    *m = g_inbox[g_in_head];
+    g_in_head = (g_in_head + 1) % SIM_INBOX;
+    g_in_n--;
+    return 1;
+}
+
+/* Sends one key_event and waits (bounded by the link's retries) for the hub's ack. 0 ok, 1 on failure. */
+static int send_key(long remote, long key, long action) {
     hp_rf_val_t v[3] = {{.u = (uint32_t)remote}, {.u = (uint32_t)key}, {.u = (uint32_t)action}};
     uint8_t payload[HP_RF_MSG_MAX];
-    hp_rf_inner_t fr[HP_RF_MAX_FRAGS];
-    size_t plen = 0, nf = 0;
-    if (hp_rf_pack(HP_MSG_KEY_EVENT, v, 3, payload, sizeof payload, &plen) < 0 ||
-        hp_rf_split(HP_MSG_KEY_EVENT, seq, payload, plen, fr, HP_RF_MAX_FRAGS, &nf) < 0) {
+    size_t plen = 0;
+    if (hp_rf_pack(HP_MSG_KEY_EVENT, v, 3, payload, sizeof payload, &plen) < 0) {
         fprintf(stderr, "remote_sim: cannot encode key_event\n");
         return 1;
     }
-    for (size_t i = 0; i < nf; i++) {
-        hp_rf_frame_t w;
-        hp_rf_wrap_hub(SIM_RF_SLOT, &fr[i], &w); /* fire-and-forget: the sim link is reliable */
-        if (rf->send(rf->self, w.data, w.len) < 0) {
+    uint32_t fails = hp_rf_link_status(&g_link).failures;
+    if (hp_rf_link_send(&g_link, HP_MSG_KEY_EVENT, payload, plen, (uint32_t)now_ms()) < 0) {
+        fprintf(stderr, "remote_sim: RF send failed\n");
+        return 1;
+    }
+    while (hp_rf_link_status(&g_link).queued) {
+        if (link_step() < 0 || hp_rf_link_status(&g_link).failures != fails) {
             fprintf(stderr, "remote_sim: RF send failed\n");
             return 1;
         }
+        nap_ms(1);
     }
     return 0;
 }
 
-static int press(hp_rf_transport *rf, long remote, long key, long action) {
-    return send_key(rf, 1, remote, key, action);
+static int press(long remote, long key, long action) {
+    return send_key(remote, key, action);
 }
 
-static int hold(hp_rf_transport *rf, long remote, long key, long total_ms, long interval_ms) {
-    uint8_t seq = 1;
-    if (send_key(rf, seq++, remote, key, HP_KEY_ACTION_PRESS)) return 1;
+static int hold(long remote, long key, long total_ms, long interval_ms) {
+    if (send_key(remote, key, HP_KEY_ACTION_PRESS)) return 1;
     long start = now_ms();
     for (long next = interval_ms; next < total_ms; next += interval_ms) {
         long wait = start + next - now_ms();
-        if (wait > 0) {
-            struct timespec ts = {wait / 1000, (wait % 1000) * 1000000L};
-            nanosleep(&ts, NULL);
-        }
-        if (send_key(rf, seq++, remote, key, HP_KEY_ACTION_HOLD)) return 1;
+        if (wait > 0) nap_ms(wait);
+        if (send_key(remote, key, HP_KEY_ACTION_HOLD)) return 1;
     }
     long wait = start + total_ms - now_ms();
-    if (wait > 0) {
-        struct timespec ts = {wait / 1000, (wait % 1000) * 1000000L};
-        nanosleep(&ts, NULL);
-    }
-    return send_key(rf, seq, remote, key, HP_KEY_ACTION_RELEASE);
+    if (wait > 0) nap_ms(wait);
+    return send_key(remote, key, HP_KEY_ACTION_RELEASE);
 }
 
-static int dump_page(hp_rf_transport *rf, long timeout_ms) {
-    hp_rf_asm_t as;
-    hp_rf_msg_t msg;
-    uint8_t fr[HP_RF_FRAME_MAX + 1];
-    hp_rf_asm_init(&as);
+static int dump_page(long timeout_ms) {
     long deadline = now_ms() + timeout_ms;
+    hp_rf_msg_t msg;
     for (;;) {
-        long left = deadline - now_ms();
-        if (left <= 0) {
-            fprintf(stderr, "remote_sim: timed out waiting for page_push\n");
-            return 3;
-        }
-        int n = rf->recv(rf->self, fr, sizeof fr, (int)left);
-        if (n < 0) {
+        if (link_step() < 0) {
             fprintf(stderr, "remote_sim: hub disconnected\n");
             return 1;
         }
-        if (n == 0 || n > HP_RF_FRAME_MAX) continue;
-        if (!rx_complete(&as, fr, (size_t)n, &msg) || msg.type != HP_MSG_PAGE_PUSH) continue;
-        hp_rf_val_t v[3];
-        if (hp_rf_unpack(HP_MSG_PAGE_PUSH, msg.payload, msg.len, v, 3) < 0) continue;
-        char b64[4 * ((255 + 2) / 3) + 1];
-        hp_base64_encode(v[2].p, v[2].len, b64);
-        printf("{\"remote\":%u,\"page\":%u,\"data\":\"%s\"}\n", (unsigned)v[0].u, (unsigned)v[1].u, b64);
-        fflush(stdout);
-        return 0;
+        while (inbox_pop(&msg)) {
+            hp_rf_val_t v[3];
+            if (msg.type != HP_MSG_PAGE_PUSH || hp_rf_unpack(HP_MSG_PAGE_PUSH, msg.payload, msg.len, v, 3) < 0) continue;
+            char b64[4 * ((255 + 2) / 3) + 1];
+            hp_base64_encode(v[2].p, v[2].len, b64);
+            printf("{\"remote\":%u,\"page\":%u,\"data\":\"%s\"}\n", (unsigned)v[0].u, (unsigned)v[1].u, b64);
+            fflush(stdout);
+            return 0;
+        }
+        if (deadline - now_ms() <= 0) {
+            fprintf(stderr, "remote_sim: timed out waiting for page_push\n");
+            return 3;
+        }
+        nap_ms(1);
     }
 }
 
@@ -198,43 +213,39 @@ static void on_tile(const hp_rf_val_t *v) {
 
 /* Receive until timeout_ms of quiet (or, with stop_on_page, until a page is stored).
  * 1 = a page arrived (stop_on_page), 0 = quiet/timeout, -1 = hub gone. */
-static int pump(hp_rf_transport *rf, hp_rf_asm_t *as, long timeout_ms, int stop_on_page) {
-    hp_rf_msg_t msg;
-    uint8_t fr[HP_RF_FRAME_MAX + 1];
+static int pump(long timeout_ms, int stop_on_page) {
     long deadline = now_ms() + timeout_ms;
+    hp_rf_msg_t msg;
     for (;;) {
-        long left = deadline - now_ms();
-        if (left <= 0) return 0;
-        int n = rf->recv(rf->self, fr, sizeof fr, (int)left);
-        if (n < 0) return -1;
-        if (n == 0 || n > HP_RF_FRAME_MAX) continue;
-        if (!rx_complete(as, fr, (size_t)n, &msg)) continue;
-        hp_rf_val_t v[4];
-        if (msg.type == HP_MSG_PAGE_PUSH && hp_rf_unpack(HP_MSG_PAGE_PUSH, msg.payload, msg.len, v, 3) == 0) {
-            if (on_page(v) && stop_on_page) return 1;
-            if (!stop_on_page) deadline = now_ms() + timeout_ms;
-        } else if (msg.type == HP_MSG_TILE_UPDATE &&
-                   hp_rf_unpack(HP_MSG_TILE_UPDATE, msg.payload, msg.len, v, 4) == 0) {
-            on_tile(v);
-            if (!stop_on_page) deadline = now_ms() + timeout_ms;
+        if (link_step() < 0) return -1;
+        while (inbox_pop(&msg)) {
+            hp_rf_val_t v[4];
+            if (msg.type == HP_MSG_PAGE_PUSH && hp_rf_unpack(HP_MSG_PAGE_PUSH, msg.payload, msg.len, v, 3) == 0) {
+                if (on_page(v) && stop_on_page) return 1;
+                if (!stop_on_page) deadline = now_ms() + timeout_ms;
+            } else if (msg.type == HP_MSG_TILE_UPDATE &&
+                       hp_rf_unpack(HP_MSG_TILE_UPDATE, msg.payload, msg.len, v, 4) == 0) {
+                on_tile(v);
+                if (!stop_on_page) deadline = now_ms() + timeout_ms;
+            }
         }
+        if (deadline - now_ms() <= 0) return 0;
+        nap_ms(1);
     }
 }
 
 /* Wait for a page, then let tile_updates settle. 0 ok, else an exit code. */
-static int collect_page(hp_rf_transport *rf, long timeout_ms, long settle_ms) {
-    hp_rf_asm_t as;
-    hp_rf_asm_init(&as);
-    int rc = pump(rf, &as, timeout_ms, 1);
+static int collect_page(long timeout_ms, long settle_ms) {
+    int rc = pump(timeout_ms, 1);
     if (rc < 0) { fprintf(stderr, "remote_sim: hub disconnected\n"); return 1; }
     if (rc == 0) { fprintf(stderr, "remote_sim: timed out waiting for page_push\n"); return 3; }
-    while ((rc = pump(rf, &as, settle_ms, 0)) == 1) {}
+    while ((rc = pump(settle_ms, 0)) == 1) {}
     if (rc < 0) { fprintf(stderr, "remote_sim: hub disconnected\n"); return 1; }
     return 0;
 }
 
-static int dump_layout(hp_rf_transport *rf, long timeout_ms, long settle_ms) {
-    int rc = collect_page(rf, timeout_ms, settle_ms);
+static int dump_layout(long timeout_ms, long settle_ms) {
+    int rc = collect_page(timeout_ms, settle_ms);
     if (rc) return rc;
     const hp_page_t *p = &st.pages[st.last];
     cJSON *o = cJSON_CreateObject(), *ws = cJSON_CreateArray();
@@ -265,8 +276,8 @@ static int dump_layout(hp_rf_transport *rf, long timeout_ms, long settle_ms) {
     return 0;
 }
 
-static int tap(hp_rf_transport *rf, long remote, long x, long y, long timeout_ms, long settle_ms) {
-    int rc = collect_page(rf, timeout_ms, settle_ms);
+static int tap(long remote, long x, long y, long timeout_ms, long settle_ms) {
+    int rc = collect_page(timeout_ms, settle_ms);
     if (rc) return rc;
     const hp_widget_t *w = hp_page_hit(&st.pages[st.last], (int)x, (int)y);
     if (!w || w->kind == HP_WIDGET_LABEL) {
@@ -276,7 +287,7 @@ static int tap(hp_rf_transport *rf, long remote, long x, long y, long timeout_ms
         return 0;
     }
     long key = 128 + w->id;
-    if (send_key(rf, 1, remote, key, 0) || send_key(rf, 2, remote, key, 1)) return 1;
+    if (send_key(remote, key, 0) || send_key(remote, key, 1)) return 1;
     printf("{\"hit\":true,\"id\":%u,\"key\":%ld}\n", (unsigned)w->id, key);
     fflush(stdout);
     return 0;
@@ -332,11 +343,12 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, "remote_sim: attached\n");
     fflush(stderr);
-    rc = dump     ? dump_page(rf, timeout_ms)
-         : layout ? dump_layout(rf, timeout_ms, settle_ms)
-         : do_tap ? tap(rf, remote, tx, ty, timeout_ms, settle_ms)
-         : hold_key >= 0 ? hold(rf, remote, hold_key, hold_ms, hold_iv)
-                  : press(rf, remote, key, action);
+    hp_rf_link_init(&g_link, rf, true, SIM_RF_SLOT, on_deliver, NULL);
+    rc = dump     ? dump_page(timeout_ms)
+         : layout ? dump_layout(timeout_ms, settle_ms)
+         : do_tap ? tap(remote, tx, ty, timeout_ms, settle_ms)
+         : hold_key >= 0 ? hold(remote, hold_key, hold_ms, hold_iv)
+                  : press(remote, key, action);
     hp_rf_pair_destroy(rf);
     return rc;
 }

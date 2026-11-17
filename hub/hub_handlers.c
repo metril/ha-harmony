@@ -39,7 +39,6 @@ static void hub_notify(void *vctx, hp_actsm_evt_t evt, int idx) {
 void hub_ctx_init(hub_ctx_t *c) {
     memset(c, 0, sizeof *c);
     hp_map_init(&c->map);
-    hp_rf_asm_init(&c->rf_asm);
     hp_sched_init(&c->sched, mono_ms, NULL);
     hp_irout_init(&c->irout, &c->sched);
     hp_map_set_out(&c->map, &c->irout);
@@ -51,7 +50,14 @@ void hub_set_clock(hub_ctx_t *c, hp_clock_fn fn, void *ctx) {
     c->sched.clock_ctx = ctx;
 }
 
-int hub_next_timeout_ms(const hub_ctx_t *c) { return hp_sched_next_timeout_ms(&c->sched); }
+int hub_next_timeout_ms(const hub_ctx_t *c) {
+    int t = hp_sched_next_timeout_ms(&c->sched);
+    if (c->link_bound) { /* an in-flight RF object needs a pump at its retry deadline */
+        int r = hp_rf_link_next_timeout_ms(&c->link, mono_ms(NULL));
+        if (r >= 0 && (t < 0 || r < t)) t = r;
+    }
+    return t;
+}
 void hub_run_timers(hub_ctx_t *c) {
     hp_sched_run(&c->sched, hp_sched_now(&c->sched));
     hub_flush_pending(c); /* a transition may have completed / changed device state */
@@ -63,26 +69,28 @@ void hub_shutdown(hub_ctx_t *c) {
 
 #define HUB_RF_SLOT 1 /* the single paired remote (docs/hardware/hub-rf-cc2544.md s7) */
 
-/* Packs, splits and sends one RF message. 0, -HP_E_TOOBIG (nothing sent),
- * -HP_E_NOENT (no remote; nothing sent), other negative: link failed. */
+static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m);
+static void link_deliver(void *ctx, const hp_rf_msg_t *m) { handle_rf_msg(ctx, m); }
+
+/* The link is bound lazily: callers install sinks.rf (and rf_inner_blocks) after hub_ctx_init. */
+static void rf_link_ensure(hub_ctx_t *h) {
+    if (h->link_bound) return;
+    hp_rf_link_init(&h->link, h->sinks.rf, !h->rf_inner_blocks, HUB_RF_SLOT, link_deliver, h);
+    h->link_bound = true;
+}
+
+
+/* Packs and queues one RF message on the link (stop-and-wait, driven by hub_pump_rf).
+ * 0, -HP_E_TOOBIG (nothing sent), -HP_E_NOENT (no remote; nothing sent), -HP_E_BUSY (link queue
+ * full). A later failure after all retries is counted by the link, not reported here. */
 static int rf_send_msg(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, size_t nv) {
     uint8_t payload[HP_RF_MSG_MAX];
-    hp_rf_inner_t fr[HP_RF_MAX_FRAGS];
-    size_t plen = 0, nf = 0;
+    size_t plen = 0;
     if (!h->sinks.rf) return -HP_E_NOENT;
     int rc = hp_rf_pack(t, v, nv, payload, sizeof payload, &plen);
     if (rc < 0) return rc;
-    rc = hp_rf_split(t, h->rf_seq++, payload, plen, fr, HP_RF_MAX_FRAGS, &nf);
-    if (rc < 0) return rc;
-    /* The sim link is reliable, so this is fire-and-forget: no ack wait or retry here
-     * (the hardware driver will drive hp_rf_tx_t). */
-    for (size_t i = 0; i < nf; i++) {
-        hp_rf_frame_t w;
-        hp_rf_wrap_hub(HUB_RF_SLOT, &fr[i], &w);
-        rc = h->sinks.rf->send(h->sinks.rf->self, w.data, w.len);
-        if (rc < 0) return (i == 0 || rc == -HP_E_NOENT) ? rc : -HP_E_IO;
-    }
-    return 0;
+    rf_link_ensure(h);
+    return hp_rf_link_send(&h->link, t, payload, plen, mono_ms(NULL));
 }
 
 /* ------------------------------------------------------------ broadcast */
@@ -405,20 +413,15 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
 
 void hub_pump_rf(hub_ctx_t *h) {
     if (!h->sinks.rf) return;
-    uint8_t fr[HP_RF_FRAME_MAX + 1];
-    hp_rf_msg_t msg;
-    hp_rf_inner_t in, ack;
-    uint8_t slot;
-    int n;
-    while ((n = h->sinks.rf->recv(h->sinks.rf->self, fr, sizeof fr, 0)) != 0) {
-        if (n < 0) { /* link event (remote gone) or error: drop partial reassembly */
-            hp_rf_asm_init(&h->rf_asm);
-            h->rf_attached = false;
-            break;
-        }
-        if (hp_rf_unwrap_hub(fr, (size_t)n, &slot, &in) < 0) continue; /* not a data frame */
-        /* Acks are not sent on the sim link (see rf_send_msg); DUPLICATE is dropped. */
-        if (hp_rf_asm_push(&h->rf_asm, &in, &msg, &ack) == HP_ASM_COMPLETE) handle_rf_msg(h, &msg);
+    rf_link_ensure(h);
+    /* Received objects are delivered (and acked) from inside the pump; a peer that went away
+     * resets reassembly and drops what was queued for it. */
+    if (hp_rf_link_pump(&h->link, mono_ms(NULL)) == -HP_E_NOENT) h->rf_attached = false;
+    uint32_t failures = hp_rf_link_status(&h->link).failures;
+    if (failures != h->rf_failures) {
+        fprintf(stderr, "hub: RF send failed after %d retries (%u object(s) dropped)\n", HP_RF_RETRIES,
+                (unsigned)(failures - h->rf_failures));
+        h->rf_failures = failures;
     }
     if (h->sinks.rf->attached) {
         bool now = h->sinks.rf->attached(h->sinks.rf->self);

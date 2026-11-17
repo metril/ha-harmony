@@ -61,6 +61,7 @@
 #include "hub/engine/mapping.h"
 #include "hub/engine/sched.h"
 #include "hub/rf/framing.h"
+#include "hub/rf/link.h"
 #include "hub/net/jsonrpc.h"
 #include "hub/net/ws.h"
 
@@ -72,8 +73,10 @@ typedef struct {
     bool pending_state;     /* a state_update to broadcast after the reply */
     int pending_activity;
     bool pending_power;
-    hp_rf_asm_t rf_asm;     /* remote->hub reassembly */
-    uint8_t rf_seq;         /* hub->remote message sequence */
+    hp_rf_link_t link;      /* RF object link (acks, retries, reassembly), bound lazily to sinks.rf */
+    bool link_bound;
+    bool rf_inner_blocks;   /* transport carries bare 28-byte inner blocks (rf_spi), not 30-byte hub frames (sim) */
+    uint32_t rf_failures;   /* link failures already logged */
     bool pending_list;      /* an activity_list to broadcast after the reply */
     const hp_session_t *list_skip; /* ...to everyone but the set_config sender */
     hp_sched_t sched;       /* timers: key repeat, SIRC copies, activity transitions, state writes */
@@ -102,7 +105,8 @@ void hub_send_state(hub_ctx_t *, hp_ws_conn_t *);
 void hub_flush_pending(hub_ctx_t *);
 /* Clean shutdown: writes the state file if a change is still pending. */
 void hub_shutdown(hub_ctx_t *);
-/* Drains the RF transport, applying keys and broadcasting key_event. */
+/* Pumps the RF link: delivers received objects (keys, battery), acks them, drives sends and
+ * retries. Set sinks.rf (and rf_inner_blocks) before the first call. */
 void hub_pump_rf(hub_ctx_t *);
 /* Sends {v,id:0,t:type,d} to every authenticated connection; takes ownership of d. */
 void hub_broadcast(hub_ctx_t *, const char *type, cJSON *d);

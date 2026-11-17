@@ -31,6 +31,7 @@ target_link_libraries(cjson PRIVATE m)
 add_library(hp_core STATIC
   proto/gen/harmony_proto.c
   hub/rf/framing.c
+  hub/rf/link.c
   hub/rf/rf_payload.c
   remote/page/page.c
 )
