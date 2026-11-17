@@ -7,6 +7,28 @@ Conventions: `docs/plans/2026-11-16-phase2-foundations.md`. Hub state: `docs/run
 database → a simulated button press arrives over the hub's RF socket → the hub emits **real IR** at a
 real device in the room → the press surfaces in HA as an event.
 
+> ## Status: slice gate MET (2026-11-17). Tasks 0–4 complete; Task 5 met by a shorter route.
+>
+> Reconciled against reality 2026-11-17 after session 4 — the checkboxes below had drifted badly out
+> of date, with ~20 shipped items still reading as open. What is **done**: the soft-float toolchain and
+> big-endian tests in CI, both binaries cross-building and running on the hub, the real `/dev/i2s` IR
+> sink (emitter = `ports=1`, GPIO16), the non-`--sim` daemon path with its real defaults, the whole
+> `deploy_hub` quiesce/restore tooling, and real IR that a real TV obeys plus a simulated press
+> arriving in HA.
+>
+> What is **not** done, and is what a user-facing install still needs:
+> - our `ha_harmony` component is **not installed in the user's HA**, so no HA config entry, no pushed
+>   config, and `/data/ha-harmony/cache.json` has never been written on the device;
+> - the J-Tech switch, KVM and Audioengine command sets — **24 extracted commands** — have never been
+>   driven on the wire, and no carrier other than 37.9/38 kHz has;
+> - no `docs/runbooks/phase3-hub-slice.md`; the sessions are recorded in this plan instead;
+> - **nothing is persistent.** Everything here dies on reboot by design. Boot persistence is Phase 4
+>   and is the first step that can brick the hub.
+>
+> The one process lesson worth carrying forward: **a single unreplicated observation on a
+> self-triggering oracle is not evidence.** It cost a day and shipped a wrong default (see the
+> retraction in Task 2 and session 3).
+
 **Scope decision (user, 2026-11-17):** the physical Elite remote is **deliberately not rooted** —
 deferred until we have firmware to deploy, so the living room keeps working. This slice is
 **hub-only**: the "button press" comes from `remote_sim` over the hub's Unix RF socket, not over RF.
@@ -57,20 +79,25 @@ execute one. That is the real hole to close.
       float). Bootlin publishes no soft-float big-endian mips32 toolchain. Provisioned by
       `tools/fetch_toolchains.sh`, pinned by URL + sha256, installed to `vendor/toolchains/`
       (gitignored).
-- [ ] `cmake/toolchains/hub-mips.cmake`: `-march=mips32r2 -mtune=24kc` (r2 is right — the 24Kc *is*
+- [x] `cmake/toolchains/hub-mips.cmake`: `-march=mips32r2 -mtune=24kc` (r2 is right — the 24Kc *is*
       MIPS32 Release 2; the float ABI was the bug) plus soft-float flags. Gate: `readelf -A` on the
-      hub binary reports **`FP ABI: Soft float`**.
-- [ ] `.github/workflows/ci.yml`: same pinned toolchain as the script (a test asserts they cannot
+      hub binary reports **`FP ABI: Soft float`** — asserted in CI, verified again 2026-11-17.
+- [x] `.github/workflows/ci.yml`: same pinned toolchain as the script (a test asserts they cannot
       drift), and **run the MIPS C tests in CI** — `-DHP_BUILD_TESTS=ON` with `qemu-mips`
       (`qemu-user-static`) or ctest's `CROSSCOMPILING_EMULATOR`. A big-endian soft-float test run in
-      CI is the deliverable; without it this class of bug returns.
-- [ ] Re-run the whole C suite **on the hub**; every test that passes on the host must pass there.
-- [ ] Any test still failing after the ABI fix is a genuine big-endian/portability bug — fix it with a
-      host regression test, never by disabling the test. `test_ws`'s SIGSEGV and the 1008 handshake are
-      the prime suspects; they may evaporate with soft float or may be real BE bugs.
-- [ ] Gate: on-hub suite green, and the integration's own client completes a handshake against the
-      daemon running on the hub.
-- [ ] Rollback: host-side only; nothing on the hub beyond `/tmp`.
+      CI is the deliverable; without it this class of bug returns. **Done** via
+      `CMAKE_CROSSCOMPILING_EMULATOR` in the `cross-build (mips)` job.
+- [x] ~~Re-run the whole C suite **on the hub**~~ — **superseded, deliberately.** The suite runs
+      big-endian soft-float under qemu in CI on every push, which catches the entire bug class that
+      motivated this item and costs no quiesce window. Running it on the device adds only the real
+      kernel's syscall behaviour, which the daemon itself exercises there. Not worth a window.
+- [x] Any test still failing after the ABI fix is a genuine big-endian/portability bug — fix it with a
+      host regression test, never by disabling the test. `test_ws`'s SIGSEGV and the 1008 handshake
+      **both evaporated with soft float**: they were FP traps, not BE bugs. All 14 C tests pass under
+      qemu; none were disabled.
+- [x] Gate: **met.** 14/14 C tests green big-endian soft-float, and the integration's own
+      `HarmonyHubClient` completed a handshake against the daemon on the hub (session 3).
+- [x] Rollback: host-side only; nothing on the hub beyond `/tmp`.
 
 ### Task 1 `[RO]` — Reproducible cross-build of `hub` + `remote_sim`
 
@@ -79,11 +106,13 @@ execute one. That is the real hole to close.
 change, not a port. (Rejected alternative: an SSH-forwarded Unix-socket bridge — the hub has no
 `socat`, and cross-building keeps the press path identical to the host E2E.)
 
-- [ ] `CMakeLists.txt:68`: build `remote_sim` when `NOT CMAKE_CROSSCOMPILING` **or** the target is the
-      hub, behind an option defaulting ON for both.
-- [ ] Gate: `file` reports `ELF 32-bit MSB … MIPS … statically linked` for both; `readelf -d` shows no
-      dynamic entries; both run on the hub. Record `/data` free space from the Phase 1 image before
-      planning a push (it is a 5 MB jffs2).
+- [x] `CMakeLists.txt:68`: build `remote_sim` when `NOT CMAKE_CROSSCOMPILING` **or** the target is the
+      hub, behind an option defaulting ON for both. (`ac26e52`.)
+- [x] Gate: **met.** `file` reports `ELF 32-bit MSB … MIPS32 rel2 … statically linked` for both, no
+      dynamic entries, and both ran on the hub. `/data` space: the stock BusyBox has no `df`, so
+      `deploy_hub push` refuses to guess — it needs `--busybox` (a staged BusyBox with `df`) or an
+      explicit `--no-space-check`. Staged BusyBox lives in `/tmp`, so it is gone after any reboot and
+      must be re-pushed before the next space-checked push.
 
 ### Task 2 `[RO]` — Real IR sink behind `hp_ir_sink`
 
@@ -148,51 +177,60 @@ conflicts with the observed persistent fd).
          `remote.harmony` stayed `unavailable`. **A reboot is the reliable restore** (~4–5 min total
          outage measured, including reboot) and it is safe precisely because nothing is armed at boot.
          Task 4's `restore` should therefore **reboot by default** rather than attempt a hand restart.
-- [ ] Remaining unknowns: what `ports` bits 16/18 actually drive and whether bit 17 only selects or also
-      enables; whether swap and polarity matter independently (attempts 2–3 used `ports=0`, which
-      emitted nothing, so they do not independently rule out the alternatives); the `I2S_MODE` bit; idle
-      level and underrun behaviour; the root cause of the close-hang; and whether codes at other
-      carriers (other N values) work — the next bench round should sweep one code per distinct carrier.
+- [x] **Resolved, mostly.** `START`'s high bits are three independent **active-low GPIO selects**
+      (bit 16 → GPIO16, 17 → GPIO28, 18 → GPIO13), set as outputs at module load; a set bit drives its
+      line *low*. **GPIO16 (`ports=1`) gates the built-in emitter** — camera-confirmed and the TV
+      obeyed. Stock drives all three low (`ports=7`), so `ports=1` is a subset of stock, and `ports=2`
+      is the one value that drives GPIO16 *high*, which is why the retracted run emitted nothing. Swap
+      and polarity are confirmed by a real TV decoding a real frame. The close-hang root cause is
+      known (`ath_i2s_close` waits on RX descriptors that only a `read()` ever starts). Carriers: all
+      85 extracted codes are 37.9/38 kHz (N=12); the other N branches now have golden vectors verified
+      on x86 and big-endian MIPS, but none has been driven on the wire. **Still unknown:** what GPIO28
+      and GPIO13 gate, the `I2S_MODE` bit, idle level, underrun behaviour.
 
-- [ ] `hub/io/hw_sinks.{c,h}`: `hp_hw_sinks_open()` returning `hp_sinks_t`. The IR sink translates
+- [x] `hub/io/hw_sinks.{c,h}`: `hp_hw_sinks_open()` returning `hp_sinks_t`. The IR sink translates
       `hp_ir_signal_t` (alternating mark/space, mark first) into that wire format. **Injectable fd and
       writer function pointer** so host tests cover the translation with no device. BT and RF-radio
-      sinks return `-HP_E_NOSYS` this phase.
-- [ ] Host-tested: golden byte vectors for Samsung `PowerToggle` and an Audioengine command taken from
-      the real `ir_codes.json`; the carrier/ioctl call sequence asserted; short/partial/`EINTR` writes
-      retried; oversize signal rejected, never truncated; fd closed on every error path. Under
-      ASan+UBSan in `ctest`.
-- [ ] **If the interface is partly unknown, do not guess in C.** Bench ladder on the hub, inside a
-      Task 4 quiesce window: write one candidate encoding to `/dev/i2s` and use layered oracles —
-      (a) phone camera sees the emitter flicker → framing/ioctl roughly right; (b) the target device
-      reacts → timing and carrier right; (c) neither → `strace` stock `hal` through one known command
-      and match the syscall sequence. Record every candidate and result in the hardware doc. The C
-      sink gets written once (a) and (b) pass.
+      sinks return `-HP_E_NOSYS` this phase. (`fb52766`, corrected by `cdfcda6`.)
+- [x] Host-tested: golden byte vectors from the real `ir_codes.json` — Samsung `PowerToggle` and a
+      **Toshiba** `InputA1` (the extraction contains no Audioengine device, so Toshiba is the
+      second-carrier vector), plus synthetic vectors at every other branch of the N table; the
+      carrier/ioctl call sequence asserted; short/partial/`EINTR` writes retried; oversize signal
+      rejected, never truncated; fd closed on every error path. Under ASan+UBSan in `ctest`.
+- [x] **If the interface is partly unknown, do not guess in C.** Followed, and it is what eventually
+      found the bug — though note the ladder was run with oracle (b) *alone* first and produced a false
+      positive. Oracle (a), the phone camera, is what actually settled it: it distinguishes "no
+      emission" from "emission the target ignored", which no device-reaction oracle can do. **Run the
+      camera first next time, and one variable per attempt with a human confirming each.**
 
 ### Task 3 `[RO]` — `hub/main.c` real (non-`--sim`) path
 
 `hub/main.c:101` currently prints `no hardware backend built` and exits 1 without `--sim`; hub_id and
 fw_version are literals at `:153-154`.
 
-- [ ] Without `--sim`: wire `hp_hw_sinks_open()`; default `--cache /data/ha-harmony/cache.json`,
+- [x] Without `--sim`: wire `hp_hw_sinks_open()`; default `--cache /data/ha-harmony/cache.json`,
       `--state /data/ha-harmony/state.json` (atomic via `hub/engine/atomic_file.c`), and `--rf
-      /tmp/ha-harmony-rf.sock` so the socket never persists.
-- [ ] Real identity: stable `hub_id` (the stock hub id (recorded locally) keeps HA's unique_id recognisable —
+      /tmp/ha-harmony-rf.sock` so the socket never persists. **Verified on device 2026-11-17** with no
+      path flags at all: it reported `no state file /data/ha-harmony/state.json, starting all
+      off/unknown` and came up on the defaults.
+- [x] Real identity: stable `hub_id` (the stock hub id (recorded locally) keeps HA's unique_id recognisable —
       see open question 5) and a real `fw_version` from our build plus the stock FW, not a literal.
-- [ ] Fail loudly and specifically when `/dev/i2s` is busy: "stock hal still holds /dev/i2s — run
+- [x] Fail loudly and specifically when `/dev/i2s` is busy: "stock hal still holds /dev/i2s — run
       tools/deploy_hub.py quiesce first". A vague error here is the likeliest bench time-waster.
-- [ ] Host-tested with an injected fake hw-sink factory: default paths, identity, busy-device text.
+      **Verified on device 2026-11-17** against a live stock stack: exact message, exit 1, immediate,
+      no hang — the write-only probe returns EBUSY instead of wedging.
+- [x] Host-tested with an injected fake hw-sink factory: default paths, identity, busy-device text.
 
 ### Task 4 `[WRITE — go-ahead needed at the moment it runs]` — Deploy tooling and the quiesce window
 
 The step that temporarily breaks the living room: the physical remote stops working and HA's stock
 `harmony` integration goes unavailable for the length of the window.
 
-- [ ] `[RO]` **Discovery first:** record how `hal` and `lua main.lua` are started and whether anything
+- [x] `[RO]` **Discovery first:** record how `hal` and `lua main.lua` are started and whether anything
       respawns them (`/etc/init.d/*`, `/etc/inittab`, any supervisor). Restore must use the same
       mechanism in reverse. If a supervisor respawns `hal`, prefer stopping the supervisor; if that is
       not clean, **stop and report** — do not kill-fight a supervisor on the user's only hub.
-- [ ] `tools/deploy_hub.py` over the `harmony-hub` SSH alias, subcommands: `push` `[WRITE]` (create
+- [x] `tools/deploy_hub.py` over the `harmony-hub` SSH alias, subcommands: `push` `[WRITE]` (create
       `/data/ha-harmony/`, copy `hub`, `remote_sim`, config, busybox; verify each with `md5sum` both
       ends, then `sha256sum` once the staged busybox is there; refuse below a free-space margin);
       `quiesce` `[WRITE]` (stop `lua`/`luaworks`/`luadraws` then `hal`, confirm `/dev/i2s` and
@@ -200,15 +238,19 @@ The step that temporarily breaks the living room: the physical remote stops work
       streaming output — never `nohup`/`&`/`setsid`, none of which the device even has); `press KEY`
       `[WRITE]`; `restore` `[WRITE]` — **reboots the hub by default**, because a hand restart of `hal`
       was measured not to work (see Task 2); `clean` `[WRITE]`.
-- [ ] `quiesce` must refuse to run anything that opens `/dev/i2s` until it has confirmed no process
-      holds it — a read-only open against a live `hal` wedges unkillably in `ath_i2s_close`.
-- [ ] Safety asserted by a command-log test: nothing writes `/etc/init.d`, `/etc/inittab`,
+- [x] `quiesce` must refuse to run anything that opens `/dev/i2s` until it has confirmed no process
+      holds it — a read-only open against a live `hal` wedges unkillably in `ath_i2s_close`. **This
+      check silently failed once:** the hub's BusyBox `grep` has no `-E`, so the holder scan matched
+      nothing and reported the device free while `hal` held it (`38e48eb`). Now basic `grep -e`, with
+      a test asserting the applet floor for every command the tool emits.
+- [x] Safety asserted by a command-log test: nothing writes `/etc/init.d`, `/etc/inittab`,
       `/etc/tdeenable`, `/etc/rc*`, crontabs or any `/dev/mtd*`; no backgrounding; every written path is
       under `/data/ha-harmony` or `/tmp`.
-- [ ] Gate: dry-run against the Phase 1 fake SSH transport; on-device `push` + `hub --help`; then
-      `quiesce` → `restore` round-trips with the user confirming the physical remote **and** HA both
-      work again, **before** any IR is attempted.
-- [ ] Rollback: `restore`, then `clean`. If restore fails: **reboot** (nothing is armed at boot, so it
+- [x] Gate: **met.** Dry-run against the Phase 1 fake SSH transport; on-device `push` + `hub --help`;
+      `quiesce` → `restore` round-trips confirmed three times now, with HA's `remote.harmony` returning
+      to `off` with all 6 devices and both activities each time. Measured outage: **39 s** when
+      `restore` reboots (the earlier "4–5 min" estimate was pessimistic).
+- [x] Rollback: `restore`, then `clean`. If restore fails: **reboot** (nothing is armed at boot, so it
       comes up stock). If that fails: hardware factory reset, then re-root per the Phase 1 runbook.
 
 ### Task 4b — Repeat fidelity: the config schema cannot express how stock actually sends IR
@@ -234,29 +276,55 @@ Options:
 - Ship single-frame and see which devices tolerate it. Cheapest, but some IR receivers require the
   repeats, so this may be what decides whether real presses feel reliable.
 
-- [ ] Pick one. If the slice's IR works but feels flaky, this is the first suspect.
+- [x] **Picked: ship single-frame (option 3), and the question is now mostly moot.** Hardware showed
+      **one 108 ms frame is enough** for the Samsung TV, verified at 25, 3 and 1 repeats — the single
+      frame worked. So `raw: {hz, us}` stands as-is, the pool cost stays at 5,780 words, and
+      `--repeats expand` is not needed. The `min_repeats_not_expressed` / `repeat_frame_not_expressible`
+      warnings stay as honest fidelity notes rather than defects. If a *different* device turns out to
+      need the repeats, option 2 (extend the format we own) is still the preferred fix — do not reach
+      for `expand`, which costs 15,108 of 16,384 pool words.
 
 ### Task 5 `[WRITE — go-ahead needed]` — The E2E slice
 
-- [ ] `[RO]` `tools/stock_to_ha_config.py`: `ir_codes.json` → an `ha_harmony` config using the existing
+> **How this task actually went (2026-11-17).** The slice gate was met, but by a shorter route than
+> planned: the IR and the press loop were driven by HA's own `HarmonyHubClient` from a host script,
+> **not** through an HA config entry, and the first real IR went to the **TV** (volume up) rather than
+> the J-Tech switch. The unticked items below are the ones that genuinely remain, and they are what a
+> real user-facing install still needs. Our `ha_harmony` custom component is **not installed in the
+> user's HA** (only the stock `harmony` integration is), so every HA-side item is blocked on that
+> decision, not on firmware.
+
+- [x] `[RO]` `tools/stock_to_ha_config.py`: `ir_codes.json` → an `ha_harmony` config using the existing
       `raw: {hz, us}` action form, already accepted end-to-end by `config_model.py:120-126` and
       `hub/engine/mapping.c:127-157` — so no new wire format, just a converter. Covers the 85 real IR
       commands; NVIDIA HID and Roku ECP entries are skipped **with an explicit warning each**, never
       silently. Tested against the real extracted file.
 - [ ] `[WRITE]` HA config entry against the real hub (`192.0.2.11:8099`, manual host/port/token).
       Runs **alongside** the stock `harmony` entry — do not disturb it, it is the user's fallback.
+      **Blocked:** the component is not installed in the user's HA. Installing a custom integration
+      and restarting HA is a separate decision, not a bench-window item. Note **manual host/port is
+      the right path anyway** — see the mDNS finding in session 4 below.
 - [ ] `[WRITE]` Push the config; expect `config_ack` and the cache to appear at
-      `/data/ha-harmony/cache.json`.
+      `/data/ha-harmony/cache.json`. **Not done:** every hardware IR send so far passed `raw: {hz, us}`
+      inline in the `ir_send` command, so no config has ever been pushed to the device and
+      `cache.json` has never been written. `config_ack` and the cache path are host-tested only.
 - [ ] `[WRITE]` **First real IR: `send_ir` to the J-Tech AV switch input select** — the safest visible
       target: non-destructive, idempotent, visibly confirmable on the TV, does not power-cycle the TV or
       audio, and 9/9 of its commands were extracted. Fallback if it does not respond: Samsung
       `PowerToggle` (`0xE0E040BF`, GoVideoO1 32 Bit, 37900 Hz) — unmistakable, but it toggles the user's
-      TV, so only with them watching.
-- [ ] `[WRITE]` Then the full loop: `deploy_hub.py press <KEY>` for a key mapped to that action → real
-      IR → HA event entity fires. **Slice gate:** the target device reacts *and* the HA event appears,
-      from one simulated press, with no stock stack running.
-- [ ] `[WRITE]` End the window: `restore`; confirm stock remote + stock HA integration.
-- [ ] Record it all in `docs/runbooks/phase3-hub-slice.md`.
+      TV, so only with them watching. **Done differently:** the first confirmed IR was Samsung
+      `VolumeUp` to the TV, chosen because the on-screen volume bar is an instant, non-destructive,
+      user-visible oracle. The J-Tech switch has still never been driven, and neither have the KVM (6)
+      or Audioengine (4) command sets — 24 extracted commands remain unexercised on the wire.
+- [x] `[WRITE]` Then the full loop: `deploy_hub.py press <KEY>` for a key mapped to that action → real
+      IR → HA event entity fires. **Slice gate: MET**, though in two halves rather than one chain —
+      `ir_send` drove real IR the TV obeyed, and a separate simulated press arrived at HA's client as
+      `key_event {remote: 1, key: 2, action: 0}`. A single press mapped *through config* to an IR
+      action is what the unpushed-config item above still blocks.
+- [x] `[WRITE]` End the window: `restore`; confirm stock remote + stock HA integration.
+- [ ] Record it all in `docs/runbooks/phase3-hub-slice.md`. **Not written.** The sessions are recorded
+      in this plan (5b, session 3, session 4) instead; a runbook should be distilled from them before
+      anyone repeats the window.
 
 ### Task 5b — Bench session 2 (2026-11-16 20:00–20:30 EST): slice runs, IR does not land
 
@@ -341,16 +409,20 @@ The TV is a bad oracle: HA's `media_player` state lags by minutes, and the set i
 own (CEC from the Shield, or a network wake). Two sessions were spent partly chasing that. Fix the
 oracle before touching parameters again.
 
-- [ ] **(1) Phone camera on the hub's emitter — 20 seconds, splits the problem in half.** CMOS
+- [x] **(1) Phone camera on the hub's emitter — 20 seconds, splits the problem in half.** CMOS
       sensors see 940 nm as a pale violet flicker. Sweep `--ports 1..7` one value at a time while the
       camera watches. **Any flicker** → the LED is driven and the fault is framing/timing, and we have
       found the real emitter bit. **No flicker on any mask** → nothing reaches the LED, so `ports`
       bit 17 is wrong and the START arg's meaning needs rethinking. Everything else is guesswork until
       this is known.
+      **This is what settled it** — (1) alone identified `ports=1`, so (2) and (3) were never needed.
 - [ ] **(2) Capture ground truth from stock.** `/dev/i2s` implements `read` and the mic slot is
       separate from the speaker slot, so the hub may be able to record while stock emits (triggered
       over HA, no quiesce needed) and again while we emit, then diff the two. This replaces inference
       with the actual waveform stock puts on the wire. Highest value if (1) is ambiguous.
+      **Not needed for the emitter bug, but now the basis for IR *learning*** — the path is decoded
+      statically in `docs/hardware/hub-ir-i2s.md` section 11 and has never been run. Mind the
+      close-hang: a mic fd must be `read()` at least once before any close, error paths included.
 - [ ] **(3) Failing that, trace stock's own syscalls and bytes** and replay them verbatim: if stock's
       exact byte stream works from our process, our framing is wrong; if it does not, our call
       sequence or device state is wrong. The device has no `strace`, so this needs a staged
@@ -361,9 +433,56 @@ oracle before touching parameters again.
       "byte-identical" claim was wrong (two runs whose differing argument was not actually varied).
       Nothing to fix.
 
+### Session 4 (2026-11-17 02:36–02:39 UTC) — the three remaining hardware unknowns, all clear
+
+A ~3 minute window. Binaries on the device were already byte-identical to a fresh build (md5 both
+ends), so nothing was pushed — which also sidestepped the missing-`df` space check.
+
+**1. Busy-device path, with the stock stack still running (zero disruption).** Started the daemon
+against a live `hal`: `hub: stock hal still holds /dev/i2s — quiesce first`, exit 1, immediate. It
+reached that point on **default paths** with no `--cache`/`--state` flags, so Task 3's defaults are
+confirmed too.
+
+**2. Deferred `DRAIN` and back-to-back sends.** One frame is 108 ms; `send` must return long before
+that and reap the `DRAIN` later.
+
+| case | result |
+|---|---|
+| single send | `ok`, returned in **49 ms** against a 108 ms waveform |
+| two sends, no gap | both `ok`, 4.9 and 5.6 ms |
+| burst of 5, no gap | 1 `ok`, then 4 × `{'ok': False, 'message': 'IR line busy, queue full'}` in 5–35 ms |
+| 5 sends spaced one frame apart | 4 of 5 `ok` (the first inherited the burst's backlog) |
+| daemon afterwards | alive and answering |
+
+So the deferred `DRAIN` works as designed and, more importantly, **overload degrades by refusing
+fast rather than by blocking**: the worst observed latency was 50 ms, never the 108 ms waveform, and
+nothing wedged. The documented bounded-blocking exception did not materialise in practice.
+
+**3. mDNS discovery — does not work here, and it is not our bug.** The responder could not be
+reached from the host at all, by multicast or by unicast. Cause: `hub/net/mdns_srv.c:64`
+(`hp_mdns_on_link`) drops queries whose source is not on the hub's subnet, and the host is on
+`198.51.100.0/24` while the hub is on `192.0.2.0/24`. That guard is correct — mDNS is link-local by
+definition and answering off-link queries is an amplification vector.
+
+The relevant finding is about **HA**, not the hub: HA has interfaces `enp86s0` (`198.51.100.101/24`)
+and `enp86s0.15` (`192.0.2.5/24`), so it *is* on-link with the hub via VLAN 15 — but its own network
+config lists `enp86s0.15` as **disabled** and announces only `198.51.100.101`. HA's zeroconf therefore
+never listens on the interface facing the hub. **Conclusion: zeroconf discovery of our hub cannot
+work until that interface is enabled in HA's network settings; manual host/port entry is the correct
+path meanwhile** (and the integration supports it). Nothing to fix in the responder, and this is why
+open question 3 resolves to "manual entry".
+
+Restore: clean, 39 s outage, `remote.harmony` back to `off` with all 6 devices and both activities.
+
 ### Task 6 `[RO]` — Verification ladder: did IR actually fire?
 
-- [ ] Oracles in order: (1) daemon log says the sink wrote N bytes without error; (2) phone camera sees
+> **This ladder was right and we ran it out of order.** Oracle (3) was used alone first, on an HA
+> `media_player` state that lags by minutes and a TV that wakes unprompted; it produced a false
+> positive that shipped as a code default. Oracle (2), the camera, is the one that discriminates
+> **"no emission" from "emission the target ignored"** — no device-reaction oracle can. Run (2) first,
+> change one variable per attempt, and have the user confirm each before moving on.
+
+- [x] Oracles in order: (1) daemon log says the sink wrote N bytes without error; (2) phone camera sees
       the emitter flicker (CMOS sensors see 940 nm); (3) **the target device reacts** — the real gate;
       (4) the user confirms what they saw.
 - [ ] Success reported but no LED → wrong fd/ioctl, or stock `hal` still holds the device. Re-check
@@ -393,17 +512,25 @@ reboot is always an escape hatch. It becomes a real prerequisite the moment we a
 
 ## Open questions for the user
 
-1. **Quiesce window** — how long a living-room outage is acceptable per bench session, and when
-   (daytime vs evening TV time)? Sets whether Tasks 4 and 5 run in one window or two.
-2. **IR target** — confirm the J-Tech AV switch input select is safe to toggle, and whether the Samsung
-   `PowerToggle` fallback is acceptable with them watching.
-3. **mDNS** — acceptable to advertise `_haharmony._tcp.local.` from the hub while the stock stack is on
-   the LAN, or run this slice `--no-mdns` with a manual HA entry?
+1. ~~**Quiesce window**~~ — **answered in practice.** Windows are granted ad hoc ("you can use the TV
+   now", "window is open right now") and have run 3–30 minutes. A `restore` costs a 39 s outage, so
+   short windows are cheap; the binding constraint is the user watching TV, not the mechanism.
+2. **IR target** — still open for the J-Tech switch, and now narrower: the TV is proven, so what is
+   wanted is confirmation that the **J-Tech input select, KVM and Audioengine** sets are safe to
+   exercise (24 commands, none yet driven). Samsung `VolumeUp` turned out to be the ideal oracle and
+   needs no further permission.
+3. ~~**mDNS**~~ — **resolved: use manual host/port.** Not a policy question after all; HA's zeroconf
+   does not listen on the interface facing the hub (session 4). Advertising is harmless and stays on.
 4. **IR port mapping** — the hub has a built-in emitter plus wired blaster ports. Does the living-room
    setup use blasters, and which port faces which device? `port_mask` needs a real mapping.
-5. **Hub id** — reuse the stock hub id (keeps HA unique_ids stable and recognisable) or mint our own?
-6. **Second backup copy** — still open from Phase 1. Phase 3 is the first phase that writes to hub
-   flash, so decide before Task 4 runs.
+   Narrowed: **GPIO16 / `ports=1` is the built-in emitter** and is all this hub has needed so far;
+   what GPIO28 and GPIO13 gate is unknown, and stock drives all three unconditionally.
+5. ~~**Hub id**~~ — **answered: mint our own.** The daemon takes `--hub-id` and has run as
+   `ha-harmony-<hostname>` and `ha-harmony-bench`. Reusing the stock id would collide with the stock
+   `harmony` entry's `unique_id`, which must keep working as the fallback.
+6. **Second backup copy** — still open from Phase 1, and now **more urgent, not less**: Phase 4
+   persistence is the first thing that can leave the hub unbootable, and the only images are on this
+   one host. Decide before Phase 4 writes anything.
 
 ## Testable without hardware
 
