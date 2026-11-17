@@ -3,7 +3,7 @@
 
 Read-only on the device: only `cat`, `dd if=...`, `sha256sum`/`md5sum`, `test`, `uname`.
 Every image is hashed on the device and locally over the received bytes; mismatch => `*.CORRUPT`.
-`dd` is preferred; a BusyBox without it is read with `cat` (read-only `/dev/mtdNro` if present).
+`dd` is preferred; a BusyBox without it is read with `cat` (read-only `/dev/mtdNro` or `/dev/mtdrN` if present).
 `--verify <dir>` re-checks a finished backup offline (no SSH).
 """
 
@@ -234,11 +234,11 @@ class Backup:
         return ["dd", f"if={dev}", f"bs={bs}"] if self.read_method == "dd" else ["cat", dev]
 
     def nodes(self, p: Partition) -> tuple[str, str | None]:
-        """(primary device, extra raw char device). `cat` mode prefers the read-only mtdNro node."""
+        """(primary device, extra raw char device). `cat` mode prefers a read-only raw node (mtdNro, or mtdrN as on the Harmony Hub)."""
         if self.read_method == "cat" and p.char_device:
-            ro = f"{p.char_device}ro"
-            if self.sh(f"test -c {shlex.quote(ro)}")[0] == 0:
-                return ro, None
+            for ro in (f"{p.char_device}ro", f"/dev/mtdr{p.index}"):
+                if self.sh(f"test -c {shlex.quote(ro)}")[0] == 0:
+                    return ro, None
         return p.device, (p.char_device if self.has_char(p) else None)
 
     def dest(self, p: Partition, raw: bool = False) -> Path:

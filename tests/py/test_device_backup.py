@@ -40,6 +40,7 @@ class FakeSsh:
                 for i, (_, d) in parts.items()
                 for kind, sfx in (("mtdblock", ""), ("mtd", ""), ("mtd", "ro"))
             }
+            | {f"/dev/mtdr{i}": d for i, (_, d) in parts.items()}
         )
         self.command_v, self.hash_fail = command_v, dict(hash_fail or {})
         self.explode, self.stream_err = dict(explode or {}), stream_err
@@ -343,6 +344,15 @@ def test_cat_with_ro_node_when_dd_missing(tmp_path):
         assert Path(p["file"]).read_bytes() == data
     hash_cmds = [c[-1] for c in fake.calls if "| sha256sum" in c[-1]]
     assert hash_cmds and all(c.startswith("{ cat /dev/mtd") for c in hash_cmds)
+
+
+def test_cat_with_mtdr_node_when_no_mtdNro(tmp_path):
+    nodes = {f"/dev/mtdr{i}" for i in PARTS}
+    fake = FakeSsh(utils=("cat", "sha256sum"), char=nodes)
+    rc, m = run(tmp_path, fake)
+    assert rc == 0 and m["read_method"] == "cat"
+    assert fake.stream_argvs == [["cat", f"/dev/mtdr{i}"] for i in PARTS]
+    assert all(p["read_node"] == f"/dev/mtdr{p['index']}" for p in m["partitions"])
 
 
 def test_cat_block_device_without_ro_node(tmp_path):
