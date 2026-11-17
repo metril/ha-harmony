@@ -7,9 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/un.h>
+#include <unistd.h>
 
 #include "hub/hp_errors.h"
 #include "hub/hub_handlers.h"
+#include "hub/io/hw_sinks.h"
 #include "hub/io/rf_pair.h"
 #include "hub/io/sim_sinks.h"
 #include "hub/parse_num.h"
@@ -25,6 +27,7 @@ static void on_signal(int sig) { (void)sig; g_stop = 1; }
 static hp_handler_tbl_t g_tbl;
 static hub_ctx_t g_hub;
 static hp_sim_t g_sim;
+static hp_hw_t g_hw;
 
 static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     (void)user;
@@ -73,6 +76,8 @@ int main(int argc, char **argv) {
     const char *cache = NULL;
     const char *state = NULL;
     const char *rf_path = NULL;
+    const char *hub_id = NULL, *fw_version = NULL;
+    long ir_ports = HP_HW_DEFAULT_IR_PORTS;
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
     int mdns = -1; /* -1 = default: on for the real daemon, off under --sim */
     hp_mdns_opts_t mo = {HP_MDNS_PORT, NULL, NULL, NULL};
@@ -84,6 +89,9 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--cache") && i + 1 < argc) cache = argv[++i];
         else if (!strcmp(argv[i], "--state") && i + 1 < argc) state = argv[++i];
         else if (!strcmp(argv[i], "--rf") && i + 1 < argc) rf_path = argv[++i];
+        else if (!strcmp(argv[i], "--hub-id") && i + 1 < argc) hub_id = argv[++i];
+        else if (!strcmp(argv[i], "--fw-version") && i + 1 < argc) fw_version = argv[++i];
+        else if (!strcmp(argv[i], "--ir-ports") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 255, &ir_ports)) return bad_num("--ir-ports", argv[i]); }
         else if (!strcmp(argv[i], "--mdns")) mdns = 1;
         else if (!strcmp(argv[i], "--no-mdns")) mdns = 0;
         else if (!strcmp(argv[i], "--mdns-port") && i + 1 < argc) { long mp; if (hp_parse_num(argv[++i], 0, 65535, &mp)) return bad_num("--mdns-port", argv[i]); mo.port = (uint16_t)mp; }
@@ -92,15 +100,17 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--auth-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &auth_ms)) return bad_num("--auth-timeout-ms", argv[i]); }
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
-            fprintf(stderr, "usage: hub --sim [--port N] --token T [--cache PATH] [--state PATH] [--rf PATH] "
+            fprintf(stderr, "usage: hub [--sim] [--port N] --token T [--cache PATH] [--state PATH] [--rf PATH] "
+                            "[--hub-id ID] [--fw-version V] [--ir-ports MASK] "
                             "[--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P]\n");
             return 2;
         }
     }
-    if (!sim) {
-        fprintf(stderr, "no hardware backend built\n");
-        return 1;
+    if (!sim) { /* real-hub defaults; --sim keeps none */
+        if (!cache) cache = "/data/ha-harmony/cache.json";
+        if (!state) state = "/data/ha-harmony/state.json";
+        if (!rf_path) rf_path = "/tmp/ha-harmony-rf.sock";
     }
     if (!token || !*token || port < 0 || port > 65535 || auth_ms <= 0 || idle_ms <= 0 ||
         auth_ms > INT32_MAX || idle_ms > INT32_MAX) {
@@ -116,8 +126,22 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &sa, NULL);
 
     hub_ctx_init(&g_hub);
-    hp_sim_init(&g_sim, stdout);
-    g_hub.sinks = hp_sim_sinks(&g_sim);
+    if (sim) {
+        hp_sim_init(&g_sim, stdout);
+        g_hub.sinks = hp_sim_sinks(&g_sim);
+    } else {
+        hp_hw_cfg_t hc = {NULL, (uint8_t)ir_ports, NULL};
+        int hr = hp_hw_sinks_open(&hc, &g_hw);
+        if (hr == -HP_E_HALBUSY) {
+            fprintf(stderr, "hub: stock hal still holds /dev/i2s — quiesce first\n");
+            return 1;
+        }
+        if (hr < 0) {
+            fprintf(stderr, "hub: cannot open /dev/i2s (%d)\n", hr);
+            return 1;
+        }
+        g_hub.sinks = g_hw.sinks;
+    }
     g_hub.cache_path = cache;
     hp_rf_transport *rf = NULL;
     if (rf_path && strlen(rf_path) >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
@@ -150,8 +174,14 @@ int main(int argc, char **argv) {
     }
     hub_install(&g_tbl, &g_hub);
     g_tbl.token = token;
-    g_tbl.hub_id = "sim-hub";
-    g_tbl.fw_version = "sim";
+    static char host[64];
+    static char real_id[80];
+    if (!hub_id && !sim) {
+        if (gethostname(host, sizeof host - 1) != 0 || !host[0]) strcpy(host, "hub");
+        snprintf(real_id, sizeof real_id, "ha-harmony-%s", host);
+    }
+    g_tbl.hub_id = hub_id ? hub_id : sim ? "sim-hub" : real_id;
+    g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : "ha-harmony-hub";
     hp_ws_cb_t cb = {on_text, on_close};
     hp_ws_server_t *srv = hp_ws_listen((uint16_t)port, token, &cb, NULL);
     if (!srv) {
@@ -175,10 +205,12 @@ int main(int argc, char **argv) {
         hp_ws_poll(srv, wait);
         hub_pump_rf(&g_hub);
         hp_mdns_srv_service(&g_mdns);
+        if (!sim) hp_hw_service(&g_hw);
         hub_run_timers(&g_hub);
     }
     hp_mdns_srv_stop(&g_mdns); /* goodbye (TTL 0) */
     hub_shutdown(&g_hub);
+    if (!sim) hp_hw_sinks_close(&g_hw);
     hp_ws_close(srv);
     hp_rf_pair_destroy(rf);
     hp_map_free(&g_hub.map);
