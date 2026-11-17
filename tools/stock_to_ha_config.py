@@ -1,0 +1,423 @@
+#!/usr/bin/env -S uv run
+"""Convert the extracted stock Harmony IR database into an `ha_harmony` integration config.
+
+Input:  `ir_codes.json` from the Phase 1 backup tool (or the `extracted/` dir holding it):
+        {"warnings": [...], "devices": {"<id>": {"<command>": {...}}}}
+Output: a `<hub_id>.yaml` / `.json` in the format documented in docs/ha-config.md, using the
+        `raw: {hz, us}` IR action so the hub's own carrier and timings are kept verbatim.
+
+Mapping of the stock signal (`once` / `repeat` / `finish` / `min_repeats`) onto `raw`:
+
+The config schema's `raw` action is ONE mark/space sequence plus a carrier. The hub sends it once
+per press and, while the key is held, re-sends the same sequence (hub/engine/irout.c; raw codes
+always have rep_n = 0). There is no separate repeat frame. (`pronto` has a once/repeat split but
+quantises durations to carrier periods and derives the carrier from a frequency word, so 37900 Hz
+and 568/552 us would not survive; it is not used.)
+
+--repeats single (default)  the press frame is `once` if the stock signal has one, else `repeat`
+                            (the Samsung-style "frame lives in repeat" signals). A separate stock
+                            repeat frame (NEC-style short repeat), `min_repeats` and `finish` are
+                            not expressible and are recorded per command in the report.
+--repeats expand            emits what the stock hub puts on the wire for one press:
+                            once + repeat * min_repeats + finish (a frame-only signal is sent
+                            max(min_repeats, 1) times). Spaces above 65535 us (hub u16) are clamped
+                            and noted. Uses much more of the hub's 16384-word pool.
+
+Nothing is dropped silently: non-IR commands (hid, roku_ecp) are skipped with a warning each,
+anything unconvertible is an error (exit status 1, no config written), and a per-device coverage
+report reconciles converted + skipped + errors == input.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import Counter
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+
+MAX_US = 65535  # hub stores durations as u16
+MAX_DUR = 512  # HP_IR_MAX_DUR: durations per signal
+HZ_RANGE = (1000, 1_000_000)
+NAME_MAX_BYTES = 31
+SKIP_TRANSPORTS = {
+    "hid": "Bluetooth HID usage command, not IR; the hub cannot send it as an IR action",
+    "roku_ecp": "Roku ECP over IP (HTTP keypress), not IR; needs a network integration instead",
+}
+
+# Stock device id -> (config slug, display name). Override or extend with --device-name.
+KNOWN_DEVICES: dict[str, tuple[str, str]] = {
+    "51886472": ("samsung_tv", "Samsung TV"),
+    "67368870": ("nvidia_shield", "NVIDIA Game Console"),
+    "81729894": ("kvm_1", "KVM 1"),
+    "64694265": ("jtech_switch", "J-Tech AV Switch"),
+    "80756020": ("roku_stick", "Roku Streaming Stick"),
+    "51887071": ("audioengine_a5", "Audioengine A5+"),
+}
+
+
+class ConvertError(ValueError):
+    """An entry that cannot be converted; always fatal."""
+
+
+@dataclass
+class CmdResult:
+    device: str
+    command: str
+    status: str  # converted | skipped | error
+    reason: str = ""
+    notes: list[str] = field(default_factory=list)
+    stock: dict[str, Any] = field(default_factory=dict)
+    emitted_us: int = 0
+
+
+# ----------------------------------------------------------------------------- loading
+def _no_dup_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    dups = []
+    for k, v in pairs:
+        if k in out:
+            dups.append(k)
+        out[k] = v
+    if dups:
+        out["\0duplicates"] = dups
+    return out
+
+
+def locate(path: Path) -> Path:
+    p = path / "ir_codes.json" if path.is_dir() else path
+    if not p.is_file():
+        raise SystemExit(f"error: no ir_codes.json at {p}")
+    return p
+
+
+def load_stock(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_no_dup_pairs)
+    if not isinstance(data, dict) or not isinstance(data.get("devices"), dict):
+        raise SystemExit(f"error: {path}: expected an object with a `devices` mapping")
+    return data
+
+
+# ----------------------------------------------------------------------------- conversion
+def _int_list(entry: dict[str, Any], key: str) -> list[int]:
+    v = entry.get(key)
+    if not isinstance(v, list) or any(isinstance(x, bool) or not isinstance(x, int) for x in v):
+        raise ConvertError(f"`{key}` must be a list of integers")
+    return v
+
+
+def convert_ir(entry: dict[str, Any], mode: str) -> tuple[int, list[int], list[str]]:
+    """One stock IR entry -> (carrier Hz, durations, notes). Raises ConvertError."""
+    hz = entry.get("carrier_hz")
+    if isinstance(hz, bool) or not isinstance(hz, int) or not HZ_RANGE[0] <= hz <= HZ_RANGE[1]:
+        raise ConvertError(f"carrier_hz {hz!r} is not an integer in {HZ_RANGE[0]}..{HZ_RANGE[1]}")
+    once, rep, fin = (_int_list(entry, k) for k in ("once", "repeat", "finish"))
+    mr = entry.get("min_repeats")
+    if isinstance(mr, bool) or not isinstance(mr, int) or mr < 0:
+        raise ConvertError(f"min_repeats {mr!r} is not a non-negative integer")
+    if not once and not rep:
+        raise ConvertError("signal has neither `once` nor `repeat` durations")
+    notes: list[str] = []
+    if mode == "single":
+        us = list(once or rep)
+        if once and rep:
+            notes.append("repeat_frame_not_expressible")
+        if fin:
+            notes.append("finish_not_expressible")
+        if not once and mr > 1 or once and mr:
+            notes.append("min_repeats_not_expressed")
+    else:
+        n = mr if once else max(mr, 1)
+        us = once + rep * n + fin
+    for i, v in enumerate(us):
+        if v <= 0:
+            raise ConvertError(f"duration #{i} is {v}; durations must be positive")
+        if v > MAX_US:
+            if i % 2 == 0:
+                raise ConvertError(f"mark #{i} is {v} us, above the hub's {MAX_US} us limit")
+            us[i] = MAX_US
+            notes.append(f"space_clamped_to_{MAX_US}")
+    if len(us) % 2:
+        raise ConvertError(f"odd number of durations ({len(us)}); a space is missing")
+    if len(us) > MAX_DUR:
+        raise ConvertError(f"{len(us)} durations exceed the hub limit of {MAX_DUR}")
+    return hz, us, notes
+
+
+def command_name(name: str) -> str:
+    """Stock command key -> config command name (kept verbatim; only validated)."""
+    if not name or any(ord(c) < 32 for c in name):
+        raise ConvertError("empty or control-character command name")
+    if len(name.encode()) > NAME_MAX_BYTES:
+        raise ConvertError(f"command name over {NAME_MAX_BYTES} bytes")
+    if name in ("power_on", "power_off") or name.startswith("input_"):
+        raise ConvertError("command name is reserved by the hub (power_on/power_off/input_*)")
+    return name
+
+
+def device_ident(dev_id: str, names: dict[str, tuple[str, str]]) -> tuple[str, str]:
+    if dev_id in names:
+        return names[dev_id]
+    slug = "dev_" + "".join(c if c.isalnum() else "_" for c in dev_id.lower())[:27]
+    return slug, f"Harmony device {dev_id}"
+
+
+@dataclass
+class Conversion:
+    config: dict[str, Any]
+    results: list[CmdResult]
+    warnings: list[str]
+    omitted_devices: list[str]
+
+
+def convert(
+    stock: dict[str, Any],
+    *,
+    mode: str = "single",
+    only: list[str] | None = None,
+    names: dict[str, tuple[str, str]] | None = None,
+) -> Conversion:
+    names = {**KNOWN_DEVICES, **(names or {})}
+    devices = stock["devices"]
+    warnings: list[str] = []
+    results: list[CmdResult] = []
+    out_devices: list[dict[str, Any]] = []
+    omitted: list[str] = []
+    if "\0duplicates" in devices:
+        dups = devices.pop("\0duplicates")
+        warnings.append(f"duplicate device ids in input (last one kept): {dups}")
+        results.append(CmdResult(",".join(dups), "*", "error", "duplicate device id in input"))
+    for want in only or []:
+        if want not in devices:
+            raise SystemExit(f"error: --device {want}: not in the input ({', '.join(devices)})")
+    seen_slugs: dict[str, str] = {}
+    for dev_id, cmds in devices.items():
+        if only and dev_id not in only:
+            continue
+        slug, dname = device_ident(dev_id, names)
+        if slug in seen_slugs:
+            results.append(
+                CmdResult(
+                    dev_id,
+                    "*",
+                    "error",
+                    f"slug {slug!r} also used by device {seen_slugs[slug]}; pass --device-name",
+                )
+            )
+            continue
+        seen_slugs[slug] = dev_id
+        if not isinstance(cmds, dict):
+            results.append(CmdResult(dev_id, "*", "error", "device is not a mapping"))
+            continue
+        cmds = dict(cmds)
+        for dup in cmds.pop("\0duplicates", []):
+            results.append(CmdResult(dev_id, dup, "error", "duplicate command name in input"))
+        if not cmds:
+            warnings.append(f"device {dev_id} ({dname}): no commands in the input")
+        converted: dict[str, Any] = {}
+        for cname, entry in cmds.items():
+            r = CmdResult(dev_id, cname, "converted")
+            results.append(r)
+            try:
+                if not isinstance(entry, dict):
+                    raise ConvertError(f"entry is {type(entry).__name__}, not an object")
+                r.stock = {
+                    k: entry.get(k)
+                    for k in ("protocol", "transport", "carrier_hz", "min_repeats", "key")
+                    if k in entry
+                }
+                if entry.get("transport") == "ir":
+                    r.stock.update(
+                        once_n=len(entry.get("once") or []),
+                        repeat_n=len(entry.get("repeat") or []),
+                        finish_n=len(entry.get("finish") or []),
+                    )
+                    hz, us, r.notes = convert_ir(entry, mode)
+                    converted[command_name(cname)] = {"raw": {"hz": hz, "us": us}}
+                    r.emitted_us = len(us)
+                elif entry.get("transport") in SKIP_TRANSPORTS:
+                    r.status = "skipped"
+                    r.reason = f"{entry['transport']}: {SKIP_TRANSPORTS[entry['transport']]}"
+                else:
+                    raise ConvertError(f"unknown transport {entry.get('transport')!r}")
+            except ConvertError as exc:
+                r.status, r.reason = "error", str(exc)
+        if converted:
+            out_devices.append({"id": slug, "name": dname, "commands": converted})
+        else:
+            omitted.append(f"{dev_id} ({dname})")
+    return Conversion({"devices": out_devices}, results, warnings, omitted)
+
+
+# ----------------------------------------------------------------------------- reporting
+def summarise(conv: Conversion) -> dict[str, Any]:
+    per: dict[str, Counter[str]] = {}
+    for r in conv.results:
+        per.setdefault(r.device, Counter())[r.status] += 1
+    tot: Counter[str] = Counter()
+    for c in per.values():
+        tot.update(c)
+    total_in = sum(tot.values())
+    assert tot["converted"] + tot["skipped"] + tot["error"] == total_in, "counts do not reconcile"
+    return {"devices": {d: dict(c) for d, c in per.items()}, "total": {**tot, "input": total_in}}
+
+
+def render_report(conv: Conversion, summary: dict[str, Any], *, only_ir: bool, mode: str) -> str:
+    lines = [f"stock_to_ha_config: repeats={mode}"]
+    lines += [f"warning: {w}" for w in conv.warnings]
+    skipped = [r for r in conv.results if r.status == "skipped"]
+    if not only_ir:
+        lines += [f"warning: skipped {r.device}/{r.command}: {r.reason}" for r in skipped]
+    lines += [
+        f"ERROR: {r.device}/{r.command}: {r.reason}" for r in conv.results if r.status == "error"
+    ]
+    notes = Counter(n for r in conv.results for n in r.notes)
+    for n, c in sorted(notes.items()):
+        lines.append(f"note: {c} command(s): {n} (details per command in --report)")
+    lines.append("coverage (in / converted / skipped / errors):")
+    for dev, c in summary["devices"].items():
+        n = sum(c.values())
+        lines.append(
+            f"  {dev}: {n} / {c.get('converted', 0)} / {c.get('skipped', 0)} / {c.get('error', 0)}"
+        )
+    t = summary["total"]
+    lines.append(
+        f"total: {t['input']} in = {t.get('converted', 0)} converted + {t.get('skipped', 0)} "
+        f"skipped + {t.get('error', 0)} errors"
+    )
+    if skipped:
+        by = Counter(r.stock.get("transport", "?") for r in skipped)
+        lines.append(
+            f"skipped by transport: {dict(by)}" + (" (--only-ir: not listed)" if only_ir else "")
+        )
+    if conv.omitted_devices:
+        lines.append(
+            f"devices omitted (no convertible commands): {', '.join(conv.omitted_devices)}"
+        )
+    ok = t["converted"] + t.get("skipped", 0) + t.get("error", 0) == t["input"]
+    lines.append(f"reconciliation: converted + skipped + errors == input: {'OK' if ok else 'FAIL'}")
+    return "\n".join(lines)
+
+
+def cross_check_coverage(stock_path: Path, summary: dict[str, Any], all_devices: bool) -> list[str]:
+    cov_path = stock_path.with_name("coverage.json")
+    if not (all_devices and cov_path.is_file()):
+        return []
+    try:
+        cov = json.loads(cov_path.read_text(encoding="utf-8"))
+        out = []
+        for dev, c in cov["devices"].items():
+            have = sum(summary["devices"].get(dev, {}).values())
+            if have != c["commands"]:
+                out.append(
+                    f"coverage.json counts {c['commands']} commands for {dev}, "
+                    f"ir_codes.json has {have}"
+                )
+        return out
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return [f"coverage.json unreadable: {exc}"]
+
+
+# ----------------------------------------------------------------------------- output
+def dump_config(config: dict[str, Any], fmt: str, header: str) -> str:
+    if fmt == "json":
+        return json.dumps(config, indent=1, ensure_ascii=False) + "\n"
+    body = yaml.safe_dump(
+        config, sort_keys=False, allow_unicode=True, width=100, default_flow_style=None
+    )
+    return "".join(f"# {ln}\n" for ln in header.splitlines()) + body
+
+
+def validate_config(text: str, fmt: str) -> tuple[int, int]:
+    """Run the real config_model + compiler. Returns (config bytes, pool words)."""
+    sys.path.insert(0, str(ROOT))
+    from custom_components.ha_harmony.compiler import compact_json, compile_config
+    from custom_components.ha_harmony.config_model import parse_model
+
+    model = parse_model(text, "<generated>")  # JSON is valid YAML
+    compiled = compile_config(model)
+    size = len(compact_json(compiled.hub_json).encode())
+    words = sum(
+        len(c.get("raw", {}).get("us", []))
+        for d in model["devices"]
+        for c in d["commands"].values()
+    )
+    return size, words
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("input", type=Path, help="extracted dir or ir_codes.json")
+    ap.add_argument("--out", type=Path, required=True, help="output .yaml/.yml/.json")
+    ap.add_argument("--device", action="append", default=[], metavar="ID", help="only this device")
+    ap.add_argument("--only-ir", action="store_true", help="no per-command skip warnings")
+    ap.add_argument("--format", choices=("yaml", "json"), help="default: from --out suffix")
+    ap.add_argument("--repeats", choices=("single", "expand"), default="single")
+    ap.add_argument("--report", type=Path, help="write the full per-command report (JSON)")
+    ap.add_argument("--device-name", action="append", default=[], metavar="ID=slug:Name")
+    ap.add_argument("--no-validate", action="store_true", help="skip config_model/compiler check")
+    a = ap.parse_args(argv)
+
+    fmt = a.format or ("json" if a.out.suffix == ".json" else "yaml")
+    names: dict[str, tuple[str, str]] = {}
+    for spec in a.device_name:
+        dev, _, rest = spec.partition("=")
+        slug, _, nm = rest.partition(":")
+        if not dev or not slug:
+            ap.error(f"--device-name {spec!r}: expected ID=slug[:Name]")
+        names[dev] = (slug, nm or slug)
+
+    src = locate(a.input)
+    stock = load_stock(src)
+    conv = convert(stock, mode=a.repeats, only=a.device or None, names=names)
+    summary = summarise(conv)
+    conv.warnings += cross_check_coverage(src, summary, not a.device)
+    report = render_report(conv, summary, only_ir=a.only_ir, mode=a.repeats)
+    print(report, file=sys.stderr)
+
+    if a.report:
+        a.report.write_text(
+            json.dumps(
+                {
+                    "repeats": a.repeats,
+                    "summary": summary,
+                    "warnings": conv.warnings,
+                    "omitted_devices": conv.omitted_devices,
+                    "commands": [r.__dict__ for r in conv.results],
+                },
+                indent=1,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    if summary["total"].get("error"):
+        print("FAILED: unconvertible entries; no config written", file=sys.stderr)
+        return 1
+    header = (
+        f"Generated by tools/stock_to_ha_config.py from {src.name} (repeats={a.repeats}).\n"
+        "Carrier and durations are the stock hub's own values, verbatim."
+    )
+    text = dump_config(conv.config, fmt, header)
+    if not a.no_validate:
+        try:
+            size, words = validate_config(text, fmt)
+        except Exception as exc:  # noqa: BLE001 - surface any schema/limit failure
+            print(f"FAILED: generated config rejected by ha_harmony: {exc}", file=sys.stderr)
+            return 1
+        print(
+            f"validated against config_model + compiler: {size} bytes, {words} pool words",
+            file=sys.stderr,
+        )
+    a.out.write_text(text, encoding="utf-8")
+    print(f"wrote {a.out}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
