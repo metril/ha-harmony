@@ -235,11 +235,16 @@ def test_refuses_when_the_daemon_is_missing() -> None:
     assert ibh.MARKER not in hub.files
 
 
-def test_t2_rehearsal_may_install_without_a_working_daemon() -> None:
-    """T2 deliberately installs a broken daemon to prove the strike guard on hardware."""
-    hub = FakeHub(files={ibh.RCS_LOCAL: STOCK_RCS_LOCAL})
-    assert install(hub, require_daemon=False) == 0
-    assert ibh.MARKER in hub.files
+def test_there_is_no_way_to_install_without_a_daemon(capsys) -> None:
+    """A missing-daemon install cannot rehearse the strike guard, so no flag may allow one.
+
+    An `--allow-missing-daemon` flag once existed "for the T2 rehearsal". It was useless for
+    that: the hook leaves stock alone, spending no strike, when the daemon is missing. The
+    real rehearsal (run on hardware 2026-11-17) used a daemon that is present but exits 1.
+    """
+    with pytest.raises(SystemExit):
+        ibh.main(["install", "--yes", "--token", "t", "--allow-missing-daemon"], runner=FakeHub())
+    assert "unrecognized arguments" in capsys.readouterr().err
 
 
 def test_installing_twice_does_not_duplicate_the_block(hub: FakeHub) -> None:

@@ -150,12 +150,42 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
       guard never trip, replacing a refusal with `exit`, and sourcing the config instead of parsing it
       each fail the tests that exist to catch them — the config mutation is caught both statically and
       behaviourally (the planted command really does run).
-- [ ] **T2 `[WRITE, go-ahead needed]` — install with the daemon deliberately broken.** Install the
-      hook pointing at a binary that exits non-zero immediately, then power-cycle **three times**.
-      Expected: each boot leaves SSH up, and the third removes the marker so boot four is pure stock.
-      **This proves the guard on the real device before the guard ever has to matter.**
+- [x] **T2 `[WRITE]` — install with the daemon deliberately broken. GATE MET, 2026-11-17.**
+      Install the hook pointing at a binary that exits non-zero immediately, then reboot **four
+      times**. **This proves the guard on the real device before the guard ever has to matter.**
       **Gate:** SSH survives all four boots; `remote.harmony` healthy on boot four.
-      Use `--allow-missing-daemon`, which exists for exactly this rehearsal and is otherwise refused.
+
+      **Correction found while running it:** the plan originally said to use an
+      `--allow-missing-daemon` flag. That could not have worked — the hook deliberately leaves stock
+      alone, spending no strike, when the daemon is *missing*, so the rehearsal would have booted
+      stock three times and proved nothing. The flag has been **removed**. The rehearsal needs a
+      daemon that is **present and executable but exits 1**: the real binary was moved aside to
+      `hub.real` and a 66-byte stub put in its place.
+
+      Also verified on the device before installing, because the installer's safety check depends on
+      it: BusyBox 1.13.4's `sh -n` does **not** execute the file (if it had, `sh -n rcS.local` would
+      have run stock's boot script live) and does catch a syntax error (exit 2).
+
+      | boot | SSH | marker | strikes | `hal` | hook log |
+      |---|---|---|---|---|---|
+      | 1 | up | present | 1 | **suppressed** | `starting (boot strike 1 of 3)`, stub exits 1 |
+      | 2 | up | present | 2 | **suppressed** | `starting (boot strike 2 of 3)`, stub exits 1 |
+      | 3 | up | **removed by the hook** | cleared | **running** | `DISABLED after 3 unclean boots ... booting stock` |
+      | 4 | up | absent | none | running | unchanged — the block did not even run without the marker |
+
+      Two things this shows beyond the gate: `DEMO_MODE=1` from a file sourced at `rcS:43` really
+      does suppress `hal` at `rcS:84` — the core mechanism of the whole phase, now proven on hardware
+      — and the disabling boot **hands itself back to stock on that same boot** rather than waiting
+      for a fourth. HA's `remote.harmony` returned to `off` with all 6 devices and both activities.
+
+      **Cleanup, verified:** real daemon restored (md5 `b540739c`, unchanged), `uninstall --purge`
+      run, and `rcS.local` is **byte-identical to stock** (md5 `711cb00b`, matching the install-time
+      backup). The hub is exactly as found.
+
+      Caveats, stated so they are not mistaken for coverage: these were **soft reboots** over SSH, not
+      cold power cycles — the identical `rcS` path, but not a power-loss test. And the hook log is only
+      truncated on the starting path, so a disabling boot appends to the previous boot's lines;
+      harmless, and arguably useful history.
       - [x] **Installer written and tested: `tools/install_boot_hook.py`** (`status`/`install`/
             `uninstall`, every write behind `--yes`), 26 tests. **Nothing has been run against the
             device.** Kept separate from `deploy_hub.py` on purpose: that tool has a test asserting it

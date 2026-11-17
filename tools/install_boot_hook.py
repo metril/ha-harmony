@@ -146,19 +146,22 @@ class HookInstaller:
         )
         return 0
 
-    def install(self, token: str, port: int, hub_id: str | None, require_daemon: bool = True) -> int:
+    def install(self, token: str, port: int, hub_id: str | None) -> int:
         if not self.hook_src.is_file():
             raise InstallError(f"hook source missing: {self.hook_src}")
         hook = self.hook_src.read_bytes()
 
         # --- preflight: refuse rather than half-install -------------------------
-        if require_daemon:
-            rc, _, _ = self.r.run(["test", "-x", DAEMON])
-            if rc != 0:
-                raise InstallError(
-                    f"{DAEMON} is missing or not executable -- run deploy_hub.py push first "
-                    "(or pass --allow-missing-daemon for the T2 guard rehearsal)"
-                )
+        # No escape hatch for a missing daemon. One existed "for the guard rehearsal" and
+        # was useless for it: the hook deliberately leaves stock alone, spending no strike,
+        # when the daemon is missing -- so such a rehearsal boots stock three times and
+        # proves nothing. To rehearse the guard, install with a daemon that is PRESENT and
+        # executable but exits non-zero (that is what T2 did on hardware, 2026-11-17).
+        rc, _, _ = self.r.run(["test", "-x", DAEMON])
+        if rc != 0:
+            raise InstallError(
+                f"{DAEMON} is missing or not executable -- run deploy_hub.py push first"
+            )
         local = self._read(RCS_LOCAL)
         if local is None:
             raise InstallError(f"{RCS_LOCAL} not found -- this is not the expected stock firmware")
@@ -275,11 +278,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--token", required=True, help="WS auth token the daemon will require")
     p.add_argument("--hub-port", type=int, default=8099, help="daemon WS port (default %(default)s)")
     p.add_argument("--hub-id", default=None)
-    p.add_argument(
-        "--allow-missing-daemon",
-        action="store_true",
-        help="install without a working daemon -- for the T2 guard rehearsal only",
-    )
     p = sub.add_parser("uninstall", help="[WRITE] disarm and remove the hook")
     p.add_argument("--yes", action="store_true")
     p.add_argument("--purge", action="store_true", help="also remove hub.conf and the boot log")
@@ -302,9 +300,7 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
             case "status":
                 return inst.status()
             case "install":
-                return inst.install(
-                    a.token, a.hub_port, a.hub_id, require_daemon=not a.allow_missing_daemon
-                )
+                return inst.install(a.token, a.hub_port, a.hub_id)
             case "uninstall":
                 return inst.uninstall(a.purge)
     except InstallError as e:
