@@ -35,7 +35,9 @@ DISABLE = f"{APP_DIR}/DISABLE"
 DEFAULT_APP = "harmony_remote"
 MAX_BOOTS = 3
 HOOK_MARKER = "# ha-harmony-hook"
-POWERSOURCE = "/sys/bus/i2c/devices/1-0048/powersource"
+# The PMIC exposes its nodes on a sub-device, not the i2c client itself (verified on the
+# Elite 2026-11-17; the bare 1-0048/powersource does not exist).
+POWERSOURCE = "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/powersource"
 SOC = "/sys/bus/i2c/devices/1-0070/soc"
 VOLATILE = "/var/volatile"
 
