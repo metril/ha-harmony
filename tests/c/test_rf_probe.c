@@ -13,6 +13,7 @@ typedef struct {
   int wret[MAXLOG], nw, wi;     /* write() return script; exhausted = 0 (no frame back) */
   struct { uint8_t d[RFP_BUF]; int n; int overrun_to; } rd[MAXRD]; /* n<0: EINTR; overrun_to>n: scribble */
   int nrd, ri;
+  int hal; /* what hal_alive() reports: 0 not alive (the default), 1 alive, -1 cannot tell */
 } fake_t;
 
 static void lg(fake_t *f, char op, const char *p, const void *d, int n) {
@@ -47,7 +48,22 @@ static ssize_t f_read(void *c, int fd, void *b, size_t cap) {
 }
 static int f_close(void *c, int fd) { (void)c; (void)fd; return 0; }
 static void f_alarm(void *c, unsigned s) { lg(c, 'a', NULL, NULL, (int)s); }
-static rfp_ops_t mk(fake_t *f) { return (rfp_ops_t){f, f_open, f_write, f_read, f_close, f_alarm}; }
+static int f_hal_alive(void *c) { return ((fake_t *)c)->hal; }
+static rfp_ops_t mk(fake_t *f) {
+  return (rfp_ops_t){f, f_open, f_write, f_read, f_close, f_alarm, f_hal_alive};
+}
+
+/* Like run_cmd but returns stderr, where the preflight refusal is written. */
+static char *run_cmd_err(const rfp_ops_t *o, int argc, char **argv, int *rc) {
+  char *buf = NULL; size_t sz = 0;
+  char *ebuf = NULL; size_t esz = 0;
+  FILE *out = open_memstream(&buf, &sz), *err = open_memstream(&ebuf, &esz);
+  *rc = rfp_run(o, argc, argv, out, err);
+  fclose(out);
+  fclose(err);
+  free(buf);
+  return ebuf;
+}
 
 static void push_rd(fake_t *f, const uint8_t *d, int n) {
   f->rd[f->nrd].n = n;
@@ -65,6 +81,43 @@ static char *run_cmd(const rfp_ops_t *o, int argc, char **argv, int *rc) {
   fclose(err);
   free(ebuf);
   return buf;
+}
+
+/* The cc2544 driver's open() is not exclusive, so it never returns EBUSY and an errno check cannot
+ * detect stock hal. The preflight must refuse before opening, and must fail CLOSED when it cannot
+ * tell -- opening the radio while hal holds it can hang the flash SPI bus the two share. */
+static void test_preflight_refuses_when_hal_alive(void) {
+  const char *subcmd[] = {"--probe", "--version", "--pipes", "--listen"};
+  for (size_t i = 0; i < sizeof subcmd / sizeof subcmd[0]; i++) {
+    for (int hal = 1; hal >= -1; hal -= 2) { /* 1 = alive, -1 = indeterminate */
+      fake_t f = {0};
+      f.hal = hal;
+      rfp_ops_t o = mk(&f);
+      char *argv[] = {"rf_probe", (char *)subcmd[i]};
+      int rc;
+      char *e = run_cmd_err(&o, 2, argv, &rc);
+      CT_EQ(rc, 1);
+      CT_CHECK(strstr(e, "refusing to open") && strstr(e, "quiesce"));
+      CT_CHECK(strstr(e, hal > 0 ? "stock hal is alive" : "could not determine"));
+      /* and crucially: the device was never opened */
+      for (int k = 0; k < f.nlog; k++) CT_CHECK(f.log[k].op != 'o');
+      free(e);
+    }
+  }
+}
+
+/* A NULL hal_alive in the ops table must also fail closed, not be treated as "no hal". */
+static void test_preflight_fails_closed_without_probe_fn(void) {
+  fake_t f = {0};
+  rfp_ops_t o = mk(&f);
+  o.hal_alive = NULL;
+  char *argv[] = {"rf_probe", "--probe"};
+  int rc;
+  char *e = run_cmd_err(&o, 2, argv, &rc);
+  CT_EQ(rc, 1);
+  CT_CHECK(strstr(e, "could not determine"));
+  for (int k = 0; k < f.nlog; k++) CT_CHECK(f.log[k].op != 'o');
+  free(e);
 }
 
 static void test_frame_len(void) {
@@ -302,6 +355,8 @@ static void test_brick_safety(void) {
 }
 
 int main(void) {
+  CT_RUN(test_preflight_refuses_when_hal_alive);
+  CT_RUN(test_preflight_fails_closed_without_probe_fn);
   CT_RUN(test_frame_len);
   CT_RUN(test_write_ret_is_rx_len);
   CT_RUN(test_write_negative_is_io);
