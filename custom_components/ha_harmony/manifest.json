@@ -1,12 +1,12 @@
 {
   "domain": "ha_harmony",
   "name": "Harmony Hub (custom firmware)",
-  "codeowners": [],
+  "codeowners": ["@metril"],
   "config_flow": true,
-  "documentation": "https://example.invalid/ha_harmony",
+  "documentation": "https://github.com/metril/ha-harmony",
   "integration_type": "hub",
   "iot_class": "local_push",
-  "issue_tracker": "https://example.invalid/ha_harmony/issues",
+  "issue_tracker": "https://github.com/metril/ha-harmony/issues",
   "requirements": [],
   "version": "0.1.0",
   "zeroconf": ["_haharmony._tcp.local."]

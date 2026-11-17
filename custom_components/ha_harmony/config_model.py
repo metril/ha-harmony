@@ -231,6 +231,10 @@ def _build_schema(r: _Resolver) -> vol.Schema:
     device = {
         vol.Required("id"): _slug,
         vol.Optional("name"): _name,
+        # Other names this device answers to in `remote.send_command` / `set_device_state`
+        # (e.g. the stock hub's numeric device id, so existing automations keep working).
+        # Resolved in Home Assistant; never sent to the hub.
+        vol.Optional("aliases", default=list): [_name],
         vol.Optional("power"): power,
         vol.Optional("inputs", default=dict): {_name: ir},
         vol.Optional("settle_ms"): _int(0, 60000),
@@ -308,6 +312,18 @@ def _check_refs(model: Model) -> None:
     uniq(model["devices"], "devices", "device")
     uniq(model["activities"], "activities", "activity")
     uniq(model["pages"], "pages", "page")
+
+    # An alias must name exactly one device, and never shadow another device's real id --
+    # otherwise `device: X` would silently reach a different device than it says.
+    owner: dict[str, str] = {}
+    for i, d in enumerate(model["devices"]):
+        for j, alias in enumerate(d["aliases"]):
+            path = ["devices", i, "aliases", j]
+            if alias in devs and alias != d["id"]:
+                raise _RefError(path, f"alias {alias!r} is another device's id")
+            if alias in owner and owner[alias] != d["id"]:
+                raise _RefError(path, f"alias {alias!r} is also used by {owner[alias]!r}")
+            owner[alias] = d["id"]
 
     def check_action(a: dict[str, Any], path: list[Any]) -> None:
         if a["type"] == "device":

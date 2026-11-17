@@ -687,3 +687,28 @@ async def test_hub_restart_recovery(hass, start_hub, write_yaml, tmp_path, keep_
     )
     await until(hass, lambda: val(hass, "select", "activity") == "Music")
     await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_send_command_and_set_device_state_accept_aliases(hass, hub_rf, write_yaml):
+    """An automation written for the stock integration addresses a device by the stock hub's
+    numeric id; with that id configured as an alias it works after only an entity swap."""
+    write_yaml(BASE.replace("    name: TV\n", "    name: TV\n    aliases: ['51886472', Samsung TV]\n"))
+    entry = await setup(hass, hub_rf)
+    remote = "remote.harmony_hub_sim_hub"
+    for alias in ("51886472", "Samsung TV"):
+        await hass.services.async_call(
+            "remote", "send_command",
+            {"entity_id": remote, "device": alias, "command": ["vol_up"]}, blocking=True,
+        )  # fmt: skip
+        assert read_lines(hub_rf, 1) == [ir_line(nec(4, 16))], alias
+    await hass.services.async_call(
+        "ha_harmony", "set_device_state", {"device": "51886472", "power": True}, blocking=True
+    )
+    await until(hass, lambda: val(hass, "binary_sensor", "dev_tv_power") == "on")
+    # an unknown name still reaches the hub unchanged, and the hub still refuses it
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "remote", "send_command",
+            {"entity_id": remote, "device": "99999999", "command": ["vol_up"]}, blocking=True,
+        )  # fmt: skip
+    await hass.config_entries.async_unload(entry.entry_id)

@@ -240,3 +240,211 @@ def test_accepts_extracted_dir_and_coverage_mismatch(data, tmp_path, capsys):
     out = tmp_path / "o.yaml"
     assert tool.main([str(tmp_path), "--out", str(out)]) == 0
     assert "coverage.json counts 9 commands for 222" in capsys.readouterr().err
+
+
+# ----------------------------------------------------------------------------- power, inputs, activities
+# Synthetic stock DeviceList.json / engine config, shaped like the real ones (the real files are
+# gitignored device data; tests/py/test_real_config.py runs against them where they exist).
+TV_ON, TV_OFF, TV_H1, TV_H3, TV_TV = (
+    [9000, 4500, 560, 560], [9000, 4500, 560, 1690], [9000, 4500, 1690, 560],
+    [9000, 4500, 1690, 1690], [9000, 4500, 560, 300],
+)  # fmt: skip
+
+
+def press(cmd):
+    return [{"__type": "IRPressAction", "IRCommandName": cmd, "Order": 0, "Duration": None}]
+
+
+def power_feature(dev_id, *, on=None, off=None, toggle=None, delay=0):
+    return {
+        "__type": "PowerFeature", "DeviceId-": int(dev_id), "PowerOnDelay": delay,
+        "PowerOnActions": press(on) if on else None,
+        "PowerOffActions": press(off) if off else None,
+        "PowerToggleActions": press(toggle) if toggle else None,
+    }  # fmt: skip
+
+
+def input_feature(dev_id, *pairs):
+    return {
+        "__type": "InputFeature", "DeviceId-": int(dev_id),
+        "Inputs": [{"InputName": lbl, "Actions": act} for lbl, act in pairs],
+    }  # fmt: skip
+
+
+@pytest.fixture
+def ext():
+    """IR database + DeviceList + engine config for a TV (discrete power, inputs), a toggle
+    switch, a manually powered amp, and a Bluetooth-only console."""
+    ir_db = stock(
+        **{
+            "51886472": {
+                "PowerOn": ir([], TV_ON), "PowerOff": ir([], TV_OFF),
+                "InputHdmi1": ir([], TV_H1), "InputHdmi3": ir([], TV_H3),
+                "InputTV": ir([], TV_TV),  # stock's IR database spells it InputTV ...
+            },
+            "64694265": {"PowerToggle": ir([], FRAME)},
+            "51887071": {"Mute": ir([], FRAME)},
+            "67368870": {"Home": {"transport": "hid", "key": "07000027"}},
+        }
+    )  # fmt: skip
+    device_list = {
+        "DevicesWithFeatures": [
+            {"Device": {"Name": "Samsung TV", "Transport": 1}, "DeviceFeatures": [
+                power_feature("51886472", on="PowerOn", off="PowerOff", delay=5000),
+                input_feature(
+                    "51886472",
+                    ("HDMI 1", press("InputHdmi1")), ("HDMI 3", press("InputHdmi3")),
+                    ("TV", press("InputTv")),  # ... while DeviceList spells it InputTv
+                    ("HDMI 4(with HDMI 1,HDMI 2,HDMI 3,HDMI 4 Active)", press("InputHdmi3")),
+                    ("SmartHub", press("Exit") + press("Exit")),  # a two-press sequence
+                ),
+            ]},
+            {"Device": {"Name": "J-Tech", "Transport": 1}, "DeviceFeatures": [
+                power_feature("64694265", toggle="PowerToggle", delay=1500),
+            ]},
+            {"Device": {"Name": "Amp", "Transport": 1}, "DeviceFeatures": [
+                power_feature("51887071", delay=500),  # manual power: no actions at all
+            ]},
+            {"Device": {"Name": "Console", "Transport": 32}, "DeviceFeatures": [
+                power_feature("67368870", on="Home", off="Sleep", delay=1500),
+            ]},
+        ]
+    }  # fmt: skip
+    engine = {
+        "data": {
+            "activity": [
+                {"id": "1", "label": "SHIELD TV", "type": "VirtualDvd", "fixit": {
+                    "51886472": {"Power": "On", "Input": "HDMI 1"},
+                    "67368870": {"Power": "On"},
+                    "64694265": {"Power": "Off", "isRelativePower": True},
+                }},
+                {"id": "2", "label": "Watch Roku", "type": "VirtualGeneric", "fixit": {
+                    "51886472": {"Power": "On", "Input": "HDMI 3"},
+                }},
+                {"id": "-1", "label": "PowerOff", "type": "PowerOff", "fixit": {
+                    "51886472": {"Power": "Off"},
+                }},
+            ]
+        }
+    }  # fmt: skip
+    return ir_db, device_list, engine
+
+
+def run_ext(ext, tmp_path, *, activities=True):
+    ir_db, device_list, engine = ext
+    src, dl, ec = tmp_path / "ir_codes.json", tmp_path / "DeviceList.json", tmp_path / "ec.json"
+    src.write_text(json.dumps(ir_db))
+    dl.write_text(json.dumps(device_list))
+    ec.write_text(json.dumps(engine))
+    out = tmp_path / "out.yaml"
+    args = [str(src), "--out", str(out), "--device-list", str(dl)]
+    if activities:
+        args += ["--engine-config", str(ec)]
+    rc = tool.main(args)
+    return rc, (yaml.safe_load(out.read_text()) if out.exists() else None)
+
+
+def dev(cfg, slug):
+    return next(d for d in cfg["devices"] if d["id"] == slug)
+
+
+def test_without_the_new_flags_output_is_unchanged(data, tmp_path):
+    """Back-compat: no --device-list means devices + commands only, exactly as before."""
+    rc, out = run(data, tmp_path)
+    cfg = yaml.safe_load(out.read_text())
+    assert rc == 0 and "activities" not in cfg
+    assert all(set(d) == {"id", "name", "commands"} for d in cfg["devices"])
+
+
+def test_discrete_power_and_settle_come_from_stock(ext, tmp_path):
+    rc, cfg = run_ext(ext, tmp_path)
+    tv = dev(cfg, "samsung_tv")
+    assert rc == 0
+    assert tv["power"] == {"on": tv["commands"]["PowerOn"], "off": tv["commands"]["PowerOff"]}
+    assert tv["settle_ms"] == 5000
+
+
+def test_toggle_power_is_kept_as_a_toggle(ext, tmp_path):
+    _, cfg = run_ext(ext, tmp_path)
+    jt = dev(cfg, "jtech_switch")
+    assert jt["power"] == {"toggle": jt["commands"]["PowerToggle"]} and jt["settle_ms"] == 1500
+
+
+def test_manual_power_gets_no_power_block_and_no_settle(ext, tmp_path):
+    _, cfg = run_ext(ext, tmp_path)
+    amp = dev(cfg, "audioengine_a5")
+    assert "power" not in amp and "settle_ms" not in amp
+
+
+def test_inputs_match_stock_labels_and_resolve_case_clashes(ext, tmp_path):
+    _, cfg = run_ext(ext, tmp_path)
+    tv = dev(cfg, "samsung_tv")
+    assert list(tv["inputs"]) == ["HDMI 1", "HDMI 3", "TV"]
+    assert tv["inputs"]["TV"] == tv["commands"]["InputTV"], "InputTv must resolve to InputTV"
+
+
+def test_case_insensitive_match_refuses_ambiguity():
+    assert tool._resolve_cmd("InputTv", {"InputTV": 1}) == "InputTV"
+    assert tool._resolve_cmd("InputTv", {"InputTV": 1, "inputtv": 2}) is None
+    assert tool._resolve_cmd("InputTv", {"InputTv": 1, "InputTV": 2}) == "InputTv"  # exact wins
+
+
+def test_unexpressible_inputs_are_reported_not_dropped(ext, tmp_path, capsys):
+    _, cfg = run_ext(ext, tmp_path)
+    err = capsys.readouterr().err
+    assert "HDMI 4(with HDMI 1,HDMI 2,HDMI 3,HDMI 4 Active)" in err and "31 bytes" in err
+    assert "'SmartHub': not a single IR press" in err
+    assert "SmartHub" not in dev(cfg, "samsung_tv")["inputs"]
+
+
+def test_activities_list_only_devices_stock_wants_on(ext, tmp_path):
+    _, cfg = run_ext(ext, tmp_path)
+    acts = {a["name"]: a for a in cfg["activities"]}
+    assert list(acts) == ["SHIELD TV", "Watch Roku"], "PowerOff maps to the built-in off"
+    assert acts["SHIELD TV"] == {
+        "id": "shield_tv",
+        "name": "SHIELD TV",
+        "devices": [{"device": "samsung_tv", "input": "HDMI 1"}],
+    }
+    assert acts["Watch Roku"]["devices"] == [{"device": "samsung_tv", "input": "HDMI 3"}]
+
+
+def test_a_device_the_hub_cannot_drive_is_reported_for_ha(ext, tmp_path, capsys):
+    """The console is Bluetooth-only: stock powers it, the hub cannot -- say so, loudly."""
+    _, cfg = run_ext(ext, tmp_path)
+    err = capsys.readouterr().err
+    assert "wants Console ON" in err and "(transport 32)" in err  # DeviceList's own name
+    assert "Home Assistant automation" in err
+    shield = cfg["activities"][0]["devices"]
+    assert all(d["device"] != "nvidia_shield" for d in shield)
+
+
+def test_engine_config_requires_device_list(data, tmp_path):
+    src = tmp_path / "ir_codes.json"
+    src.write_text(json.dumps(data))
+    with pytest.raises(SystemExit):
+        tool.main([str(src), "--out", str(tmp_path / "o.yaml"), "--engine-config", "x.json"])
+
+
+def test_extended_output_compiles_and_counts_power_and_input_words(ext, tmp_path, capsys):
+    rc, cfg = run_ext(ext, tmp_path)
+    assert rc == 0
+    compile_config(parse_model(yaml.safe_dump(cfg)))  # the real pipeline accepts it
+    # pool words now include power + inputs, which each carry their own copy of a raw code
+    cmd_words = sum(len(c["raw"]["us"]) for d in cfg["devices"] for c in d["commands"].values())
+    reported = int(capsys.readouterr().err.split("bytes, ")[1].split(" pool")[0])
+    assert reported > cmd_words, "pool count must include power and input codes"
+
+
+def test_slugify():
+    assert tool._slugify("SHIELD TV") == "shield_tv"
+    assert tool._slugify("Watch  Roku!") == "watch_roku"
+    assert tool._slugify("***") == "activity"
+    assert len(tool._slugify("x" * 50)) == 31
+
+
+def test_stock_id_and_stock_name_become_aliases(ext, tmp_path):
+    """So `remote.send_command device: "51886472"` from a stock-era automation keeps working."""
+    _, cfg = run_ext(ext, tmp_path)
+    assert dev(cfg, "samsung_tv")["aliases"] == ["51886472", "Samsung TV"]
+    assert dev(cfg, "jtech_switch")["aliases"] == ["64694265", "J-Tech"]

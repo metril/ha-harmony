@@ -1,0 +1,36 @@
+name: release
+
+# Push a tag `vX.Y.Z` (matching manifest.json's version) to publish the HACS package:
+# a GitHub release with ha_harmony.zip attached. The tests run first; nothing is released red.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python deps
+        run: uv sync --locked
+      - name: Build C binaries
+        run: |
+          cmake -S . -B build
+          cmake --build build -j --target hub remote_sim
+      - name: Test
+        run: uv run pytest tests/py -n auto -q
+      - name: Build package
+        run: uv run tools/package_integration.py --version "${GITHUB_REF_NAME#v}" --out dist/ha_harmony.zip
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/ha_harmony.zip \
+            --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
