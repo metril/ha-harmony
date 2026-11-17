@@ -152,11 +152,13 @@ async def test_concurrent_clients(hub_process):
             await w.close()
 
 
-def test_no_hardware_backend_exits_nonzero(built_binaries):
+def test_real_backend_without_i2s_exits_nonzero(built_binaries):
+    # No /dev/i2s on a dev host (or it is held by stock hal): the daemon must refuse to start.
     res = subprocess.run(
-        [str(built_binaries / "hub")], check=False, capture_output=True, text=True, timeout=5
+        [str(built_binaries / "hub"), "--token", "t", "--no-mdns"],
+        check=False, capture_output=True, text=True, timeout=5,
     )
-    assert res.returncode != 0 and "no hardware backend built" in res.stderr
+    assert res.returncode != 0 and "/dev/i2s" in res.stderr
 
 
 @pytest.mark.parametrize(
