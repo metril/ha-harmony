@@ -1,4 +1,12 @@
-# ha-harmony
+<p align="center">
+  <img src="custom_components/ha_harmony/brand/logo.png" alt="Harmony" width="373">
+</p>
+
+<h1 align="center">ha-harmony</h1>
+
+<p align="center">
+  <img src="custom_components/ha_harmony/brand/icon.png" alt="Harmony" width="96">
+</p>
 
 Custom firmware for the Logitech Harmony Hub, plus a Home Assistant integration that talks to it
 directly over your LAN. The goal is a Harmony setup that keeps working after Logitech's cloud is
