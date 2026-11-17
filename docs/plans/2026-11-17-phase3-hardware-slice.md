@@ -355,9 +355,11 @@ oracle before touching parameters again.
       exact byte stream works from our process, our framing is wrong; if it does not, our call
       sequence or device state is wrong. The device has no `strace`, so this needs a staged
       `strace` build or a `ptrace` helper — more work, but it is conclusive.
-- [ ] Also fix `ir_bench --duty`: it is a **no-op**. Setting 25 or 50 produced a byte-identical
-      stream to the default (the N=12 pattern hardcodes 4 ones / 8 zeros), so "duty swept" in session
-      2 tested nothing. Either implement it or remove the flag.
+- [x] ~~Fix `ir_bench --duty`: it is a no-op.~~ **Retracted — the flag works.** `--duty` feeds
+      `pulse = (duty*N+99)/100`, which gates the mark bits at `tools/ir_bench.c:115`; duty 25/33/50
+      give 3/9, 4/8 and 6/6 pulse/space bits and three distinct stream hashes. The earlier
+      "byte-identical" claim was wrong (two runs whose differing argument was not actually varied).
+      Nothing to fix.
 
 ### Task 6 `[RO]` — Verification ladder: did IR actually fire?
 

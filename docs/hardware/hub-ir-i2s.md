@@ -127,10 +127,15 @@ Direction/mux are configured **once at module load**, not in START or open
   START-controlled lines. This is what makes the mapping bit16->GPIO16, bit17->GPIO28, bit18->GPIO13 solid.
 - `ar7240_reset(1)`, 1 ms delay, default divider `0xb80b001c = 0x00215999`, `STEREO_CONFIG = 0x00a21302`, `i2s_reset`.
 
-**What the three lines physically select is UNKNOWN.** Active-low and the three-line
-width fit "one gate per emitter group" (built-in vs two mini-blaster jacks) but nothing in
-the binaries names them. Earlier text claiming "bit 17 = built-in emitter" was **never
-established**; it came from the retracted run.
+**GPIO16 gates the built-in emitter** [HARDWARE, 2026-11-17, section 9b]: `ports = 1`
+(arg `0x10000`, GPIO16 low, GPIO28/GPIO13 high) emits IR that a phone camera sees and a
+Samsung TV obeys. This is consistent with the static decode: stock's `ports = 7` drives all
+three low, so `ports = 1` is a **subset** of stock, and `ports = 2` (GPIO28 low, **GPIO16
+high**) is the one case that gates the built-in emitter *off* — which is exactly why the
+retracted bit-17 run emitted nothing. What GPIO28 and GPIO13 gate is still unknown; the
+three-line width fits "one gate per emitter group" (built-in plus two mini-blaster jacks),
+and this hub has no blaster cables attached, so driving them low costs nothing and stock
+does it unconditionally.
 
 **What stock sends** [CODE]: `hal`'s `ir_send` RPC handler (@0x424430, json format
 `{enable:b, keyLatency?:i, ports?:i}`, strings @0x44a140/0x44a150/0x44a15c) initialises
@@ -142,7 +147,8 @@ passed with `n=0` to ops+0x30 = `hornet_i2s_write_start` (@0x4079dc: `a2<<16 | (
 Every device in our hub backup has `controlPort: null` (`backups/phase1/hub/pre-root-config/devices.json`),
 so stock sends with the default **ports = 7, START arg `0x70000`: GPIO16, GPIO28 and GPIO13 all low**
 [INFERRED that the Lua layer omits `ports` for these devices; the `null` is the only evidence].
-The values logged in section 9 are 0, 1, 2; **7 has never been tried**, and the daemon default is `0x02` (section 10).
+7 has never been tried and does not need to be: `ports = 1` is proven sufficient (section 9b),
+and the daemon default is now `0x01` (section 10).
 
 - If the DMA is not yet running (one-shot flag `sc_buf_var+8292`, set by speaker `open`):
   program TX descriptor base `0xb80a0018` = ring phys address (`ath_i2s_dma_desc` @0x0) and start
@@ -335,16 +341,18 @@ wrapper @0x407858 (`nor`), i.e. received bits are active-low.
 | bitstream structure: 1 bit/bclk, carrier baked in, MSB-first, mark=1, N/duty/b formulas | high | section 6 table |
 | `START` arg: bits 16/17/18 -> GPIO16/GPIO28/GPIO13 `OUT` level, set = low; bits 0-15 only `n==0` test | high (decode); high that these GPIOs are outputs | @0x1094-0x1100; `init_module` OE `0x10012000` |
 | stock default `ports = 7` (`START` arg `0x70000`) | high for the code default; medium that stock actually sends 7 for our devices | @0x42445c/0x424504; `controlPort: null` in backup |
-| what each GPIO physically gates | **unknown** | no binary evidence |
+| GPIO16 (START bit 16) gates the built-in emitter | **high** | hardware: camera flicker + TV reacted, section 9b |
+| what GPIO28 and GPIO13 gate | **unknown** | no binary evidence; not needed (`ports = 1` suffices) |
 | 16.16 divider `D = b/40` | high | boot default 0x215999 = 1334 ns = hal +0x08; DRAIN duration matched |
-| byte-pair swap direction (physical) | medium | `hal` wrapper; same code path as stock |
+| byte-pair swap direction (physical), mark polarity, N=12 at 37.9 kHz | high | hardware: the TV decoded a real Samsung frame, section 9b |
+| one 108 ms frame is enough for a Samsung TV (no `min_repeats`) | high | hardware: verified at 25, 3 and 1 repeats, section 9b |
 | `I2S_MODE` bit meaning, line idle level, underrun behaviour | unknown | |
 
 ## 8. Unknowns and cheapest experiments
 
-Superseded by section 12 (ranked list with experiments). Remaining unknowns: what the three
-START GPIOs gate; idle level; underrun behaviour; whether the emitter also needs state set by the
-Lua layer or another process (section 12, item 4).
+Superseded by sections 9b (what the hardware settled) and 12 (what is left). Remaining unknowns:
+what GPIO28 and GPIO13 gate; idle level; underrun behaviour; carriers that need N != 12 (only
+37900 Hz has been driven); the IR **capture** path (section 11, never run).
 
 ## 9. Bench result (2026-11-16, live hub) - SUCCESS CLAIM RETRACTED
 
@@ -353,6 +361,10 @@ Lua layer or another process (section 12, item 4).
 > after a stock send, reached no device). The table below is kept as a **log of what was run**, not
 > as evidence. The only facts it supports: every ioctl returned 0, `write` returned in full, and `DRAIN`
 > blocked for the predicted duration. Nothing in it shows IR leaving the hub.
+>
+> **Superseded by section 9b**, which confirmed IR on hardware with `ports = 1`. Note that row 4
+> here *did* use `ports = 1` and saw no reaction - on an oracle (HA's `media_player` state) too
+> slow and too noisy to show it. The working mask was tried in this very run and missed.
 
 Tool: `tools/ir_bench.c` (soft-float MIPS build, all parameters are arguments).
 Target: Samsung `PowerToggle` (NEC-like `0xE0E040BF`, 37900 Hz, 4500/4500 header,
@@ -397,18 +409,46 @@ happens, and since the loop ignores signals SIGKILL cannot stop it. **Always `re
 before closing a mic fd** (section 11). `ir_bench --probe` does open+close with no read and therefore
 hangs by construction: remove or fix it.
 
-Still unknown: what each of the three START GPIOs gates (section 3); the I2S_MODE bit; idle level and
+Still unknown: what GPIO28 and GPIO13 gate (section 3); the I2S_MODE bit; idle level and
 underrun behaviour.
+
+## 9b. Bench result (2026-11-17, live hub) - IR CONFIRMED, `ports = 1`
+
+Same tool and same Samsung stream as section 9. **Oracle: a phone camera aimed at the
+emitter window** (940 nm reads as a violet flicker), with the TV's on-screen volume bar as a
+second, independent witness. The HA `media_player` state was *not* used: it lags by minutes
+and the TV wakes unprompted, which is what produced the retracted section 9 result.
+
+| ports | arg | GPIO16/28/13 | camera | TV |
+|-------|-----|--------------|--------|-----|
+| 1 | `0x10000` | low/high/high | **flicker** | **volume bar moved** |
+| 2 | `0x20000` | high/low/high | nothing | nothing |
+
+Run one variant at a time with a human confirming each; a batched sweep cannot tell you which
+variant did it, and that is how the first wrong conclusion was reached.
+
+**Established:**
+- **`ports = 1` (START bit 16) drives the built-in emitter.** Byte order (adjacent-pair swap),
+  mark polarity (mark = 1-bits, no inversion), N=12 at 37900 Hz and the divider formula are all
+  therefore correct as implemented - the TV decoded a real Samsung frame.
+- **One 108 ms frame is enough.** Verified at 25, 3 and 1 repeats; the single frame worked.
+  So the `raw: {hz, us}` config form needs no `min_repeats` field, and repeat fidelity is a
+  refinement, not a blocker.
+- Full path end to end: HA's own `HarmonyHubClient` -> WS `ir_send` -> our MIPS daemon's
+  non-sim path -> `/dev/i2s` -> TV obeyed.
+
+The only error in the pre-2026-11-17 model was the port mask. Everything upstream of START was
+already right, which is why every ioctl returned 0 and `DRAIN` blocked for the full predicted
+duration: the daemon was emitting a correct waveform into a gated-off output.
 
 ## 10. Daemon backend (`hub/io/hw_sinks.c`)
 
-> **Status: unverified on hardware, and its default is probably wrong.** `--ir-ports` defaults to `0x02`
-> (bit 17 only) on the strength of the retracted section 9 result, whereas stock's default is `0x07`
-> (section 3). Do not change it until the section 12 ports sweep identifies a working value.
+> **Status: IR path verified on real hardware (section 9b).** `--ir-ports` defaults to `0x01`
+> (START bit 16, the built-in emitter).
 
 Implements the section 9 sequence behind `hp_ir_sink`; host-tested with injected syscalls and
 diffed byte-for-byte against `tools/ir_bench.c --out`. Engine `port_mask` bit n maps to START bit
-16+n (`--ir-ports`, default `0x02` = bit 17, the built-in emitter; mask 0 = all configured ports;
+16+n (`--ir-ports`, default `0x01` = bit 16, the built-in emitter; mask 0 = all configured ports;
 an empty result is `-HP_E_INVAL`). `send` ends after START and leaves DRAIN+close to
 `hp_hw_service()` (or the next send), so the daemon loop never blocks. Not yet verified on the
 device: the deferred-DRAIN flow, startup write-open/close probe, hold-open-after-START, any
@@ -469,9 +509,23 @@ logging a monotonic timestamp per chunk, for ~3 s; **drain and close cleanly**. 
 Diff in the run-length domain (mark/space durations, carrier period, repeat structure), not raw bytes.
 If the receiver sees stock but not ours, the problem is upstream of the bit stream (section 12).
 
-## 12. Why our emission is inert: ranked hypotheses and experiments (pass 2, static)
+## 12. Why our emission was inert: RESOLVED (hypothesis 1)
 
-1. **We never drove the select lines stock drives (`ports` != 7). Likelihood: high.** START rewrites
+> **Resolved 2026-11-17 by section 9b.** The cause was hypothesis 1 - the wrong select line -
+> though not in the form predicted: the fix was not stock's `ports = 7` but `ports = 1`
+> (GPIO16 alone). `ports = 2` was the single worst choice available, because it is the one
+> value that drives GPIO16 *high* and so gates the built-in emitter off. Hypotheses 2-5 are
+> ruled out as explanations of the inert emission: with only the port mask changed, the same
+> bitstream, clock and call sequence drove a real TV. They are kept below because the
+> register-snapshot and capture experiments remain useful for the unexplored parts
+> (what GPIO28/GPIO13 gate, carriers needing N != 12, IR learning).
+>
+> The process lesson, recorded because it cost the most: a single unreplicated observation on a
+> self-triggering oracle is not evidence. The TV's own wake behaviour manufactured a false
+> positive that then shipped as a code default.
+
+1. **We never drove the select lines stock drives (`ports` != 7). Likelihood: high.** [CONFIRMED as
+   the cause, with the corrected mask `ports = 1`; see the banner above.] START rewrites
    GPIO16/GPIO28/GPIO13 together, active-low. Stock sends `ports=7` (all three low) by default; we tried
    0, 1, 2 only (bench default 0, daemon default 2). If the emitter path needs GPIO16 and/or GPIO13 low in
    addition to or instead of GPIO28, ports=2 emits nothing. The earlier "prime with a stock send, then
