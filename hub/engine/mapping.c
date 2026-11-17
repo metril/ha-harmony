@@ -104,7 +104,7 @@ static int parse_ir_v1(hp_map_t *m, const cJSON *j, hp_action_t *a) {
     int n = cJSON_GetArraySize(pr);
     if (n < 4) return fail(m, INVAL, "pronto needs at least 4 words");
     if (n > HP_MAP_MAX_PRONTO) return fail(m, TOOBIG, "pronto longer than %d words", HP_MAP_MAX_PRONTO);
-    size_t off, i = 0;
+    size_t off = 0, i = 0;
     int r = pool_alloc(m, (size_t)n, &off);
     if (r < 0) return r;
     for (const cJSON *w = pr->child; w; w = w->next, i++) {
@@ -150,7 +150,7 @@ static int parse_ir_v2(hp_map_t *m, const cJSON *j, hp_action_t *a) {
         int n = cJSON_GetArraySize(us);
         if (n < 1) return fail(m, INVAL, "raw us must not be empty");
         if (n > HP_IR_MAX_DUR) return fail(m, TOOBIG, "raw longer than %d durations", HP_IR_MAX_DUR);
-        size_t off, i = 0;
+        size_t off = 0, i = 0;
         int r = pool_alloc(m, (size_t)n, &off);
         if (r < 0) return r;
         for (const cJSON *d = us->child; d; d = d->next, i++) {
@@ -163,7 +163,7 @@ static int parse_ir_v2(hp_map_t *m, const cJSON *j, hp_action_t *a) {
         a->pool_n = (uint16_t)n;
     } else {
         uint16_t w[HP_MAP_MAX_PRONTO];
-        size_t n = 0, off;
+        size_t n = 0, off = 0;
         if (!cJSON_IsString(pt)) return fail(m, INVAL, "pronto must be a hex string");
         int r = hp_ir_parse_pronto(pt->valuestring, w, HP_MAP_MAX_PRONTO, &n);
         if (r == -HP_E_TOOBIG) return fail(m, TOOBIG, "pronto longer than %d words", HP_MAP_MAX_PRONTO);
@@ -297,7 +297,7 @@ static int parse_keymap(hp_map_t *m, const cJSON *j, hp_keybind_t *keys, uint8_t
     if (!cJSON_IsObject(j)) return fail(m, INVAL, "keys must be an object");
     *nkeys = 0;
     for (const cJSON *it = j->child; it; it = it->next) {
-        uint16_t code;
+        uint16_t code = 0;
         int r;
         if (!it->string || (r = parse_code(m, it->string, &code)) < 0) return it->string ? r : INVAL;
         if (*nkeys >= HP_MAP_MAX_KEYS) return fail(m, TOOBIG, "more than %d keys in one key map", HP_MAP_MAX_KEYS);
