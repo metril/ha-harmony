@@ -162,3 +162,37 @@ observe IR on the TV and both events in HA; 30 min idle on the cradle. Restore h
    is configured in Task 7b. The stock `harmony` integration stays until the user removes it.
 2. Pairing: both chips hold the slot-1 pairing today. If our frames are accepted under it, no re-pair
    is needed; if not, Task 2's `set_pairing` and a remote-side bind are required.
+
+## Bench session 1 (2026-11-17, 07:10–07:30 UTC) — gate partly met
+
+Hub quiesced at 07:10:02; our daemon `hub --token … --rf-spi --rf-slot 2`, the Elite running
+`harmony_remote --slot 1 --powermode 0x30`; `ha_harmony` v0.2.0 (released for this) configured in
+HA against the hub. Hub restored to stock afterwards.
+
+**Met — remote → hub → IR → HA, on real hardware:**
+- Hard **Vol +** and **Mute** on the Elite → our app → RF → our hub daemon → key mapping → **real IR;
+  the Samsung TV obeyed both** (observed by the user). HA's event entity reported `volume_up`
+  (logical key 8, remote 1); an earlier unprompted press arrived as `play` (key 14).
+- HA compiled the gate config and pushed it; the hub wrote `cache.json` (35 KB).
+
+**Not met — hub → remote:** the 2-frame `page_push` never reached the remote (it logged nothing,
+not even a rejected report), so the Elite stayed on the app's boot page ("Harmony"). Single-frame
+hub→remote objects (acks) most likely do arrive: the remote never fell back to "Hub unreachable"
+after its heartbeats. The hub's radio emits `20 02 42 00` / `20 02 42 01` (TX status, slot 2) after
+transmissions, which the driver dropped; the leading hypothesis is that the second frame of an
+object is written before the radio has finished the first. Next: per-frame pacing on TX status or a
+minimum gap, and `--rf-debug` frame logs with timestamps on both ends. The 30-min idle soak was not
+run.
+
+**Corrections found at the bench:**
+- **Slots are HID++ device indices, which start at 1.** The Elite is device **2** on the hub
+  (`10 02 41 04 87 21 40` = link up, wpid 0x4021), and the hub is device **1** on the remote
+  (`10 01 41 04 07 0b 88`, wpid 0x880B). The pipe table had been read off by one (pipe `0x20` is
+  device 1). Addressing the wrong index gives `10 01 8f 40 0d 09 00` (error 0x09) per frame.
+  `--rf-slot` (hub) and `--slot` (remote) set them; learning them from link status is a follow-up.
+- `deploy_hub.py run` forces a TTY (`ssh -tt`) and fails from a non-interactive session; the
+  daemon was started detached on the device instead. Needs a `--detach` mode.
+- A `ps | grep` stop-check matched its own ssh command line and reported the app as still running;
+  there is no evidence the app is slow to stop. Use `pidof` or match the binary path with `awk`.
+- The released v0.1.2 integration rejected the new key names, so v0.2.0 was published from this
+  branch (tag on `phase4-rf-remote`, not `main`).
