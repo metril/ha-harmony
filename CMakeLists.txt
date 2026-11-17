@@ -56,6 +56,7 @@ add_library(hp_hub STATIC
   hub/engine/activity.c
   hub/engine/atomic_file.c
   hub/io/sim_sinks.c
+  hub/io/hw_sinks.c
   hub/io/rf_pair.c
   hub/ir/encode.c
   hub/hub_handlers.c
