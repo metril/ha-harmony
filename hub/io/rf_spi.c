@@ -20,7 +20,14 @@
 #define RX_MAX 64
 #define LOG_MAX 32    /* diagnostics are rate-limited by total count */
 #define REPORT_HUB_DATA 0x12
+#define REPORT_REMOTE_DATA 0x20
 #define LINK_LOST 0x40
+
+/* The remote's /dev/rfspi memcpys `count` bytes into a 32-byte kernel slab with no check: a longer
+ * write overflows kernel heap. spi_write() enforces this cap for every remote-role write. */
+#define REMOTE_WRITE_CAP 32
+_Static_assert(HP_RF_REMOTE_FRAME_LEN <= REMOTE_WRITE_CAP, "remote frame must fit the kernel slab");
+_Static_assert(HP_RF_SPI_REMOTE_WRITE_CAP == REMOTE_WRITE_CAP, "header and driver caps agree");
 
 static const uint8_t CMD_INIT[7] = {0x10, 0xFF, 0x80, 0x00, 0x00, 0x01, 0x00};
 
@@ -28,6 +35,8 @@ typedef struct {
     hp_rf_transport t; /* first member */
     hp_rf_spi_ops_t ops;
     uint8_t slot;
+    hp_rf_spi_role_t role;
+    uint8_t powermode;
     int fd;
     bool claimed;
 
@@ -94,6 +103,7 @@ static void wake(spi_t *s) {
 /* The only write() site. 0 ok (including a positive return, which is an rx length), -HP_E_BUSY while
  * backing off after an error, -HP_E_IO on a negative return. */
 static int spi_write(spi_t *s, const uint8_t *buf, size_t n) {
+    if (s->role == HP_RF_SPI_ROLE_REMOTE && n > REMOTE_WRITE_CAP) return -HP_E_TOOBIG; /* never reaches the syscall */
     pthread_mutex_lock(&s->tx_mu);
     uint64_t now = s->ops.now_ms(s->ops.ctx);
     int rc = 0;
@@ -125,13 +135,19 @@ static void push_event(spi_t *s) {
 
 static void on_report(spi_t *s, const uint8_t *b, size_t n) {
     pthread_mutex_lock(&s->mu);
-    if (n == HP_RF_HUB_FRAME_LEN && b[0] == REPORT_HUB_DATA) {
+    const uint8_t *inner = NULL;
+    if (s->role == HP_RF_SPI_ROLE_HUB) {
+        if (n == HP_RF_HUB_FRAME_LEN && b[0] == REPORT_HUB_DATA) inner = b + 2;
+    } else if (n == HP_RF_REMOTE_FRAME_LEN && b[0] == REPORT_REMOTE_DATA && b[2] == 0x12) {
+        inner = b + 4;
+    }
+    if (inner) {
         s->attached = true;
         if (s->qn == RXQ) { /* reader outran the hub loop: drop the oldest, keep the freshest */
             s->qhead = (s->qhead + 1) % RXQ;
             s->qn--;
         }
-        memcpy(s->q[(s->qhead + s->qn++) % RXQ], b + 2, HP_RF_INNER_LEN);
+        memcpy(s->q[(s->qhead + s->qn++) % RXQ], inner, HP_RF_INNER_LEN);
         push_event(s);
     } else if ((b[0] == 0x10 || b[0] == 0x11) && n >= 5 && b[1] == s->slot && b[2] == 0x41 && b[3] == 0x04) {
         if (b[4] & LINK_LOST) {
@@ -192,9 +208,13 @@ static int spi_send(void *self, const uint8_t *frame, size_t len) {
     if (!s->claimed) return -HP_E_INVAL;
     if (!frame || !len) return -HP_E_INVAL;
     if (len > HP_RF_INNER_LEN) return -HP_E_TOOBIG;
-    uint8_t w[HP_RF_HUB_FRAME_LEN] = {REPORT_HUB_DATA, s->slot};
-    memcpy(w + 2, frame, len);
-    return spi_write(s, w, sizeof w);
+    hp_rf_inner_t in;
+    memset(in.b, 0, sizeof in.b); /* a short block is zero padded */
+    memcpy(in.b, frame, len);
+    hp_rf_frame_t w;
+    if (s->role == HP_RF_SPI_ROLE_REMOTE) hp_rf_wrap_remote(s->slot, s->powermode, &in, &w);
+    else hp_rf_wrap_hub(s->slot, &in, &w);
+    return spi_write(s, w.data, w.len);
 }
 
 static void drain_wake(spi_t *s) {
@@ -255,7 +275,13 @@ int hp_rf_spi_open(const hp_rf_spi_cfg_t *cfg, hp_rf_transport **out) {
     spi_t *s = calloc(1, sizeof *s);
     if (!s) return -HP_E_IO;
     s->ops = (cfg && cfg->ops) ? *cfg->ops : hp_rf_spi_real_ops();
-    s->slot = (cfg && cfg->slot) ? cfg->slot : HP_RF_SPI_SLOT;
+    s->role = cfg ? cfg->role : HP_RF_SPI_ROLE_HUB;
+    if (s->role != HP_RF_SPI_ROLE_HUB && s->role != HP_RF_SPI_ROLE_REMOTE) {
+        free(s);
+        return -HP_E_INVAL;
+    }
+    s->powermode = cfg ? (uint8_t)(cfg->powermode & 0xF0) : 0; /* upper nibble only */
+    s->slot = (cfg && cfg->slot) ? cfg->slot : s->role == HP_RF_SPI_ROLE_REMOTE ? HP_RF_SPI_REMOTE_SLOT : HP_RF_SPI_SLOT;
     s->fd = -1;
     s->wake[0] = s->wake[1] = -1;
     const char *dev = (cfg && cfg->dev_path) ? cfg->dev_path : HP_RF_SPI_DEV;
@@ -346,13 +372,20 @@ int hp_rf_spi_wake_fd(const hp_rf_transport *t) {
 }
 
 int hp_rf_spi_set_pairing(hp_rf_transport *t, unsigned seconds) {
-    if (!t || t->recv != spi_recv || seconds < 1 || seconds > 255) return -HP_E_INVAL;
+    if (!t || t->recv != spi_recv || ((spi_t *)t->self)->role != HP_RF_SPI_ROLE_HUB || seconds < 1 || seconds > 255)
+        return -HP_E_INVAL; /* host-chip operation */
     const uint8_t cmd[7] = {0x10, 0xFF, 0x80, 0xB2, 0x01, 0x00, (uint8_t)seconds};
     return spi_write(t->self, cmd, sizeof cmd);
 }
 
 int hp_rf_spi_unpair(hp_rf_transport *t, unsigned slot) {
-    if (!t || t->recv != spi_recv || slot < 1 || slot > 15) return -HP_E_INVAL;
+    if (!t || t->recv != spi_recv || ((spi_t *)t->self)->role != HP_RF_SPI_ROLE_HUB || slot < 1 || slot > 15)
+        return -HP_E_INVAL; /* host-chip operation */
     const uint8_t cmd[7] = {0x10, 0xFF, 0x80, 0xB2, 0x03, (uint8_t)slot, 0x00};
     return spi_write(t->self, cmd, sizeof cmd);
+}
+
+int hp_rf_spi_write_for_test(hp_rf_transport *t, const uint8_t *buf, size_t n) {
+    if (!t || t->recv != spi_recv || !buf) return -HP_E_INVAL;
+    return spi_write(t->self, buf, n);
 }

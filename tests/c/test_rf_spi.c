@@ -14,11 +14,12 @@
 #include "ctest_assert.h"
 #include "hub/hp_errors.h"
 #include "hub/io/rf_spi.h"
+#include "hub/rf/link.h"
 
 #define NW 64
 #define NRX 32
 
-typedef struct {
+typedef struct fake {
     pthread_mutex_t mu;
     pthread_cond_t cv;
     int hal;       /* hal_alive result */
@@ -38,9 +39,15 @@ typedef struct {
     int in_read;
     size_t min_cap;
     _Atomic uint64_t now;
+    /* in-memory radio bridge (two-endpoint test) */
+    struct fake *peer;
+    int is_remote;  /* this fake is the remote's device */
+    int drop_acks;  /* swallow this many outgoing ack frames */
 } fake_t;
 
 static fake_t *F;
+struct fake;
+static void feed(struct fake *f, const uint8_t *b, size_t n);
 
 static int f_open(void *c, const char *p, int fl) {
     fake_t *f = c;
@@ -68,7 +75,32 @@ static ssize_t f_write(void *c, int fd, const void *b, size_t n) {
     }
     f->nw++;
     int mode = f->write_mode;
+    fake_t *peer = f->peer;
+    int drop = 0;
+    if (peer && n >= 30 && (((const uint8_t *)b)[0] == 0x12 || ((const uint8_t *)b)[0] == 0x20)) {
+        const uint8_t *inner = (const uint8_t *)b + (f->is_remote ? 4 : 2);
+        if ((inner[0] & 0xE0) == 0x40 && f->drop_acks > 0) {
+            f->drop_acks--;
+            drop = 1;
+        }
+    }
     pthread_mutex_unlock(&f->mu);
+    if (peer && !drop && n >= 30) { /* the radios: 30-byte hub frame <-> 32-byte remote frame */
+        const uint8_t *p = b;
+        uint8_t o[32];
+        size_t on;
+        if (f->is_remote && n == 32 && p[0] == 0x20) {
+            o[0] = 0x12, o[1] = 1; /* the remote is slot 1 on the hub */
+            memcpy(o + 2, p + 4, 28);
+            on = 30;
+            feed(peer, o, on);
+        } else if (!f->is_remote && n == 30 && p[0] == 0x12) {
+            o[0] = 0x20, o[1] = 0, o[2] = 0x12, o[3] = 0; /* the hub is slot 0 on the remote */
+            memcpy(o + 4, p + 2, 28);
+            on = 32;
+            feed(peer, o, on);
+        }
+    }
     if (mode < 0) {
         errno = EIO;
         return -1;
@@ -135,7 +167,13 @@ static hp_rf_spi_ops_t fake_ops(fake_t *f) {
 
 static int open_fake(fake_t *f, uint8_t slot, hp_rf_transport **t) {
     hp_rf_spi_ops_t o = fake_ops(f);
-    hp_rf_spi_cfg_t cfg = {NULL, slot, &o};
+    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, HP_RF_SPI_ROLE_HUB, 0};
+    return hp_rf_spi_open(&cfg, t);
+}
+
+static int open_remote(fake_t *f, uint8_t slot, uint8_t powermode, hp_rf_transport **t) {
+    hp_rf_spi_ops_t o = fake_ops(f);
+    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, HP_RF_SPI_ROLE_REMOTE, powermode};
     return hp_rf_spi_open(&cfg, t);
 }
 
@@ -412,7 +450,7 @@ static void test_destroy_real_signal(void) {
     o.write = p_write;
     o.close = p_close;
     o.hal_alive = p_hal;
-    hp_rf_spi_cfg_t cfg = {NULL, 0, &o};
+    hp_rf_spi_cfg_t cfg = {NULL, 0, &o, HP_RF_SPI_ROLE_HUB, 0};
     hp_rf_transport *t = NULL;
     CT_EQ(hp_rf_spi_open(&cfg, &t), 0);
     ms_sleep(50); /* let the reader block in read() */
@@ -476,6 +514,223 @@ static void test_brick_safety_and_explicit_pairing(void) {
     hp_rf_spi_destroy(t);
 }
 
+/* ---- remote role ---- */
+
+/* A 32-byte remote report 0x20, byte1, 0x12, slot, inner[28]. */
+static void remote_report(uint8_t out[32], uint8_t slot, uint8_t seed) {
+    out[0] = 0x20;
+    out[1] = slot;
+    out[2] = 0x12;
+    out[3] = slot;
+    for (int i = 0; i < 28; i++) out[4 + i] = (uint8_t)(seed + i);
+}
+
+static void test_remote_wrap_and_cap(void) {
+    uint8_t in[28];
+    for (int i = 0; i < 28; i++) in[i] = (uint8_t)(0x50 + i);
+    const struct { uint8_t slot, pm, want1; } cases[] = {
+        {0, 0x00, 0x00}, {1, 0x00, 0x01}, {0, 0x30, 0x30}, {5, 0x40, 0x45}, {0x12, 0x10, 0x12}, {0, 0x0F, 0x00}};
+    for (size_t k = 0; k < sizeof cases / sizeof cases[0]; k++) {
+        fake_t f;
+        fake_init(&f);
+        hp_rf_transport *t = NULL;
+        CT_EQ(open_remote(&f, cases[k].slot, cases[k].pm, &t), 0);
+        const uint8_t init[7] = {0x10, 0xFF, 0x80, 0x00, 0x00, 0x01, 0x00};
+        CT_EQ(f.wlen[0], 7); /* init is sent in the remote role too */
+        CT_MEM_EQ(f.w[0], init, 7);
+        CT_EQ(t->claim(t->self), 0);
+        CT_EQ(t->send(t->self, in, 28), 0);
+        CT_EQ(f.wlen[1], 32);
+        CT_EQ(f.w[1][0], 0x20);
+        CT_EQ(f.w[1][1], cases[k].want1);
+        CT_EQ(f.w[1][2], 0x12);
+        CT_EQ(f.w[1][3], cases[k].slot); /* default slot 0 is the hub's pipe */
+        CT_MEM_EQ(f.w[1] + 4, in, 28);
+        CT_EQ(t->send(t->self, in, 3), 0); /* short: zero padded to 32 */
+        CT_EQ(f.wlen[2], 32);
+        for (int i = 7; i < 32; i++) CT_EQ(f.w[2][i], 0);
+        CT_EQ(t->send(t->self, in, 29), -HP_E_TOOBIG);
+        hp_rf_spi_destroy(t);
+    }
+
+    /* the 32-byte cap: nothing longer ever reaches the syscall, in either direction of the guard */
+    fake_t f;
+    fake_init(&f);
+    hp_rf_transport *t = NULL;
+    uint8_t big[64] = {0x20};
+    CT_EQ(open_remote(&f, 0, 0, &t), 0);
+    int n = f.nw;
+    CT_EQ(hp_rf_spi_write_for_test(t, big, 33), -HP_E_TOOBIG);
+    CT_EQ(hp_rf_spi_write_for_test(t, big, 64), -HP_E_TOOBIG);
+    CT_EQ(f.nw, n);
+    CT_EQ(hp_rf_spi_write_for_test(t, big, 32), 0); /* exactly the cap is fine */
+    CT_EQ(f.nw, n + 1);
+    CT_EQ(f.wlen[n], 32);
+    hp_rf_spi_destroy(t);
+    CT_EQ(HP_RF_SPI_REMOTE_WRITE_CAP, 32);
+}
+
+static void test_role_classification(void) {
+    uint8_t fr[64], hub30[30], rem32[32];
+    data_report(hub30, 1, 0x40);
+    remote_report(rem32, 0, 0x70);
+
+    /* remote role: 0x20 data in, 0x12 and malformed 0x20 dropped */
+    fake_t f;
+    fake_init(&f);
+    hp_rf_transport *t = NULL;
+    CT_EQ(open_remote(&f, 0, 0, &t), 0);
+    t->claim(t->self);
+    feed(&f, hub30, 30);
+    uint8_t bad[32];
+    memcpy(bad, rem32, 32);
+    bad[2] = 0x13; /* wrong inner marker */
+    feed(&f, bad, 32);
+    feed(&f, rem32, 31); /* wrong length */
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 100), 0);
+    CT_CHECK(!t->attached(t->self));
+    feed(&f, rem32, 32);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
+    CT_MEM_EQ(fr, rem32 + 4, 28);
+    CT_CHECK(t->attached(t->self)); /* the first data frame attaches */
+
+    /* link status in the remote role: this slot's loss, queued frames first, then NOENT once */
+    const uint8_t lost[7] = {0x10, 0x00, 0x41, 0x04, 0x40, 0x00, 0x00};
+    const uint8_t other[7] = {0x10, 0x01, 0x41, 0x04, 0x40, 0x00, 0x00};
+    feed(&f, other, sizeof other);
+    ms_sleep(30);
+    CT_CHECK(t->attached(t->self));
+    feed(&f, rem32, 32);
+    feed(&f, lost, sizeof lost);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), -HP_E_NOENT);
+    CT_CHECK(!t->attached(t->self));
+    const uint8_t up[7] = {0x10, 0x00, 0x41, 0x04, 0x01, 0x00, 0x00};
+    feed(&f, up, sizeof up);
+    wait_attached(t, true);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 20), 0);
+    hp_rf_spi_destroy(t);
+
+    /* hub role: 0x12 in, a 0x20 report is dropped */
+    fake_init(&f);
+    CT_EQ(open_fake(&f, 0, &t), 0);
+    t->claim(t->self);
+    feed(&f, rem32, 32);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 100), 0);
+    CT_CHECK(!t->attached(t->self));
+    feed(&f, hub30, 30);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
+    hp_rf_spi_destroy(t);
+}
+
+static void test_remote_pairing_refused_and_brick_safety(void) {
+    fake_t f;
+    fake_init(&f);
+    hp_rf_transport *t = NULL;
+    uint8_t fr[64], in[28] = {7};
+    CT_EQ(open_remote(&f, 0, 0x30, &t), 0);
+    t->claim(t->self);
+    uint8_t rep[32];
+    remote_report(rep, 0, 9);
+    feed(&f, rep, 32);
+    t->recv(t->self, fr, sizeof fr, 2000);
+    t->send(t->self, in, 28);
+    f.write_mode = -1;
+    t->send(t->self, in, 28);
+    f.write_mode = 0;
+    f.now += 5000;
+    int n = f.nw;
+    CT_EQ(hp_rf_spi_set_pairing(t, 60), -HP_E_INVAL);
+    CT_EQ(hp_rf_spi_unpair(t, 1), -HP_E_INVAL);
+    CT_EQ(f.nw, n); /* nothing written */
+    CT_EQ(f.nopens, 1); /* only /dev/rfspi: never /dev/rffw */
+    CT_CHECK(!strcmp(f.opens[0], "/dev/rfspi"));
+    for (int i = 0; i < f.nw && i < NW; i++) {
+        CT_CHECK(f.wlen[i] == 7 || f.wlen[i] == 32);
+        CT_CHECK(!(f.wlen[i] == 7 && f.w[i][3] == 0xB2)); /* no pair/unpair */
+        CT_CHECK(f.wlen[i] <= 32);
+    }
+    hp_rf_spi_destroy(t);
+    CT_EQ(f.nclosed, 1);
+}
+
+/* ---- two real hp_rf_link_t endpoints over the radio bridge ---- */
+
+typedef struct {
+    int n[32]; /* deliveries per message type */
+    uint8_t last[32][8];
+} sink_t;
+
+static void sink(void *ctx, const hp_rf_msg_t *m) {
+    sink_t *k = ctx;
+    if (m->type < 32) {
+        k->n[m->type]++;
+        memcpy(k->last[m->type], m->payload, m->len < 8 ? m->len : 8);
+    }
+}
+
+static void run_pumps(hp_rf_link_t *h, hp_rf_link_t *r, fake_t *fh, int steps) {
+    for (int i = 0; i < steps; i++) {
+        ms_sleep(3); /* let the reader threads move bytes */
+        fh->now += 50;
+        uint32_t now = (uint32_t)fh->now;
+        hp_rf_link_pump(h, now);
+        hp_rf_link_pump(r, now);
+    }
+}
+
+static void test_two_endpoint_link(void) {
+    for (int dropped = 0; dropped < 3; dropped++) {
+        fake_t fh, fr;
+        fake_init(&fh);
+        fake_init(&fr);
+        fr.is_remote = 1;
+        fh.peer = &fr;
+        fr.peer = &fh;
+        hp_rf_transport *th = NULL, *tr = NULL;
+        CT_EQ(open_fake(&fh, 0, &th), 0);
+        CT_EQ(open_remote(&fr, 0, 0, &tr), 0);
+        th->claim(th->self);
+        tr->claim(tr->self);
+        const uint8_t hup[7] = {0x10, 0x01, 0x41, 0x04, 0x01, 0, 0}; /* remote is slot 1 on the hub */
+        const uint8_t rup[7] = {0x10, 0x00, 0x41, 0x04, 0x01, 0, 0}; /* hub is slot 0 on the remote */
+        feed(&fh, hup, 7);
+        feed(&fr, rup, 7);
+        wait_attached(th, true);
+        wait_attached(tr, true);
+
+        sink_t hs, rs;
+        memset(&hs, 0, sizeof hs);
+        memset(&rs, 0, sizeof rs);
+        hp_rf_link_t hl, rl;
+        hp_rf_link_init(&hl, th, false, 1, sink, &hs);
+        hp_rf_link_init(&rl, tr, false, 0, sink, &rs);
+
+        fr.drop_acks = dropped; /* the remote's ack to a page_push is lost: the hub retransmits */
+        fh.drop_acks = dropped; /* the hub's ack to a key_event is lost: the remote retransmits */
+        const uint8_t key[3] = {0x11, 0x22, 0x33};
+        const uint8_t page[40] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                                  21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40};
+        CT_EQ(hp_rf_link_send(&rl, HP_MSG_KEY_EVENT, key, sizeof key, (uint32_t)fh.now), 0);
+        CT_EQ(hp_rf_link_send(&hl, HP_MSG_PAGE_PUSH, page, sizeof page, (uint32_t)fh.now), 0);
+        run_pumps(&hl, &rl, &fh, 40);
+
+        CT_EQ(hs.n[HP_MSG_KEY_EVENT], 1); /* exactly once, despite retransmits */
+        CT_MEM_EQ(hs.last[HP_MSG_KEY_EVENT], key, 3);
+        CT_EQ(rs.n[HP_MSG_PAGE_PUSH], 1);
+        CT_MEM_EQ(rs.last[HP_MSG_PAGE_PUSH], page, 8);
+        hp_rf_link_status_t st = hp_rf_link_status(&rl);
+        CT_EQ(st.queued, 0);
+        CT_EQ(st.failures, 0);
+        CT_EQ(hp_rf_link_status(&hl).failures, 0);
+        /* every remote write was a legal 32-byte frame (or the init command) */
+        for (int i = 0; i < fr.nw && i < NW; i++) CT_CHECK(fr.wlen[i] == 7 || fr.wlen[i] == 32);
+        for (int i = 0; i < fh.nw && i < NW; i++) CT_CHECK(fh.wlen[i] == 7 || fh.wlen[i] == 30);
+        hp_rf_spi_destroy(th);
+        hp_rf_spi_destroy(tr);
+    }
+}
+
 int main(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
@@ -491,6 +746,10 @@ int main(void) {
     CT_RUN(test_destroy_real_signal);
     CT_RUN(test_real_hal_check_is_decisive);
     CT_RUN(test_brick_safety_and_explicit_pairing);
+    CT_RUN(test_remote_wrap_and_cap);
+    CT_RUN(test_role_classification);
+    CT_RUN(test_remote_pairing_refused_and_brick_safety);
+    CT_RUN(test_two_endpoint_link);
     (void)nwrites;
     return CT_DONE();
 }

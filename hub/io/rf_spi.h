@@ -4,6 +4,25 @@
 /* hp_rf_transport over /dev/rfspi, the hub's CC2544 radio (docs/hardware/hub-rf-cc2544.md).
  * Every syscall goes through hp_rf_spi_ops_t, so each path is host-testable.
  *
+ * ROLES. The same driver and link layer run on the hub (HP_RF_SPI_ROLE_HUB, the default) and on the
+ * Elite remote (HP_RF_SPI_ROLE_REMOTE); the role picks codec, report id, default slot, write cap and
+ * pairing behaviour. Remote role:
+ *  - frames are 32 bytes both ways: `0x20, (slot & 0x0F) | powermode, 0x12, slot, inner[28]`; recv()
+ *    accepts only such 0x20 reports (a 0x12 report is dropped), and the first one marks attached.
+ *  - HARD 32-BYTE WRITE CAP. The remote's /dev/rfspi memcpys `count` bytes into a 32-byte kernel slab
+ *    with NO check, so a longer write overflows kernel heap. Every write goes through one site that
+ *    refuses n > 32 with -HP_E_TOOBIG before the syscall (plus a _Static_assert on the frame size).
+ *  - `powermode`: the stock value of the power-mode byte was NOT recovered. The default 0x00 is
+ *    UNVALIDATED; only the upper nibble is used. The remote app exposes it as a command-line option
+ *    so it can be tried at the bench without a rebuild.
+ *  - the slot defaults to 0 (the hub's pipe on the remote).
+ *  - hp_rf_spi_set_pairing / hp_rf_spi_unpair are host-chip operations: -HP_E_INVAL, nothing written.
+ *  - the init command `10 FF 80 00 00 01 00` is sent in both roles (measured on the remote's chip).
+ *  - link-status `10 <slot> 41 04 <status>` is assumed to have the same shape as on the hub; this is
+ *    UNVALIDATED on the remote.
+ * READER. Received entries queue in kernel heap even with no opener, so the reader thread runs for
+ * the whole time the device is open (from open() to destroy()) in both roles; do not stop it early.
+ *
  * SAFETY. Opens only /dev/rfspi (and /proc, for the preflight): never /dev/rffw, the chip-flash
  * programmer. Opening is refused, fail closed, while stock `hal` is alive OR when that cannot be
  * determined (-HP_E_HALBUSY; run `tools/deploy_hub.py quiesce`). Pairing / unpair commands are
@@ -34,7 +53,9 @@
 #include "hub/io/sinks.h"
 
 #define HP_RF_SPI_DEV "/dev/rfspi"
-#define HP_RF_SPI_SLOT 1 /* the single paired remote (measured pipe table) */
+#define HP_RF_SPI_SLOT 1        /* hub role: the single paired remote (measured pipe table) */
+#define HP_RF_SPI_REMOTE_SLOT 0 /* remote role: the hub is in the remote's slot 0 (measured pipe table) */
+#define HP_RF_SPI_REMOTE_WRITE_CAP 32 /* the remote driver's kernel slab: see ROLES */
 #define HP_RF_SPI_BACKOFF_MIN_MS 50
 #define HP_RF_SPI_BACKOFF_MAX_MS 1000
 
@@ -51,10 +72,14 @@ typedef struct hp_rf_spi_ops {
     void (*interrupt)(void *ctx, pthread_t reader);
 } hp_rf_spi_ops_t;
 
+typedef enum { HP_RF_SPI_ROLE_HUB = 0, HP_RF_SPI_ROLE_REMOTE = 1 } hp_rf_spi_role_t;
+
 typedef struct {
     const char *dev_path;        /* NULL = /dev/rfspi */
-    uint8_t slot;                /* remote's slot; 0 = HP_RF_SPI_SLOT */
+    uint8_t slot;                /* peer slot; 0 = the role's default (hub: 1, remote: 0) */
     const hp_rf_spi_ops_t *ops;  /* NULL = real syscalls */
+    hp_rf_spi_role_t role;       /* default HP_RF_SPI_ROLE_HUB */
+    uint8_t powermode;           /* remote role only: upper-nibble value OR'd into frame byte 1 */
 } hp_rf_spi_cfg_t;
 
 /* The real syscalls (hal preflight walks /proc). Tests copy it and override fields. */
@@ -67,6 +92,10 @@ int hp_rf_spi_open(const hp_rf_spi_cfg_t *cfg, hp_rf_transport **out);
 void hp_rf_spi_destroy(hp_rf_transport *t);
 /* Readable when recv() has something (frame or link-loss) to return; -1 if t is not an rf_spi. */
 int hp_rf_spi_wake_fd(const hp_rf_transport *t);
+
+/* Test seam: the guarded single write site, so a test can prove an over-long write never reaches
+ * the syscall. Not for production use. */
+int hp_rf_spi_write_for_test(hp_rf_transport *t, const uint8_t *buf, size_t n);
 
 /* Explicit-only radio commands. 0, -HP_E_INVAL, -HP_E_BUSY (write backoff), -HP_E_IO. */
 int hp_rf_spi_set_pairing(hp_rf_transport *t, unsigned seconds); /* 10 FF 80 B2 01 00 <secs>, secs 1..255 */

@@ -33,10 +33,12 @@ add_library(hp_core STATIC
   hub/rf/framing.c
   hub/rf/link.c
   hub/rf/rf_payload.c
+  hub/io/rf_spi.c
   remote/page/page.c
 )
 target_include_directories(hp_core PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(hp_core PUBLIC m)
+find_package(Threads REQUIRED)
+target_link_libraries(hp_core PUBLIC m Threads::Threads)
 
 if(CMAKE_CROSSCOMPILING AND HP_TARGET STREQUAL "remote")
   # Remote firmware: shared core + entry stub; no host-only tools/tests.
@@ -64,7 +66,6 @@ add_library(hp_hub STATIC
   hub/io/sim_sinks.c
   hub/io/hw_sinks.c
   hub/io/rf_pair.c
-  hub/io/rf_spi.c
   hub/ir/encode.c
   hub/hub_handlers.c
 )
