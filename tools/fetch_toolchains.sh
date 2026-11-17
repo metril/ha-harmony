@@ -5,7 +5,10 @@
 #          float). The hub is an AR9330 (MIPS 24Kc) with no FPU and a kernel
 #          without FP emulation, so a hard-float binary dies with SIGILL.
 #          Bootlin publishes no soft-float big-endian mips32 toolchain.
-#   remote Bootlin armv5-eabi uclibc.
+#   remote Bootlin armv5-eabi MUSL, not uclibc. The Elite runs Linux 2.6.37, and
+#          uClibc-ng 1.0.54 calls statx (4.11+) and clock_gettime64 (5.1+) with
+#          no fallback, so stat/opendir/clock_gettime all fail with ENOSYS there.
+#          musl retries the old syscalls on ENOSYS (verified on the Elite).
 #
 # The pins here must match .github/workflows/ci.yml, so a local cross-build and
 # CI use the same compiler. Installs to vendor/toolchains/<arch>/ (gitignored),
@@ -30,8 +33,8 @@ MIPS_ARCH=mips_24kc
 MIPS_URL=https://downloads.openwrt.org/releases/24.10.0/targets/ath79/generic/openwrt-toolchain-24.10.0-ath79-generic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 MIPS_SHA=ef3087ea607f52f5127c9d0bd74581f78ba26093f29b6330951117676eb66207
 ARM_ARCH=armv5-eabi
-ARM_TC=armv5-eabi--uclibc--stable-2025.08-1
-ARM_SHA=e5415d32b39e94bf7b990ea4ead3619bf7055e338309d2cce2b6de2dd7307f12
+ARM_TC=armv5-eabi--musl--stable-2025.08-1
+ARM_SHA=8cdb4ad70c6b5a66427fa3315fe3ddde1c19c90232674dec59045e04d2a36cf1
 ARM_URL=https://toolchains.bootlin.com/downloads/releases/toolchains/armv5-eabi/tarballs/$ARM_TC.tar.xz
 
 while [ $# -gt 0 ]; do

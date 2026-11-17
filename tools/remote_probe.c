@@ -17,6 +17,7 @@
 #include <sys/types.h>
 
 #include <linux/fb.h>
+#include <linux/ioctl.h> /* _IOC_* decoders: musl does not expose them via <sys/ioctl.h> */
 #include <linux/input.h>
 
 #define RPR_FB "/dev/fb0"

@@ -33,7 +33,12 @@ xdist-safe.
   ~150-line RGB565 flush to an `mmap`ed `/dev/fb0` (double-buffered by y-pan; virtual height is 960)
   and our own evdev reader, so the dependency stays render-only. **No SDL**: host tests render pages
   into a memory framebuffer and compare a hash against golden vectors.
-- **Static linking on the remote** (uClibc-ng 1.0.54 vs stock uClibc 0.9.30.1 — dynamic cannot work).
+- **Static linking on the remote, with musl** (Bootlin `armv5-eabi--musl--stable-2025.08-1`). Not
+  uClibc-ng: measured on the Elite 2026-11-17, uClibc-ng 1.0.54 binaries get **ENOSYS** from `stat`,
+  `fstat`, `opendir` and `clock_gettime`, because it calls `statx` (Linux 4.11+) and
+  `clock_gettime64` (5.1+) with no fallback, and the Elite runs 2.6.37. musl retries the old syscalls
+  on ENOSYS; the same test passes with it. Dynamic linking against stock uClibc 0.9.30.1 cannot work
+  either. `remote-arm.cmake` refuses a non-musl sysroot.
 - **RF object layer is ours, inner layout is stock's.** Inner block: `hdr = kind(0x20 object,
   0x40 ack, 0x60 continuation) | 0x10 on an object's first frame | seq(4 bit)`, `type`, `flags`,
   `payload[25]`. Objects are `len(1) + body`, split into 25-byte chunks, **stop-and-wait with one

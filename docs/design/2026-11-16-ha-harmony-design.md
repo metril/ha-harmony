@@ -65,7 +65,7 @@ Known hardware (from harmony-ng docs):
 
 ## Decisions
 - **Model: middle-ground hub.** HA owns config/logic; HA compiles button→IR/BT mapping tables + activity steps and pushes them to hub; hub executes locally (instant, works when HA down), reports every press/gesture to HA as events. Non-IR/BT actions go through HA.
-- **Stock kernels v1**, userspace only, **C11** static (uClibc, Bootlin toolchains). New hub kernel (OpenWrt ath79 + own CC2544/IR drivers) = later phase, requires USB-UART adapter.
+- **Stock kernels v1**, userspace only, **C11** static (musl on both: OpenWrt's for the hub, Bootlin armv5-eabi musl for the remote — uClibc-ng gets ENOSYS on the Elite's 2.6.37 kernel). New hub kernel (OpenWrt ath79 + own CC2544/IR drivers) = later phase, requires USB-UART adapter.
 - **HA link:** custom integration (HACS-style `custom_components/`) ↔ hub WebSocket (token auth, mDNS discovery).
 - **Remote UI:** pages defined in HA (YAML/options flow: entity tiles, button grids, now-playing, activities), pushed to remote, rendered natively with **LVGL** on fbdev.
 - **BT:** BTstack library (personal-use licence OK) over `/dev/ttyATH0`, HID device role for Apple TV/Shield.

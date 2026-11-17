@@ -78,11 +78,11 @@ jobs:
             binary: hub
             expect: 'ELF 32-bit MSB.*MIPS.*statically linked'
           - name: arm
-            toolchain: armv5-eabi--uclibc--stable-2025.08-1
-            url: https://toolchains.bootlin.com/downloads/releases/toolchains/armv5-eabi/tarballs/armv5-eabi--uclibc--stable-2025.08-1.tar.xz
+            toolchain: armv5-eabi--musl--stable-2025.08-1
+            url: https://toolchains.bootlin.com/downloads/releases/toolchains/armv5-eabi/tarballs/armv5-eabi--musl--stable-2025.08-1.tar.xz
             strip: 1
             tar_flag: -J
-            sha256: e5415d32b39e94bf7b990ea4ead3619bf7055e338309d2cce2b6de2dd7307f12
+            sha256: 8cdb4ad70c6b5a66427fa3315fe3ddde1c19c90232674dec59045e04d2a36cf1
             tc_file: remote-arm
             binary: remote
             expect: 'ELF 32-bit LSB.*ARM.*statically linked'
