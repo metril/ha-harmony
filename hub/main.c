@@ -74,6 +74,7 @@ static int bad_num(const char *flag, const char *val) {
 
 int main(int argc, char **argv) {
     bool sim = false, rf_spi = false;
+    long rf_slot = 0; /* 0 = driver default; the Elite measured as HID++ device 2 on this hub */
     long port = 8099;
     const char *token = NULL;
     const char *cache = NULL;
@@ -93,6 +94,15 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--state") && i + 1 < argc) state = argv[++i];
         else if (!strcmp(argv[i], "--rf") && i + 1 < argc) rf_path = argv[++i];
         else if (!strcmp(argv[i], "--rf-spi")) rf_spi = true;
+        else if (!strcmp(argv[i], "--rf-slot") && i + 1 < argc) {
+            char *end = NULL;
+            const char *v = argv[++i];
+            rf_slot = strtol(v, &end, 10);
+            if (!*v || !end || *end || rf_slot < 1 || rf_slot > 15) {
+                fprintf(stderr, "hub: --rf-slot %s: must be 1..15 (the remote's HID++ device index)\n", v);
+                return 2;
+            }
+        }
         else if (!strcmp(argv[i], "--hub-id") && i + 1 < argc) hub_id = argv[++i];
         else if (!strcmp(argv[i], "--fw-version") && i + 1 < argc) fw_version = argv[++i];
         else if (!strcmp(argv[i], "--ir-ports") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 255, &ir_ports)) return bad_num("--ir-ports", argv[i]); }
@@ -104,7 +114,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--auth-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &auth_ms)) return bad_num("--auth-timeout-ms", argv[i]); }
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
-            fprintf(stderr, "usage: hub [--sim] [--port N] --token T [--cache PATH] [--state PATH] [--rf PATH | --rf-spi] "
+            fprintf(stderr, "usage: hub [--sim] [--port N] --token T [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N]] "
                             "[--hub-id ID] [--fw-version V] [--ir-ports MASK] "
                             "[--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P]\n");
@@ -138,7 +148,7 @@ int main(int argc, char **argv) {
         hp_sim_init(&g_sim, stdout);
         g_hub.sinks = hp_sim_sinks(&g_sim);
     } else {
-        hp_rf_spi_cfg_t rc_cfg = {NULL, 0, NULL, HP_RF_SPI_ROLE_HUB, 0};
+        hp_rf_spi_cfg_t rc_cfg = {NULL, (uint8_t)rf_slot, NULL, HP_RF_SPI_ROLE_HUB, 0};
         hp_hw_cfg_t hc = {NULL, (uint8_t)ir_ports, NULL, rf_spi ? &rc_cfg : NULL};
         int hr = hp_hw_sinks_open(&hc, &g_hw);
         if (hr == -HP_E_HALBUSY) {

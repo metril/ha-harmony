@@ -171,6 +171,9 @@ def test_real_backend_without_i2s_exits_nonzero(built_binaries):
         ("--auth-timeout-ms", "abc"),
         ("--idle-timeout-ms", "0"),
         ("--idle-timeout-ms", "9999999999"),
+        ("--rf-slot", "0"),
+        ("--rf-slot", "16"),
+        ("--rf-slot", "x"),
     ],
 )
 def test_bad_numeric_flag_exits_2(built_binaries, flag, val):
