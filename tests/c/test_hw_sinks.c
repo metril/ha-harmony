@@ -152,6 +152,38 @@ static void test_golden(void) {
     golden("samsung", SAMSUNG, LEN(SAMSUNG), 37900, 1, 49152, 6144, 0x0036f999, 12, 2199, 0xaf77ed7d);
     golden("toshiba", TOSHIBA, LEN(TOSHIBA), 38000, 1, 49232, 6154, 0x0036d333, 12, 2193, 0xffdd5435);
     golden("syn100", SYN100, LEN(SYN100), 100000, 1, 22544, 2818, 0x00190000, 10, 1000, 0xa17ce287);
+    /* The N table has five branches and the stock database only ever reaches N=12 (every extracted
+     * code is 37.9/38 kHz). The rest are reachable only through hand-written `raw: {hz, us}` config
+     * and the Flipper/Pronto/SmartIR importers, so they get golden vectors too. 455 kHz is Bang &
+     * Olufsen's real carrier; 350/420 kHz stand in for the N=8 and N=4 branches. */
+    golden("n8_350k", SYN100, LEN(SYN100), 350000, 1, 63040, 7880, 0x0008f333, 8, 358, 0xc9f2cf85);
+    golden("n4_420k", SYN100, LEN(SYN100), 420000, 1, 37840, 4730, 0x000ee666, 4, 596, 0x2aba0871);
+    /* N=2 quantises duty to 50 %: pulse = (33*2+99)/100 = 1 of 2 bits. Nothing nearer to 33 % exists
+     * at this carrier, so a 455 kHz mark is a square wave by construction, not by a bug. */
+    golden("n2_455k", SYN100, LEN(SYN100), 455000, 1, 20512, 2564, 0x001b7999, 2, 1099, 0xad385ff5);
+}
+
+/* Every boundary of the N table, from both sides. A wrong comparison here silently changes the
+ * carrier of any imported code near the edge, and no stock code would ever catch it. */
+static void test_carrier_branches(void) {
+    static const struct { uint32_t hz, x, n; } B[] = {
+        {444346, 2250, 2},  {444149, 2251, 4},   /* X < 2251  */
+        {399921, 2500, 4},  {399761, 2501, 8},   /* X < 2501  */
+        {333389, 2999, 8},  {333278, 3000, 10},  /* X < 3000  */
+        { 83337, 11999, 10}, {83330, 12000, 12}, /* X < 12000 */
+    };
+    static uint8_t buf[HP_HW_RING_BYTES];
+    hp_hw_wave_t w;
+    for (size_t i = 0; i < LEN(B); i++) {
+        CHECK(hp_hw_ir_build(SYN100, LEN(SYN100), B[i].hz, 1, buf, sizeof buf, &w) == 0);
+        CHECK(w.period_ns == B[i].x && w.n == B[i].n);
+        /* bit_ns is the carrier period split N ways, rounded up, and the divider tracks it. */
+        CHECK(w.bit_ns == (B[i].x + B[i].n - 1) / B[i].n);
+        CHECK(w.divider == (uint32_t)(((uint64_t)w.bit_ns << 16) / 40));
+    }
+    /* Outside the supported range nothing is built. */
+    CHECK(hp_hw_ir_build(SYN100, LEN(SYN100), 8999, 1, buf, sizeof buf, &w) == -HP_E_INVAL);
+    CHECK(hp_hw_ir_build(SYN100, LEN(SYN100), 500001, 1, buf, sizeof buf, &w) == -HP_E_INVAL);
 }
 
 static void test_sequence(void) {
@@ -287,6 +319,7 @@ int main(int argc, char **argv) {
     g_bench = argv[1];
     g_h = calloc(1, sizeof *g_h);
     test_golden();
+    test_carrier_branches();
     test_sequence();
     test_ports();
     test_writes();

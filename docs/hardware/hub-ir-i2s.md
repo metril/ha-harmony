@@ -351,8 +351,18 @@ wrapper @0x407858 (`nor`), i.e. received bits are active-low.
 ## 8. Unknowns and cheapest experiments
 
 Superseded by sections 9b (what the hardware settled) and 12 (what is left). Remaining unknowns:
-what GPIO28 and GPIO13 gate; idle level; underrun behaviour; carriers that need N != 12 (only
-37900 Hz has been driven); the IR **capture** path (section 11, never run).
+what GPIO28 and GPIO13 gate; idle level; underrun behaviour; the IR **capture** path (section 11,
+never run).
+
+**Carriers other than 37.9/38 kHz** are now covered in software but not on the wire. Every stock code
+is N=12, so the other four branches of the N table are reachable only through hand-written
+`raw: {hz, us}` config and the importers. `tests/c/test_hw_sinks.c` therefore pins golden vectors at
+N=8 (350 kHz), N=4 (420 kHz) and N=2 (455 kHz, Bang & Olufsen's real carrier) alongside the existing
+N=12 and N=10 ones, plus both sides of all four `N` boundaries, each cross-checked byte-for-byte
+against `ir_bench` and verified identical on x86-64 and big-endian MIPS. Note N=2 quantises duty to
+50 %: `pulse = (33*2+99)/100 = 1` of 2 bits, so a 455 kHz mark is necessarily a square wave. What
+remains unverified is only whether such a carrier is reproduced correctly **by the hardware**, which
+needs a device that uses one.
 
 ## 9. Bench result (2026-11-16, live hub) - SUCCESS CLAIM RETRACTED
 
