@@ -47,3 +47,15 @@ add_test(NAME rf_probe COMMAND test_rf_probe)
 add_executable(test_remote_probe test_remote_probe.c)
 target_include_directories(test_remote_probe PRIVATE ${CMAKE_SOURCE_DIR})
 add_test(NAME remote_probe COMMAND test_remote_probe)
+
+# Remote app (LVGL render, evdev input, power): host-only through the injected syscall seam.
+if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
+  foreach(t remote_input remote_power remote_render remote_app)
+    add_executable(test_${t} test_${t}.c)
+    target_link_libraries(test_${t} PRIVATE hp_remote_app hp_hub)
+    add_test(NAME ${t} COMMAND test_${t})
+  endforeach()
+  target_compile_definitions(test_remote_render PRIVATE
+    HP_PAGES_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json"
+    HP_RENDER_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/remote_render.json")
+endif()

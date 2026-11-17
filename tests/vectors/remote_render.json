@@ -1,0 +1,12 @@
+{
+ "hash": "fnv1a-64 over the 240x320 RGB565 framebuffer (153600 bytes, little-endian)",
+ "pages": {
+  "empty": "8d6cf8f17a427325",
+  "one_button": "e4dd45c274cd86cf",
+  "mixed": "aa965748a6ca030c",
+  "max_widgets": "8d6cf8f17a427325",
+  "max_label": "5b375337970275e5",
+  "corner_16x16": "8334ea3d360ede29",
+  "max_size_15x15": "ac8f62d70bdb2f65"
+ }
+}
