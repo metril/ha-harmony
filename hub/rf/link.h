@@ -22,6 +22,9 @@
 #define HP_LINK_QUEUE 8
 #define HP_LINK_GAP_MS 20     /* default minimum gap between the frames of one object */
 #define HP_LINK_SLOT_ANY 0xFF /* tx_slot: accept a TX status for any slot */
+#define HP_LINK_OUT_TIMEOUT_MS 300 /* strict downlink: a written frame with no TX status is taken as done after this */
+#define HP_LINK_POLL_MS 30         /* remote polling: gap while an object awaits its ack */
+#define HP_LINK_IDLE_POLL_MS 250   /* ...and otherwise, while awake */
 
 typedef void (*hp_rf_link_deliver_fn)(void *ctx, const hp_rf_msg_t *msg);
 
@@ -60,6 +63,22 @@ typedef struct {
     hp_rf_link_log_fn log; /* NULL = off (per-object debug events) */
     void *log_ctx;
     uint32_t now_dbg;      /* last caller clock, for log lines only */
+    uint32_t rx_frames;    /* frames received from the peer (any kind, polls included), monotonic */
+    uint32_t last_tx;      /* clock of the last frame handed to the transport */
+    /* Remote polling (set_poll/set_awake): a poll frame whenever nothing was sent for poll_ms while an
+     * object awaits its ack, else idle_poll_ms, only while awake. The peer's downlink rides on our uplink. */
+    uint32_t poll_ms, idle_poll_ms;
+    bool awake;
+    /* Strict downlink (hub; `strict` set after init, effective only when the transport has tx_status):
+     * at most one frame is in the radio. The next one is written after TX status 00 for it; on 01 it is
+     * kept and rewritten once the link is up. Acks go first and coalesce (newest replaces an unwritten
+     * one). Object retries and the link-loss reset do not run while a frame is outstanding / the link is down. */
+    bool strict;
+    bool out_busy, out_ack;
+    hp_rf_inner_t out_fr;
+    uint32_t out_at;
+    bool pa_v, pd_v;       /* a pending (unwritten) ack / data frame */
+    hp_rf_inner_t pa, pd;
 } hp_rf_link_t;
 
 typedef struct {
@@ -71,6 +90,11 @@ typedef struct {
 /* `tp` must already be claimed by the caller. deliver may be NULL (objects dropped). */
 void hp_rf_link_init(hp_rf_link_t *l, hp_rf_transport *tp, bool wrapped, uint8_t slot,
                      hp_rf_link_deliver_fn deliver, void *ctx);
+
+/* Remote side: enables polling (poll_ms 0 = off). Idle 0 = same as poll_ms. */
+void hp_rf_link_set_poll(hp_rf_link_t *l, uint32_t poll_ms, uint32_t idle_poll_ms);
+/* Polling runs only while awake; waking polls at once. */
+void hp_rf_link_set_awake(hp_rf_link_t *l, bool awake, uint32_t now_ms);
 
 /* Enables per-object debug logging (send/frame/ack/retry/fail/deliver); fn NULL turns it off. */
 void hp_rf_link_set_log(hp_rf_link_t *l, hp_rf_link_log_fn fn, void *ctx);

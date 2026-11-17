@@ -71,11 +71,45 @@ static void test_fallback_only_on_link_failure(void) {
   CT_CHECK(!app.ui.fallback);
   CT_EQ(app.ui.page.page_id, 1);
   CT_EQ(app.state_updates, 1);
-  /* only a send failure after retries does */
+  /* a send failure alone does not: it takes 3 in a row AND 5 s without a word from the hub */
   fkl_push_kind(&lk, APP_LINK_EV_FAILED);
-  step_at(302000);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  step_at(302000); /* the state_update above counts as the hub speaking, at 301000 */
+  CT_CHECK(!app.ui.fallback);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  step_at(306100);
   CT_CHECK(app.ui.fallback);
   CT_EQ(app.ui.page.page_id, RA_UI_PAGE_FALLBACK);
+  /* any hub frame brings the last real page back (tile updates meanwhile land in the saved copy) */
+  fkl_push_kind(&lk, APP_LINK_EV_ALIVE);
+  step_at(306200);
+  CT_CHECK(!app.ui.fallback);
+  CT_EQ(app.ui.page.page_id, 1);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  step_at(312000);
+  CT_CHECK(app.ui.fallback);
+  /* a successful object in between resets the run: heard = alive */
+  fkl_push_kind(&lk, APP_LINK_EV_ALIVE);
+  step_at(312100);
+  CT_CHECK(!app.ui.fallback);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  fkl_push_kind(&lk, APP_LINK_EV_ALIVE);
+  fkl_push_kind(&lk, APP_LINK_EV_FAILED);
+  step_at(330000);
+  CT_CHECK(!app.ui.fallback);
+  /* a fatal failure (no radio at all) shows it at once */
+  app_link_event_t *fe = &lk.q[lk.nq++];
+  memset(fe, 0, sizeof *fe);
+  fe->kind = APP_LINK_EV_FAILED;
+  fe->fatal = true;
+  step_at(330100);
+  CT_CHECK(app.ui.fallback);
   /* a fresh page pushed after recovery replaces it */
   fkl_push_page(&lk, PAGE2, sizeof PAGE2);
   step_at(303000);
@@ -89,6 +123,26 @@ static void test_fallback_only_on_link_failure(void) {
   strcpy(e->text, "72 F");
   step_at(304000);
   CT_CHECK(!strcmp(app.ui.page.widgets[0].text, "72 F"));
+  app_destroy(&app);
+}
+
+static void test_unblank_and_awake(void) {
+  CT_EQ(start(NULL), 0);
+  CT_EQ(fk.nblank, 1); /* the panel stays dark until FBIOBLANK(UNBLANK) */
+  CT_EQ(fk.blank_arg, FB_BLANK_UNBLANK);
+  CT_CHECK(fk_log_is_safe(&fk, NULL));
+  step_at(1000);
+  CT_EQ(lk.nawake, 1);
+  CT_CHECK(lk.awake); /* awake while the backlight is on */
+  for (uint64_t t = 2000; t < 40000; t += 1000) step_at(t);
+  CT_EQ(app.power.state, RA_PW_OFF);
+  CT_CHECK(!lk.awake); /* asleep: the link must not poll */
+  int n = lk.nawake;
+  step_at(41000);
+  CT_EQ(lk.nawake, n); /* only changes are reported */
+  fk_key(&fk, 0, 115, 1); /* a press wakes it */
+  step_at(42000);
+  CT_CHECK(lk.awake);
   app_destroy(&app);
 }
 
@@ -239,6 +293,7 @@ static void test_full_session_is_safe(void) {
 int main(void) {
   CT_RUN(test_refuses_wrong_panel);
   CT_RUN(test_fallback_only_on_link_failure);
+  CT_RUN(test_unblank_and_awake);
   CT_RUN(test_bootcount);
   CT_RUN(test_seam_refuses);
   CT_RUN(test_full_session_is_safe);

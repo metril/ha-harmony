@@ -569,8 +569,8 @@ async def test_services(hass, hub_rf, write_yaml):
         )
     with pytest.raises(ServiceValidationError):
         await call(const.DOMAIN, "push_pages", {"config_entry": "missing"}, blocking=True)
-    await call(const.DOMAIN, "push_pages", {}, blocking=True)  # no remote attached: no error
-    assert entry.runtime_data._pages_pending
+    await call(const.DOMAIN, "push_pages", {}, blocking=True)  # no remote attached: held by the hub, no error
+    assert not entry.runtime_data._pages_pending  # the hub holds the pages until the remote links up
     await hass.config_entries.async_unload(entry.entry_id)
 
 

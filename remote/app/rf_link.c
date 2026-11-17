@@ -17,10 +17,14 @@ static app_link_event_t *ring_push(rf_link_t *l) {
   return e;
 }
 
-static void raise_failed(rf_link_t *l) {
+static void raise_failed_ex(rf_link_t *l, bool fatal) {
   app_link_event_t *e = ring_push(l);
-  if (e) e->kind = APP_LINK_EV_FAILED;
+  if (e) {
+    e->kind = APP_LINK_EV_FAILED;
+    e->fatal = fatal;
+  }
 }
+static void raise_failed(rf_link_t *l) { raise_failed_ex(l, false); }
 
 static void deliver(void *ctx, const hp_rf_msg_t *m) {
   rf_link_t *l = ctx;
@@ -125,11 +129,16 @@ static void service(rf_link_t *l, uint64_t now) {
   if (!l->tp) {
     if (!l->dead_reported) {
       l->dead_reported = true;
-      raise_failed(l);
+      raise_failed_ex(l, true); /* no radio at all: say so at once */
     }
     return;
   }
   int rc = hp_rf_link_pump(&l->link, t32(now));
+  if (l->link.rx_frames != l->seen_rx) { /* something came from the hub */
+    l->seen_rx = l->link.rx_frames;
+    app_link_event_t *e = ring_push(l);
+    if (e) e->kind = APP_LINK_EV_ALIVE;
+  }
   if (rc == -HP_E_IO) ra_logf(&l->sys, "rf_link: link dead");
   bool att = l->tp->attached ? l->tp->attached(l->tp->self) : l->was_attached;
   if (att && l->lost) { /* re-attached after a loss: tell the hub we are here */
@@ -164,6 +173,11 @@ static int rf_get_fd(void *ctx) {
   return l->tp ? hp_rf_spi_wake_fd(l->tp) : -1;
 }
 
+static void rf_set_awake(void *ctx, bool awake) {
+  rf_link_t *l = ctx;
+  if (l->tp) hp_rf_link_set_awake(&l->link, awake, t32(l->sys.ops.now_ms(l->sys.ops.ctx)));
+}
+
 static uint32_t rf_next_ms(void *ctx, uint64_t now) {
   rf_link_t *l = ctx;
   if (l->n || (!l->tp && !l->dead_reported)) return 0;
@@ -194,6 +208,7 @@ int rf_link_open(rf_link_t *l, const hp_rf_spi_cfg_t *cfg) {
   l->tp = tp;
   l->lt = (hp_rf_transport){l, lt_send, lt_recv, lt_claim, NULL, lt_tx_status};
   hp_rf_link_init(&l->link, &l->lt, false, 0, deliver, l);
+  hp_rf_link_set_poll(&l->link, RF_LINK_POLL_MS, RF_LINK_IDLE_POLL_MS); /* active once the app reports awake */
   if (cfg->debug) hp_rf_link_set_log(&l->link, cfg->log ? cfg->log : hp_rf_log_stderr, cfg->log_ctx);
   l->next_batt_ms = 0; /* first heartbeat on the first poll */
   l->dead_reported = false;
@@ -207,5 +222,6 @@ void rf_link_close(rf_link_t *l) {
 }
 
 app_link_t rf_link_app(rf_link_t *l) {
-  return (app_link_t){.ctx = l, .send_key = rf_send_key, .poll = rf_poll, .get_fd = rf_get_fd, .next_ms = rf_next_ms};
+  return (app_link_t){.ctx = l, .send_key = rf_send_key, .poll = rf_poll, .get_fd = rf_get_fd, .next_ms = rf_next_ms,
+                      .set_awake = rf_set_awake};
 }

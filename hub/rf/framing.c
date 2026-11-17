@@ -40,6 +40,12 @@ void hp_rf_make_ack(uint8_t type, uint8_t seq, hp_rf_inner_t *out)
     out->b[1] = type;
 }
 
+void hp_rf_make_poll(hp_rf_inner_t *out)
+{
+    memset(out->b, 0, HP_RF_INNER_LEN);
+    out->b[0] = HP_RF_KIND_POLL;
+}
+
 void hp_rf_wrap_hub(uint8_t slot, const hp_rf_inner_t *in, hp_rf_frame_t *out)
 {
     out->data[0] = 0x12;
@@ -94,6 +100,7 @@ int hp_rf_asm_push(hp_rf_asm_t *a, const hp_rf_inner_t *in, hp_rf_msg_t *out, hp
     uint8_t kind = b[0] & KIND_MASK, seq = b[0] & SEQ_MASK, type = b[1];
     int first = (b[0] & HP_RF_FLAG_FIRST) != 0;
 
+    if (kind == HP_RF_KIND_POLL) return HP_ASM_POLL;
     if (kind == HP_RF_KIND_ACK) {
         out->type = (hp_msg_type_t)type;
         out->seq = seq;

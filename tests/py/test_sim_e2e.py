@@ -82,14 +82,15 @@ async def test_page_push_without_remote(hub_rf):
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_rf.url) as ws:
         await hello(ws)
         r = await call(ws, "page_push", {"remote": 1, "page": 1, "data": "AAAA"}, id=7)
-        assert r["t"] == "error" and r["d"]["code"] == "no_remote"
+        # held for the remote's next link-up: a plain ok
+        assert r["t"] == "command_result" and r["d"]["ok"] is True and r["id"] == 7
 
 
 async def test_page_push_without_rf_socket(hub_process):
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
         await hello(ws)
         r = await call(ws, "page_push", {"remote": 1, "page": 1, "data": "AAAA"}, id=7)
-        assert r["d"]["code"] == "no_remote"
+        assert r["t"] == "command_result" and r["d"]["ok"] is True  # no peer yet: held
 
 
 async def test_second_remote_refused(hub_rf, run_remote, start_remote_dump):

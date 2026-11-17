@@ -430,6 +430,13 @@ static void test_peer_that_never_acks_shows_fallback_only(void) {
   CT_CHECK(!app.ui.fallback); /* retries are still running */
   CT_CHECK(rec_ms <= 150);    /* the link's retry deadline bounds the wait */
   for (int i = 0; i < 4; i++) tick(160);
+  CT_CHECK(!app.ui.fallback); /* one failed object is not enough... */
+  for (int k = 0; k < 2; k++) { /* ...it takes three in a row, and 5 s without hearing the hub */
+    fk_key(&fk, 0, 115, 0);
+    for (int i = 0; i < 5; i++) tick(1100);
+    fk_key(&fk, 0, 115, 1);
+    for (int i = 0; i < 4; i++) tick(160);
+  }
   CT_CHECK(app.ui.fallback);
   CT_EQ(app.ui.page.page_id, RA_UI_PAGE_FALLBACK);
   CT_EQ(nhkeys, keys); /* nothing got through, and nothing else was delivered */
@@ -471,6 +478,35 @@ static void test_idle_link_is_silent_and_heartbeats(void) {
   teardown();
 }
 
+/* inner kind of each frame the remote wrote */
+static int count_remote_writes(uint8_t kind) {
+  int n = 0;
+  for (int i = 0; i < fr.nw && i < 512; i++)
+    if (fr.w[i].len == 32 && fr.w[i].head[4] == kind) n++;
+  return n;
+}
+
+static void test_polls_only_while_awake(void) {
+  setup();
+  WAIT_FOR(nhbatt == 1);
+  DRAIN();
+  int p0 = count_remote_writes(HP_RF_KIND_POLL);
+  for (int i = 0; i < 20; i++) tick(RF_LINK_IDLE_POLL_MS); /* 5 s awake and idle */
+  int awake_polls = count_remote_writes(HP_RF_KIND_POLL) - p0;
+  CT_CHECK(awake_polls >= 15 && awake_polls <= 22);
+  CT_EQ(nhother, 0); /* the hub ignored every poll: no delivery, no ack */
+  CT_EQ(hp_rf_link_status(&hub_link).delivered, 1u);
+  for (int i = 0; i < 40; i++) tick(1000); /* idle past the backlight-off time */
+  CT_EQ(app.power.state, RA_PW_OFF);
+  int p1 = count_remote_writes(HP_RF_KIND_POLL);
+  for (int i = 0; i < 20; i++) tick(1000); /* asleep: silence */
+  CT_EQ(count_remote_writes(HP_RF_KIND_POLL), p1);
+  fk_key(&fk, 0, 115, 1); /* wakes; the press itself is consumed */
+  for (int i = 0; i < 4; i++) tick(RF_LINK_IDLE_POLL_MS);
+  CT_CHECK(count_remote_writes(HP_RF_KIND_POLL) > p1);
+  teardown();
+}
+
 static void test_heartbeat_unreadable_soc(void) {
   /* never had a reading: nothing honest to send, retried every 5 s */
   CT_EQ(setup_ex(0, 1), 0);
@@ -503,7 +539,7 @@ static void test_wait_includes_link_fd_and_deadline(void) {
   CT_EQ(rec_n, 3);
   CT_EQ(rec_fd[2], hp_rf_spi_wake_fd(rf.tp));
   CT_CHECK(rec_fd[2] >= 0);
-  CT_CHECK(rec_ms >= 1000 && rec_ms <= APP_LINK_IDLE_WAIT_MS); /* idle: rare wakeups, still capped */
+  CT_CHECK(rec_ms <= RF_LINK_IDLE_POLL_MS); /* idle: woken for the next poll, never later */
   fr.drop_all = 1;
   fk_key(&fk, 0, 115, 1);
   tick(1);
@@ -684,6 +720,7 @@ int main(void) {
   CT_RUN(test_tile_update_changes_render);
   CT_RUN(test_dropped_ack_delivers_once);
   CT_RUN(test_peer_that_never_acks_shows_fallback_only);
+  CT_RUN(test_polls_only_while_awake);
   CT_RUN(test_idle_link_is_silent_and_heartbeats);
   CT_RUN(test_heartbeat_unreadable_soc);
   CT_RUN(test_wait_includes_link_fd_and_deadline);

@@ -309,6 +309,22 @@ framing it.
 
 After transmissions the hub's radio delivers 32-byte reports `20 <slot> 42 <status> 00 ...` (slot 2, status 00 or 01). What 00 vs 01 mean is not known, so the driver only passes them on (`hp_rf_transport.tx_status`). Remote to hub objects (single frame) worked; the 2-frame hub to remote `page_push` did not arrive, so the link now paces multi-frame objects: frame N+1 follows a TX status for the previous frame, or a 20 ms gap (`hp_rf_link_t.gap_ms`), whichever is first. Object ack + retry remain the source of truth. Link status is logged once per transition. `--rf-debug` (hub and remote app) logs every write/read as `rf_spi <ms> TX|RX <rc/len>: <hex>` plus per-object link events.
 
+### 8c. Downlink piggyback model and TX status (bench session 2, 2026-11-17) **[MEASURED]**
+
+- **Hub to remote frames ride on the remote's next uplink** (Unifying style): the radio holds the written
+  frame until the remote transmits, then delivers it. The remote must therefore transmit often: it sends
+  a poll frame (inner kind `0x80`, hdr byte `0x80` then zeros; `hp_rf_make_poll`) every 30 ms while an
+  object awaits its ack, every 250 ms otherwise while awake.
+- **Link state follows the remote's uplinks:** `10 <slot> 41 04 87 ..` (up) arrives when the remote transmits;
+  `..47..` (lost) about 500 ms after its last uplink.
+- **TX status** `20 <slot> 42 <s>`: `00` = the held downlink frame was delivered; `01` = the link dropped with
+  the frame still pending (not delivered). A stray `00` also arrives right at link-up with nothing held, so a
+  status with no frame outstanding is ignored.
+- **Consequences for the hub driver:** keep one frame in the radio at a time, write the next only after `00`,
+  keep and rewrite after `01` once the link is up, send acks first and never queue a second ack behind one
+  (a retrying remote otherwise piles up duplicate acks that are delivered ahead of fresh frames), and hold
+  object retries while a frame is in the radio or the link is down. See `hub/rf/link.c` (`strict`).
+
 ## 9. What this means for our code
 
 `hub/rf/framing.h` defines a 4-byte header `type, seq, (idx<<4|total), len`

@@ -6,8 +6,8 @@
  *
  * Allowed: open /dev/fb0 O_RDWR; /dev/input/event0 and event2 O_RDONLY; the backlight and key-LED
  * brightness nodes O_WRONLY; the three power nodes O_RDONLY; the boot-counter file named by
- * HARMONY_BOOTCOUNT_FILE (write). ioctl: the two fb GETs only (never EVIOCGRAB, FBIOPUT_*, FBIOPAN,
- * FBIOBLANK). mmap: the fb fd only. exec: /sbin/poweroff, only from the battery guard.
+ * HARMONY_BOOTCOUNT_FILE (write). ioctl: the two fb GETs, plus FBIOBLANK with FB_BLANK_UNBLANK only (ra_fb_unblank:
+ * the panel stays dark until it is issued); never EVIOCGRAB, FBIOPUT_*, FBIOPAN, any other blank level. mmap: the fb fd only. exec: /sbin/poweroff, only from the battery guard.
  * Never: /dev/rfspi (Task 3 owns it via its own module), /dev/rffw, /dev/mspfw, /dev/watchdog,
  * /dev/mtd*, /sys/power/state, any kill or charger node. */
 #include <stddef.h>
@@ -55,6 +55,8 @@ void ra_sys_init(ra_sys_t *s, const ra_ops_t *ops, const char *bootcount_path);
 int ra_open_fb(ra_sys_t *s); /* O_RDWR */
 int ra_open_input(ra_sys_t *s, const char *p); /* event0 / event2, O_RDONLY */
 int ra_ioctl_fb(ra_sys_t *s, unsigned long req, void *arg);
+/* FBIOBLANK(FB_BLANK_UNBLANK): the Elite's LCD shows nothing until this is issued (pan alone does nothing). */
+int ra_fb_unblank(ra_sys_t *s);
 void *ra_mmap_fb(ra_sys_t *s, size_t len);
 ssize_t ra_read(ra_sys_t *s, int fd, void *buf, size_t n);
 int ra_close(ra_sys_t *s, int fd);

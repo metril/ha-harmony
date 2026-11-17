@@ -1,5 +1,6 @@
 #include "remote/app/display.h"
 
+#include <errno.h>
 #include <linux/fb.h>
 #include <string.h>
 
@@ -38,6 +39,7 @@ int ra_display_init(ra_display_t *d, ra_sys_t *sys) {
   d->fb_len = (size_t)f.line_length * RA_SCREEN_H;
   d->fb = ra_mmap_fb(sys, d->fb_len);
   if (!d->fb) return -1;
+  if (ra_fb_unblank(sys) < 0) ra_logf(sys, "FBIOBLANK unblank failed (%d); the panel may stay dark", errno);
 
   d->disp = lv_display_create(RA_SCREEN_W, RA_SCREEN_H);
   lv_display_set_color_format(d->disp, LV_COLOR_FORMAT_RGB565);

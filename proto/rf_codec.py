@@ -8,7 +8,7 @@ CHUNK = 25
 BODY_MAX = 254
 INNER_LEN = 28
 HUB_FRAME_LEN = 30
-KIND_OBJECT, KIND_ACK, KIND_CONT = 0x20, 0x40, 0x60
+KIND_OBJECT, KIND_ACK, KIND_CONT, KIND_POLL = 0x20, 0x40, 0x60, 0x80
 FIRST = 0x10
 
 
@@ -27,6 +27,11 @@ def split(msg_type: int, seq: int, body: bytes, slot: int = 1) -> list[bytes]:
     return frames
 
 
+def make_poll(slot: int = 1) -> bytes:
+    """A remote's poll frame in hub mode: 0x80 then zeros; receivers ignore it."""
+    return bytes([0x12, slot, KIND_POLL]) + bytes(27)
+
+
 class Reassembler:
     """Reassembles hub-mode frames; acks and non-data frames yield None."""
 
@@ -43,7 +48,7 @@ class Reassembler:
             raise ValueError("not a hub-mode data frame")
         hdr, mtype, idx, data = frame[2], frame[3], frame[4], frame[5:]
         kind, seq = hdr & 0xE0, hdr & 0x0F
-        if kind == KIND_ACK:
+        if kind in (KIND_ACK, KIND_POLL):
             return None
         if kind == KIND_OBJECT and hdr & FIRST and data[0] <= BODY_MAX:
             self._key, self._need, self._next, self._buf = (mtype, seq), data[0] + 1, 1, b""

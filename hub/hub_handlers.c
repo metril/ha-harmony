@@ -53,7 +53,7 @@ void hub_set_clock(hub_ctx_t *c, hp_clock_fn fn, void *ctx) {
 int hub_next_timeout_ms(const hub_ctx_t *c) {
     int t = hp_sched_next_timeout_ms(&c->sched);
     if (c->link_bound) { /* an in-flight RF object needs a pump at its retry deadline */
-        int r = hp_rf_link_next_timeout_ms(&c->link, mono_ms(NULL));
+        int r = hp_rf_link_next_timeout_ms(&c->link, hp_sched_now(&c->sched));
         if (r >= 0 && (t < 0 || r < t)) t = r;
     }
     return t;
@@ -76,22 +76,77 @@ static void link_deliver(void *ctx, const hp_rf_msg_t *m) { handle_rf_msg(ctx, m
 static void rf_link_ensure(hub_ctx_t *h) {
     if (h->link_bound) return;
     hp_rf_link_init(&h->link, h->sinks.rf, !h->rf_inner_blocks, HUB_RF_SLOT, link_deliver, h);
+    h->link.strict = true; /* one downlink frame in the radio at a time (only where TX status exists) */
     if (h->rf_debug) hp_rf_link_set_log(&h->link, hp_rf_log_stderr, NULL);
     h->link_bound = true;
 }
 
 
-/* Packs and queues one RF message on the link (stop-and-wait, driven by hub_pump_rf).
- * 0, -HP_E_TOOBIG (nothing sent), -HP_E_NOENT (no remote; nothing sent), -HP_E_BUSY (link queue
- * full). A later failure after all retries is counted by the link, not reported here. */
-static int rf_send_msg(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, size_t nv) {
+/* ---- messages held while the remote is away ---- */
+
+static bool pend_match(const hub_pend_t *p, uint8_t type, uint8_t remote, uint8_t page, uint8_t tile) {
+    return p->type == type && p->remote == remote && p->page == page && p->tile == tile;
+}
+
+static void pend_remove(hub_ctx_t *h, uint8_t i) {
+    memmove(&h->pend[i], &h->pend[i + 1], (size_t)(h->npend - i - 1) * sizeof h->pend[0]);
+    h->npend--;
+}
+
+/* Drops held messages that a newer one makes stale: the same key, and for a page_push every tile_update
+ * of that page (the page carries the tile text). */
+static void pend_supersede(hub_ctx_t *h, uint8_t type, uint8_t remote, uint8_t page, uint8_t tile) {
+    for (uint8_t i = 0; i < h->npend;) {
+        const hub_pend_t *p = &h->pend[i];
+        bool stale = pend_match(p, type, remote, page, tile) ||
+                     (type == HP_MSG_PAGE_PUSH && p->type == HP_MSG_TILE_UPDATE && p->remote == remote && p->page == page);
+        if (stale) pend_remove(h, i);
+        else i++;
+    }
+}
+
+static bool rf_up(const hub_ctx_t *h) { return !h->sinks.rf->attached || h->sinks.rf->attached(h->sinks.rf->self); }
+
+/* Packs and queues one RF message on the link (stop-and-wait, driven by hub_pump_rf). While the remote
+ * is not attached the message is held instead (latest per key) and sent when the link comes up: that
+ * is 0 too. -HP_E_NOENT only without an RF transport; -HP_E_TOOBIG (nothing sent); -HP_E_BUSY (link
+ * queue full). A later failure after all retries is counted by the link, not reported here. */
+static int rf_send_keyed(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, size_t nv, uint8_t remote, uint8_t page,
+                         uint8_t tile) {
     uint8_t payload[HP_RF_MSG_MAX];
     size_t plen = 0;
     if (!h->sinks.rf) return -HP_E_NOENT;
     int rc = hp_rf_pack(t, v, nv, payload, sizeof payload, &plen);
     if (rc < 0) return rc;
     rf_link_ensure(h);
-    return hp_rf_link_send(&h->link, t, payload, plen, mono_ms(NULL));
+    pend_supersede(h, (uint8_t)t, remote, page, tile);
+    if (rf_up(h)) {
+        rc = hp_rf_link_send(&h->link, t, payload, plen, hp_sched_now(&h->sched));
+        if (rc != -HP_E_NOENT) return rc;
+    }
+    if (h->npend == HUB_PEND_MAX) pend_remove(h, 0); /* the oldest loses */
+    hub_pend_t *p = &h->pend[h->npend++];
+    p->type = (uint8_t)t;
+    p->remote = remote;
+    p->page = page;
+    p->tile = tile;
+    p->len = plen;
+    memcpy(p->payload, payload, plen);
+    return 0;
+}
+
+static int rf_send_msg(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, size_t nv) {
+    return rf_send_keyed(h, t, v, nv, 0, 0, 0);
+}
+
+/* The link is up: send what was held, oldest first, until the link queue is full. */
+static void pend_flush(hub_ctx_t *h) {
+    while (h->npend && rf_up(h)) {
+        const hub_pend_t *p = &h->pend[0];
+        int rc = hp_rf_link_send(&h->link, (hp_msg_type_t)p->type, p->payload, p->len, hp_sched_now(&h->sched));
+        if (rc == -HP_E_BUSY || rc == -HP_E_NOENT) return; /* later */
+        pend_remove(h, 0); /* sent, or unsendable */
+    }
 }
 
 /* ------------------------------------------------------------ broadcast */
@@ -282,7 +337,7 @@ static int cmd_tile_update(hub_ctx_t *h, uint32_t id, const cJSON *args, char *r
         !u8_arg(args, "tile", &t) || !cJSON_IsString(tx))
         return reply_ok(id, "command_result", false, "args need remote, page, tile (0..255) and text", reply, cap, len);
     hp_rf_val_t v[4] = {{.u = r}, {.u = p}, {.u = t}, {.p = (const uint8_t *)tx->valuestring, .len = strlen(tx->valuestring)}};
-    int rc = rf_send_msg(h, HP_MSG_TILE_UPDATE, v, 4);
+    int rc = rf_send_keyed(h, HP_MSG_TILE_UPDATE, v, 4, (uint8_t)r, (uint8_t)p, (uint8_t)t);
     if (rc == -HP_E_TOOBIG) return reply_err(id, "too_big", "tile text exceeds 255 bytes", reply, cap, len);
     if (rc == -HP_E_NOENT) return reply_err(id, "no_remote", "no remote attached", reply, cap, len);
     if (rc < 0) return reply_err(id, "rf_error", "RF send failed", reply, cap, len);
@@ -362,7 +417,7 @@ static int on_page_push(void *vctx, hp_session_t *sess, uint32_t id, const cJSON
     size_t n = hp_base64_decode(b64->valuestring, strlen(b64->valuestring), data, sizeof data);
     if (n == (size_t)-1 || n > HP_PAGE_MAX_BYTES) return reply_err(id, "too_big", "page data exceeds 251 bytes", reply, cap, len);
     hp_rf_val_t v[3] = {{.u = (uint32_t)r->valuedouble}, {.u = (uint32_t)pg->valuedouble}, {.p = data, .len = n}};
-    int rc = rf_send_msg(h, HP_MSG_PAGE_PUSH, v, 3);
+    int rc = rf_send_keyed(h, HP_MSG_PAGE_PUSH, v, 3, (uint8_t)v[0].u, (uint8_t)v[1].u, 0);
     if (rc == -HP_E_TOOBIG) return reply_err(id, "too_big", "page does not fit the RF budget", reply, cap, len);
     if (rc == -HP_E_NOENT) return reply_err(id, "no_remote", "no remote attached", reply, cap, len);
     if (rc < 0) return reply_err(id, "rf_error", "RF send failed", reply, cap, len);
@@ -417,7 +472,7 @@ void hub_pump_rf(hub_ctx_t *h) {
     rf_link_ensure(h);
     /* Received objects are delivered (and acked) from inside the pump; a peer that went away
      * resets reassembly and drops what was queued for it. */
-    if (hp_rf_link_pump(&h->link, mono_ms(NULL)) == -HP_E_NOENT) h->rf_attached = false;
+    if (hp_rf_link_pump(&h->link, hp_sched_now(&h->sched)) == -HP_E_NOENT) h->rf_attached = false;
     uint32_t failures = hp_rf_link_status(&h->link).failures;
     if (failures != h->rf_failures) {
         fprintf(stderr, "hub: RF send failed after %d retries (%u object(s) dropped)\n", HP_RF_RETRIES,
@@ -432,5 +487,6 @@ void hub_pump_rf(hub_ctx_t *h) {
         }
         h->rf_attached = now;
     }
+    pend_flush(h);
     hub_flush_pending(h); /* a key may have started/stopped an activity */
 }

@@ -41,6 +41,7 @@ typedef struct {
   int boot_writes;
   char bootcount[8];
   int nexec;
+  int nblank, blank_arg; /* FBIOBLANK calls seen and the last level */
   uint64_t now;
   char msgs[64][160];
   int nmsgs;
@@ -140,7 +141,10 @@ static __attribute__((unused)) int fk_ioctl(void *c, int fd, unsigned long req, 
   fk_log(f, "ioctl %#lx", req);
   if (req == FBIOGET_VSCREENINFO) memcpy(arg, &f->var, sizeof f->var);
   else if (req == FBIOGET_FSCREENINFO) memcpy(arg, &f->fix, sizeof f->fix);
-  else { errno = ENOTTY; return -1; }
+  else if (req == FBIOBLANK) {
+    f->nblank++;
+    f->blank_arg = (int)(intptr_t)arg;
+  } else { errno = ENOTTY; return -1; }
   return 0;
 }
 
@@ -230,8 +234,9 @@ static __attribute__((unused)) void fk_touch(fk_t *f, int x, int y, int down) {
 typedef struct {
   struct { uint8_t code, action; } sent[512];
   int nsent;
-  app_link_event_t q[16];
+  app_link_event_t q[64];
   int nq, qh;
+  int awake, nawake; /* last set_awake value and number of calls */
 } fk_link_t;
 
 static __attribute__((unused)) int fkl_send(void *c, uint8_t code, uint8_t action) {
@@ -249,7 +254,14 @@ static __attribute__((unused)) int fkl_poll(void *c, uint64_t now, app_link_even
   *ev = l->q[l->qh++];
   return 1;
 }
-static __attribute__((unused)) app_link_t fkl_link(fk_link_t *l) { return (app_link_t){.ctx = l, .send_key = fkl_send, .poll = fkl_poll}; }
+static __attribute__((unused)) void fkl_set_awake(void *c, bool awake) {
+  fk_link_t *l = c;
+  l->awake = awake;
+  l->nawake++;
+}
+static __attribute__((unused)) app_link_t fkl_link(fk_link_t *l) {
+  return (app_link_t){.ctx = l, .send_key = fkl_send, .poll = fkl_poll, .set_awake = fkl_set_awake};
+}
 
 static __attribute__((unused)) void fkl_push_page(fk_link_t *l, const uint8_t *d, size_t n) {
   app_link_event_t *e = &l->q[l->nq++];
@@ -287,7 +299,7 @@ static __attribute__((unused)) int fk_log_is_safe(const fk_t *f, const char *boo
       if (strcmp(l + 5, "/sbin/poweroff")) { fprintf(stderr, "unsafe syscall: %s\n", l); ok = 0; }
     } else if (!strncmp(l, "ioctl ", 6)) {
       unsigned long req = strtoul(l + 6, NULL, 16);
-      if (req != FBIOGET_VSCREENINFO && req != FBIOGET_FSCREENINFO) { fprintf(stderr, "unsafe syscall: %s\n", l); ok = 0; }
+      if (req != FBIOGET_VSCREENINFO && req != FBIOGET_FSCREENINFO && req != FBIOBLANK) { fprintf(stderr, "unsafe syscall: %s\n", l); ok = 0; }
     }
   }
   return ok;

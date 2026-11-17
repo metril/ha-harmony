@@ -17,13 +17,14 @@ typedef enum {
   APP_LINK_EV_PAGE_PUSH,   /* page, data[0..len) */
   APP_LINK_EV_TILE_UPDATE, /* page, tile, text */
   APP_LINK_EV_STATE_UPDATE,/* activity, power */
-  APP_LINK_EV_FAILED       /* a send failed after all retries */
+  APP_LINK_EV_FAILED,      /* a send failed after all retries (fatal: the link cannot work at all) */
+  APP_LINK_EV_ALIVE        /* any frame arrived from the hub */
 } app_link_event_kind_t;
 
 typedef struct {
   app_link_event_kind_t kind;
   uint8_t page, tile, activity;
-  bool power;
+  bool power, fatal; /* fatal: FAILED that shows the fallback at once */
   uint8_t data[HP_PAGE_MAX_BYTES];
   size_t len;
   char text[HP_PAGE_MAX_TEXT + 1];
@@ -41,6 +42,8 @@ typedef struct {
   /* Optional. Milliseconds until the link next needs a poll (retry deadline, heartbeat), 0 = now,
    * UINT32_MAX = nothing scheduled. Bounds the loop's wait. */
   uint32_t (*next_ms)(void *ctx, uint64_t now);
+  /* Optional. The screen is awake (not backlight-off): the link polls the hub only then. */
+  void (*set_awake)(void *ctx, bool awake);
 } app_link_t;
 
 extern const app_link_t app_link_null;
@@ -56,6 +59,11 @@ typedef struct {
   unsigned state_updates; /* count of state_update events seen (content unused until the UI shows it) */
   uint8_t last_activity;
   bool last_power;
+  /* Fallback policy: >= APP_FAIL_COUNT consecutive FAILED events AND no hub frame for APP_FAIL_SILENCE_MS. */
+  unsigned fail_run;
+  uint64_t last_rx_ms;
+  hp_page_t saved; /* the last real page pushed, restored when the hub is heard again */
+  bool have_saved, awake_known, last_awake;
 } app_t;
 
 /* 0 ok; <0 refused to start (bad panel, cannot open the framebuffer or input). One app per process. */
@@ -63,6 +71,9 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
 /* One loop iteration: wait for input up to max_wait_ms (less when a timer is due), then process
  * input, holds, power, link events and LVGL timers. */
 void app_step(app_t *a, unsigned max_wait_ms);
+
+#define APP_FAIL_COUNT 3
+#define APP_FAIL_SILENCE_MS 5000
 
 /* Cap on the wait when the link has an fd to wake on (it is woken by a frame, and by the link's
  * own deadline): idle wakeups are rare. Without an fd the cap stays 100 ms (polling). */

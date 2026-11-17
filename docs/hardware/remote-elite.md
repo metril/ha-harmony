@@ -31,6 +31,10 @@ pages — y-pan double-buffering is available), `bpp=16`, **RGB565**: red offset
 offset 5 length 6, blue offset 0 length 5, no alpha. `line_length=480`, `smem_len=466944`. No
 rotation. Stock (`luadraws.so`, cairo/pango) mmaps fb0.
 
+**The panel stays dark until `FBIOBLANK(FB_BLANK_UNBLANK)` is issued [MEASURED, bench 2]:** drawing into the
+mapping and panning change nothing visible; `echo 0 > /sys/class/graphics/fb0/blank` made our framebuffer
+appear. The app issues it right after mapping (`ra_fb_unblank`, the only blank request the allow-list admits).
+
 Backlight `/sys/class/backlight/ap3156_backlight/`: `max_brightness` 31, stock maximum 26, fades
 1 step per 50 ms to dim/off. Key LEDs `/sys/class/leds/tps6507x:white/brightness`, max 99, stock 42,
 written 0 before suspend. **[CODE]**

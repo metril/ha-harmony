@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -34,6 +35,11 @@ int ra_open_input(ra_sys_t *s, const char *p) {
 int ra_ioctl_fb(ra_sys_t *s, unsigned long req, void *arg) {
   if (s->fb_fd < 0 || (req != FBIOGET_VSCREENINFO && req != FBIOGET_FSCREENINFO)) return eperm();
   return s->ops.ioctl(s->ops.ctx, s->fb_fd, req, arg);
+}
+
+int ra_fb_unblank(ra_sys_t *s) {
+  if (s->fb_fd < 0) return eperm();
+  return s->ops.ioctl(s->ops.ctx, s->fb_fd, FBIOBLANK, (void *)(intptr_t)FB_BLANK_UNBLANK);
 }
 
 void *ra_mmap_fb(ra_sys_t *s, size_t len) {

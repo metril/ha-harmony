@@ -196,3 +196,49 @@ run.
   there is no evidence the app is slow to stop. Use `pidof` or match the binary path with `awk`.
 - The released v0.1.2 integration rejected the new key names, so v0.2.0 was published from this
   branch (tag on `phase4-rf-remote`, not `main`).
+
+## Bench session 2 (2026-11-17)
+
+Real hub (CC2544 host mode, `/dev/rfspi`) and Elite, both run with `--rf-debug`.
+
+**Measured:**
+1. The Elite LCD shows nothing we draw until `FBIOBLANK(FB_BLANK_UNBLANK)` is issued
+   (`echo 0 > /sys/class/graphics/fb0/blank` made our framebuffer appear). Panning alone does nothing.
+2. Hub to remote frames are delivered only piggybacked on the remote's next uplink transmission
+   (Unifying style). The hub link goes up (`10 02 41 04 87..`) when the remote transmits and is lost
+   (`..47..`) about 500 ms after its last uplink. The hub gets TX status `20 02 42 00` when a downlink
+   frame was delivered and `42 01` when the link dropped with a frame still pending.
+3. Consequences: every remote key object FAILED after 3 retries, because the hub's acks arrive one
+   or more uplinks late; the hub's duplicate acks for each retry pile up in the radio, so stale frames
+   are delivered ahead of fresh ones. A 2-frame `page_push` did get delivered and acked while the
+   user tapped keys, and the page rendered briefly, then the remote switched to "Hub unreachable"
+   after one failed key.
+4. The hub's `page_push` returned `no_remote` whenever the link was down, i.e. almost always.
+
+**Outcome:** the page rendered on the screen (after the manual unblank), and a hub to remote page
+transfer is proven. The rest was link behaviour, fixed as follows.
+
+**Fixes:**
+- Remote display: `FBIOBLANK(UNBLANK)` at open, through the syscall seam (the one extra ioctl the
+  allow-list admits). Power code only drives the backlight, never the fb blank, so wake needs nothing.
+- Remote polling: while awake (backlight not off) a poll frame (inner kind `0x80`, rest zero; ignored
+  by the receiver) goes out after 30 ms without a transmission while an object awaits its ack, and
+  every 250 ms otherwise. None while asleep. A poll gives the hub's radio the uplink it needs to deliver
+  the queued ack/page and keeps the link up (the 500 ms drop). Mirrored in `proto/rf_codec.py` and
+  `tests/vectors/rf/frames.json`.
+- Hub downlink: at most one frame in the radio; the next is written after TX status 00; on 01 (or a
+  link loss) it is kept and rewritten once the link is up. Acks go first and coalesce (newest replaces
+  an unwritten one). The object retry clock and the link-loss queue reset are held while a frame is in
+  the radio or the link is down. A frame with no status for 300 ms is taken as done (the stale `00` at
+  link-up showed statuses are not strictly per frame).
+- Hub `page_push` / `tile_update` / `state_update` while the remote is not attached are held (latest per
+  remote+page, remote+page+tile, resp. type; a page supersedes its tiles) and sent at the next link-up.
+  The WS reply is the plain `command_result` ok (the schema has no room for a `queued` flag). HA's
+  "pages pending" retry is no longer triggered by `no_remote` in that case.
+- Remote fallback: "Hub unreachable" only after 3 consecutive failed objects AND 5 s without any frame
+  from the hub (or no radio at all); any hub frame restores the last pushed page.
+- Regression: `tests/c/test_link_radio.c` models fact 2 exactly (fake radio, real hub context and
+  link) and asserts first-try acks with polling, 2-frame page delivery, held page delivery after link
+  up, and radio queue depth <= 1 with no ack pile-up.
+
+Not re-benched yet: all of the above is host-tested only.

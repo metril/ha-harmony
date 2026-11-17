@@ -27,11 +27,14 @@
  *                     index is the `activity` value used in state_update.
  *   page_push      -> (ws, data = base64) packed with rf_payload, split at the
  *                     hub->remote frame cap (30) and sent over RF. Success:
- *                     command_result {ok:true} (same id). Failure: `error` with
- *                     code "too_big" (data > 255 bytes after decoding, or more
- *                     than 15 fragments; nothing is sent), "no_remote" (no
- *                     remote attached; nothing is sent) or "rf_error" (the link
- *                     failed mid-message). Always exactly one reply.
+ *                     command_result {ok:true} (same id). While the remote's link is
+ *                     down the page is held (the latest per remote+page) and sent when
+ *                     the link comes up: the reply is the same plain ok. Failure:
+ *                     `error` with code "too_big" (data > 255 bytes after decoding, or
+ *                     more than 15 fragments; nothing is sent), "no_remote" (the hub
+ *                     has no RF transport at all) or "rf_error" (the link failed
+ *                     mid-message). tile_update and state_update are held the same
+ *                     way (latest per key). Always exactly one reply.
  *   command        -> more verbs (device "hub"):
  *                       ir_send     args = IR action object, same forms/validation as format-2
  *                                   config ({proto,addr,cmd} | {raw:{hz,us}} | {pronto:"hex"},
@@ -65,6 +68,14 @@
 #include "hub/net/jsonrpc.h"
 #include "hub/net/ws.h"
 
+#define HUB_PEND_MAX 8
+/* An RF message held back while the remote's link is down; the latest per key wins. */
+typedef struct {
+    uint8_t type, remote, page, tile; /* the key: page_push (remote,page), tile_update (remote,page,tile), state_update () */
+    size_t len;
+    uint8_t payload[HP_RF_MSG_MAX];
+} hub_pend_t;
+
 typedef struct {
     hp_map_t map;
     hp_sinks_t sinks;
@@ -86,6 +97,8 @@ typedef struct {
     bool rf_attached;       /* last seen RF link state: announce remote_attached on a new attach */
     uint8_t pending_dev[HP_MAP_MAX_DEVICES]; /* devices whose device_state is to be broadcast, in change order */
     uint8_t npending_dev;
+    hub_pend_t pend[HUB_PEND_MAX]; /* oldest first */
+    uint8_t npend;
 } hub_ctx_t;
 
 /* Initialises the context with a CLOCK_MONOTONIC millisecond clock for the timers. */

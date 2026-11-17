@@ -61,29 +61,54 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
   }
   a->input_open = true;
   ra_power_init(&a->power, &a->sys, a->sys.ops.now_ms(a->sys.ops.ctx));
+  a->last_rx_ms = a->sys.ops.now_ms(a->sys.ops.ctx);
   return 0;
 }
 
-static void handle_link_event(app_t *a, const app_link_event_t *ev) {
+static void heard(app_t *a, uint64_t now) {
+  a->last_rx_ms = now;
+  a->fail_run = 0;
+}
+
+static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now) {
   switch (ev->kind) {
   case APP_LINK_EV_PAGE_PUSH: {
     hp_page_t p;
+    heard(a, now);
     int r = hp_page_decode(ev->data, ev->len, &p);
-    if (r < 0) ra_logf(&a->sys, "page_push rejected (%d)", r);
-    else ra_ui_show_page(&a->ui, &p);
+    if (r < 0) {
+      ra_logf(&a->sys, "page_push rejected (%d)", r);
+    } else {
+      a->saved = p;
+      a->have_saved = true;
+      ra_ui_show_page(&a->ui, &p);
+    }
     break;
   }
   case APP_LINK_EV_TILE_UPDATE:
+    heard(a, now);
+    if (a->have_saved && a->saved.page_id == ev->page) (void)hp_page_set_tile_text(&a->saved, ev->tile, ev->text, strlen(ev->text));
     if (ra_ui_tile_text(&a->ui, ev->page, ev->tile, ev->text, strlen(ev->text)) < 0)
       ra_logf(&a->sys, "tile_update %u/%u ignored", ev->page, ev->tile);
     break;
   case APP_LINK_EV_STATE_UPDATE:
+    heard(a, now);
     a->state_updates++;
     a->last_activity = ev->activity;
     a->last_power = ev->power;
     break;
+  case APP_LINK_EV_ALIVE:
+    heard(a, now);
+    if (a->ui.fallback) { /* the hub is back: the last real page, not a blank wait for the next push */
+      if (a->have_saved) ra_ui_show_page(&a->ui, &a->saved);
+      else ra_ui_show_boot(&a->ui);
+    }
+    break;
   case APP_LINK_EV_FAILED:
-    if (!a->ui.fallback) ra_ui_show_fallback(&a->ui);
+    a->fail_run++;
+    if (!a->ui.fallback &&
+        (ev->fatal || (a->fail_run >= APP_FAIL_COUNT && now - a->last_rx_ms >= APP_FAIL_SILENCE_MS)))
+      ra_ui_show_fallback(&a->ui);
     break;
   case APP_LINK_EV_NONE:
     break;
@@ -111,8 +136,12 @@ void app_step(app_t *a, unsigned max_wait_ms) {
       if (ready[i]) ra_input_read(&a->input, i, now);
   ra_input_tick(&a->input, now);
   ra_power_tick(&a->power, now);
+  bool awake = a->power.state != RA_PW_OFF;
+  if (a->link.set_awake && (!a->awake_known || awake != a->last_awake)) a->link.set_awake(a->link.ctx, awake);
+  a->awake_known = true;
+  a->last_awake = awake;
   app_link_event_t ev;
-  for (int i = 0; i < LINK_EVENTS_PER_STEP && a->link.poll(a->link.ctx, now, &ev) > 0; i++) handle_link_event(a, &ev);
+  for (int i = 0; i < LINK_EVENTS_PER_STEP && a->link.poll(a->link.ctx, now, &ev) > 0; i++) handle_link_event(a, &ev, now);
   lv_timer_handler(); /* render what changed */
   if (!a->healthy_written && a->input_open && a->display.frames >= 1 && ra_write_bootcount(&a->sys) == 0)
     a->healthy_written = true;

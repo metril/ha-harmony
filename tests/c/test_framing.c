@@ -115,6 +115,13 @@ static void test_vectors(const char *path)
     if (!root) { free(txt); return; }
     const cJSON *vs = cJSON_GetObjectItem(root, "vectors"), *rj = cJSON_GetObjectItem(root, "reject"), *e;
     CT_CHECK(cJSON_GetArraySize(vs) >= 7);
+    {
+        uint8_t want[HP_RF_INNER_LEN];
+        hp_rf_inner_t poll;
+        hp_rf_make_poll(&poll);
+        CT_EQ(unhex(cJSON_GetObjectItem(root, "poll")->valuestring, want, sizeof want), (size_t)HP_RF_INNER_LEN);
+        CT_MEM_EQ(poll.b, want, HP_RF_INNER_LEN);
+    }
     cJSON_ArrayForEach(e, vs) check_vector(e);
     /* Measured on the device (hub-rf-cc2544.md s8a): 0x10/0x11 control frames are not data. */
     cJSON_ArrayForEach(e, rj) {
@@ -393,8 +400,12 @@ static void test_ack_frame(void)
     CT_EQ(msg.seq, 0xb);
     memset(junk.b, 0, sizeof junk.b); /* kind 0x00: not ours */
     CT_EQ(hp_rf_asm_push(&a, &junk, &msg, &ackf), -HP_E_INVAL);
-    junk.b[0] = 0x80;
+    junk.b[0] = 0xA0;
     CT_EQ(hp_rf_asm_push(&a, &junk, &msg, &ackf), -HP_E_INVAL);
+    hp_rf_make_poll(&junk);
+    CT_EQ(junk.b[0], 0x80);
+    for (int i = 1; i < HP_RF_INNER_LEN; i++) CT_EQ(junk.b[i], 0);
+    CT_EQ(hp_rf_asm_push(&a, &junk, &msg, &ackf), HP_ASM_POLL);
 }
 
 /* ---- sender against a lossy link ---- */

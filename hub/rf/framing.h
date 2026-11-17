@@ -6,7 +6,8 @@
  *
  * Inner block: [0] hdr = kind | 0x10 (first frame of an object) | seq (low 4 bits)
  *              [1] type  [2] flags  [3..27] payload[25]
- * kind: 0x20 object frame, 0x40 ack, 0x60 continuation.
+ * kind: 0x20 object frame, 0x40 ack, 0x60 continuation, 0x80 poll (all-zero otherwise: a remote's "I am here,
+ * send me what you have" transmission; the receiver ignores it: no ack, no delivery, partials untouched).
  * Object = len(1) + body (body <= 254), carried in 25-byte chunks, zero padded. All frames
  * of an object share seq and type. `flags` is the frame index within the object (0 on the
  * first frame, where a receiver ignores it so captured stock frames still decode); without
@@ -30,6 +31,7 @@
 #define HP_RF_KIND_OBJECT 0x20
 #define HP_RF_KIND_ACK 0x40
 #define HP_RF_KIND_CONT 0x60
+#define HP_RF_KIND_POLL 0x80
 #define HP_RF_FLAG_FIRST 0x10
 
 #define HP_RF_RETRIES 3
@@ -60,6 +62,8 @@ int hp_rf_split(hp_msg_type_t t, uint8_t seq, const uint8_t *body, size_t len,
                 hp_rf_inner_t *out, size_t out_cap, size_t *out_n);
 
 void hp_rf_make_ack(uint8_t type, uint8_t seq, hp_rf_inner_t *out);
+/* The poll frame: 0x80 followed by zeros. */
+void hp_rf_make_poll(hp_rf_inner_t *out);
 
 /* ---- outer wrapping (decoders reject wrong report ids / lengths with -HP_E_INVAL) ---- */
 
@@ -77,6 +81,7 @@ int hp_rf_unwrap_remote(const uint8_t *f, size_t len, uint8_t *slot, uint8_t *by
 #define HP_ASM_COMPLETE 1   /* object delivered in *out; send *ack */
 #define HP_ASM_DUPLICATE 2  /* complete retry of the last delivered object: send *ack, deliver nothing */
 #define HP_ASM_ACK 3        /* an ack arrived: out->type/seq name the acked object */
+#define HP_ASM_POLL 4       /* a poll arrived: nothing to do, reassembly state untouched */
 
 typedef struct {
     int active;

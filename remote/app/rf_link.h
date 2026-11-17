@@ -16,7 +16,13 @@
  * read). millivolts is always 0: the schema has no "unknown" encoding and the app's allow-list has
  * no voltage node (nothing new is added), so 0 means unknown. If the soc read fails the last good
  * percent is sent; if there never was one the cycle is skipped and retried in RF_LINK_RETRY_MS.
- * A failed or refused send is retried in RF_LINK_RETRY_MS. */
+ * A failed or refused send is retried in RF_LINK_RETRY_MS.
+ *
+ * POLLING. The hub's frames reach the remote only piggybacked on the remote's own transmissions, so
+ * while awake (the app reports it through set_awake) the link sends a minimal poll frame whenever
+ * nothing was transmitted for RF_LINK_POLL_MS while an object awaits its ack, and every
+ * RF_LINK_IDLE_POLL_MS otherwise; none while asleep. Any frame heard from the hub raises
+ * APP_LINK_EV_ALIVE. */
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -27,6 +33,8 @@
 #define RF_LINK_REMOTE_ID 1 /* key_event.remote, as remote_sim's default */
 #define RF_LINK_BATTERY_MS (5 * 60 * 1000)
 #define RF_LINK_RETRY_MS 5000
+#define RF_LINK_POLL_MS HP_LINK_POLL_MS          /* poll gap while an object awaits its ack */
+#define RF_LINK_IDLE_POLL_MS HP_LINK_IDLE_POLL_MS /* poll gap otherwise, while awake */
 #define RF_LINK_RING 16
 
 typedef struct {
@@ -37,7 +45,7 @@ typedef struct {
   uint8_t remote;
   app_link_event_t ring[RF_LINK_RING];
   unsigned head, n;
-  uint32_t seen_failures;
+  uint32_t seen_failures, seen_rx;
   uint64_t next_batt_ms;
   int last_pct;
   bool was_attached, lost, dead_reported;

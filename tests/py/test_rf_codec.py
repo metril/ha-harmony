@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from proto.rf_codec import Reassembler, split
+from proto.rf_codec import Reassembler, make_poll, split
 
 VECTORS = json.loads((Path(__file__).parent.parent / "vectors" / "rf" / "frames.json").read_text())
 
@@ -45,3 +45,14 @@ def test_dup_continuation_and_retried_object():
         r.push(f[1])
     assert [r.push(x) for x in f][-1] == (3, body)
     assert [r.push(x) for x in f][-1] is None  # re-acked, not redelivered
+
+
+def test_poll_frame_is_ignored():
+    poll = make_poll()
+    assert poll[2:].hex() == VECTORS["poll"]
+    f = split(3, 3, bytes(range(60)))
+    r = Reassembler()
+    assert r.push(f[0]) is None
+    assert r.push(poll) is None  # does not abandon the partial
+    assert r.push(f[1]) is None
+    assert r.push(f[2]) == (3, bytes(range(60)))
