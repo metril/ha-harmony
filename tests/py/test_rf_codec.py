@@ -5,94 +5,43 @@ import pytest
 
 from proto.rf_codec import Reassembler, split
 
-VECTORS = Path(__file__).parent.parent / "vectors" / "rf_frames.json"
+VECTORS = json.loads((Path(__file__).parent.parent / "vectors" / "rf" / "frames.json").read_text())
 
 
-def pat(n: int) -> bytes:
-    return bytes((i * 7 + 3) & 0xFF for i in range(n))
-
-
-def roundtrip(payload: bytes, cap: int) -> list[bytes]:
-    frames = split(9, 5, payload, cap)
+@pytest.mark.parametrize("v", VECTORS["vectors"], ids=lambda v: v["name"])
+def test_vectors_match_hub_frames(v):
+    frames = split(v["type"], v["seq"], bytes.fromhex(v["body"]), v["slot"])
+    assert [f.hex() for f in frames] == v["hub"]
     r = Reassembler()
-    out = None
-    for i, f in enumerate(frames):
-        assert len(f) <= cap
-        out = r.push(f)
-        assert (out is None) == (i + 1 < len(frames))
-    assert out == (9, payload)
-    return frames
+    out = [r.push(f) for f in frames]
+    assert out[:-1] == [None] * (len(frames) - 1)
+    assert out[-1] == (v["type"], bytes.fromhex(v["body"]))
 
 
-@pytest.mark.parametrize(
-    ("n", "cap", "frags"),
-    [(0, 30, 1), (5, 30, 1), (26, 30, 1), (27, 30, 2), (28, 32, 1), (29, 32, 2),
-     (390, 30, 15), (420, 32, 15)],
-)
-def test_roundtrip(n, cap, frags):
-    assert len(roundtrip(pat(n), cap)) == frags
-
-
-@pytest.mark.parametrize(("n", "cap"), [(391, 30), (421, 32)])
-def test_too_big(n, cap):
-    with pytest.raises(ValueError, match="fragments"):
-        split(9, 1, pat(n), cap)
-
-
-def test_bad_cap():
-    for cap in (4, 33):
-        with pytest.raises(ValueError):
-            split(9, 1, b"x", cap)
-
-
-def test_duplicate_and_out_of_order():
-    p = pat(80)
-    f = split(3, 3, p, 30)
+@pytest.mark.parametrize("n", range(255))
+def test_every_length_roundtrips(n):
+    body = bytes((i * 7 + 3) & 0xFF for i in range(n))
     r = Reassembler()
-    for i in (2, 2, 0, 0, 3):
-        assert r.push(f[i]) is None
-    assert r.push(f[1]) == (3, p)
+    res = [r.push(f) for f in split(5, n, body)]
+    assert res[-1] == (5, body) and all(x is None for x in res[:-1])
 
 
-def test_mismatched_total_keeps_state():
-    p = pat(80)
-    f = split(3, 3, p, 30)
-    r = Reassembler()
-    assert r.push(f[0]) is None
-    bad = bytes([f[1][0], f[1][1], (1 << 4) | 5]) + f[1][3:]
+def test_too_big_and_rejects():
     with pytest.raises(ValueError):
-        r.push(bad)
-    assert r.push(f[1]) is None
-    assert r.push(f[2]) is None
-    assert r.push(f[3]) == (3, p)
+        split(1, 1, bytes(255))
+    r = Reassembler()
+    for bad in VECTORS["reject"]:
+        with pytest.raises(ValueError):
+            r.push(bytes.fromhex(bad["frame"]))
 
 
-def test_new_seq_discards_partial():
-    f = split(3, 3, pat(80), 30)
-    g = split(3, 4, b"\xab" * 10, 30)
+def test_dup_continuation_and_retried_object():
+    body = bytes(range(60))
+    f = split(3, 3, body)
     r = Reassembler()
     r.push(f[0])
     r.push(f[1])
-    assert r.push(g[0]) == (3, b"\xab" * 10)
-    assert r.push(f[2]) is None
-    assert r.push(f[3]) is None
-
-
-@pytest.mark.parametrize(
-    "frame",
-    [b"", b"\x01\x01\x01", bytes([1, 1, 0x00, 0]), bytes([1, 1, 0x22, 0]),
-     bytes([1, 1, 0xF3, 0]), bytes([1, 1, 0x01, 10, 0, 0, 0, 0]),
-     bytes([1, 1, 0x01, 33]) + bytes(28), bytes([1, 1, 0x01, 255]) + bytes(28)],
-)
-def test_malformed(frame):
     with pytest.raises(ValueError):
-        Reassembler().push(frame)
-
-
-def test_python_matches_c_vectors():
-    cases = json.loads(VECTORS.read_text())
-    assert cases
-    for c in cases:
-        payload = bytes.fromhex(c["payload"])
-        got = split(c["type"], c["seq"], payload, c["frame_cap"])
-        assert [f.hex() for f in got] == c["frames"]
+        r.push(f[1])
+    assert [r.push(x) for x in f][-1] == (3, body)
+    assert [r.push(x) for x in f][-1] is None  # re-acked, not redelivered

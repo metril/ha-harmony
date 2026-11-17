@@ -5,7 +5,6 @@ function(add_hp_test name)
   add_test(NAME ${name} COMMAND test_${name})
 endfunction()
 
-add_hp_test(framing)
 add_hp_test(ws)
 add_hp_test(jsonrpc)
 add_hp_test(mapping)
@@ -17,8 +16,10 @@ add_hp_test(rf_payload)
 add_hp_test(rf_pair)
 add_hp_test(mdns)
 
-add_executable(gen_rf_vectors gen_rf_vectors.c)
-target_link_libraries(gen_rf_vectors PRIVATE hp_hub)
+# RF object codec: golden vectors shared with the remote build (argv[1] = frames.json).
+add_executable(test_framing test_framing.c)
+target_link_libraries(test_framing PRIVATE hp_hub)
+add_test(NAME framing COMMAND test_framing ${CMAKE_SOURCE_DIR}/tests/vectors/rf/frames.json)
 
 add_hp_test(page)
 target_compile_definitions(test_page PRIVATE HP_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json")

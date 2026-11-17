@@ -1,51 +1,68 @@
-"""Python mirror of hub/rf/framing.c (RF fragmentation and reassembly)."""
+"""Python mirror of hub/rf/framing.c: RF object framing in hub mode (30-byte frames).
 
-HDR_LEN = 4
-MAX_FRAGS = 15
-FRAME_MAX = 32
+Fire-and-forget helpers for the sim link (which is reliable, so no acks or retries);
+the C codec owns stop-and-wait. Vectors: tests/vectors/rf/frames.json.
+"""
+
+CHUNK = 25
+BODY_MAX = 254
+INNER_LEN = 28
+HUB_FRAME_LEN = 30
+KIND_OBJECT, KIND_ACK, KIND_CONT = 0x20, 0x40, 0x60
+FIRST = 0x10
 
 
-def split(msg_type: int, seq: int, payload: bytes, frame_cap: int) -> list[bytes]:
-    """Split into frames of at most frame_cap bytes. Raises ValueError, never truncates."""
-    if not HDR_LEN < frame_cap <= FRAME_MAX:
-        raise ValueError(f"invalid frame_cap {frame_cap}")
-    if not 0 <= msg_type <= 0xFF or not 0 <= seq <= 0xFF:
-        raise ValueError("type/seq out of range")
-    per = frame_cap - HDR_LEN
-    n = max(1, -(-len(payload) // per))
-    if n > MAX_FRAGS:
-        raise ValueError(f"payload of {len(payload)} bytes needs {n} fragments (max {MAX_FRAGS})")
+def split(msg_type: int, seq: int, body: bytes, slot: int = 1) -> list[bytes]:
+    """One object as hub-mode frames (0x12, slot, inner[28]). Raises ValueError, never truncates."""
+    if not 0 <= msg_type <= 0xFF or not 0 <= slot <= 0xFF:
+        raise ValueError("type/slot out of range")
+    if len(body) > BODY_MAX:
+        raise ValueError(f"body of {len(body)} bytes exceeds {BODY_MAX}")
+    obj = bytes([len(body)]) + body
     frames = []
-    for i in range(n):
-        chunk = payload[i * per : (i + 1) * per]
-        frames.append(bytes([msg_type, seq, (i << 4) | n, len(chunk)]) + chunk)
+    for i in range(0, len(obj), CHUNK):
+        hdr = (KIND_OBJECT | FIRST if i == 0 else KIND_CONT) | (seq & 0x0F)
+        inner = bytes([hdr, msg_type, i // CHUNK]) + obj[i : i + CHUNK].ljust(CHUNK, b"\0")
+        frames.append(bytes([0x12, slot]) + inner)
     return frames
 
 
 class Reassembler:
+    """Reassembles hub-mode frames; acks and non-data frames yield None."""
+
     def __init__(self) -> None:
         self._key: tuple[int, int] | None = None
-        self._total = 0
-        self._parts: dict[int, bytes] = {}
+        self._need = 0
+        self._next = 0
+        self._buf = b""
+        self._last: int | None = None
 
     def push(self, frame: bytes) -> tuple[int, bytes] | None:
-        """Return (type, payload) when complete, None if more needed; ValueError if malformed."""
-        if len(frame) < HDR_LEN:
-            raise ValueError("frame shorter than header")
-        mtype, seq, frag, flen = frame[0], frame[1], frame[2], frame[3]
-        index, total = frag >> 4, frag & 0x0F
-        if total == 0 or index >= total:
-            raise ValueError("bad fragment index/total")
-        if flen > FRAME_MAX - HDR_LEN or flen > len(frame) - HDR_LEN:
-            raise ValueError("fragment len exceeds frame")
-        key = (mtype, seq)
-        if key == self._key and total != self._total:
-            raise ValueError("mismatched fragment total")
-        if key != self._key:
-            self._key, self._total, self._parts = key, total, {}
-        self._parts.setdefault(index, bytes(frame[HDR_LEN : HDR_LEN + flen]))
-        if len(self._parts) < total:
+        """(type, body) when an object completes, None otherwise; ValueError if malformed."""
+        if len(frame) != HUB_FRAME_LEN or frame[0] != 0x12:
+            raise ValueError("not a hub-mode data frame")
+        hdr, mtype, idx, data = frame[2], frame[3], frame[4], frame[5:]
+        kind, seq = hdr & 0xE0, hdr & 0x0F
+        if kind == KIND_ACK:
             return None
-        payload = b"".join(self._parts[i] for i in range(total))
-        self._key, self._total, self._parts = None, 0, {}
-        return mtype, payload
+        if kind == KIND_OBJECT and hdr & FIRST and data[0] <= BODY_MAX:
+            self._key, self._need, self._next, self._buf = (mtype, seq), data[0] + 1, 1, b""
+        elif (
+            kind == KIND_CONT
+            and not hdr & FIRST
+            and self._key == (mtype, seq)
+            and idx == self._next
+        ):
+            self._next += 1
+        else:
+            self._key = None
+            raise ValueError("frame does not belong to the current object")
+        self._buf += data[: self._need - len(self._buf)]
+        if len(self._buf) < self._need:
+            return None
+        body = self._buf[1:]
+        self._key = None
+        if self._last == seq:
+            return None  # a retried object whose ack was lost: re-acked, not redelivered
+        self._last = seq
+        return mtype, body

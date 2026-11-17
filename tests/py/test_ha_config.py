@@ -469,7 +469,7 @@ async def test_battery_entities(hass, hub_rf, write_yaml):
     entry = await setup(hass, hub_rf)
     assert val(hass, "sensor", "battery_1") == "unknown"
     sock = rf_attach(hub_rf.rf)
-    for fr in rf_codec.split(13, 2, bytes([1, 77, 0x0E, 0xD8]), 32):
+    for fr in rf_codec.split(13, 2, bytes([1, 77, 0x0E, 0xD8])):
         sock.send(fr)
     await until(hass, lambda: val(hass, "sensor", "battery_1") == "77")
     assert val(hass, "sensor", "voltage_1") == "3800"

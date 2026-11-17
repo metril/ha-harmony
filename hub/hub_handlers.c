@@ -57,21 +57,25 @@ void hub_shutdown(hub_ctx_t *c) {
     if (hp_actsm_flush_state(&c->act) < 0) fprintf(stderr, "hub: final state write failed\n");
 }
 
-#define HUB_RF_CAP 30 /* hub->remote total frame size */
+#define HUB_RF_SLOT 1 /* the single paired remote (docs/hardware/hub-rf-cc2544.md s7) */
 
 /* Packs, splits and sends one RF message. 0, -HP_E_TOOBIG (nothing sent),
  * -HP_E_NOENT (no remote; nothing sent), other negative: link failed. */
 static int rf_send_msg(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, size_t nv) {
     uint8_t payload[HP_RF_MSG_MAX];
-    hp_rf_frame_t fr[HP_RF_MAX_FRAGS];
+    hp_rf_inner_t fr[HP_RF_MAX_FRAGS];
     size_t plen = 0, nf = 0;
     if (!h->sinks.rf) return -HP_E_NOENT;
     int rc = hp_rf_pack(t, v, nv, payload, sizeof payload, &plen);
     if (rc < 0) return rc;
-    rc = hp_rf_split(t, h->rf_seq++, payload, plen, HUB_RF_CAP, fr, HP_RF_MAX_FRAGS, &nf);
+    rc = hp_rf_split(t, h->rf_seq++, payload, plen, fr, HP_RF_MAX_FRAGS, &nf);
     if (rc < 0) return rc;
+    /* The sim link is reliable, so this is fire-and-forget: no ack wait or retry here
+     * (the hardware driver will drive hp_rf_tx_t). */
     for (size_t i = 0; i < nf; i++) {
-        rc = h->sinks.rf->send(h->sinks.rf->self, fr[i].data, fr[i].len);
+        hp_rf_frame_t w;
+        hp_rf_wrap_hub(HUB_RF_SLOT, &fr[i], &w);
+        rc = h->sinks.rf->send(h->sinks.rf->self, w.data, w.len);
         if (rc < 0) return (i == 0 || rc == -HP_E_NOENT) ? rc : -HP_E_IO;
     }
     return 0;
@@ -399,6 +403,8 @@ void hub_pump_rf(hub_ctx_t *h) {
     if (!h->sinks.rf) return;
     uint8_t fr[HP_RF_FRAME_MAX + 1];
     hp_rf_msg_t msg;
+    hp_rf_inner_t in, ack;
+    uint8_t slot;
     int n;
     while ((n = h->sinks.rf->recv(h->sinks.rf->self, fr, sizeof fr, 0)) != 0) {
         if (n < 0) { /* link event (remote gone) or error: drop partial reassembly */
@@ -406,8 +412,9 @@ void hub_pump_rf(hub_ctx_t *h) {
             h->rf_attached = false;
             break;
         }
-        if (n > HP_RF_FRAME_MAX) continue;
-        if (hp_rf_asm_push(&h->rf_asm, fr, (size_t)n, &msg) == HP_ASM_COMPLETE) handle_rf_msg(h, &msg);
+        if (hp_rf_unwrap_hub(fr, (size_t)n, &slot, &in) < 0) continue; /* not a data frame */
+        /* Acks are not sent on the sim link (see rf_send_msg); DUPLICATE is dropped. */
+        if (hp_rf_asm_push(&h->rf_asm, &in, &msg, &ack) == HP_ASM_COMPLETE) handle_rf_msg(h, &msg);
     }
     if (h->sinks.rf->attached) {
         bool now = h->sinks.rf->attached(h->sinks.rf->self);

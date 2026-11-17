@@ -162,7 +162,7 @@ def test_tile_update_shows_in_layout(rf_path, start_remote):
     seq = iter(range(1, 100))
 
     def send(mtype, payload):
-        for fr in rf_codec.split(mtype, next(seq), payload, 32):
+        for fr in rf_codec.split(mtype, next(seq), payload):
             conn.send(fr)
 
     send(PAGE_PUSH, bytes([1, 9, len(PAGE)]) + PAGE)

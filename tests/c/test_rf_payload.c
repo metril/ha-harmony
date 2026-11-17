@@ -49,17 +49,19 @@ static void test_state_update_bool(void) {
 }
 
 static void test_page_push(void) {
-    uint8_t data[255];
-    for (int i = 0; i < 255; i++) data[i] = (uint8_t)i;
-    hp_rf_val_t v[3] = {{.u = 1}, {.u = 2}, {.p = data, .len = 255}}, o[3];
+    uint8_t data[256]; /* 251 = the largest page that fits one 254-byte RF object */
+    for (int i = 0; i < 256; i++) data[i] = (uint8_t)i;
+    hp_rf_val_t v[3] = {{.u = 1}, {.u = 2}, {.p = data, .len = 251}}, o[3];
     uint8_t buf[HP_RF_MSG_MAX];
     size_t n = 0;
     CT_EQ(hp_rf_pack(HP_MSG_PAGE_PUSH, v, 3, buf, sizeof buf, &n), 0);
-    CT_EQ(n, 258);
-    CT_EQ(buf[2], 255);
+    CT_EQ(n, 254);
+    CT_EQ(buf[2], 251);
     CT_EQ(hp_rf_unpack(HP_MSG_PAGE_PUSH, buf, n, o, 3), 0);
-    CT_EQ(o[2].len, 255);
-    CT_MEM_EQ(o[2].p, data, 255);
+    CT_EQ(o[2].len, 251);
+    CT_MEM_EQ(o[2].p, data, 251);
+    v[2].len = 252; /* 255 bytes of payload no longer fit one object */
+    CT_EQ(hp_rf_pack(HP_MSG_PAGE_PUSH, v, 3, buf, sizeof buf, &n), -HP_E_TOOBIG);
     v[2].len = 256; /* length prefix is u8 */
     CT_EQ(hp_rf_pack(HP_MSG_PAGE_PUSH, v, 3, buf, sizeof buf, &n), -HP_E_TOOBIG);
     v[2].len = 100;
@@ -101,16 +103,21 @@ static void test_rejects(void) {
 }
 
 static void test_split_budget(void) {
-    /* 255-byte page = 258 payload bytes: 10 fragments at the hub->remote cap of 30. */
-    uint8_t data[255] = {0};
-    hp_rf_val_t v[3] = {{.u = 1}, {.u = 2}, {.p = data, .len = 255}};
+    /* A 251-byte page = 254 payload bytes, the largest object body: 11 inner blocks. */
+    uint8_t data[251] = {0};
+    hp_rf_val_t v[3] = {{.u = 1}, {.u = 2}, {.p = data, .len = 251}};
+    uint8_t big[255] = {0};
+    hp_rf_val_t vb[3] = {{.u = 1}, {.u = 2}, {.p = big, .len = 255}};
     uint8_t buf[HP_RF_MSG_MAX];
     size_t n;
-    hp_rf_frame_t fr[HP_RF_MAX_FRAGS];
+    hp_rf_inner_t fr[HP_RF_MAX_FRAGS];
     size_t nf = 0;
     CT_EQ(hp_rf_pack(HP_MSG_PAGE_PUSH, v, 3, buf, sizeof buf, &n), 0);
-    CT_EQ(hp_rf_split(HP_MSG_PAGE_PUSH, 1, buf, n, 30, fr, HP_RF_MAX_FRAGS, &nf), 0);
-    CT_EQ(nf, 10);
+    CT_EQ(n, HP_RF_BODY_MAX);
+    CT_EQ(hp_rf_split(HP_MSG_PAGE_PUSH, 1, buf, n, fr, HP_RF_MAX_FRAGS, &nf), 0);
+    CT_EQ(nf, 11);
+    /* a 255-byte page (258) no longer fits one object */
+    CT_EQ(hp_rf_pack(HP_MSG_PAGE_PUSH, vb, 3, buf, sizeof buf, &n), -HP_E_TOOBIG);
 }
 
 int main(void) {

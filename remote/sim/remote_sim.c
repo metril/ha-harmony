@@ -51,7 +51,7 @@
 #include "hub/rf/rf_payload.h"
 #include "remote/page/page.h"
 
-#define REMOTE_RF_CAP 32 /* remote->hub total frame size */
+#define SIM_RF_SLOT 1 /* the sim socket carries hub-mode (30 B) frames both ways */
 
 static int usage(void) {
     fprintf(stderr, "usage: remote_sim --rf PATH (--press KEY_CODE | --hold KEY_CODE,MS | --dump-page | --dump-layout | --tap X,Y) "
@@ -66,21 +66,32 @@ static long now_ms(void) {
     return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+/* One received frame through unwrap + reassembly: 1 when it completed a new object. */
+static int rx_complete(hp_rf_asm_t *as, const uint8_t *f, size_t n, hp_rf_msg_t *msg) {
+    hp_rf_inner_t in, ack;
+    uint8_t slot;
+    if (hp_rf_unwrap_hub(f, n, &slot, &in) < 0) return 0;
+    return hp_rf_asm_push(as, &in, msg, &ack) == HP_ASM_COMPLETE;
+}
+
 static int send_key(hp_rf_transport *rf, uint8_t seq, long remote, long key, long action) {
     hp_rf_val_t v[3] = {{.u = (uint32_t)remote}, {.u = (uint32_t)key}, {.u = (uint32_t)action}};
     uint8_t payload[HP_RF_MSG_MAX];
-    hp_rf_frame_t fr[HP_RF_MAX_FRAGS];
+    hp_rf_inner_t fr[HP_RF_MAX_FRAGS];
     size_t plen = 0, nf = 0;
     if (hp_rf_pack(HP_MSG_KEY_EVENT, v, 3, payload, sizeof payload, &plen) < 0 ||
-        hp_rf_split(HP_MSG_KEY_EVENT, seq, payload, plen, REMOTE_RF_CAP, fr, HP_RF_MAX_FRAGS, &nf) < 0) {
+        hp_rf_split(HP_MSG_KEY_EVENT, seq, payload, plen, fr, HP_RF_MAX_FRAGS, &nf) < 0) {
         fprintf(stderr, "remote_sim: cannot encode key_event\n");
         return 1;
     }
-    for (size_t i = 0; i < nf; i++)
-        if (rf->send(rf->self, fr[i].data, fr[i].len) < 0) {
+    for (size_t i = 0; i < nf; i++) {
+        hp_rf_frame_t w;
+        hp_rf_wrap_hub(SIM_RF_SLOT, &fr[i], &w); /* fire-and-forget: the sim link is reliable */
+        if (rf->send(rf->self, w.data, w.len) < 0) {
             fprintf(stderr, "remote_sim: RF send failed\n");
             return 1;
         }
+    }
     return 0;
 }
 
@@ -126,8 +137,7 @@ static int dump_page(hp_rf_transport *rf, long timeout_ms) {
             return 1;
         }
         if (n == 0 || n > HP_RF_FRAME_MAX) continue;
-        if (hp_rf_asm_push(&as, fr, (size_t)n, &msg) != HP_ASM_COMPLETE || msg.type != HP_MSG_PAGE_PUSH)
-            continue;
+        if (!rx_complete(&as, fr, (size_t)n, &msg) || msg.type != HP_MSG_PAGE_PUSH) continue;
         hp_rf_val_t v[3];
         if (hp_rf_unpack(HP_MSG_PAGE_PUSH, msg.payload, msg.len, v, 3) < 0) continue;
         char b64[4 * ((255 + 2) / 3) + 1];
@@ -189,7 +199,7 @@ static int pump(hp_rf_transport *rf, hp_rf_asm_t *as, long timeout_ms, int stop_
         int n = rf->recv(rf->self, fr, sizeof fr, (int)left);
         if (n < 0) return -1;
         if (n == 0 || n > HP_RF_FRAME_MAX) continue;
-        if (hp_rf_asm_push(as, fr, (size_t)n, &msg) != HP_ASM_COMPLETE) continue;
+        if (!rx_complete(as, fr, (size_t)n, &msg)) continue;
         hp_rf_val_t v[4];
         if (msg.type == HP_MSG_PAGE_PUSH && hp_rf_unpack(HP_MSG_PAGE_PUSH, msg.payload, msg.len, v, 3) == 0) {
             if (on_page(v) && stop_on_page) return 1;

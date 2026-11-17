@@ -12,6 +12,8 @@ from ir_ref import encode
 from test_engine_ir import cfg, drain_devices, pending_lines, until
 from test_hub_engine import call, hello, read_lines, recv
 
+from proto import rf_codec
+
 SETTLE_TV, SETTLE_AMP = 40, 20
 
 
@@ -280,10 +282,10 @@ async def test_rf_reattach_cycles_do_not_lose_the_next_remote(hub_rf):
         await hello(ws)
         for i in range(25):
             a = rf_attach(hub_rf.rf)
-            a.send(bytes([12, 1, 0x02, 0x01, 0]))  # fragment 0 of 2, then vanish
+            a.send(rf_codec.split(12, 1, bytes(60))[0])  # frame 0 of 3, then vanish
             a.close()
             b = rf_attach(hub_rf.rf)
-            b.send(bytes([10, 1, 0x01, 3, 1, 2, 0]))
+            b.send(rf_codec.split(10, 1, bytes([1, 2, 0]))[0])
             assert (await recv(ws))["d"] == {"remote": 1, "key": 2, "action": 0}, i
             b.close()
 
