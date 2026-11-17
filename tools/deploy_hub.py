@@ -31,6 +31,7 @@ from device_backup import DEFAULT_RUN_TIMEOUT, DEFAULT_SSH_TIMEOUT, SshRunner, p
 REMOTE_DIR = "/data/ha-harmony"
 REMOTE_HUB = f"{REMOTE_DIR}/hub"
 REMOTE_SIM = f"{REMOTE_DIR}/remote_sim"
+REMOTE_RF_PROBE = f"{REMOTE_DIR}/rf_probe"
 REMOTE_CONFIG = f"{REMOTE_DIR}/config.json"
 # tmpfs: gone after reboot. The basename MUST be "busybox": this build dispatches on argv[0] and
 # does not fall back to argv[1], so any other name fails with "applet not found".
@@ -293,6 +294,7 @@ class Deployer:
         self,
         hub: Path,
         remote_sim: Path | None = None,
+        rf_probe: Path | None = None,
         config: Path | None = None,
         busybox: Path | None = None,
         margin_kb: int = DEFAULT_MARGIN_KB,
@@ -301,6 +303,8 @@ class Deployer:
         items: list[tuple[Path, str, str | None]] = [(hub, REMOTE_HUB, "755")]
         if remote_sim:
             items.append((remote_sim, REMOTE_SIM, "755"))
+        if rf_probe:
+            items.append((rf_probe, REMOTE_RF_PROBE, "755"))
         if config:
             items.append((config, REMOTE_CONFIG, None))
         for local, _, _ in items + ([(busybox, "", None)] if busybox else []):
@@ -474,10 +478,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     add("status", "[read-only] stock processes, device holders, /data free space, our files", False)
     p = add(
-        "push", "[WRITE] copy hub (+remote_sim, config, BusyBox) to /data/ha-harmony, md5-verified"
+        "push", "[WRITE] copy hub (+remote_sim, rf_probe, config, BusyBox) to /data/ha-harmony, md5-verified"
     )
     p.add_argument("--hub", type=Path, required=True)
     p.add_argument("--remote-sim", type=Path)
+    p.add_argument("--rf-probe", type=Path, help="read-only CC2544 probe tool")
     p.add_argument("--config", type=Path)
     p.add_argument("--busybox", type=Path, help="static MIPS BusyBox, staged to /tmp (gives df)")
     p.add_argument("--margin-kb", type=int, default=DEFAULT_MARGIN_KB)
@@ -522,8 +527,8 @@ def main(
             case "status":
                 return d.status()
             case "push":
-                return d.push(a.hub, a.remote_sim, a.config, a.busybox, a.margin_kb,
-                              not a.no_space_check)  # fmt: skip
+                return d.push(a.hub, a.remote_sim, a.rf_probe, a.config, a.busybox,
+                              a.margin_kb, not a.no_space_check)  # fmt: skip
             case "quiesce":
                 return d.quiesce(a.timeout)
             case "run":
