@@ -23,9 +23,11 @@ static size_t unhex(const char *s, uint8_t *out, size_t cap) {
     return n;
 }
 
+static const char *vec_path = HP_VECTORS; /* argv[1] overrides (running on the hub) */
+
 static cJSON *load(void) {
-    FILE *f = fopen(HP_VECTORS, "rb");
-    if (!f) { fprintf(stderr, "cannot open %s\n", HP_VECTORS); exit(1); }
+    FILE *f = fopen(vec_path, "rb");
+    if (!f) { fprintf(stderr, "cannot open %s\n", vec_path); exit(1); }
     static char buf[1 << 16];
     size_t n = fread(buf, 1, sizeof buf - 1, f);
     fclose(f);
@@ -132,7 +134,8 @@ static void test_out_untouched_on_error(void) {
     CT_EQ(p.page_id, 0x5a);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc > 1) vec_path = argv[1];
     cJSON *root = load();
     test_valid_vectors(root);
     test_invalid_vectors(root);
