@@ -255,6 +255,244 @@ def convert(
     return Conversion({"devices": out_devices}, results, warnings, omitted)
 
 
+# ----------------------------------------------------------------------------- power, inputs, activities
+# Optional second pass. ir_codes.json carries only IR codes; the stock hub's full device database
+# (DeviceList.json, on the data partition) says which command powers each device on/off/toggles it,
+# how long it needs after power-on, and what each input is called; the stock engine config holds the
+# activities as per-device target states ("fixit"). Both are the stock hub's own data, verbatim.
+MAX_SETTLE_MS = 60000  # config_model's settle_ms bound
+_SLUG_OK = set("abcdefghijklmnopqrstuvwxyz0123456789_")
+
+
+@dataclass
+class StockDevice:
+    id: str
+    name: str
+    transport: Any = None
+    power_on: str | None = None
+    power_off: str | None = None
+    power_toggle: str | None = None
+    power_other: str = ""  # set when stock power exists but is not one single IR press
+    power_on_delay_ms: int = 0
+    inputs: list[tuple[str, str]] = field(default_factory=list)  # (label, IR command), stock order
+    inputs_unexpressible: list[str] = field(default_factory=list)
+
+
+def _single_ir_press(actions: Any) -> str | None:
+    """Stock action list -> the command name if it is exactly one plain IR press, else None."""
+    if not isinstance(actions, list) or len(actions) != 1 or not isinstance(actions[0], dict):
+        return None
+    a = actions[0]
+    if a.get("__type") != "IRPressAction" or a.get("Duration") not in (None, 0):
+        return None
+    name = a.get("IRCommandName")
+    return name if isinstance(name, str) and name else None
+
+
+def load_device_list(path: Path) -> dict[str, StockDevice]:
+    """Stock DeviceList.json -> {stock device id: power/input/timing facts}."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out: dict[str, StockDevice] = {}
+    for entry in data.get("DevicesWithFeatures", []):
+        dev = entry.get("Device") or {}
+        feats = entry.get("DeviceFeatures") or []
+        dev_id = next(
+            (str(f["DeviceId-"]) for f in feats if isinstance(f, dict) and f.get("DeviceId-")),
+            None,
+        )
+        if dev_id is None:
+            continue
+        sd = StockDevice(dev_id, dev.get("Name") or dev_id, dev.get("Transport"))
+        for f in feats:
+            if not isinstance(f, dict):
+                continue
+            if f.get("__type") == "PowerFeature":
+                sd.power_on = _single_ir_press(f.get("PowerOnActions"))
+                sd.power_off = _single_ir_press(f.get("PowerOffActions"))
+                sd.power_toggle = _single_ir_press(f.get("PowerToggleActions"))
+                has_any = any(f.get(k) for k in ("PowerOnActions", "PowerOffActions", "PowerToggleActions"))
+                if has_any and not (sd.power_on and sd.power_off) and not sd.power_toggle:
+                    sd.power_other = "power actions are not single IR presses"
+                delay = f.get("PowerOnDelay")
+                sd.power_on_delay_ms = delay if isinstance(delay, int) and delay > 0 else 0
+            elif f.get("__type") == "InputFeature":
+                for inp in f.get("Inputs") or []:
+                    label = inp.get("InputName") if isinstance(inp, dict) else None
+                    if not label:
+                        continue
+                    cmd = _single_ir_press(inp.get("Actions"))
+                    if cmd:
+                        sd.inputs.append((label, cmd))
+                    elif inp.get("Actions"):
+                        sd.inputs_unexpressible.append(f"{label!r}: not a single IR press")
+        out[dev_id] = sd
+    return out
+
+
+def load_activities(path: Path) -> list[dict[str, Any]]:
+    """Stock engine config -> its activity list (each carries `fixit` target states)."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data = data.get("data", data)
+    acts = data.get("activity", [])
+    if not isinstance(acts, list):
+        raise SystemExit(f"error: {path}: expected `activity` to be a list")
+    return acts
+
+
+def _resolve_cmd(name: str | None, cmds: dict[str, Any]) -> str | None:
+    """Find a stock command by name among the converted ones.
+
+    Stock's two databases disagree on case for the same command (DeviceList says `InputTv`, the IR
+    database `InputTV`). Exact match first; otherwise a case-insensitive match, but only when it is
+    unique -- if two commands differ only by case, refuse rather than pick one.
+    """
+    if name is None:
+        return None
+    if name in cmds:
+        return name
+    hits = [c for c in cmds if c.lower() == name.lower()]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _label_ok(label: str) -> bool:
+    return bool(label) and not any(ord(c) < 32 for c in label) and len(label.encode()) <= NAME_MAX_BYTES
+
+
+def _slugify(label: str) -> str:
+    s = "".join(c if c in _SLUG_OK else "_" for c in label.lower())
+    while "__" in s:
+        s = s.replace("__", "_")
+    return s.strip("_")[:31] or "activity"
+
+
+def apply_device_features(
+    conv: Conversion, stock_devs: dict[str, StockDevice], names: dict[str, tuple[str, str]]
+) -> None:
+    """Add power / settle_ms / inputs to each converted device, from stock's own definitions.
+
+    Every value is a copy of an already-converted command's raw code, so power and inputs fire
+    exactly the signal the matching button does. Anything not expressible is a warning, never a guess.
+    """
+    names = {**KNOWN_DEVICES, **names}
+    by_slug = {device_ident(sid, names)[0]: sd for sid, sd in stock_devs.items()}
+    rebuilt: list[dict[str, Any]] = []
+    for d in conv.config["devices"]:
+        sd = by_slug.get(d["id"])
+        cmds = d["commands"]
+        if sd is None:
+            conv.warnings.append(f"{d['name']}: not in DeviceList.json; no power/inputs added")
+            rebuilt.append(d)
+            continue
+
+        power: dict[str, Any] | None = None
+        if sd.power_on and sd.power_off:
+            on, off = _resolve_cmd(sd.power_on, cmds), _resolve_cmd(sd.power_off, cmds)
+            if on is None or off is None:
+                missing = [c for c, r in ((sd.power_on, on), (sd.power_off, off)) if r is None]
+                conv.warnings.append(f"{d['name']}: power uses {missing}, not converted; no power")
+            else:
+                power = {"on": json.loads(json.dumps(cmds[on])),
+                         "off": json.loads(json.dumps(cmds[off]))}  # fmt: skip
+        elif sd.power_toggle:
+            tog = _resolve_cmd(sd.power_toggle, cmds)
+            if tog is not None:
+                power = {"toggle": json.loads(json.dumps(cmds[tog]))}
+            else:
+                conv.warnings.append(f"{d['name']}: toggle {sd.power_toggle!r} not converted")
+        elif sd.power_other:
+            conv.warnings.append(f"{d['name']}: {sd.power_other}; no power control emitted")
+
+        inputs: dict[str, Any] = {}
+        for label, cmd in sd.inputs:
+            found = _resolve_cmd(cmd, cmds)
+            if not _label_ok(label):
+                conv.warnings.append(
+                    f"{d['name']}: input {label!r} skipped (names are at most {NAME_MAX_BYTES} bytes)"
+                )
+            elif found is None:
+                conv.warnings.append(f"{d['name']}: input {label!r} uses {cmd!r}, not converted")
+            elif label in inputs:
+                conv.warnings.append(f"{d['name']}: duplicate input label {label!r}; first kept")
+            else:
+                inputs[label] = json.loads(json.dumps(cmds[found]))
+        for why in sd.inputs_unexpressible:
+            conv.warnings.append(f"{d['name']}: input {why}")
+
+        out: dict[str, Any] = {"id": d["id"], "name": d["name"]}
+        if power and sd.power_on_delay_ms:
+            out["settle_ms"] = min(sd.power_on_delay_ms, MAX_SETTLE_MS)
+        if power:
+            out["power"] = power
+        if inputs:
+            out["inputs"] = inputs
+        out["commands"] = cmds
+        rebuilt.append(out)
+    conv.config["devices"] = rebuilt
+
+
+def apply_activities(
+    conv: Conversion,
+    activities: list[dict[str, Any]],
+    stock_devs: dict[str, StockDevice],
+    names: dict[str, tuple[str, str]],
+) -> None:
+    """Stock activities -> config activities. A device stock wants ON is listed (with its input);
+    everything else is off, which is the config's own semantics, so stock's explicit Off is implied.
+
+    A device the hub cannot drive (no IR: Bluetooth, IP) is reported, not dropped silently: stock
+    powers it some other way, and Home Assistant has to do that part now.
+    """
+    names = {**KNOWN_DEVICES, **names}
+    devs = {d["id"]: d for d in conv.config["devices"]}
+    out: list[dict[str, Any]] = []
+    used: set[str] = {"off"}
+    for act in activities:
+        label = act.get("label")
+        if act.get("type") == "PowerOff" or str(act.get("id")) == "-1":
+            continue  # the config's built-in `off` activity
+        if not isinstance(label, str) or not _label_ok(label):
+            conv.warnings.append(f"activity {label!r}: unusable name; skipped")
+            continue
+        slug = base = _slugify(label)
+        n = 2
+        while slug in used:
+            slug, n = f"{base[:28]}_{n}", n + 1
+        used.add(slug)
+
+        on: list[dict[str, Any]] = []
+        for stock_id, state in (act.get("fixit") or {}).items():
+            if not isinstance(state, dict) or state.get("Power") != "On":
+                continue
+            dslug = device_ident(stock_id, names)[0]
+            sd = stock_devs.get(stock_id)
+            dname = sd.name if sd else stock_id
+            d = devs.get(dslug)
+            if d is None:
+                how = f"transport {sd.transport}" if sd else "unknown device"
+                conv.warnings.append(
+                    f"activity {label!r}: wants {dname} ON, but the hub has no IR for it ({how});"
+                    " do that part with a Home Assistant automation on this activity"
+                )
+                continue
+            entry: dict[str, Any] = {"device": dslug}
+            want_input = state.get("Input")
+            if want_input:
+                if want_input in d.get("inputs", {}):
+                    entry["input"] = want_input
+                else:
+                    conv.warnings.append(
+                        f"activity {label!r}: {dname} input {want_input!r} has no matching input"
+                    )
+            if "power" not in d and "input" not in entry:
+                conv.warnings.append(
+                    f"activity {label!r}: {dname} has no power control or input; listing it does nothing"
+                )
+                continue
+            on.append(entry)
+        out.append({"id": slug, "name": label, "devices": on})
+    conv.config["activities"] = out
+
+
 # ----------------------------------------------------------------------------- reporting
 def summarise(conv: Conversion) -> dict[str, Any]:
     per: dict[str, Counter[str]] = {}
@@ -337,18 +575,15 @@ def dump_config(config: dict[str, Any], fmt: str, header: str) -> str:
 def validate_config(text: str, fmt: str) -> tuple[int, int]:
     """Run the real config_model + compiler. Returns (config bytes, pool words)."""
     sys.path.insert(0, str(ROOT))
-    from custom_components.ha_harmony.compiler import compact_json, compile_config
+    from custom_components.ha_harmony.compiler import _pool_words, compact_json, compile_config
     from custom_components.ha_harmony.config_model import parse_model
 
     model = parse_model(text, "<generated>")  # JSON is valid YAML
     compiled = compile_config(model)
     size = len(compact_json(compiled.hub_json).encode())
-    words = sum(
-        len(c.get("raw", {}).get("us", []))
-        for d in model["devices"]
-        for c in d["commands"].values()
-    )
-    return size, words
+    # The compiler's own count over everything it sends: commands AND power/inputs, which each
+    # carry their own copy of a raw code (the hub pool has no dedup).
+    return size, _pool_words(compiled.hub_json)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -362,7 +597,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--report", type=Path, help="write the full per-command report (JSON)")
     ap.add_argument("--device-name", action="append", default=[], metavar="ID=slug:Name")
     ap.add_argument("--no-validate", action="store_true", help="skip config_model/compiler check")
+    ap.add_argument(
+        "--device-list",
+        type=Path,
+        help="stock DeviceList.json: adds power on/off/toggle, settle_ms and named inputs",
+    )
+    ap.add_argument(
+        "--engine-config",
+        type=Path,
+        help="stock engine config JSON: adds activities (needs --device-list)",
+    )
     a = ap.parse_args(argv)
+    if a.engine_config and not a.device_list:
+        ap.error("--engine-config needs --device-list (activities refer to power and inputs)")
 
     fmt = a.format or ("json" if a.out.suffix == ".json" else "yaml")
     names: dict[str, tuple[str, str]] = {}
@@ -376,6 +623,11 @@ def main(argv: list[str] | None = None) -> int:
     src = locate(a.input)
     stock = load_stock(src)
     conv = convert(stock, mode=a.repeats, only=a.device or None, names=names)
+    if a.device_list:
+        stock_devs = load_device_list(a.device_list)
+        apply_device_features(conv, stock_devs, names)
+        if a.engine_config:
+            apply_activities(conv, load_activities(a.engine_config), stock_devs, names)
     summary = summarise(conv)
     conv.warnings += cross_check_coverage(src, summary, not a.device)
     report = render_report(conv, summary, only_ir=a.only_ir, mode=a.repeats)
