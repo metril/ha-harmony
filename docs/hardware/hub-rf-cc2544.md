@@ -305,6 +305,10 @@ provoked it); the meaning of the trailing bytes in the `0x03`, `0x21` and `0x31`
 replies; and whether the `0x21` layout is `08 28` + EquadID or something else
 framing it.
 
+### 8b. TX status and frame pacing (first RF bench run, 2026-11-17) **[MEASURED, semantics UNKNOWN]**
+
+After transmissions the hub's radio delivers 32-byte reports `20 <slot> 42 <status> 00 ...` (slot 2, status 00 or 01). What 00 vs 01 mean is not known, so the driver only passes them on (`hp_rf_transport.tx_status`). Remote to hub objects (single frame) worked; the 2-frame hub to remote `page_push` did not arrive, so the link now paces multi-frame objects: frame N+1 follows a TX status for the previous frame, or a 20 ms gap (`hp_rf_link_t.gap_ms`), whichever is first. Object ack + retry remain the source of truth. Link status is logged once per transition. `--rf-debug` (hub and remote app) logs every write/read as `rf_spi <ms> TX|RX <rc/len>: <hex>` plus per-object link events.
+
 ## 9. What this means for our code
 
 `hub/rf/framing.h` defines a 4-byte header `type, seq, (idx<<4|total), len`

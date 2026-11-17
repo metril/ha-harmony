@@ -20,6 +20,8 @@
 #include "hub/rf/framing.h"
 
 #define HP_LINK_QUEUE 8
+#define HP_LINK_GAP_MS 20     /* default minimum gap between the frames of one object */
+#define HP_LINK_SLOT_ANY 0xFF /* tx_slot: accept a TX status for any slot */
 
 typedef void (*hp_rf_link_deliver_fn)(void *ctx, const hp_rf_msg_t *msg);
 
@@ -28,6 +30,11 @@ typedef struct {
     size_t len;
     uint8_t body[HP_RF_BODY_MAX];
 } hp_rf_link_obj_t;
+
+typedef void (*hp_rf_link_log_fn)(void *ctx, const char *line);
+
+/* Default log sink: the line plus a newline on stderr. */
+void hp_rf_log_stderr(void *ctx, const char *line);
 
 typedef struct {
     hp_rf_transport *tp;
@@ -46,6 +53,13 @@ typedef struct {
     bool noent;            /* the head object hit -HP_E_NOENT on its first frame and was dropped */
     uint32_t failures;     /* objects dropped after all retries (monotonic) */
     uint32_t delivered;    /* objects delivered up (monotonic) */
+    /* Frame pacing (objects of 2+ frames): frame N+1 follows a TX status for tx_slot, or gap_ms. */
+    uint32_t gap_ms;       /* HP_LINK_GAP_MS; set after init to change (0 = no pacing) */
+    uint8_t tx_slot;       /* HP_LINK_SLOT_ANY by default */
+    bool released;         /* a TX status arrived since the last data frame was sent */
+    hp_rf_link_log_fn log; /* NULL = off (per-object debug events) */
+    void *log_ctx;
+    uint32_t now_dbg;      /* last caller clock, for log lines only */
 } hp_rf_link_t;
 
 typedef struct {
@@ -57,6 +71,9 @@ typedef struct {
 /* `tp` must already be claimed by the caller. deliver may be NULL (objects dropped). */
 void hp_rf_link_init(hp_rf_link_t *l, hp_rf_transport *tp, bool wrapped, uint8_t slot,
                      hp_rf_link_deliver_fn deliver, void *ctx);
+
+/* Enables per-object debug logging (send/frame/ack/retry/fail/deliver); fn NULL turns it off. */
+void hp_rf_link_set_log(hp_rf_link_t *l, hp_rf_link_log_fn fn, void *ctx);
 
 /* Queues one object (and transmits it at once when nothing is ahead of it). 0; -HP_E_TOOBIG (body > HP_RF_BODY_MAX); -HP_E_INVAL; -HP_E_NOENT when the
  * transport reports no peer, by attached() or by refusing the first frame (nothing queued); -HP_E_BUSY when the queue is full.

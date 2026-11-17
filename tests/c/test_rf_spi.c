@@ -167,13 +167,13 @@ static hp_rf_spi_ops_t fake_ops(fake_t *f) {
 
 static int open_fake(fake_t *f, uint8_t slot, hp_rf_transport **t) {
     hp_rf_spi_ops_t o = fake_ops(f);
-    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, HP_RF_SPI_ROLE_HUB, 0};
+    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
     return hp_rf_spi_open(&cfg, t);
 }
 
 static int open_remote(fake_t *f, uint8_t slot, uint8_t powermode, hp_rf_transport **t) {
     hp_rf_spi_ops_t o = fake_ops(f);
-    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, HP_RF_SPI_ROLE_REMOTE, powermode};
+    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, HP_RF_SPI_ROLE_REMOTE, powermode, false, NULL, NULL};
     return hp_rf_spi_open(&cfg, t);
 }
 
@@ -450,7 +450,7 @@ static void test_destroy_real_signal(void) {
     o.write = p_write;
     o.close = p_close;
     o.hal_alive = p_hal;
-    hp_rf_spi_cfg_t cfg = {NULL, 0, &o, HP_RF_SPI_ROLE_HUB, 0};
+    hp_rf_spi_cfg_t cfg = {NULL, 0, &o, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
     hp_rf_transport *t = NULL;
     CT_EQ(hp_rf_spi_open(&cfg, &t), 0);
     ms_sleep(50); /* let the reader block in read() */
@@ -731,6 +731,225 @@ static void test_two_endpoint_link(void) {
     }
 }
 
+/* ---- diagnostics, TX status, link-status logs ---- */
+
+typedef struct {
+    pthread_mutex_t mu;
+    char line[64][256];
+    int n;
+} cap_t;
+
+static void cap_init(cap_t *c) {
+    memset(c, 0, sizeof *c);
+    pthread_mutex_init(&c->mu, NULL);
+}
+
+static void cap_log(void *ctx, const char *l) {
+    cap_t *c = ctx;
+    pthread_mutex_lock(&c->mu);
+    if (c->n < 64) snprintf(c->line[c->n], sizeof c->line[0], "%s", l);
+    c->n++;
+    pthread_mutex_unlock(&c->mu);
+}
+
+static int cap_count(cap_t *c, const char *needle) {
+    int k = 0;
+    pthread_mutex_lock(&c->mu);
+    for (int i = 0; i < c->n && i < 64; i++)
+        if (strstr(c->line[i], needle)) k++;
+    pthread_mutex_unlock(&c->mu);
+    return k;
+}
+
+static int cap_total(cap_t *c) {
+    pthread_mutex_lock(&c->mu);
+    int n = c->n;
+    pthread_mutex_unlock(&c->mu);
+    return n;
+}
+
+static int open_cfg(fake_t *f, hp_rf_spi_role_t role, uint8_t slot, bool debug, cap_t *c, hp_rf_transport **t) {
+    hp_rf_spi_ops_t o = fake_ops(f);
+    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, role, 0, debug, cap_log, c};
+    return hp_rf_spi_open(&cfg, t);
+}
+
+static bool wait_txs(hp_rf_transport *t, uint8_t *slot, uint8_t *st) {
+    for (int i = 0; i < 2000; i++) {
+        if (t->tx_status(t->self, slot, st)) return true;
+        ms_sleep(1);
+    }
+    return false;
+}
+
+static void test_tx_status_surfaced(void) {
+    fake_t f;
+    cap_t c;
+    fake_init(&f);
+    cap_init(&c);
+    hp_rf_transport *t = NULL;
+    CT_EQ(open_cfg(&f, HP_RF_SPI_ROLE_HUB, 2, false, &c, &t), 0);
+    t->claim(t->self);
+    CT_CHECK(t->tx_status != NULL);
+    uint8_t r0[32] = {0x20, 0x02, 0x42, 0x00}, r1[32] = {0x20, 0x02, 0x42, 0x01}, other[32] = {0x20, 0x03, 0x42, 0x00};
+    uint8_t slot = 0xEE, st = 0xEE;
+    CT_EQ(t->tx_status(t->self, &slot, &st), 0); /* none pending */
+    feed(&f, r0, 32);
+    feed(&f, other, 32); /* another slot: not ours */
+    feed(&f, r1, 32);
+    CT_CHECK(wait_txs(t, &slot, &st));
+    CT_EQ(slot, 2);
+    CT_EQ(st, 0);
+    CT_CHECK(wait_txs(t, &slot, &st));
+    CT_EQ(slot, 2);
+    CT_EQ(st, 1);
+    ms_sleep(20);
+    CT_EQ(t->tx_status(t->self, &slot, &st), 0);
+    uint8_t buf[HP_RF_INNER_LEN];
+    CT_EQ(t->recv(t->self, buf, sizeof buf, 0), 0); /* never queued as data */
+    CT_CHECK(!t->attached(t->self));                /* and not a link-up either */
+    hp_rf_spi_destroy(t);
+
+    /* remote role: the same 0x20/0x42 shape, any slot, byte1 & 0x0F */
+    fake_t g;
+    fake_init(&g);
+    hp_rf_transport *r = NULL;
+    CT_EQ(open_cfg(&g, HP_RF_SPI_ROLE_REMOTE, 0, false, &c, &r), 0);
+    r->claim(r->self);
+    uint8_t rs[32] = {0x20, 0x31, 0x42, 0x01};
+    feed(&g, rs, 32);
+    CT_CHECK(wait_txs(r, &slot, &st));
+    CT_EQ(slot, 1);
+    CT_EQ(st, 1);
+    hp_rf_spi_destroy(r);
+}
+
+static void test_link_transition_logs(void) {
+    fake_t f;
+    cap_t c;
+    fake_init(&f);
+    cap_init(&c);
+    hp_rf_transport *t = NULL;
+    CT_EQ(open_cfg(&f, HP_RF_SPI_ROLE_HUB, 2, false, &c, &t), 0);
+    t->claim(t->self);
+    const uint8_t up[7] = {0x10, 0x02, 0x41, 0x04, 0x87, 0x21, 0x40};
+    const uint8_t lost[7] = {0x10, 0x02, 0x41, 0x04, 0x47, 0x21, 0x40};
+    const uint8_t wrong[7] = {0x10, 0x01, 0x41, 0x04, 0x47, 0x21, 0x40}; /* another slot: ignored */
+    feed(&f, up, 7);
+    wait_attached(t, true);
+    feed(&f, up, 7);
+    feed(&f, wrong, 7);
+    feed(&f, lost, 7);
+    feed(&f, lost, 7);
+    wait_attached(t, false);
+    feed(&f, up, 7);
+    wait_attached(t, true);
+    feed(&f, up, 7); /* queued behind: once the reader has it, the log would show */
+    ms_sleep(30);
+    CT_EQ(cap_count(&c, "link up (slot 2, status 0x87, wpid 4021)"), 2);
+    CT_EQ(cap_count(&c, "link lost (status 0x47)"), 1);
+    CT_EQ(cap_total(&c), 3); /* exactly one line per transition, no debug lines */
+    hp_rf_spi_destroy(t);
+}
+
+static void test_rf_debug_frames(void) {
+    for (int dbg = 0; dbg < 2; dbg++) {
+        fake_t f;
+        cap_t c;
+        fake_init(&f);
+        cap_init(&c);
+        hp_rf_transport *t = NULL;
+        CT_EQ(open_cfg(&f, HP_RF_SPI_ROLE_HUB, 2, dbg, &c, &t), 0);
+        t->claim(t->self);
+        CT_EQ(cap_total(&c), dbg ? 1 : 0); /* the init command write */
+        if (dbg) CT_EQ(cap_count(&c, " TX 0: 10 ff 80 00 00 01 00"), 1);
+        uint8_t fr[3] = {0xA1, 0xB2, 0xC3};
+        CT_EQ(t->send(t->self, fr, sizeof fr), 0);
+        CT_EQ(cap_total(&c), dbg ? 2 : 0);
+        uint8_t rx[30] = {0x12, 0x02, 0xD4, 0xE5};
+        feed(&f, rx, 30);
+        uint8_t buf[HP_RF_INNER_LEN];
+        CT_EQ(t->recv(t->self, buf, sizeof buf, 1000), HP_RF_INNER_LEN);
+        if (dbg) {
+            CT_EQ(cap_total(&c), 3);
+            CT_EQ(cap_count(&c, " TX 0: 12 02 a1 b2 c3 00 00"), 1);
+            CT_EQ(cap_count(&c, " RX 30: 12 02 d4 e5 00 00"), 1);
+            CT_EQ(cap_count(&c, " ms TX 0:"), 2);
+            pthread_mutex_lock(&c.mu);
+            CT_CHECK(strncmp(c.line[1], "rf_spi ", 7) == 0);
+            pthread_mutex_unlock(&c.mu);
+        } else {
+            CT_EQ(cap_total(&c), 0);
+        }
+        hp_rf_spi_destroy(t);
+    }
+}
+
+typedef struct {
+    int n, last_len;
+    uint32_t sum;
+} sweep_sink_t;
+
+static void sweep_deliver(void *ctx, const hp_rf_msg_t *m) {
+    sweep_sink_t *k = ctx;
+    k->n++;
+    k->last_len = (int)m->len;
+    k->sum = 0;
+    for (size_t i = 0; i < m->len; i++) k->sum = k->sum * 31 + m->payload[i];
+}
+
+/* Every body size 0..254, alternating hub->remote / remote->hub, over the paced link and both drivers. */
+static void test_two_endpoint_every_size(void) {
+    fake_t fh, fr;
+    fake_init(&fh);
+    fake_init(&fr);
+    fr.is_remote = 1;
+    fh.peer = &fr;
+    fr.peer = &fh;
+    hp_rf_transport *th = NULL, *tr = NULL;
+    CT_EQ(open_fake(&fh, 0, &th), 0);
+    CT_EQ(open_remote(&fr, 0, 0, &tr), 0);
+    th->claim(th->self);
+    tr->claim(tr->self);
+    const uint8_t hup[7] = {0x10, 0x01, 0x41, 0x04, 0x01, 0, 0};
+    const uint8_t rup[7] = {0x10, 0x00, 0x41, 0x04, 0x01, 0, 0};
+    feed(&fh, hup, 7);
+    feed(&fr, rup, 7);
+    wait_attached(th, true);
+    wait_attached(tr, true);
+    sweep_sink_t hs = {0}, rs = {0};
+    hp_rf_link_t hl, rl;
+    hp_rf_link_init(&hl, th, false, 1, sweep_deliver, &hs);
+    hp_rf_link_init(&rl, tr, false, 0, sweep_deliver, &rs);
+    for (size_t len = 0; len <= HP_RF_BODY_MAX; len++) {
+        uint8_t body[HP_RF_BODY_MAX];
+        uint32_t want = 0;
+        for (size_t i = 0; i < len; i++) {
+            body[i] = (uint8_t)(i * 5 + len);
+            want = want * 31 + body[i];
+        }
+        bool to_remote = len % 2 == 0;
+        hp_rf_link_t *from = to_remote ? &hl : &rl;
+        sweep_sink_t *k = to_remote ? &rs : &hs;
+        int before = k->n;
+        CT_EQ(hp_rf_link_send(from, HP_MSG_PAGE_PUSH, body, len, (uint32_t)fh.now), 0);
+        for (int step = 0; step < 60 && (k->n == before || hp_rf_link_status(from).queued); step++) {
+            ms_sleep(1);
+            fh.now += 25;
+            hp_rf_link_pump(&hl, (uint32_t)fh.now);
+            hp_rf_link_pump(&rl, (uint32_t)fh.now);
+        }
+        CT_EQ(k->n, before + 1); /* exactly once */
+        CT_EQ(k->last_len, (int)len);
+        CT_EQ(k->sum, want);
+        if (k->n != before + 1) break;
+    }
+    CT_EQ(hp_rf_link_status(&hl).failures, 0);
+    CT_EQ(hp_rf_link_status(&rl).failures, 0);
+    hp_rf_spi_destroy(th);
+    hp_rf_spi_destroy(tr);
+}
+
 int main(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
@@ -750,6 +969,10 @@ int main(void) {
     CT_RUN(test_role_classification);
     CT_RUN(test_remote_pairing_refused_and_brick_safety);
     CT_RUN(test_two_endpoint_link);
+    CT_RUN(test_two_endpoint_every_size);
+    CT_RUN(test_tx_status_surfaced);
+    CT_RUN(test_link_transition_logs);
+    CT_RUN(test_rf_debug_frames);
     (void)nwrites;
     return CT_DONE();
 }

@@ -76,6 +76,7 @@ static void link_deliver(void *ctx, const hp_rf_msg_t *m) { handle_rf_msg(ctx, m
 static void rf_link_ensure(hub_ctx_t *h) {
     if (h->link_bound) return;
     hp_rf_link_init(&h->link, h->sinks.rf, !h->rf_inner_blocks, HUB_RF_SLOT, link_deliver, h);
+    if (h->rf_debug) hp_rf_link_set_log(&h->link, hp_rf_log_stderr, NULL);
     h->link_bound = true;
 }
 

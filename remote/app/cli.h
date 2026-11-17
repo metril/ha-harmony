@@ -7,6 +7,7 @@
  *   --powermode 0xN0  upper nibble OR'd into byte 1 of every frame. Default 0x00. UNVALIDATED: stock's
  *                     value was not recovered. The low nibble must be 0.
  *   --slot N          the hub's slot on the remote, 0..15 (default 0, as measured)
+ *   --rf-debug        log every radio write/read frame and every link event to stderr (a flag, no value)
  * Both `--opt value` and `--opt=value` are accepted. */
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,6 +16,7 @@
 typedef struct {
   bool rf_spi;
   uint8_t powermode, slot;
+  bool rf_debug;
 } ra_cli_t;
 
 /* 0 ok; -1 bad or unknown option / value (nothing is printed; the caller prints usage, exits 2). */

@@ -38,6 +38,13 @@
  * attached() is false until a link-up status or a data frame arrives, and false again on a
  * `10 <slot> 41 04 <status>` report with status & 0x40.
  *
+ * TX STATUS. A 32-byte `0x20 <slot> 0x42 <status> ...` report is the radio's TX-status for a frame
+ * (measured on the hub; its 00 / 01 semantics are unknown, so they are only passed on). It is not
+ * data and not queued for recv(): it is surfaced through hp_rf_transport.tx_status (hub role: only
+ * for the configured slot; remote role: same shape, any slot, byte1 & 0x0F). A link-status change
+ * (`10 <slot> 41 04 <status>`) is logged once per transition ("link up (slot 2, status 0x87, wpid
+ * 4021)" / "link lost (status 0x47)").
+ *
  * write() returns 0 (normal) or a positive received length for success, negative for error. After
  * a negative return (-EIO: the chip's ready line is stuck) writes are suppressed (-HP_E_BUSY, no
  * syscall) for 50 ms, doubling to 1 s while errors continue: the radio shares the NOR-flash SPI
@@ -80,6 +87,9 @@ typedef struct {
     const hp_rf_spi_ops_t *ops;  /* NULL = real syscalls */
     hp_rf_spi_role_t role;       /* default HP_RF_SPI_ROLE_HUB */
     uint8_t powermode;           /* remote role only: upper-nibble value OR'd into frame byte 1 */
+    bool debug;                  /* log every write and read (ms since open, TX/RX, rc/len, hex) */
+    void (*log)(void *ctx, const char *line); /* sink for debug and link-transition lines; NULL = stderr */
+    void *log_ctx;
 } hp_rf_spi_cfg_t;
 
 /* The real syscalls (hal preflight walks /proc). Tests copy it and override fields. */

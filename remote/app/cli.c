@@ -27,6 +27,11 @@ int ra_cli_parse(int argc, char **argv, ra_cli_t *out) {
     const char *a = argv[i], *v = NULL;
     size_t n = 0;
     while (a[n] && a[n] != '=') n++;
+    if (n == 10 && !strncmp(a, "--rf-debug", 10)) { /* a flag: no value */
+      if (a[n] == '=') return -1;
+      c.rf_debug = true;
+      continue;
+    }
     if (a[n] == '=') v = a + n + 1;
     else if (i + 1 < argc) v = argv[i + 1], i++;
     if (!v) return -1;
@@ -51,9 +56,10 @@ int ra_cli_parse(int argc, char **argv, ra_cli_t *out) {
 
 void ra_cli_usage(FILE *f, const char *prog) {
   fprintf(f,
-          "usage: %s [--rf spi|none] [--powermode 0xN0] [--slot N]\n"
+          "usage: %s [--rf spi|none] [--powermode 0xN0] [--slot N] [--rf-debug]\n"
           "  --rf         spi = the radio (device default), none = no link (bench display tests)\n"
           "  --powermode  upper nibble OR'd into frame byte 1, 0x00..0xF0 (default 0x00, UNVALIDATED)\n"
-          "  --slot       the hub's slot on the remote, 0..15 (default 0, measured)\n",
+          "  --slot       the hub's slot on the remote, 0..15 (default 0, measured)\n"
+          "  --rf-debug   log every radio frame and link event to stderr\n",
           prog);
 }

@@ -238,7 +238,7 @@ static int setup_ex(int hal, int soc_missing) {
   nhkeys = nhbatt = nhother = 0;
   rec_n = 0;
   hp_rf_spi_ops_t ho = fake_ops(&fh);
-  hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0};
+  hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
   CT_EQ(hp_rf_spi_open(&hc, &hub_tp), 0);
   CT_EQ(hub_tp->claim(hub_tp->self), 0);
   hp_rf_link_init(&hub_link, hub_tp, false, 1, hub_deliver, NULL);
@@ -249,7 +249,7 @@ static int setup_ex(int hal, int soc_missing) {
   app_link_t link = rf_link_app(&rf);
   CT_EQ(app_init(&app, &ops, &link, NULL), 0);
   hp_rf_spi_ops_t ro = fake_ops(&fr);
-  hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0};
+  hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL};
   return rf_link_open(&rf, &rc);
 }
 /* open, and wait until the remote has spoken: the hub only then knows it is attached */
@@ -553,6 +553,17 @@ static void test_cli(void) {
     char *av[4] = {"x", (char *)bad[i][0], (char *)bad[i][1], NULL};
     CT_EQ(ra_cli_parse(bad[i][1] ? 3 : 2, av, &c), -1);
   }
+  CT_CHECK(!c.rf_debug);
+  char *d1[] = {"x", "--rf-debug"};
+  CT_EQ(ra_cli_parse(2, d1, &c), 0);
+  CT_CHECK(c.rf_debug);
+  char *d2[] = {"x", "--slot", "3", "--rf-debug", "--powermode", "0x10"};
+  CT_EQ(ra_cli_parse(6, d2, &c), 0);
+  CT_CHECK(c.rf_debug);
+  CT_EQ(c.slot, 3);
+  CT_EQ(c.powermode, 0x10);
+  char *d3[] = {"x", "--rf-debug=1"};
+  CT_EQ(ra_cli_parse(2, d3, &c), -1); /* a flag takes no value */
   char *a5[] = {"x", "--slot", "2", "--rf", "bad"};
   ra_cli_t keep = {.slot = 9};
   c = keep;

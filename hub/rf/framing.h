@@ -111,6 +111,11 @@ typedef struct {
     uint8_t retries; /* retransmissions done so far */
     uint32_t deadline;
     size_t n;
+    /* Pacing. pace_ms == 0 (default): every frame goes out at once. pace_ms > 0: frame 0 goes out at
+     * start, each further frame only from hp_rf_tx_service(), after a TX status or `pace_ms`. */
+    uint32_t pace_ms;
+    uint32_t next_at; /* earliest time of the next paced frame */
+    size_t sent;      /* frames of the current transmission already handed to send() */
     hp_rf_inner_t fr[HP_RF_MAX_FRAGS];
 } hp_rf_tx_t;
 
@@ -120,6 +125,11 @@ void hp_rf_tx_init(hp_rf_tx_t *tx, hp_rf_send_fn send, void *ctx);
  * is in flight; -HP_E_TOOBIG/-HP_E_INVAL as hp_rf_split; -HP_E_IO if the send callback fails on
  * the first transmission (nothing is in flight then). Allowed from IDLE/OK/FAILED. */
 int hp_rf_tx_start(hp_rf_tx_t *tx, hp_msg_type_t t, const uint8_t *body, size_t len, uint32_t now_ms);
+
+/* Paced transmissions only: sends the next frame when `released` (the radio reported TX done for the
+ * previous one) or the inter-frame gap expired. Returns 1 if a frame was sent. The retry timer is
+ * (re)armed from the last frame. No-op unless a paced object is part-sent. */
+int hp_rf_tx_service(hp_rf_tx_t *tx, uint32_t now_ms, int released);
 
 /* Feed an ack seen by hp_rf_asm_push (HP_ASM_ACK). 1 if it completed the in-flight object. */
 int hp_rf_tx_on_ack(hp_rf_tx_t *tx, uint8_t type, uint8_t seq);

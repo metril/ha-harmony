@@ -167,7 +167,7 @@ int hp_rf_pair_create(const char *path, hp_rf_transport **out) {
     unlink(path);
     if (bind(p->lfd, (struct sockaddr *)&a, sizeof a) < 0 || listen(p->lfd, 4) < 0) goto fail;
     strcpy(p->path, path);
-    p->t = (hp_rf_transport){p, hub_send, hub_recv, pair_claim, hub_attached};
+    p->t = (hp_rf_transport){p, hub_send, hub_recv, pair_claim, hub_attached, NULL};
     *out = &p->t;
     return 0;
 fail:
@@ -190,7 +190,7 @@ int hp_rf_pair_connect(const char *path, hp_rf_transport **out) {
         free(p);
         return -HP_E_IO;
     }
-    p->t = (hp_rf_transport){p, remote_send, remote_recv, pair_claim, NULL};
+    p->t = (hp_rf_transport){p, remote_send, remote_recv, pair_claim, NULL, NULL};
     *out = &p->t;
     return 0;
 }

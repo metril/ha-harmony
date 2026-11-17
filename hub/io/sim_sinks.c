@@ -72,7 +72,7 @@ void hp_sim_init(hp_sim_t *s, FILE *mirror) {
     s->mirror = mirror;
     s->ir = (hp_ir_sink){s, sim_ir_send};
     s->bt = (hp_bt_sink){s, sim_bt_key};
-    s->rf = (hp_rf_transport){s, sim_rf_send, sim_rf_recv, sim_rf_claim, NULL};
+    s->rf = (hp_rf_transport){s, sim_rf_send, sim_rf_recv, sim_rf_claim, NULL, NULL};
 }
 
 hp_sinks_t hp_sim_sinks(hp_sim_t *s) {

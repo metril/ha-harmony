@@ -143,11 +143,27 @@ void hp_rf_tx_init(hp_rf_tx_t *tx, hp_rf_send_fn send, void *ctx)
     tx->ctx = ctx;
 }
 
-static int tx_send_all(hp_rf_tx_t *tx)
+/* Starts a transmission of the whole object (paced: only frame 0, the rest via hp_rf_tx_service). */
+static int tx_send_all(hp_rf_tx_t *tx, uint32_t now_ms)
 {
-    for (size_t i = 0; i < tx->n; i++)
+    tx->sent = 0;
+    size_t lim = tx->pace_ms ? 1 : tx->n;
+    for (size_t i = 0; i < lim; i++) {
+        tx->sent = i + 1;
         if (tx->send(tx->ctx, &tx->fr[i]) < 0) return -HP_E_IO;
+    }
+    tx->next_at = now_ms + tx->pace_ms;
     return 0;
+}
+
+int hp_rf_tx_service(hp_rf_tx_t *tx, uint32_t now_ms, int released)
+{
+    if (!tx || tx->state != HP_RF_TX_WAIT || tx->sent >= tx->n) return 0;
+    if (!released && (int32_t)(now_ms - tx->next_at) < 0) return 0;
+    (void)tx->send(tx->ctx, &tx->fr[tx->sent++]); /* a lost frame is the object retry's problem */
+    tx->next_at = now_ms + tx->pace_ms;
+    tx->deadline = now_ms + HP_RF_RETRY_MS;
+    return 1;
 }
 
 int hp_rf_tx_start(hp_rf_tx_t *tx, hp_msg_type_t t, const uint8_t *body, size_t len, uint32_t now_ms)
@@ -162,7 +178,7 @@ int hp_rf_tx_start(hp_rf_tx_t *tx, hp_msg_type_t t, const uint8_t *body, size_t 
     tx->seq = seq;
     tx->type = (uint8_t)t;
     tx->retries = 0;
-    if (tx_send_all(tx) < 0) {
+    if (tx_send_all(tx, now_ms) < 0) {
         tx->state = HP_RF_TX_IDLE;
         return -HP_E_IO;
     }
@@ -182,12 +198,16 @@ int hp_rf_tx_on_ack(hp_rf_tx_t *tx, uint8_t type, uint8_t seq)
 hp_rf_tx_state_t hp_rf_tx_poll(hp_rf_tx_t *tx, uint32_t now_ms)
 {
     if (tx->state != HP_RF_TX_WAIT || (int32_t)(now_ms - tx->deadline) < 0) return tx->state;
+    if (tx->sent < tx->n) { /* still pacing the frames out: the retry clock starts at the last one */
+        tx->deadline = now_ms + HP_RF_RETRY_MS;
+        return tx->state;
+    }
     if (tx->retries >= HP_RF_RETRIES) {
         tx->state = HP_RF_TX_FAILED;
         return tx->state;
     }
     tx->retries++;
-    (void)tx_send_all(tx); /* a failed attempt still counts; the next timeout retries */
+    (void)tx_send_all(tx, now_ms); /* a failed attempt still counts; the next timeout retries */
     tx->deadline = now_ms + HP_RF_RETRY_MS;
     return tx->state;
 }

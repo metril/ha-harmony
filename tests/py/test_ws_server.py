@@ -161,6 +161,15 @@ def test_real_backend_without_i2s_exits_nonzero(built_binaries):
     assert res.returncode != 0 and "/dev/i2s" in res.stderr
 
 
+def test_rf_debug_flag_parses(built_binaries):
+    # --rf-debug is a valueless flag: parsing succeeds (exit is the missing /dev/i2s, never usage code 2).
+    res = subprocess.run(
+        [str(built_binaries / "hub"), "--token", "t", "--no-mdns", "--rf-spi", "--rf-slot", "2", "--rf-debug"],
+        check=False, capture_output=True, text=True, timeout=5,
+    )
+    assert res.returncode not in (0, 2) and "usage" not in res.stderr
+
+
 @pytest.mark.parametrize(
     ("flag", "val"),
     [

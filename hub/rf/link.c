@@ -1,5 +1,7 @@
 #include "hub/rf/link.h"
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "hub/hp_errors.h"
@@ -12,11 +14,33 @@ void hp_rf_link_init(hp_rf_link_t *l, hp_rf_transport *tp, bool wrapped, uint8_t
     l->slot = slot;
     l->deliver = deliver;
     l->deliver_ctx = ctx;
+    l->gap_ms = HP_LINK_GAP_MS;
+    l->tx_slot = HP_LINK_SLOT_ANY;
     hp_rf_asm_init(&l->as);
 }
 
-static int emit(void *vl, const hp_rf_inner_t *fr) {
-    hp_rf_link_t *l = vl;
+void hp_rf_log_stderr(void *ctx, const char *line) {
+    (void)ctx;
+    fprintf(stderr, "%s\n", line);
+}
+
+void hp_rf_link_set_log(hp_rf_link_t *l, hp_rf_link_log_fn fn, void *ctx) {
+    l->log = fn;
+    l->log_ctx = ctx;
+}
+
+static void lg(hp_rf_link_t *l, uint32_t now, const char *fmt, ...) {
+    if (!l->log) return;
+    char line[160];
+    int n = snprintf(line, sizeof line, "link %8u ms: ", (unsigned)now);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line + n, sizeof line - (size_t)n, fmt, ap);
+    va_end(ap);
+    l->log(l->log_ctx, line);
+}
+
+static int emit_raw(hp_rf_link_t *l, const hp_rf_inner_t *fr) {
     int rc;
     if (l->wrapped) {
         hp_rf_frame_t w;
@@ -26,6 +50,16 @@ static int emit(void *vl, const hp_rf_inner_t *fr) {
         rc = l->tp->send(l->tp->self, fr->b, HP_RF_INNER_LEN);
     }
     l->last_rc = rc;
+    return rc;
+}
+
+/* The sender's frames: a TX status only counts for a frame handed over after the previous one. */
+static int emit(void *vl, const hp_rf_inner_t *fr) {
+    hp_rf_link_t *l = vl;
+    l->released = false;
+    int rc = emit_raw(l, fr);
+    lg(l, l->now_dbg, "frame %zu/%zu handed to transport (seq %u) rc=%d", l->tx.sent ? l->tx.sent : 1, l->tx.n,
+       (unsigned)l->tx.seq, rc);
     return rc;
 }
 
@@ -51,6 +85,7 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now);
 int hp_rf_link_send(hp_rf_link_t *l, hp_msg_type_t type, const uint8_t *body, size_t len, uint32_t now_ms) {
     if (!l || !l->tp || (len && !body) || (unsigned)type > 0xFF) return -HP_E_INVAL;
     if (len > HP_RF_BODY_MAX) return -HP_E_TOOBIG;
+    l->now_dbg = now_ms;
     if (l->tp->attached && !l->tp->attached(l->tp->self)) return -HP_E_NOENT;
     if (l->qn == HP_LINK_QUEUE) return -HP_E_BUSY;
     if (!l->tx.send) hp_rf_tx_init(&l->tx, emit, l);
@@ -70,7 +105,7 @@ int hp_rf_link_send(hp_rf_link_t *l, hp_msg_type_t type, const uint8_t *body, si
     return 0;
 }
 
-static void send_ack(hp_rf_link_t *l, const hp_rf_inner_t *ack) { (void)emit(l, ack); }
+static void send_ack(hp_rf_link_t *l, const hp_rf_inner_t *ack) { (void)emit_raw(l, ack); }
 
 static void on_frame(hp_rf_link_t *l, const uint8_t *f, size_t n) {
     hp_rf_inner_t in, ack;
@@ -85,11 +120,19 @@ static void on_frame(hp_rf_link_t *l, const uint8_t *f, size_t n) {
     switch (hp_rf_asm_push(&l->as, &in, &msg, &ack)) {
     case HP_ASM_COMPLETE:
         l->delivered++;
+        lg(l, l->now_dbg, "rx object type %d seq %u len %zu delivered", (int)msg.type, (unsigned)msg.seq, msg.len);
         send_ack(l, &ack);
         if (l->deliver) l->deliver(l->deliver_ctx, &msg);
         break;
-    case HP_ASM_DUPLICATE: send_ack(l, &ack); break;
-    case HP_ASM_ACK: (void)hp_rf_tx_on_ack(&l->tx, (uint8_t)msg.type, msg.seq); break;
+    case HP_ASM_DUPLICATE:
+        lg(l, l->now_dbg, "rx duplicate seq %u (ack only)", (unsigned)ack.b[0] & 0x0F);
+        send_ack(l, &ack);
+        break;
+    case HP_ASM_ACK: {
+        int hit = hp_rf_tx_on_ack(&l->tx, (uint8_t)msg.type, msg.seq);
+        lg(l, l->now_dbg, "rx ack type %d seq %u%s", (int)msg.type, (unsigned)msg.seq, hit ? " (completes in-flight object)" : " (ignored)");
+        break;
+    }
     default: break;
     }
 }
@@ -99,6 +142,8 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
         hp_rf_link_obj_t *o = &l->q[l->qhead];
         if (!l->started) {
             if (l->start_tries && (int32_t)(now - l->start_at) < 0) return;
+            l->tx.pace_ms = l->gap_ms;
+            lg(l, now, "send start type %d len %zu seq %u", (int)o->type, o->len, (unsigned)(l->tx.next_seq & 0x0F));
             int rc = hp_rf_tx_start(&l->tx, o->type, o->body, o->len, now);
             if (rc == -HP_E_IO && l->last_rc == -HP_E_NOENT) { /* nobody there: not a retryable failure */
                 l->start_tries = 0;
@@ -125,9 +170,13 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
             l->started = true;
             return;
         }
-        switch (hp_rf_tx_poll(&l->tx, now)) {
-        case HP_RF_TX_OK: pop(l); continue;
-        case HP_RF_TX_FAILED: l->failures++; pop(l); continue;
+        (void)hp_rf_tx_service(&l->tx, now, l->released);
+        uint8_t was = l->tx.retries;
+        hp_rf_tx_state_t st = hp_rf_tx_poll(&l->tx, now);
+        if (l->tx.retries != was) lg(l, now, "retry %u of %d (seq %u)", (unsigned)l->tx.retries, HP_RF_RETRIES, (unsigned)l->tx.seq);
+        switch (st) {
+        case HP_RF_TX_OK: lg(l, now, "tx done: object acked (seq %u)", (unsigned)l->tx.seq); pop(l); continue;
+        case HP_RF_TX_FAILED: lg(l, now, "tx FAILED after retries (seq %u)", (unsigned)l->tx.seq); l->failures++; pop(l); continue;
         default: return;
         }
     }
@@ -136,6 +185,7 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
 int hp_rf_link_pump(hp_rf_link_t *l, uint32_t now_ms) {
     uint8_t fr[HP_RF_FRAME_MAX + 1];
     int rc = 0, n;
+    l->now_dbg = now_ms;
     if (!l->tx.send) hp_rf_tx_init(&l->tx, emit, l);
     while ((n = l->tp->recv(l->tp->self, fr, sizeof fr, 0)) != 0) {
         if (n < 0) {
@@ -144,6 +194,14 @@ int hp_rf_link_pump(hp_rf_link_t *l, uint32_t now_ms) {
             break;
         }
         on_frame(l, fr, (size_t)n);
+    }
+    if (l->tp->tx_status) {
+        uint8_t sl, st;
+        while (l->tp->tx_status(l->tp->self, &sl, &st)) {
+            bool mine = l->tx_slot == HP_LINK_SLOT_ANY || sl == l->tx_slot;
+            lg(l, now_ms, "tx status slot %u status 0x%02x%s", (unsigned)sl, (unsigned)st, mine ? "" : " (other slot, ignored)");
+            if (mine) l->released = true;
+        }
     }
     drive_tx(l, now_ms);
     if (l->noent) { /* a queued object found nobody home */
@@ -156,6 +214,7 @@ int hp_rf_link_pump(hp_rf_link_t *l, uint32_t now_ms) {
 int hp_rf_link_next_timeout_ms(const hp_rf_link_t *l, uint32_t now_ms) {
     if (!l->qn) return -1;
     uint32_t at = l->started ? l->tx.deadline : l->start_tries ? l->start_at : now_ms;
+    if (l->started && l->tx.state == HP_RF_TX_WAIT && l->tx.sent < l->tx.n) at = l->tx.next_at; /* pacing */
     int32_t d = (int32_t)(at - now_ms);
     return d < 0 ? 0 : d;
 }

@@ -75,6 +75,7 @@ typedef struct {
     bool pending_power;
     hp_rf_link_t link;      /* RF object link (acks, retries, reassembly), bound lazily to sinks.rf */
     bool link_bound;
+    bool rf_debug; /* --rf-debug: per-object link events on stderr */
     bool rf_inner_blocks;   /* transport carries bare 28-byte inner blocks (rf_spi), not 30-byte hub frames (sim) */
     uint32_t rf_failures;   /* link failures already logged */
     bool pending_list;      /* an activity_list to broadcast after the reply */

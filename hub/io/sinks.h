@@ -35,6 +35,9 @@ typedef struct hp_rf_transport {
     int (*claim)(void *self);
     /* Optional (NULL = unknown): is a remote attached right now? */
     bool (*attached)(void *self);
+    /* Optional (NULL = the transport has no TX status): pops one pending TX-status report. Returns 1
+     * and fills *slot / *status, or 0 when none is pending. Never blocks. */
+    int (*tx_status)(void *self, uint8_t *slot, uint8_t *status);
 } hp_rf_transport;
 
 typedef struct {

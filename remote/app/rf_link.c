@@ -87,6 +87,10 @@ static int lt_recv(void *self, uint8_t *f, size_t cap, int ms) {
   rf_link_t *l = self;
   return l->tp->recv(l->tp->self, f, cap, ms);
 }
+static int lt_tx_status(void *self, uint8_t *slot, uint8_t *status) {
+  rf_link_t *l = self;
+  return l->tp->tx_status ? l->tp->tx_status(l->tp->self, slot, status) : 0;
+}
 static int lt_claim(void *self) {
   rf_link_t *l = self;
   return l->tp->claim(l->tp->self);
@@ -188,8 +192,9 @@ int rf_link_open(rf_link_t *l, const hp_rf_spi_cfg_t *cfg) {
     return -HP_E_BUSY;
   }
   l->tp = tp;
-  l->lt = (hp_rf_transport){l, lt_send, lt_recv, lt_claim, NULL};
+  l->lt = (hp_rf_transport){l, lt_send, lt_recv, lt_claim, NULL, lt_tx_status};
   hp_rf_link_init(&l->link, &l->lt, false, 0, deliver, l);
+  if (cfg->debug) hp_rf_link_set_log(&l->link, cfg->log ? cfg->log : hp_rf_log_stderr, cfg->log_ctx);
   l->next_batt_ms = 0; /* first heartbeat on the first poll */
   l->dead_reported = false;
   return 0;

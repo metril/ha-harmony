@@ -25,6 +25,10 @@ typedef struct {
     int sent_objs, sent_acks;                     /* frames that left this endpoint */
     int gone;                                     /* recv reports -HP_E_NOENT once */
     int refuse;                                   /* send fails with -HP_E_IO this many times */
+    uint32_t at[64];                              /* net->now of each non-ack frame sent */
+    int nat;
+    uint8_t txs[16][2];                           /* queued TX statuses (slot, status) */
+    int txs_n;
     hp_rf_link_t link;
     hp_rf_msg_t got[300];
     int ngot;
@@ -60,8 +64,20 @@ static int t_send(void *self, const uint8_t *frame, size_t len) {
     }
     if (e->dup_next > 0 && !ack) e->dup_next--;
     if (ack) e->sent_acks++;
-    else e->sent_objs++;
+    else {
+        e->sent_objs++;
+        if (e->nat < 64) e->at[e->nat++] = e->net->now;
+    }
     return 0;
+}
+
+static int t_txs(void *self, uint8_t *slot, uint8_t *status) {
+    ep_t *e = self;
+    if (!e->txs_n) return 0;
+    *slot = e->txs[0][0];
+    *status = e->txs[0][1];
+    memmove(e->txs[0], e->txs[1], (size_t)(--e->txs_n) * 2);
+    return 1;
 }
 
 static int t_recv(void *self, uint8_t *frame, size_t cap, int timeout_ms) {
@@ -96,7 +112,7 @@ static void net_init(net_t *n, bool wrapped) {
         ep_t *e = &n->ep[i];
         e->net = n;
         e->idx = i;
-        e->t = (hp_rf_transport){e, t_send, t_recv, t_claim, NULL};
+        e->t = (hp_rf_transport){e, t_send, t_recv, t_claim, NULL, NULL};
         hp_rf_link_init(&e->link, &e->t, wrapped, 1, deliver, e);
     }
     n->now = 1000;
@@ -150,7 +166,7 @@ static void test_lost_ack_delivered_once(void) {
         for (size_t i = 0; i < sizeof body; i++) body[i] = (uint8_t)(i + 7);
         n.ep[1].drop_acks = 1; /* B's first ack is lost: A retries the whole object */
         CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
-        run(&n, 1000);
+        run(&n, 1200);
         CT_EQ(n.ep[1].ngot, 1); /* delivered exactly once */
         CT_EQ(n.ep[1].got[0].len, sizeof body);
         CT_MEM_EQ(n.ep[1].got[0].payload, body, sizeof body);
@@ -204,7 +220,7 @@ static void test_every_body_size(void) {
             uint8_t body[HP_RF_BODY_MAX];
             for (size_t i = 0; i < len; i++) body[i] = (uint8_t)(i * 7 + len);
             CT_EQ(send_obj(&n, 0, (int)(len & 0xFF), body, len), 0);
-            run(&n, 40);
+            run(&n, 40 + HP_LINK_GAP_MS * HP_RF_MAX_FRAGS); /* frames are paced */
             CT_EQ(n.ep[1].ngot, (int)len + 1);
             if (n.ep[1].ngot != (int)len + 1) return;
             const hp_rf_msg_t *m = &n.ep[1].got[len];
@@ -278,13 +294,124 @@ static int noent_send(void *self, const uint8_t *f, size_t l) { (void)self; (voi
 static int idle_recv(void *self, uint8_t *f, size_t c, int t) { (void)self; (void)f; (void)c; (void)t; return 0; }
 
 static void test_noent_synchronous(void) {
-    hp_rf_transport t = {NULL, noent_send, idle_recv, t_claim, NULL};
+    hp_rf_transport t = {NULL, noent_send, idle_recv, t_claim, NULL, NULL};
     hp_rf_link_t l;
     uint8_t b[1] = {0};
     hp_rf_link_init(&l, &t, true, 1, NULL, NULL);
     CT_EQ(hp_rf_link_send(&l, HP_MSG_KEY_EVENT, b, 1, 0), -HP_E_NOENT); /* nobody there: reported at once */
     CT_EQ(hp_rf_link_status(&l).queued, 0);
     CT_EQ(hp_rf_link_status(&l).failures, 0);
+}
+
+/* ---- pacing ---- */
+
+static void add_status(ep_t *e, uint8_t slot, uint8_t st) {
+    e->txs[e->txs_n][0] = slot;
+    e->txs[e->txs_n][1] = st;
+    e->txs_n++;
+}
+
+static void test_pacing_gap(void) {
+    for (int frames = 2; frames <= 3; frames++) {
+        net_t n;
+        net_init(&n, false);
+        uint8_t body[60 + 25];
+        memset(body, 7, sizeof body);
+        size_t len = frames == 2 ? 30 : 60; /* 1+30 = 2 chunks, 1+60 = 3 chunks */
+        CT_EQ(send_obj(&n, 0, 5, body, len), 0);
+        CT_EQ(n.ep[0].sent_objs, 1); /* frame 1 at once */
+        run(&n, HP_LINK_GAP_MS - 5);
+        CT_EQ(n.ep[0].sent_objs, 1); /* nothing before the gap */
+        run(&n, 5);
+        CT_EQ(n.ep[0].sent_objs, 2);
+        if (frames == 3) {
+            run(&n, HP_LINK_GAP_MS);
+            CT_EQ(n.ep[0].sent_objs, 3);
+            CT_EQ(n.ep[0].at[2] - n.ep[0].at[1], HP_LINK_GAP_MS);
+        }
+        CT_EQ(n.ep[0].at[1] - n.ep[0].at[0], HP_LINK_GAP_MS);
+        run(&n, 100);
+        CT_EQ(n.ep[1].ngot, 1);
+        CT_EQ(hp_rf_link_status(&n.ep[0].link).failures, 0);
+        CT_EQ(n.ep[0].sent_objs, frames); /* no retry: the ack arrived */
+        CT_EQ(hp_rf_link_next_timeout_ms(&n.ep[0].link, n.now), -1);
+    }
+}
+
+static void test_pacing_tx_status(void) {
+    net_t n;
+    net_init(&n, false);
+    n.ep[0].t.tx_status = t_txs;
+    n.ep[0].link.tx_slot = 2;
+    uint8_t body[60] = {0};
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0); /* 3 frames */
+    CT_EQ(n.ep[0].sent_objs, 1);
+    add_status(&n.ep[0], 3, 0x00); /* another slot: does not release */
+    run(&n, 10);
+    CT_EQ(n.ep[0].sent_objs, 1);
+    add_status(&n.ep[0], 2, 0x01); /* ours: frame 2 well before the gap */
+    run(&n, 5);
+    CT_EQ(n.ep[0].sent_objs, 2);
+    CT_CHECK(n.ep[0].at[1] - n.ep[0].at[0] < HP_LINK_GAP_MS);
+    run(&n, 5); /* a status must be for the NEW frame: none arrived, so the gap rules */
+    CT_EQ(n.ep[0].sent_objs, 2);
+    add_status(&n.ep[0], 2, 0x00);
+    run(&n, 5);
+    CT_EQ(n.ep[0].sent_objs, 3);
+    run(&n, 100);
+    CT_EQ(n.ep[1].ngot, 1);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).failures, 0);
+}
+
+static void test_pacing_single_frame_unaffected(void) {
+    net_t n;
+    net_init(&n, false);
+    uint8_t b[3] = {1, 2, 3};
+    CT_EQ(send_obj(&n, 0, 5, b, sizeof b), 0);
+    CT_EQ(n.ep[0].sent_objs, 1);
+    run(&n, 5);
+    CT_EQ(n.ep[1].ngot, 1);
+    CT_EQ(n.ep[0].sent_objs, 1);
+    n.ep[1].drop_acks = 1; /* retry still resends the single frame after the retry time */
+    CT_EQ(send_obj(&n, 0, 5, b, sizeof b), 0);
+    run(&n, HP_RF_RETRY_MS + 20);
+    CT_EQ(n.ep[0].sent_objs, 3);
+    CT_EQ(n.ep[1].ngot, 2);
+}
+
+static void test_pacing_retry_repaces(void) {
+    net_t n;
+    net_init(&n, false);
+    uint8_t body[60] = {0};
+    n.ep[1].drop_acks = 1;
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    run(&n, 1000);
+    CT_EQ(n.ep[0].sent_objs, 6); /* 3 + 3 */
+    CT_EQ(n.ep[1].ngot, 1);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).failures, 0);
+    CT_CHECK(n.ep[0].at[4] - n.ep[0].at[3] >= HP_LINK_GAP_MS); /* the retry is paced too */
+}
+
+static void cap_log(void *ctx, const char *line) {
+    char *buf = ctx;
+    strncat(buf, line, 2000 - strlen(buf) - 2);
+    strcat(buf, "\n");
+}
+
+static void test_link_debug_log(void) {
+    net_t n;
+    net_init(&n, false);
+    static char buf[2048];
+    buf[0] = 0;
+    hp_rf_link_set_log(&n.ep[0].link, cap_log, buf);
+    uint8_t body[30] = {0};
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    run(&n, 100);
+    CT_CHECK(strstr(buf, "send start type 5"));
+    CT_CHECK(strstr(buf, "frame 1/2 handed"));
+    CT_CHECK(strstr(buf, "frame 2/2 handed"));
+    CT_CHECK(strstr(buf, "rx ack type 5"));
+    CT_CHECK(strstr(buf, "tx done"));
 }
 
 int main(void) {
@@ -298,5 +425,10 @@ int main(void) {
     test_first_frame_refused_is_retried();
     test_peer_lost_resets();
     test_noent_synchronous();
+    test_pacing_gap();
+    test_pacing_tx_status();
+    test_pacing_single_frame_unaffected();
+    test_pacing_retry_repaces();
+    test_link_debug_log();
     return CT_DONE();
 }

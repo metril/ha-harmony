@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,8 @@
 #define REPORT_HUB_DATA 0x12
 #define REPORT_REMOTE_DATA 0x20
 #define LINK_LOST 0x40
+#define TXSQ 8
+#define TX_STATUS_ID 0x42
 
 /* The remote's /dev/rfspi memcpys `count` bytes into a 32-byte kernel slab with no check: a longer
  * write overflows kernel heap. spi_write() enforces this cap for every remote-role write. */
@@ -54,6 +57,14 @@ typedef struct {
     pthread_mutex_t tx_mu; /* serialises write() and its backoff state */
     uint64_t next_ok;
     unsigned delay_ms;
+
+    bool debug;
+    void (*log)(void *ctx, const char *line);
+    void *log_ctx;
+    uint64_t t0;
+    int link_logged; /* -1 nothing logged yet, 0 lost, 1 up */
+    uint8_t txs[TXSQ][2]; /* pending TX statuses: slot, status */
+    size_t txs_head, txs_n;
 } spi_t;
 
 /* ---- real syscalls ---- */
@@ -95,6 +106,30 @@ static void logf_limited(spi_t *s, const char *what, const uint8_t *b, size_t n)
     fputc('\n', stderr);
 }
 
+/* Diagnostics sink (default stderr). */
+static void emit_line(spi_t *s, const char *line) {
+    if (s->log) s->log(s->log_ctx, line);
+    else fprintf(stderr, "%s\n", line);
+}
+
+static void slogf(spi_t *s, const char *fmt, ...) {
+    char line[160];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    emit_line(s, line);
+}
+
+/* --rf-debug: one line per syscall. `rc` is write()'s return or read()'s length. */
+static void dbg_frame(spi_t *s, const char *dir, long rc, const uint8_t *b, size_t n) {
+    if (!s->debug) return;
+    char line[16 + 24 + 3 * RX_MAX + 8];
+    int k = snprintf(line, sizeof line, "rf_spi %8llu ms %s %ld:", (unsigned long long)(s->ops.now_ms(s->ops.ctx) - s->t0), dir, rc);
+    for (size_t i = 0; i < n && i < RX_MAX && (size_t)k + 4 < sizeof line; i++) k += snprintf(line + k, sizeof line - (size_t)k, " %02x", b[i]);
+    emit_line(s, line);
+}
+
 static void wake(spi_t *s) {
     uint8_t b = 1;
     if (write(s->wake[1], &b, 1) < 0) { /* pipe full = already readable */ }
@@ -113,6 +148,7 @@ static int spi_write(spi_t *s, const uint8_t *buf, size_t n) {
         ssize_t w;
         do w = s->ops.write(s->ops.ctx, s->fd, buf, n);
         while (w < 0 && errno == EINTR);
+        dbg_frame(s, "TX", (long)w, buf, n);
         if (w < 0) {
             unsigned d = s->delay_ms ? s->delay_ms * 2 : HP_RF_SPI_BACKOFF_MIN_MS;
             s->delay_ms = d > HP_RF_SPI_BACKOFF_MAX_MS ? HP_RF_SPI_BACKOFF_MAX_MS : d;
@@ -136,6 +172,16 @@ static void push_event(spi_t *s) {
 static void on_report(spi_t *s, const uint8_t *b, size_t n) {
     pthread_mutex_lock(&s->mu);
     const uint8_t *inner = NULL;
+    bool txs_shape = n == HP_RF_REMOTE_FRAME_LEN && b[0] == REPORT_REMOTE_DATA && b[2] == TX_STATUS_ID;
+    if (txs_shape && (s->role == HP_RF_SPI_ROLE_REMOTE || b[1] == s->slot)) {
+        if (s->txs_n == TXSQ) { s->txs_head = (s->txs_head + 1) % TXSQ; s->txs_n--; }
+        uint8_t *e = s->txs[(s->txs_head + s->txs_n++) % TXSQ];
+        e[0] = s->role == HP_RF_SPI_ROLE_REMOTE ? (uint8_t)(b[1] & 0x0F) : b[1];
+        e[1] = b[3];
+        push_event(s);
+        pthread_mutex_unlock(&s->mu);
+        return;
+    }
     if (s->role == HP_RF_SPI_ROLE_HUB) {
         if (n == HP_RF_HUB_FRAME_LEN && b[0] == REPORT_HUB_DATA) inner = b + 2;
     } else if (n == HP_RF_REMOTE_FRAME_LEN && b[0] == REPORT_REMOTE_DATA && b[2] == 0x12) {
@@ -150,6 +196,13 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
         memcpy(s->q[(s->qhead + s->qn++) % RXQ], inner, HP_RF_INNER_LEN);
         push_event(s);
     } else if ((b[0] == 0x10 || b[0] == 0x11) && n >= 5 && b[1] == s->slot && b[2] == 0x41 && b[3] == 0x04) {
+        int up = !(b[4] & LINK_LOST);
+        if (s->link_logged != up) {
+            s->link_logged = up;
+            if (up && n >= 7) slogf(s, "rf_spi: link up (slot %u, status 0x%02x, wpid %02x%02x)", (unsigned)b[1], (unsigned)b[4], (unsigned)b[6], (unsigned)b[5]);
+            else if (up) slogf(s, "rf_spi: link up (slot %u, status 0x%02x)", (unsigned)b[1], (unsigned)b[4]);
+            else slogf(s, "rf_spi: link lost (status 0x%02x)", (unsigned)b[4]);
+        }
         if (b[4] & LINK_LOST) {
             if (s->attached) {
                 s->attached = false;
@@ -179,6 +232,7 @@ static void *reader_main(void *arg) {
             continue;
         }
         if (n == 0) continue;
+        dbg_frame(s, "RX", (long)n, buf, n > RX_MAX ? RX_MAX : (size_t)n);
         if (n > RX_MAX) { /* the driver's entries are 64 bytes: anything else is not a frame */
             logf_limited(s, "oversize read dropped", buf, RX_MAX);
             continue;
@@ -260,6 +314,21 @@ static int spi_recv(void *self, uint8_t *frame, size_t cap, int timeout_ms) {
     return rc;
 }
 
+static int spi_tx_status(void *self, uint8_t *slot, uint8_t *status) {
+    spi_t *s = self;
+    int got = 0;
+    pthread_mutex_lock(&s->mu);
+    if (s->txs_n) {
+        *slot = s->txs[s->txs_head][0];
+        *status = s->txs[s->txs_head][1];
+        s->txs_head = (s->txs_head + 1) % TXSQ;
+        s->txs_n--;
+        got = 1;
+    }
+    pthread_mutex_unlock(&s->mu);
+    return got;
+}
+
 static bool spi_attached(void *self) {
     spi_t *s = self;
     pthread_mutex_lock(&s->mu);
@@ -283,6 +352,13 @@ int hp_rf_spi_open(const hp_rf_spi_cfg_t *cfg, hp_rf_transport **out) {
     s->powermode = cfg ? (uint8_t)(cfg->powermode & 0xF0) : 0; /* upper nibble only */
     s->slot = (cfg && cfg->slot) ? cfg->slot : s->role == HP_RF_SPI_ROLE_REMOTE ? HP_RF_SPI_REMOTE_SLOT : HP_RF_SPI_SLOT;
     s->fd = -1;
+    s->link_logged = -1;
+    if (cfg) {
+        s->debug = cfg->debug;
+        s->log = cfg->log;
+        s->log_ctx = cfg->log_ctx;
+    }
+    s->t0 = s->ops.now_ms ? s->ops.now_ms(s->ops.ctx) : 0;
     s->wake[0] = s->wake[1] = -1;
     const char *dev = (cfg && cfg->dev_path) ? cfg->dev_path : HP_RF_SPI_DEV;
 
@@ -317,7 +393,7 @@ int hp_rf_spi_open(const hp_rf_spi_cfg_t *cfg, hp_rf_transport **out) {
     int pr = pthread_create(&s->reader, &at, reader_main, s);
     pthread_attr_destroy(&at);
     if (pr != 0) goto fail_pipe;
-    s->t = (hp_rf_transport){s, spi_send, spi_recv, spi_claim, spi_attached};
+    s->t = (hp_rf_transport){s, spi_send, spi_recv, spi_claim, spi_attached, spi_tx_status};
     if (spi_write(s, CMD_INIT, sizeof CMD_INIT) < 0)
         fprintf(stderr, "rf_spi: init command failed (the chip's ready line may be stuck); continuing\n");
     *out = &s->t;
