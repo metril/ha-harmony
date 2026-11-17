@@ -1,8 +1,8 @@
 # Hub IR output via `/dev/i2s`
 
 Our own description of how the stock Harmony Hub emits IR, derived from static
-analysis of the stock `ath_i2s.ko` and `/usr/bin/hal`. Nothing here has been
-exercised on the device yet. Every claim carries evidence; **[INFERRED]** marks
+analysis of the stock `ath_i2s.ko` and `/usr/bin/hal`, then **exercised on the
+device** (section 9: our own `tools/ir_bench.c` turned the Samsung TV on). Every claim carries evidence; **[INFERRED]** marks
 conclusions not directly visible in code, **UNKNOWN** marks gaps.
 
 Binaries analysed (read-only copies, md5 verified against the device, not
@@ -274,3 +274,52 @@ IR-capable receiver and, better, the hub's own mic-side read loopback
 and polarity together. Because stopping `hal` is disruptive, prefer a
 read-only `open(O_RDONLY)` of `/dev/i2s` first (independent mic slot, does not
 touch the speaker slot) only to confirm the node and ioctl plumbing.
+
+## 9. Bench result (2026-11-16, live hub)
+
+Tool: `tools/ir_bench.c` (soft-float MIPS build, all parameters are arguments).
+Target: Samsung `PowerToggle` (NEC-like `0xE0E040BF`, 37900 Hz, 4500/4500 header,
+560/1690 bits, 46780 us final gap), 3 repeats. Oracle: HA
+`media_player.un55js9000` (was `off`). `hal`/`lua` were killed first, so the
+speaker slot was free. Computed stream for all attempts: X=26385 ns, N=12,
+duty 33 % (4 ones + 8 zeros per cycle), bit time 2199 ns, divider `0x0036f999`
+(54.975), 147,392 bits = 18,424 bytes, 324.1 ms.
+
+| # | variable changed | ports | swap | invert | syscalls | TV state before -> after |
+|---|------------------|-------|------|--------|----------|--------------------------|
+| 1 | baseline | 0 | 1 | 0 | all rc 0, write 18424 | off -> off |
+| 2 | swap off | 0 | 0 | 0 | all rc 0 | off -> off |
+| 3 | invert (swap 1) | 0 | 1 | 1 | all rc 0 | off -> off |
+| 4 | ports = 1 | 1 | 1 | 0 | all rc 0, DRAIN 323.5 ms | off -> off |
+| 5 | **ports = 2** | 2 | 1 | 0 | all rc 0, DRAIN 323.5 ms | off -> **on** (volume 0.21) |
+
+Stopped at the first success.
+
+Confirmed:
+- **ports = 2 (`START` arg `0x20000`, bit 17, the GPIO28 line) drives the
+  built-in emitter.** ports 0 and 1 emit nothing visible; bit 17 is required.
+  Only one `ports` value was tried after 1, so bits 16 and 18 (and combinations)
+  remain unmapped, and whether bit 17 is "emitter select" or "enable" is unknown.
+- **Bit time**: `DRAIN` blocked 323.5 ms for a stream computed at 324.1 ms, so
+  divider `D = ceil(X/N)/40` yields the intended 2199 ns/bit to within 0.2 %
+  (as far as the DMA clock; the optical carrier was not scoped, but the TV
+  decoded a 37.9 kHz NEC frame, so it is right to within receiver tolerance).
+- **Byte order**: swapping adjacent byte pairs (`swap=1`, as `hal` does) with
+  MSB-first packing works. The un-swapped stream (attempt 2) was only tried with
+  ports 0, so it is not disproved independently of the ports result.
+- **Polarity**: mark = 1 (not inverted) works. Inverted was tried only with
+  ports 0, so not disproved independently either.
+- Call sequence `open(O_WRONLY)`, DSIZE 16, MODE 2, VOLUME 15, FREQ, write,
+  START, DRAIN, close works as described; every call returned 0 and the single
+  18,424-byte write returned in full (0.2 ms, DMA not started until START).
+- `N=12` / carrier-period/12 rounding is sufficient for a Samsung TV.
+
+Hazard found: a **read-only open of `/dev/i2s` (mic slot) followed by `close()`
+hung in the kernel** (`ath_i2s_close`, process spinning in state R, SIGKILL had no
+effect) while `hal` held the speaker slot. Afterwards a restarted `hal` died
+immediately (zombie `[hal]` children) and only a `reboot` restored the stock
+stack. Do not `--probe` while `hal` runs; a plain reboot cleared it.
+
+Still unknown: meaning of ports bits 16 and 18 and whether bit 17 only selects
+the emitter; whether 0/1 would work with other ports values; the I2S_MODE bit;
+idle level and underrun behaviour; mic-slot close hang root cause.
