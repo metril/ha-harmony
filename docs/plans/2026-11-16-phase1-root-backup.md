@@ -75,7 +75,7 @@ would cost us the rooting window, not the device.
       another subnet but **already routed** via `10.10.77.1` — no VLAN work, no Wi-Fi re-point, so
       reachability costs zero device writes. Verified read-only, 2026-11-16: ping 2/2, **8088 open**,
       **5222 open** (stock XMPP), **22 closed** (expected pre-root). A `setup.account?getProvisionInfo`
-      POST to 8088 returned `activeRemoteId REDACTED-HUB-ID`, matching HA's `harmony` entry unique_id — so
+      POST to 8088 returned `an `activeRemoteId``, matching HA's `harmony` entry unique_id — so
       `10.10.76.11` is confirmed as this hub, not another device.
 - [x] `tools/hubfind.py` **dropped** — the IP is known and routing works; a discovery tool would be
       dead code. Re-add only if the hub's address changes.
@@ -130,7 +130,7 @@ empties the root password, writes `/etc/nowatchdog`, reboots.
 
 **Partly done pre-root, 2026-11-16.** `tools/fetch_stock_config.py` pulls the stock config straight
 off the un-rooted hub over its local WebSocket API —
-`ws://10.10.76.11:8088/?domain=svcs.myharmony.com&hubId=REDACTED-HUB-ID`, envelope
+`ws://10.10.76.11:8088/?domain=svcs.myharmony.com&hubId=<HUB_ID>`, envelope
 `{"hubId","timeout","hbus":{"cmd","id","params"}}` — using only read-only queries (`engine?config`,
 `engine?getCurrentActivity`, `statedigest?get`, `setup.account?getProvisionInfo`). Output in
 `backups/phase1/hub/pre-root-config/` (gitignored): `devices.json`, `activities.json`,
