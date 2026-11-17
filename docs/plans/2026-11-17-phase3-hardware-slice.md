@@ -244,6 +244,49 @@ Options:
 - [ ] `[WRITE]` End the window: `restore`; confirm stock remote + stock HA integration.
 - [ ] Record it all in `docs/runbooks/phase3-hub-slice.md`.
 
+### Task 5b — Bench session 2 (2026-11-16 20:00–20:30 EST): slice runs, IR does not land
+
+**What was proven.** `deploy_hub push` (md5-verified both ends) → `quiesce` → the daemon running on
+the real hub in its **non-sim hardware path** (`hub_id=ha-harmony-pimentoblue`,
+`fw=ha-harmony-hub`) → **HA's own `HarmonyHubClient` connected to it** → `ir_send` with the real
+extracted Samsung `PowerToggle` returned `{'ok': True}` → `remote_sim --press 2` **on the hub** came
+back to that client as `key_event {remote: 1, key: 2, action: 0}`. Every link in the loop works
+except the last hop.
+
+**What failed.** No IR reached the TV — not from our sink, and not from `ir_bench` with the exact
+parameters and syscall trace that worked at 19:29:59. Five+ sends, every ioctl returning 0 and
+`DRAIN` blocking the full 323.5 ms, so the DMA consumed the whole bitstream each time.
+
+**Then the stock firmware worked.** `remote.send_command` (device `Samsung TV`, `PowerToggle`,
+3 repeats) through HA's stock integration — untouched Logitech code, same hub, same emitter — **did
+turn the TV on**. So the emitter has line of sight from the hub's new position, and the fault is
+**ours**, not aim.
+
+**Two methodology lessons, both of which inverted a conclusion mid-session:**
+1. **`media_player.un55js9000` lags.** It still read `off` *after* the stock command had visibly
+   turned the TV on. It was reliable at 19:29 and unreliable here, so it is **not a trustworthy
+   oracle on its own** — confirm with the user's eyes, or poll for 30 s+ before concluding anything.
+2. A **physical change invalidated the baseline**: the hub was moved to a longer USB cable, which
+   also power-cycled it (fresh boot, `/tmp` wiped, stock stack back, `/data/ha-harmony` intact) and
+   **swapped the hidraw numbering** — `hidraw3` is now the remote (`c12b`), `hidraw4` the hub
+   (`c129`). Our udev rule matches on PID, so access was unaffected. Also note the physical remote
+   has **its own IR blaster**, so pressing it is *not* a test of the hub's emitter.
+
+**Leading hypotheses for why ours does not land, cheapest first:**
+- **(a) Marginal modulation.** Our carrier duty/N/divider may be close-but-wrong, producing a weak
+  or mis-shaped carrier that decoded once at the old (closer) position and never at the new one.
+  Stock IR is robust at both. **Test:** parameter sweep at the new position — duty 25/33/50, N
+  8/10/12, `--swap 0/1`, `--invert 0/1`, `--ports 2/6` — with the user watching as the oracle.
+- **(b) Missing initialisation that stock `hal` does.** Killing `hal` may leave a GPIO
+  direction/output-enable or clock mux unset that it configures at startup, so our emission is
+  correctly timed but never reaches the LED. **Test:** have stock send IR (priming the hardware),
+  then quiesce *immediately* and run `ir_bench` with the 19:29 parameters. If it works, this is it.
+- **(c) The 19:29 success was conditioned on prior attempts.** Attempts 1–4 that night poked
+  `ports=0/1` (GPIO16) before attempt 5 succeeded on `ports=2`. **Test:** replay the 1→5 sequence.
+- **(d) An IR receive path exists** (`/dev/i2s` implements `read`, and the mic slot is separate from
+  the speaker slot), so the hub may be able to **capture its own stock emission and ours and diff
+  them** — the strongest possible evidence, and worth the effort if (a)–(c) do not settle it.
+
 ### Task 6 `[RO]` — Verification ladder: did IR actually fire?
 
 - [ ] Oracles in order: (1) daemon log says the sink wrote N bytes without error; (2) phone camera sees
