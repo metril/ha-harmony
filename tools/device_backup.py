@@ -251,8 +251,17 @@ class Backup:
     def discover_skips(self, parts: list[Partition]) -> dict[int, str]:
         if self.target != "remote":
             return {}
+        # Fail CLOSED. Without /proc/mounts we cannot tell which gluebi volumes are mounted, and
+        # reading a mounted one oopsed the Elite's kernel (ubi_leb_read via gluebi_read) and left
+        # unkillable D-state readers. Imaging nothing is recoverable; that is not.
         rc, out, _ = self.r.run(["cat", "/proc/mounts"])
-        return skip_reasons(parts, out.decode("utf-8", "replace")) if rc == 0 else {}
+        text = out.decode("utf-8", "replace") if rc == 0 else ""
+        if not text.strip():
+            raise RuntimeError(
+                "remote: cannot read /proc/mounts, so mounted gluebi volumes cannot be "
+                "identified and skipped; refusing to image (reading one oopses the kernel)"
+            )
+        return skip_reasons(parts, text)
 
     def detect_utils(self) -> dict[str, bool]:
         _, out, _ = self.sh(DETECT_SCRIPT)

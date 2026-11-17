@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import device_backup as db
 
@@ -236,7 +238,10 @@ def test_remote_fallback_to_proc_partitions(tmp_path):
     parts = {0: ("nand0", b"R" * 2048), 1: ("nand1", b"S" * 1024)}
     text = "major minor #blocks name\n 8 0 2 nand0\n 8 1 1 nand1\n"
     devmap = {"/dev/nand0": parts[0][1], "/dev/nand1": parts[1][1]}
-    fake = FakeSsh(parts=parts, mtd=False, proc_partitions=text, char=False, devmap=devmap)
+    # A remote must expose /proc/mounts (the tool fails closed without it); no UBI here.
+    mounts = "rootfs / rootfs rw 0 0\nproc /proc proc rw,relatime 0 0\n"
+    fake = FakeSsh(parts=parts, mtd=False, proc_partitions=text, char=False, devmap=devmap,
+                   mounts=mounts)  # fmt: skip
     rc, m = run(tmp_path, fake, target="remote")
     assert rc == 0 and m["discovery_source"] == "/proc/partitions"
     assert [p["device_path"] for p in m["partitions"]] == ["/dev/nand0", "/dev/nand1"]
@@ -736,6 +741,20 @@ def test_elite_skips_mounted_gluebi_but_images_ro_squashfs(tmp_path, capsys):
     assert not [d for d in fake.streams if GLUEBI_NODE.search(d)]
     assert not [c for c in fake.calls if GLUEBI_NODE.search(shlex.join(c))]
     assert "data: skipped" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("mounts", [None, "", "   \n"])
+def test_elite_unreadable_mounts_fails_closed(tmp_path, mounts):
+    """No /proc/mounts means mounted gluebi volumes can't be identified. Reading one oopsed the
+    Elite's kernel, so the tool must refuse outright rather than image everything."""
+    fake = FakeSsh(parts=ELITE, erase=ELITE_ERASE, mounts=mounts, utils=("cat", "md5sum"),
+                   char=False)  # fmt: skip
+    rc, m = run(tmp_path, fake, target="remote")
+    assert rc != 0
+    assert not fake.streams  # no partition was read at all
+    assert not [c for c in fake.calls if GLUEBI_NODE.search(shlex.join(c))]
+    if m is not None:
+        assert m["status"] == "failed"
 
 
 def test_elite_dry_run_announces_skips(tmp_path, capsys):
