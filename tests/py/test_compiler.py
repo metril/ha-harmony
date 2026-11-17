@@ -312,3 +312,42 @@ def test_too_many_keys_widgets_and_bytes():
     )
     with pytest.raises(CompileError, match="128 soft keys"):
         compile_config(model(many))
+
+
+# --- device aliases (HA-side names for a device; never sent to the hub) ------------------------
+
+
+def test_aliases_are_optional_and_kept_off_the_hub():
+    plain = compile_config(model(f"devices: [{{id: tv, commands: {{x: {NEC}}}}}]"))
+    aliased = compile_config(
+        model(f"devices: [{{id: tv, aliases: ['51886472', Samsung TV], commands: {{x: {NEC}}}}}]")
+    )
+    assert aliased.devices["tv"].aliases == ("51886472", "Samsung TV")
+    assert plain.devices["tv"].aliases == ()
+    assert aliased.hub_json == plain.hub_json, "aliases must never reach the hub"
+
+
+def test_alias_may_not_shadow_another_devices_id():
+    bad(
+        f"devices: [{{id: tv, commands: {{x: {NEC}}}}},"
+        f" {{id: amp, aliases: [tv], commands: {{x: {NEC}}}}}]",
+        "devices[1].aliases[0]",
+        "another device's id",
+    )
+
+
+def test_alias_may_not_name_two_devices():
+    bad(
+        f"devices: [{{id: tv, aliases: ['1'], commands: {{x: {NEC}}}}},"
+        f" {{id: amp, aliases: ['1'], commands: {{x: {NEC}}}}}]",
+        "devices[1].aliases[0]",
+        "also used by 'tv'",
+    )
+
+
+def test_alias_equal_to_own_id_is_harmless():
+    model(f"devices: [{{id: tv, aliases: [tv], commands: {{x: {NEC}}}}}]")
+
+
+def test_alias_obeys_name_rules():
+    bad(f"devices: [{{id: tv, aliases: ['{'x' * 32}'], commands: {{x: {NEC}}}}}]", "31 bytes")

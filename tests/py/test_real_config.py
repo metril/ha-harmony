@@ -202,6 +202,32 @@ async def test_stock_activities_drive_the_tv_like_stock_does(hass, loaded_fast, 
     assert read_lines(hub_rf, 1) == [line("PowerOff")]
 
 
+@pytest.mark.parametrize(
+    ("device", "command", "target"),
+    [
+        # verbatim from the user's own automation and scripts written for the stock integration
+        ("51887071", "VolumeUp", "audioengine_a5"),  # Hue Tap Dial, dial right
+        ("51887071", "Mute", "audioengine_a5"),  # Hue Tap Dial, button 4 hold
+        ("81729894", "PowerOn", "kvm_1"),  # script.kvm_on
+        ("Audioengine A5+ Speakers", "VolumeDown", "audioengine_a5"),  # stock also takes names
+    ],
+)
+async def test_stock_automations_work_after_an_entity_swap(
+    hass, loaded, real_cfg, hub_rf, device, command, target
+):
+    """Migration: an automation written for `remote.harmony` (stock) keeps its `device` and
+    `command` verbatim -- stock's numeric device id -- and only its entity_id changes."""
+    remote = er.async_get(hass).async_get_entity_id("remote", "ha_harmony", f"{HUB_ID}_remote")
+    await hass.services.async_call(
+        "remote",
+        "send_command",
+        {"entity_id": remote, "device": device, "command": command},
+        blocking=True,
+    )
+    raw = {d["id"]: d for d in real_cfg["devices"]}[target]["commands"][command]["raw"]
+    assert read_lines(hub_rf, 1) == [_ir_line(raw["hz"], raw["us"])]
+
+
 async def test_restart_does_not_re_push_an_unchanged_config(hass, loaded):
     """The hash gate: a reload with the same file must not resend 85 commands to the hub."""
     coord = loaded.runtime_data
