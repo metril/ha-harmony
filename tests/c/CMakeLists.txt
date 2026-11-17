@@ -27,3 +27,9 @@ target_compile_definitions(test_page PRIVATE HP_VECTORS="${CMAKE_SOURCE_DIR}/tes
 add_executable(test_ir_encode test_ir_encode.c)
 target_link_libraries(test_ir_encode PRIVATE hp_hub)
 add_test(NAME ir_encode COMMAND test_ir_encode ${CMAKE_SOURCE_DIR}/tests/vectors/ir)
+
+# Real-hardware IR sink: host-only via injected syscalls. argv[1] = ir_bench (byte-for-byte reference).
+add_executable(test_hw_sinks test_hw_sinks.c)
+target_link_libraries(test_hw_sinks PRIVATE hp_hub)
+add_dependencies(test_hw_sinks ir_bench)
+add_test(NAME hw_sinks COMMAND test_hw_sinks $<TARGET_FILE:ir_bench>)

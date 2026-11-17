@@ -6,6 +6,32 @@ Reference: `iranl/harmony-ng` (MIT) — **clean-room**: read its docs for hardwa
 
 Known hardware (from harmony-ng docs):
 - Hub: AR9344 MIPS32 BE, Linux 2.6.31, 16MB NOR (mtd0 uboot, mtd1/2 kernel, mtd3 squashfs root, mtd4 /data jffs2, mtd5 /cache), BT via UART HCI `/dev/ttyATH0`, IR via I2S, CC2544 RF via `/dev/rfspi` + stock `cc2544.ko` (SPI shared w/ NOR → single RF owner or hang).
+
+**Corrections from the real rooted hub (verified 2026-11-17, read-only):**
+- **The SoC is an Atheros AR9330 "Hornet" with a MIPS 24Kc V7.4 — not an AR9344/74Kc**, and it has
+  **no FPU** (`/proc/cpuinfo`; `ASEs implemented: mips16`). The 2.6.31 kernel has no FP emulation, so
+  **every floating-point instruction is SIGILL**: hub binaries must be built **soft-float**
+  (stock `/usr/bin/hal` is `mips32`, `FP ABI: Soft float`). Our first hard-float cross-build crashed
+  six of thirteen C tests on-device and broke the WebSocket handshake. See
+  `docs/plans/2026-11-17-phase3-hardware-slice.md` Task 0.
+- **IR is emitted as a bitstream, not as pulse timings.** `/dev/i2s` takes a waveform of one bit per
+  I2S bit-clock with the carrier cycles already baked in (mark = runs of 1-bits), written into a DMA
+  ring and then started by ioctl. Interface documented in `docs/hardware/hub-ir-i2s.md`.
+- **7 mtd partitions, not 6** — there is also `mtd6 "mfg"` (64K, all-`0xff`). mtd0 u-boot 64K, mtd1/mtd2 kernel+kernel2 960K each, mtd3 root 4M squashfs, mtd4 data 5M jffs2, mtd5 cache 5M jffs2.
+- `/` is **unionfs**: `/mnt/data` (mtd4, jffs2, rw) over `/mnt/root` (mtd3, squashfs, ro). Writes to
+  "rootfs" paths such as `/usr/sbin` land in mtd4 and are wiped by the hardware factory reset.
+- **BT is not on `/dev/ttyATH0`** — that node does not exist. `hciattach ttyS0 bcsp` attaches it on
+  **`/dev/ttyS0`**, exposed as `hci0` with stock `bluetoothd` + `krfcommd`. Our BT plan must target
+  `ttyS0`/`hci0`.
+- **IR is `/dev/i2s`**; RF is `/dev/rfspi` with `/dev/rffw` alongside (RF firmware). Also present:
+  `/dev/caldata`, `/dev/nvram`, `/dev/freset`, `/dev/dk0`/`dk1`, `/dev/gadget`.
+- **Contention is real and exclusive:** stock `/usr/bin/hal -f -s` holds `/dev/i2s` open **write-only**
+  and `/dev/rfspi` **read-write** for its whole lifetime. Our daemon therefore cannot emit IR or use RF
+  while the stock stack runs — the stock `hal` and `lua main.lua` (Luaworks) must be stopped first.
+  Nothing we deploy is armed at boot, so a reboot restores full stock behaviour.
+- Raw mtd char nodes are named **`/dev/mtdrN`**, not `/dev/mtdNro`, and read identically to `mtdblockN`.
+- Stock BusyBox is minimal: **no `dd`, `sha256sum`, `tar`, `find`, `head`, `df`, `sync`, `sort`,
+  `readlink`, and no `command` builtin.** `cat`, `md5sum`, `which`, `lua`, `sed`, `grep`, `cp` exist.
 - Elite: DM365 ARM926, Linux 2.6.37, 240×320 RGB565 fb, Synaptics touch, MSP430 power/RTC, CC2544 RF, NAND (/ squashfs, /data, /opt).
 - RF: HID++-style frames, hub→remote 30B (0x12), remote→hub 32B (0x20); CC2544 FW closed, no RSSI.
 - Root: USB HID path (no soldering), stock root untouched, factory reset restores.
