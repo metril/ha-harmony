@@ -65,6 +65,9 @@ target_link_libraries(hp_hub PUBLIC hp_core cjson m)
 add_executable(hub hub/main.c)
 target_link_libraries(hub PRIVATE hp_hub)
 
+# Bench-only IR emitter experiment (not shipped in the hub binary).
+add_executable(ir_bench tools/ir_bench.c)
+
 if(NOT CMAKE_CROSSCOMPILING)
   add_executable(remote_sim remote/sim/remote_sim.c)
   target_link_libraries(remote_sim PRIVATE hp_hub)
