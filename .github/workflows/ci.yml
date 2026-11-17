@@ -67,21 +67,28 @@ jobs:
       matrix:
         include:
           - name: mips
-            toolchain: mips32--uclibc--stable-2025.08-1
-            arch_dir: mips32
-            sha256: 0218bfa5ef4624350e48cc372632fb4bac60db54822a56f5565d4144c180f095
+            # OpenWrt ath79 SDK toolchain: gcc 13.3, musl, soft-float (the hub's
+            # AR9330/24Kc has no FPU). Keep in step with tools/fetch_toolchains.sh.
+            toolchain: openwrt-24.10.0-ath79-gcc13.3-musl
+            url: https://downloads.openwrt.org/releases/24.10.0/targets/ath79/generic/openwrt-toolchain-24.10.0-ath79-generic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+            sha256: ef3087ea607f52f5127c9d0bd74581f78ba26093f29b6330951117676eb66207
+            strip: 2
+            tar_flag: --zstd
             tc_file: hub-mips
             binary: hub
             expect: 'ELF 32-bit MSB.*MIPS.*statically linked'
           - name: arm
             toolchain: armv5-eabi--uclibc--stable-2025.08-1
-            arch_dir: armv5-eabi
+            url: https://toolchains.bootlin.com/downloads/releases/toolchains/armv5-eabi/tarballs/armv5-eabi--uclibc--stable-2025.08-1.tar.xz
+            strip: 1
+            tar_flag: -J
             sha256: e5415d32b39e94bf7b990ea4ead3619bf7055e338309d2cce2b6de2dd7307f12
             tc_file: remote-arm
             binary: remote
             expect: 'ELF 32-bit LSB.*ARM.*statically linked'
     env:
       HP_TOOLCHAIN_ROOT: ${{ github.workspace }}/toolchain
+      STAGING_DIR: ${{ github.workspace }}/toolchain
     steps:
       - uses: actions/checkout@v4
       - name: Cache toolchain
@@ -93,12 +100,11 @@ jobs:
       - name: Download toolchain
         if: steps.tc-cache.outputs.cache-hit != 'true'
         run: |
-          url=https://toolchains.bootlin.com/downloads/releases/toolchains/${{ matrix.arch_dir }}/tarballs/${{ matrix.toolchain }}.tar.xz
-          curl -fsSL --retry 3 -o tc.tar.xz "$url"
-          echo "${{ matrix.sha256 }}  tc.tar.xz" | sha256sum -c -
+          curl -fsSL --retry 3 -o tc.tar "${{ matrix.url }}"
+          echo "${{ matrix.sha256 }}  tc.tar" | sha256sum -c -
           mkdir toolchain
-          tar -xf tc.tar.xz -C toolchain --strip-components=1
-          rm tc.tar.xz
+          tar ${{ matrix.tar_flag }} -xf tc.tar -C toolchain --strip-components=${{ matrix.strip }}
+          rm tc.tar
       - name: Configure
         run: >-
           cmake -S . -B build-cross -DCMAKE_BUILD_TYPE=Release
@@ -110,7 +116,11 @@ jobs:
           out=$(file build-cross/${{ matrix.binary }})
           echo "$out"
           echo "$out" | grep -E '${{ matrix.expect }}'
-      - name: Run C tests under qemu (big-endian check)
+      - name: Assert hub is soft-float (AR9330 has no FPU; hard-float is SIGILL)
+        if: matrix.name == 'mips'
+        run: |
+          readelf -A build-cross/hub | tee /dev/stderr | grep -q 'Soft float'
+      - name: Run C tests under qemu (big-endian, soft-float)
         if: matrix.name == 'mips'
         run: |
           sudo apt-get update -qq
