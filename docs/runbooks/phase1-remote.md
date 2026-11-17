@@ -132,6 +132,14 @@ uv run python tools/device_backup.py --target remote --host 192.168.2.1 --user r
   --key ~/.ssh/harmony_owner_ed25519 --out-dir backups/phase1/remote/$TS
 ```
 
+**The tool now skips mounted gluebi volumes automatically.** It reads `/proc/mounts` and, for every
+writable `ubi<N>:<name>` ubifs mount, never touches the mtd partition of that name (`data` and
+`cache` here); it records them in the manifest as `skipped` with the reason `mounted gluebi volume
+(ubi0:data, rw) — contained in mtd3 'ubi'`. Read-only mounts such as the squashfs `root`
+(`/dev/mtdblock6`) are still imaged. `--verify` prints the skips as `SKIPPED` and treats them as OK,
+so **a re-run should produce a passing `--verify`**. The run history below (20261117T050746Z) predates
+this and is kept as it happened.
+
 Two warnings are expected and correct on this device:
 
 - `dd missing on device; reading partitions with cat` — the supported fallback path.
@@ -147,9 +155,9 @@ Two warnings are expected and correct on this device:
 uv run python tools/device_backup.py --verify backups/phase1/remote/$TS
 ```
 
-### Expect `--verify` to FAIL on this device, for four partitions
+### History: `--verify` FAILED on run 20261117T050746Z, for four partitions
 
-Run 20261117T050746Z, which is the Phase 1 remote backup of record:
+Run 20261117T050746Z (before the tool skipped mounted gluebi volumes), the Phase 1 remote backup of record:
 
 - `ubl` (mtd1) and `u-boot` (mtd2) fail their `mtdblock` read with `cat: read error: Input/output
   error`. The **raw `mtd` read of both succeeds and hash-verifies** — raw is the authoritative read

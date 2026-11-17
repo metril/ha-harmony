@@ -12,6 +12,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import device_backup as db
 
 ERASE = 0x1000
+_EL = 0x1F000  # Elite gluebi/NAND erase size; mtd0-3 use 0x20000
+ELITE_NAMES = ["u-boot env", "ubl", "u-boot", "ubi", "kernel", "kernel2", "root", "data",
+               "cache", "mfg", "log"]  # fmt: skip
+ELITE_ERASE = {i: (0x20000 if i < 4 else _EL) for i in range(11)}
+ELITE = {  # real /proc/mtd names and erase sizes, tiny contents
+    i: (n, bytes([i + 1]) * (ELITE_ERASE[i] // 64 * 2)) for i, n in enumerate(ELITE_NAMES)
+}
+ELITE_MOUNTS = (
+    "rootfs / rootfs rw 0 0\n"
+    "ubi0:cache /cache ubifs rw,relatime 0 0\n"
+    "/dev/mtdblock6 /mnt/root squashfs ro,relatime 0 0\n"
+    "ubi0:data /mnt/data ubifs rw,relatime 0 0\n"
+    "none / unionfs rw,relatime,dirs=/mnt/data=rw:/mnt/root=ro 0 0\n"
+)
+HUB_MOUNTS = "/dev/mtdblock4 / jffs2 rw,relatime 0 0\n/dev/mtdblock5 /x jffs2 rw 0 0\n"
 PARTS = {  # index -> (name, bytes)
     0: ("boot", b"B" * 8192),
     1: ("kernel loader", bytes(range(256)) * 32),
@@ -19,10 +34,10 @@ PARTS = {  # index -> (name, bytes)
 }
 
 
-def mtd_text(parts=PARTS) -> str:
+def mtd_text(parts=PARTS, erase=None) -> str:
     lines = ["dev:    size   erasesize  name"]
     for i, (n, d) in parts.items():
-        lines.append(f'mtd{i}: {len(d):08x} {ERASE:08x} "{n}"')
+        lines.append(f'mtd{i}: {len(d):08x} {(erase or {}).get(i, ERASE):08x} "{n}"')
     return "\n".join(lines) + "\n"
 
 
@@ -30,7 +45,8 @@ class FakeSsh:
     def __init__(self, parts=PARTS, utils=("dd", "cat", "sha256sum", "md5sum"), mtd=True,
                  corrupt_hash=(), truncate=(), proc_partitions="", char=True,
                  devmap=None, command_v=True, hash_fail=None, explode=None,
-                 stream_err=b""):  # fmt: skip
+                 stream_err=b"", mounts=None, erase=None):  # fmt: skip
+        self.mounts, self.erase = mounts, erase
         self.parts, self.utils, self.mtd = parts, utils, mtd
         self.devmap = (
             devmap
@@ -57,9 +73,11 @@ class FakeSsh:
         self.calls.append(argv)
         cmd = shlex.join(argv)
         if argv[:2] == ["cat", "/proc/mtd"]:
-            return (0, mtd_text(self.parts).encode(), b"") if self.mtd else (1, b"", b"no")
+            return (0, mtd_text(self.parts, self.erase).encode(), b"") if self.mtd else (1, b"", b"no")
         if argv[:2] == ["cat", "/proc/partitions"]:
             return 0, self.proc_partitions.encode(), b""
+        if argv[:2] == ["cat", "/proc/mounts"]:
+            return (0, self.mounts.encode(), b"") if self.mounts is not None else (1, b"", b"no")
         if argv[0] == "uname":
             return 0, b"Linux fake 2.6.31 mips\n", b""
         if "command -v" in cmd:
@@ -385,7 +403,7 @@ SH_SHAPES = tuple(
     )
 )
 ARG_OK = {
-    "cat": re.compile(rf"/proc/mtd|/proc/partitions|{DEV}"),
+    "cat": re.compile(rf"/proc/mtd|/proc/partitions|/proc/mounts|{DEV}"),
     "dd": re.compile(rf"if={DEV}|bs=\d+"),
     "uname": re.compile(r"-a"),
 }
@@ -454,6 +472,9 @@ def test_checker_rejects_known_bad_and_new_writes():
         assert not violations(good), good
 
 
+GLUEBI_NODE = re.compile(r"mtd(?:block|r)?[78](?!\d)")
+
+
 def test_commands_are_read_only_by_construction(tmp_path):
     log: list[list[str]] = []
     scenarios = [
@@ -468,10 +489,16 @@ def test_commands_are_read_only_by_construction(tmp_path):
         ({"mtd": False}, ()),
         ({"command_v": False}, ()),  # direct-probe fallback
         ({"hash_fail": {"/dev/mtdblock0": "rc"}}, ()),  # device hash pass failure
+        ({"parts": ELITE, "erase": ELITE_ERASE, "mounts": ELITE_MOUNTS, "utils": ("cat", "md5sum"),
+          "char": False}, ()),  # Elite: cat + md5 + block nodes only
+        ({"parts": ELITE, "erase": ELITE_ERASE, "mounts": ELITE_MOUNTS}, ()),
+        ({"parts": ELITE, "erase": ELITE_ERASE, "mounts": ELITE_MOUNTS}, ("--dry-run",)),
+        ({"parts": ELITE, "erase": ELITE_ERASE, "mounts": ELITE_MOUNTS}, ("--only", "data")),
     ]
     for i, (kw, extra) in enumerate(scenarios):
         out = tmp_path / str(i)
-        db.main(["--host", "h", "--target", "hub", "--out-dir", str(out), *extra],
+        tgt = "remote" if "mounts" in kw else "hub"
+        db.main(["--host", "h", "--target", tgt, "--out-dir", str(out), *extra],
                 runner=RecordingSsh(FakeSsh(**kw), log))  # fmt: skip
         if i == 0:  # second pass: skip/conflict path against the finished dump
             db.main(["--host", "h", "--target", "hub", "--out-dir", str(out)],
@@ -482,6 +509,7 @@ def test_commands_are_read_only_by_construction(tmp_path):
     assert len(log) > 40 and all(c[0] == "ssh" for c in log)
     for argv in log:
         assert not violations(argv[-1]), argv  # the remote command itself, allow-listed
+        assert not GLUEBI_NODE.search(argv[-1]), argv  # Elite: mtd7/mtd8 never touched
 
 
 # --- --verify -----------------------------------------------------------------------------
@@ -682,3 +710,69 @@ def test_keyboard_interrupt_exits_130_without_traceback(tmp_path, monkeypatch, c
     assert db.main(["--host", "h", "--target", "hub", "--out-dir", str(out)], runner=Boom()) == 130
     assert "interrupted" in capsys.readouterr().err
     assert json.loads((out / "manifest.json").read_text())["status"] == "failed"
+
+
+# --- mounted gluebi volumes (Elite) ---------------------------------------------------------
+
+
+def elite(tmp_path, *extra, **kw):
+    fake = FakeSsh(parts=ELITE, erase=ELITE_ERASE, mounts=ELITE_MOUNTS, utils=("cat", "md5sum"),
+                   char=False, **kw)  # fmt: skip
+    return fake, *run(tmp_path, fake, *extra, target="remote")
+
+
+def test_elite_skips_mounted_gluebi_but_images_ro_squashfs(tmp_path, capsys):
+    fake, rc, m = elite(tmp_path)
+    assert rc == 0 and m["status"] == "ok"
+    by = {p["name"]: p for p in m["partitions"]}
+    for n in ("data", "cache"):
+        assert by[n]["status"] == "skipped" and by[n]["file"] is None
+        assert by[n]["reason"] == (
+            f"mounted gluebi volume (ubi0:{n}, rw) \u2014 contained in mtd3 'ubi'"
+        )
+    for n in ("root", "ubi", "kernel", "mfg", "log", "ubl"):
+        assert by[n]["status"] == "ok", n  # ro squashfs (mtdblock6) is still imaged
+    assert "/dev/mtdblock6" in fake.streams
+    assert not [d for d in fake.streams if GLUEBI_NODE.search(d)]
+    assert not [c for c in fake.calls if GLUEBI_NODE.search(shlex.join(c))]
+    assert "data: skipped" in capsys.readouterr().out
+
+
+def test_elite_dry_run_announces_skips(tmp_path, capsys):
+    fake, rc, _ = elite(tmp_path, "--dry-run")
+    out = capsys.readouterr().out
+    assert rc == 0 and "SKIP mtd7" in out and "SKIP mtd8" in out
+    assert "'data'" not in out and "'cache'" not in out  # not in the read plan
+    assert not fake.streams
+
+
+def test_elite_verify_passes_with_skips(tmp_path, capsys):
+    elite(tmp_path)
+    assert verify(tmp_path / "out") == 0
+    out = capsys.readouterr().out
+    assert "SKIPPED" in out and "mounted gluebi volume (ubi0:data, rw)" in out
+    assert "RESULT: OK" in out
+
+
+def test_elite_verify_still_fails_on_other_errors(tmp_path):
+    elite(tmp_path)
+    (tmp_path / "out" / "03_ubi.img").write_bytes(b"x")
+    assert verify(tmp_path / "out") == 1
+
+
+def test_unknown_container_and_rw_only(tmp_path):
+    parts = {i: v for i, v in ELITE.items() if v[0] != "ubi"}
+    fake = FakeSsh(parts=parts, erase=ELITE_ERASE, mounts=ELITE_MOUNTS)
+    _, m = run(tmp_path, fake, target="remote")
+    by = {p["name"]: p for p in m["partitions"]}
+    assert by["data"]["reason"].endswith("contained in unknown container")
+    ro = ELITE_MOUNTS.replace("ubifs rw,relatime", "ubifs ro,relatime")
+    _, m = run(tmp_path / "ro", FakeSsh(parts=ELITE, erase=ELITE_ERASE, mounts=ro), target="remote")
+    assert all(p["status"] == "ok" for p in m["partitions"])  # ro ubifs is not skipped
+
+
+def test_hub_jffs2_mounts_not_skipped(tmp_path):
+    _, m = run(tmp_path, FakeSsh(mounts=HUB_MOUNTS))
+    assert [p["status"] for p in m["partitions"]] == ["ok"] * 3
+    _, m = run(tmp_path / "b", FakeSsh(mounts=ELITE_MOUNTS.replace("mtdblock6", "x")))
+    assert all(p["status"] == "ok" for p in m["partitions"])  # hub target never skips

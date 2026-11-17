@@ -42,6 +42,8 @@ PROBES = {
     "find": "which find >/dev/null 2>&1",
     "tar": "which tar >/dev/null 2>&1",
 }
+UBI_MOUNT_RE = re.compile(r"^ubi(\d+):(.+)$")
+CONTAINER_NAME = "ubi"
 RC_RE = re.compile(rb"(?m)^rc=(\d+)\s*$")
 RECORDS_RE = re.compile(rb"(?m)^(\d+)\+(\d+) records (in|out)\s*$")
 
@@ -171,6 +173,34 @@ def parse_proc_partitions(text: str) -> list[Partition]:
     return parts
 
 
+def parse_rw_ubifs_volumes(mounts: str) -> dict[str, str]:
+    """`/proc/mounts` -> {ubi volume name: "ubiN:name"} for writable ubifs mounts only."""
+    vols: dict[str, str] = {}
+    for line in mounts.splitlines():
+        f = line.split()
+        if len(f) < 4 or f[2] != "ubifs" or "rw" not in f[3].split(","):
+            continue
+        m = UBI_MOUNT_RE.match(f[0])
+        if m:
+            vols[m[2]] = f[0]
+    return vols
+
+
+def skip_reasons(parts: list[Partition], mounts: str) -> dict[int, str]:
+    """{mtd index: reason} for mtds that are mounted rw gluebi volumes (reading oopses gluebi).
+
+    Their content lives in the containing UBI partition (the mtd named "ubi"), which is imaged.
+    """
+    vols = parse_rw_ubifs_volumes(mounts)
+    container = next((p for p in parts if p.name == CONTAINER_NAME), None)
+    where = f"mtd{container.index} '{container.name}'" if container else "unknown container"
+    return {
+        p.index: f"mounted gluebi volume ({vols[p.name]}, rw) \u2014 contained in {where}"
+        for p in parts
+        if p.name in vols and p.name != CONTAINER_NAME
+    }
+
+
 def safe_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "unnamed"
 
@@ -217,6 +247,12 @@ class Backup:
             raise RuntimeError("remote: neither /proc/mtd nor /proc/partitions yielded partitions")
         self.manifest["proc_partitions"] = out.decode("utf-8", "replace")
         return "/proc/partitions", parts
+
+    def discover_skips(self, parts: list[Partition]) -> dict[int, str]:
+        if self.target != "remote":
+            return {}
+        rc, out, _ = self.r.run(["cat", "/proc/mounts"])
+        return skip_reasons(parts, out.decode("utf-8", "replace")) if rc == 0 else {}
 
     def detect_utils(self) -> dict[str, bool]:
         _, out, _ = self.sh(DETECT_SCRIPT)
@@ -390,16 +426,24 @@ class Backup:
                 if missing:
                     raise RuntimeError(f"--only matched no partition: {sorted(missing)}")
                 parts = [p for p in parts if keep(p)]
+            skips = self.discover_skips(parts)
+            m["skipped_partitions"] = {str(i): r for i, r in skips.items()}
             self.read_method = m["read_method"] = self._pick_reader(utils)
             tool = self._pick_tool(utils)
             m["hash_utility"] = tool
-            m["plan"] = self.plan(parts, utils)
+            m["plan"] = self.plan([p for p in parts if p.index not in skips], utils)
             if dry_run:
                 m["status"] = "dry-run"
                 return 0
             self.out.mkdir(parents=True, exist_ok=True)
             for p in parts:
-                m["partitions"].append(self.run_partition(p, tool))
+                if p.index in skips:  # never touch these nodes: reading them oopses the kernel
+                    m["partitions"].append({
+                        "name": p.name, "index": p.index, "erasesize": p.erasesize,
+                        "status": "skipped", "reason": skips[p.index], "file": None,
+                    })  # fmt: skip
+                else:
+                    m["partitions"].append(self.run_partition(p, tool))
                 self.write_manifest()  # keep device hashes if the run dies mid-way
             bad = [x for x in m["partitions"] if x["status"] not in ("ok", "skipped")]
             for x in bad:
@@ -458,6 +502,8 @@ def print_plan(m: dict[str, Any]) -> None:
                                    m.get("utilities", {}).items()))  # fmt: skip
     for w in m["warnings"]:
         print(w, file=sys.stderr)
+    for i, why in m.get("skipped_partitions", {}).items():
+        print(f"  SKIP mtd{i}: {why} (never read)")
     for p in m.get("plan", []):
         raw = f" raw={p['raw_device']}" if p["raw_device"] else ""
         print(f"  [{p['index']}] {p['name']!r}: {p['size_bytes']} B {p['device_path']}{raw}"
@@ -493,6 +539,9 @@ def _check_image(
         out["status"] = status
         res["errors"].append(f"{label}: {msg}")
 
+    if rec.get("status") == "skipped" and rec.get("reason") and not rec.get("file"):
+        out.update(status="skipped", reason=rec["reason"])  # deliberately never imaged
+        return
     if rec.get("status") not in ("ok", "skipped") or not rec.get("file"):
         return fail(f"manifest records status {rec.get('status')!r}, no verified image")
     name = Path(rec["file"]).name
@@ -544,6 +593,9 @@ def verify_dir(d: Path) -> dict[str, Any]:
 def print_verify(res: dict[str, Any]) -> None:
     print(f"verify {res['dir']}")
     for i in res["images"]:
+        if i["status"] == "skipped":
+            print(f"  {'SKIPPED':<13} {i['partition']}: {i['reason']}")
+            continue
         print(f"  {i['status'].upper():<13} {i['partition']}: {i['file']} magic={i['magic']}")
     for w in res["warnings"]:
         print(f"WARNING: {w}", file=sys.stderr)
@@ -600,7 +652,8 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
     for w in b.warnings:
         print(w, file=sys.stderr)
     for p in b.manifest["partitions"]:
-        print(f"{p['name']}: {p['status']}")
+        why = f" ({p['reason']}; not read)" if p.get("reason") else ""
+        print(f"{p['name']}: {p['status']}{why}")
     for e in b.errors:
         print(f"ERROR: {e}", file=sys.stderr)
     print(f"manifest: {path} status={b.manifest['status']}")
