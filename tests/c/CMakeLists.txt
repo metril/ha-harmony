@@ -33,3 +33,8 @@ add_executable(test_hw_sinks test_hw_sinks.c)
 target_link_libraries(test_hw_sinks PRIVATE hp_hub)
 add_dependencies(test_hw_sinks ir_bench)
 add_test(NAME hw_sinks COMMAND test_hw_sinks $<TARGET_FILE:ir_bench>)
+
+# rf_probe (read-only radio probe): host-only via injected syscalls; the tool source is #included.
+add_executable(test_rf_probe test_rf_probe.c)
+target_include_directories(test_rf_probe PRIVATE ${CMAKE_SOURCE_DIR})
+add_test(NAME rf_probe COMMAND test_rf_probe)

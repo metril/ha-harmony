@@ -69,6 +69,12 @@ target_link_libraries(hub PRIVATE hp_hub)
 # Bench-only IR emitter experiment (not shipped in the hub binary).
 add_executable(ir_bench tools/ir_bench.c)
 
+# Read-only CC2544 radio probe (/dev/rfspi); built for the hub target alongside hub/remote_sim.
+if(NOT CMAKE_CROSSCOMPILING OR HP_TARGET STREQUAL "hub")
+  add_executable(rf_probe tools/rf_probe.c)
+  target_include_directories(rf_probe PRIVATE ${CMAKE_SOURCE_DIR})
+endif()
+
 # remote_sim drives the hub's RF link, which is a Unix socket *on the hub*, so the hub target
 # needs it too: with the physical remote deliberately unrooted, a simulated press has to
 # originate on the device. It links only hp_hub and plain sockets, so there is nothing

@@ -119,7 +119,15 @@ jobs:
       - name: Assert hub is soft-float (AR9330 has no FPU; hard-float is SIGILL)
         if: matrix.name == 'mips'
         run: |
-          readelf -A build-cross/hub | tee /dev/stderr | grep -q 'Soft float'
+          for b in hub remote_sim rf_probe; do
+            readelf -A build-cross/$b | tee /dev/stderr | grep -q 'Soft float'
+          done
+      - name: Assert rf_probe is a static big-endian MIPS ELF
+        if: matrix.name == 'mips'
+        run: |
+          out=$(file build-cross/rf_probe)
+          echo "$out"
+          echo "$out" | grep -E 'ELF 32-bit MSB.*MIPS.*statically linked'
       - name: Run C tests under qemu (big-endian, soft-float)
         if: matrix.name == 'mips'
         run: |
