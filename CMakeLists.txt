@@ -40,10 +40,42 @@ target_include_directories(hp_core PUBLIC ${CMAKE_SOURCE_DIR})
 find_package(Threads REQUIRED)
 target_link_libraries(hp_core PUBLIC m Threads::Threads)
 
+# Remote app: vendored LVGL (render only, remote/lv_conf.h) + our app (display, ui, input, power).
+# Built for the remote ARM target and for host tests; the hub MIPS build never needs it.
+if(NOT CMAKE_CROSSCOMPILING OR HP_TARGET STREQUAL "remote")
+  file(GLOB_RECURSE _lvgl_src CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/vendor/lvgl/src/*.c)
+  add_library(lvgl STATIC ${_lvgl_src})
+  # SYSTEM: LVGL's headers must not trip our -Werror. Its own sources are built with relaxed flags.
+  target_include_directories(lvgl SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/vendor/lvgl ${CMAKE_SOURCE_DIR}/remote)
+  target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
+  target_compile_options(lvgl PRIVATE -w -Wno-error -ffunction-sections -fdata-sections)
+  target_link_libraries(lvgl PRIVATE m)
+  if(NOT CMAKE_CROSSCOMPILING)
+    target_compile_definitions(lvgl PUBLIC HP_HOST_BUILD)  # asserts on (remote/lv_conf.h)
+  endif()
+
+  add_library(hp_remote_app STATIC
+    remote/app/sys.c
+    remote/app/real_ops.c
+    remote/app/display.c
+    remote/app/ui.c
+    remote/app/input.c
+    remote/app/power.c
+    remote/app/app.c
+  )
+  target_link_libraries(hp_remote_app PUBLIC hp_core lvgl)
+  if(NOT CMAKE_CROSSCOMPILING)
+    # Host build only to keep main.c under -Werror/ASan; it needs a real 240x320 /dev/fb0 to run.
+    add_executable(harmony_remote remote/app/main.c)
+    target_link_libraries(harmony_remote PRIVATE hp_remote_app)
+  endif()
+endif()
+
 if(CMAKE_CROSSCOMPILING AND HP_TARGET STREQUAL "remote")
-  # Remote firmware: shared core + entry stub; no host-only tools/tests.
-  add_executable(remote remote/main.c)
-  target_link_libraries(remote PRIVATE hp_core)
+  # Remote firmware: the LVGL app (shared core + page decoder); no host-only tools/tests.
+  add_executable(harmony_remote remote/app/main.c)
+  target_link_libraries(harmony_remote PRIVATE hp_remote_app)
+  target_link_options(harmony_remote PRIVATE -Wl,--gc-sections)
   # Bring-up probes run on the remote itself (static ARM): the radio probe with its 32-byte write
   # cap, and the read-only framebuffer/input probe.
   add_executable(rf_probe tools/rf_probe.c)

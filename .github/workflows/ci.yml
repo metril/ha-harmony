@@ -84,7 +84,7 @@ jobs:
             tar_flag: -J
             sha256: 8cdb4ad70c6b5a66427fa3315fe3ddde1c19c90232674dec59045e04d2a36cf1
             tc_file: remote-arm
-            binary: remote
+            binary: harmony_remote
             expect: 'ELF 32-bit LSB.*ARM.*statically linked'
     env:
       HP_TOOLCHAIN_ROOT: ${{ github.workspace }}/toolchain
@@ -131,7 +131,7 @@ jobs:
       - name: Assert remote probes are static ARM ELFs
         if: matrix.name == 'arm'
         run: |
-          for b in remote_probe rf_probe; do
+          for b in remote_probe rf_probe harmony_remote; do
             out=$(file build-cross/$b)
             echo "$out"
             echo "$out" | grep -E 'ELF 32-bit LSB.*ARM.*statically linked'
