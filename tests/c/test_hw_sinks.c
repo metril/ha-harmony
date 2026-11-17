@@ -97,7 +97,7 @@ static void setup(void) {
     OPS = (hp_hw_ops_t){&F, f_open, f_write, f_ioctl, f_close, f_now};
 }
 static int open_hw(uint8_t ports) {
-    hp_hw_cfg_t c = {NULL, ports, &OPS};
+    hp_hw_cfg_t c = {NULL, ports, &OPS, NULL};
     int r = hp_hw_sinks_open(&c, g_h);
     F.nlog = 0; F.opens = F.closes = 0; /* forget the startup probe */
     return r;

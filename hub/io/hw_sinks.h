@@ -3,7 +3,8 @@
 
 /* Real hub hardware backend behind hp_sinks_t. Only the IR sink is implemented this phase
  * (/dev/i2s, wire format bench-proven 2026-11-16, docs/hardware/hub-ir-i2s.md section 9);
- * BT and RF-radio return -HP_E_NOSYS. Every syscall and the clock go through hp_hw_ops_t so
+ * BT returns -HP_E_NOSYS. The RF radio is opt-in via cfg.rf (hub/io/rf_spi.h: preflight, reader
+ * thread); without it the RF sink is a -HP_E_NOSYS stub. Every syscall and the clock go through hp_hw_ops_t so
  * the whole translation is host-testable with no device.
  *
  * PORT MASK. The engine's port_mask (hp_ir_sink contract: bit n = port n) maps one-to-one onto
@@ -33,6 +34,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "hub/io/rf_spi.h"
 #include "hub/io/sinks.h"
 
 #define HP_HW_RING_BYTES (512u * 768u) /* driver ring: a larger stream is rejected, never split */
@@ -61,6 +63,7 @@ typedef struct {
     const char *dev_path;       /* NULL = /dev/i2s */
     uint8_t ir_ports;           /* emitter ports wired; 0 = HP_HW_DEFAULT_IR_PORTS */
     const hp_hw_ops_t *ops;     /* NULL = real syscalls + CLOCK_MONOTONIC */
+    const hp_rf_spi_cfg_t *rf;  /* non-NULL = also open the CC2544 radio (hub/io/rf_spi.h); NULL = RF stays a stub */
 } hp_hw_cfg_t;
 
 /* Derived wire parameters for one waveform. */
@@ -79,6 +82,7 @@ typedef struct {
     hp_hw_cfg_t cfg;
     hp_hw_ops_t ops;
     bool rf_claimed;
+    hp_rf_transport *rfspi; /* the real radio when cfg.rf was given; sinks.rf then points at it */
     bool pending;          /* fd open, START issued, DRAIN+close owed */
     int fd;
     uint64_t deadline_ms;  /* predicted end of the pending waveform */

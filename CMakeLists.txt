@@ -64,10 +64,12 @@ add_library(hp_hub STATIC
   hub/io/sim_sinks.c
   hub/io/hw_sinks.c
   hub/io/rf_pair.c
+  hub/io/rf_spi.c
   hub/ir/encode.c
   hub/hub_handlers.c
 )
-target_link_libraries(hp_hub PUBLIC hp_core cjson m)
+find_package(Threads REQUIRED)
+target_link_libraries(hp_hub PUBLIC hp_core cjson m Threads::Threads)
 
 add_executable(hub hub/main.c)
 target_link_libraries(hub PRIVATE hp_hub)

@@ -180,6 +180,11 @@ int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *h) {
     int fd = open_dev(h);
     if (fd < 0) return fd;
     (void)h->ops.close(h->ops.ctx, fd);
+    if (cfg->rf) {
+        int rc = hp_rf_spi_open(cfg->rf, &h->rfspi);
+        if (rc < 0) return rc;
+        h->sinks.rf = h->rfspi;
+    }
     return 0;
 }
 
@@ -188,5 +193,8 @@ void hp_hw_service(hp_hw_t *h) {
 }
 
 void hp_hw_sinks_close(hp_hw_t *h) {
-    if (h) drain_close(h);
+    if (!h) return;
+    drain_close(h);
+    hp_rf_spi_destroy(h->rfspi);
+    h->rfspi = NULL;
 }

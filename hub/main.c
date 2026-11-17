@@ -13,6 +13,7 @@
 #include "hub/hub_handlers.h"
 #include "hub/io/hw_sinks.h"
 #include "hub/io/rf_pair.h"
+#include "hub/io/rf_spi.h"
 #include "hub/io/sim_sinks.h"
 #include "hub/parse_num.h"
 #include "hub/net/jsonrpc.h"
@@ -55,6 +56,8 @@ static hp_mdns_srv_t g_mdns; /* fd < 0 until started */
 static int rf_fds(void *arg, int out[4]) {
     int n = arg ? hp_rf_pair_fds(arg, out) : 0;
     if (n < 0) n = 0;
+    int spi = hp_rf_spi_wake_fd(g_hub.sinks.rf); /* the real radio's reader thread wakes the poll */
+    if (spi >= 0 && n < 4) out[n++] = spi;
     if (n < 4 && g_mdns.fd >= 0) out[n++] = g_mdns.fd;
     return n;
 }
@@ -70,7 +73,7 @@ static int bad_num(const char *flag, const char *val) {
 }
 
 int main(int argc, char **argv) {
-    bool sim = false;
+    bool sim = false, rf_spi = false;
     long port = 8099;
     const char *token = NULL;
     const char *cache = NULL;
@@ -89,6 +92,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--cache") && i + 1 < argc) cache = argv[++i];
         else if (!strcmp(argv[i], "--state") && i + 1 < argc) state = argv[++i];
         else if (!strcmp(argv[i], "--rf") && i + 1 < argc) rf_path = argv[++i];
+        else if (!strcmp(argv[i], "--rf-spi")) rf_spi = true;
         else if (!strcmp(argv[i], "--hub-id") && i + 1 < argc) hub_id = argv[++i];
         else if (!strcmp(argv[i], "--fw-version") && i + 1 < argc) fw_version = argv[++i];
         else if (!strcmp(argv[i], "--ir-ports") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 255, &ir_ports)) return bad_num("--ir-ports", argv[i]); }
@@ -100,7 +104,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--auth-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &auth_ms)) return bad_num("--auth-timeout-ms", argv[i]); }
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
-            fprintf(stderr, "usage: hub [--sim] [--port N] --token T [--cache PATH] [--state PATH] [--rf PATH] "
+            fprintf(stderr, "usage: hub [--sim] [--port N] --token T [--cache PATH] [--state PATH] [--rf PATH | --rf-spi] "
                             "[--hub-id ID] [--fw-version V] [--ir-ports MASK] "
                             "[--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P]\n");
@@ -110,7 +114,11 @@ int main(int argc, char **argv) {
     if (!sim) { /* real-hub defaults; --sim keeps none */
         if (!cache) cache = "/data/ha-harmony/cache.json";
         if (!state) state = "/data/ha-harmony/state.json";
-        if (!rf_path) rf_path = "/tmp/ha-harmony-rf.sock";
+        if (!rf_path && !rf_spi) rf_path = "/tmp/ha-harmony-rf.sock";
+    }
+    if (rf_spi && (sim || rf_path)) {
+        fprintf(stderr, "hub: --rf-spi (the real radio) cannot be combined with --sim or --rf\n");
+        return 2;
     }
     if (!token || !*token || port < 0 || port > 65535 || auth_ms <= 0 || idle_ms <= 0 ||
         auth_ms > INT32_MAX || idle_ms > INT32_MAX) {
@@ -130,10 +138,12 @@ int main(int argc, char **argv) {
         hp_sim_init(&g_sim, stdout);
         g_hub.sinks = hp_sim_sinks(&g_sim);
     } else {
-        hp_hw_cfg_t hc = {NULL, (uint8_t)ir_ports, NULL};
+        hp_rf_spi_cfg_t rc_cfg = {NULL, 0, NULL};
+        hp_hw_cfg_t hc = {NULL, (uint8_t)ir_ports, NULL, rf_spi ? &rc_cfg : NULL};
         int hr = hp_hw_sinks_open(&hc, &g_hw);
         if (hr == -HP_E_HALBUSY) {
-            fprintf(stderr, "hub: stock hal still holds /dev/i2s — quiesce first\n");
+            fprintf(stderr, "hub: stock hal holds the hardware (or could not be ruled out): "
+                            "run `tools/deploy_hub.py quiesce` first\n");
             return 1;
         }
         if (hr < 0) {
@@ -141,6 +151,7 @@ int main(int argc, char **argv) {
             return 1;
         }
         g_hub.sinks = g_hw.sinks;
+        g_hub.rf_inner_blocks = rf_spi; /* rf_spi carries bare 28-byte inner blocks; the socket carries hub frames */
     }
     g_hub.cache_path = cache;
     hp_rf_transport *rf = NULL;
@@ -156,7 +167,7 @@ int main(int argc, char **argv) {
         }
         g_hub.sinks.rf = rf;
     }
-    if (g_hub.sinks.rf->claim(g_hub.sinks.rf->self) < 0) {
+    if (g_hub.sinks.rf && g_hub.sinks.rf->claim(g_hub.sinks.rf->self) < 0) {
         fprintf(stderr, "hub: RF transport already claimed\n");
         return 1;
     }

@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "hub/hp_errors.h"
+#include "hub/io/hal_check.h"
 
 #define RFP_DEV "/dev/rfspi"
 /* The driver's queued entry is a fixed 64-byte buffer with its length at +0x40, and read() ignores
@@ -383,37 +384,9 @@ static ssize_t r_read_file(void *c, const char *p, void *b, size_t cap) {
   return n;
 }
 
-/* Is a process named exactly `hal` alive? Walk /proc/<pid>/stat and read the name between the
- * first '(' and the last ')' -- the hub's 2.6.31 kernel has no /proc/<pid>/comm (added in 2.6.33),
- * and its BusyBox has no pgrep. Returns 1 yes, 0 no, -1 if /proc could not be read at all; an
- * unreadable individual entry is skipped, since a pid can exit mid-walk. Matches the name
- * deploy_hub.py's named_alive("hal") uses. */
 static int r_hal_alive(void *c) {
   (void)c;
-  DIR *d = opendir("/proc");
-  if (!d) return -1;
-  int found = 0;
-  struct dirent *e;
-  while (!found && (e = readdir(d))) {
-    const char *n = e->d_name;
-    size_t i = 0;
-    while (n[i] >= '0' && n[i] <= '9') i++;
-    if (i == 0 || n[i] != 0) continue; /* not a pid directory */
-    char path[64], buf[256];
-    if (snprintf(path, sizeof path, "/proc/%s/stat", n) >= (int)sizeof path) continue;
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) continue;
-    ssize_t got = read(fd, buf, sizeof buf - 1);
-    close(fd);
-    if (got <= 0) continue;
-    buf[got] = 0;
-    char *a = strchr(buf, '('), *b = strrchr(buf, ')');
-    if (!a || !b || b <= a + 1) continue;
-    *b = 0;
-    found = strcmp(a + 1, "hal") == 0;
-  }
-  closedir(d);
-  return found;
+  return hp_hal_alive_proc();
 }
 
 int main(int argc, char **argv) {
