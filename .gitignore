@@ -20,3 +20,6 @@ backups/
 
 # Pinned cross toolchains (hundreds of MB, fetched by tools/fetch_toolchains.sh)
 vendor/toolchains/
+
+# Release packages (built by tools/package_integration.py)
+dist/
