@@ -3,12 +3,12 @@ export interface Route {
   section: string;
   parts: string[];
 }
-export const SECTIONS = ['overview', 'devices', 'activities', 'keys', 'pages', 'ir', 'history'] as const;
+export const SECTIONS = ['remote', 'overview', 'devices', 'activities', 'ir', 'history'] as const;
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
-  const section = parts.shift() ?? 'overview';
-  return { section: (SECTIONS as readonly string[]).includes(section) ? section : 'overview', parts };
+  const section = parts.shift() ?? 'remote';
+  return { section: (SECTIONS as readonly string[]).includes(section) ? section : 'remote', parts };
 }
 export const hashFor = (...parts: (string | number)[]): string => '#/' + parts.map((p) => encodeURIComponent(String(p))).join('/');
 

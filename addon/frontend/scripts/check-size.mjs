@@ -2,7 +2,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 
-const BUDGET = { js: 60 * 1024, css: 8 * 1024 }; // gzip bytes
+// JS raised from 60 to 90 KiB for the remote studio (visual editor, 50 stock icons, Elite drawing); CSS is unchanged
+const BUDGET = { js: 90 * 1024, css: 8 * 1024 }; // gzip bytes
 const dir = new URL('../dist/assets/', import.meta.url);
 let bad = false;
 for (const ext of ['js', 'css']) {

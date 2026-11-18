@@ -135,6 +135,25 @@ export interface HaService {
   fields?: string[];
 }
 
+/** One hard key's effective action in one layer (config/keymap). */
+export interface KeymapRow {
+  key: string;
+  code: number;
+  source: 'default' | 'activity' | 'none';
+  action: ({ kind: string; label: string } & Record<string, unknown>) | null;
+}
+export interface Keymap {
+  ok: boolean;
+  default: KeymapRow[];
+  activities: { id: string; name: string; keys: KeymapRow[] }[];
+}
+export interface Health {
+  ok: boolean;
+  addon_version: string;
+  /** what this add-on build can store; absent on older builds */
+  capabilities?: { ha_actions?: boolean; page_format?: number };
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -217,7 +236,7 @@ export class Api {
     return data as T;
   }
 
-  health = () => this.request<{ ok: boolean; addon_version: string }>('GET', 'api/v1/health');
+  health = () => this.request<Health>('GET', 'api/v1/health');
   hubs = () => this.request<{ hubs: HubInfo[] }>('GET', 'api/v1/hubs');
   getConfig = (hub: string, full = false) =>
     this.request<ConfigResponse>('GET', 'api/v1/config', { query: { hub, full: full ? '1' : undefined } });
@@ -238,6 +257,9 @@ export class Api {
   /** Always 200; look at `ok` and `errors`. Without `config` it checks the saved draft. */
   preview = (hub: string, config?: Config) =>
     this.request<Preview>('POST', 'api/v1/config/preview', { query: { hub }, body: config ? { config } : {} });
+  /** Effective hard-key action per layer; 422 when the config does not validate. */
+  keymap = (hub: string, config?: Config) =>
+    this.request<Keymap>('POST', 'api/v1/config/keymap', { query: { hub }, body: config ? { config } : {} });
   apply = (hub: string) => this.request<Meta & { ok: true }>('POST', 'api/v1/config/apply', { query: { hub } });
   revert = (hub: string, target: 'applied' | 'previous') =>
     this.request<Meta & { ok: true }>('POST', 'api/v1/config/revert', { query: { hub }, body: { target } });

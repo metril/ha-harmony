@@ -8,6 +8,7 @@
   --scrim: rgba(16, 24, 32, 0.45);
   --r1: 6px; --r2: 10px; --r3: 16px;
   --sh: 0 1px 2px rgba(16, 24, 32, 0.06), 0 4px 16px rgba(16, 24, 32, 0.06);
+  --cv: #e6ebee; --dot: #cbd3d9; --lift: 0 10px 28px rgba(16, 24, 32, 0.28);
   --rbg: #101820; --rs1: #182430; --rs2: #202c38; --rs3: #304050;
   --rtx: #f8fcf8; --rtx2: #a8b4c0; --racc: #20c8b0; --rwarm: #f8c040; --rbad: #f85848;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Arial, sans-serif;
@@ -22,6 +23,7 @@
     --ir: #f8c040; --irs: #3a2e12; --onir: #1a1404; --irbg: #f8c040;
     --bad: #ff7a6b; --bads: #3d1b19; --ok: #5bd58a; --oks: #16341f; --focus: #5fe3cf;
     --scrim: rgba(0, 0, 0, 0.6);
+    --cv: #0a1016; --dot: #1c2832; --lift: 0 12px 30px rgba(0, 0, 0, 0.6);
     --sh: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
     color-scheme: dark;
   }
@@ -33,6 +35,7 @@
   --ir: #f8c040; --irs: #3a2e12; --onir: #1a1404; --irbg: #f8c040;
   --bad: #ff7a6b; --bads: #3d1b19; --ok: #5bd58a; --oks: #16341f; --focus: #5fe3cf;
   --scrim: rgba(0, 0, 0, 0.6);
+  --cv: #0a1016; --dot: #1c2832; --lift: 0 12px 30px rgba(0, 0, 0, 0.6);
   --sh: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
   color-scheme: dark;
 }

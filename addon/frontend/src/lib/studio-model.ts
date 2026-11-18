@@ -538,3 +538,21 @@ export function errorTarget(path: (string | number)[]): ErrorTarget {
   if (a === 'activities' && c === 'keys' && typeof d === 'string') return { kind: 'key', layer: `#${String(b)}`, key: d };
   return null;
 }
+
+// ---------------------------------------------------------------- config widgets <-> wire widgets
+/** For each config widget of a page, the index of the same widget in the wire page (or -1: promoted header label, other wire page). */
+export function wireMap(p: Page, wireCount: number, offset = 0): number[] {
+  const promoted = promotedIndex(p);
+  let j = 0;
+  return p.widgets.map((_, i) => {
+    if (p.list) return i - offset >= 0 && i - offset < wireCount ? i - offset : -1;
+    if (i === promoted) return -1;
+    return j < wireCount ? j++ : -1;
+  });
+}
+/** Grid of the drawn page: v2 shifts rows up by one when a header label was promoted to the title. */
+export function gridOf(p: Page): { cols: number; rows: number; shift: number } {
+  const { cols, rows } = pageDims(p);
+  const shift = promotedIndex(p) >= 0 && rows > 1 ? 1 : 0;
+  return { cols, rows: rows - shift, shift };
+}

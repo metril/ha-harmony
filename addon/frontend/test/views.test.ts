@@ -114,7 +114,7 @@ describe('screens render with a realistic config', () => {
   });
 
   it('unbuilt sections show a clear empty state, not a dead link', async () => {
-    for (const s of ['activities', 'keys', 'pages', 'ir']) {
+    for (const s of ['activities', 'ir']) {
       const { app } = await boot({ hash: `#/${s}` });
       const p = app.shadowRoot!.querySelector('hh-placeholder')!;
       await settle(p as HTMLElement);
