@@ -41,6 +41,7 @@ export class HhDevices extends StoreElement {
       .dcard h2 { margin: 0; font-size: 15px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dcard .src { font-size: 12px; color: var(--tx3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .addw { display: grid; }
       .add { text-align: center; padding: 16px; display: grid; place-items: center; align-content: center; gap: 8px; min-height: 230px; border: 2px dashed var(--line); border-radius: var(--r3); color: var(--tx2); text-decoration: none; font-weight: 600; background: transparent; }
       .add:hover { background: var(--sf2); color: var(--tx); border-color: var(--acc); }
       .add .plus { width: 48px; height: 48px; border-radius: 50%; background: var(--accs); color: var(--acc); display: grid; place-items: center; }
@@ -57,8 +58,8 @@ export class HhDevices extends StoreElement {
       .page { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
       .side { display: grid; gap: 14px; }
       .grp { margin-bottom: 18px; }
-      .grp h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; display: flex; gap: 8px; align-items: center; }
-      .grp h3 .sic { width: 18px; height: 18px; color: var(--acc); }
+      .grp h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; display: flex; gap: 8px; align-items: center; }
+      .grp h2 .sic { width: 18px; height: 18px; color: var(--acc); }
       .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; }
       .key { display: flex; align-items: center; gap: 6px; height: 48px; padding: 0 6px 0 4px; border-radius: var(--r2); border: 1px solid var(--line); background: linear-gradient(var(--sf), var(--sf2)); min-width: 0; }
       .key.bad { border-color: var(--bad); background: var(--bads); }
@@ -209,7 +210,7 @@ export class HhDevices extends StoreElement {
       <div class="head"><h1>Devices</h1><span class="chip">${all.length} / ${LIMITS.devices}</span><span class="muted">What the hub can control. Open one to see its keypad.</span></div>
       <div class="gallery" role="list" aria-label="Devices">
         ${all.map((d, i) => html`<div role="listitem" class="cont">${this.card(d, i)}</div>`)}
-        <a class="add" role="listitem" href=${hashFor('devices', 'new')}><span class="plus">${icon('plus')}</span>Add device<span class="muted">From the IR archive, pasted codes or Home Assistant</span></a>
+        <div role="listitem" class="addw"><a class="add" href=${hashFor('devices', 'new')}><span class="plus">${icon('plus')}</span>Add device<span class="muted">From the IR archive, pasted codes or Home Assistant</span></a></div>
       </div>
       ${all.length === 0 ? html`<p class="muted">No devices yet. Add your first one to get started.</p>` : nothing}`;
   }
@@ -251,8 +252,8 @@ export class HhDevices extends StoreElement {
     const numbered = g === 'numbers' ? [...items].sort((a, b) => (/\d/.exec(a[0])?.[0] ?? '9').localeCompare(/\d/.exec(b[0])?.[0] ?? '9')) : items;
     const dp = ['', 'up', '', 'left', 'ok', 'right', '', 'down', ''];
     const map = new Map(items);
-    return html`<section class="grp" aria-label=${pretty(g)}>
-      <h3>${stockIconSvg(groupIconId(g))} ${pretty(g)}<span class="muted">${items.length}</span></h3>
+    return html`<section class="grp" aria-label="${pretty(g)} keys">
+      <h2>${stockIconSvg(groupIconId(g))} ${pretty(g)}<span class="muted">${items.length}</span></h2>
       ${nav && Object.keys(dpadNames).length ? html`<div class="dpad">${dp.map((s) => (s && dpadNames[s] ? this.key(d, where, dpadNames[s] as string, map.get(dpadNames[s] as string) as IrAction) : html`<span></span>`))}</div>` : nothing}
       <div class=${g === 'numbers' && numbered.length >= 8 ? 'numpad' : 'keys'}>${(nav ? rest : numbered).map(([n, c]) => this.key(d, where, n, c))}${g === 'inputs' ? this.placeholder('inputs', 'input') : nothing}</div>
     </section>`;
@@ -262,7 +263,7 @@ export class HhDevices extends StoreElement {
     const by = new Map<Group, [string, IrAction][]>(GROUPS.map((g) => [g, []]));
     for (const c of cmds) by.get(groupCommand(c[0]) as Group)?.push(c);
     return html`
-      <section class="grp" aria-label="Power"><h3>${stockIconSvg(groupIconId('power'))} Power</h3><div class="keys">${this.powerKeys(d)}${(by.get('power') ?? []).map(([n, c]) => this.key(d, 'commands', n, c))}${!d.power ? html`<span class="muted">No power control (see Power on the right)</span>` : nothing}</div></section>
+      <section class="grp" aria-label="Power keys"><h2>${stockIconSvg(groupIconId('power'))} Power</h2><div class="keys">${this.powerKeys(d)}${(by.get('power') ?? []).map(([n, c]) => this.key(d, 'commands', n, c))}${!d.power ? html`<span class="muted">No power control (see Power on the right)</span>` : nothing}</div></section>
       ${GROUPS.filter((g) => g !== 'power' && g !== 'inputs' && (by.get(g)?.length ?? 0) > 0).map((g) => this.groupBlock(d, g, by.get(g) ?? [], 'commands'))}
       ${this.groupBlock(d, 'inputs', Object.entries(d.inputs ?? {}), 'inputs')}
       <div class="keys">${this.placeholder('commands', 'command')}</div>`;
@@ -317,7 +318,7 @@ export class HhDevices extends StoreElement {
   private powerPanel(d: Device) {
     const mode = powerMode(d);
     const modes: [PowerMode, string][] = [['both', 'On and off'], ['toggle', 'One toggle'], ['none', 'None']];
-    return html`<section class="card" aria-label="Power">
+    return html`<section class="card" aria-label="Power control">
       <h2>Power</h2>
       <div class="seg" role="group" aria-label="Power control">${modes.map(([m, label]) => html`<button aria-pressed=${mode === m} @click=${() => this.put(setPowerMode(this.store.config, d.id, m))}>${label}</button>`)}</div>
       <p class="why mt">${mode === 'both' ? 'Separate on and off codes: the hub always knows what it sends.' : mode === 'toggle' ? 'One code switches it on and off. It can get out of step if you use the original remote.' : 'The hub will not switch this device on or off.'}</p>
@@ -357,7 +358,7 @@ export class HhDevices extends StoreElement {
         <label class="f">Where its state comes from<input type="text" list="hh-dev-ents" aria-label="Entity" .value=${d.entity ?? ''} placeholder="media_player.shield" ?disabled=${!ok} @change=${(e: Event) => set(patchDevice(this.store.config, d.id, { entity: (e.target as HTMLInputElement).value.trim() || undefined }))} />
           <datalist id="hh-dev-ents">${(st.entities ?? []).slice(0, 300).map((e) => html`<option value=${e.entity_id}>${e.name ?? ''}</option>`)}</datalist>
           <span class="hint">Power shows as on unless this entity is off, standby, unavailable or unknown.</span></label></section>
-      <section class="card" aria-label="Power"><h2>Power</h2>
+      <section class="card" aria-label="Power control"><h2>Power</h2>
         ${(['on', 'off'] as const).map((k) => this.haAction(`Power ${k}`, d.power?.[k], (a) => set(setPowerCode(this.store.config, d.id, k, a))))}</section>
       ${(['inputs', 'commands'] as const).map((where) => html`<section class="card" aria-label=${pretty(where)}><h2>${pretty(where)}</h2>
         ${Object.entries(d[where] ?? {}).map(([n, a]) => this.haAction(n, a, (x) => { if (x) set((where === 'inputs' ? setInput : setCommand)(this.store.config, d.id, n, x)); }, html`<button class="btn sm danger" @click=${() => void this.removeItem(d, where, n)}>Delete</button>`))}

@@ -31,7 +31,7 @@ export class HhPalette extends LitElement {
       summary .sic { width: 20px; height: 20px; color: var(--acc); }
       summary small { margin-left: auto; color: var(--tx3); font-weight: 500; font-size: 11px; }
       .grp { padding: 0 10px 10px; }
-      .grp h4 { margin: 8px 0 5px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; }
+      .grp h2 { margin: 8px 0 5px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; }
       .chips { display: flex; flex-wrap: wrap; gap: 5px; }
       .chip2 { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; max-width: 100%; padding: 0 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--sf2); color: var(--tx); font-size: 12.5px; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
       .chip2:hover { background: var(--sf3); }
@@ -136,7 +136,7 @@ export class HhPalette extends LitElement {
       const cards = GROUPS.map((grp) => {
         const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
-          ? html`<h4>${pretty(grp)}</h4><div class="chips" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
+          ? html`<h2>${pretty(grp)}</h2><div class="chips" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
               ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), stockIconSvg(commandIconId(c.name, c.group))))}
             </div>`
           : nothing;

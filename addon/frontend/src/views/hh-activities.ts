@@ -46,6 +46,7 @@ export class HhActivities extends StoreElement {
       .newcard .plus { width: 44px; height: 44px; border-radius: 50%; background: var(--accs); color: var(--acc); display: grid; place-items: center; }
       /* editor */
       .tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+      .tabs .tl { display: contents; }
       .tabs a { height: 32px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 600; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; }
       .tabs a[aria-selected="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
       .name { font-size: 20px; font-weight: 650; border: 1px solid transparent; border-radius: var(--r1); background: transparent; color: var(--tx); padding: 2px 8px; min-width: 0; flex: 1 1 200px; height: 40px; }
@@ -384,7 +385,7 @@ export class HhActivities extends StoreElement {
     if (!a) return html`<div class="card"><h2>That activity is gone</h2><a class="btn" href=${hashFor('activities')}>All activities</a></div>`;
     const o = this.offer?.id === id ? this.offer : null;
     return html`
-      <div class="tabs" role="tablist" aria-label="Activities">${(this.cfg.activities ?? []).map((x) => html`<a role="tab" href=${hashFor('activities', x.id)} aria-selected=${x.id === id}>${x.name ?? x.id}</a>`)}<button class="btn sm" @click=${() => (this.newOpen = true)}>+ New</button></div>
+      <div class="tabs"><div role="tablist" aria-label="Activities" class="tl">${(this.cfg.activities ?? []).map((x) => html`<a role="tab" href=${hashFor('activities', x.id)} aria-selected=${x.id === id}>${x.name ?? x.id}</a>`)}</div><button class="btn sm" @click=${() => (this.newOpen = true)}>+ New</button></div>
       <div class="head"><input class="name" aria-label="Activity name" .value=${a.name ?? a.id} @change=${(e: Event) => this.store.replace(renameActivity(this.cfg, id, trimBytes((e.target as HTMLInputElement).value.trim()) || id), `an${id}`)} />
         <a class="btn" href=${hashFor('remote', id)}>Open on remote</a><button class="btn danger" @click=${() => void this.removeActivity(id)}>Delete</button></div>
       ${o ? html`<div class="banner" role="status"><span><b>${a.name ?? id}</b> is new. Make it easy to start?</span><span class="sp"></span><span class="offer">

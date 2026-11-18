@@ -29,8 +29,9 @@ export class HhApp extends StoreElement {
     shared,
     css`
       :host { display: block; min-height: 100vh; }
-      .skip { position: absolute; left: 8px; top: -48px; z-index: 20; background: var(--acc); color: var(--onacc); padding: 8px 12px; border-radius: var(--r1); }
+      .skip { position: absolute; left: 8px; top: -48px; z-index: 20; background: var(--acc); color: var(--onacc); padding: 8px 12px; border-radius: var(--r1); border: 0; cursor: pointer; }
       .skip:focus { top: 8px; }
+      h1.vh { margin: 0; }
       header { height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--sf); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 7; }
       .brand { font-weight: 650; display: flex; gap: 8px; align-items: center; }
       .brand .ic { color: var(--acc); }
@@ -141,6 +142,11 @@ export class HhApp extends StoreElement {
     ];
   }
 
+  private sectionTitle(): string {
+    const names: Record<string, string> = { remote: 'Remote studio', overview: 'Overview', devices: 'Devices', ir: 'Add a device', activities: 'Activities', history: 'History' };
+    return names[this.router.route.section] ?? 'Harmony Editor';
+  }
+
   private view() {
     const { section, parts } = this.router.route;
     switch (section) {
@@ -177,8 +183,8 @@ export class HhApp extends StoreElement {
     const sec = this.router.route.section;
     const errs = s.errorSummary.bySection;
     return html`
-      <a class="skip" href="#main" @click=${(e: Event) => { e.preventDefault(); this.shadowRoot?.querySelector('main')?.focus(); }}>Skip to content</a>
       <header>
+        <button class="skip" @click=${() => this.shadowRoot?.querySelector('main')?.focus()}>Skip to content</button>
         <button class="btn ghost icon menu" aria-label="Menu" aria-expanded=${this.railOpen} @click=${() => (this.railOpen = !this.railOpen)}>${icon('menu')}</button>
         <span class="brand">${icon('hub')} Harmony Editor</span>
         ${this.hubs.length > 1
@@ -216,6 +222,7 @@ export class HhApp extends StoreElement {
             ${s.errorSummary.unlocated.length
               ? html`<div class="banner bad" role="alert">${s.errorSummary.unlocated.map((u) => html`<span>${u.msg}</span>`)}</div>`
               : nothing}
+            <h1 class="vh">${this.sectionTitle()}</h1>
             ${!s.loaded ? html`<p class="muted" role="status">Loading…</p>` : this.view()}
           </main>
         </div>

@@ -23,6 +23,7 @@ export class HhPageStrip extends LitElement {
     css`
       :host { display: block; background: var(--sf); border-top: 1px solid var(--line); }
       .strip { display: flex; gap: 8px; align-items: stretch; padding: 6px 12px 6px; overflow-x: auto; }
+      .items { display: flex; gap: 8px; align-items: stretch; }
       .pg { position: relative; display: grid; gap: 3px; width: 84px; flex: none; justify-items: center; padding: 6px 4px 4px; border-radius: var(--r2); border: 1.5px solid transparent; background: transparent; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: pan-x; }
       .pg:hover { background: var(--sf2); }
       .pg[aria-current="true"] { border-color: var(--acc); background: var(--accs); }
@@ -30,7 +31,7 @@ export class HhPageStrip extends LitElement {
       .pg.dragging { opacity: 0.5; }
       .thumb { width: 54px; height: 72px; border-radius: 6px; overflow: hidden; background: #101820; box-shadow: 0 0 0 1px var(--line); display: block; }
       .name { font-size: 12px; font-weight: 600; max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx); }
-      .sub { font-size: 11px; color: var(--tx3); display: flex; gap: 6px; align-items: center; }
+      .sub { font-size: 11px; color: var(--tx2); display: flex; gap: 6px; align-items: center; }
       .tw { position: relative; display: block; }
       .tw.multi .thumb { box-shadow: 0 0 0 1px var(--line), 4px 4px 0 -1px var(--sf3), 4px 4px 0 0 var(--line), 8px 8px 0 -2px var(--sf3), 8px 8px 0 -1px var(--line); margin: 0 8px 8px 0; }
       .seq, .kd { position: absolute; font-size: 10px; line-height: 14px; font-weight: 700; padding: 0 4px; border-radius: 7px; background: var(--acc); color: var(--onacc); pointer-events: none; }
@@ -140,7 +141,8 @@ export class HhPageStrip extends LitElement {
     const cfg = st.store.config;
     const pages = cfg.pages ?? [];
     return html`
-      <div class="strip" role="list" aria-label="Pages (Alt+Left and Alt+Right reorder)">
+      <div class="strip">
+        <div class="items" role="list" aria-label="Pages (Alt+Left and Alt+Right reorder)">
         ${pages.map((p, i) => {
           const pp = st.previewOf(i);
           const v2 = pp?.wire_pages[0]?.page ?? pp?.page;
@@ -170,6 +172,7 @@ export class HhPageStrip extends LitElement {
             </div>
           </div>`;
         })}
+        </div>
         <button class="add" aria-haspopup="menu" aria-expanded=${this.menu} @click=${() => (this.menu = !this.menu)}>${icon('plus')}Add page</button>
       </div>
       ${this.menu
