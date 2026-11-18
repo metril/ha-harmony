@@ -430,7 +430,7 @@ export class HhRemote extends LitElement {
     void frameOver;
     const stripKeys = KEYS.filter((k) => k.group === 'strip');
     const hardKeys = KEYS.filter((k) => k.group !== 'strip');
-    return html`<svg class="remote" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width=${dims.width ?? nothing} height=${dims.height ?? nothing} role="group" aria-label="Harmony Elite remote, ${st.layerName(st.layer)} layer" preserveAspectRatio="xMidYMin meet"
+    return html`<svg class="remote" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width=${dims.width ?? nothing} height=${dims.height ?? nothing} role="group" aria-label="Harmony Elite remote, ${st.layerName(st.layer)} layer" preserveAspectRatio="xMidYMid meet"
       @pointermove=${this.onMove} @pointerup=${this.onUp} @pointercancel=${this.onUp}>
       <defs>
         <linearGradient id="bodyg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b3137"></stop><stop offset="0.4" stop-color="#1b2024"></stop><stop offset="1" stop-color="#15191d"></stop></linearGradient>

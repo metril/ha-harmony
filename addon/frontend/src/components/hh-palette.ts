@@ -20,7 +20,7 @@ export class HhPalette extends LitElement {
       :host { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--sf); }
       .head { padding: 10px 12px 8px; display: grid; gap: 8px; border-bottom: 1px solid var(--line); }
       .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; background: var(--sf2); border-radius: var(--r1); padding: 2px; }
-      .tabs button { height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--tx2); font-size: 12px; font-weight: 600; cursor: pointer; }
+      .tabs button { height: 30px; padding: 0 2px; border: 0; border-radius: 5px; background: transparent; color: var(--tx2); font-size: 11.5px; white-space: nowrap; font-weight: 600; cursor: pointer; }
       .tabs button[aria-selected="true"] { background: var(--sf); color: var(--tx); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
       input[type="search"], .typed input { height: 34px; width: 100%; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; }
       .body { overflow: auto; padding: 8px 12px 16px; flex: 1; min-height: 0; }

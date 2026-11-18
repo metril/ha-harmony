@@ -57,7 +57,7 @@ export class HhStudio extends StoreElement implements StudioHost {
       .cw { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
       .tools { position: absolute; top: 10px; right: 12px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
       .tools .grp { background: var(--sf); border: 1px solid var(--line); box-shadow: var(--sh); }
-      .canvas { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background-color: var(--cv); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 18px 18px; padding: 14px 16px 16px; position: relative; scroll-behavior: auto; }
+      .canvas { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background-color: var(--cv); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 18px 18px; padding: 14px 124px 16px 16px; position: relative; scroll-behavior: auto; }
       hh-remote { flex: 1 1 auto; min-height: 0; }
       .banner2 { position: sticky; top: 0; z-index: 3; margin: -14px -16px 10px; flex: none; padding: 8px 14px; background: var(--acc); color: var(--onacc); font-weight: 600; display: flex; gap: 10px; align-items: center; }
       .banner2 .sp { flex: 1; }
@@ -82,6 +82,12 @@ export class HhStudio extends StoreElement implements StudioHost {
       .sheetbtns { display: none; }
       .scrim { display: none; }
       @media (max-width: 1100px) { :host { --pw: 244px; --iw: 264px; } }
+      /* X-ray is a reading mode: on narrower screens it takes the whole width so the labels stay legible */
+      @media (max-width: 1280px) and (min-width: 861px) {
+        .studio.xr { grid-template-columns: minmax(0, 1fr); }
+        .studio.xr .pal, .studio.xr .insp { display: none; }
+        .studio.xr .canvas { padding-right: 124px; }
+      }
       @media (max-width: 1100px) { .tools .grp button { min-width: 30px; padding: 0 7px; } }
       @media (max-width: 860px) {
         :host { --pw: 0px; --iw: 0px; }
@@ -490,7 +496,7 @@ export class HhStudio extends StoreElement implements StudioHost {
     const popKind = sel?.kind;
     const screenMode = st.mode === 'screen';
     return html`
-      <div class="studio">
+      <div class=${classMap({ studio: true, xr: st.xray && !screenMode })}>
         <aside class="pal" aria-label="Palette"><hh-palette .host=${this} .assigner=${this.assigner}></hh-palette></aside>
         <section class="mid" aria-label="Remote canvas">
           <div class="tb">
