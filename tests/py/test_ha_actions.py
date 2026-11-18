@@ -260,7 +260,7 @@ def test_the_documented_example_compiles():
     from pathlib import Path
 
     doc = (Path(__file__).resolve().parents[2] / "docs/ha-config.md").read_text()
-    block = re.search(r"### Example: Shield.*?```yaml\n(.*?)```", doc, re.S).group(1)
+    block = re.search(r"### Example: Shield.*?```yaml\n(.*?)```", doc, re.DOTALL).group(1)
     c = compile_config(parse_model(block, "ha-config.md"))
     assert [d["id"] for d in c.hub_json["devices"]] == ["tv"]
     assert c.hub_json["devices"][0]["commands"]["vol_up"]["repeats"] == 3
