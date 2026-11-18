@@ -463,3 +463,42 @@ async def test_event_types_and_config_hash_are_computed_once_per_compile(hass, r
     assert c.event_types is c.compiled.event_types is c.event_types
     assert "volume_up" in c.event_types and "unknown" in c.event_types
     assert c.compiled.config_hash is c.compiled.config_hash
+
+
+# 11: first setup with nothing cached: one pull, a bounded wait, never the hub sync
+async def test_first_setup_with_a_slow_addon_returns_within_the_bound(
+    hass, fake_hub, fake_addon, clock, monkeypatch
+):
+    import time
+
+    from conftest import make_entry
+
+    from custom_components.ha_harmony.addon_link import AddonClient
+    from custom_components.ha_harmony.const import FIRST_APPLY_WAIT  # noqa: F401
+
+    monkeypatch.setattr(const, "FIRST_APPLY_WAIT", 0.3)
+    fetches = []
+    real = AddonClient.fetch
+
+    async def slow_fetch(self, hub_id):
+        fetches.append(hub_id)
+        await asyncio.sleep(1.5)  # the add-on takes much longer than setup may wait
+        return await real(self, hub_id)
+
+    monkeypatch.setattr(AddonClient, "fetch", slow_fetch)
+    hub = ScriptHub()
+    server = await fake_hub(hub.handler)
+    fake_addon.apply_yaml(YAML)
+    entry = make_entry("127.0.0.1", server.port, addon=fake_addon)
+    entry.add_to_hass(hass)
+    t0 = time.monotonic()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    assert time.monotonic() - t0 < 1.0  # the bound, not the add-on's 1.5 s (let alone the 20 s timeout)
+    c = entry.runtime_data
+    assert c.compiled.devices == {} and hass.states.get("sensor.tv_input") is None
+    await settle(hass, lambda: c.managed, timeout=5)  # the same single pull fills everything in
+    await settle(hass, lambda: hass.states.get("sensor.tv_input") is not None)
+    assert len(fetches) == 1  # not one from setup and one from the link loop
+    await settle(hass, lambda: any(t == "set_config" for t, _ in hub.got))
+    assert [t for t, _ in hub.got].count("set_config") == 1
+    await hass.config_entries.async_unload(entry.entry_id)

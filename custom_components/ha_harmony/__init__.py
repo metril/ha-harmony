@@ -155,8 +155,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
                 entry.data[CONF_ADDON_TOKEN],
             )
         )
-        await coordinator.async_initial_fetch()
-    await coordinator.async_sync_config()
+        await coordinator.async_wait_first_config()  # bounded; the loop's own (single) pull
+    # the hub sync is never awaited here: entities come up and fill in as it completes
+    coordinator.async_start_first_sync()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

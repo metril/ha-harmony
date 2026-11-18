@@ -29,6 +29,7 @@ ADDON_SLUG = "ha_harmony_editor"
 BUNDLE_MAX_BYTES = 2 * 1024 * 1024  # a hub config is <= 128 KiB compiled; sources stay far below
 LINK_FETCH_TIMEOUT = 20.0  # seconds, whole request
 LINK_WAIT_TIMEOUT = 70.0  # the add-on holds a wait for 55 s
+FIRST_APPLY_WAIT = 5.0  # setup waits at most this long for the first config when nothing is cached
 LINK_BACKOFF_MIN = 5.0
 LINK_BACKOFF_MAX = 120.0
 STORE_VERSION = 1

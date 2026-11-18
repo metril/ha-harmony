@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -197,6 +198,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._acked: tuple[str, str, str | None] | None = None
         self._link: AddonClient | None = None
         self._apply_lock = asyncio.Lock()
+        self.first_sync: asyncio.Task[None] | None = None
+        self._first_apply = asyncio.Event()  # the link loop's first pull has been handled
         self.last_error: str | None = None
         self.config_pushes = 0  # set_config requests sent (observable by tests)
         self.tile_updates = 0
@@ -380,6 +383,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 )
             self._apply_compiled(bundle.compiled)
             self.async_set_link_state("ok")
+            self._first_apply.set()
         await self.async_sync_config()
         return bundle
 
@@ -409,6 +413,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._ack_later(exc.rev, "error", detail[:200])
         self.last_error = str(exc)
         self._notify(TOPIC_LINK)
+        self._first_apply.set()
         self._set_issue(ISSUE_SCHEMA if exc.schema else ISSUE_INVALID, str(exc))
         self.async_set_link_state("rejected")
 
@@ -419,14 +424,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self.hass, self._link_loop(client), f"{DOMAIN} add-on link {self.hub_id}"
         )
 
-    async def async_initial_fetch(self) -> None:
-        """First run with nothing cached: try once so entities exist at setup; never raises."""
+    async def async_wait_first_config(self, timeout: float | None = None) -> None:
+        """First run with nothing cached: give the link loop's first pull (the only one) a few seconds
+        so entities exist when setup returns; never raises, never waits for the hub."""
         if self._link is None or self.managed:
             return
-        try:
-            await self.async_process_raw(await self._link.fetch(self.hub_id))
-        except AddonError as exc:
-            self._note_link_failure(exc)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(self._first_apply.wait(), timeout or const.FIRST_APPLY_WAIT)
 
     async def async_refresh_from_addon(self) -> None:
         """Service entry point: pull now, apply, push what changed; raises with the reason."""
@@ -455,6 +459,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         else:
             state = "unreachable"
         first = state != self.link_state
+        self._first_apply.set()  # a first answer, even a failed one: setup need not wait longer
         self.async_set_link_state(state)
         if first and state in ("unreachable", "auth_failed"):
             _LOGGER.warning(
@@ -508,6 +513,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 delay = min(delay * 2, const.LINK_BACKOFF_MAX)
             except Exception:
                 _LOGGER.exception("Unexpected error in the add-on link; retrying")
+                self._first_apply.set()
                 await asyncio.sleep(const.LINK_BACKOFF_MAX)
 
     def _apply_compiled(self, compiled: Compiled) -> None:
@@ -522,6 +528,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             for cb in list(self._config_listeners):
                 cb()
             self._notify(TOPIC_CONFIG)
+
+    def async_start_first_sync(self) -> None:
+        """Setup's hub sync, in the background (`first_sync`); entities fill in as it completes."""
+        self.first_sync = self.config_entry.async_create_background_task(
+            self.hass, self.async_sync_config(), f"{DOMAIN} first sync {self.hub_id}"
+        )
 
     async def async_sync_config(self) -> None:
         """Push set_config iff the hub's hash differs, then pages and tile texts. Never raises."""
