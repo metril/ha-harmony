@@ -480,7 +480,7 @@ def test_stop_lua_off_leaves_lua_alone(root: Path) -> None:
 def test_launcher_uses_only_hub_tools_for_lua_stop() -> None:
     code = re.sub(r"#.*", "", HOOK.read_text())
     assert "killall" in code
-    assert not re.search(r"\b(pidof|pkill|killall -9|kill -9|kill -KILL)\b", code)
+    assert not re.search(r"\b(pidof|pkill|killall -9|kill -KILL)\b", code)
 
 
 # --- brick-safety audit: nothing on the sync path may kill or hang rcS ------------
@@ -670,7 +670,7 @@ def test_reboot_switch_off(root: Path) -> None:
 
 def test_no_reboot_after_the_health_mark(root: Path) -> None:
     install_daemon(root, "sleep 0.25")  # health window is 0.1 s, dies later
-    install_conf(root)
+    install_conf(root, "token=benchtok\nrespawn_max=0\n")
     source_hook(root, healthy=1)
     log = _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
     assert "daemon died after health mark" in log and "rebooting" not in log.replace(
@@ -765,3 +765,157 @@ def test_onhub_selftest_script_passes_under_host_shells(tmp_path: Path) -> None:
     assert pr.returncode == 0 and "0 failure(s)" in out, out
     assert out.count("PASS") >= 12 and "FAIL" not in out
     assert not (Path("/etc/ha-harmony-enable")).exists()
+
+
+# --- bounded respawn after the health mark, wedge cover, log stamps ------------------
+
+FAST = {"HAH_BACKOFF1": "0.05", "HAH_BACKOFF2": "0.05", "HAH_BACKOFF3": "0.05"}
+# Counts launches; dies 0.6 s after start (well past the 0.1 s health window in these tests).
+MORTAL = 'echo x >>"$(dirname "$0")/runs"; sleep 0.6; exit 1'
+IMMORTAL = 'echo "$@" >"$(dirname "$0")/argv.txt"; echo x >>"$(dirname "$0")/runs"; sleep 30'
+
+
+def _runs(root: Path) -> int:
+    f = root / "data" / "ha-harmony" / "runs"
+    return len(f.read_text().split()) if f.exists() else 0
+
+
+def _wait_runs(root: Path, n: int, tries: int = 400) -> None:
+    for _ in range(tries):
+        if _runs(root) >= n:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"wanted {n} launches, saw {_runs(root)}")
+
+
+def _clog(root: Path) -> str:
+    f = root / "cache" / "ha-harmony.log"
+    return f.read_text() if f.exists() else ""
+
+
+def test_death_after_health_respawns_then_budget_exhausts_without_reboot(root: Path) -> None:
+    install_daemon(root, MORTAL)
+    install_conf(root, "token=t\nrespawn_max=2\n")
+    source_hook(root, extra_env=FAST)
+    _wait_text(root / "cache" / "ha-harmony.log", "budget exhausted")
+    time.sleep(0.5)  # stays down: no third respawn
+    assert _runs(root) == 3, "initial launch + exactly respawn_max respawns"
+    assert not (root / "reboot.log").exists(), "respawns never reboot"
+    assert not (root / "cache" / "ha-harmony-boot.n").exists(), "strike counter untouched"
+    assert (root / "etc" / "ha-harmony-enable").exists()
+    assert "respawn 2 of 2" in _clog(root)
+
+
+def test_default_budget_is_three(root: Path) -> None:
+    install_daemon(root, MORTAL)
+    install_conf(root)
+    source_hook(root, extra_env=FAST)
+    _wait_text(root / "cache" / "ha-harmony.log", "budget exhausted (3 of 3)")
+    assert _runs(root) == 4
+
+
+def test_respawn_max_zero_is_the_old_single_shot_behaviour(root: Path) -> None:
+    install_daemon(root, MORTAL)
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    source_hook(root, extra_env=FAST)
+    _wait_text(root / "cache" / "ha-harmony.log", "no respawn")
+    time.sleep(0.3)
+    assert _runs(root) == 1
+    assert not (root / "reboot.log").exists()
+
+
+def test_respawn_max_zero_passes_no_heartbeat_flag(root: Path) -> None:
+    install_daemon(root, IMMORTAL)
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    source_hook(root)
+    assert "--heartbeat" not in _argv(root)
+
+
+def test_heartbeat_and_rf_debug_flags_in_argv(root: Path) -> None:
+    install_daemon(root, IMMORTAL)
+    install_conf(root, "token=t\nrf=spi\nrf_debug=1\n")
+    source_hook(root)
+    argv = _argv(root)
+    assert f"--heartbeat {root}/var/volatile/ha-harmony.hb" in argv
+    assert argv.split()[-1] == "--rf-debug"
+
+
+@pytest.mark.parametrize("junk", ["respawn_max=x", "respawn_max=100", "respawn_max=-1", "rf_debug=2"])
+def test_bad_respawn_or_debug_value_is_stock(root: Path, junk: str) -> None:
+    install_daemon(root, IMMORTAL)
+    install_conf(root, f"token=t\n{junk}\n")
+    _, demo = source_hook(root)
+    assert demo == "unset" and not (root / "cache" / "ha-harmony-boot.n").exists()
+
+
+def test_early_death_with_respawn_enabled_keeps_strike_and_reboots_no_respawn(root: Path) -> None:
+    install_daemon(root, 'echo x >>"$(dirname "$0")/runs"; exit 1')
+    install_conf(root, "token=t\nrespawn_max=3\n")
+    source_hook(root, extra_env=FAST)
+    _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    time.sleep(0.3)
+    assert _runs(root) == 1
+    assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
+    assert (root / "reboot.log").exists()
+
+
+def _fake_clock(root: Path, secs: int) -> Path:
+    f = root / "uptime"
+    f.write_text(f"{secs}.00 1.00\n")
+    return f
+
+
+def test_stale_heartbeat_kills_and_respawns_the_wedged_daemon(root: Path) -> None:
+    clock = _fake_clock(root, 1000)
+    install_daemon(root, IMMORTAL)
+    install_conf(root, "token=t\nrespawn_max=1\n")
+    source_hook(root, extra_env={**FAST, "HAH_UPTIME_FILE": str(clock)})
+    _wait_runs(root, 1)
+    time.sleep(0.4)  # healthy, polling, heartbeat never written but the clock has not moved
+    assert _runs(root) == 1
+    _fake_clock(root, 1100)  # 100 s with no heartbeat
+    _wait_runs(root, 2)
+    _wait_text(root / "cache" / "ha-harmony.log", "heartbeat stale")
+    time.sleep(0.3)
+    assert _runs(root) == 2, "second launch is fresh; budget of 1 is spent"
+    assert not (root / "reboot.log").exists()
+    assert not (root / "cache" / "ha-harmony-boot.n").exists()
+
+
+def test_fresh_heartbeat_is_left_alone(root: Path) -> None:
+    clock = _fake_clock(root, 1000)
+    install_daemon(root, IMMORTAL)
+    install_conf(root, "token=t\n")
+    source_hook(root, extra_env={**FAST, "HAH_UPTIME_FILE": str(clock)})
+    _wait_runs(root, 1)
+    (root / "var" / "volatile" / "ha-harmony.hb").write_text("1100\n")
+    _fake_clock(root, 1100)
+    time.sleep(0.5)
+    assert _runs(root) == 1
+
+
+def test_budget_refills_after_an_hour_of_uptime(root: Path) -> None:
+    clock = _fake_clock(root, 1000)
+    install_daemon(root, MORTAL)
+    install_conf(root, "token=t\nrespawn_max=1\n")
+    source_hook(root, extra_env={**FAST, "HAH_UPTIME_FILE": str(clock), "HAH_HB_STALE": "99999"})
+    _wait_text(root / "cache" / "ha-harmony.log", "respawn 1 of 1")
+    _wait_runs(root, 2)  # run 2 is the last respawn of the budget
+    time.sleep(0.25)  # the watcher has taken this run's start stamp
+    _fake_clock(root, 1000 + 3600)  # ... which then runs "an hour"
+    _wait_runs(root, 3)  # refilled, so it is respawned once more
+    _wait_text(root / "cache" / "ha-harmony.log", "budget refilled")
+    assert not (root / "reboot.log").exists()
+
+
+def test_log_lines_carry_uptime_stamps(root: Path) -> None:
+    install_daemon(root, "echo DAEMON-LINE; sleep 30")
+    install_conf(root)
+    source_hook(root)
+    vlog = root / "var" / "volatile" / "ha-harmony.log"
+    _wait_text(vlog, "DAEMON-LINE")
+    assert re.search(r"^\[up \d+s\] DAEMON-LINE$", vlog.read_text(), re.M)
+    _wait_text(root / "cache" / "ha-harmony.log", "healthy")
+    lines = _clog(root).splitlines()
+    assert lines and all(re.match(r"\[up \d+s( \d{4}-\d\d-\d\d [\d:]+)?\] ha-harmony: ", ln) for ln in lines)
+    assert any(re.match(r"\[up \d+s \d{4}-", ln) for ln in lines), "background lines carry the date"

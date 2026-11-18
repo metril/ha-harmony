@@ -551,7 +551,7 @@ def test_start_sh_runs_app_with_exact_slot_and_powermode(boot):
 @pytest.mark.parametrize(("slot", "pm"), [(7, "0xAB"), (15, "0x00")])
 def test_start_script_argv_is_configurable(slot, pm):
     text = dr.start_script(slot=slot, powermode=pm)
-    assert f'"$APP_BIN" --slot {slot} --powermode 0x{pm[2:].lower()} >>' in text
+    assert f'"$APP_BIN" --slot {slot} --powermode 0x{pm[2:].lower()} 2>&1' in text
 
 
 @pytest.mark.parametrize("slot", ["0", "16", "x", "-1", "1 ; reboot", ""])

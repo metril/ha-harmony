@@ -41,7 +41,12 @@ mark, clearing the strike every time: an unbounded reboot loop.
 ## Behaviour to expect
 
 Three unclean boots (daemon not alive 120 s after start) make the hook remove its own marker and boot stock.
-Single-shot: a daemon that dies after the 120 s mark stays dead until the next boot (no reboot, no respawn).
+A daemon that dies after the 120 s mark is respawned (backoff 5 s, 30 s, 120 s) at most `respawn_max` times per
+boot (`hub.conf`, default 3; 0 = old single-shot). Respawns never reboot and never touch the strike counter; the
+budget refills after 1 h of continuous uptime; when it is spent the hub stays inert until the next boot. A daemon
+that is alive but wedged (heartbeat file `/var/volatile/ha-harmony.hb` older than 60 s) is killed and respawned
+on the same budget. `rf_debug=1` in `hub.conf` passes `--rf-debug`. Hook and daemon log lines are prefixed
+`[up Ns ...]`.
 A daemon that dies BEFORE the mark makes the watcher `reboot` (default; bounded by the strike counter, boot 3 is stock),
 but only if this boot's strike was read back from /cache. If /cache cannot hold the counter, the hook leaves stock alone. A WS bind failure or radio-open failure makes
 the daemon exit 1 (`hub/main.c`), so "alive at 120 s" implies port bound and radio held.
@@ -74,3 +79,12 @@ stock, confirm `hal` is back, then image.
 `/tmp/hah-selftest` (tmpfs) and runs the key cases under the hub's own BusyBox 1.13 `sh` with `killall` and
 `reboot` defined as shell functions. It writes only under `/tmp/hah-selftest` and removes it afterwards.
 Run it before the first real arm. (BusyBox 1.13 `ls -ln` has extra columns, so the hook caps its log by line count.)
+
+## Bench gate: respawn (before trusting it)
+
+1. Arm, boot, wait past 150 s (`healthy ... strikes cleared` in `/cache/ha-harmony.log`).
+2. `kill` the daemon pid: log shows `respawn 1 of 3 in 5s`, daemon back, HA reconnects, `/cache/ha-harmony-boot.n` absent, no reboot.
+3. Kill it 3 more times (each time wait for it to return): 4th death logs `budget exhausted (3 of 3)`, daemon stays down, hub does not reboot.
+4. Reboot, then `kill -STOP` the daemon: within ~65 s the log shows `heartbeat stale`, it is killed and respawned.
+5. `respawn_max=0` + reboot + kill after 150 s: stays dead (old behaviour).
+6. Confirm `ps` shows no token on argv and the daemon log lines carry `[up Ns]`.
