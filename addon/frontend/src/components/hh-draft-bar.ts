@@ -92,7 +92,9 @@ export class HhDraftBar extends StoreElement {
       s.saveState === 'saving' || s.saveState === 'dirty'
         ? 'saving…'
         : s.saveState === 'error'
-          ? 'not saved'
+          ? this.store.offline
+          ? 'not saved · retrying'
+          : 'not saved'
           : s.saveState === 'conflict'
             ? 'conflict'
             : s.hasDraft && s.savedAt

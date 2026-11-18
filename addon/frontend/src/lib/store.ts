@@ -44,6 +44,10 @@ export class Store extends EventTarget {
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: DraftQueue;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** the add-on could not be reached while saving; edits are kept and retried */
+  offline = false;
+  private retries = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private seq = 0;
   private toastId = 0;
 
@@ -166,6 +170,7 @@ export class Store extends EventTarget {
     this.emit();
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.save(), this.debounceMs);
+    if (this.retryTimer) clearTimeout(this.retryTimer);
     if (this.previewTimer) clearTimeout(this.previewTimer);
     this.previewTimer = setTimeout(() => void this.check(true), 150);
   }
@@ -193,12 +198,28 @@ export class Store extends EventTarget {
       this.confirmedHasDraft = true;
       this.savedAt = r.draft_updated;
       if (this.saveState === 'saving') this.saveState = 'saved';
+      if (this.offline) {
+        this.offline = false;
+        this.toast('The add-on is back. Your edits are saved.');
+      }
+      this.retries = 0;
       this.emit();
       if (this.saveState === 'saved') await this.check();
     } catch (e) {
       if (e instanceof ApiError && e.isConflict) {
         this.saveState = 'conflict';
         this.emit();
+        return;
+      }
+      if (e instanceof ApiError && (e.isNetwork || [502, 503, 504].includes(e.status))) {
+        // the add-on is restarting or unreachable: keep the edits here and retry with a growing pause
+        this.saveState = 'error';
+        this.offline = true;
+        if (this.retries === 0) this.toast('The add-on cannot be reached. Your edits are kept here and saved as soon as it is back.', 'error');
+        this.emit();
+        const wait = Math.min(30000, 2000 * 2 ** this.retries++);
+        if (this.retryTimer) clearTimeout(this.retryTimer);
+        this.retryTimer = setTimeout(() => void this.save(), wait);
         return;
       }
       // roll back to what the server holds, and say so
@@ -240,11 +261,20 @@ export class Store extends EventTarget {
     await this.save(true);
   }
 
-  async discard(): Promise<void> {
+  /** After a destructive server-side swap of the draft (discard, import, revert): reload, then keep what was replaced one Undo away. */
+  private async swapWith(prev: Config, hadDraft: boolean, what: string, run: () => Promise<unknown>): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    await this.api.revert(this.hub, 'applied');
+    await run();
     await this.load();
+    if (hadDraft || Object.keys(prev).length) {
+      this.past = [clone(prev)];
+      this.toast(what, 'info', true);
+    }
+  }
+
+  async discard(): Promise<void> {
+    await this.swapWith(clone(this.config), this.hasDraft, 'Draft discarded.', () => this.api.revert(this.hub, 'applied'));
   }
 
   /** Saves pending edits, then applies the saved draft. Throws ApiError (422 carries errors). */
@@ -274,14 +304,14 @@ export class Store extends EventTarget {
   }
 
   async revertTo(target: 'previous'): Promise<void> {
-    await this.api.revert(this.hub, target);
-    await this.load();
+    await this.swapWith(clone(this.config), this.hasDraft, 'Reverted to the previous version.', () => this.api.revert(this.hub, target));
   }
 
   async importYaml(text: string): Promise<void> {
     // the user already confirmed replacing the draft: only a live conflict check applies
-    await this.api.importYaml(this.hub, text, this.saveState === 'conflict' ? null : this.queue.rev);
-    await this.load();
+    await this.swapWith(clone(this.config), this.hasDraft, 'Draft replaced by the imported file.', () =>
+      this.api.importYaml(this.hub, text, this.saveState === 'conflict' ? null : this.queue.rev),
+    );
   }
 
   /** Restore an applied version as the draft: fetch its source config, then replace the draft with it. */

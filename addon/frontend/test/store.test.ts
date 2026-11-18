@@ -39,6 +39,44 @@ describe('draft store', () => {
     expect(store.hasDraft).toBe(true);
   });
 
+  it('keeps the edits and retries when the add-on is unreachable (restart), then says it is back', async () => {
+    let up = false;
+    const puts: unknown[] = [];
+    const { store } = setup({
+      'PUT api/v1/config/draft': (c) => {
+        if (!up) return { status: 503, body: { error: { code: 'unavailable', msg: 'starting' } } };
+        puts.push(JSON.parse(c.body ?? '{}').config);
+        return { body: draftResp };
+      },
+    });
+    await store.load();
+    store.edit((c) => (c.devices![0]!.name = 'Kept'));
+    await vi.advanceTimersByTimeAsync(700);
+    expect(store.saveState).toBe('error');
+    expect(store.offline).toBe(true);
+    expect(store.config.devices![0]!.name).toBe('Kept'); // nothing rolled back
+    expect(store.toasts.filter((t) => t.kind === 'error')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2100); // first retry, still down: no second toast
+    expect(store.toasts.filter((t) => t.kind === 'error')).toHaveLength(1);
+    up = true;
+    await vi.advanceTimersByTimeAsync(4200);
+    expect(puts).toHaveLength(1);
+    expect((puts[0] as { devices: { name: string }[] }).devices[0]?.name).toBe('Kept');
+    expect(store.saveState).toBe('saved');
+    expect(store.offline).toBe(false);
+    expect(store.toasts.some((t) => /back/.test(t.text))).toBe(true);
+  });
+
+  it('keeps a discarded draft one Undo away', async () => {
+    const draft = { config: { ...tvConfig(), keys: { play: { none: true } } }, updated: 1_700_000_000 };
+    const { store } = setup({ 'POST api/v1/config/revert': () => ({ body: { ...META, hub: 'h' } }) }, draft);
+    await store.load();
+    expect(store.config.keys).toEqual({ play: { none: true } });
+    await store.discard();
+    expect(store.toasts.some((t) => t.undo)).toBe(true);
+    expect(store.canUndo).toBe(true);
+  });
+
   it('shows an optimistic edit at once and rolls back with a toast when the PUT fails', async () => {
     const { store } = setup({ 'PUT api/v1/config/draft': () => ({ status: 500, body: { error: { code: 'x', msg: 'disk full' } } }) });
     await store.load();
