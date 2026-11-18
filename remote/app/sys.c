@@ -42,6 +42,12 @@ int ra_fb_unblank(ra_sys_t *s) {
   return s->ops.ioctl(s->ops.ctx, s->fb_fd, FBIOBLANK, (void *)(intptr_t)FB_BLANK_UNBLANK);
 }
 
+int ra_fb_blank(ra_sys_t *s, int blank) {
+  if (s->fb_fd < 0) return eperm();
+  return s->ops.ioctl(s->ops.ctx, s->fb_fd, FBIOBLANK,
+                      (void *)(intptr_t)(blank ? FB_BLANK_POWERDOWN : FB_BLANK_UNBLANK));
+}
+
 void *ra_mmap_fb(ra_sys_t *s, size_t len) {
   if (s->fb_fd < 0) {
     errno = EPERM;
@@ -93,6 +99,21 @@ int ra_write_bootcount(ra_sys_t *s) {
   s->ops.close(s->ops.ctx, fd);
   return w == 2 ? 0 : -1;
 }
+
+int ra_suspend(ra_sys_t *s) {
+  int fd = s->ops.open(s->ops.ctx, RA_PATH_POWERSTATE, O_WRONLY, 0);
+  if (fd < 0) return -1;
+  ssize_t w = s->ops.write(s->ops.ctx, fd, "mem\n", 4);
+  int e = errno;
+  s->ops.close(s->ops.ctx, fd);
+  if (w != 4) {
+    errno = w < 0 ? e : EIO;
+    return -1;
+  }
+  return 0;
+}
+
+uint64_t ra_wall_ms(ra_sys_t *s) { return s->ops.wall_ms ? s->ops.wall_ms(s->ops.ctx) : s->ops.now_ms(s->ops.ctx); }
 
 int ra_poweroff(ra_sys_t *s) { return s->ops.exec_poweroff(s->ops.ctx, RA_POWEROFF_PATH); }
 

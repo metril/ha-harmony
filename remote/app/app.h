@@ -46,6 +46,8 @@ typedef struct {
   uint32_t (*next_ms)(void *ctx, uint64_t now);
   /* Optional. The screen is awake (not backlight-off): the link polls the hub only then. */
   void (*set_awake)(void *ctx, bool awake);
+  /* Optional. The kernel resumed from suspend (gap_ms asleep): re-announce to the hub (remote_info, battery) and re-poll. */
+  void (*resumed)(void *ctx, uint64_t now, uint64_t gap_ms);
 } app_link_t;
 
 extern const app_link_t app_link_null;

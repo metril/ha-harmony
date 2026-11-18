@@ -231,6 +231,15 @@ static void rf_set_awake(void *ctx, bool awake) {
   if (l->tp) hp_rf_link_set_awake(&l->link, awake, t32(l->sys.ops.now_ms(l->sys.ops.ctx)));
 }
 
+static void rf_resumed(void *ctx, uint64_t now, uint64_t gap_ms) {
+  rf_link_t *l = ctx;
+  (void)gap_ms;
+  l->lost = false; /* the hub may have timed us out while we slept: announce ourselves again, then the battery */
+  l->info_pending = true;
+  l->next_info_ms = now;
+  l->next_batt_ms = now;
+}
+
 static uint32_t rf_next_ms(void *ctx, uint64_t now) {
   rf_link_t *l = ctx;
   if (l->n || (!l->tp && !l->dead_reported)) return 0;
@@ -284,5 +293,5 @@ void rf_link_close(rf_link_t *l) {
 
 app_link_t rf_link_app(rf_link_t *l) {
   return (app_link_t){.ctx = l, .send_key = rf_send_key, .poll = rf_poll, .get_fd = rf_get_fd, .next_ms = rf_next_ms,
-                      .set_awake = rf_set_awake};
+                      .set_awake = rf_set_awake, .resumed = rf_resumed};
 }

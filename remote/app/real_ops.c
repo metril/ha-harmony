@@ -3,6 +3,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/select.h>
@@ -11,7 +13,24 @@
 
 #include "remote/app/sys.h"
 
-static int r_open(void *c, const char *p, int fl, int mode) { (void)c; return open(p, fl, mode); }
+/* Test hook, off unless HARMONY_FAKE_BATT_DIR is set: the three battery nodes are read from <dir>/soc, <dir>/powersource and
+ * <dir>/battcharge when that file exists (anything else, and a missing file, goes to the real node). Lets a bench run force
+ * the low-battery guard without discharging the cell. Reads only: the allow-list has already refused every other path. */
+static const char *fake_batt_file(const char *p, char *out, size_t n) {
+  const char *dir = getenv("HARMONY_FAKE_BATT_DIR");
+  if (!dir || !*dir) return NULL;
+  const char *leaf = !strcmp(p, RA_PATH_SOC) ? "soc" : !strcmp(p, RA_PATH_POWERSRC) ? "powersource"
+                   : !strcmp(p, RA_PATH_BATTCHARGE) ? "battcharge" : NULL;
+  if (!leaf || snprintf(out, n, "%s/%s", dir, leaf) >= (int)n || access(out, R_OK) != 0) return NULL;
+  return out;
+}
+
+static int r_open(void *c, const char *p, int fl, int mode) {
+  (void)c;
+  char f[256];
+  if ((fl & O_ACCMODE) == O_RDONLY && fake_batt_file(p, f, sizeof f)) p = f;
+  return open(p, fl, mode);
+}
 static int r_close(void *c, int fd) { (void)c; return close(fd); }
 static ssize_t r_read(void *c, int fd, void *b, size_t n) { (void)c; return read(fd, b, n); }
 static ssize_t r_write(void *c, int fd, const void *b, size_t n) { (void)c; return write(fd, b, n); }
@@ -48,6 +67,13 @@ static uint64_t r_now(void *c) {
   return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
 }
 
+static uint64_t r_wall(void *c) {
+  (void)c;
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
 static int r_poweroff(void *c, const char *path) {
   (void)c;
   pid_t pid = fork();
@@ -64,5 +90,5 @@ static void r_log(void *c, const char *m) { (void)c; fprintf(stderr, "harmony_re
 const ra_ops_t ra_real_ops = {
     .open = r_open, .close = r_close, .read = r_read, .write = r_write, .ioctl = r_ioctl,
     .mmap = r_mmap, .munmap = r_munmap, .wait = r_wait, .now_ms = r_now,
-    .exec_poweroff = r_poweroff, .log = r_log,
+    .exec_poweroff = r_poweroff, .log = r_log, .wall_ms = r_wall,
 };

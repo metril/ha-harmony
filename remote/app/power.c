@@ -25,7 +25,8 @@ static void set_led(ra_power_t *p, int v) {
 
 static int target_for(ra_pw_state_t s) { return s == RA_PW_ACTIVE ? RA_BL_NORMAL : s == RA_PW_DIM ? RA_BL_DIM : RA_BL_OFF; }
 
-static void set_state(ra_power_t *p, ra_pw_state_t s) {
+static void set_state(ra_power_t *p, ra_pw_state_t s, uint64_t now) {
+  if (s == RA_PW_OFF && p->state != RA_PW_OFF) p->off_since_ms = now;
   p->state = s;
   p->bl_target = target_for(s);
   set_led(p, s == RA_PW_ACTIVE ? RA_LED_ON : RA_LED_OFF);
@@ -49,7 +50,7 @@ bool ra_power_input(ra_power_t *p, uint64_t now) {
     return true;
   }
   p->last_input_ms = now;
-  set_state(p, RA_PW_ACTIVE);
+  set_state(p, RA_PW_ACTIVE, now);
   return false;
 }
 
@@ -111,13 +112,45 @@ static void battery_poll(ra_power_t *p) {
   else ra_logf(p->sys, "poweroff failed, will retry");
 }
 
+bool ra_power_suspend_due(ra_power_t *p, uint64_t now) {
+  if (p->suspend_mode == RA_SUSPEND_NEVER || p->state != RA_PW_OFF || p->bl != 0 || p->poweroff_requested) return false;
+  if (now < p->off_since_ms + RA_SUSPEND_AFTER_MS || now < p->suspend_hold_ms) return false;
+  if (p->suspend_mode == RA_SUSPEND_BATTERY) {
+    char src[32];
+    size_t n = ra_sysfs_read(p->sys, RA_PATH_POWERSRC, src, sizeof src) < 0 ? 0 : strlen(src);
+    while (n && isspace((unsigned char)src[n - 1])) n--;
+    if (n != 7 || memcmp(src, "battery", 7) != 0) { /* powered, or unreadable: never suspend on a guess */
+      p->suspend_hold_ms = now + RA_SUSPEND_RECHECK_MS;
+      return false;
+    }
+  }
+  return true;
+}
+
+void ra_power_suspend_failed(ra_power_t *p, uint64_t now) { p->suspend_hold_ms = now + RA_SUSPEND_RETRY_MS; }
+
+void ra_power_resumed(ra_power_t *p, uint64_t now, uint64_t gap_ms) {
+  p->suspends++;
+  p->suspended_ms += gap_ms;
+  p->last_input_ms = p->last_step_ms = p->next_batt_ms = now;
+  p->suspend_hold_ms = now + RA_SUSPEND_WAKE_HOLD_MS;
+  set_state(p, RA_PW_ACTIVE, now);
+}
+
+uint64_t ra_power_gap_ms(uint64_t wall0, uint64_t mono0, uint64_t wall1, uint64_t mono1) {
+  if (wall1 < wall0 || mono1 < mono0) return 0;
+  uint64_t w = wall1 - wall0, m = mono1 - mono0;
+  uint64_t g = w > m ? w - m : 0;
+  return g > RA_SUSPEND_GAP_MAX_MS ? 0 : g;
+}
+
 void ra_power_tick(ra_power_t *p, uint64_t now) {
   if (p->state == RA_PW_ACTIVE) {
     uint64_t idle = now - p->last_input_ms;
-    if (idle >= RA_OFF_AFTER_MS) set_state(p, RA_PW_OFF);
-    else if (idle >= RA_DIM_AFTER_MS) set_state(p, RA_PW_DIM);
+    if (idle >= RA_OFF_AFTER_MS) set_state(p, RA_PW_OFF, now);
+    else if (idle >= RA_DIM_AFTER_MS) set_state(p, RA_PW_DIM, now);
   } else if (p->state == RA_PW_DIM && now - p->last_input_ms >= RA_OFF_AFTER_MS) {
-    set_state(p, RA_PW_OFF);
+    set_state(p, RA_PW_OFF, now);
   }
   if (p->bl != p->bl_target && now - p->last_step_ms >= RA_BL_STEP_MS) {
     p->bl += p->bl < p->bl_target ? 1 : -1;
@@ -143,6 +176,12 @@ uint32_t ra_power_next_ms(const ra_power_t *p, uint64_t now) {
     if (d < best) best = d;
   } else if (p->state == RA_PW_DIM) {
     uint64_t at = p->last_input_ms + RA_OFF_AFTER_MS;
+    uint64_t d = at > now ? at - now : 0;
+    if (d < best) best = d;
+  }
+  if (p->suspend_mode != RA_SUSPEND_NEVER && p->state == RA_PW_OFF && !p->poweroff_requested) {
+    uint64_t at = p->off_since_ms + RA_SUSPEND_AFTER_MS;
+    if (p->suspend_hold_ms > at) at = p->suspend_hold_ms;
     uint64_t d = at > now ? at - now : 0;
     if (d < best) best = d;
   }

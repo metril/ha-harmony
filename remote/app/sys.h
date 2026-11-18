@@ -6,10 +6,11 @@
  *
  * Allowed: open /dev/fb0 O_RDWR; /dev/input/event0 and event2 O_RDONLY; the backlight and key-LED
  * brightness nodes O_WRONLY; the three power nodes O_RDONLY; the boot-counter file named by
- * HARMONY_BOOTCOUNT_FILE (write). ioctl: the two fb GETs, plus FBIOBLANK with FB_BLANK_UNBLANK only (ra_fb_unblank:
- * the panel stays dark until it is issued); never EVIOCGRAB, FBIOPUT_*, FBIOPAN, any other blank level. mmap: the fb fd only. exec: /sbin/poweroff, only from the battery guard.
+ * HARMONY_BOOTCOUNT_FILE (write); /sys/power/state O_WRONLY, only through ra_suspend (writes "mem"). ioctl: the two fb GETs,
+ * plus FBIOBLANK with FB_BLANK_UNBLANK (ra_fb_unblank: the panel stays dark until it is issued) or FB_BLANK_POWERDOWN
+ * (ra_fb_blank, before a suspend); never EVIOCGRAB, FBIOPUT_*, FBIOPAN, any other blank level. mmap: the fb fd only. exec: /sbin/poweroff, only from the battery guard.
  * Never: /dev/rfspi (Task 3 owns it via its own module), /dev/rffw, /dev/mspfw, /dev/watchdog,
- * /dev/mtd*, /sys/power/state, any kill or charger node. */
+ * /dev/mtd*, any CPU-frequency node (a frequency change can cut an I2C transfer and hang the remote), any kill or charger node. */
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -23,6 +24,7 @@
 #define RA_PATH_POWERSRC "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/powersource"
 #define RA_PATH_BATTCHARGE "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/battcharge"
 #define RA_POWEROFF_PATH "/sbin/poweroff"
+#define RA_PATH_POWERSTATE "/sys/power/state"
 
 typedef struct ra_ops {
   void *ctx;
@@ -39,6 +41,7 @@ typedef struct ra_ops {
   uint64_t (*now_ms)(void *ctx); /* monotonic */
   int (*exec_poweroff)(void *ctx, const char *path); /* spawn without waiting; 0 on success */
   void (*log)(void *ctx, const char *msg);
+  uint64_t (*wall_ms)(void *ctx); /* optional (NULL = now_ms). Wall clock: keeps counting through a suspend, unlike CLOCK_MONOTONIC */
 } ra_ops_t;
 
 typedef struct {
@@ -57,6 +60,8 @@ int ra_open_input(ra_sys_t *s, const char *p); /* event0 / event2, O_RDONLY */
 int ra_ioctl_fb(ra_sys_t *s, unsigned long req, void *arg);
 /* FBIOBLANK(FB_BLANK_UNBLANK): the Elite's LCD shows nothing until this is issued (pan alone does nothing). */
 int ra_fb_unblank(ra_sys_t *s);
+/* FBIOBLANK(FB_BLANK_POWERDOWN) when blank, else UNBLANK. */
+int ra_fb_blank(ra_sys_t *s, int blank);
 void *ra_mmap_fb(ra_sys_t *s, size_t len);
 ssize_t ra_read(ra_sys_t *s, int fd, void *buf, size_t n);
 int ra_close(ra_sys_t *s, int fd);
@@ -64,6 +69,9 @@ int ra_close(ra_sys_t *s, int fd);
 int ra_sysfs_write(ra_sys_t *s, const char *path, const char *val);
 int ra_sysfs_read(ra_sys_t *s, const char *path, char *buf, size_t n); /* NUL-terminated, <0 on error */
 int ra_write_bootcount(ra_sys_t *s);
+/* Write "mem" to /sys/power/state: returns when the kernel resumes (0), or -1 with errno if the suspend was refused. */
+int ra_suspend(ra_sys_t *s);
+uint64_t ra_wall_ms(ra_sys_t *s);
 int ra_poweroff(ra_sys_t *s); /* battery guard only */
 void ra_logf(ra_sys_t *s, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
