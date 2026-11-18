@@ -46,7 +46,7 @@
  *                                   tile_update (state ignored). Both share one held-message key. Replies like
  *                                   page_push (command_result ok / error no_remote | rf_error | too_big).
  *   remote_info   -> from RF: cached per remote (cleared when the RF link is lost) and broadcast on ws
- *                     {remote,page_fmt,caps,icons} when new or changed; resent to every client right after
+ *                     {remote,page_fmt,caps,icons} when new or changed, and for the first one after a link-up even if identical; resent to every client right after
  *                     hello_ack (hub_send_state). Unknown RF message types are still dropped.
  *   hello_ack      -> also config_hash (8 lowercase hex chars, CRC-32 of the loaded config text;
  *                     omitted when no config is loaded).
