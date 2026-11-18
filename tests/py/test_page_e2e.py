@@ -3,11 +3,9 @@
 import base64
 import json
 import socket
-import subprocess
 
 import aiohttp
-import pytest
-from conftest import RemoteDump
+from conftest import finish
 from test_hub_engine import call, hello, recv
 
 from custom_components.ha_harmony.harmony_core.page_codec import Widget, encode_page
@@ -33,36 +31,12 @@ LAYOUT = {
 }
 
 
-@pytest.fixture
-def start_remote(built_binaries):
-    procs: list[subprocess.Popen] = []
-
-    def _start(rf: str, *args: str) -> RemoteDump:
-        proc = subprocess.Popen(
-            [str(built_binaries / "remote_sim"), "--rf", rf, "--timeout-ms", "5000", *args],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        procs.append(proc)
-        return RemoteDump(proc)
-
-    yield _start
-    for p in procs:
-        if p.poll() is None:
-            p.kill()
-        p.wait()
-        p.stdout.close()
-        p.stderr.close()
-
-
-def finish(r: RemoteDump) -> tuple[int, str, str]:
-    out, err = r.proc.communicate(timeout=10)
-    return r.proc.returncode, out.decode(), err.decode()
-
-
 async def push(ws, data: bytes, page=9, remote=1, id=5):
     r = await call(
-        ws, "page_push", {"remote": remote, "page": page, "data": base64.b64encode(data).decode()}, id=id
+        ws,
+        "page_push",
+        {"remote": remote, "page": page, "data": base64.b64encode(data).decode()},
+        id=id,
     )
     assert r["t"] == "command_result" and r["d"]["ok"] is True
 
@@ -188,7 +162,9 @@ async def test_tile_update_via_hub_command(hub_rf, start_remote):
         await hello(ws)
         await push(ws, PAGE)
         args = {"remote": 1, "page": 9, "tile": 3, "text": "21.5\u00b0C"}
-        res = await call(ws, "command", {"device": "hub", "command": "tile_update", "args": args}, id=6)
+        res = await call(
+            ws, "command", {"device": "hub", "command": "tile_update", "args": args}, id=6
+        )
         assert res["t"] == "command_result" and res["d"]["ok"] is True and res["id"] == 6
     code, out, err = finish(r)
     assert code == 0, err

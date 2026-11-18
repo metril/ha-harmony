@@ -5,9 +5,8 @@ import base64
 import json
 
 import aiohttp
-from conftest import RemoteDump  # noqa: F401  (fixture types)
+from conftest import finish
 from test_hub_engine import TOKEN, call, env, hello, recv
-from test_page_e2e import finish, start_remote  # noqa: F401  (fixture)
 
 from custom_components.ha_harmony.harmony_core.page_codec import Page, Widget, encode
 
@@ -74,7 +73,7 @@ async def test_remote_info_is_broadcast_cached_and_resent(hub_rf, start_remote):
             assert [m["t"] for m in between] == ["remote_info"]
             assert between[0]["d"] == {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50}
         await push(ws1, RAW)
-        code, out, _ = finish(r)
+        code, _, _ = finish(r)
         assert code == 0
     # the remote has gone: its remote_info is stale and no new client sees it
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_rf.url) as ws3:
@@ -109,7 +108,9 @@ async def test_v2_page_and_tile_state_reach_a_capable_remote(hub_rf, start_remot
 
 
 async def test_state_arg_is_ignored_for_a_remote_without_the_cap(hub_rf, start_remote):
-    r = start_remote(hub_rf.rf, "--info", "2", "--dump-layout", "--settle-ms", "600")  # page store only
+    r = start_remote(
+        hub_rf.rf, "--info", "2", "--dump-layout", "--settle-ms", "600"
+    )  # page store only
     r.wait_attached()
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_rf.url) as ws:
         await ws.send_str(env("hello", {"token": TOKEN}, 1))
