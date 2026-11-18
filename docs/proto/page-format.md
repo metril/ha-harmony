@@ -33,8 +33,21 @@ golden vectors: `tests/vectors/pages.json`.
   data over 251 bytes: `HP_E_TOOBIG` (one RF object body is 254 bytes and
   `page_push` spends 3 on its header). The Python encoder raises `ValueError`
   for the same cases. Nothing is ever silently truncated.
-- Pixels: a cell spans (240/cols) x (320/rows) px; pixel (px,py) is in cell
-  (px*cols/240, py*rows/320), integer division. Hit-testing is by cell.
+- Pixels: the top 32 px of the 240x320 screen are the remote's status bar and
+  are never part of a page. The grid fills the 240x288 content area below it:
+  a cell spans (240/cols) x (288/rows) px; pixel (px,py) with py >= 32 is in
+  cell (px*cols/240, (py-32)*rows/288), integer division. Hit-testing is by
+  cell (the whole cell, including the margin drawn around the widget); the
+  status bar is not hit-testable. Wire format unchanged.
+- Presentation (remote-side only, nothing on the wire): a label widget at
+  x=0, y=0 spanning all `cols` with h=1 is shown as the status-bar title
+  instead of in the grid, and the remaining rows are laid out over the whole
+  240x288 area as if the page had rows-1 rows (widget row y draws and hits as
+  row y-1; hit: (py-32)*(rows-1)/288 + 1). Without such a label, or with
+  rows=1, the plain rule above applies and the page is titled "Harmony". A
+  button labelled exactly "Power Off" (case-insensitive) is drawn in the
+  danger colour. Widgets are drawn inset 8 px from the screen edge and 8 px apart.
+  Labels that do not fit end in "..." instead of wrapping.
 - Tiles show live text set by `tile_update` (remote, page, tile id, text);
   text starts empty and is truncated to 31 bytes at a UTF-8 boundary.
 - Tapping a button or tile emits `key_event` with code `128 + widget id`

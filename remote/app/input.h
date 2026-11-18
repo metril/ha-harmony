@@ -23,6 +23,9 @@ typedef struct {
   bool (*gate)(void *ctx, uint64_t now);
   void (*activity)(void *ctx, uint64_t now); /* any other accepted input: restart the idle timer */
   const hp_page_t *(*page)(void *ctx);       /* page used to hit-test taps */
+  /* Optional (NULL = none). Finger down / moved at pixel (x,y): down true; lifted: down false.
+   * Visual feedback only; never called for a touch the gate consumed. */
+  void (*touch)(void *ctx, int x, int y, bool down);
 } ra_input_sink_t;
 
 typedef struct {

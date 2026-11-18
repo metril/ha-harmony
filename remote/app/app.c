@@ -1,6 +1,7 @@
 #include "remote/app/app.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "hub/hp_errors.h"
@@ -24,11 +25,30 @@ static uint32_t tick_cb(void) { return (uint32_t)g_tick_sys->ops.now_ms(g_tick_s
 
 static void sink_emit(void *ctx, uint8_t code, uint8_t action) {
   app_t *a = ctx;
+  if (a->ntx < sizeof a->tx / sizeof a->tx[0]) { /* the radio write can block: the pixels go out first (send_pending) */
+    a->tx[a->ntx].code = code;
+    a->tx[a->ntx++].action = action;
+    return;
+  }
   if (a->link.send_key(a->link.ctx, code, action) < 0) ra_logf(&a->sys, "send_key %u/%u failed", code, action);
+}
+static void send_pending(app_t *a) {
+  for (unsigned i = 0; i < a->ntx; i++)
+    if (a->link.send_key(a->link.ctx, a->tx[i].code, a->tx[i].action) < 0)
+      ra_logf(&a->sys, "send_key %u/%u failed", a->tx[i].code, a->tx[i].action);
+  a->ntx = 0;
 }
 static bool sink_gate(void *ctx, uint64_t now) {
   app_t *a = ctx;
-  return ra_power_input(&a->power, now);
+  bool pass = ra_power_input(&a->power, now);
+  if (pass) ra_ui_toast_dismiss(&a->ui); /* any touch or key clears the toast */
+  return pass;
+}
+static void sink_touch(void *ctx, int x, int y, bool down) {
+  app_t *a = ctx;
+  ra_display_note(&a->display, down ? RA_WHY_PRESS : RA_WHY_RELEASE, a->input_ms);
+  if (down) ra_ui_press_at(&a->ui, x, y);
+  else ra_ui_release(&a->ui);
 }
 static void sink_activity(void *ctx, uint64_t now) {
   app_t *a = ctx;
@@ -52,7 +72,8 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
     return r;
   }
   ra_ui_init(&a->ui);
-  ra_input_sink_t sink = {.ctx = a, .emit = sink_emit, .gate = sink_gate, .activity = sink_activity, .page = sink_page};
+  ra_input_sink_t sink = {.ctx = a, .emit = sink_emit, .gate = sink_gate, .activity = sink_activity, .page = sink_page,
+                       .touch = sink_touch};
   if (ra_input_open(&a->input, &a->sys, &sink) < 0) {
     ra_logf(&a->sys, "cannot open input devices");
     ra_display_destroy(&a->display);
@@ -68,6 +89,7 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
 static void heard(app_t *a, uint64_t now) {
   a->last_rx_ms = now;
   a->fail_run = 0;
+  ra_ui_set_link(&a->ui, 0);
 }
 
 static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now) {
@@ -81,12 +103,14 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
     } else {
       a->saved = p;
       a->have_saved = true;
+      ra_display_note(&a->display, RA_WHY_PAGE, 0);
       ra_ui_show_page(&a->ui, &p);
     }
     break;
   }
   case APP_LINK_EV_TILE_UPDATE:
     heard(a, now);
+    ra_display_note(&a->display, RA_WHY_STATUS, 0);
     if (a->have_saved && a->saved.page_id == ev->page) (void)hp_page_set_tile_text(&a->saved, ev->tile, ev->text, strlen(ev->text));
     if (ra_ui_tile_text(&a->ui, ev->page, ev->tile, ev->text, strlen(ev->text)) < 0)
       ra_logf(&a->sys, "tile_update %u/%u ignored", ev->page, ev->tile);
@@ -96,16 +120,21 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
     a->state_updates++;
     a->last_activity = ev->activity;
     a->last_power = ev->power;
+    if (!a->have_saved && !a->ui.fallback && a->ui.page.page_id == RA_UI_PAGE_BOOT) ra_ui_show_receiving(&a->ui);
     break;
   case APP_LINK_EV_ALIVE:
     heard(a, now);
+    if (a->ui.fallback) ra_display_note(&a->display, RA_WHY_PAGE, 0);
     if (a->ui.fallback) { /* the hub is back: the last real page, not a blank wait for the next push */
       if (a->have_saved) ra_ui_show_page(&a->ui, &a->saved);
-      else ra_ui_show_boot(&a->ui);
+      else ra_ui_show_receiving(&a->ui);
+    } else if (!a->have_saved && a->ui.page.page_id == RA_UI_PAGE_BOOT) {
+      ra_ui_show_receiving(&a->ui); /* the hub answers, its pages are on the way */
     }
     break;
   case APP_LINK_EV_FAILED:
     a->fail_run++;
+    ra_ui_set_link(&a->ui, 1);
     if (!a->ui.fallback &&
         (ev->fatal || (a->fail_run >= APP_FAIL_COUNT && now - a->last_rx_ms >= APP_FAIL_SILENCE_MS)))
       ra_ui_show_fallback(&a->ui);
@@ -131,18 +160,49 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   int ready[3] = {0, 0, 0};
   int w = a->sys.ops.wait(a->sys.ops.ctx, fds, nfd, t, ready);
   now = a->sys.ops.now_ms(a->sys.ops.ctx);
+  a->input_ms = now;
   if (w > 0)
     for (int i = 0; i < 2; i++)
       if (ready[i]) ra_input_read(&a->input, i, now);
   ra_input_tick(&a->input, now);
+  if (w > 0 || a->ntx) {
+    lv_refr_now(a->display.disp); /* touch / key feedback: pixels now, not at the next refresh timer */
+    send_pending(a);              /* then the radio */
+  }
   ra_power_tick(&a->power, now);
+  if (a->power.batt_polls != a->last_batt_polls) {
+    a->last_batt_polls = a->power.batt_polls;
+    ra_display_note(&a->display, RA_WHY_STATUS, 0);
+    ra_ui_set_battery(&a->ui, a->power.soc, a->power.external_power);
+    /* Low-battery toast with hysteresis: queued at <= 10 % off the charger, once; re-armed only at >= 13 % or on
+     * external power. It is shown when the screen is on (see below), not while asleep. */
+    if (a->power.external_power || a->power.soc >= RA_LOWBATT_REARM_PCT) {
+      a->lowbatt_disarmed = false;
+      if (a->power.external_power) a->lowbatt_pending = false;
+    } else if (a->power.soc <= RA_LOWBATT_PCT && !a->lowbatt_disarmed) {
+      a->lowbatt_disarmed = true;
+      a->lowbatt_pending = true;
+    }
+  }
   bool awake = a->power.state != RA_PW_OFF;
   if (a->link.set_awake && (!a->awake_known || awake != a->last_awake)) a->link.set_awake(a->link.ctx, awake);
+  if (a->awake_known && awake && !a->last_awake) ra_display_note(&a->display, RA_WHY_WAKE, 0);
   a->awake_known = true;
   a->last_awake = awake;
   app_link_event_t ev;
   for (int i = 0; i < LINK_EVENTS_PER_STEP && a->link.poll(a->link.ctx, now, &ev) > 0; i++) handle_link_event(a, &ev, now);
+  lv_timer_ready(lv_display_get_refr_timer(a->display.disp)); /* a page, tile or status change: draw it now, not at the next 33 ms tick */
   lv_timer_handler(); /* render what changed */
+  if (a->lowbatt_pending && a->power.state != RA_PW_OFF) { /* the screen is on and its frame is drawn: show it now */
+    char b[24];
+    snprintf(b, sizeof b, "Battery %d%%", a->power.soc);
+    ra_ui_toast(&a->ui, b, "Place on the charger");
+    a->lowbatt_pending = false;
+  }
+  if (a->ui.oom != a->oom_logged) {
+    a->oom_logged = a->ui.oom;
+    ra_logf(&a->sys, "ui: out of memory building a screen; showing the error state (%u so far)", a->ui.oom);
+  }
   if (!a->healthy_written && a->input_open && a->display.frames >= 1 && ra_write_bootcount(&a->sys) == 0)
     a->healthy_written = true;
 }

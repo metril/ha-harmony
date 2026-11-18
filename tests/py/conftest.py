@@ -127,7 +127,15 @@ def start_hub(built_binaries, tmp_path):
         out_path, err_path = tmp_path / f"hub{n}.out", tmp_path / f"hub{n}.err"
         with open(out_path, "wb") as out, open(err_path, "wb") as err:
             proc = subprocess.Popen(
-                [str(built_binaries / "hub"), "--sim", "--port", str(port), "--token", token, *extra],
+                [
+                    str(built_binaries / "hub"),
+                    "--sim",
+                    "--port",
+                    str(port),
+                    "--token",
+                    token,
+                    *extra,
+                ],
                 stdout=out,
                 stderr=err,
                 cwd=tmp_path,
@@ -340,3 +348,12 @@ async def fake_hub():
     yield _make
     for hub in hubs:
         await hub.stop()
+
+
+def page_tap_y(rows: int, row: int, *, titled: bool = False) -> int:
+    """Pixel y in the middle of grid row `row`: the grid fills the 240x288 area below the 32 px status bar;
+    a full-width row-0 label (the title) is consumed and the rest laid out as rows-1 rows (page-format.md)."""
+    shift = 1 if titled and rows > 1 else 0
+    n = rows - shift
+    r = row - shift
+    return 32 + (2 * r + 1) * 288 // (2 * n)

@@ -332,6 +332,10 @@ static void test_page_push_renders_golden(void) {
   CT_EQ(hub_push_page(raw, n), 0);
   WAIT_FOR(app.ui.page.page_id == 1);
   DRAIN();
+  /* the golden has an unknown battery and a live link: the status bar here shows the fake gauge, so reset it */
+  ra_ui_set_battery(&app.ui, -1, 0);
+  ra_ui_set_link(&app.ui, 0);
+  lv_refr_now(app.display.disp);
   snprintf(got, sizeof got, "%016llx", (unsigned long long)fb_hash());
   CT_CHECK(!strcmp(got, hash));
   if (strcmp(got, hash)) fprintf(stderr, "render %s golden %s\n", got, hash);
@@ -363,9 +367,9 @@ static void test_keys_and_taps_reach_the_hub(void) {
   CT_EQ(hkeys[base + 1].key, vol);
   CT_EQ(hkeys[base + 1].action, HP_KEY_ACTION_RELEASE);
   /* a tap on the page's button (id 1) */
-  fk_touch(&fk, 10, 10, 1);
+  fk_touch(&fk, 10, 42, 1);
   tick(50);
-  fk_touch(&fk, 10, 10, 0);
+  fk_touch(&fk, 10, 42, 0);
   tick(50);
   WAIT_FOR(nhkeys == base + 4);
   CT_EQ(hkeys[base + 2].key, HP_SOFT_KEY_BASE + 1);
@@ -598,6 +602,15 @@ static void test_cli(void) {
   CT_CHECK(c.rf_debug);
   CT_EQ(c.slot, 3);
   CT_EQ(c.powermode, 0x10);
+  CT_CHECK(!c.ui_debug);
+  char *u1[] = {"x", "--ui-debug"};
+  CT_EQ(ra_cli_parse(2, u1, &c), 0);
+  CT_CHECK(c.ui_debug);
+  char *u2[] = {"x", "--ui-debug", "--slot", "1", "--rf-debug"};
+  CT_EQ(ra_cli_parse(5, u2, &c), 0);
+  CT_CHECK(c.ui_debug && c.rf_debug);
+  char *u3[] = {"x", "--ui-debug=1"};
+  CT_EQ(ra_cli_parse(2, u3, &c), -1); /* a flag takes no value */
   char *d3[] = {"x", "--rf-debug=1"};
   CT_EQ(ra_cli_parse(2, d3, &c), -1); /* a flag takes no value */
   char *a5[] = {"x", "--slot", "2", "--rf", "bad"};
@@ -661,9 +674,9 @@ static void test_full_session_is_safe_with_rf(void) {
   tick(100);
   fk_key(&fk, 0, 115, 0);
   tick(100);
-  fk_touch(&fk, 10, 10, 1);
+  fk_touch(&fk, 10, 42, 1);
   tick(100);
-  fk_touch(&fk, 10, 10, 0);
+  fk_touch(&fk, 10, 42, 0);
   tick(100);
   fk_key(&fk, 0, 114, 1); /* a held key: press, holds, release */
   tick(50);
