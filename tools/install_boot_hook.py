@@ -48,6 +48,7 @@ RCS = "/etc/init.d/rcS"  # never written; read only, and only to report its hook
 RCS_LOCAL = "/etc/init.d/rcS.local"
 RCS_HARMONY = "/etc/init.d/rcS.harmony"
 MARKER = "/etc/ha-harmony-enable"
+NOWATCHDOG = "/etc/nowatchdog"  # read only (test -e); stock rcS:59 skips the watchdog while it exists
 COUNTER = "/cache/ha-harmony-boot.n"
 PIDFILE = "/cache/ha-harmony.pid"
 LOG = "/cache/ha-harmony.log"
@@ -69,14 +70,12 @@ fi
 {END}"""
 
 HOOK_SRC = Path(__file__).resolve().parent / "boot" / "rcS.harmony"
+SELFTEST_SRC = Path(__file__).resolve().parent / "boot" / "hook_selftest.sh"
+SELFTEST_DIR = "/tmp/hah-selftest"  # tmpfs; the ONLY place selftest writes
 
 
 class InstallError(RuntimeError):
     """Refused or failed; the message is shown to the user verbatim."""
-
-
-class NonAtomicError(InstallError):
-    """The rcS.local replace was not a provable atomic rename."""
 
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9._~+/=-]{1,256}")  # keep in step with rcS.harmony
@@ -113,7 +112,7 @@ class HookInstaller:
         m = re.match(r"\s*(\d+)\s", out.decode(errors="replace")) if rc == 0 else None
         return int(m.group(1)) if m else None
 
-    def _write(self, path: str, data: bytes, mode: str, atomic: str | None = None) -> None:
+    def _write(self, path: str, data: bytes, mode: str, atomic: bool = False) -> None:
         """Write via a temp file then `mv`, so a half-written boot file never exists.
 
         `mv` within the same filesystem is atomic; /etc is the unionfs rw branch (mtd4),
@@ -128,16 +127,15 @@ class HookInstaller:
         self._run(["mv", tmp, path], f"mv into place {path}")
         if atomic:
             # /etc is a unionfs; when the target lives only in the read-only lower layer a
-            # rename may be a copy-up, which is NOT atomic. A rename keeps the inode.
+            # rename may be a copy-up (not atomic), but unionfs may also hand out its own inode
+            # numbers, so a mismatch can be a false positive. rcS sources rcS.local only under
+            # `[ -x ... ]`, so a briefly missing file is a stock boot with SSH up: warn, do not refuse.
             after = self._inode(path)
             if before is None or after is None or before != after:
-                msg = (
-                    f"{path}: mv was not provably an atomic rename (inode {before} -> {after}); "
-                    "on unionfs this can be a non-atomic copy-up"
+                print(
+                    f"WARNING: {path}: mv not provably an atomic rename (inode {before} -> {after}); "
+                    "content is verified by read-back, and a missing rcS.local still boots stock"
                 )
-                if atomic == "strict":
-                    raise NonAtomicError(msg)
-                print(f"WARNING: {msg}")
         got = self._read(path)
         if got is None or md5_bytes(got) != md5_bytes(data):
             raise InstallError(f"verify failed for {path}: content differs after write")
@@ -198,6 +196,24 @@ class HookInstaller:
         )
         return 0
 
+    def selftest(self, hook_src: Path | None = None, script_src: Path | None = None) -> int:
+        """Dry-run the hook on the hub's own BusyBox sh, writing only under /tmp/hah-selftest."""
+        hook = (hook_src or self.hook_src).read_bytes()
+        script = (script_src or SELFTEST_SRC).read_bytes()
+        self._run(["mkdir", "-p", SELFTEST_DIR], "create selftest dir")
+        try:
+            for name, data in (("rcS.harmony", hook), ("selftest.sh", script)):
+                rc, _, err = self.r.run_input(["sh", "-c", f"cat > {SELFTEST_DIR}/{name}"], data)
+                if rc != 0:
+                    raise InstallError(f"upload {name} failed: {err.decode(errors='replace').strip()}")
+            rc, out, err = self.r.run(["sh", f"{SELFTEST_DIR}/selftest.sh", f"{SELFTEST_DIR}/rcS.harmony"])
+            print(out.decode(errors="replace").rstrip())
+            if rc != 0:
+                print(err.decode(errors="replace").rstrip(), file=sys.stderr)
+        finally:
+            self.r.run(["rm", "-rf", SELFTEST_DIR])
+        return 0 if rc == 0 else 1
+
     def disarm(self) -> int:
         """Remove the marker and nothing else: next boot is pure stock."""
         if self._exists(MARKER):
@@ -217,7 +233,6 @@ class HookInstaller:
         expect_md5: str | None = None,
         stop_lua: bool = True,
         reboot_on_early_death: bool = True,
-        allow_nonatomic: bool = False,
     ) -> int:
         if not TOKEN_RE.fullmatch(token or ""):
             raise InstallError("token must match [A-Za-z0-9._~+/=-]{1,256} (no whitespace or CR/LF)")
@@ -243,6 +258,11 @@ class HookInstaller:
         if rc != 0:
             raise InstallError(
                 f"{DAEMON} is missing or not executable -- run deploy_hub.py push first"
+            )
+        if not self._exists(NOWATCHDOG):
+            raise InstallError(
+                f"{NOWATCHDOG} is absent (stock watchdog enabled): with no hal/lua the watchdog would "
+                "reboot the hub after every health mark, an unbounded loop. Refusing to arm."
             )
         got = self._md5_on_device(DAEMON)
         if got != expect_md5:
@@ -290,19 +310,11 @@ class HookInstaller:
             body = local.decode(errors="replace")
             if not body.endswith("\n"):
                 body += "\n"
-            mode = "warn" if allow_nonatomic else "strict"
-            try:
-                self._write(RCS_LOCAL, (body + BLOCK + "\n").encode(), "755", atomic=mode)
-            except NonAtomicError as e:
-                self._write(RCS_LOCAL, local, "755", atomic="warn")  # best-effort restore
-                raise InstallError(
-                    f"{e}. Restored the original and did NOT arm. Re-run with "
-                    f"--allow-nonatomic-rcs-local only if you accept that window. Backup: {backup}"
-                ) from e
+            self._write(RCS_LOCAL, (body + BLOCK + "\n").encode(), "755", atomic=True)
             ok, err = self._syntax_ok(RCS_LOCAL)
             if not ok:
                 # The dangerous case, and the whole reason for the backup.
-                self._write(RCS_LOCAL, local, "755", atomic="warn")
+                self._write(RCS_LOCAL, local, "755", atomic=True)
                 raise InstallError(
                     f"{RCS_LOCAL} stopped parsing after our edit ({err}); "
                     f"restored the original and did NOT arm. Backup: {backup}"
@@ -344,10 +356,10 @@ class HookInstaller:
                 if not skipping:
                     kept.append(line)
             new = ("\n".join(kept).rstrip("\n") + "\n").encode()
-            self._write(RCS_LOCAL, new, "755", atomic="warn")
+            self._write(RCS_LOCAL, new, "755", atomic=True)
             ok, err = self._syntax_ok(RCS_LOCAL)
             if not ok:
-                self._write(RCS_LOCAL, local, "755", atomic="warn")
+                self._write(RCS_LOCAL, local, "755", atomic=True)
                 raise InstallError(f"removing the block broke {RCS_LOCAL} ({err}); restored it")
             print(f"removed our block from {RCS_LOCAL}; syntax ok")
         else:
@@ -385,12 +397,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--expect-md5", required=True, help="md5 of the local hub build; arm only if the device matches")
     p.add_argument("--no-reboot-on-early-death", action="store_true",
                    help="do not reboot when the daemon dies inside the 120 s health window")
-    p.add_argument("--allow-nonatomic-rcs-local", action="store_true",
-                   help="accept a non-atomic (copy-up) replace of rcS.local on unionfs")
     p.add_argument("--keep-lua", action="store_true", help="do not stop luaworks/luadraws at boot")
     p.add_argument("--hub-port", type=int, default=8099, help="daemon WS port (default %(default)s)")
     p.add_argument("--hub-id", default=None)
     p = sub.add_parser("disarm", help="[WRITE] remove only the marker; next boot is pure stock")
+    p.add_argument("--yes", action="store_true")
+    p = sub.add_parser("selftest", help="[WRITE /tmp only] dry-run the hook under the hub's BusyBox sh")
     p.add_argument("--yes", action="store_true")
     p = sub.add_parser("uninstall", help="[WRITE] disarm and remove the hook")
     p.add_argument("--yes", action="store_true")
@@ -433,10 +445,11 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
                     expect_md5=a.expect_md5,
                     stop_lua=not a.keep_lua,
                     reboot_on_early_death=not a.no_reboot_on_early_death,
-                    allow_nonatomic=a.allow_nonatomic_rcs_local,
                 )
             case "disarm":
                 return inst.disarm()
+            case "selftest":
+                return inst.selftest()
             case "uninstall":
                 return inst.uninstall(a.purge)
     except InstallError as e:

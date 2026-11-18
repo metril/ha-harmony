@@ -11,7 +11,9 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,20 @@ def _shell(request):
     sh = request.param
     _CUR["shell"] = sh.split(":") if ":" in sh else [sh]
     yield
+
+
+_PGIDS: list[int] = []
+
+
+@pytest.fixture(autouse=True)
+def _reap():
+    """No stub daemon or watcher may outlive its test: each run is its own process group."""
+    yield
+    while _PGIDS:
+        try:
+            os.killpg(_PGIDS.pop(), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 HOOK = Path(__file__).resolve().parents[2] / "tools" / "boot" / "rcS.harmony"
@@ -51,6 +67,7 @@ def root(tmp_path: Path) -> Path:
     """A fake device root with the directories the hook expects."""
     for d in ("etc", "cache", "data/ha-harmony", "var/volatile"):
         (tmp_path / d).mkdir(parents=True)
+    (tmp_path / "etc" / "nowatchdog").write_text("")
     (tmp_path / "etc" / "ha-harmony-enable").write_text("")
     return tmp_path
 
@@ -88,7 +105,8 @@ def source_hook(
         "HAH_HEALTHY_SECS": str(healthy),
         "HAH_MAX_UNCLEAN": str(limit),
         "HAH_START_DELAY": str(delay),
-        "HAH_POLL_SECS": "1",
+        "HAH_POLL_SLEEP": "0.05",  # ms-scale: the hub uses whole seconds
+        "HAH_HEALTHY_POLLS": str(healthy * 2),
         **(extra_env or {}),
     }
     # A logging killall stub always shadows the real one: never signal host processes.
@@ -111,9 +129,13 @@ def source_hook(
     else:
         env["PATH"] = f"{stub}:/usr/bin:/bin"
 
-    p = subprocess.run(
-        [*_CUR["shell"], "-c", script], capture_output=True, text=True, env=env, timeout=60, check=False
-    )
+    proc = subprocess.Popen(
+        [*_CUR["shell"], "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        env=env, start_new_session=True,
+    )  # fmt: skip
+    _PGIDS.append(proc.pid)
+    pout, perr = proc.communicate(timeout=60)
+    p = subprocess.CompletedProcess(proc.args, proc.returncode, pout, perr)
     assert p.returncode == 0, f"hook returned {p.returncode}: {p.stderr}"
     m = re.search(r"__DEMO__=(\S+)", p.stdout)
     assert m, f"no marker in output: {p.stdout!r}"
@@ -216,9 +238,7 @@ def test_a_daemon_that_dies_leaves_the_strike_standing(root: Path) -> None:
     install_conf(root)
     source_hook(root, healthy=1)
     counter = root / "cache" / "ha-harmony-boot.n"
-    import time
-
-    time.sleep(2.5)
+    _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
     assert counter.read_text().strip() == "1", "a dead daemon must not clear its strike"
 
 
@@ -286,23 +306,27 @@ def test_runs_inside_the_hub_applet_floor(root: Path) -> None:
     _wait_for(root / "cache" / "ha-harmony.pid")
 
 
-def _wait_gone(p: Path, tries: int = 60) -> None:
-    import time
-
+def _wait_gone(p: Path, tries: int = 250) -> None:
     for _ in range(tries):
         if not p.exists():
             return
-        time.sleep(0.25)
+        time.sleep(0.02)
 
 
-def _wait_for(p: Path, tries: int = 60) -> None:
-    import time
-
+def _wait_for(p: Path, tries: int = 250) -> None:
     for _ in range(tries):
         if p.exists() and p.stat().st_size:
             return
-        time.sleep(0.1)
+        time.sleep(0.02)
     raise AssertionError(f"{p} never appeared")
+
+
+def _wait_text(p: Path, text: str, tries: int = 250) -> str:
+    for _ in range(tries):
+        if p.exists() and text in p.read_text():
+            return p.read_text()
+        time.sleep(0.02)
+    raise AssertionError(f"{text!r} never appeared in {p}: {p.read_text() if p.exists() else ''}")
 
 
 # --- conf keys, argv, deferred launcher, log placement ---------------------------
@@ -352,12 +376,7 @@ def test_daemon_output_never_goes_to_cache(root: Path) -> None:
     install_conf(root)
     source_hook(root)
     vlog = root / "var" / "volatile" / "ha-harmony.log"
-    for _ in range(60):
-        if vlog.exists() and "DAEMON-ERR" in vlog.read_text():
-            break
-        import time
-
-        time.sleep(0.1)
+    _wait_text(vlog, "DAEMON-ERR")
     assert "DAEMON-CHATTER" in vlog.read_text()
     for f in (root / "cache").iterdir():
         assert "DAEMON" not in f.read_text(), f"daemon output leaked into {f}"
@@ -376,8 +395,6 @@ def test_launch_is_deferred_not_synchronous(root: Path) -> None:
     """With a long delay the hook still returns at once and has started nothing."""
     install_daemon(root, ARGV_DAEMON)
     install_conf(root)
-    import time
-
     t0 = time.monotonic()
     _, demo = source_hook(root, delay=30)
     assert time.monotonic() - t0 < 10, "the synchronous path waited"
@@ -484,10 +501,15 @@ def test_sourcing_leaks_no_state_into_the_caller(root: Path) -> None:
     pre = "cd /; umask 027; set -- keep me; IFS=:; trap 'echo T' USR1; "
     guards = "".join(f'{n}() {{ :; }}; ' for n in ("killall", "reboot"))
     script_after = f"{guards}{pre}. \"{HOOK}\" >/dev/null 2>&1; {probe}"
-    env = {"HAH_ROOT": str(root), "HAH_START_DELAY": "0", "HAH_POLL_SECS": "1", "HAH_HEALTHY_SECS": "1", "PATH": f"{root}/_stub:/usr/bin:/bin"}
-    a = subprocess.run([*_CUR["shell"], "-c", script_after], capture_output=True, text=True, env=env, check=False)
-    b = subprocess.run([*_CUR["shell"], "-c", f"{pre}{probe}"], capture_output=True, text=True, env=env, check=False)
-    assert a.stdout == b.stdout, f"hook leaked caller state:\n{b.stdout}\n---\n{a.stdout}"
+    env = {"HAH_ROOT": str(root), "HAH_START_DELAY": "0", "HAH_POLL_SLEEP": "0.05", "HAH_HEALTHY_POLLS": "1", "PATH": f"{root}/_stub:/usr/bin:/bin"}
+    runs = []
+    for script in (script_after, f"{pre}{probe}"):
+        pr = subprocess.Popen([*_CUR["shell"], "-c", script], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)  # fmt: skip
+        _PGIDS.append(pr.pid)
+        runs.append(pr.communicate(timeout=60)[0])
+    after, before = runs
+    assert after == before, f"hook leaked caller state:\n{before}\n---\n{after}"
 
 
 # --- config hardening -----------------------------------------------------------
@@ -541,28 +563,28 @@ def test_early_death_reboots_by_default_only_with_a_persisted_strike(root: Path)
     install_daemon(root, "exit 1")
     install_conf(root)
     source_hook(root, healthy=2)
+    log = _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    assert "rebooting (reboot_on_early_death)" in log
     _wait_for(root / "reboot.log")
     assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
 
 
 def test_reboot_switch_off(root: Path) -> None:
-    import time
-
     install_daemon(root, "exit 1")
     install_conf(root, "token=t\nreboot_on_early_death=0\n")
     source_hook(root, healthy=2)
-    time.sleep(3.5)
-    assert "died within" in (root / "cache" / "ha-harmony.log").read_text()
+    # The watcher's own final lines say whether it decided against rebooting: no race.
+    log = _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    assert "died within" in log and "not rebooting" in log
     assert not (root / "reboot.log").exists()
 
 
 def test_no_reboot_after_the_health_mark(root: Path) -> None:
-    import time
-
-    install_daemon(root, "sleep 3")  # healthy window is 1 s, dies later
+    install_daemon(root, "sleep 0.25")  # health window is 0.1 s, dies later
     install_conf(root)
     source_hook(root, healthy=1)
-    time.sleep(4.5)
+    log = _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    assert "daemon died after health mark" in log and "rebooting" not in log.replace("no reboot", "")
     assert not (root / "reboot.log").exists()
 
 
@@ -577,21 +599,77 @@ def test_bad_reboot_switch_value_is_stock(root: Path) -> None:
 
 
 def test_daemon_log_is_capped_without_corrupting_the_append_stream(root: Path) -> None:
-    import time
-
     install_daemon(
         root,
         'i=0; while [ $i -lt 60 ]; do echo "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; i=$((i+1)); done;'
-        " sleep 4; echo AFTER-TRUNCATE; sleep 30",
+        " sleep 0.3; echo AFTER-TRUNCATE; sleep 30",
     )
     install_conf(root)
     source_hook(root, healthy=1, extra_env={"HAH_LOG_MAX": "500"})
     vlog = root / "var" / "volatile" / "ha-harmony.log"
-    for _ in range(100):
-        if vlog.exists() and b"AFTER-TRUNCATE" in vlog.read_bytes():
-            break
-        time.sleep(0.2)
+    _wait_text(vlog, "AFTER-TRUNCATE")
     data = vlog.read_bytes()
     assert b"AFTER-TRUNCATE" in data
     assert b"\0" not in data, "truncation must not leave a hole under the daemon's O_APPEND fd"
     assert len(data) < 500, "log was not capped"
+
+
+# --- review round 2: conf-loop hang guards, watchdog guard ---------------------------
+
+
+def test_conf_loop_terminates_when_read_never_clears_its_variable(root: Path) -> None:
+    """A shell whose `read` leaves the old value at EOF must not spin the loop forever."""
+    install_daemon(root, "sleep 30")
+    install_conf(root, "token=abc\n")
+    stub = (
+        'read() { for a; do v=$a; done; n=$((${n:-0}+1)); '
+        '[ "$n" = 1 ] && { eval "$v=\\"token=abc\\""; return 0; }; return 1; }; '
+    )
+    _, demo = source_hook(root, prelude=stub)
+    assert demo == "1"
+
+
+def test_conf_loop_is_hard_capped(root: Path) -> None:
+    """Second guard: a `read` that never ends is cut off after a bounded number of lines."""
+    install_daemon(root, "sleep 30")
+    install_conf(root, "token=abc\n")
+    stub = 'read() { for a; do v=$a; done; eval "$v=\\"x=y\\""; return 0; }; '
+    out, demo = source_hook(root, prelude=stub)  # must return, not spin
+    assert demo == "unset" and "too many lines" in out
+
+
+def test_conf_loop_resets_the_line_variable_each_iteration() -> None:
+    code = re.sub(r"#.*", "", HOOK.read_text())
+    assert "while hah_line=''; IFS= read -r hah_line" in code
+
+
+def test_stock_watchdog_enabled_leaves_stock_alone_with_no_strike(root: Path) -> None:
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root)
+    (root / "etc" / "nowatchdog").unlink()
+    out, demo = source_hook(root)
+    assert demo == "unset" and "watchdog" in out
+    assert not (root / "cache" / "ha-harmony-boot.n").exists()
+    assert (root / "etc" / "ha-harmony-enable").exists()
+
+
+def test_onhub_selftest_script_passes_under_host_shells(tmp_path: Path) -> None:
+    """The on-hub dry run is itself tested here (fast knobs); it writes only under its own dir."""
+    script = HOOK.parent / "hook_selftest.sh"
+    work = tmp_path / "st"
+    env = {
+        **os.environ,
+        "HAH_SELFTEST_DIR": str(work),
+        "HAH_SELFTEST_NAP": "0.05",
+        "HAH_SELFTEST_POLLS": "2",
+        "HAH_SELFTEST_SETTLE": "0.15",
+        "HAH_SELFTEST_TICK": "0.02",
+        "HAH_SELFTEST_FINAL": "0.2",
+    }
+    pr = subprocess.Popen([*_CUR["shell"], str(script), str(HOOK)], stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, env=env, start_new_session=True)  # fmt: skip
+    _PGIDS.append(pr.pid)
+    out = pr.communicate(timeout=60)[0]
+    assert pr.returncode == 0 and "0 failure(s)" in out, out
+    assert out.count("PASS") >= 11 and "FAIL" not in out
+    assert not (Path("/etc/ha-harmony-enable")).exists()

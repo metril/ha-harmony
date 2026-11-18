@@ -53,11 +53,12 @@ hah_pidfile="$hah_root/cache/ha-harmony.pid"
 hah_dir="$hah_root/data/ha-harmony"
 hah_daemon="$hah_dir/hub"
 hah_conf="$hah_dir/hub.conf"
+hah_nowd="$hah_root/etc/nowatchdog"
 
 # Numeric knobs (test overrides) are matched, never trusted: digits only, else the default.
 hah_num() {
 	case "$1" in
-	'' | *[!0-9]*) echo "$2" ;;
+	'' | *[!0-9]* | 0[0-9]*) echo "$2" ;; # no leading zeros: `08` is an arithmetic error
 	*) echo "$1" ;;
 	esac
 }
@@ -67,6 +68,12 @@ hah_delay=$(hah_num "${HAH_START_DELAY:-}" 20)
 hah_step=$(hah_num "${HAH_POLL_SECS:-}" 5)
 hah_logmax=$(hah_num "${HAH_LOG_MAX:-}" 262144)
 [ "$hah_step" -ge 1 ] 2>/dev/null || hah_step=1
+# Poll interval: seconds on the hub; tests may pass a fraction (HAH_POLL_SLEEP) and a poll count.
+case "${HAH_POLL_SLEEP:-}" in
+'' | *[!0-9.]*) hah_nap="$hah_step" ;;
+*) hah_nap="$HAH_POLL_SLEEP" ;;
+esac
+hah_polls=$(hah_num "${HAH_HEALTHY_POLLS:-}" "")
 [ "$hah_limit" -ge 1 ] 2>/dev/null || hah_limit=3
 
 hah_say() {
@@ -78,6 +85,10 @@ hah_say() {
 # binary or config must leave the hub fully stock, never inert.
 if [ ! -x "$hah_daemon" ] || [ ! -r "$hah_conf" ]; then
 	hah_say "daemon or config missing ($hah_daemon / $hah_conf) - leaving stock alone"
+elif [ ! -e "$hah_nowd" ]; then
+	# With the stock watchdog enabled, no hal and no lua would reboot the hub AFTER the
+	# health mark, clearing the strike each time: an unbounded reboot loop. Stay stock.
+	hah_say "$hah_nowd absent (stock watchdog enabled) - leaving stock alone"
 else
 	# Read config without sourcing it. Split each line at the FIRST '=' with parameter
 	# expansion (values may themselves contain '='). Only these keys are honoured; any
@@ -91,7 +102,17 @@ else
 	hah_stoplua=1
 	hah_reboot=1
 	hah_bad=''
-	while IFS= read -r hah_line || [ -n "$hah_line" ]; do
+	hah_cap=''
+	# `hah_line=''` first: some shells leave the old value at EOF, which would loop forever.
+	# hah_cap is a hard bound (50 lines) as a second guard; a real conf has under 10.
+	while hah_line=''; IFS= read -r hah_line || [ -n "$hah_line" ]; do
+		hah_cap="${hah_cap}x"
+		case "$hah_cap" in
+		xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx*)
+			hah_bad="conf has too many lines"
+			break
+			;;
+		esac
 		case "$hah_line" in
 		*=*) ;;
 		*) continue ;;
@@ -227,11 +248,12 @@ else
 
 					# Health window: poll (no `timeout` applet). Alive at the end means
 					# port bound and radio held (the daemon exits non-zero otherwise).
+					[ -n "$hah_polls" ] || hah_polls=$((hah_healthy / hah_step))
 					hah_t=0
 					hah_up=1
-					while [ "$hah_t" -lt "$hah_healthy" ]; do
-						sleep "$hah_step"
-						hah_t=$((hah_t + hah_step))
+					while [ "$hah_t" -lt "$hah_polls" ]; do
+						sleep "$hah_nap"
+						hah_t=$((hah_t + 1))
 						if ! kill -0 "$hah_pid" 2>/dev/null; then
 							hah_up=0
 							break
@@ -242,9 +264,10 @@ else
 						echo "ha-harmony: healthy after ${hah_healthy}s - strikes cleared" >>"$hah_log" 2>/dev/null
 						# Cap the tmpfs daemon log. The daemon holds it open O_APPEND (>>),
 						# so truncating in place is safe: its next write lands at the new
-						# end, no hole. No `wc`/`stat` on the hub: size comes from `ls -ln` (numeric ids: names may contain spaces).
+						# end, no hole. No `wc`/`stat` on the hub: size comes from `ls -ln`
+						# (numeric ids: names may contain spaces).
 						while kill -0 "$hah_pid" 2>/dev/null; do
-							sleep "$hah_step"
+							sleep "$hah_nap"
 							hah_sz=$(ls -ln "$hah_dlog" 2>/dev/null)
 							# shellcheck disable=SC2086
 							set -- $hah_sz
@@ -252,15 +275,20 @@ else
 								: >"$hah_dlog" 2>/dev/null
 							fi
 						done
+						echo "ha-harmony: daemon died after health mark - no reboot, no respawn" >>"$hah_log" 2>/dev/null
 					else
 						echo "ha-harmony: died within ${hah_healthy}s - strike $hah_n stands" >>"$hah_log" 2>/dev/null
 						# Reboot only if THIS boot's strike is really persisted, so the
 						# strike counter bounds the reboot loop (boot 3 goes to stock).
 						if [ "$hah_reboot" = 1 ] && [ "$(cat "$hah_counter" 2>/dev/null)" = "$hah_n" ]; then
 							echo "ha-harmony: rebooting (reboot_on_early_death)" >>"$hah_log" 2>/dev/null
+							echo "ha-harmony: watcher done" >>"$hah_log" 2>/dev/null
 							reboot
+						else
+							echo "ha-harmony: not rebooting (switch off or strike not persisted)" >>"$hah_log" 2>/dev/null
 						fi
 					fi
+					echo "ha-harmony: watcher done" >>"$hah_log" 2>/dev/null
 				) >/dev/null 2>&1 &
 			fi
 		fi
@@ -268,6 +296,6 @@ else
 fi
 
 unset hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
-unset hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
+unset hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
 unset hah_rf hah_slot hah_rfargs hah_stoplua hah_reboot hah_bad hah_k hah_v hah_line hah_cr
 unset -f hah_say hah_num 2>/dev/null

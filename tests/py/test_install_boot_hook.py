@@ -36,6 +36,7 @@ class FakeHub:
         self.files: dict[str, bytes] = {
             ibh.RCS_LOCAL: STOCK_RCS_LOCAL,
             ibh.DAEMON: DAEMON_BYTES,
+            ibh.NOWATCHDOG: b"",
         }
         if files is not None:
             self.files = dict(files)
@@ -52,6 +53,9 @@ class FakeHub:
         if argv[:1] == ["cat"]:
             p = argv[1]
             return (0, self.files[p], b"") if p in self.files else (1, b"", b"No such file")
+        if argv[:1] == ["sh"] and argv[1:2] and argv[1].endswith("selftest.sh"):
+            self.selftest_rc = getattr(self, "selftest_rc", 0)
+            return (self.selftest_rc, b"PASS fake\n", b"")
         if argv[:2] == ["ls", "-i"]:
             p = argv[2]
             if p not in self.files:
@@ -148,7 +152,7 @@ FORBIDDEN = (
     r"/etc/rc\d",
     r"/dev/mtd",
     r"/etc/tdeenable",  # our SSH depends on it; never ours to touch
-    r"/etc/nowatchdog",  # watchdog policy is a separate, deliberate decision
+    r"(?<!test -e )/etc/nowatchdog",  # only `test -e` is allowed; watchdog policy is a separate, deliberate decision
     r"mtd_?debug|flash_erase|flashcp",
 )
 
@@ -252,7 +256,7 @@ def test_removes_the_hook_when_it_does_not_parse_on_device() -> None:
 
 
 def test_refuses_without_rcs_local() -> None:
-    hub = FakeHub(files={ibh.DAEMON: DAEMON_BYTES})
+    hub = FakeHub(files={ibh.DAEMON: DAEMON_BYTES, ibh.NOWATCHDOG: b""})
     with pytest.raises(ibh.InstallError, match="not the expected stock firmware"):
         install(hub)
 
@@ -510,24 +514,53 @@ def test_reboot_on_early_death_switch_written_only_when_off(hub: FakeHub) -> Non
     assert "reboot_on_early_death=0\n" in h2.files[ibh.CONF].decode()
 
 
-def test_nonatomic_rcs_local_replace_aborts_restores_and_does_not_arm() -> None:
+def test_nonatomic_rcs_local_replace_only_warns(capsys) -> None:
+    """rcS sources rcS.local under -x, and unionfs inode numbers may differ spuriously."""
     hub = FakeHub()
     hub.copyup = True
-    with pytest.raises(ibh.InstallError, match="atomic"):
-        install(hub)
-    assert hub.files[ibh.RCS_LOCAL] == STOCK_RCS_LOCAL, "original must be restored"
-    assert ibh.MARKER not in hub.files
-
-
-def test_nonatomic_can_be_accepted_explicitly(capsys) -> None:
-    hub = FakeHub()
-    hub.copyup = True
-    install(hub, allow_nonatomic=True)
+    install(hub)
     assert ibh.MARKER in hub.files
     assert "WARNING" in capsys.readouterr().out
+    assert "allow-nonatomic-rcs-local" not in ibh.build_parser().format_help()
 
 
 def test_atomic_rename_installs_silently(hub: FakeHub, capsys) -> None:
     install(hub)
     assert ibh.MARKER in hub.files and "WARNING" not in capsys.readouterr().out
     assert any(c[:2] == ["ls", "-i"] for c in hub.log)
+
+
+def test_install_refuses_when_the_stock_watchdog_is_enabled() -> None:
+    hub = FakeHub()
+    del hub.files[ibh.NOWATCHDOG]
+    with pytest.raises(ibh.InstallError, match="watchdog"):
+        install(hub)
+    assert not any(c[0] in ("mv", "rm") for c in hub.log)
+    assert ibh.MARKER not in hub.files
+
+
+def test_selftest_writes_only_under_tmp_hah_selftest_and_cleans_up(capsys) -> None:
+    hub = FakeHub()
+    assert ibh.main(["selftest", "--yes"], runner=hub) == 0
+    for c in hub.log:
+        flat = " ".join(c)
+        if c[0] in ("mkdir", "rm", "chmod", "mv") or c[:2] == ["sh", "-c"]:
+            assert ibh.SELFTEST_DIR in flat, f"selftest wrote outside its dir: {flat}"
+        assert not re.search(r"/etc/|/data|/cache|/dev/", flat.replace(ibh.SELFTEST_DIR, "")), flat
+    assert hub.log[-1] == ["rm", "-rf", ibh.SELFTEST_DIR]
+    uploads = [c for c in hub.log if c[:2] == ["sh", "-c"]]
+    assert len(uploads) == 2
+    assert hub.files[ibh.RCS_LOCAL] == STOCK_RCS_LOCAL and ibh.MARKER not in hub.files
+
+
+def test_selftest_failure_exits_nonzero_and_still_cleans_up() -> None:
+    hub = FakeHub()
+    hub.selftest_rc = 1
+    assert ibh.main(["selftest", "--yes"], runner=hub) == 1
+    assert hub.log[-1] == ["rm", "-rf", ibh.SELFTEST_DIR]
+
+
+def test_selftest_needs_yes() -> None:
+    hub = FakeHub()
+    assert ibh.main(["selftest"], runner=hub) == 2
+    assert hub.log == []

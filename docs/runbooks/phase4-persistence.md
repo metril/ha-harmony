@@ -15,7 +15,8 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
    `token`, `port`, `hub_id`, `rf=spi`, `rf_slot=N`, `stop_lua=0|1` (default on: the boot subshell runs `killall lua luaworks luadraws`
    before starting the daemon; `--keep-lua` writes `stop_lua=0`), `reboot_on_early_death=0|1` (default 1;
    `--no-reboot-on-early-death` writes 0). `install` clears the strike counter before arming. If the rcS.local
-   replace is not a provable atomic rename it restores and refuses unless `--allow-nonatomic-rcs-local`.
+   replace is not a provable atomic rename it only warns (rcS sources rcS.local under `[ -x ]`, so a missing file
+   is a stock boot with SSH up).
 4. Marker `/etc/ha-harmony-enable` is created last. Reboot to take effect.
 
 ## Status / disarm
@@ -25,6 +26,12 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
   tmpfs, gone on reboot).
 - `tools/install_boot_hook.py disarm --yes`: removes only the marker; next boot is pure stock.
 - `uninstall --yes [--purge]`: disarm, remove our block and files (`--purge` also conf and log).
+
+**Warning:** stopping the daemon by hand within about 140 s of an armed boot (20 s launch delay + 120 s health
+window) makes the hub reboot (`reboot_on_early_death`, default on). Run `disarm --yes` first.
+**Watchdog:** the hook refuses to arm (stock boots, no strike) and the installer refuses to install unless
+`/etc/nowatchdog` exists. With the stock watchdog enabled, no hal/lua would reboot the hub after each health
+mark, clearing the strike every time: an unbounded reboot loop.
 
 ## Behaviour to expect
 
@@ -55,3 +62,10 @@ it retries and logs; whether that is benign long-term was not determined, hence 
 
 No `device_backup.py` / flash imaging while armed: the daemon holds the shared SPI bus. Disarm, reboot to
 stock, confirm `hal` is back, then image.
+
+## On-hub dry run (not yet run)
+
+`tools/install_boot_hook.py selftest --yes` copies the hook and `tools/boot/hook_selftest.sh` into
+`/tmp/hah-selftest` (tmpfs) and runs the key cases under the hub's own BusyBox 1.13 `sh` with `killall` and
+`reboot` defined as shell functions. It writes only under `/tmp/hah-selftest` and removes it afterwards.
+Run it before the first real arm.

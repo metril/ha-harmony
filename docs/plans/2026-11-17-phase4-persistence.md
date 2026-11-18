@@ -298,3 +298,16 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
   positional params, `set` flags; tested under `/bin/sh` and host `busybox sh`).
 - Daemon log cap 256 KB: the watcher truncates `/var/volatile/ha-harmony.log` in place. The daemon holds it
   `>>` (O_APPEND), so its next write lands at the new end with no hole; the test asserts no NULs.
+
+**Second-round probes (2026-11-17, read-only):**
+- `rcS:40-46`: `# product specific configuration` / `if [ -x /etc/init.d/rcS.local ]; then source /etc/init.d/rcS.local; fi`.
+  Guarded by `-x`, so a briefly absent rcS.local is a stock boot with SSH up. The installer's inode mismatch is
+  therefore only a WARNING (unionfs may hand out its own inode numbers); `--allow-nonatomic-rcs-local` is gone.
+- Lua processes in `ps` now: exactly one, pid 129 `/usr/bin/lua main.lua --syslog --datadir=/data tasks/...`.
+- Watchdog. Known: `/etc/nowatchdog` exists now (0 B); stock `rcS:59` starts `/usr/bin/watchdog` only when it
+  is absent; no process currently holds `/dev/watchdog`; `/usr/bin/watchdog` is the only binary whose strings
+  contain `/dev/watchdog` (it also references `/var/watchdog`); hal has `/var/watchdog/hal`, `keep_watchdog_alive`
+  and a `-w` (disable watchdog thread) option; the lua `watchdog` task opens a "watch dog file". Unknown: the
+  exact feed protocol (not disassembled) and whether the kernel driver can arm itself. Conclusion: a reboot loop
+  after the health mark is only possible if `/etc/nowatchdog` is removed. Guard implemented: the hook leaves stock
+  alone (no strike) and the installer refuses unless `/etc/nowatchdog` exists.

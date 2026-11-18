@@ -38,6 +38,10 @@ REMOTE_CONFIG = f"{REMOTE_DIR}/config.json"
 REMOTE_BUSYBOX = "/tmp/busybox"
 RF_SOCKET = "/tmp/ha-harmony-rf.sock"
 DETACH_LOG = "/tmp/ha-harmony-hub.log"  # tmpfs; a detached daemon's output, gone on reboot
+ARMED_WARNING = (
+    "NOTE: if the boot hook is armed, stopping the daemon by hand within ~140 s of boot makes the hub "
+    "reboot (reboot_on_early_death). Run `install_boot_hook.py disarm --yes` first."
+)
 DETACH_SETTLE_S = 3  # on-device `sleep` before asking pidof
 WRITE_ROOTS = (REMOTE_DIR, "/tmp")  # the only places this tool may write
 DATA_MOUNT = "/data"
@@ -390,6 +394,7 @@ class Deployer:
                 raise DeployError(f"devices still held by pids {sorted({p for p, _ in held})}")
         if self.r.run(["test", "-x", REMOTE_HUB])[0] != 0:
             raise DeployError(f"{REMOTE_HUB} missing or not executable: run push first")
+        self.out(ARMED_WARNING)
         self.out(f"running {REMOTE_HUB} {shlex.join(args)} (foreground; Ctrl-C stops it)")
         return self.r.run_foreground([REMOTE_HUB, *args])
 
@@ -422,6 +427,7 @@ class Deployer:
                 f"hub is not running {DETACH_SETTLE_S}s after start; log:\n"
                 + log.decode("utf-8", "replace")[-600:]
             )
+        self.out(ARMED_WARNING)
         self.out(f"hub running detached, pid {' '.join(pid)}; log {DETACH_LOG}")
         return 0
 
