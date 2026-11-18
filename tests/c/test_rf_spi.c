@@ -981,6 +981,55 @@ static void test_two_endpoint_every_size(void) {
     hp_rf_spi_destroy(tr);
 }
 
+/* Link loss is a marker in the receive queue, in order with the frames: frames of a re-attached link come AFTER it
+ * (even when the reader saw lost+up+frames before the hub looked), and a full queue keeps the marker. */
+static void test_loss_is_ordered_with_frames(void) {
+    fake_t f;
+    fake_init(&f);
+    hp_rf_transport *t = NULL;
+    uint8_t fr[64], rep[30];
+    CT_EQ(open_fake(&f, 0, &t), 0);
+    t->claim(t->self);
+    const uint8_t lost[7] = {0x10, 0x01, 0x41, 0x04, 0x40, 0x00, 0x00};
+    const uint8_t up[7] = {0x10, 0x01, 0x41, 0x04, 0x01, 0x00, 0x00};
+    data_report(rep, 1, 0x11);
+    feed(&f, rep, 30); /* old link */
+    feed(&f, lost, sizeof lost);
+    feed(&f, up, sizeof up);
+    data_report(rep, 1, 0x22);
+    feed(&f, rep, 30); /* new link */
+    ms_sleep(60);      /* the reader has seen all of it before the hub loop reads */
+    CT_CHECK(t->attached(t->self));
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 0), 28);
+    CT_EQ(fr[0], 0x11);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 0), -HP_E_NOENT);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 0), 28);
+    CT_EQ(fr[0], 0x22);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 0), 0);
+
+    /* a full queue drops the oldest FRAME, never the marker */
+    for (int i = 0; i < 16; i++) {
+        data_report(rep, 1, (uint8_t)(0x30 + i));
+        feed(&f, rep, 30);
+    }
+    feed(&f, lost, sizeof lost);
+    feed(&f, up, sizeof up);
+    data_report(rep, 1, 0x70);
+    feed(&f, rep, 30);
+    ms_sleep(100);
+    int frames = 0, losses = 0, after = 0;
+    int rc;
+    while ((rc = t->recv(t->self, fr, sizeof fr, 0)) != 0) {
+        if (rc == -HP_E_NOENT) losses++;
+        else if (fr[0] == 0x70) after += losses ? 1 : 100;
+        else if (!losses) frames++;
+    }
+    CT_EQ(losses, 1);
+    CT_EQ(after, 1);
+    CT_CHECK(frames >= 13);
+    hp_rf_spi_destroy(t);
+}
+
 int main(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
@@ -991,6 +1040,7 @@ int main(void) {
     CT_RUN(test_send_wraps_hub_frame);
     CT_RUN(test_write_results_and_backoff);
     CT_RUN(test_reader_classifies);
+    CT_RUN(test_loss_is_ordered_with_frames);
     CT_RUN(test_wake_fd);
     CT_RUN(test_destroy_wakes_blocked_reader);
     CT_RUN(test_destroy_real_signal);

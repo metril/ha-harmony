@@ -258,6 +258,7 @@ static void bcast_one(hp_ws_conn_t *c, void *arg) {
 static void broadcast_except(hub_ctx_t *h, const char *type, cJSON *d, const hp_session_t *skip) {
     char buf[1536]; /* activity_list: 16 names of up to 31 bytes + hash */
     size_t n = 0;
+    if (h->bcast_hook && d) h->bcast_hook(h->bcast_ctx, type, d);
     if (h->srv && hp_make_reply(0, type, d, buf, sizeof buf, &n) == 0) {
         bcast_t b = {buf, n, skip};
         hp_ws_foreach(h->srv, bcast_one, &b);
@@ -582,8 +583,36 @@ static void emit_key(void *vctx, uint8_t remote, uint8_t key, hp_key_action_t ac
     hub_broadcast(vctx, "key_event", d);
 }
 
+/* A remote link is up. Exactly one `remote_attached` per link-up, and anything cached about the remote is
+ * (re)announced after it: Home Assistant drops the info it holds on `remote_attached`. Idempotent: called from
+ * every place that can learn of the link first (a frame, the transport's flag), whichever comes first. */
+static void rf_link_up(hub_ctx_t *h) {
+    if (h->rf_attached) return;
+    h->rf_attached = true;
+    h->info_fresh = true;
+    cJSON *d = cJSON_CreateObject();
+    if (d) hub_broadcast(h, "remote_attached", d);
+    for (unsigned i = 0; i < HUB_INFO_MAX; i++) {
+        if (!h->info[i].valid) continue;
+        h->info_fresh = false; /* the cached info is out again: the next identical one is a heartbeat */
+        h->info_bcast++;
+        cJSON *j = info_json(&h->info[i]);
+        if (j) hub_broadcast(h, "remote_info", j);
+    }
+}
+
+/* The link went away (in sequence with the frames: everything received before is handled). What was in flight
+ * and what the old remote announced are void; the next link's frames come after this and are untouched. */
+static void rf_link_lost(hub_ctx_t *h) {
+    h->rf_attached = false;
+    h->info_fresh = true;
+    memset(h->page_out, 0, sizeof h->page_out); /* the link dropped what was in flight without a result */
+    memset(h->info, 0, sizeof h->info); /* the remote may come back as another firmware: ask again */
+}
+
 static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
     hp_rf_val_t v[6];
+    rf_link_up(h); /* a frame proves the link is up, and its link-up must precede what the frame says */
     if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
         int rc = hp_key_handle(&h->map, &h->sinks, (uint8_t)v[0].u, (uint8_t)v[1].u, (hp_key_action_t)v[2].u,
                                emit_key, h);
@@ -621,41 +650,19 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
 void hub_pump_rf(hub_ctx_t *h) {
     if (!h->sinks.rf) return;
     rf_link_ensure(h);
-    /* `remote_attached` goes out before anything this pump delivers: the remote's remote_info is sent right after
-     * link-up, and Home Assistant drops the info it holds on `remote_attached`, so the other order loses it. */
-    if (h->sinks.rf->attached && h->sinks.rf->attached(h->sinks.rf->self) && !h->rf_attached) {
-        h->info_fresh = true;
-        h->rf_attached = true;
-        cJSON *d = cJSON_CreateObject();
-        if (d) hub_broadcast(h, "remote_attached", d);
-    }
-    /* Received objects are delivered (and acked) from inside the pump; a peer that went away
-     * resets reassembly and drops what was queued for it. */
-    if (hp_rf_link_pump(&h->link, hp_sched_now(&h->sched)) == -HP_E_NOENT) {
-        h->rf_attached = false;
-        h->info_fresh = true;
-        memset(h->page_out, 0, sizeof h->page_out); /* the link dropped what was in flight without a result */
-        memset(h->info, 0, sizeof h->info); /* the remote may come back as another firmware: ask again */
-    }
+    /* Received objects are delivered (and acked) from inside the pump, link loss in sequence with them
+     * (-HP_E_NOENT): `remote_attached` is announced by the first frame of a link or by the transport's flag, and
+     * `rf_link_up` is idempotent, so it goes out once per link-up and before anything that link says. */
+    if (hp_rf_link_pump(&h->link, hp_sched_now(&h->sched)) == -HP_E_NOENT) rf_link_lost(h);
     uint32_t failures = hp_rf_link_status(&h->link).failures;
     if (failures != h->rf_failures) {
         fprintf(stderr, "hub: RF send failed after %d retries (%u object(s) dropped)\n", HP_RF_RETRIES,
                 (unsigned)(failures - h->rf_failures));
         h->rf_failures = failures;
     }
-    if (h->sinks.rf->attached) {
-        bool now = h->sinks.rf->attached(h->sinks.rf->self);
-        if (now && !h->rf_attached) { /* a re-attach the pump itself noticed (it reset the state above) */
-            cJSON *d = cJSON_CreateObject();
-            if (d) hub_broadcast(h, "remote_attached", d);
-        }
-        if (!now && h->rf_attached) { /* link lost: its remote_info is stale, and nothing in flight will report */
-            memset(h->info, 0, sizeof h->info);
-            memset(h->page_out, 0, sizeof h->page_out);
-            h->info_fresh = true;
-        }
-        h->rf_attached = now;
-    }
+    /* A link that is up without having sent a frame yet (or that came back right after a loss handled above). The
+     * flag going false is not acted on here: its loss marker is still queued behind the frames of that link. */
+    if (h->sinks.rf->attached && h->sinks.rf->attached(h->sinks.rf->self)) rf_link_up(h);
     pend_flush(h);
     hub_flush_pending(h); /* a key may have started/stopped an activity */
 }

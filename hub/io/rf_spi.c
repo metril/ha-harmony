@@ -47,9 +47,10 @@ typedef struct {
     pthread_cond_t cv;
     uint8_t q[RXQ][HP_RF_INNER_LEN];
     uint32_t q_at[RXQ];   /* arrival time (reader thread) of each queued frame */
+    bool q_lost[RXQ];     /* the entry is a link-lost marker, not a frame: loss is ordered with the frames */
     uint32_t last_rx_at;  /* arrival time of the frame recv() returned last */
     size_t qhead, qn;
-    bool attached, lost_pending;
+    bool attached;
     int wake[2]; /* self-pipe: readable while recv() has something to return */
     unsigned logged;
     bool reader_done;
@@ -173,6 +174,26 @@ static void push_event(spi_t *s) {
     wake(s);
 }
 
+/* Appends an entry (frame or lost marker). When full the oldest FRAME goes (the freshest data is kept);
+ * a marker is only dropped when the queue holds nothing else. Caller holds mu. */
+static size_t q_push(spi_t *s, bool lost) {
+    if (s->qn == RXQ) {
+        size_t drop = 0; /* offset from the head */
+        while (drop < s->qn && s->q_lost[(s->qhead + drop) % RXQ]) drop++;
+        if (drop == s->qn) drop = 0;
+        for (size_t i = drop; i + 1 < s->qn; i++) { /* close the gap, keeping the order */
+            size_t a = (s->qhead + i) % RXQ, b = (s->qhead + i + 1) % RXQ;
+            memcpy(s->q[a], s->q[b], HP_RF_INNER_LEN);
+            s->q_at[a] = s->q_at[b];
+            s->q_lost[a] = s->q_lost[b];
+        }
+        s->qn--;
+    }
+    size_t qi = (s->qhead + s->qn++) % RXQ;
+    s->q_lost[qi] = lost;
+    return qi;
+}
+
 static void on_report(spi_t *s, const uint8_t *b, size_t n) {
     pthread_mutex_lock(&s->mu);
     const uint8_t *inner = NULL;
@@ -195,11 +216,7 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
     }
     if (inner) {
         s->attached = true;
-        if (s->qn == RXQ) { /* reader outran the hub loop: drop the oldest, keep the freshest */
-            s->qhead = (s->qhead + 1) % RXQ;
-            s->qn--;
-        }
-        size_t qi = (s->qhead + s->qn++) % RXQ;
+        size_t qi = q_push(s, false); /* a full queue (reader outran the hub loop) drops the oldest frame */
         memcpy(s->q[qi], inner, HP_RF_INNER_LEN);
         s->q_at[qi] = (uint32_t)s->ops.now_ms(s->ops.ctx);
         push_event(s);
@@ -214,7 +231,7 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
         if (b[4] & LINK_LOST) {
             if (s->attached) {
                 s->attached = false;
-                s->lost_pending = true;
+                q_push(s, true); /* in sequence with the frames: those before it belong to the old link */
                 push_event(s);
             }
         } else if (!s->attached) {
@@ -298,20 +315,17 @@ static int spi_recv(void *self, uint8_t *frame, size_t cap, int timeout_ms) {
     pthread_mutex_lock(&s->mu);
     for (;;) {
         if (s->qn) {
-            if (cap < HP_RF_INNER_LEN) {
+            if (s->q_lost[s->qhead]) {
+                rc = -HP_E_NOENT; /* the link went away here: frames queued after this are the next link's */
+            } else if (cap < HP_RF_INNER_LEN) {
                 rc = -HP_E_TOOBIG; /* dropped: an unreturnable frame must not wedge the queue */
             } else {
                 memcpy(frame, s->q[s->qhead], HP_RF_INNER_LEN);
                 rc = HP_RF_INNER_LEN;
             }
-            s->last_rx_at = s->q_at[s->qhead];
+            if (!s->q_lost[s->qhead]) s->last_rx_at = s->q_at[s->qhead];
             s->qhead = (s->qhead + 1) % RXQ;
             s->qn--;
-            break;
-        }
-        if (s->lost_pending) {
-            s->lost_pending = false;
-            rc = -HP_E_NOENT;
             break;
         }
         drain_wake(s);

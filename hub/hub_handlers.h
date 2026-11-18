@@ -130,6 +130,8 @@ typedef struct {
     uint32_t info_bcast;     /* remote_info broadcasts sent (diagnostics, tests) */
     uint32_t pend_dropped; /* held messages lost to a full queue (a tile that found only pages, or the oldest page) */
     hub_info_t info[HUB_INFO_MAX]; /* remote_info per remote; dropped when the RF link is lost */
+    void (*bcast_hook)(void *ctx, const char *type, const cJSON *d); /* tests: sees every broadcast, in order */
+    void *bcast_ctx;
 } hub_ctx_t;
 
 /* Initialises the context with a CLOCK_MONOTONIC millisecond clock for the timers. */

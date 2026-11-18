@@ -34,7 +34,8 @@
  *
  * Semantics (rf_pair.c's contract): claim() 0 once, then -HP_E_BUSY; send()/recv() are -HP_E_INVAL
  * before the claim; send() over 28 bytes is -HP_E_TOOBIG; recv() returns the length, 0 on timeout,
- * -HP_E_NOENT exactly once when the link goes from attached to lost (queued frames come first).
+ * -HP_E_NOENT exactly once when the link goes from attached to lost, IN ORDER with the frames (a marker in
+ * the receive queue: frames received before the loss come first, those of a re-attached link follow it).
  * attached() is false until a link-up status or a data frame arrives, and false again on a
  * `10 <slot> 41 04 <status>` report with status & 0x40.
  *
