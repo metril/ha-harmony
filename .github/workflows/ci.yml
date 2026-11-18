@@ -198,6 +198,9 @@ jobs:
       - uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
         with:
           category: integration
+          # repository settings and a licence choice belong to the owner, not to this workflow; drop
+          # these when the GitHub description/topics are set and a LICENSE is added
+          ignore: description topics license
 
   ci:
     if: always()
