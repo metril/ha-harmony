@@ -4,6 +4,13 @@
  *  - the hub link goes up when the remote transmits and is lost 500 ms after the last uplink;
  *  - TX status: 00 when the held frame was delivered, 01 when the link dropped with it pending; a stale
  *    00 also arrives at link-up with nothing held.
+ * The radio buffer is a FIFO (a second write queues, so depth 2 is observable). An uplink delivers the head
+ * frame only if it starts >= UPLINK_PREP_MS after that frame's write (a frame already in flight at the write
+ * does not carry it): this is what the hub's 5 ms release margin assumes. The fake stamps arrival (uplink
+ * reaching the hub) and write times like rf_spi's frame_times hook and can delay the hub's reads (hold_rx).
+ * Two models (MODEL_S2 = the above; MODEL_S3 = bench session 3): in S3 a held frame is also delivered 8 ms
+ * after the write by the radio itself while the link is up (no host uplink needed), and delivery emits NO
+ * status 00 (only the stale one at link-up and 01 on a drop). An uplink still delivers a held frame.
  * The hub end is the real hub context (page_push handler, held-message store, strict downlink link),
  * the remote end the real hp_rf_link_t with polling. Deterministic: fake clock, no threads. */
 #include <stdio.h>
@@ -18,14 +25,24 @@
 
 #define QN 64
 #define IDLE_DROP_MS 500
+#define S3_DELIVER_MS 8
+#define UPLINK_PREP_MS 5
+#define DLQ 8
+
+typedef enum { MODEL_S2, MODEL_S3 } model_t;
 
 typedef struct {
     uint32_t now;
     bool up, lost_pending;
     uint32_t last_uplink;
-    bool dl_v;          /* a hub->remote frame is held in the radio */
-    uint8_t dl[HP_RF_INNER_LEN];
-    int max_depth, depth_now;
+    model_t model;
+    uint32_t max_lat;   /* max write->remote delivery latency (ms) */
+    uint8_t dl[DLQ][HP_RF_INNER_LEN]; /* hub->remote frames held in the radio, oldest first */
+    uint32_t dl_at[DLQ];
+    int dl_n;
+    uint32_t last_wr, last_rx_at, hrx_at[QN]; /* stamps: last write finish, arrival of the last frame read, per queued uplink */
+    bool hold_rx;       /* the hub's reader has not got to the queued uplinks yet */
+    int max_depth;
     int hub_acks_written, hub_data_written, hub_writes_while_down;
     int remote_objs_sent, remote_polls_sent;
     int drop_dl;        /* delivered frames to lose on the air (status still 00) */
@@ -54,18 +71,19 @@ static int hub_send(void *self, const uint8_t *f, size_t n) {
         status(0x01);
         return 0;
     }
-    if (R.dl_v) R.max_depth = R.max_depth < 2 ? 2 : R.max_depth; /* a second frame while one is held */
-    memcpy(R.dl, f, n);
-    R.dl_v = true;
-    R.depth_now = R.dl_v ? 1 : 0;
-    if (R.max_depth < 1) R.max_depth = 1;
+    if (R.dl_n == DLQ) return -HP_E_BUSY;
+    memcpy(R.dl[R.dl_n], f, n);
+    R.dl_at[R.dl_n++] = R.now;
+    R.last_wr = R.now;
+    if (R.dl_n > R.max_depth) R.max_depth = R.dl_n;
     return 0;
 }
 
 static int hub_recv(void *self, uint8_t *f, size_t cap, int ms) {
     (void)self; (void)ms; (void)cap;
-    if (R.hrx_n) {
+    if (R.hrx_n && !R.hold_rx) {
         memcpy(f, R.hrx[R.hrx_h], HP_RF_INNER_LEN);
+        R.last_rx_at = R.hrx_at[R.hrx_h];
         R.hrx_h = (R.hrx_h + 1) % QN;
         R.hrx_n--;
         return HP_RF_INNER_LEN;
@@ -88,6 +106,24 @@ static int hub_txs(void *self, uint8_t *slot, uint8_t *st) {
     return 1;
 }
 
+/* The held frame reaches the remote (or is lost on the air). */
+static void deliver_dl(bool with_status) {
+    if (R.now - R.dl_at[0] > R.max_lat) R.max_lat = R.now - R.dl_at[0];
+    if (R.drop_dl > 0) R.drop_dl--;
+    else if (R.rrx_n < QN) memcpy(R.rrx[(R.rrx_h + R.rrx_n++) % QN], R.dl[0], HP_RF_INNER_LEN);
+    memmove(R.dl[0], R.dl[1], (size_t)(DLQ - 1) * HP_RF_INNER_LEN);
+    memmove(&R.dl_at[0], &R.dl_at[1], (size_t)(DLQ - 1) * sizeof R.dl_at[0]);
+    R.dl_n--;
+    if (with_status) status(0x00);
+}
+
+static int hub_times(void *self, uint32_t *rx_at, uint32_t *tx_at) {
+    (void)self;
+    *rx_at = R.last_rx_at;
+    *tx_at = R.last_wr;
+    return 1;
+}
+
 static int rem_send(void *self, const uint8_t *f, size_t n) {
     (void)self;
     if (n != HP_RF_INNER_LEN) return -HP_E_INVAL;
@@ -98,14 +134,11 @@ static int rem_send(void *self, const uint8_t *f, size_t n) {
         status(0x00); /* the stale status seen at link-up */
     }
     R.last_uplink = R.now;
-    if (R.hrx_n < QN) memcpy(R.hrx[(R.hrx_h + R.hrx_n++) % QN], f, n);
-    if (R.dl_v) { /* the hub's frame rides on this transmission */
-        R.dl_v = false;
-        R.depth_now = 0;
-        if (R.drop_dl > 0) R.drop_dl--;
-        else if (R.rrx_n < QN) memcpy(R.rrx[(R.rrx_h + R.rrx_n++) % QN], R.dl, HP_RF_INNER_LEN);
-        status(0x00);
+    if (R.hrx_n < QN) {
+        R.hrx_at[(R.hrx_h + R.hrx_n) % QN] = R.now;
+        memcpy(R.hrx[(R.hrx_h + R.hrx_n++) % QN], f, n);
     }
+    if (R.dl_n && R.now - R.dl_at[0] >= UPLINK_PREP_MS) deliver_dl(R.model == MODEL_S2); /* the hub's frame rides on this transmission */
     return 0;
 }
 static int rem_recv(void *self, uint8_t *f, size_t cap, int ms) {
@@ -118,12 +151,12 @@ static int rem_recv(void *self, uint8_t *f, size_t cap, int ms) {
 }
 
 static void radio_tick(void) {
+    while (R.model == MODEL_S3 && R.up && R.dl_n && R.now - R.dl_at[0] >= S3_DELIVER_MS) deliver_dl(false);
     if (R.up && R.now - R.last_uplink >= IDLE_DROP_MS) {
         R.up = false;
         R.lost_pending = true;
-        if (R.dl_v) { /* dropped with a frame pending */
-            R.dl_v = false;
-            R.depth_now = 0;
+        while (R.dl_n) { /* dropped with frames pending */
+            R.dl_n--;
             status(0x01);
         }
     }
@@ -145,11 +178,12 @@ static void rem_deliver(void *ctx, const hp_rf_msg_t *m) {
     if (m->type == HP_MSG_TILE_UPDATE) ntiles++;
 }
 
-static void world_init(bool poll) {
+static void world_init(bool poll, model_t model) {
     memset(&R, 0, sizeof R);
+    R.model = model;
     R.now = 1000;
-    R.hub_t = (hp_rf_transport){NULL, hub_send, hub_recv, claim, hub_attached, hub_txs};
-    R.rem_t = (hp_rf_transport){NULL, rem_send, rem_recv, claim, NULL, NULL};
+    R.hub_t = (hp_rf_transport){NULL, hub_send, hub_recv, claim, hub_attached, hub_txs, hub_times};
+    R.rem_t = (hp_rf_transport){NULL, rem_send, rem_recv, claim, NULL, NULL, NULL};
     npages = ntiles = 0;
     hub_ctx_init(&H);
     hub_set_clock(&H, clk, NULL);
@@ -198,8 +232,8 @@ static int send_uplink(void) { /* the stand-in for a key press: any object the h
 #define B64_A "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB"
 #define B64_B "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJC"
 
-static void test_uplink_acked_without_retries_with_polling(void) {
-    world_init(true);
+static void test_uplink_acked_without_retries_with_polling(model_t m) {
+    world_init(true, m);
     run(1000); /* polls bring the link up */
     CT_CHECK(R.up);
     for (int i = 0; i < 5; i++) { /* five "key presses", one after another */
@@ -216,8 +250,8 @@ static void test_uplink_acked_without_retries_with_polling(void) {
     CT_EQ(R.hub_writes_while_down, 0);
 }
 
-static void test_without_polling_the_ack_waits_for_the_retry(void) {
-    world_init(false);
+static void test_without_polling_the_ack_waits_for_the_retry(void) { /* S2 only */
+    world_init(false, MODEL_S2);
     CT_EQ(send_uplink(), 0);
     run(100);
     CT_EQ(hp_rf_link_status(&RL).queued, 1u); /* the ack is stuck in the radio until the remote speaks again */
@@ -225,8 +259,8 @@ static void test_without_polling_the_ack_waits_for_the_retry(void) {
     CT_EQ(hp_rf_link_status(&RL).queued, 0u); /* the retry carried it */
 }
 
-static void test_two_frame_page_delivered_after_link_up(void) {
-    world_init(true);
+static void test_two_frame_page_delivered_after_link_up(model_t m) {
+    world_init(true, m);
     run(400);
     CT_CHECK(R.up);
     CT_CHECK(push_page(3, B64_A));
@@ -239,8 +273,8 @@ static void test_two_frame_page_delivered_after_link_up(void) {
     CT_CHECK(R.max_depth <= 1);
 }
 
-static void test_page_pushed_while_link_down_is_sent_on_link_up(void) {
-    world_init(true);
+static void test_page_pushed_while_link_down_is_sent_on_link_up(model_t m) {
+    world_init(true, m);
     run(400);
     hp_rf_link_set_awake(&RL, false, R.now); /* remote goes quiet: link lost after 500 ms */
     run(800);
@@ -262,8 +296,8 @@ static void test_page_pushed_while_link_down_is_sent_on_link_up(void) {
     CT_CHECK(R.max_depth <= 1);
 }
 
-static void test_no_duplicate_ack_pile_up(void) {
-    world_init(true);
+static void test_no_duplicate_ack_pile_up(model_t m) {
+    world_init(true, m);
     run(400);
     R.drop_dl = 3; /* the first acks are lost on the air: the remote retries the object */
     CT_EQ(send_uplink(), 0);
@@ -279,8 +313,8 @@ static void test_no_duplicate_ack_pile_up(void) {
     CT_EQ(R.hub_writes_while_down, 0);
 }
 
-static void test_link_flap_keeps_queue_and_sends_in_order(void) {
-    world_init(true);
+static void test_link_flap_keeps_queue_and_sends_in_order(model_t m) {
+    world_init(true, m);
     run(400);
     CT_CHECK(push_page(1, B64_A));
     hp_rf_link_set_awake(&RL, false, R.now); /* link drops mid-delivery */
@@ -292,12 +326,139 @@ static void test_link_flap_keeps_queue_and_sends_in_order(void) {
     CT_CHECK(R.max_depth <= 1);
 }
 
+/* ---- S3 only: the radio delivers by itself, so only an uplink frame proves delivery ---- */
+
+static void test_s3_key_pair_acked_first_try(void) {
+    world_init(true, MODEL_S3);
+    run(1000);
+    CT_CHECK(R.up);
+    for (int i = 0; i < 2; i++) { /* the second object goes right after the first is acked */
+        CT_EQ(send_uplink(), 0);
+        uint32_t t0 = R.now;
+        while (hp_rf_link_status(&RL).queued && R.now - t0 < 300) run(5);
+        CT_CHECK(R.now - t0 <= 100);
+        CT_EQ(R.remote_objs_sent, i + 1); /* first try */
+    }
+    CT_EQ(R.hub_acks_written, 2);
+    CT_EQ(hp_rf_link_status(&RL).failures, 0u);
+    CT_CHECK(R.max_depth <= 1);
+    CT_CHECK(R.max_lat <= 15);
+}
+
+static void test_s3_two_frame_page_fast(void) {
+    world_init(true, MODEL_S3);
+    run(400);
+    CT_CHECK(push_page(3, B64_A));
+    uint32_t t0 = R.now;
+    while ((npages < 1 || hp_rf_link_status(&H.link).queued) && R.now - t0 < 600) run(5);
+    CT_EQ(npages, 1);
+    CT_CHECK(R.now - t0 <= 120);
+    CT_EQ(hp_rf_link_status(&H.link).queued, 0u);
+    CT_EQ(R.hub_data_written, 2);
+    CT_CHECK(R.max_depth <= 1);
+    CT_EQ(hp_rf_link_status(&H.link).failures, 0u);
+}
+
+static void test_s3_asleep_remote_falls_back_to_timeout(void) {
+    world_init(true, MODEL_S3);
+    run(400);
+    while (R.now - R.last_uplink >= 5) run(5); /* just after a poll: the link stays up for 500 ms more */
+    hp_rf_link_set_awake(&RL, false, R.now);   /* no more polls */
+    CT_CHECK(R.up);
+    CT_CHECK(push_page(3, B64_A));
+    run(400);
+    CT_EQ(npages, 1); /* frame 2 left on the 300 ms timeout */
+    CT_EQ(hp_rf_link_status(&H.link).queued, 0u);
+    CT_EQ(hp_rf_link_status(&H.link).failures, 0u);
+    CT_EQ(hp_rf_link_status(&RL).failures, 0u);
+    CT_CHECK(R.max_depth <= 1);
+    CT_EQ(R.hub_writes_while_down, 0);
+}
+
+static void test_s3_dropped_downlink_dedup(void) {
+    world_init(true, MODEL_S3);
+    run(400);
+    R.drop_dl = 2;
+    CT_EQ(send_uplink(), 0);
+    run(1500);
+    CT_EQ(hp_rf_link_status(&RL).queued, 0u);
+    CT_EQ(hp_rf_link_status(&RL).failures, 0u);
+    CT_EQ(hp_rf_link_status(&H.link).delivered, 1u);
+    CT_CHECK(R.hub_acks_written <= R.remote_objs_sent);
+    CT_CHECK(R.max_depth <= 1);
+}
+
+/* An uplink that arrived BEFORE the write but is read after it (late reader) must not release the frame. */
+static void test_late_read_of_pre_write_uplink_does_not_release(model_t m) {
+    world_init(true, m);
+    run(1000);
+    R.hold_rx = true; /* the hub's reader is behind */
+    int polls = R.remote_polls_sent;
+    while (R.remote_polls_sent == polls) run(5); /* a poll arrives, unread */
+    CT_CHECK(push_page(3, B64_A));
+    run(5); /* the hub writes frame 1 */
+    CT_EQ(R.hub_data_written, 1);
+    R.hold_rx = false;
+    run(5); /* the stale uplink is read 5 ms after the write */
+    CT_EQ(R.hub_data_written, 1);
+    CT_CHECK(R.max_depth <= 1);
+    run(1500);
+    CT_EQ(npages, 1);
+    CT_EQ(R.hub_data_written, 2);
+    CT_CHECK(R.max_depth <= 1);
+}
+
+/* An uplink arriving within the margin after the write does not release; one after the margin does. */
+static void test_uplink_margin(model_t m) {
+    for (int late = 0; late < 2; late++) {
+        world_init(true, m);
+        run(1000);
+        CT_CHECK(push_page(3, B64_A));
+        run(5); /* frame 1 written at R.now */
+        CT_EQ(R.hub_data_written, 1);
+        uint32_t t_w = R.now;
+        if (late) run(UPLINK_PREP_MS); /* arrives exactly one margin after the write */
+        CT_EQ(send_uplink(), 0);
+        (void)t_w;
+        run(5); /* the hub reads it */
+        CT_EQ(R.hub_acks_written, late ? 1 : 0); /* the uplink's ack goes out at once only if it released the slot */
+        CT_EQ(R.hub_data_written, 1);
+        CT_CHECK(R.max_depth <= 1);
+        run(1500);
+        CT_EQ(npages, 1);
+        CT_CHECK(R.max_depth <= 1);
+    }
+}
+
+/* A transport without frame_times: no uplink release, the 300 ms timeout (or a status 00) only. */
+static void test_without_stamps_release_is_by_timeout(void) {
+    world_init(true, MODEL_S3);
+    R.hub_t.frame_times = NULL;
+    run(400);
+    CT_CHECK(push_page(3, B64_A));
+    uint32_t t0 = R.now;
+    while (npages < 1 && R.now - t0 < 800) run(5);
+    CT_EQ(npages, 1);
+    CT_CHECK(R.now - t0 >= (uint32_t)HP_LINK_OUT_TIMEOUT_MS);
+    CT_EQ(R.hub_data_written, 2);
+    CT_CHECK(R.max_depth <= 1);
+}
+
 int main(void) {
-    test_uplink_acked_without_retries_with_polling();
+    for (model_t m = MODEL_S2; m <= MODEL_S3; m++) {
+        test_uplink_acked_without_retries_with_polling(m);
+        test_two_frame_page_delivered_after_link_up(m);
+        test_page_pushed_while_link_down_is_sent_on_link_up(m);
+        test_no_duplicate_ack_pile_up(m);
+        test_link_flap_keeps_queue_and_sends_in_order(m);
+        test_late_read_of_pre_write_uplink_does_not_release(m);
+        test_uplink_margin(m);
+    }
     test_without_polling_the_ack_waits_for_the_retry();
-    test_two_frame_page_delivered_after_link_up();
-    test_page_pushed_while_link_down_is_sent_on_link_up();
-    test_no_duplicate_ack_pile_up();
-    test_link_flap_keeps_queue_and_sends_in_order();
+    test_without_stamps_release_is_by_timeout();
+    test_s3_key_pair_acked_first_try();
+    test_s3_two_frame_page_fast();
+    test_s3_asleep_remote_falls_back_to_timeout();
+    test_s3_dropped_downlink_dedup();
     return CT_DONE();
 }

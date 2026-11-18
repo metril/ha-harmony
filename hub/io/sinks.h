@@ -38,6 +38,11 @@ typedef struct hp_rf_transport {
     /* Optional (NULL = the transport has no TX status): pops one pending TX-status report. Returns 1
      * and fills *slot / *status, or 0 when none is pending. Never blocks. */
     int (*tx_status)(void *self, uint8_t *slot, uint8_t *status);
+    /* Optional (NULL = no stamps): times in the transport's own clock (ms, wraps at 32 bits). Returns 1 and
+     * fills *rx_at = when the frame most recently returned by recv() ARRIVED (stamped by the reader, not
+     * when recv read it) and *tx_at = when the last send() finished its write; else 0. Lets the strict
+     * downlink tell an uplink that postdates a write (proves delivery) from one that was already queued. */
+    int (*frame_times)(void *self, uint32_t *rx_at, uint32_t *tx_at);
 } hp_rf_transport;
 
 typedef struct {

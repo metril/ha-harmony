@@ -112,7 +112,7 @@ static void net_init(net_t *n, bool wrapped) {
         ep_t *e = &n->ep[i];
         e->net = n;
         e->idx = i;
-        e->t = (hp_rf_transport){e, t_send, t_recv, t_claim, NULL, NULL};
+        e->t = (hp_rf_transport){e, t_send, t_recv, t_claim, NULL, NULL, NULL};
         hp_rf_link_init(&e->link, &e->t, wrapped, 1, deliver, e);
     }
     n->now = 1000;
@@ -294,7 +294,7 @@ static int noent_send(void *self, const uint8_t *f, size_t l) { (void)self; (voi
 static int idle_recv(void *self, uint8_t *f, size_t c, int t) { (void)self; (void)f; (void)c; (void)t; return 0; }
 
 static void test_noent_synchronous(void) {
-    hp_rf_transport t = {NULL, noent_send, idle_recv, t_claim, NULL, NULL};
+    hp_rf_transport t = {NULL, noent_send, idle_recv, t_claim, NULL, NULL, NULL};
     hp_rf_link_t l;
     uint8_t b[1] = {0};
     hp_rf_link_init(&l, &t, true, 1, NULL, NULL);
@@ -414,6 +414,62 @@ static void test_link_debug_log(void) {
     CT_CHECK(strstr(buf, "tx done"));
 }
 
+/* Remote polling: fast (HP_LINK_POLL_MS) while a partial object is being reassembled, for at most 1 s. */
+static void test_poll_fast_while_partial(void) {
+    net_t n;
+    net_init(&n, false);
+    hp_rf_link_t *rl = &n.ep[1].link;
+    hp_rf_link_set_poll(rl, HP_LINK_POLL_MS, HP_LINK_IDLE_POLL_MS);
+    hp_rf_link_set_awake(rl, true, n.now);
+    uint8_t body[30];
+    memset(body, 7, sizeof body);
+    /* ep0 sends a 2-frame object; hold back frame 2 by pacing, ep1 only pumps */
+    n.ep[0].link.gap_ms = 100000;
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    (void)hp_rf_link_pump(rl, n.now); /* frame 1 rx; the wake poll goes out */
+    CT_CHECK(rl->as.active);
+    uint32_t t = rl->last_tx;
+    CT_CHECK(hp_rf_link_next_timeout_ms(rl, n.now) <= (int)HP_LINK_POLL_MS);
+    n.now = t + HP_LINK_POLL_MS - 1;
+    CT_CHECK(hp_rf_link_next_timeout_ms(rl, n.now) == 1);
+    n.now = t + HP_LINK_POLL_MS;
+    CT_EQ(hp_rf_link_next_timeout_ms(rl, n.now), 0);
+    (void)hp_rf_link_pump(rl, n.now); /* polls at the fast interval */
+    CT_EQ(rl->last_tx, n.now);
+    /* 1 s after the last rx the idle interval applies again */
+    n.now = rl->last_rx + 1000;
+    (void)hp_rf_link_pump(rl, n.now);
+    CT_CHECK(hp_rf_link_next_timeout_ms(rl, n.now) > (int)HP_LINK_POLL_MS);
+    /* completion: back to idle at once */
+    n.ep[0].link.gap_ms = 0;
+    n.ep[0].link.tx.next_at = n.now;
+    run(&n, 40);
+    CT_EQ(n.ep[1].ngot, 1);
+    CT_CHECK(!rl->as.active);
+    CT_CHECK(hp_rf_link_next_timeout_ms(rl, n.now) > (int)HP_LINK_POLL_MS);
+}
+
+/* A partial object does not make an asleep remote poll. */
+static void test_no_fast_poll_while_asleep(void) {
+    net_t n;
+    net_init(&n, false);
+    hp_rf_link_t *rl = &n.ep[1].link;
+    hp_rf_link_set_poll(rl, HP_LINK_POLL_MS, HP_LINK_IDLE_POLL_MS);
+    hp_rf_link_set_awake(rl, true, n.now);
+    uint8_t body[30];
+    memset(body, 7, sizeof body);
+    n.ep[0].link.gap_ms = 100000;
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    (void)hp_rf_link_pump(rl, n.now);
+    CT_CHECK(rl->as.active);
+    hp_rf_link_set_awake(rl, false, n.now);
+    uint32_t last = rl->last_tx;
+    n.now += 500;
+    (void)hp_rf_link_pump(rl, n.now);
+    CT_EQ(rl->last_tx, last);
+    CT_EQ(hp_rf_link_next_timeout_ms(rl, n.now), -1);
+}
+
 int main(void) {
     test_basic_both_directions(true);
     test_basic_both_directions(false);
@@ -430,5 +486,7 @@ int main(void) {
     test_pacing_single_frame_unaffected();
     test_pacing_retry_repaces();
     test_link_debug_log();
+    test_poll_fast_while_partial();
+    test_no_fast_poll_while_asleep();
     return CT_DONE();
 }

@@ -23,6 +23,7 @@
 #define HP_LINK_GAP_MS 20     /* default minimum gap between the frames of one object */
 #define HP_LINK_SLOT_ANY 0xFF /* tx_slot: accept a TX status for any slot */
 #define HP_LINK_OUT_TIMEOUT_MS 300 /* strict downlink: a written frame with no TX status is taken as done after this */
+#define HP_LINK_UPLINK_RELEASE_MS 5 /* strict downlink: an uplink frame arriving this long after a write finished releases the radio slot */
 #define HP_LINK_POLL_MS 30         /* remote polling: gap while an object awaits its ack */
 #define HP_LINK_IDLE_POLL_MS 250   /* ...and otherwise, while awake */
 
@@ -65,18 +66,25 @@ typedef struct {
     uint32_t now_dbg;      /* last caller clock, for log lines only */
     uint32_t rx_frames;    /* frames received from the peer (any kind, polls included), monotonic */
     uint32_t last_tx;      /* clock of the last frame handed to the transport */
+    uint32_t last_rx;      /* clock of the last frame received from the peer (any kind) */
     /* Remote polling (set_poll/set_awake): a poll frame whenever nothing was sent for poll_ms while an
-     * object awaits its ack, else idle_poll_ms, only while awake. The peer's downlink rides on our uplink. */
+     * object awaits its ack or a partial object is being reassembled (and a frame was received within the last
+     * 1 s: this releases the hub's slot for the next frame), else idle_poll_ms, only while awake. The peer's downlink rides on our uplink. */
     uint32_t poll_ms, idle_poll_ms;
     bool awake;
     /* Strict downlink (hub; `strict` set after init, effective only when the transport has tx_status):
-     * at most one frame is in the radio. The next one is written after TX status 00 for it; on 01 it is
-     * kept and rewritten once the link is up. Acks go first and coalesce (newest replaces an unwritten
+     * at most one frame is in the radio. The next one is written once the previous is released: by TX status 00,
+     * by any uplink frame that ARRIVED >= HP_LINK_UPLINK_RELEASE_MS after the write finished (transport stamps via
+     * frame_times; the radio emits no per-frame 00 while the link is up, yet delivers; a later host frame proves
+     * delivery; without stamps this path is off), or by the HP_LINK_OUT_TIMEOUT_MS fallback.
+     * On 01 the frame is kept and rewritten once the link is up. Acks go first and coalesce (newest replaces an unwritten
      * one). Object retries and the link-loss reset do not run while a frame is outstanding / the link is down. */
     bool strict;
     bool out_busy, out_ack;
     hp_rf_inner_t out_fr;
     uint32_t out_at;
+    uint32_t out_wr;       /* the write's finish time in the transport's clock (frame_times); valid when out_wr_ok */
+    bool out_wr_ok;
     bool pa_v, pd_v;       /* a pending (unwritten) ack / data frame */
     hp_rf_inner_t pa, pd;
 } hp_rf_link_t;

@@ -206,7 +206,7 @@ int rf_link_open(rf_link_t *l, const hp_rf_spi_cfg_t *cfg) {
     return -HP_E_BUSY;
   }
   l->tp = tp;
-  l->lt = (hp_rf_transport){l, lt_send, lt_recv, lt_claim, NULL, lt_tx_status};
+  l->lt = (hp_rf_transport){l, lt_send, lt_recv, lt_claim, NULL, lt_tx_status, NULL};
   hp_rf_link_init(&l->link, &l->lt, false, 0, deliver, l);
   hp_rf_link_set_poll(&l->link, RF_LINK_POLL_MS, RF_LINK_IDLE_POLL_MS); /* active once the app reports awake */
   if (cfg->debug) hp_rf_link_set_log(&l->link, cfg->log ? cfg->log : hp_rf_log_stderr, cfg->log_ctx);

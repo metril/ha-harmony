@@ -46,6 +46,8 @@ typedef struct {
     pthread_mutex_t mu; /* guards the receive state below */
     pthread_cond_t cv;
     uint8_t q[RXQ][HP_RF_INNER_LEN];
+    uint32_t q_at[RXQ];   /* arrival time (reader thread) of each queued frame */
+    uint32_t last_rx_at;  /* arrival time of the frame recv() returned last */
     size_t qhead, qn;
     bool attached, lost_pending;
     int wake[2]; /* self-pipe: readable while recv() has something to return */
@@ -57,6 +59,7 @@ typedef struct {
     pthread_mutex_t tx_mu; /* serialises write() and its backoff state */
     uint64_t next_ok;
     unsigned delay_ms;
+    uint32_t last_tx_at;  /* when the last successful write() returned */
 
     bool debug;
     void (*log)(void *ctx, const char *line);
@@ -156,6 +159,7 @@ static int spi_write(spi_t *s, const uint8_t *buf, size_t n) {
             rc = -HP_E_IO;
         } else {
             s->delay_ms = 0;
+            s->last_tx_at = (uint32_t)s->ops.now_ms(s->ops.ctx);
         }
     }
     pthread_mutex_unlock(&s->tx_mu);
@@ -183,7 +187,9 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
         return;
     }
     if (s->role == HP_RF_SPI_ROLE_HUB) {
-        if (n == HP_RF_HUB_FRAME_LEN && b[0] == REPORT_HUB_DATA) inner = b + 2;
+        /* only the configured peer's data: another slot's uplink must not look like our remote's
+         * (same filter as the TX status above) */
+        if (n == HP_RF_HUB_FRAME_LEN && b[0] == REPORT_HUB_DATA && b[1] == s->slot) inner = b + 2;
     } else if (n == HP_RF_REMOTE_FRAME_LEN && b[0] == REPORT_REMOTE_DATA && b[2] == 0x12) {
         inner = b + 4;
     }
@@ -193,7 +199,9 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
             s->qhead = (s->qhead + 1) % RXQ;
             s->qn--;
         }
-        memcpy(s->q[(s->qhead + s->qn++) % RXQ], inner, HP_RF_INNER_LEN);
+        size_t qi = (s->qhead + s->qn++) % RXQ;
+        memcpy(s->q[qi], inner, HP_RF_INNER_LEN);
+        s->q_at[qi] = (uint32_t)s->ops.now_ms(s->ops.ctx);
         push_event(s);
     } else if ((b[0] == 0x10 || b[0] == 0x11) && n >= 5 && b[1] == s->slot && b[2] == 0x41 && b[3] == 0x04) {
         int up = !(b[4] & LINK_LOST);
@@ -296,6 +304,7 @@ static int spi_recv(void *self, uint8_t *frame, size_t cap, int timeout_ms) {
                 memcpy(frame, s->q[s->qhead], HP_RF_INNER_LEN);
                 rc = HP_RF_INNER_LEN;
             }
+            s->last_rx_at = s->q_at[s->qhead];
             s->qhead = (s->qhead + 1) % RXQ;
             s->qn--;
             break;
@@ -312,6 +321,17 @@ static int spi_recv(void *self, uint8_t *frame, size_t cap, int timeout_ms) {
     }
     pthread_mutex_unlock(&s->mu);
     return rc;
+}
+
+static int spi_frame_times(void *self, uint32_t *rx_at, uint32_t *tx_at) {
+    spi_t *s = self;
+    pthread_mutex_lock(&s->mu);
+    *rx_at = s->last_rx_at;
+    pthread_mutex_unlock(&s->mu);
+    pthread_mutex_lock(&s->tx_mu);
+    *tx_at = s->last_tx_at;
+    pthread_mutex_unlock(&s->tx_mu);
+    return 1;
 }
 
 static int spi_tx_status(void *self, uint8_t *slot, uint8_t *status) {
@@ -393,7 +413,7 @@ int hp_rf_spi_open(const hp_rf_spi_cfg_t *cfg, hp_rf_transport **out) {
     int pr = pthread_create(&s->reader, &at, reader_main, s);
     pthread_attr_destroy(&at);
     if (pr != 0) goto fail_pipe;
-    s->t = (hp_rf_transport){s, spi_send, spi_recv, spi_claim, spi_attached, spi_tx_status};
+    s->t = (hp_rf_transport){s, spi_send, spi_recv, spi_claim, spi_attached, spi_tx_status, spi_frame_times};
     if (spi_write(s, CMD_INIT, sizeof CMD_INIT) < 0)
         fprintf(stderr, "rf_spi: init command failed (the chip's ready line may be stuck); continuing\n");
     *out = &s->t;

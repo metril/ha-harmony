@@ -175,7 +175,7 @@ int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *h) {
     h->fd = -1;
     h->ir = (hp_ir_sink){h, ir_send};
     h->bt = (hp_bt_sink){h, bt_key};
-    h->rf = (hp_rf_transport){h, rf_send, rf_recv, rf_claim, NULL, NULL};
+    h->rf = (hp_rf_transport){h, rf_send, rf_recv, rf_claim, NULL, NULL, NULL};
     h->sinks = (hp_sinks_t){&h->ir, &h->bt, &h->rf};
     int fd = open_dev(h);
     if (fd < 0) return fd;

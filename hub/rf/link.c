@@ -81,9 +81,15 @@ static int emit(void *vl, const hp_rf_inner_t *fr) {
     return rc;
 }
 
-/* The frame in the radio is finished: delivered (status 00) or not (01 / link loss: kept for a rewrite). */
-static void out_done(hp_rf_link_t *l, bool delivered) {
+typedef enum { REL_ST00, REL_ST01, REL_UPLINK, REL_TIMEOUT, REL_LOSS } rel_t;
+
+/* The frame in the radio is finished: delivered (status 00, an uplink frame after it, the timeout) or not
+ * (01 / link loss: kept for a rewrite). */
+static void out_done(hp_rf_link_t *l, bool delivered, rel_t why) {
     if (!l->out_busy) return;
+    static const char *const names[] = {"status 00", "status 01", "uplink", "timeout", "link loss"};
+    lg(l, l->now_dbg, "radio frame (%s) released by %s after %u ms", l->out_ack ? "ack" : "data", names[why],
+       (unsigned)(l->now_dbg - l->out_at));
     l->out_busy = false;
     if (delivered) {
         if (!l->out_ack) l->released = true;
@@ -99,8 +105,7 @@ static void out_done(hp_rf_link_t *l, bool delivered) {
 static void flush_out(hp_rf_link_t *l, uint32_t now) {
     if (!strict_on(l)) return;
     if (l->out_busy && (int32_t)(now - l->out_at) >= HP_LINK_OUT_TIMEOUT_MS) {
-        lg(l, now, "no TX status for the frame in the radio: taking it as done");
-        out_done(l, true);
+        out_done(l, true, REL_TIMEOUT);
     }
     if (l->out_busy || !link_up(l)) return;
     bool ack = l->pa_v;
@@ -111,6 +116,8 @@ static void flush_out(hp_rf_link_t *l, uint32_t now) {
     l->out_ack = ack;
     l->out_fr = *fr;
     l->out_at = now;
+    uint32_t rx_at;
+    l->out_wr_ok = l->tp->frame_times && l->tp->frame_times(l->tp->self, &rx_at, &l->out_wr);
     if (ack) l->pa_v = false;
     else {
         l->pd_v = false;
@@ -122,7 +129,7 @@ static void flush_out(hp_rf_link_t *l, uint32_t now) {
 static void reset(hp_rf_link_t *l) {
     if (strict_on(l)) { /* the link dropped: keep what is queued (it is sent after the next link-up) */
         l->as.active = 0;
-        out_done(l, false);
+        out_done(l, false, REL_LOSS);
         return;
     }
     hp_rf_asm_init(&l->as);
@@ -180,6 +187,14 @@ static void on_frame(hp_rf_link_t *l, const uint8_t *f, size_t n) {
         memcpy(in.b, f, HP_RF_INNER_LEN);
     }
     l->rx_frames++;
+    l->last_rx = l->now_dbg;
+    /* An uplink frame that ARRIVED after the write finished proves the downlink frame was delivered: the radio
+     * sends no per-frame TX status while the link is up. Arrival and write are the transport's own stamps
+     * (the reader thread's clock, not when we read); the margin covers a frame already in flight at the write. */
+    uint32_t rx_at, tx_at;
+    if (strict_on(l) && l->out_busy && l->out_wr_ok && l->tp->frame_times &&
+        l->tp->frame_times(l->tp->self, &rx_at, &tx_at) && (int32_t)(rx_at - l->out_wr) >= HP_LINK_UPLINK_RELEASE_MS)
+        out_done(l, true, REL_UPLINK);
     switch (hp_rf_asm_push(&l->as, &in, &msg, &ack)) {
     case HP_ASM_COMPLETE:
         l->delivered++;
@@ -256,15 +271,16 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
     }
 }
 
-static uint32_t poll_iv(const hp_rf_link_t *l) {
+static uint32_t poll_iv(const hp_rf_link_t *l, uint32_t now) {
     bool waiting = l->qn && l->started && l->tx.state == HP_RF_TX_WAIT;
-    return waiting || !l->idle_poll_ms ? l->poll_ms : l->idle_poll_ms;
+    bool partial = l->as.active && (int32_t)(now - l->last_rx) < 1000; /* the peer has more frames of an object */
+    return waiting || partial || !l->idle_poll_ms ? l->poll_ms : l->idle_poll_ms;
 }
 
 /* ms until the next poll is due (0 = now), -1 when not polling. */
 static int poll_due(const hp_rf_link_t *l, uint32_t now) {
     if (!l->poll_ms || !l->awake) return -1;
-    int32_t d = (int32_t)(l->last_tx + poll_iv(l) - now);
+    int32_t d = (int32_t)(l->last_tx + poll_iv(l, now) - now);
     return d < 0 ? 0 : d;
 }
 
@@ -297,7 +313,7 @@ int hp_rf_link_pump(hp_rf_link_t *l, uint32_t now_ms) {
             bool mine = l->tx_slot == HP_LINK_SLOT_ANY || sl == l->tx_slot;
             lg(l, now_ms, "tx status slot %u status 0x%02x%s", (unsigned)sl, (unsigned)st, mine ? "" : " (other slot, ignored)");
             if (!mine) continue;
-            if (strict_on(l)) out_done(l, st == 0x00); /* a status with nothing in the radio (e.g. at link-up) is ignored */
+            if (strict_on(l)) out_done(l, st == 0x00, st == 0x00 ? REL_ST00 : REL_ST01); /* a status with nothing in the radio (e.g. at link-up) is ignored */
             else l->released = true;
         }
     }

@@ -20,7 +20,8 @@
  *
  * POLLING. The hub's frames reach the remote only piggybacked on the remote's own transmissions, so
  * while awake (the app reports it through set_awake) the link sends a minimal poll frame whenever
- * nothing was transmitted for RF_LINK_POLL_MS while an object awaits its ack, and every
+ * nothing was transmitted for RF_LINK_POLL_MS while an object awaits its ack or a partial downlink
+ * object is being reassembled (a frame heard within the last second), and every
  * RF_LINK_IDLE_POLL_MS otherwise; none while asleep. Any frame heard from the hub raises
  * APP_LINK_EV_ALIVE. */
 #include <stdbool.h>

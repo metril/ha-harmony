@@ -334,6 +334,37 @@ static void test_write_results_and_backoff(void) {
     hp_rf_spi_destroy(t);
 }
 
+/* Hub role: data from another slot is not the peer's (it must not release our frame); frame_times stamps
+ * arrival (reader clock) and the last write. */
+static void test_hub_data_slot_filter_and_stamps(void) {
+    fake_t f;
+    fake_init(&f);
+    hp_rf_transport *t = NULL;
+    uint8_t fr[64], rep[30];
+    CT_EQ(open_fake(&f, 2, &t), 0);
+    t->claim(t->self);
+    CT_CHECK(t->frame_times != NULL);
+    f.now = 100100;
+    data_report(rep, 1, 0x10); /* another slot */
+    feed(&f, rep, 30);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 100), 0);
+    f.now = 100200;
+    data_report(rep, 2, 0x20);
+    feed(&f, rep, 30);
+    wait_attached(t, true); /* queued by the reader at 100200 */
+    f.now = 100300;         /* read later than it arrived */
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
+    CT_MEM_EQ(fr, rep + 2, 28);
+    uint32_t rx = 0, tx = 0;
+    CT_EQ(t->frame_times(t->self, &rx, &tx), 1);
+    CT_EQ(rx, 100200u); /* the reader's arrival time, not the read time */
+    f.now = 100400;
+    CT_EQ(t->send(t->self, fr, 28), 0);
+    CT_EQ(t->frame_times(t->self, &rx, &tx), 1);
+    CT_EQ(tx, 100400u);
+    hp_rf_spi_destroy(t);
+}
+
 static void test_reader_classifies(void) {
     fake_t f;
     fake_init(&f);
@@ -971,6 +1002,7 @@ int main(void) {
     CT_RUN(test_two_endpoint_link);
     CT_RUN(test_two_endpoint_every_size);
     CT_RUN(test_tx_status_surfaced);
+    CT_RUN(test_hub_data_slot_filter_and_stamps);
     CT_RUN(test_link_transition_logs);
     CT_RUN(test_rf_debug_frames);
     (void)nwrites;
