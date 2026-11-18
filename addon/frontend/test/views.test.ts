@@ -72,20 +72,37 @@ describe('screens render with a realistic config', () => {
     expect(ov.shadowRoot!.querySelector('button[aria-disabled="true"]')?.textContent).toContain('Add first device');
   });
 
-  it('devices: 60+ commands listed read-only; Send IR fires the shown code through ir/test', async () => {
+  it('devices: keypad of 60+ commands, each with its own Send IR; the list view has every row', async () => {
     const { app, calls } = await boot({ hash: '#/devices/tv' });
     const dv = app.shadowRoot!.querySelector('hh-devices')!;
     await settle(dv as HTMLElement);
-    expect(dv.shadowRoot!.querySelectorAll('tbody tr').length).toBe(61);
+    expect(dv.shadowRoot!.querySelectorAll('.key .k').length).toBeGreaterThan(60);
     const send = dv.shadowRoot!.querySelector('hh-send-ir')! as HTMLElement & { updateComplete: Promise<unknown> };
     await send.updateComplete;
     const btn = send.shadowRoot!.querySelector('button')!;
     expect(btn.getAttribute('aria-disabled')).toBe('false');
+    expect(btn.getAttribute('aria-label')).toBe('Send IR for power on');
     btn.click();
     await vi.waitFor(() => expect(calls.find((c) => c.url.includes('ir/test'))).toBeTruthy());
-    expect(JSON.parse(calls.find((c) => c.url.includes('ir/test'))!.body!)).toEqual({ hub: 'h', ir: { proto: 'nec', addr: 4, cmd: 0 } });
-    expect(text(dv)).toContain('Living room TV');
-    expect(text(dv)).toContain('From IR archive');
+    expect(JSON.parse(calls.find((c) => c.url.includes('ir/test'))!.body!)).toEqual({ hub: 'h', ir: { proto: 'nec', addr: 4, cmd: 2 } });
+    expect(text(dv)).toContain('IR archive · Samsung UE55');
+    ([...dv.shadowRoot!.querySelectorAll('.seg button')].find((b) => b.textContent === 'List view') as HTMLButtonElement).click();
+    await settle(dv as HTMLElement);
+    expect(dv.shadowRoot!.querySelectorAll('tbody tr').length).toBe(61);
+  });
+
+  it('devices gallery: a card per device with power status, counts and source, plus Add device', async () => {
+    const { app } = await boot({ hash: '#/devices' });
+    const dv = app.shadowRoot!.querySelector('hh-devices')!;
+    await settle(dv as HTMLElement);
+    expect(dv.shadowRoot!.querySelectorAll('.dcard').length).toBe(2);
+    const t = text(dv);
+    expect(t).toContain('Power on + off');
+    expect(t).toContain('Power toggle only');
+    expect(t).toContain('61 commands');
+    expect(t).toContain('IR archive · Samsung UE55');
+    expect(t).toContain('Your Harmony backup');
+    expect(dv.shadowRoot!.querySelector('a.add')!.getAttribute('href')).toBe('#/devices/new');
   });
 
   it('history: current rev, newest earlier rev revertable', async () => {
