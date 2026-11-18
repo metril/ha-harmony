@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 (2026-11-18)
+
+- Fix: the add-on failed to start under a Supervisor ("/bin/sh: can't open '/init': Permission denied"). The
+  AppArmor profile allowed executing the s6 scripts but not reading them; it now grants read as well.
+
 ## 0.3.0 (2026-11-18)
 
 - Reverting to the previous version keeps the config it replaces in the history, so a revert can be reverted.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 (2026-11-18)
+
+- Add-on: fix start-up failure under a Supervisor (AppArmor profile now grants read on the s6 scripts).
+
 ## 0.3.0 (2026-11-18)
 
 ### BREAKING

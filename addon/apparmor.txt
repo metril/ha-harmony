@@ -1,7 +1,10 @@
 #include <tunables/global>
 
-# Least-privilege profile for the editor add-on. NOT yet exercised under a Supervisor: loading it
-# and tuning it in complain mode is still to do (see the add-on security guide).
+# Least-privilege profile for the editor add-on, modelled on the official example profile.
+# Every executable also needs READ: /init and the s6 service scripts are #!/bin/sh scripts, and
+# the interpreter (busybox sh) must open them. "ix" alone lets the kernel exec them but made sh fail
+# with "can't open '/init': Permission denied" (0.3.0). Not yet loaded under a real Supervisor.
+
 profile ha_harmony_editor flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
@@ -12,6 +15,9 @@ profile ha_harmony_editor flags=(attach_disconnected,mediate_deleted) {
   capability setgid,
   capability kill,
   capability dac_override,
+  capability dac_read_search,
+  capability fsetid,
+  capability setpcap,
 
   signal (send) set=(kill,term,int,hup,cont),
 
@@ -25,24 +31,30 @@ profile ha_harmony_editor flags=(attach_disconnected,mediate_deleted) {
   deny network packet,
 
   # S6-Overlay (base image init)
-  /init ix,
-  /bin/** ix,
-  /sbin/** ix,
-  /usr/bin/** ix,
-  /usr/sbin/** ix,
-  /run/{s6,s6-rc*,service}/** ix,
-  /package/** ix,
-  /command/** ix,
+  /init rix,
+  /bin/** rix,
+  /sbin/** rix,
+  /usr/bin/** rix,
+  /usr/sbin/** rix,
+  /usr/lib/bashio/** rix,
+  /run/{s6,s6-rc*,service}/** rix,
+  /package/** rix,
+  /command/** rix,
+  /etc/s6-overlay/** r,
   /etc/services.d/** rwix,
   /etc/cont-init.d/** rwix,
   /etc/cont-finish.d/** rwix,
+  /etc/fix-attrs.d/** r,
   /run/{,**} rwk,
   /dev/tty rw,
   /dev/null rw,
+  /dev/{,**} r,
+  /proc/** r,
+  /sys/fs/cgroup/** r,
   /dev/urandom r,
 
   # Python runtime and the application (read-only)
-  /usr/local/** rix,
+  /usr/local/** mrix,
   /usr/lib/** mr,
   /lib/** mr,
   /opt/app/** r,

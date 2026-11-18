@@ -47,3 +47,19 @@ def test_repository_and_build_files():
     assert set(build) == {"aarch64", "amd64"}
     assert (ROOT / "addon/apparmor.txt").read_text().count("profile ha_harmony_editor") == 1
     assert "--require-hashes" in (ROOT / "addon/Dockerfile").read_text()
+
+
+def test_apparmor_profile_lets_the_start_chain_read_what_it_execs():
+    """0.3.0 regression: `/init ix` (no read) made busybox sh fail on the /init script."""
+    import re
+
+    prof = (ROOT / "addon/apparmor.txt").read_text()
+    assert re.search(rf"^profile {CFG['slug']} ", prof, re.MULTILINE)
+    rules = {m.group(1): m.group(2) for m in re.finditer(r"^\s*(/\S+)\s+([a-z]+),", prof, re.MULTILINE)}
+    # shell-script entry points: the interpreter must read them, not just exec
+    for path in ("/init", "/bin/**", "/usr/bin/**", "/package/**", "/command/**", "/etc/services.d/**"):
+        assert "r" in rules[path] and "x" in rules[path], path
+    for path in ("/etc/s6-overlay/**", "/usr/lib/bashio/**", "/opt/app/**", "/opt/deps/**", "/proc/**"):
+        assert "r" in rules[path], path
+    assert "w" in rules["/data/**"] and "w" in rules["/tmp/**"]
+    assert "deny network raw," in prof
