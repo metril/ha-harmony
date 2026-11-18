@@ -149,6 +149,29 @@ jobs:
           cmake --build build-cross-test -j
           ctest --test-dir build-cross-test --output-on-failure -j
 
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: addon/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: addon/frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # budget (gzip): JS 60 KiB, CSS 8 KiB, see scripts/check-size.mjs
+      - run: npm run size
+      - name: Bundle checks run against the built output
+        run: npx vitest run test/csp.test.ts
+
   addon-image:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -160,7 +183,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [c-tests, py-tests, lint, cross-build, addon-image]
+    needs: [c-tests, py-tests, lint, cross-build, frontend, addon-image]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

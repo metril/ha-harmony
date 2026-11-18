@@ -23,7 +23,8 @@ the table below.
 
 | Method | Path | Auth | Summary |
 | --- | --- | --- | --- |
-| GET | `/` | ingress | Placeholder page (no script) |
+| GET | `/` | ingress | The editor UI (`index.html`; placeholder page when the frontend is not built) |
+| GET | `/assets` | ingress | Hashed UI assets under /assets/… (immutable cache; only present when the frontend is built) |
 | GET | `/api/v1/health` | ingress | Versions |
 | GET | `/api/v1/config` | ingress | Draft, applied metadata, history, draft `rev` |
 | PUT | `/api/v1/config/draft` | ingress | Store the draft (honours `If-Match`) |

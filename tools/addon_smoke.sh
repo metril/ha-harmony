@@ -52,6 +52,9 @@ check "health from ingress IP" "$(probe 172.30.32.2 GET /api/v1/health)" 200
 check "health from other peer" "$(probe 172.30.32.3 GET /api/v1/health)" 403
 check "UI from other peer" "$(probe 172.30.32.3 GET /)" 403
 check "UI from ingress IP" "$(probe 172.30.32.2 GET /)" 200
+asset="$(docker exec "$CT" sh -c 'ls /opt/app/frontend/assets | grep "\.js$"' | head -1)"
+check "built bundle present in image" "$([ -n "$asset" ] && echo yes || echo no)" yes
+check "bundle from ingress IP" "$(probe 172.30.32.2 GET "/assets/$asset")" 200
 check "draft write from ingress IP" \
   "$(probe 172.30.32.2 PUT /api/v1/config/draft '{"config":{}}')" 200
 user="$(docker exec "$CT" sh -c "ps -o user,args | grep '[h]armony_addon' | awk '{print \$1}'")"

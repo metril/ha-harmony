@@ -1,13 +1,9 @@
 """docs/addon-api.md must list every route the add-on serves (and nothing it does not)."""
 
 import re
-import tempfile
 from pathlib import Path
 
-from test_addon import router_routes
-
-from harmony_addon.app import create_app
-from harmony_addon.auth import NoAuth
+from test_addon import all_routes
 
 DOC = Path(__file__).resolve().parents[2] / "docs" / "addon-api.md"
 ROW = re.compile(
@@ -16,8 +12,7 @@ ROW = re.compile(
 
 
 def test_every_route_is_in_the_api_doc_with_the_right_auth_class():
-    with tempfile.TemporaryDirectory() as d:
-        served = router_routes(create_app(d, auth=NoAuth()))
+    served = all_routes()
     rows = ROW.findall(DOC.read_text())
     documented = {(m, p) for m, p, _ in rows}
     assert len(documented) == len(rows), "a route is listed twice"

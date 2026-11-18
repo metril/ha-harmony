@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 from aiohttp import FormData
@@ -162,8 +163,16 @@ def _is_bundle(path: str) -> bool:
     return path == "/api/v1/bundle" or path.startswith("/api/v1/bundle/")
 
 
-with tempfile.TemporaryDirectory() as _d:
-    _ALL = router_routes(create_app(_d, auth=NoAuth()))
+def all_routes() -> list[tuple[str, str]]:
+    """The full router, built WITH a static UI so index and /assets are enumerated too."""
+    with tempfile.TemporaryDirectory() as d:
+        ui = Path(d) / "ui"
+        (ui / "assets").mkdir(parents=True)
+        (ui / "index.html").write_text("<!doctype html>")
+        return router_routes(create_app(Path(d) / "data", auth=NoAuth(), static_dir=ui))
+
+
+_ALL = all_routes()
 ROUTES = [("GET", "/"), ("GET", "/nope")] + [r for r in _ALL if not _is_bundle(r[1])]
 BUNDLE_ROUTES = [r for r in _ALL if _is_bundle(r[1])]
 

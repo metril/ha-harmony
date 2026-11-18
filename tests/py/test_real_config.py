@@ -51,15 +51,12 @@ def real_cfg() -> dict:
 
 
 @pytest.fixture
-async def loaded(hass, hub_rf, tmp_path):
-    """HA with the real config file in place and the entry set up against hub --sim."""
+async def loaded(hass, hub_rf, fake_addon):
+    """HA with the real config applied in the add-on and the entry set up against hub --sim."""
     assert REAL is not None
-    hass.config.config_dir = str(tmp_path / "cfg")
-    dest = tmp_path / "cfg" / "ha_harmony" / f"{HUB_ID}.yaml"
-    dest.parent.mkdir(parents=True)
-    dest.write_bytes(REAL.read_bytes())
+    fake_addon.apply_yaml(REAL.read_text(encoding="utf-8"))
 
-    entry = make_entry("127.0.0.1", hub_rf.port)
+    entry = make_entry("127.0.0.1", hub_rf.port, addon=fake_addon)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -150,7 +147,7 @@ def test_stock_power_timing_and_activities_survive_conversion(real_cfg):
 
 
 @pytest.fixture
-async def loaded_fast(hass, hub_rf, tmp_path):
+async def loaded_fast(hass, hub_rf, fake_addon):
     """As `loaded`, but with settle_ms shrunk to 20: the hub waits out settle in real time,
     and these tests are about WHICH IR is sent in WHAT order, not the stock delay values
     (those are pinned by test_stock_power_timing_and_activities_survive_conversion)."""
@@ -159,11 +156,8 @@ async def loaded_fast(hass, hub_rf, tmp_path):
     for d in cfg["devices"]:
         if "settle_ms" in d:
             d["settle_ms"] = 20
-    hass.config.config_dir = str(tmp_path / "cfg")
-    dest = tmp_path / "cfg" / "ha_harmony" / f"{HUB_ID}.yaml"
-    dest.parent.mkdir(parents=True)
-    dest.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
-    entry = make_entry("127.0.0.1", hub_rf.port)
+    fake_addon.apply_yaml(yaml.safe_dump(cfg, sort_keys=False))
+    entry = make_entry("127.0.0.1", hub_rf.port, addon=fake_addon)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()

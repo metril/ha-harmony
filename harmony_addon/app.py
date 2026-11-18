@@ -63,7 +63,8 @@ JSON_TYPES = {"application/json"}
 YAML_TYPES = {"text/yaml", "application/yaml"}
 CSP = (
     "default-src 'none'; base-uri 'none'; form-action 'none'; "
-    "frame-ancestors 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"
+    "frame-ancestors 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+    "connect-src 'self'"
 )
 CSRF_HEADER = "X-HH-CSRF"
 
@@ -114,6 +115,11 @@ def _harden(request: web.Request, resp: web.StreamResponse) -> None:
     resp.headers["Referrer-Policy"] = "no-referrer"
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
+    elif request.path.startswith("/assets/") and resp.status == 200:
+        # build output is content-hashed (vite), so it never changes under one name
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif request.path == "/" and resp.status == 200:
+        resp.headers["Cache-Control"] = "no-cache"
 
 
 def make_auth_mw(auth: Auth):
@@ -683,6 +689,14 @@ async def wait_bundle(request: web.Request) -> web.Response:
             return web.Response(status=204)
 
 
+STATIC_KEY = web.AppKey("static_dir", Path)
+
+
+async def spa_index(request: web.Request) -> web.StreamResponse:
+    # Served as-is: every URL inside is relative, so it works under any ingress prefix.
+    return web.FileResponse(request.app[STATIC_KEY] / "index.html")
+
+
 async def index(request: web.Request) -> web.Response:
     o = request.app[OPTIONS_KEY]
     e = html.escape
@@ -714,6 +728,7 @@ def create_app(
     ir_sender: IrSender | None = None,
     send_clock: Callable[[], float] = time.monotonic,
     irdb_dir: Path | str | None = None,
+    static_dir: Path | str | None = None,
 ) -> web.Application:
     """`auth` guards the ingress routes; the bundle routes always need `bundle_token` (default:
     the 0600 token file under data_dir) from a peer in `bundle_networks` (None: any, for tests)."""
@@ -766,7 +781,14 @@ def create_app(
         app.on_startup.append(_announce)
         app.on_shutdown.append(_withdraw)
     api = "/api/v1"
-    app.router.add_get("/", index)
+    if static_dir is not None and (Path(static_dir) / "index.html").is_file():
+        app[STATIC_KEY] = Path(static_dir)
+        app.router.add_get("/", spa_index)
+        assets = Path(static_dir) / "assets"
+        if assets.is_dir():
+            app.router.add_static("/assets", assets, follow_symlinks=False)
+    else:
+        app.router.add_get("/", index)
     app.router.add_get(f"{api}/health", health)
     app.router.add_get(f"{api}/config", get_config)
     app.router.add_put(f"{api}/config/draft", put_draft)
