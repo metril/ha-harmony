@@ -181,9 +181,27 @@ jobs:
       - name: Build amd64 image and smoke test (ingress IP 200, other peer 403, non-root)
         run: tools/addon_smoke.sh
 
+  hassfest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # pinned by commit: the action is only published on its moving master branch
+      - uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361 # master
+
+  hacs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # pinned by commit: the action is only published on its moving main branch
+      - uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
+        with:
+          category: integration
+
   ci:
     if: always()
-    needs: [c-tests, py-tests, lint, cross-build, frontend, addon-image]
+    needs: [c-tests, py-tests, lint, cross-build, frontend, addon-image, hassfest, hacs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
