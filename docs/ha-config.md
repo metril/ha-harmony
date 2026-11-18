@@ -77,9 +77,13 @@ pages:
   `{flipper: {file, signal}}` or `{smartir: {file, command: "cool.24.auto"}}`; optional `port_mask` 1..255.
   File references are only accepted by the add-on's importer, which inlines them; the integration
   refuses any that remain.
+  Optional `repeats` 1..8 (default 1): the hub sends the frame that many times in total, one frame period
+  apart (`tools/stock_to_ha_config.py` emits it for stock's `min_repeats` on frame-only signals). A hub
+  older than this field ignores it and sends one frame.
 - **Action** in `keys`, `steps`, `off` and page buttons: an IR action; `{device, command}` (a command,
   `power_on`/`power_off`); `{device, input}`; `{activity: <id>|"off"}` (not in `steps`/`off`);
   `{event: name}` (HA only); `{bt: usage}`; `{none: true}`.
+  `{ha: {service, target, data, repeat}}` (Home Assistant only): see [Home Assistant actions](#home-assistant-actions).
 - **Device command names** are free text (max 31 bytes) but `power_on`, `power_off` and names starting with
   `input_` are reserved for the built-ins and rejected. Home Assistant's device buttons and
   `remote.send_command` use the hub's `device_command` verb, so a toggle device is never toggled the
@@ -112,6 +116,11 @@ pages:
   `kind: home|favorites` (at most one each), `activity: <id>` (auto-shown when it starts), `back: true`,
   `list: {rows: N}` (replaces `cols`/`rows`; widgets omit `x`/`y` and become one full-width row each;
   the compiler splits into groups of N rows or 251 bytes, at most 15; the remote pages with Up/Down).
+- **Tile taps**: a tile takes `tap:` (an action, `toggle`, or `none`). Left out, a tile on a `light`, `switch`,
+  `fan`, `cover`, `input_boolean`, `media_player` or `remote` entity toggles it (`<domain>.toggle`), a `scene` or
+  `script` is turned on, a `button` / `input_button` is pressed; other domains do nothing. `tap: toggle` on a
+  domain with no such default is an error. The tap is the tile's soft key (`tap_<id>`), so an `ha:` tap runs in
+  Home Assistant and any other action runs on the hub.
 - **Widget keys**: `icon: <name>|none` (`proto/icons.yaml`), `role: default|primary|secondary|danger`,
   `shape: card|row|pill|monogram` (list pages default `row`), `icon_only: true` (label kept, not drawn),
   `nav: next|prev|home|<page id>` (button without `action`; handled on the remote, no key event).
@@ -123,6 +132,117 @@ pages:
 - **Hub limits** (`hub/engine/mapping.h`): 16 devices, 256 commands, 64 inputs, 16 activities,
   128 keys per map, 16 steps per list, 8 devices per activity, 128 KiB of config. Over-limit configs
   fail with a message and nothing is pushed.
+
+## Home Assistant actions
+
+`{ha: {service: "domain.service", target: {entity_id: <id or [ids]>}, data: {...}, repeat: false}}` is an
+action kind that runs in **Home Assistant**, not on the hub. It is accepted wherever an action is: hard
+keys (default and per-activity layers), page buttons, tile taps, and the `steps` / `off` of an activity.
+
+- `service` is `domain.service` (`^[a-z_]+\.[a-z0-9_]+$`) with the domain in the allow-list: `light switch scene
+  script media_player remote fan cover climate input_boolean input_button button number select`
+  (`remote.send_command` covers Android TV / Roku style remotes; `homeassistant.toggle` and
+  `shell_command` are not allowed). `target.entity_id` is required (1..8 ids). `data` is small JSON only:
+  at most 1 KiB, 64 values, 4 levels deep, strings up to 200 characters, and **no templates** (any string
+  containing a double brace, `{%` or `{#` is refused); `entity_id`, `device_id`, `area_id` and the like belong
+  in `target`.
+- The add-on validates and the integration validates again when it compiles the bundle, and checks the
+  allow-list once more at dispatch. A hostile bundle is rejected as a whole and the previous config stays.
+- The hub never sees these. The key or button stays an ordinary forwarded key (`key_event`), and the compiler
+  hands Home Assistant a table keyed by *(activity layer, key code)* built with the same rule as the hub's
+  lookup (the activity's own entry, else the default layer; the X-ray view uses the same function). When an
+  activity maps a key to an `ha:` action that the default layer maps to IR, the hub gets a `none` there so the
+  inherited IR is not sent as well.
+- On a key press the integration looks the key up for the hub's **current activity** (the last `state_update`)
+  and calls the service with `blocking=False` in the same callback, with its own context. Nothing is awaited
+  before the call. `repeat: false` (default) fires once on PRESS. `repeat: true` also fires on every HOLD the
+  remote sends (one per 400 ms while the key stays down) and stops at RELEASE; there is no timer in Home
+  Assistant. A service or entity that does not exist logs one warning per (service, entity) per config
+  revision and never raises. The *Remote N keys* event entity still fires for every key, so automations keep
+  working.
+
+### Home Assistant devices
+
+A device with `kind: ha` has no IR: its `power` (`on` and `off`), `inputs` and `commands` are `ha:` actions,
+and the optional `entity` is where its state comes from (power is on unless the entity is `off`, `standby`,
+`unavailable` or `unknown`; the `source` attribute is the input). Everything else works as for IR devices:
+`{device: shield, command: ok}` on a key or button becomes that service call, the device gets its buttons,
+`remote.send_command` and a power sensor, and activities may list it with an `input`. It does not count
+against the hub's device limits and never reaches the hub.
+
+**Order when an activity starts or stops** (the hub runs its IR sequence as always; Home Assistant runs its
+steps once the hub *reports the result*, so they come after the TV's settle time): when the hub reports
+activity B running, Home Assistant (1) powers off the HA devices of the previous activity that B does not use,
+(2) when everything went off, runs the previous activity's HA `off` steps, then for B (3) powers on its HA
+devices that are not already on (the entity is the truth), (4) selects their inputs, waiting the device's
+`settle_ms` first if it was just powered on, and (5) runs B's HA `steps`. The first `state_update` after a
+connection is only a baseline (no steps run when Home Assistant restarts). A newer transition cancels the
+steps still waiting. HA steps and IR steps of one list are not interleaved: IR steps run first.
+
+### Which pages a remote gets
+
+Each remote announces its page format (`remote_info`). After a link-up the integration waits up to 1.5 s for
+it: nothing arrives -> page format v1; `page_fmt` 2 -> v2. A later `remote_info` with another format re-pushes
+in that format. The hub's first `remote_info` after each link-up re-pushes the whole set (the remote may have
+rebooted), but one link-up causes one push. Pages go out one at a time (each command result is the
+backpressure); a newer config cancels the running push and the new set starts only after it has stopped.
+The *Remote N page format* diagnostic sensor shows `unknown` / `v1` / `v2` with the capabilities. For a remote
+with the `tile_state` capability a tile also carries a state (on / off / unavailable / value) and a short
+formatted value (units, rounded numbers, brightness as a percentage, at most 31 bytes); other remotes get the
+legacy text. Only entities on pages are watched, bursts are coalesced (about 100 ms, latest value wins), only a
+changed rendering is sent, every tile is sent again after a page push, and nothing is sent while no remote is
+attached.
+
+### Example: Shield over Android TV, a toggling light tile, a scene button
+
+```yaml
+devices:
+  - id: tv
+    name: TV
+    settle_ms: 5000
+    power: {on: {proto: samsung32, addr: 7, cmd: 2, repeats: 3}, off: {proto: samsung32, addr: 7, cmd: 98, repeats: 3}}
+    inputs: {hdmi1: {proto: samsung32, addr: 7, cmd: 1, repeats: 3}}
+    commands: {vol_up: {proto: samsung32, addr: 7, cmd: 7, repeats: 3}, vol_down: {proto: samsung32, addr: 7, cmd: 11, repeats: 3}}
+  - id: shield
+    kind: ha
+    name: Shield
+    entity: media_player.shield
+    settle_ms: 1500
+    power:
+      on: {ha: {service: remote.send_command, target: {entity_id: remote.shield}, data: {command: HOME}}}
+      off: {ha: {service: remote.send_command, target: {entity_id: remote.shield}, data: {command: POWER}}}
+    inputs:
+      home: {ha: {service: remote.send_command, target: {entity_id: remote.shield}, data: {command: HOME}}}
+    commands:
+      ok: {ha: {service: remote.send_command, target: {entity_id: remote.shield}, data: {command: DPAD_CENTER}}}
+      down: {ha: {service: remote.send_command, target: {entity_id: remote.shield}, data: {command: DPAD_DOWN}, repeat: true}}
+      up: {ha: {service: remote.send_command, target: {entity_id: remote.shield}, data: {command: DPAD_UP}, repeat: true}}
+activities:
+  - id: shield_tv
+    name: Shield TV
+    devices: [{device: tv, input: hdmi1}, {device: shield, input: home}]
+    keys:
+      select: {device: shield, command: ok}
+      up: {device: shield, command: up}
+      down: {device: shield, command: down}
+keys:
+  volume_up: {device: tv, command: vol_up}
+  volume_down: {device: tv, command: vol_down}
+pages:
+  - id: home
+    kind: home
+    title: Living Room
+    cols: 2
+    rows: 4
+    widgets:
+      - {type: tile, id: lamp, x: 0, y: 0, w: 2, label: Lamp, entity: light.living_room}        # tap toggles it
+      - {type: button, id: relax, x: 0, y: 1, w: 2, label: Relax, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_relax}}}}
+      - {type: button, id: tv, x: 0, y: 2, w: 2, label: Shield TV, action: {activity: shield_tv}}
+```
+
+`remote.send_command` is Home Assistant's own service on `remote.shield` (the Android TV Remote
+integration); the keys and buttons are forwarded to Home Assistant by the hub, so they need Home Assistant
+to be up.
 
 ## Operation
 The config is pushed on connect only if the hub's `config_hash` differs from the compiled one. Services:

@@ -253,3 +253,17 @@ def test_remote_info_wait_default_is_one_and_a_half_seconds():
 
     src = (Path(__file__).resolve().parents[2] / "custom_components/ha_harmony/const.py").read_text()
     assert re.search(r"^INFO_WAIT = 1\.5\b", src, re.MULTILINE)
+
+
+def test_the_documented_example_compiles():
+    import re
+    from pathlib import Path
+
+    doc = (Path(__file__).resolve().parents[2] / "docs/ha-config.md").read_text()
+    block = re.search(r"### Example: Shield.*?```yaml\n(.*?)```", doc, re.S).group(1)
+    c = compile_config(parse_model(block, "ha-config.md"))
+    assert [d["id"] for d in c.hub_json["devices"]] == ["tv"]
+    assert c.hub_json["devices"][0]["commands"]["vol_up"]["repeats"] == 3
+    assert set(c.ha_keys["shield_tv"]) >= {1, 2, 5}  # up, down, select under the activity
+    tile = next(t for t in c.tiles if t.entity_id == "light.living_room")
+    assert c.ha_keys[None][128 + tile.widget].service == "light.toggle"
