@@ -4,7 +4,8 @@ import { repeat } from 'lit/directives/repeat.js';
 import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { HA_DOMAINS } from '../lib/studio-state';
-import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, entityDomain, groupCommand, pretty, type Source } from '../lib/studio-model';
+import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, entityDomain, fieldData, groupCommand, pretty, resolveIr, type Source } from '../lib/studio-model';
+import './hh-send-ir';
 
 type Kind = 'command' | 'input' | 'activity' | 'alloff' | 'ha';
 const KINDS: [Kind, string][] = [['command', 'Command'], ['input', 'Input'], ['activity', 'Activity'], ['alloff', 'All off'], ['ha', 'Home Assistant']];
@@ -18,6 +19,7 @@ export class HhActionPicker extends LitElement {
       :host { display: grid; gap: 10px; min-width: 0; font-size: 13px; }
       .cur { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--r1); background: var(--sf2); }
       .cur b { font-weight: 600; }
+      .sp { flex: 1; }
       .seg { display: flex; flex-wrap: wrap; gap: 4px; }
       .seg button { height: 30px; padding: 0 10px; border-radius: 15px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); cursor: pointer; font-size: 12px; font-weight: 600; }
       .seg button[aria-pressed="true"] { background: var(--accs); border-color: var(--acc); color: var(--tx); }
@@ -47,6 +49,7 @@ export class HhActionPicker extends LitElement {
   @state() private service = '';
   @state() private entity = '';
   @state() private repeatHeld = false;
+  @state() private fields: Record<string, string> = {};
   @state() private q = '';
 
   private get cfg() {
@@ -92,7 +95,10 @@ export class HhActionPicker extends LitElement {
     } else if (k === 'activity') {
       if (this.activity) this.fire({ kind: 'activity', id: this.activity });
     } else if (k === 'alloff') this.fire({ kind: 'alloff' });
-    else if (this.service && HA_ENTITY_ID.test(this.entity)) this.fire({ kind: 'ha', service: this.service, entity_id: this.entity, ...(this.mode === 'key' && this.repeatHeld ? { repeat: true } : {}) });
+    else if (this.service && HA_ENTITY_ID.test(this.entity)) {
+      const data = fieldData(this.fields);
+      this.fire({ kind: 'ha', service: this.service, entity_id: this.entity, ...(data ? { data } : {}), ...(this.mode === 'key' && this.repeatHeld ? { repeat: true } : {}) });
+    }
   }
   private ready(): boolean {
     const k = this.kind;
@@ -126,6 +132,10 @@ export class HhActionPicker extends LitElement {
       </label>`;
   }
 
+  private serviceFields(): string[] {
+    const [domain, service] = this.service.split('.');
+    return (this.host.state.services ?? []).find((s) => s.domain === domain && s.service === service)?.fields ?? [];
+  }
   private haFields() {
     const st = this.host.state;
     const services = this.serviceOptions();
@@ -134,7 +144,7 @@ export class HhActionPicker extends LitElement {
       ${st.haWritable ? nothing : html`<p class="why" role="note">Home Assistant actions need a newer add-on and integration (this one cannot store them yet).</p>`}
       <label>Service
         ${services.length
-          ? html`<select .value=${this.service} @change=${(e: Event) => (this.service = (e.target as HTMLSelectElement).value)}>
+          ? html`<select .value=${this.service} @change=${(e: Event) => { this.service = (e.target as HTMLSelectElement).value; this.fields = {}; }}>
               <option value="">Choose a service</option>
               ${services.map((s) => html`<option value=${s} ?selected=${s === this.service}>${s}</option>`)}
             </select>`
@@ -146,6 +156,7 @@ export class HhActionPicker extends LitElement {
       </label>
       ${st.entities === null && st.haLoaded ? html`<p class="why">Home Assistant could not be read, so type the entity id.</p>` : nothing}
       ${this.entity && !HA_ENTITY_ID.test(this.entity) ? html`<p class="why" role="alert">Entity ids look like light.living_room.</p>` : nothing}
+      ${this.serviceFields().map((f) => html`<label>${f}<input type="text" aria-label="Field ${f}" placeholder="optional" .value=${this.fields[f] ?? ''} @input=${(e: Event) => (this.fields = { ...this.fields, [f]: (e.target as HTMLInputElement).value })} /></label>`)}
       ${this.mode === 'key' ? html`<label class="chk"><input type="checkbox" .checked=${this.repeatHeld} @change=${(e: Event) => (this.repeatHeld = (e.target as HTMLInputElement).checked)} /> Repeat while held</label>` : nothing}`;
   }
 
@@ -153,8 +164,9 @@ export class HhActionPicker extends LitElement {
     if (!this.host) return nothing;
     const sug = this.suggestions();
     const cur = this.value ? describeAction(this.cfg, this.value) : this.current || 'Nothing';
+    const ir = resolveIr(this.cfg, this.value);
     return html`
-      <div class="cur"><span class="muted">Now</span> <b>${cur}</b></div>
+      <div class="cur"><span class="muted">Now</span> <b>${cur}</b>${ir ? html`<span class="sp"></span><hh-send-ir .code=${ir} name=${cur}></hh-send-ir>` : nothing}</div>
       <label>Search
         <input type="search" placeholder="vol_up, Watch TV, light…" .value=${this.q} @input=${(e: Event) => (this.q = (e.target as HTMLInputElement).value)} />
       </label>
