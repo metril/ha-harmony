@@ -436,3 +436,30 @@ async def test_flapping_ws_link_pushes_nothing_per_reconnect(hass, rig, clock):
     await asyncio.sleep(0.3)
     await settle(hass)
     assert hub.pages() == [] and c.config_pushes == 1  # bounded work per reconnect: a hello and a resync
+
+
+# 10: a hold is not an event unless asked for; event_types is built once per compile
+async def test_hold_repeats_write_no_event_by_default(hass, rig, clock, writes):
+    hub, c = await rig()
+    await settle(hass)
+    writes.clear()
+    for action in (0, 2, 2, 2, 1):  # press, three hold repeats, release
+        await press(hub, 4, action)
+    await settle(hass, lambda: len(writes) >= 2)
+    await asyncio.sleep(0.1)
+    assert [e for e in writes if e.startswith("event.")] == ["event.harmony_hub_sim_hub_remote_1_keys"] * 2
+    st = hass.states.get("event.harmony_hub_sim_hub_remote_1_keys")
+    assert st.attributes["action"] == "release" and "remote" not in st.attributes
+    hass.config_entries.async_update_entry(c.config_entry, options={"hold_events": True})
+    writes.clear()
+    for action in (0, 2, 2, 2, 1):
+        await press(hub, 4, action)
+    await settle(hass, lambda: len(writes) >= 5)
+    assert [e for e in writes if e.startswith("event.")] == ["event.harmony_hub_sim_hub_remote_1_keys"] * 5
+
+
+async def test_event_types_and_config_hash_are_computed_once_per_compile(hass, rig, clock):
+    _hub, c = await rig()
+    assert c.event_types is c.compiled.event_types is c.event_types
+    assert "volume_up" in c.event_types and "unknown" in c.event_types
+    assert c.compiled.config_hash is c.compiled.config_hash

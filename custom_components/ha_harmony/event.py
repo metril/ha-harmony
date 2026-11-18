@@ -8,6 +8,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
+from .const import CONF_HOLD_EVENTS
 from .coordinator import TOPIC_CONFIG, HarmonyCoordinator
 
 
@@ -38,7 +39,7 @@ class HarmonyKeyEvent(HarmonyEntity, EventEntity):
     def _on_key(self, remote: int, key: int, action: str) -> None:
         if remote != self._remote:
             return
-        self._trigger_event(
-            self.coordinator.key_name(key), {"key": key, "action": action, "remote": remote}
-        )
+        if action == "hold" and not self.coordinator.config_entry.options.get(CONF_HOLD_EVENTS):
+            return  # a 3 s hold would be ~9 recorder rows; the actions path (repeat: true) is unaffected
+        self._trigger_event(self.coordinator.key_name(key), {"key": key, "action": action})
         self.async_write_ha_state()

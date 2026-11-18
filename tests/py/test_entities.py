@@ -108,6 +108,7 @@ async def test_remote_services(hass, hub_cfg, fast_client):
 
 async def test_key_event_fires_event_entity(hass, hub_cfg, fast_client, run_remote):
     entry = await _setup(hass, hub_cfg)
+    hass.config_entries.async_update_entry(entry, options={"hold_events": True})  # opt-in
     assert run_remote(hub_cfg.rf, "--press", "Menu", "--action", "2").returncode == 0
     await _until(hass, lambda: _state(hass, EVENT) not in (None, "unknown"))
     st = hass.states.get(EVENT)

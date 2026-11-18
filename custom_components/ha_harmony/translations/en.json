@@ -182,5 +182,19 @@
     "need_power_or_input": {
       "message": "Give power and/or input."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Harmony options",
+        "description": "Key events from the remotes.",
+        "data": {
+          "hold_events": "Also fire an event for each hold repeat"
+        },
+        "data_description": {
+          "hold_events": "Off by default: a press and a release are recorded, a held key is not (it would write a database row every 0.4 s). Home Assistant key actions with repeat are not affected."
+        }
+      }
+    }
   }
 }

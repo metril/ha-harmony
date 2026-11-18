@@ -255,7 +255,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
 
     @property
     def event_types(self) -> list[str]:
-        return sorted({*KEY_NAMES.values(), *self.compiled.key_names.values(), UNKNOWN_KEY})
+        return self.compiled.event_types
 
     def async_subscribe_topics(
         self, topics: Iterable[str], cb: Callable[[], None]

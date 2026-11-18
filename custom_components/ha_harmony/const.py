@@ -22,6 +22,7 @@ CONFIG_SUBDIR = "ha_harmony"  # only to spot a leftover <config>/ha_harmony/<hub
 CONF_ADDON_HOST = "addon_host"
 CONF_ADDON_PORT = "addon_port"
 CONF_ADDON_TOKEN = "addon_token"
+CONF_HOLD_EVENTS = "hold_events"  # option: also write an event for each hold repeat
 CONF_ADDON_SLUG = "addon_slug"
 CONF_ADDON_UUID = "addon_uuid"
 ADDON_SLUG = "ha_harmony_editor"

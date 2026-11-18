@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -22,6 +22,7 @@ from .const import (
     CONF_ADDON_SLUG,
     CONF_ADDON_TOKEN,
     CONF_ADDON_UUID,
+    CONF_HOLD_EVENTS,
     CONF_TOKEN,
     DEFAULT_PORT,
     DOMAIN,
@@ -50,8 +51,23 @@ def _error_key(exc: Exception) -> str:
     return "unknown"
 
 
+class HarmonyOptionsFlow(OptionsFlow):
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+        current = self.config_entry.options.get(CONF_HOLD_EVENTS, False)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({vol.Required(CONF_HOLD_EVENTS, default=current): bool}),
+        )
+
+
 class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    def async_get_options_flow(config_entry: ConfigEntry) -> HarmonyOptionsFlow:
+        return HarmonyOptionsFlow()
 
     def __init__(self) -> None:
         self._host: str | None = None

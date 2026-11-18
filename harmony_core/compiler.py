@@ -6,13 +6,14 @@ import json
 import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Any
 
 from .config_model import Model
 from .ha_actions import HaCall, call_of
 from .harmony_proto import SOFT_KEY_BASE
 from .keymap import effective
-from .keys import KEY_NAMES, key_code
+from .keys import KEY_NAMES, UNKNOWN_KEY, key_code
 from .page_build import MAX_PAGES, MAX_SOFT_KEYS, CompileError, Tile, build_pages, encode_pages
 from .page_codec import MAX_BYTES, MAX_WIDGETS, Page, page_size
 
@@ -110,9 +111,15 @@ class Compiled:
     # equality: two compiles of the same config are the same config.
     usage: dict[str, Any] = field(default_factory=dict, compare=False)
 
-    @property
+    @cached_property
     def config_hash(self) -> str:
+        """Computed once per compile (a compiled config is never mutated)."""
         return config_hash(self.hub_json)
+
+    @cached_property
+    def event_types(self) -> list[str]:
+        """Every key name the event entity can report, sorted; built once per compile."""
+        return sorted({*KEY_NAMES.values(), *self.key_names.values(), UNKNOWN_KEY})
 
     @property
     def gen(self) -> int:
