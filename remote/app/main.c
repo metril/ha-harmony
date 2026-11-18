@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "remote/app/app.h"
 #include "remote/app/cli.h"
@@ -37,6 +38,10 @@ int main(int argc, char **argv) {
     return 1;
   }
   rf_link_set_store(&rf, &app.store);
+  /* Suspend to RAM is opt-in until the bench gate passes (docs/runbooks/remote-suspend-soak.md). */
+  const char *sm = getenv("HARMONY_SUSPEND");
+  if (sm && !strcmp(sm, "battery")) app.power.suspend_mode = RA_SUSPEND_BATTERY;
+  else if (sm && !strcmp(sm, "always")) app.power.suspend_mode = RA_SUSPEND_ALWAYS;
   app.display.ui_debug = cli.ui_debug;
   if (cli.rf_spi) {
     /* After the panel checks, so a refused start never touches the radio. A failed open (stock hal

@@ -43,6 +43,11 @@ typedef struct {
   int nexec;
   int nblank, blank_arg; /* FBIOBLANK calls seen and the last level */
   uint64_t now;
+  uint64_t slept; /* wall time the fake clock gained while "asleep"; wall = now + slept */
+  int nsuspend, suspend_errno; /* writes of "mem" to /sys/power/state; errno to refuse them with (0 = accept) */
+  uint64_t suspend_sleep_ms; /* each accepted suspend sleeps this long on the wall clock only */
+  const char *resume_soc, *resume_chg; /* sysfs values that appear while "asleep" (the cell drained) */
+  int suspend_order[64];     /* nblank value at each suspend: the panel is blanked first */
   char msgs[64][160];
   int nmsgs;
 } fk_t;
@@ -128,7 +133,15 @@ static __attribute__((unused)) ssize_t fk_write(void *c, int fd, const void *buf
   memcpy(s, buf, n < 15 ? n : 15);
   if (!strcmp(p, "/sys/class/backlight/ap3156_backlight/brightness") && f->nbl < 2048) f->bl_w[f->nbl++] = atoi(s);
   else if (!strcmp(p, "/sys/class/leds/tps6507x:white/brightness") && f->nled < 64) f->led_w[f->nled++] = atoi(s);
-  else {
+  else if (!strcmp(p, "/sys/power/state")) {
+    if (f->suspend_errno) { errno = f->suspend_errno; return -1; }
+    if (n != 4 || memcmp(buf, "mem\n", 4)) { errno = EINVAL; return -1; }
+    if (f->nsuspend < 64) f->suspend_order[f->nsuspend] = f->blank_arg;
+    f->nsuspend++;
+    f->slept += f->suspend_sleep_ms;
+    if (f->resume_soc) fk_set_file(f, "/sys/bus/i2c/devices/1-0070/soc", f->resume_soc);
+    if (f->resume_chg) fk_set_file(f, "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/battcharge", f->resume_chg);
+  } else {
     f->boot_writes++;
     snprintf(f->bootcount, sizeof f->bootcount, "%.*s", (int)(n < 7 ? n : 7), (const char *)buf);
   }
@@ -170,6 +183,7 @@ static __attribute__((unused)) int fk_wait(void *c, const int *fds, int n, unsig
 }
 
 static __attribute__((unused)) uint64_t fk_now(void *c) { return ((fk_t *)c)->now; }
+static __attribute__((unused)) uint64_t fk_wall(void *c) { return ((fk_t *)c)->now + ((fk_t *)c)->slept; }
 
 static __attribute__((unused)) int fk_exec(void *c, const char *path) {
   fk_t *f = c;
@@ -186,7 +200,7 @@ static __attribute__((unused)) void fk_logmsg(void *c, const char *m) {
 static __attribute__((unused)) ra_ops_t fk_ops(fk_t *f) {
   return (ra_ops_t){.ctx = f, .open = fk_open, .close = fk_close, .read = fk_read, .write = fk_write,
                     .ioctl = fk_ioctl, .mmap = fk_mmap, .munmap = fk_munmap, .wait = fk_wait,
-                    .now_ms = fk_now, .exec_poweroff = fk_exec, .log = fk_logmsg};
+                    .now_ms = fk_now, .exec_poweroff = fk_exec, .log = fk_logmsg, .wall_ms = fk_wall};
 }
 
 /* The Elite as measured: 240x320 RGB565, line_length 480, a healthy battery on the cradle. */
@@ -208,6 +222,7 @@ static __attribute__((unused)) void fk_init(fk_t *f) {
   fk_set_file(f, "/sys/bus/i2c/devices/1-0070/soc", "100.0\n");
   fk_set_file(f, "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/powersource", "cradle\n");
   fk_set_file(f, "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/battcharge", "0.00 0x0000\n");
+  fk_set_file(f, "/sys/power/state", "");
   fk_set_file(f, "/tmp/bootcount", NULL); /* absent until the app writes it */
 }
 
@@ -236,6 +251,8 @@ typedef struct {
   int nsent;
   app_link_event_t q[64];
   int nq, qh;
+  int nresumed;
+  uint64_t last_gap;
   int awake, nawake; /* last set_awake value and number of calls */
   unsigned block_ms; /* each send_key blocks this long on the injected clock (a slow radio write) */
   void *clk;         /* the fk_t whose clock it advances */
@@ -257,13 +274,19 @@ static __attribute__((unused)) int fkl_poll(void *c, uint64_t now, app_link_even
   *ev = l->q[l->qh++];
   return 1;
 }
+static __attribute__((unused)) void fkl_resumed(void *c, uint64_t now, uint64_t gap) {
+  fk_link_t *l = c;
+  (void)now;
+  l->nresumed++;
+  l->last_gap = gap;
+}
 static __attribute__((unused)) void fkl_set_awake(void *c, bool awake) {
   fk_link_t *l = c;
   l->awake = awake;
   l->nawake++;
 }
 static __attribute__((unused)) app_link_t fkl_link(fk_link_t *l) {
-  return (app_link_t){.ctx = l, .send_key = fkl_send, .poll = fkl_poll, .set_awake = fkl_set_awake};
+  return (app_link_t){.ctx = l, .send_key = fkl_send, .poll = fkl_poll, .set_awake = fkl_set_awake, .resumed = fkl_resumed};
 }
 
 static __attribute__((unused)) void fkl_push_page(fk_link_t *l, const uint8_t *d, size_t n) {
@@ -296,6 +319,7 @@ static __attribute__((unused)) int fk_log_is_safe(const fk_t *f, const char *boo
                  (!strcmp(path, "/sys/bus/i2c/devices/1-0070/soc") && fl == O_RDONLY) ||
                  (!strcmp(path, "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/powersource") && fl == O_RDONLY) ||
                  (!strcmp(path, "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/battcharge") && fl == O_RDONLY) ||
+                 (!strcmp(path, "/sys/power/state") && fl == O_WRONLY) ||
                  (bootcount_path && !strcmp(path, bootcount_path) && acc == O_WRONLY);
       if (!good) { fprintf(stderr, "unsafe syscall: %s\n", l); ok = 0; }
     } else if (!strncmp(l, "exec ", 5)) {

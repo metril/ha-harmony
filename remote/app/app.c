@@ -337,6 +337,31 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
   }
 }
 
+/* Blank the panel and suspend to RAM; returns on resume. The monotonic clock does not run asleep, so the gap is the wall
+ * clock's delta less the monotonic delta; everything keyed to idle time (power, link silence) restarts at the resume. */
+static void suspend_now(app_t *a) {
+  uint64_t mono0 = a->sys.ops.now_ms(a->sys.ops.ctx), wall0 = ra_wall_ms(&a->sys);
+  ra_logf(&a->sys, "suspend to RAM (screen off, on %s)", a->power.external_power ? "external power" : "battery");
+  ra_fb_blank(&a->sys, 1);
+  int rc = ra_suspend(&a->sys);
+  uint64_t now = a->sys.ops.now_ms(a->sys.ops.ctx);
+  ra_fb_blank(&a->sys, 0);
+  if (rc < 0) {
+    ra_logf(&a->sys, "suspend refused (errno %d), retrying later", errno);
+    ra_power_suspend_failed(&a->power, now);
+    return;
+  }
+  uint64_t gap = ra_power_gap_ms(wall0, mono0, ra_wall_ms(&a->sys), now);
+  ra_logf(&a->sys, "resumed after %llu ms asleep (%u suspends, %llu ms total)", (unsigned long long)gap, a->power.suspends + 1,
+          (unsigned long long)(a->power.suspended_ms + gap));
+  ra_power_resumed(&a->power, now, gap);
+  a->last_rx_ms = now; /* the hub was silent for the sleep, not failing: no fallback page for it */
+  a->fail_run = 0;
+  if (a->link.resumed) a->link.resumed(a->link.ctx, now, gap);
+  ra_display_note(&a->display, RA_WHY_WAKE, 0);
+  lv_obj_invalidate(lv_screen_active()); /* the panel lost its frame: draw the page again */
+}
+
 void app_step(app_t *a, unsigned max_wait_ms) {
   uint64_t now = a->sys.ops.now_ms(a->sys.ops.ctx);
   uint32_t lv_ms = lv_timer_handler();
@@ -376,6 +401,10 @@ void app_step(app_t *a, unsigned max_wait_ms) {
       a->lowbatt_disarmed = true;
       a->lowbatt_pending = true;
     }
+  }
+  if (!a->ntx && partial_wait_ms(a, now) == UINT32_MAX && ra_power_suspend_due(&a->power, now)) {
+    suspend_now(a);
+    now = a->sys.ops.now_ms(a->sys.ops.ctx);
   }
   bool awake = a->power.state != RA_PW_OFF;
   if (a->link.set_awake && (!a->awake_known || awake != a->last_awake)) a->link.set_awake(a->link.ctx, awake);
