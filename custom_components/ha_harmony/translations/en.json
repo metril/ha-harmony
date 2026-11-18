@@ -37,7 +37,8 @@
       "no_hub": "Set up a Harmony hub first, then restart the Harmony Editor add-on so it announces itself again.",
       "invalid_auth": "The add-on refused the discovery token. Restart the add-on and try again.",
       "cannot_connect": "Could not reach the Harmony Editor add-on.",
-      "invalid_discovery": "The add-on sent an unusable discovery message."
+      "invalid_discovery": "The add-on sent an unusable discovery message.",
+      "not_our_addon": "Only the Harmony Editor add-on can link to this integration."
     }
   },
   "issues": {

@@ -393,13 +393,13 @@ async def test_reload_service_needs_a_link_and_send_ir_refuses_files(hass, fake_
 
 
 # ------------------------------------------------------------------ Supervisor discovery flow
-def info(**cfg):
-    return HassioServiceInfo(config=cfg, name="Harmony Editor", slug="ha_harmony_editor", uuid="u1")
+def info(slug="ha_harmony_editor", **cfg):
+    return HassioServiceInfo(config=cfg, name="Harmony Editor", slug=slug, uuid="u1")
 
 
-async def hassio_flow(hass, **cfg):
+async def hassio_flow(hass, slug="ha_harmony_editor", **cfg):
     return await hass.config_entries.flow.async_init(
-        const.DOMAIN, context={"source": config_entries.SOURCE_HASSIO}, data=info(**cfg)
+        const.DOMAIN, context={"source": config_entries.SOURCE_HASSIO}, data=info(slug, **cfg)
     )
 
 
@@ -424,6 +424,9 @@ async def test_discovery_links_the_existing_entry_not_a_second_one(hass, fake_ad
 async def test_rediscovery_with_new_token_updates_without_asking(hass, fake_addon):
     entry = make_entry("127.0.0.1", 1, addon=fake_addon)
     entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, "addon_slug": "ha_harmony_editor"}
+    )
     res = await hassio_flow(hass, host="newhost", port=fake_addon.port, token="f" * 64)
     assert res["type"] is FlowResultType.ABORT and res["reason"] == "addon_updated"
     assert entry.data["addon_host"] == "newhost" and entry.data["addon_token"] == "f" * 64
@@ -446,3 +449,69 @@ async def test_discovery_with_garbage_config_aborts(hass):
     make_entry("127.0.0.1", 1).add_to_hass(hass)
     res = await hassio_flow(hass, host="h", port="not-a-port", token="t")
     assert res["type"] is FlowResultType.ABORT and res["reason"] == "invalid_discovery"
+
+
+@pytest.mark.parametrize("slug", ["evil_addon", "ha_harmony_editor_x", "xha_harmony_editor", ""])
+async def test_discovery_from_a_foreign_addon_is_rejected(hass, fake_addon, slug):
+    entry = make_entry("127.0.0.1", 1)
+    entry.add_to_hass(hass)
+    cfg = {"host": "evil", "port": fake_addon.port, "token": "t"}
+    res = await hassio_flow(hass, slug, **cfg)
+    assert res["type"] is FlowResultType.ABORT and res["reason"] == "not_our_addon"
+    assert "addon_host" not in entry.data
+
+
+async def test_repository_prefixed_slug_is_ours_and_stored(hass, fake_addon):
+    entry = make_entry("127.0.0.1", 1)
+    entry.add_to_hass(hass)
+    cfg = {"host": "127.0.0.1", "port": fake_addon.port, "token": ADDON_TOKEN}
+    res = await hassio_flow(hass, "a1b2c3d4_ha_harmony_editor", **cfg)
+    res = await hass.config_entries.flow.async_configure(res["flow_id"], {})
+    assert res["reason"] == "addon_linked"
+    assert entry.data["addon_slug"] == "a1b2c3d4_ha_harmony_editor"
+    assert entry.data["addon_uuid"] == "u1"
+
+
+async def test_changed_slug_needs_confirm_and_never_updates_silently(hass, fake_addon):
+    entry = make_entry("127.0.0.1", 1, addon=fake_addon)
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, "addon_slug": "ha_harmony_editor"}
+    )
+    res = await hassio_flow(hass, "a1b2c3d4_ha_harmony_editor", host="newhost", port=1, token="f")
+    assert res["type"] is FlowResultType.FORM and res["step_id"] == "hassio_confirm"
+    assert entry.data["addon_host"] == "127.0.0.1" and entry.data["addon_token"] == ADDON_TOKEN
+
+
+async def test_legacy_link_without_slug_needs_confirm(hass, fake_addon):
+    make_entry("127.0.0.1", 1, addon=fake_addon).add_to_hass(hass)
+    res = await hassio_flow(hass, host="newhost", port=1, token="f")
+    assert res["type"] is FlowResultType.FORM and res["step_id"] == "hassio_confirm"
+
+
+async def test_ignored_discovery_is_honoured_and_never_probed(hass, fake_addon):
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    entry = make_entry("127.0.0.1", 1)
+    entry.add_to_hass(hass)
+    MockConfigEntry(
+        domain=const.DOMAIN,
+        unique_id="hassio_ha_harmony_editor",
+        source=config_entries.SOURCE_IGNORE,
+        data={},
+    ).add_to_hass(hass)
+    cfg = {"host": "127.0.0.1", "port": fake_addon.port, "token": ADDON_TOKEN}
+    res = await hassio_flow(hass, **cfg)
+    assert res["type"] is FlowResultType.ABORT and res["reason"] == "already_configured"
+    assert "addon_host" not in entry.data
+
+
+async def test_ignored_hub_entry_never_gets_the_token(hass, fake_addon):
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    MockConfigEntry(
+        domain=const.DOMAIN, unique_id="ha-harmony-x", source=config_entries.SOURCE_IGNORE, data={}
+    ).add_to_hass(hass)
+    cfg = {"host": "127.0.0.1", "port": fake_addon.port, "token": ADDON_TOKEN}
+    res = await hassio_flow(hass, **cfg)
+    assert res["type"] is FlowResultType.ABORT and res["reason"] == "no_hub"

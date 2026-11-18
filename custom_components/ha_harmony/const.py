@@ -22,6 +22,8 @@ CONFIG_SUBDIR = "ha_harmony"  # only to spot a leftover <config>/ha_harmony/<hub
 CONF_ADDON_HOST = "addon_host"
 CONF_ADDON_PORT = "addon_port"
 CONF_ADDON_TOKEN = "addon_token"
+CONF_ADDON_SLUG = "addon_slug"
+CONF_ADDON_UUID = "addon_uuid"
 ADDON_SLUG = "ha_harmony_editor"
 BUNDLE_MAX_BYTES = 2 * 1024 * 1024  # a hub config is <= 128 KiB compiled; sources stay far below
 LINK_FETCH_TIMEOUT = 20.0  # seconds, whole request
