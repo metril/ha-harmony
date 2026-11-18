@@ -1,9 +1,8 @@
 #include <tunables/global>
 
-# Least-privilege profile for the editor add-on, modelled on the official example profile.
-# Every executable also needs READ: /init and the s6 service scripts are #!/bin/sh scripts, and
-# the interpreter (busybox sh) must open them. "ix" alone lets the kernel exec them but made sh fail
-# with "can't open '/init': Permission denied" (0.3.0). Not yet loaded under a real Supervisor.
+# Modelled on the official example profile: capabilities and network are restricted, file access is
+# broad with the host mappings denied. Hand-listed file rules broke s6 twice (0.3.0: exec without read
+# on /init; 0.3.1: no directory listing of /etc/services.d) and cannot be validated without a Supervisor.
 
 profile ha_harmony_editor flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
@@ -30,42 +29,14 @@ profile ha_harmony_editor flags=(attach_disconnected,mediate_deleted) {
   deny network raw,
   deny network packet,
 
-  # S6-Overlay (base image init)
-  /init rix,
-  /bin/** rix,
-  /sbin/** rix,
-  /usr/bin/** rix,
-  /usr/sbin/** rix,
-  /usr/lib/bashio/** rix,
-  /run/{s6,s6-rc*,service}/** rix,
-  /package/** rix,
-  /command/** rix,
-  /etc/s6-overlay/** r,
-  /etc/services.d/** rwix,
-  /etc/cont-init.d/** rwix,
-  /etc/cont-finish.d/** rwix,
-  /etc/fix-attrs.d/** r,
-  /run/{,**} rwk,
-  /dev/tty rw,
-  /dev/null rw,
-  /dev/{,**} r,
-  /proc/** r,
-  /sys/fs/cgroup/** r,
-  /dev/urandom r,
-
-  # Python runtime and the application (read-only)
-  /usr/local/** mrix,
-  /usr/lib/** mr,
-  /lib/** mr,
-  /opt/app/** r,
-  /opt/deps/** mr,
-  /etc/{passwd,group,nsswitch.conf,hosts,resolv.conf,ssl/**,mime.types} r,
-  /proc/sys/net/core/somaxconn r,
-
-  # The add-on's own data and scratch space
-  /data/ r,
-  /data/** rwk,
-  /tmp/** rwk,
+  # Files: broad, like the official example profile. A hand-listed set silently broke the start
+  # chain: s6's services-up lists the DIRECTORY /etc/services.d (`/etc/services.d/**` does not match
+  # the directory itself), got nothing under AppArmor, and so never started the editor service (0.3.1:
+  # no "copying legacy longrun editor" line, no app output). Host mappings are denied below; deny wins.
+  file,
+  ptrace (trace,read) peer=docker-default,
+  signal (receive) set=(kill,term) peer=unconfined,
+  signal (send,receive) set=(kill,term) peer=docker-default,
 
   # Host mappings: denied explicitly (none are mapped either)
   deny /config/** rwklx,

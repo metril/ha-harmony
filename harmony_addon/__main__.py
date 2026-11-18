@@ -27,6 +27,7 @@ def main() -> None:
     opts = load_options(Path(a.data_dir) / "options.json")
     logging.basicConfig(level=opts.log_level.upper(), format="%(levelname)s %(name)s: %(message)s")
     token = load_or_create_token(a.data_dir)
+    logging.getLogger("harmony_addon").info("listening on 0.0.0.0:%s (ingress)", a.port)
     web.run_app(
         create_app(
             a.data_dir,

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 (2026-11-18)
+
+- Fix: the editor service never started under a Supervisor (UI: "app seems to not be ready"). The AppArmor
+  profile's file rules did not cover the directory /etc/services.d, so s6 found no service to start. The profile
+  now uses the official example's broad `file,` with host mappings denied. The service logs a "listening on" line.
+
 ## 0.3.1 (2026-11-18)
 
 - Fix: the add-on failed to start under a Supervisor ("/bin/sh: can't open '/init': Permission denied"). The

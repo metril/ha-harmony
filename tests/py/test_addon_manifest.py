@@ -49,17 +49,23 @@ def test_repository_and_build_files():
     assert "--require-hashes" in (ROOT / "addon/Dockerfile").read_text()
 
 
-def test_apparmor_profile_lets_the_start_chain_read_what_it_execs():
-    """0.3.0 regression: `/init ix` (no read) made busybox sh fail on the /init script."""
+def test_apparmor_profile_covers_s6_start_chain():
+    """0.3.0/0.3.1 regressions: exec without read, then no listing of /etc/services.d (the service
+    never started). Broad `file,` like the official profile; host mappings stay denied."""
     import re
 
     prof = (ROOT / "addon/apparmor.txt").read_text()
     assert re.search(rf"^profile {CFG['slug']} ", prof, re.MULTILINE)
-    rules = {m.group(1): m.group(2) for m in re.finditer(r"^\s*(/\S+)\s+([a-z]+),", prof, re.MULTILINE)}
-    # shell-script entry points: the interpreter must read them, not just exec
-    for path in ("/init", "/bin/**", "/usr/bin/**", "/package/**", "/command/**", "/etc/services.d/**"):
-        assert "r" in rules[path] and "x" in rules[path], path
-    for path in ("/etc/s6-overlay/**", "/usr/lib/bashio/**", "/opt/app/**", "/opt/deps/**", "/proc/**"):
-        assert "r" in rules[path], path
-    assert "w" in rules["/data/**"] and "w" in rules["/tmp/**"]
-    assert "deny network raw," in prof
+    assert re.search(r"^\s*file,", prof, re.MULTILINE)
+    for m in ("config", "homeassistant", "share", "ssl", "media", "backup", "addons"):
+        assert f"deny /{m}/** rwklx," in prof
+    assert "deny network raw," in prof and "deny network packet," in prof
+    # a rule on the `/etc/services.d/**` glob alone cannot list the directory s6 scans
+    assert not re.search(r"^\s*/etc/services\.d/\*\* ", prof, re.MULTILINE)
+
+
+def test_service_logs_listening_on_the_ingress_port():
+    run = (ROOT / "addon/rootfs/etc/services.d/editor/run").read_text()
+    assert f"--port {CFG['ingress_port']}" in run and "listening" in run
+    main = (ROOT / "harmony_addon/__main__.py").read_text()
+    assert "listening on" in main and '"0.0.0.0"' in main

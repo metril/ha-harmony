@@ -2,4 +2,5 @@
 # /data is created by the Supervisor as root; hand it to the unprivileged server user.
 chown -R app:app /data 2>/dev/null
 export PYTHONPATH=/opt/app:/opt/deps PYTHONUNBUFFERED=1
+echo "editor service: starting, listening on 0.0.0.0:8099 (ingress)"
 exec s6-setuidgid app python -m harmony_addon --data-dir /data --port 8099
