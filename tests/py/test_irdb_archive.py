@@ -51,7 +51,7 @@ def test_brand_search_ranking_and_folding():
     assert [b.name for b in search_brands(BRANDS, "CITROEN")] == ["Citroën Audio"]
     assert [b.name for b in search_brands(BRANDS, "citroën")] == ["Citroën Audio"]
     assert [b.name for b in search_brands(BRANDS, "kard")] == ["Harman Kardon"]  # word prefix
-    assert [b.name for b in search_brands(BRANDS, "son")][0] == "Sony"  # prefix: bigger first
+    assert next(b.name for b in search_brands(BRANDS, "son")) == "Sony"  # prefix: bigger first
     assert [b.name for b in search_brands(BRANDS, "harmankardon")] == []  # no fuzzy joining
     assert [b.name for b in search_brands(BRANDS, "ricsson")] == ["Ericsson"]  # substring
     assert search_brands(BRANDS, "")[0].name == "Sony"

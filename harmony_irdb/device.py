@@ -52,8 +52,11 @@ def device_type_id(value: object) -> int | None:
 
 
 def _slug(raw: str, limit: int = 31) -> str:
-    s = "".join(f" {_SYMBOLS[c]} " if c in _SYMBOLS else c for c in raw)
-    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", s)
+    if not re.search(r"[A-Za-z0-9]", raw):  # a symbol-only name such as "+" or "."
+        raw = "".join(f" {_SYMBOLS[c]} " if c in _SYMBOLS else c for c in raw)
+    else:
+        raw = raw.replace("+", " plus ")
+    s = re.sub(r"(?<=[a-z])(?=[A-Z])", "_", raw)
     s = re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
     return s[:limit].strip("_") or "cmd"
 
@@ -185,7 +188,8 @@ class _Flow(dict):
 
 
 class _Dumper(yaml.SafeDumper):
-    pass
+    def increase_indent(self, flow=False, indentless=False):  # indent list items like the docs
+        return super().increase_indent(flow, False)
 
 
 _Dumper.add_representer(
