@@ -240,7 +240,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def expected_unique_ids(self) -> set[str]:
         h = self.hub_id
         ids = {f"{h}_remote", f"{h}_activity"}
-        if self._link is not None:
+        if self.has_addon_link:
             ids.add(f"{h}_addon_link")
         for r in self.remotes:
             ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}", f"{h}_pagefmt_{r}"}
@@ -273,7 +273,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     # -- add-on feed
     @property
     def has_addon_link(self) -> bool:
-        return self._link is not None
+        """Configured (entry data), not merely started: the cache loads before the link starts."""
+        return self._link is not None or bool(self.config_entry.data.get(const.CONF_ADDON_HOST))
 
     def async_set_link_state(self, state: str) -> None:
         if state != self.link_state:
