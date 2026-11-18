@@ -385,9 +385,20 @@ class ApplyNotifier:
 
     def __init__(self) -> None:
         self._events: dict[str, asyncio.Event] = {}
+        self.closing = False
 
     def event(self, hub: str) -> asyncio.Event:
+        if self.closing:
+            ev = asyncio.Event()
+            ev.set()
+            return ev
         return self._events.setdefault(hub, asyncio.Event())
+
+    def close(self) -> None:
+        """Shutdown: wake every waiter now (they answer 204) so stop never waits out a poll."""
+        self.closing = True
+        for hub in list(self._events):
+            self.notify(hub)
 
     def notify(self, hub: str) -> None:
         ev = self._events.pop(hub, None)
@@ -440,6 +451,8 @@ async def wait_bundle(request: web.Request) -> web.Response:
     deadline = loop.time() + app[WAIT_KEY]
     while True:
         ev = app[NOTIFIER_KEY].event(hub)  # taken before the read: no lost wake-up
+        if app[NOTIFIER_KEY].closing:
+            return web.Response(status=204)
         bundle = _bundle(hub, _store_call(app[STORE_KEY].load, hub))
         if bundle is not None and bundle["rev"] != known:
             return _bundle_response(bundle)
@@ -499,6 +512,11 @@ def create_app(
     app[CLOCK_KEY] = clock
     app[NOTIFIER_KEY] = ApplyNotifier()
     app[WAIT_KEY] = wait_seconds
+
+    async def _wake_waiters(_: web.Application) -> None:
+        app[NOTIFIER_KEY].close()
+
+    app.on_shutdown.append(_wake_waiters)
     if discovery is not None:
 
         async def _announce(_: web.Application) -> None:

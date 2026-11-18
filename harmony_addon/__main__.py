@@ -14,6 +14,9 @@ from .options import load_options
 from .supervisor import Discovery, default_supervisor
 
 
+SHUTDOWN_TIMEOUT = 3.0  # waiters are woken at shutdown; never sit out a ~55 s long poll
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default="/data")
@@ -32,6 +35,7 @@ def main() -> None:
         host="0.0.0.0",
         port=a.port,
         print=None,
+        shutdown_timeout=SHUTDOWN_TIMEOUT,
         access_log=logging.getLogger("access"),
     )
 

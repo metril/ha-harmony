@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import stat
+import time
 
 import pytest
 from test_addon import CONFIG, H, clock, put_draft
@@ -51,7 +52,7 @@ async def test_bundle_without_or_with_wrong_token_is_401_and_opaque(client):
         r = await client.get("/api/v1/bundle", headers=hdr)
         assert r.status == 401
         bodies.add(await r.text())
-        assert (await client.get("/api/v1/bundle/wait?rev=x", headers=hdr)).status == 401
+        assert (await client.get("/api/v1/bundle/wait", headers=hdr)).status == 401
     assert len(bodies) == 1  # nothing says which part failed
 
 
@@ -281,3 +282,30 @@ async def test_discovery_without_supervisor_is_a_noop():
     d = Discovery(None, 8099, TOKEN)
     await d.announce()
     await d.withdraw()
+
+
+async def test_shutdown_wakes_long_poll_waiters_with_204(aiohttp_client, tmp_path):
+    app = create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None, wait_seconds=30)
+    c = await aiohttp_client(app)
+    ws = [asyncio.ensure_future(c.get("/api/v1/bundle/wait", headers=BEARER)) for _ in range(3)]
+    await asyncio.sleep(0.1)
+    assert not any(w.done() for w in ws)
+    t0 = time.monotonic()
+    await app.shutdown()
+    rs = await asyncio.wait_for(asyncio.gather(*ws), 2)
+    assert [r.status for r in rs] == [204] * 3 and time.monotonic() - t0 < 2
+    late = await c.get("/api/v1/bundle/wait", headers=BEARER)  # a poll racing shutdown
+    assert late.status == 204
+
+
+def test_main_passes_a_short_shutdown_timeout(monkeypatch, tmp_path):
+    from aiohttp import web
+
+    from harmony_addon import __main__ as m
+
+    seen = {}
+    monkeypatch.setattr(web, "run_app", lambda app, **kw: seen.update(kw))
+    monkeypatch.setattr("sys.argv", ["x", "--data-dir", str(tmp_path)])
+    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    m.main()
+    assert seen["shutdown_timeout"] <= 5
