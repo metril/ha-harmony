@@ -113,6 +113,9 @@ class FakeRemote:
                 if bad is not None:
                     self.files[a[2]] = bad
             return 0, b"", b""
+        if a[0] == "touch":
+            self.files.setdefault(a[1], b"")
+            return 0, b"", b""
         if a[:2] == ["rm", "-f"]:
             self.files.pop(a[2], None)
             return 0, b"", b""
@@ -443,6 +446,52 @@ def test_reboot_that_never_fires_or_never_returns():
     d2, _, _ = make(FakeRemote(up_after=10**6))
     with pytest.raises(dh.DeployError, match="did not return"):
         d2.reboot(up_timeout=20)
+
+
+def test_disable_enable_toggle_and_read_back():
+    d, dev, lines = make()
+    assert d.set_disabled(True) == 0
+    assert dr.DISABLE in dev.files and "DISABLE: PRESENT" in "\n".join(lines)
+    assert d.set_disabled(False) == 0
+    assert dr.DISABLE not in dev.files and "DISABLE: absent" in "\n".join(lines)
+
+
+def test_disable_fails_loudly_if_readback_disagrees():
+    class Stuck(FakeRemote):
+        def run(self, argv):
+            if argv[:2] == ["rm", "-f"] and argv[2] == dr.DISABLE:
+                return 0, b"", b""  # silently does nothing
+            return super().run(argv)
+
+    dev = Stuck()
+    dev.files[dr.DISABLE] = b""
+    d, _, _ = make(dev)
+    with pytest.raises(dh.DeployError, match="still present"):
+        d.set_disabled(False)
+
+
+def test_cli_disable_enable_need_yes_and_work(capsys):
+    assert dr.main(["disable"]) == 2
+    dev = FakeRemote()
+    assert dr.main(["disable", "--yes"], runner=dev) == 0
+    assert dr.DISABLE in dev.files
+    assert dr.main(["enable", "--yes"], runner=dev) == 0
+    assert dr.DISABLE not in dev.files
+
+
+def test_reboot_timeout_explains_interface_rename_and_default_is_long():
+    import inspect
+
+    assert inspect.signature(dr.RemoteDeployer.reboot).parameters["up_timeout"].default >= 600
+    d, _, _ = make(FakeRemote(up_after=10**6))
+    with pytest.raises(dh.DeployError, match=r"enx"):
+        d.reboot(up_timeout=20)
+
+
+def test_reboot_survives_a_slow_return_beyond_120s():
+    d, _, lines = make(FakeRemote(up_after=80))  # ~240 s of 3 s polls on the fake clock
+    assert d.reboot() == 0
+    assert "enx" in "\n".join(lines)
 
 
 # --- start.sh: the boot counter, run for real -----------------------------------------------
@@ -867,6 +916,8 @@ def violations(remote: str) -> list[str]:
         return [] if dr.under_write_root(rest[0]) else bad
     if prog == "chmod" and len(rest) == 2 and rest[0] == "755":
         return [] if dr.under_write_root(rest[1]) else bad
+    if prog == "touch" and len(rest) == 1:
+        return [] if dr.under_write_root(rest[0]) else bad
     if prog == "rm" and len(rest) == 2 and rest[0] == "-f":
         return [] if dr.under_write_root(rest[1]) else bad
     if prog == "mv" and len(rest) == 2:
@@ -976,3 +1027,12 @@ def test_internal_write_guard_rejects_outside_paths():
             dr._need_write(p)
     for p in (dr.RCS_LOCAL, dr.RCS_TMP, "/data/app/x", "/var/volatile/x"):
         assert dr._need_write(p) == p
+
+
+def test_deploy_tools_parse_on_python_3_13():
+    """`except A, B:` (PEP 758) is 3.14-only; the tools must stay runnable on 3.13."""
+    import ast
+
+    tools = Path(__file__).resolve().parents[2] / "tools"
+    for name in ("deploy_hub.py", "deploy_remote.py", "device_backup.py"):
+        ast.parse((tools / name).read_text(), feature_version=(3, 13))

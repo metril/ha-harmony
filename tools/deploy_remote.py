@@ -516,12 +516,30 @@ class RemoteDeployer:
             self.out(f"left {APP_DIR} in place (use --purge to remove it)")
         return 0
 
+    # -- disable / enable [WRITE] -------------------------------------------------------
+    def set_disabled(self, disabled: bool) -> int:
+        """Create or remove the kill-switch file, then read it back and print the state."""
+        self.connect()
+        path = _need_write(DISABLE)
+        rc, _, err = self.r.run(["touch", path] if disabled else ["rm", "-f", path])
+        if rc != 0:
+            raise DeployError(f"could not {'create' if disabled else 'remove'} {path}: {_dec(err)[-200:]}")
+        present = self.exists(DISABLE)
+        if present != disabled:
+            raise DeployError(f"{path} is still {'present' if present else 'absent'} after the write")
+        self.out(f"DISABLE: {'PRESENT (hook will not launch the app)' if present else 'absent'}")
+        return 0
+
     # -- reboot [WRITE] -----------------------------------------------------------------
     def reboot(
-        self, down_timeout: float = 60.0, up_timeout: float = 300.0, interval: float = 3.0
+        self, down_timeout: float = 60.0, up_timeout: float = 600.0, interval: float = 3.0
     ) -> int:
         self.connect()
-        self.out("rebooting the remote")
+        self.out(
+            "rebooting the remote (a full boot can take several minutes; the USB gadget "
+            "interface is renamed enx<mac> after each reboot, so the host address may need "
+            "re-assigning)"
+        )
         rc, _, err = self.r.run(["reboot"])
         if rc not in (0, 255):
             raise DeployError(f"reboot failed (rc={rc}): {_dec(err)[-200:]}")
@@ -529,10 +547,12 @@ class RemoteDeployer:
             raise DeployError("the remote stayed reachable; cannot confirm the reboot")
         if not self.wait(lambda: self.r.run(["uname", "-a"])[0] == 0, up_timeout, interval):
             raise DeployError(
-                f"ssh did not return within {up_timeout:g}s. Check the USB cable and host "
-                "address; if it never returns, Menu+Off factory-resets it."
+                f"ssh did not return within {up_timeout:g}s. After a reboot the Elite's USB "
+                "gadget interface reappears renamed (enx<mac>, no longer usb0) and loses the "
+                "host address: find it with `ip link`, re-add the host address on it, then "
+                "retry. Also check the USB cable; if it never returns, Menu+Off factory-resets it."
             )
-        self.out("ssh is back after reboot")
+        self.out("ssh is back after reboot (if the interface was renamed, you already re-addressed it)")
         return self.status()
 
 
@@ -571,7 +591,11 @@ def build_parser() -> argparse.ArgumentParser:
     add("mark-good", "[WRITE] reset the boot counter to 0")
     p = add("uninstall", "[WRITE] restore rcS.local from the backup (md5-verified)")
     p.add_argument("--purge", action="store_true", help="also remove /data/app")
-    add("reboot", "[WRITE] reboot the remote, wait for ssh, report status")
+    p = add("reboot", "[WRITE] reboot the remote, wait for ssh, report status")
+    p.add_argument("--up-timeout", type=float, default=600.0, metavar="SEC",
+                   help="how long to wait for ssh to return (default %(default)s)")  # fmt: skip
+    add("disable", "[WRITE] touch /data/app/DISABLE (boot hook will not launch the app); read back")
+    add("enable", "[WRITE] remove /data/app/DISABLE; read back")
     return ap
 
 
@@ -614,7 +638,9 @@ def main(
             case "uninstall":
                 return d.uninstall(a.purge)
             case "reboot":
-                return d.reboot()
+                return d.reboot(up_timeout=a.up_timeout)
+            case "disable" | "enable":
+                return d.set_disabled(a.cmd == "disable")
     except DeployError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

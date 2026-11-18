@@ -212,7 +212,7 @@ class Deployer:
             return None
         try:
             return float(out.decode("utf-8", "replace").split()[0])
-        except ValueError, IndexError:
+        except (ValueError, IndexError):
             return None
 
     def procs(self) -> list[Proc]:
