@@ -36,6 +36,7 @@
 #define RA_TOAST_H 56
 #define RA_TOAST_MS 5000
 #define RA_LOWBATT_PCT 10
+#define RA_LOWBATT_REARM_PCT 13
 
 /* Fonts: Ubuntu, 4 bpp, Latin-1 (tools/gen_remote_fonts.sh) */
 LV_FONT_DECLARE(ra_font_b20); /* display: state screens, tiles */

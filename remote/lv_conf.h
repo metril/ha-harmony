@@ -9,10 +9,10 @@
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_BUILTIN
-/* Static pool, 48 KiB: a 240x320 page holds <= 32 widgets (each an object plus a label, ~0.4 KiB
+/* Static pool, 64 KiB: a 240x320 page holds <= 32 widgets (each an object plus a label, ~0.4 KiB
  * with their local styles; a full 32-widget page measures ~28 KiB), and the software
  * renderer's layer scratch for partial rendering is the rest. */
-#define LV_MEM_SIZE (48 * 1024U)
+#define LV_MEM_SIZE (64 * 1024U)
 
 #define LV_DEF_REFR_PERIOD 33
 #define LV_DPI_DEF 130
@@ -38,7 +38,8 @@
 /* Asserts on in host (test) builds; the device build trusts the same code paths. */
 #ifdef HP_HOST_BUILD
 #define LV_USE_ASSERT_NULL 1
-#define LV_USE_ASSERT_MALLOC 1
+/* No malloc assert even on the host: a failed allocation returns NULL and remote/app/ui.c handles it (error state). */
+#define LV_USE_ASSERT_MALLOC 0
 #define LV_USE_ASSERT_STYLE 1
 #define LV_USE_ASSERT_MEM_INTEGRITY 1
 #define LV_USE_ASSERT_OBJ 1

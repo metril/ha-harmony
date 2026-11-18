@@ -41,6 +41,15 @@ static void set_hidden(lv_obj_t *o, int hide) {
   else lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* Test hooks (host tests only): ra_ui_test_fail_at >= 0 makes the Nth object creation from now fail as if LVGL
+ * had run out of memory; ra_ui_test_skip_precheck disables the free-memory precheck. */
+int ra_ui_test_fail_at = -1;
+int ra_ui_test_skip_precheck;
+static int creation_fails(void) {
+  if (ra_ui_test_fail_at < 0) return 0;
+  return ra_ui_test_fail_at-- == 0;
+}
+
 static void plain(lv_obj_t *o) {
   lv_obj_remove_style_all(o);
   lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
@@ -48,7 +57,8 @@ static void plain(lv_obj_t *o) {
 
 /* One-line label that ends in "..." instead of wrapping. */
 static lv_obj_t *make_label(lv_obj_t *parent, const char *text, const lv_style_t *st, const lv_font_t *font, int w) {
-  lv_obj_t *l = lv_label_create(parent);
+  lv_obj_t *l = creation_fails() ? NULL : lv_label_create(parent);
+  if (!l) return NULL;
   lv_obj_add_style(l, st, 0);
   if (font) lv_obj_set_style_text_font(l, font, 0);
   lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
@@ -58,7 +68,8 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text, const lv_style_t
 }
 
 static lv_obj_t *rect(lv_obj_t *parent, int x, int y, int w, int h, const lv_style_t *st) {
-  lv_obj_t *o = lv_obj_create(parent);
+  lv_obj_t *o = creation_fails() ? NULL : lv_obj_create(parent);
+  if (!o) return NULL;
   plain(o);
   lv_obj_add_style(o, st, 0);
   lv_obj_set_pos(o, x, y);
@@ -77,7 +88,7 @@ static lv_obj_t *rect(lv_obj_t *parent, int x, int y, int w, int h, const lv_sty
 #define TITLE_W 128
 
 static void chrome_apply(ra_ui_t *ui) {
-  if (!ui->bar) return;
+  if (!ui->bar || !ui->title || !ui->rf[0] || !ui->rf[1] || !ui->rf[2] || !ui->pct || !ui->batt || !ui->batt_fill) return;
   lv_color_t rf = RA_COLOR(ui->link_lost ? RA_HEX_BAD : RA_HEX_TX2);
   for (int i = 0; i < 3; i++) {
     lv_obj_set_style_bg_color(ui->rf[i], rf, 0);
@@ -99,24 +110,42 @@ static void chrome_apply(ra_ui_t *ui) {
   }
 }
 
-static void bar_build(ra_ui_t *ui, lv_obj_t *scr, const char *title) {
-  ui->bar = rect(scr, 0, 0, HP_PAGE_SCREEN_W, RA_BAR_H, &ra_st_bar);
-  ui->title = make_label(ui->bar, title, &ra_st_txt_title, NULL, TITLE_W);
-  lv_obj_set_pos(ui->title, TITLE_X, 6);
+/* 0 ok, -1 out of memory (the caller shows the error state; chrome_apply ignores a partial bar). */
+static int bar_build(ra_ui_t *ui, lv_obj_t *scr, const char *title) {
+  ui->bar = ui->title = ui->pct = ui->batt = ui->batt_fill = NULL;
+  ui->rf[0] = ui->rf[1] = ui->rf[2] = NULL;
+  lv_obj_t *bar = rect(scr, 0, 0, HP_PAGE_SCREEN_W, RA_BAR_H, &ra_st_bar);
+  if (!bar) return -1;
+  lv_obj_t *t = make_label(bar, title, &ra_st_txt_title, NULL, TITLE_W);
+  if (!t) return -1;
+  lv_obj_set_pos(t, TITLE_X, 6);
+  lv_obj_t *rf[3];
   for (int i = 0; i < 3; i++) {
     int h = 4 + 4 * i;
-    ui->rf[i] = rect(ui->bar, RF_X + 5 * i, 22 - h, 3, h, &ra_st_ink);
+    rf[i] = rect(bar, RF_X + 5 * i, 22 - h, 3, h, &ra_st_ink);
+    if (!rf[i]) return -1;
   }
-  ui->pct = make_label(ui->bar, "", &ra_st_txt_cap, NULL, PCT_W);
-  lv_obj_set_style_text_align(ui->pct, LV_TEXT_ALIGN_RIGHT, 0);
-  lv_obj_set_pos(ui->pct, PCT_X, 7);
-  ui->batt = rect(ui->bar, BAT_X, BAT_Y, 22, 12, &ra_st_ink);
-  lv_obj_set_style_bg_opa(ui->batt, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(ui->batt, 1, 0);
-  lv_obj_set_style_radius(ui->batt, 2, 0);
-  ui->batt_fill = rect(ui->batt, 1, 1, 18, 8, &ra_st_ink);
-  rect(ui->bar, BAT_X + 23, BAT_Y + 3, 2, 6, &ra_st_ink);
+  lv_obj_t *pct = make_label(bar, "", &ra_st_txt_cap, NULL, PCT_W);
+  if (!pct) return -1;
+  lv_obj_set_style_text_align(pct, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_pos(pct, PCT_X, 7);
+  lv_obj_t *batt = rect(bar, BAT_X, BAT_Y, 22, 12, &ra_st_ink);
+  if (!batt) return -1;
+  lv_obj_set_style_bg_opa(batt, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(batt, 1, 0);
+  lv_obj_set_style_radius(batt, 2, 0);
+  lv_obj_t *fill = rect(batt, 1, 1, 18, 8, &ra_st_ink);
+  if (!fill || !rect(bar, BAT_X + 23, BAT_Y + 3, 2, 6, &ra_st_ink)) return -1;
+  ui->title = t;
+  ui->rf[0] = rf[0];
+  ui->rf[1] = rf[1];
+  ui->rf[2] = rf[2];
+  ui->pct = pct;
+  ui->batt = batt;
+  ui->batt_fill = fill;
+  ui->bar = bar;
   chrome_apply(ui);
+  return 0;
 }
 
 void ra_ui_set_link(ra_ui_t *ui, int lost) {
@@ -136,28 +165,65 @@ void ra_ui_set_battery(ra_ui_t *ui, int soc, int charging) {
 
 /* ---- pages ---- */
 
-static void screen_reset(ra_ui_t *ui, const char *title) {
+/* Memory ran out: drop whatever was built and show the minimal error state. Its objects (ui->err) were created
+ * once at init, so showing it allocates nothing. The page on screen is forgotten (no taps hit invisible widgets). */
+static void fail(ra_ui_t *ui) {
+  lv_obj_clean(lv_screen_active());
+  memset(ui->obj, 0, sizeof ui->obj);
+  memset(ui->lbl, 0, sizeof ui->lbl);
+  ui->msg = ui->cap = ui->bar = ui->title = ui->pct = ui->batt = ui->batt_fill = NULL;
+  ui->rf[0] = ui->rf[1] = ui->rf[2] = NULL;
+  ui->page.count = 0;
+  ui->page.page_id = RA_UI_PAGE_ERROR;
+  ui->title_idx = ui->pressed = -1;
+  ui->fallback = 0;
+  ui->oom++;
+  if (ui->err) lv_obj_remove_flag(ui->err, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Free memory needed before building `widgets` widgets: ~0.9 KiB each measured, plus the bar and the renderer's
+ * working set. Refusing early is what keeps LVGL's own allocations (which do not check for failure) safe. */
+#define BUILD_NEED(widgets) (1100u * (widgets) + 8192u)
+
+static int enough_memory(unsigned need) {
+  if (ra_ui_test_skip_precheck) return 1;
+  lv_mem_monitor_t mon;
+  lv_mem_monitor(&mon);
+  return mon.free_size >= need;
+}
+
+static int screen_reset(ra_ui_t *ui, const char *title, unsigned widgets) {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_clean(scr);
   lv_obj_remove_style_all(scr);
   lv_obj_add_style(scr, &ra_st_screen, 0);
   lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+  if (ui->err) lv_obj_add_flag(ui->err, LV_OBJ_FLAG_HIDDEN);
   memset(ui->obj, 0, sizeof ui->obj);
   memset(ui->lbl, 0, sizeof ui->lbl);
   ui->msg = ui->cap = NULL;
   ui->title_idx = -1;
   ui->pressed = -1;
-  bar_build(ui, scr, title);
+  if (!enough_memory(BUILD_NEED(widgets)) || bar_build(ui, scr, title) < 0) {
+    fail(ui);
+    return -1;
+  }
+  return 0;
 }
 
-/* Centred two-line state message in the content area. */
-static void message(ra_ui_t *ui, const char *head, const char *sub, uint32_t head_hex) {
+/* Centred two-line state message in the content area; 0 ok, -1 out of memory. */
+static int message(ra_ui_t *ui, const char *head, const char *sub, uint32_t head_hex) {
   lv_obj_t *scr = lv_screen_active();
-  ui->msg = make_label(scr, head, &ra_st_txt_display, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
-  lv_obj_set_style_text_color(ui->msg, RA_COLOR(head_hex), 0);
-  lv_obj_set_pos(ui->msg, RA_MARGIN, 148);
-  ui->cap = make_label(scr, sub, &ra_st_txt_cap, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
-  lv_obj_set_pos(ui->cap, RA_MARGIN, 176);
+  lv_obj_t *m = make_label(scr, head, &ra_st_txt_display, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
+  if (!m) return -1;
+  ui->msg = m;
+  lv_obj_set_style_text_color(m, RA_COLOR(head_hex), 0);
+  lv_obj_set_pos(m, RA_MARGIN, 148);
+  lv_obj_t *c = make_label(scr, sub, &ra_st_txt_cap, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
+  if (!c) return -1;
+  ui->cap = c;
+  lv_obj_set_pos(c, RA_MARGIN, 176);
+  return 0;
 }
 
 static void build(ra_ui_t *ui) {
@@ -166,7 +232,7 @@ static void build(ra_ui_t *ui) {
   const char *title = "Harmony";
   int title_idx = hp_page_title(p);
   if (title_idx >= 0 && p->widgets[title_idx].label[0]) title = p->widgets[title_idx].label;
-  screen_reset(ui, title);
+  if (screen_reset(ui, title, p->count) < 0) return;
   ui->title_idx = title_idx;
   int interactive_or_text = 0;
   for (unsigned i = 0; i < p->count; i++) {
@@ -176,12 +242,14 @@ static void build(ra_ui_t *ui) {
     int x1, y1, x2, y2;
     ra_ui_widget_rect(p, w, &x1, &y1, &x2, &y2);
     int bw = x2 - x1 + 1, bh = y2 - y1 + 1;
-    lv_obj_t *o;
+    lv_obj_t *o, *l;
     if (w->kind == HP_WIDGET_LABEL) {
       /* A bare section label: no surface, clipped to its cells. */
       o = rect(scr, x1, y1, bw, bh, &ra_st_screen);
+      if (!o) return fail(ui);
       lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0);
-      lv_obj_t *l = make_label(o, w->label, &ra_st_txt_cap, &ra_font_m16, bw);
+      l = make_label(o, w->label, &ra_st_txt_cap, &ra_font_m16, bw);
+      if (!l) return fail(ui);
       lv_obj_center(l);
       ui->obj[i] = o;
       ui->lbl[i] = l;
@@ -189,17 +257,18 @@ static void build(ra_ui_t *ui) {
     }
     int btn = w->kind == HP_WIDGET_BUTTON;
     o = rect(scr, x1, y1, bw, bh, btn ? &ra_st_btn : &ra_st_card);
+    if (!o) return fail(ui);
     lv_obj_add_style(o, btn ? &ra_st_btn_pr : &ra_st_card_pr, LV_STATE_PRESSED);
     const char *txt = btn ? w->label : w->text;
     const lv_style_t *ts = btn ? (bw >= 100 ? &ra_st_txt_body : &ra_st_txt_btn) : (bw >= 80 ? &ra_st_txt_display : &ra_st_txt_btn);
-    lv_obj_t *l = make_label(o, txt, ts, NULL, bw - 8);
+    l = make_label(o, txt, ts, NULL, bw - 8);
+    if (!l) return fail(ui);
     lv_obj_center(l);
     if (btn && !strcasecmp(w->label, "Power Off")) lv_obj_set_style_text_color(l, RA_COLOR(RA_HEX_BAD), 0);
     ui->obj[i] = o;
     ui->lbl[i] = l;
   }
-  if (!interactive_or_text && ui->page.page_id < RA_UI_PAGE_RECEIVING)
-    message(ui, "No activities yet", "Add some in Home Assistant", RA_HEX_TX);
+  if (!interactive_or_text && message(ui, "No activities yet", "Add some in Home Assistant", RA_HEX_TX) < 0) fail(ui);
 }
 
 void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p) {
@@ -212,14 +281,26 @@ static void show_builtin(ra_ui_t *ui, uint8_t id, const char *head, const char *
   memset(&ui->page, 0, sizeof ui->page);
   ui->page.page_id = id;
   ui->page.cols = ui->page.rows = 1;
-  screen_reset(ui, "Harmony");
-  message(ui, head, sub, head_hex);
+  if (screen_reset(ui, "Harmony", 0) < 0) return;
+  if (message(ui, head, sub, head_hex) < 0) fail(ui);
 }
 
 void ra_ui_init(ra_ui_t *ui) {
   memset(ui, 0, sizeof *ui);
   ui->soc = -1;
   ui->title_idx = ui->pressed = -1;
+  /* The error state, built once while the pool is empty and kept hidden on the top layer. */
+  ui->err = rect(lv_layer_top(), 0, 0, HP_PAGE_SCREEN_W, HP_PAGE_SCREEN_H, &ra_st_screen);
+  if (ui->err) {
+    lv_obj_t *m = make_label(ui->err, "Display error", &ra_st_txt_display, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
+    lv_obj_t *c = make_label(ui->err, "Waiting for the next page", &ra_st_txt_cap, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
+    if (m) {
+      lv_obj_set_style_text_color(m, RA_COLOR(RA_HEX_BAD), 0);
+      lv_obj_set_pos(m, RA_MARGIN, 148);
+    }
+    if (c) lv_obj_set_pos(c, RA_MARGIN, 176);
+    lv_obj_add_flag(ui->err, LV_OBJ_FLAG_HIDDEN);
+  }
   ra_ui_show_boot(ui);
 }
 
@@ -285,14 +366,23 @@ void ra_ui_toast_dismiss(ra_ui_t *ui) {
 
 void ra_ui_toast(ra_ui_t *ui, const char *line1, const char *line2) {
   ra_ui_toast_dismiss(ui);
+  if (!enough_memory(4096)) return; /* a toast is optional: skip it rather than risk the pool */
   int w = HP_PAGE_SCREEN_W - 2 * RA_MARGIN;
-  ui->toast = rect(lv_layer_top(), RA_MARGIN, HP_PAGE_SCREEN_H - RA_MARGIN - RA_TOAST_H, w, RA_TOAST_H, &ra_st_toast);
-  lv_obj_t *l1 = make_label(ui->toast, line1, &ra_st_txt_ontoast, NULL, w - 24);
-  lv_obj_set_pos(l1, 12, line2 ? 8 : 18);
-  if (line2) {
-    lv_obj_t *l2 = make_label(ui->toast, line2, &ra_st_txt_ontoast, &ra_font_r12, w - 24);
-    lv_obj_set_pos(l2, 12, 32);
+  lv_obj_t *t = rect(lv_layer_top(), RA_MARGIN, HP_PAGE_SCREEN_H - RA_MARGIN - RA_TOAST_H, w, RA_TOAST_H, &ra_st_toast);
+  if (!t) return;
+  lv_obj_t *l1 = make_label(t, line1, &ra_st_txt_ontoast, NULL, w - 24);
+  lv_obj_t *l2 = line2 ? make_label(t, line2, &ra_st_txt_ontoast, &ra_font_r12, w - 24) : NULL;
+  if (!l1 || (line2 && !l2)) {
+    lv_obj_delete(t);
+    return;
   }
+  lv_obj_set_pos(l1, 12, line2 ? 8 : 18);
+  if (l2) lv_obj_set_pos(l2, 12, 32);
   ui->toast_timer = lv_timer_create(toast_timeout, RA_TOAST_MS, ui);
+  if (!ui->toast_timer) {
+    lv_obj_delete(t);
+    return;
+  }
   lv_timer_set_repeat_count(ui->toast_timer, 1);
+  ui->toast = t;
 }

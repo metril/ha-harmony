@@ -10,6 +10,7 @@
 #include "remote/app/theme.h"
 #include "remote/page/page.h"
 
+#define RA_UI_PAGE_ERROR 0xFC    /* out of memory: error state, no widgets */
 #define RA_UI_PAGE_RECEIVING 0xFD /* built-in pages use ids a real page cannot be mistaken for... */
 #define RA_UI_PAGE_BOOT 0xFE
 #define RA_UI_PAGE_FALLBACK 0xFF /* ...but tile_update on them finds no tile and is ignored */
@@ -31,6 +32,8 @@ typedef struct {
   int soc;        /* percent or -1 unknown */
   int charging;   /* external power present */
   lv_obj_t *toast;
+  lv_obj_t *err;  /* hidden error overlay, created once at init */
+  unsigned oom;   /* times a screen could not be built (memory) and the error state was shown */
   lv_timer_t *toast_timer;
 } ra_ui_t;
 
@@ -58,5 +61,8 @@ void ra_ui_set_battery(ra_ui_t *ui, int soc, int charging);
  * ra_ui_toast_dismiss(). line2 may be NULL. */
 void ra_ui_toast(ra_ui_t *ui, const char *line1, const char *line2);
 void ra_ui_toast_dismiss(ra_ui_t *ui);
+
+/* Host-test hooks: fail the Nth object creation as if out of memory (-1 = off); skip the free-memory precheck. */
+extern int ra_ui_test_fail_at, ra_ui_test_skip_precheck;
 
 #endif

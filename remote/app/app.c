@@ -153,13 +153,15 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   if (a->power.batt_polls != a->last_batt_polls) {
     a->last_batt_polls = a->power.batt_polls;
     ra_ui_set_battery(&a->ui, a->power.soc, a->power.external_power);
-    bool low = a->power.soc <= RA_LOWBATT_PCT && !a->power.external_power;
-    if (low && !a->lowbatt_toasted) {
-      char b[24];
-      snprintf(b, sizeof b, "Battery %d%%", a->power.soc);
-      ra_ui_toast(&a->ui, b, "Place on the charger");
+    /* Low-battery toast with hysteresis: queued at <= 10 % off the charger, once; re-armed only at >= 13 % or on
+     * external power. It is shown when the screen is on (see below), not while asleep. */
+    if (a->power.external_power || a->power.soc >= RA_LOWBATT_REARM_PCT) {
+      a->lowbatt_disarmed = false;
+      if (a->power.external_power) a->lowbatt_pending = false;
+    } else if (a->power.soc <= RA_LOWBATT_PCT && !a->lowbatt_disarmed) {
+      a->lowbatt_disarmed = true;
+      a->lowbatt_pending = true;
     }
-    a->lowbatt_toasted = low;
   }
   bool awake = a->power.state != RA_PW_OFF;
   if (a->link.set_awake && (!a->awake_known || awake != a->last_awake)) a->link.set_awake(a->link.ctx, awake);
@@ -168,6 +170,16 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   app_link_event_t ev;
   for (int i = 0; i < LINK_EVENTS_PER_STEP && a->link.poll(a->link.ctx, now, &ev) > 0; i++) handle_link_event(a, &ev, now);
   lv_timer_handler(); /* render what changed */
+  if (a->lowbatt_pending && a->power.state != RA_PW_OFF) { /* the screen is on and its frame is drawn: show it now */
+    char b[24];
+    snprintf(b, sizeof b, "Battery %d%%", a->power.soc);
+    ra_ui_toast(&a->ui, b, "Place on the charger");
+    a->lowbatt_pending = false;
+  }
+  if (a->ui.oom != a->oom_logged) {
+    a->oom_logged = a->ui.oom;
+    ra_logf(&a->sys, "ui: out of memory building a screen; showing the error state (%u so far)", a->ui.oom);
+  }
   if (!a->healthy_written && a->input_open && a->display.frames >= 1 && ra_write_bootcount(&a->sys) == 0)
     a->healthy_written = true;
 }

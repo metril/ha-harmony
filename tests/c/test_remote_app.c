@@ -324,32 +324,64 @@ static void test_status_bar_and_state_screens(void) {
   CT_EQ(app.ui.pressed, -1);
   fk_touch(&fk, 230, 300, 0);
   step_at(1800);
-  /* low battery on battery power: a toast, once per dip; any touch clears it */
+  /* low battery on battery power while the screen is off: queued, shown at the next wake, once per dip */
+  uint64_t t = 1000 + 60000;
   fk_set_file(&fk, RA_PATH_SOC, "8.0\n");
   fk_set_file(&fk, RA_PATH_POWERSRC, "battery\n");
   fk_set_file(&fk, RA_PATH_BATTCHARGE, "-100.00 0x0000\n");
-  step_at(1000 + 60000);
+  step_at(t);
   CT_EQ(app.ui.soc, 8);
   CT_EQ(app.ui.charging, 0);
-  CT_CHECK(app.ui.toast != NULL);
-  step_at(1000 + 120000); /* the next poll does not raise it again... */
-  CT_CHECK(app.ui.toast == NULL); /* ...and the first one timed out */
-  fk_set_file(&fk, RA_PATH_SOC, "9.0\n");
-  step_at(1000 + 125000);
-  CT_CHECK(app.ui.toast == NULL);
-  fk_set_file(&fk, RA_PATH_SOC, "50.0\n"); /* recovered, then dips again: re-armed */
-  step_at(1000 + 180000);
-  fk_set_file(&fk, RA_PATH_SOC, "7.0\n");
-  step_at(1000 + 240000);
-  CT_CHECK(app.ui.toast != NULL);
-  fk_touch(&fk, 230, 300, 1); /* the screen was off: this touch only wakes it, the toast stays */
+  CT_EQ(app.power.state, RA_PW_OFF);
+  CT_CHECK(app.ui.toast == NULL && app.lowbatt_pending); /* nobody is looking: not shown, not lost */
+  fk_touch(&fk, 230, 300, 1); /* the wake touch is consumed; the toast appears after the wake frame */
   fk_touch(&fk, 230, 300, 0);
-  step_at(1000 + 240100);
+  t += 100;
+  step_at(t);
+  CT_EQ(app.power.state, RA_PW_ACTIVE);
+  CT_CHECK(app.ui.toast != NULL && !app.lowbatt_pending);
+  t += RA_TOAST_MS + 100; /* auto-dismisses; it is not shown again */
+  step_at(t);
+  CT_CHECK(app.ui.toast == NULL);
+  /* 10 <-> 11 % wobble does not re-fire; only >= 13 % re-arms */
+  const char *wobble[] = {"11.0\n", "10.0\n", "11.0\n", "9.0\n", "12.0\n", "10.0\n"};
+  for (unsigned i = 0; i < sizeof wobble / sizeof wobble[0]; i++) {
+    fk_set_file(&fk, RA_PATH_SOC, wobble[i]);
+    t += 60000;
+    step_at(t);
+    CT_CHECK(!app.lowbatt_pending && app.ui.toast == NULL);
+  }
+  fk_set_file(&fk, RA_PATH_SOC, "13.0\n");
+  t += 60000;
+  step_at(t);
+  fk_set_file(&fk, RA_PATH_SOC, "7.0\n"); /* a new dip: queued while off, shown on the next wake */
+  t += 60000;
+  step_at(t);
+  CT_CHECK(app.lowbatt_pending && app.ui.toast == NULL);
+  fk_touch(&fk, 230, 300, 1);
+  fk_touch(&fk, 230, 300, 0);
+  t += 100;
+  step_at(t);
   CT_CHECK(app.ui.toast != NULL);
   fk_touch(&fk, 230, 300, 1); /* a touch on the awake screen clears it */
   fk_touch(&fk, 230, 300, 0);
-  step_at(1000 + 240200);
+  t += 100;
+  step_at(t);
   CT_CHECK(app.ui.toast == NULL);
+  /* still low, no repeat; a charger re-arms; the next dip queues again */
+  fk_set_file(&fk, RA_PATH_SOC, "5.0\n");
+  t += 60000;
+  step_at(t);
+  CT_CHECK(!app.lowbatt_pending);
+  fk_set_file(&fk, RA_PATH_POWERSRC, "cradle\n");
+  t += 60000;
+  step_at(t);
+  CT_CHECK(!app.lowbatt_disarmed);
+  fk_set_file(&fk, RA_PATH_POWERSRC, "battery\n");
+  fk_set_file(&fk, RA_PATH_SOC, "6.0\n");
+  t += 60000;
+  step_at(t);
+  CT_CHECK(app.lowbatt_pending);
   CT_EQ(fk.nexec, 0); /* 7% is a warning, not the 3% poweroff guard */
   app_destroy(&app);
 }
