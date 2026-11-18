@@ -100,7 +100,21 @@ pages:
   (`VolumeUp` or `volume_up`) or the numeric logical code.
 - **Page widgets**: `button` (needs `action`), `tile` (shows the state of `entity`, updated on change),
   `label`. Grid up to 16x16, 32 widgets per page, 128 widgets over all pages, labels up to 24 bytes.
-  A page's id on the remote is its position in `pages`.
+  A page's id on the remote is its position in `pages` (a list page takes one id per group).
+  Only buttons and tiles take a soft-key id (`128+n`); labels and `nav` buttons never do.
+- **Page keys** (page format v2; v1 remotes ignore them): `title:` (max 24 bytes; else a non-empty
+  full-width label at row 0 becomes the header title, is dropped, and the rows shift up by one),
+  `kind: home|favorites` (at most one each), `activity: <id>` (auto-shown when it starts), `back: true`,
+  `list: {rows: N}` (replaces `cols`/`rows`; widgets omit `x`/`y` and become one full-width row each;
+  the compiler splits into groups of N rows or 251 bytes, at most 15; the remote pages with Up/Down).
+- **Widget keys**: `icon: <name>|none` (`proto/icons.yaml`), `role: default|primary|secondary|danger`,
+  `shape: card|row|pill|monogram` (list pages default `row`), `icon_only: true` (label kept, not drawn),
+  `nav: next|prev|home|<page id>` (button without `action`; handled on the remote, no key event).
+- **Inference** (compiler only; explicit keys always win): `{activity: off}` or a label like "power
+  off"/"all off" -> role `danger`, icon `power`; `{activity: X}` -> `bind` X (active highlight) and an
+  icon from X's name keywords; else an icon from the label's words; tile -> icon from the entity
+  domain (light bulb, climate thermo, ...); `nav` -> chevron/home icon. A page over 251 bytes fails
+  with `page 'x': N bytes over; shorten labels, use icon_only, or make it a list`.
 - **Hub limits** (`hub/engine/mapping.h`): 16 devices, 256 commands, 64 inputs, 16 activities,
   128 keys per map, 16 steps per list, 8 devices per activity, 128 KiB of config. Over-limit configs
   fail with a message and nothing is pushed.
