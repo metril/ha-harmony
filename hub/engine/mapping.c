@@ -129,8 +129,11 @@ static int parse_ir_v2(hp_map_t *m, const cJSON *j, hp_action_t *a) {
     if (pm && !int_in(pm, 1, 255)) return fail(m, INVAL, "port_mask must be 1..255");
     if ((pr != NULL) + (rw != NULL) + (pt != NULL) != 1)
         return fail(m, INVAL, "IR action needs exactly one of proto, raw, pronto");
+    const cJSON *rp = cJSON_GetObjectItemCaseSensitive(j, "repeats"); /* older hubs ignore this key */
+    if (rp && !int_in(rp, 1, 8)) return fail(m, INVAL, "repeats must be 1..8");
     a->type = HP_ACT_IR;
     a->port_mask = pm ? (uint8_t)pm->valuedouble : 255;
+    a->repeats = rp ? (uint8_t)rp->valuedouble : 1;
     if (pr) {
         const cJSON *ad = cJSON_GetObjectItemCaseSensitive(j, "addr");
         const cJSON *cm = cJSON_GetObjectItemCaseSensitive(j, "cmd");
@@ -583,7 +586,7 @@ static int apply_action(const hp_map_t *m, const hp_action_t *a, const hp_sinks_
         if (!s->ir) return -HP_E_INVAL;
         int r = hp_map_ir_code(m, a, raw, &c);
         if (r < 0) return r;
-        if (m->out) return hp_irout_send(m->out, s->ir, &c, a->port_mask, key);
+        if (m->out) return hp_irout_send_n(m->out, s->ir, &c, a->port_mask, key, a->repeats ? a->repeats : 1);
         hp_ir_signal_t sig;
         if ((r = hp_ir_encode(&c, 0, &sig)) < 0) return r;
         return s->ir->send(s->ir->self, a->port_mask, &sig);

@@ -25,7 +25,9 @@ Format 1 (see `hub/engine/mapping.h`) has no `"format"` key; a hub accepts both,
 ```
 
 ## IR action
-Exactly one of (plus optional `"port_mask"` 1..255, default 255 = all ports):
+Exactly one of (plus optional `"port_mask"` 1..255, default 255 = all ports, and optional `"repeats"` 1..8,
+default 1 = the frame is sent that many times in total, one frame period apart, like the SIRC copies; SIRC
+stays at 3 or more. A hub older than this field ignores the key and sends the frame once):
 - `{"proto": "nec"|"necext"|"samsung32"|"rc5"|"rc6"|"sirc12"|"sirc15"|"sirc20", "addr": int, "cmd": int}`
 - `{"raw": {"hz": int, "us": [int, ...]}}` (mark/space durations in microseconds, mark first)
 - `{"pronto": "0000 006D ..."}` (hex words, space separated)

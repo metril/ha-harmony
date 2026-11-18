@@ -5,7 +5,7 @@ import json
 import subprocess
 
 import pytest
-from conftest import HUB_ID, RemoteDump, make_entry
+from conftest import HUB_ID, RemoteDump, make_entry, push_config
 from pytest_homeassistant_custom_component.common import async_mock_service
 from test_activity_e2e import ir_line, nec
 from test_ha_runtime import YAML
@@ -115,3 +115,18 @@ async def test_activity_start_mixes_hub_ir_and_home_assistant_steps(hass, hub_rf
     await until(hass, lambda: lights)  # the HA part, after the hub reported the activity running
     assert len(on) == 1 and [s.data["command"] for s in sends] == ["HOME"] and len(lights) == 1
     await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_hub_sends_a_command_repeats_times_and_ignores_it_when_absent(hub_rf, run_remote):
+    cfg = {
+        "format": 2,
+        "keys": {
+            "8": {"type": "ir", "proto": "nec", "addr": 4, "cmd": 8, "repeats": 3},
+            "9": {"type": "ir", "proto": "nec", "addr": 4, "cmd": 9},
+        },
+    }
+    await push_config(hub_rf.url, config=cfg)
+    assert (await asyncio.to_thread(run_remote, hub_rf.rf, "--press", "VolumeUp")).returncode == 0
+    assert read_lines(hub_rf, 3) == [ir_line(nec(4, 8))] * 3  # three full frames
+    assert (await asyncio.to_thread(run_remote, hub_rf.rf, "--press", "VolumeDown")).returncode == 0
+    assert read_lines(hub_rf, 1) == [ir_line(nec(4, 9))]  # no repeats key: one frame
