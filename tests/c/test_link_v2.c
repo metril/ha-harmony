@@ -22,14 +22,15 @@ static void world(void) {
     CT_CHECK(R.up);
 }
 
-static void send_info(uint32_t caps) {
-    hp_rf_val_t v[4] = {{.u = 1}, {.u = 2}, {.u = caps}, {.u = 50}};
+static void send_info_stored(uint32_t caps, uint32_t gen, uint32_t pages) {
+    hp_rf_val_t v[6] = {{.u = 1}, {.u = 2}, {.u = caps}, {.u = 50}, {.u = gen}, {.u = pages}};
     uint8_t pl[HP_RF_MSG_MAX];
     size_t n;
-    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 4, pl, sizeof pl, &n), 0);
+    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 6, pl, sizeof pl, &n), 0);
     CT_EQ(hp_rf_link_send(&RL, HP_MSG_REMOTE_INFO, pl, n, R.now), 0);
     run(300);
 }
+static void send_info(uint32_t caps) { send_info_stored(caps, 0, 0); }
 
 /* A v2 page: id of total, gen, one button. Returns the raw length. */
 static size_t mkpage(uint8_t *o, uint8_t id, uint8_t total, uint8_t gen, uint8_t kind, uint8_t act) {
@@ -69,7 +70,11 @@ static void test_remote_info_cached_and_cleared_on_link_loss(void) {
         CT_EQ(i->page_fmt, 2);
         CT_EQ(i->caps, 3);
         CT_EQ(i->icons, 50);
+        CT_EQ(i->gen, 0);
+        CT_EQ(i->pages, 0);
     }
+    send_info_stored(3, 0xA7, 12); /* what the remote's page store holds is cached with the rest */
+    CT_CHECK(hub_remote_info(&H, 1) && hub_remote_info(&H, 1)->gen == 0xA7 && hub_remote_info(&H, 1)->pages == 12);
     send_info(1); /* a later one replaces it */
     CT_CHECK(hub_remote_info(&H, 1) && hub_remote_info(&H, 1)->caps == 1);
     CT_CHECK(hub_remote_info(&H, 2) == NULL);
@@ -347,7 +352,22 @@ static void test_remote_info_broadcast_once_per_link_up(void) {
     CT_EQ(H.info_bcast, 3u);
 }
 
+/* A changed stored set is relayed at once even though caps and format are the same (the hub's cache stays true, and
+ * clients skip a push that would change nothing); an identical repeat is not. */
+static void test_remote_info_broadcast_when_the_stored_set_changes(void) {
+    world();
+    send_info(3);
+    CT_EQ(H.info_bcast, 1u);
+    send_info_stored(3, 0x10, 4);
+    CT_EQ(H.info_bcast, 2u);
+    send_info_stored(3, 0x10, 4);
+    CT_EQ(H.info_bcast, 2u);
+    send_info_stored(3, 0x10, 3); /* same gen, fewer pages: the store was cleared and refilled */
+    CT_EQ(H.info_bcast, 3u);
+}
+
 int main(void) {
+    test_remote_info_broadcast_when_the_stored_set_changes();
     test_remote_info_cached_and_cleared_on_link_loss();
     test_unknown_and_unexpected_types_are_dropped();
     test_tile_state_only_for_remotes_that_announce_it();

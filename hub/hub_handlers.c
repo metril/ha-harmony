@@ -299,6 +299,8 @@ static cJSON *info_json(const hub_info_t *i) {
     cJSON_AddNumberToObject(d, "page_fmt", i->page_fmt);
     cJSON_AddNumberToObject(d, "caps", i->caps);
     cJSON_AddNumberToObject(d, "icons", i->icons);
+    cJSON_AddNumberToObject(d, "gen", i->gen);
+    cJSON_AddNumberToObject(d, "pages", i->pages);
     return d;
 }
 
@@ -306,7 +308,7 @@ void hub_send_state(hub_ctx_t *h, hp_ws_conn_t *c) {
     for (unsigned i = 0; i < HUB_INFO_MAX; i++) { /* what the remote announced, before the state it refers to */
         if (!h->info[i].valid) continue;
         cJSON *o = info_json(&h->info[i]);
-        char ib[160];
+        char ib[192];
         size_t il = 0;
         if (o && hp_make_reply(0, "remote_info", o, ib, sizeof ib, &il) == 0) (void)hp_ws_send(c, ib, il);
     }
@@ -581,7 +583,7 @@ static void emit_key(void *vctx, uint8_t remote, uint8_t key, hp_key_action_t ac
 }
 
 static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
-    hp_rf_val_t v[4];
+    hp_rf_val_t v[6];
     if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
         int rc = hp_key_handle(&h->map, &h->sinks, (uint8_t)v[0].u, (uint8_t)v[1].u, (hp_key_action_t)v[2].u,
                                emit_key, h);
@@ -593,9 +595,9 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
         cJSON_AddNumberToObject(d, "percent", v[1].u);
         cJSON_AddNumberToObject(d, "millivolts", v[2].u);
         hub_broadcast(h, "battery", d);
-    } else if (m->type == HP_MSG_REMOTE_INFO && hp_rf_unpack(m->type, m->payload, m->len, v, 4) == 0 && v[0].u <= 255) {
+    } else if (m->type == HP_MSG_REMOTE_INFO && hp_rf_unpack(m->type, m->payload, m->len, v, 6) == 0 && v[0].u <= 255) {
         hub_info_t n = {.valid = true, .remote = (uint8_t)v[0].u, .page_fmt = (uint8_t)v[1].u, .caps = (uint8_t)v[2].u,
-                        .icons = (uint8_t)v[3].u};
+                        .icons = (uint8_t)v[3].u, .gen = (uint8_t)v[4].u, .pages = (uint8_t)v[5].u};
         hub_info_t *slot = NULL;
         for (unsigned i = 0; i < HUB_INFO_MAX; i++)
             if (h->info[i].valid && h->info[i].remote == n.remote) slot = &h->info[i];
@@ -603,7 +605,7 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
             if (!h->info[i].valid) slot = &h->info[i];
         if (!slot) slot = &h->info[0]; /* more remotes than slots: the first is recycled */
         bool changed = !slot->valid || slot->remote != n.remote || slot->page_fmt != n.page_fmt || slot->caps != n.caps ||
-                       slot->icons != n.icons;
+                       slot->icons != n.icons || slot->gen != n.gen || slot->pages != n.pages;
         *slot = n;
         /* Broadcast on a change, and for the first remote_info after a link-up even when identical (Home Assistant
          * re-pushes its pages after a reattach). The 5-minute heartbeat repeats are not: one broadcast per link-up. */

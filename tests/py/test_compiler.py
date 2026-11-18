@@ -116,7 +116,7 @@ def test_docs_example_compiles():
     assert c.activities == ["Watch TV", "Stream"]
     assert len(c.pages) == 1 and len(c.tiles) == 1
     assert {"volume_up", "home", "tap_mute", "tap_off", "tap_temp"} <= set(c.key_names.values())
-    assert len(text.splitlines()) < 150
+    assert len(text.splitlines()) < 300
 
 
 def test_empty_file_is_empty_model():

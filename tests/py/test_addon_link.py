@@ -160,6 +160,8 @@ async def setup(hass, hub, addon_data):
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(entry, data={**entry.data, **addon_data})
     assert await hass.config_entries.async_setup(entry.entry_id)
+    if entry.runtime_data.first_sync is not None:  # setup does not wait for the hub sync
+        await entry.runtime_data.first_sync
     await hass.async_block_till_done()
     return entry
 
@@ -638,3 +640,11 @@ async def test_send_ir_selects_the_hub_by_its_id_as_the_add_on_sends_it(hass, fa
             const.DOMAIN, "send_ir", {"config_entry": "other-hub", "ir": bad}, blocking=True
         )
     await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_first_link_confirm_shows_what_is_linked(hass, fake_addon):
+    entry = make_entry("127.0.0.1", 1)
+    entry.add_to_hass(hass)
+    res = await hassio_flow(hass, host="addon-host", port=8199, token="t")
+    assert res["type"] is FlowResultType.FORM and res["step_id"] == "hassio_confirm"
+    assert res["description_placeholders"] == {"slug": "ha_harmony_editor", "host": "addon-host:8199"}

@@ -13,12 +13,12 @@ from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryError,
     ConfigEntryNotReady,
-    ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .addon_link import AddonClient
@@ -32,8 +32,16 @@ from .const import (
     CONF_TOKEN,
     CONFIG_SUBDIR,
     DOMAIN,
+    STORE_VERSION,
 )
-from .coordinator import ISSUE_YAML, HarmonyCoordinator
+from .coordinator import (
+    ISSUE_INVALID,
+    ISSUE_REJECTED,
+    ISSUE_SCHEMA,
+    ISSUE_YAML,
+    HarmonyCoordinator,
+)
+from .errors import invalid
 from .harmony_core.config_model import validate_ir
 
 PLATFORMS = [
@@ -72,11 +80,11 @@ def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[HarmonyCoordin
     if (wanted := call.data.get("config_entry")) is not None:
         entries = [e for e in entries if wanted in (e.entry_id, e.unique_id)]
         if not entries:
-            raise ServiceValidationError(f"No loaded ha_harmony entry matches {wanted!r}")
+            raise invalid("no_matching_hub", hub=wanted)
     elif len(entries) > 1 and call.service in ("send_ir", "set_device_state"):
-        raise ServiceValidationError("Several hubs are configured: pass `config_entry`")
+        raise invalid("several_hubs")
     if not entries:
-        raise ServiceValidationError("No loaded ha_harmony hub")
+        raise invalid("no_loaded_hub")
     return [e.runtime_data for e in entries]
 
 
@@ -91,7 +99,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 try:  # no base dir: file references are refused (inline the codes)
                     action = validate_ir(call.data["ir"])
                 except vol.Invalid as exc:
-                    raise ServiceValidationError(f"Invalid IR action: {exc.error_message}") from exc
+                    raise invalid("invalid_ir", error=exc.error_message) from exc
                 await coord.async_send_ir(action)
             else:
                 args: dict[str, Any] = {}
@@ -100,7 +108,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 if "input" in call.data:
                     args["input"] = call.data["input"]
                 if not args:
-                    raise ServiceValidationError("Give `power` and/or `input`")
+                    raise invalid("need_power_or_input")
                 await coord.async_set_device_state(call.data["device"], **args)
 
     for name, schema in SERVICE_SCHEMAS.items():
@@ -155,8 +163,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
                 entry.data[CONF_ADDON_TOKEN],
             )
         )
-        await coordinator.async_initial_fetch()
-    await coordinator.async_sync_config()
+        await coordinator.async_wait_first_config()  # bounded; the loop's own (single) pull
+    # the hub sync is never awaited here: entities come up and fill in as it completes
+    coordinator.async_start_first_sync()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -188,6 +197,14 @@ def _device_kwargs(coordinator: HarmonyCoordinator) -> dict[str, Any]:
         "manufacturer": info["manufacturer"],
         "sw_version": info["sw_version"],
     }
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> None:
+    """The entry is deleted: drop its cached add-on bundle (`.storage`) and its repair issues."""
+    hub = entry.unique_id or ""
+    await Store(hass, STORE_VERSION, f"{DOMAIN}.bundle.{hub}").async_remove()
+    for key in (ISSUE_INVALID, ISSUE_REJECTED, ISSUE_SCHEMA, ISSUE_YAML):
+        ir.async_delete_issue(hass, DOMAIN, f"{key}_{hub}")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> bool:

@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable
+import random
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aiohttp
@@ -65,6 +67,10 @@ class HarmonyHubClient:
         heartbeat_interval: float = 30.0,
         pong_timeout: float = 10.0,
         request_timeout: float = 10.0,
+        stable_after: float = 30.0,
+        clock: Callable[[], float] = time.monotonic,
+        rand: Callable[[], float] = random.random,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._url = f"ws://{host}:{port}/"
         self._token = token
@@ -73,6 +79,8 @@ class HarmonyHubClient:
         self._hb_interval = heartbeat_interval
         self._pong_timeout = pong_timeout
         self._req_timeout = request_timeout
+        self._stable_after = stable_after  # a link must stay up this long to reset the backoff
+        self._clock, self._rand, self._sleep = clock, rand, sleep
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._task: asyncio.Task[None] | None = None
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
@@ -186,8 +194,16 @@ class HarmonyHubClient:
             except Exception:
                 _LOGGER.exception("state callback failed")
 
+    def _jitter(self, delay: float) -> float:
+        """+-20 % so many clients (or restarts) never retry in lockstep."""
+        return delay * (0.8 + 0.4 * self._rand())
+
     async def _run(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        """Serve, and when the link drops wait (exponential, jittered, capped), reconnect. The wait
+        only restarts from its minimum after a link stayed up `stable_after` seconds: a hub that
+        accepts the handshake and drops again is not a healthy hub."""
         delay = self._backoff[0]
+        up_since = self._clock()
         while not self._closed:
             try:
                 await self._serve(ws)
@@ -199,8 +215,10 @@ class HarmonyHubClient:
                 _LOGGER.exception("hub connection handler failed; reconnecting")
             await self._drop(ws)
             self._notify_state(False)
+            if self._clock() - up_since >= self._stable_after:
+                delay = self._backoff[0]
             while True:
-                await asyncio.sleep(delay)
+                await self._sleep(self._jitter(delay))
                 try:
                     ws = await self._open()
                 except (HarmonyAuthError, HarmonyVersionError) as exc:
@@ -215,7 +233,9 @@ class HarmonyHubClient:
                     delay = min(delay * 2, self._backoff[1])
                     continue
                 self._ws = ws
-                delay = self._backoff[0]
+                up_since = self._clock()
+                # the wait before the next attempt doubles unless this link proves stable
+                delay = min(delay * 2, self._backoff[1])
                 self._notify_state(True)
                 break
 

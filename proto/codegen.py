@@ -189,7 +189,7 @@ KEY_BY_EVENT = {k[3]: k for k in KEYS}
 
 _PY_TAIL = '''
 
-def _check(msg: str, fname: str, ftype: str, value: Any) -> None:
+def _check(msg: str, fname: str, ftype: str, value: Any, deep: bool = True) -> None:
     where = f"{msg}.{fname}"
     if ftype in _INT_RANGES:
         lo, hi = _INT_RANGES[ftype]
@@ -204,10 +204,11 @@ def _check(msg: str, fname: str, ftype: str, value: Any) -> None:
     elif ftype == "bytes":  # base64 text on the ws
         if not isinstance(value, str):
             raise ProtoError(f"{where}: expected base64 str")
-        try:
-            base64.b64decode(value, validate=True)
-        except (binascii.Error, ValueError) as exc:
-            raise ProtoError(f"{where}: bad base64") from exc
+        if deep:  # untrusted (incoming) text is decoded once to prove it; our own is built by b64encode
+            try:
+                base64.b64decode(value, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ProtoError(f"{where}: bad base64") from exc
     elif ftype == "json":
         if not isinstance(value, dict | list):
             raise ProtoError(f"{where}: expected JSON object or array")
@@ -219,7 +220,7 @@ def _check(msg: str, fname: str, ftype: str, value: Any) -> None:
         raise ProtoError(f"{where}: unknown type {ftype}")
 
 
-def _validate(name: str, data: Any) -> dict[str, Any]:
+def _validate(name: str, data: Any, incoming: bool = False) -> dict[str, Any]:
     if name not in MESSAGES:
         raise ProtoError(f"unknown message {name!r}")
     _code, transport, fields = MESSAGES[name]
@@ -235,7 +236,7 @@ def _validate(name: str, data: Any) -> dict[str, Any]:
             if not optional:
                 raise ProtoError(f"{name}: missing field {fname!r}")
             continue
-        _check(name, fname, ftype, data[fname])
+        _check(name, fname, ftype, data[fname], incoming)
     return data
 
 
@@ -258,7 +259,7 @@ def decode_ws_full(env: Any) -> tuple[int, MsgType, dict[str, Any]]:
     name = env.get("t")
     if not isinstance(name, str):
         raise ProtoError("envelope missing type")
-    data = _validate(name, env.get("d", {}))
+    data = _validate(name, env.get("d", {}), True)
     return env["id"], MsgType[name.upper()], dict(data)
 
 

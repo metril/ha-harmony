@@ -28,6 +28,7 @@
 #include "hub/io/sinks.h"
 
 #define HP_IROUT_SIRC_COPIES 3
+#define HP_IROUT_MAX_COPIES 8 /* the `repeats` limit of config format 2 */
 #define HP_IROUT_DEFAULT_PERIOD_MS 110
 #define HP_IROUT_HOLD_CAP_MS 2000
 #define HP_IROUT_HOLD_INTERVAL_MS 400 /* remote -> hub HOLD event period while a key is held */
@@ -53,6 +54,7 @@ typedef struct {
     uint8_t port;
     int key;
     bool sirc;
+    uint8_t copies; /* frames in total (>= 1) */
     hp_ir_sink *ir;
     hp_ir_signal_t sig;
 } hp_irout_pend_t;
@@ -95,6 +97,9 @@ void hp_irout_init(hp_irout_t *, hp_sched_t *);
  * HP_IROUT_KEY_SEND, defers the send while the line is busy; HP_IROUT_KEY_NONE (-1) sends at once. Returns the encoder's or
  * sink's negative error; a failed first send schedules nothing. */
 int hp_irout_send(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key);
+/* Same, sending the frame `copies` times in total (1..8, one frame period apart, like the SIRC copies; a SIRC
+ * code is always sent at least HP_IROUT_SIRC_COPIES times). The per-command `repeats` of config format 2. */
+int hp_irout_send_n(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key, uint8_t copies);
 /* Starts repeating the last frame sent for `key`; if `key` is already repeating this only extends
  * the safety cap (no-op when `key` has no candidate frame). */
 void hp_irout_hold(hp_irout_t *, int key);

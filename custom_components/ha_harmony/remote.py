@@ -7,18 +7,24 @@ from typing import Any
 
 from homeassistant.components.remote import (
     ATTR_ACTIVITY,
+    ATTR_DELAY_SECS,
     ATTR_DEVICE,
+    ATTR_HOLD_SECS,
+    ATTR_NUM_REPEATS,
+    DEFAULT_DELAY_SECS,
     RemoteEntity,
     RemoteEntityFeature,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
-from .const import HUB_DEVICE
-from .coordinator import HarmonyCoordinator
+from .const import HOLD_REPEAT, HUB_DEVICE
+from .coordinator import TOPIC_ACTIVITY, HarmonyCoordinator
+from .errors import ha_error
+
+PARALLEL_UPDATES = 0  # push-based: commands go through the hub client, which pipelines them
 
 
 async def async_setup_entry(
@@ -34,7 +40,7 @@ class HarmonyRemote(HarmonyEntity, RemoteEntity):
     _attr_supported_features = RemoteEntityFeature.ACTIVITY
 
     def __init__(self, coordinator: HarmonyCoordinator) -> None:
-        super().__init__(coordinator, "remote")
+        super().__init__(coordinator, "remote", topics=(TOPIC_ACTIVITY,))
 
     @property
     def is_on(self) -> bool:
@@ -54,13 +60,30 @@ class HarmonyRemote(HarmonyEntity, RemoteEntity):
         if activity is None and coord.activities:
             activity = coord.activities[0]
         if activity is None:
-            raise HomeAssistantError("The hub has no activities configured")
+            raise ha_error("no_activities")
         await coord.async_start_activity(activity)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_power_off()
 
     async def async_send_command(self, command: Iterable[str], **kwargs: Any) -> None:
+        """The standard arguments: `num_repeats` runs the whole list that many times, `delay_secs`
+        separates consecutive sends (default 0.4 s), `hold_secs` keeps a command "held" by resending
+        it every HOLD_REPEAT seconds (the cadence of a held key) until that time has passed."""
+        coord = self.coordinator
         device = kwargs.get(ATTR_DEVICE) or HUB_DEVICE
-        for cmd in command:
-            await self.coordinator.async_device_command(device, cmd)
+        repeats = max(int(kwargs.get(ATTR_NUM_REPEATS) or 1), 1)
+        delay = float(kwargs.get(ATTR_DELAY_SECS, DEFAULT_DELAY_SECS) or 0)
+        hold = float(kwargs.get(ATTR_HOLD_SECS) or 0)
+        first = True
+        for _ in range(repeats):
+            for cmd in command:
+                if not first and delay > 0:
+                    await coord.async_sleep(delay)
+                first = False
+                await coord.async_device_command(device, cmd)
+                held = 0.0
+                while held + HOLD_REPEAT <= hold:
+                    await coord.async_sleep(HOLD_REPEAT)
+                    held += HOLD_REPEAT
+                    await coord.async_device_command(device, cmd)

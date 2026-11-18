@@ -1,0 +1,62 @@
+{
+  "entity": {
+    "select": {
+      "activity": {
+        "default": "mdi:play-box-multiple"
+      }
+    },
+    "sensor": {
+      "addon_link": {
+        "default": "mdi:puzzle",
+        "state": {
+          "not_linked": "mdi:puzzle-outline",
+          "connecting": "mdi:puzzle-outline",
+          "ok": "mdi:puzzle-check",
+          "unreachable": "mdi:puzzle-remove",
+          "auth_failed": "mdi:key-alert",
+          "nothing_applied": "mdi:puzzle-outline",
+          "rejected": "mdi:puzzle-remove"
+        }
+      },
+      "page_format": {
+        "default": "mdi:file-document-outline"
+      },
+      "device_input": {
+        "default": "mdi:import"
+      }
+    },
+    "binary_sensor": {
+      "device_power": {
+        "default": "mdi:power",
+        "state": {
+          "on": "mdi:power-plug",
+          "off": "mdi:power-plug-off"
+        }
+      }
+    },
+    "event": {
+      "keys": {
+        "default": "mdi:remote"
+      }
+    },
+    "button": {
+      "command": {
+        "default": "mdi:gesture-tap-button"
+      }
+    }
+  },
+  "services": {
+    "reload_config": {
+      "service": "mdi:cloud-refresh-variant"
+    },
+    "push_pages": {
+      "service": "mdi:upload"
+    },
+    "send_ir": {
+      "service": "mdi:remote"
+    },
+    "set_device_state": {
+      "service": "mdi:power-settings"
+    }
+  }
+}

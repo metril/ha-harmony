@@ -22,17 +22,25 @@ CONFIG_SUBDIR = "ha_harmony"  # only to spot a leftover <config>/ha_harmony/<hub
 CONF_ADDON_HOST = "addon_host"
 CONF_ADDON_PORT = "addon_port"
 CONF_ADDON_TOKEN = "addon_token"
+CONF_HOLD_EVENTS = "hold_events"  # option: also write an event for each hold repeat
 CONF_ADDON_SLUG = "addon_slug"
 CONF_ADDON_UUID = "addon_uuid"
 ADDON_SLUG = "ha_harmony_editor"
 BUNDLE_MAX_BYTES = 2 * 1024 * 1024  # a hub config is <= 128 KiB compiled; sources stay far below
 LINK_FETCH_TIMEOUT = 20.0  # seconds, whole request
 LINK_WAIT_TIMEOUT = 70.0  # the add-on holds a wait for 55 s
+FIRST_APPLY_WAIT = 5.0  # setup waits at most this long for the first config when nothing is cached
 LINK_BACKOFF_MIN = 5.0
 LINK_BACKOFF_MAX = 120.0
 STORE_VERSION = 1
-TILE_DEBOUNCE = 0.5  # seconds between a bound entity changing and its tile_update; tests shorten it
+TILE_DEBOUNCE = 0.1  # one tile flush per this many seconds (bursts coalesce); tests shorten it
+TILE_WINDOW = 8  # tile_update requests in flight at once during a flush
+INFO_WAIT = 1.5  # seconds a fresh remote gets to announce its page format before v1 pages are pushed
+CAP_TILE_STATE = 1  # remote_info.caps bit 0 (bit 1 = page store / paging)
+CAP_PAGING = 2
 TILE_TEXT_MAX = 31  # bytes, docs/proto/page-format.md
+
+HOLD_REPEAT = 0.4  # seconds between the resends of `remote.send_command hold_secs` (the remote's hold cadence)
 
 OFF_OPTION = "Off"
 HUB_DEVICE = "hub"

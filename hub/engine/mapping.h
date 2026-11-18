@@ -92,6 +92,7 @@ typedef enum { HP_ACT_NONE = 0, HP_ACT_IR, HP_ACT_BT, HP_ACT_HA_EVENT, HP_ACT_AC
 typedef struct {
     hp_act_type_t type;
     uint8_t port_mask;             /* HP_ACT_IR */
+    uint8_t repeats;               /* HP_ACT_IR: frames per send, 1..8 (0 = 1); format 2 `repeats` */
     uint8_t ir_kind;               /* HP_ACT_IR: hp_ir_kind_t */
     uint8_t proto;                 /* HP_IR_CODE_PROTO: hp_ir_proto_t */
     uint8_t target;                /* HP_ACT_ACTIVITY: activity index or HP_TARGET_OFF */

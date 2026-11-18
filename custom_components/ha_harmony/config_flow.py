@@ -6,7 +6,13 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    SOURCE_IGNORE,
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -22,6 +28,7 @@ from .const import (
     CONF_ADDON_SLUG,
     CONF_ADDON_TOKEN,
     CONF_ADDON_UUID,
+    CONF_HOLD_EVENTS,
     CONF_TOKEN,
     DEFAULT_PORT,
     DOMAIN,
@@ -50,8 +57,23 @@ def _error_key(exc: Exception) -> str:
     return "unknown"
 
 
+class HarmonyOptionsFlow(OptionsFlow):
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+        current = self.config_entry.options.get(CONF_HOLD_EVENTS, False)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({vol.Required(CONF_HOLD_EVENTS, default=current): bool}),
+        )
+
+
 class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    def async_get_options_flow(config_entry: ConfigEntry) -> HarmonyOptionsFlow:
+        return HarmonyOptionsFlow()
 
     def __init__(self) -> None:
         self._host: str | None = None
@@ -85,13 +107,76 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo) -> ConfigFlowResult:
         hub_id = discovery_info.properties.get("hub_id") or discovery_info.name.split(".")[0]
         await self.async_set_unique_id(hub_id)
-        self._abort_if_unique_id_configured(
-            updates={CONF_HOST: discovery_info.host, CONF_PORT: discovery_info.port}
-        )
-        self._host = discovery_info.host
-        self._port = discovery_info.port or DEFAULT_PORT
+        host, port = discovery_info.host, discovery_info.port or DEFAULT_PORT
         self.context["title_placeholders"] = {"name": hub_id}
+        entry = self.hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, hub_id)
+        if entry is not None:
+            # Never retarget a configured hub from an unauthenticated announcement: anyone on the
+            # LAN can answer mDNS, and the next connection would send them the hub token (`hello`).
+            # The user has to confirm the new address (the old one stays in use meanwhile).
+            if entry.source == SOURCE_IGNORE or (
+                entry.data.get(CONF_HOST) == host and entry.data.get(CONF_PORT) == port
+            ):
+                return self.async_abort(reason="already_configured")
+            self._host, self._port = host, port
+            return await self.async_step_hub_moved()
+        self._host, self._port = host, port
         return await self.async_step_user()
+
+    async def async_step_hub_moved(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """"Hub <id> moved to <host>?" The saved token is only sent after the user says yes."""
+        entry = self.hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, self.unique_id or "")
+        if entry is None or self._host is None:
+            return self.async_abort(reason="unknown")
+        placeholders = {
+            "name": self.unique_id or "",
+            "old_host": f"{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT)}",
+            "new_host": f"{self._host}:{self._port}",
+        }
+        if user_input is None:
+            return self.async_show_form(
+                step_id="hub_moved", description_placeholders=placeholders
+            )
+        try:
+            hub_id = await _probe(self.hass, self._host, self._port, entry.data[CONF_TOKEN])
+        except (HarmonyAuthError, HarmonyVersionError, HarmonyConnectionError):
+            return self.async_abort(reason="cannot_connect")
+        if hub_id != entry.unique_id:
+            return self.async_abort(reason="wrong_hub")
+        return self.async_update_reload_and_abort(
+            entry,
+            data_updates={CONF_HOST: self._host, CONF_PORT: self._port},
+            reason="hub_moved_updated",
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the hub's address and/or token without removing the integration."""
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                hub_id = await _probe(
+                    self.hass, user_input[CONF_HOST], user_input[CONF_PORT], user_input[CONF_TOKEN]
+                )
+            except (HarmonyAuthError, HarmonyVersionError, HarmonyConnectionError) as exc:
+                errors["base"] = _error_key(exc)
+            else:
+                if hub_id != entry.unique_id:
+                    return self.async_abort(reason="wrong_hub")
+                return self.async_update_reload_and_abort(entry, data_updates=user_input)
+        current = user_input or entry.data
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=current[CONF_HOST]): str,
+                vol.Required(CONF_PORT, default=current[CONF_PORT]): int,
+                vol.Required(CONF_TOKEN, default=current[CONF_TOKEN]): str,
+            }
+        )
+        return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors)
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
         return await self.async_step_reauth_confirm()
@@ -154,8 +239,14 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_hassio_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        if user_input is None:
-            return self.async_show_form(step_id="hassio_confirm")
+        if user_input is None:  # show what is being linked: the add-on's slug and where it answers
+            return self.async_show_form(
+                step_id="hassio_confirm",
+                description_placeholders={
+                    "slug": self._addon[CONF_ADDON_SLUG],
+                    "host": f"{self._addon[CONF_ADDON_HOST]}:{self._addon[CONF_ADDON_PORT]}",
+                },
+            )
         entries = self._async_current_entries(include_ignore=False)
         if not entries:
             return self.async_abort(reason="no_hub")

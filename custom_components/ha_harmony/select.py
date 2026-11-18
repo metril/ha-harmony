@@ -9,7 +9,9 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
 from .const import OFF_OPTION
-from .coordinator import HarmonyCoordinator
+from .coordinator import TOPIC_ACTIVITY, HarmonyCoordinator
+
+PARALLEL_UPDATES = 0  # push-based: commands go through the hub client, which pipelines them
 
 
 async def async_setup_entry(
@@ -22,10 +24,9 @@ async def async_setup_entry(
 
 class HarmonyActivitySelect(HarmonyEntity, SelectEntity):
     _attr_translation_key = "activity"
-    _attr_name = "Activity"
 
     def __init__(self, coordinator: HarmonyCoordinator) -> None:
-        super().__init__(coordinator, "activity")
+        super().__init__(coordinator, "activity", topics=(TOPIC_ACTIVITY,))
 
     @property
     def _off_label(self) -> str:

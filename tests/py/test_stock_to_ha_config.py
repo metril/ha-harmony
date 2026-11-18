@@ -71,12 +71,13 @@ def cmds(conv, dev):
 def test_single_mapping_preserves_carrier_and_durations(data):
     conv = tool.convert(data, names={"111": ("tv", "TV")})
     c = cmds(conv, "tv")
-    assert c["Power"] == {"raw": {"hz": 37900, "us": FRAME}}  # frame lived in `repeat`
+    assert c["Power"] == {"raw": {"hz": 37900, "us": FRAME}, "repeats": 3}  # frame lived in `repeat`
     assert c["Mute"] == {"raw": {"hz": 38000, "us": NEC_ONCE}}  # `once` is the press frame
     assert c["Once"]["raw"]["us"] == NEC_ONCE
     notes = {r.command: r.notes for r in conv.results}
     assert "repeat_frame_not_expressible" in notes["Mute"]
-    assert "min_repeats_not_expressed" in notes["Power"]
+    assert "min_repeats_as_repeats" in notes["Power"]
+    assert c["Power"]["repeats"] == 3 and "repeats" not in c["Mute"]  # min_repeats 3 -> repeats: 3
 
 
 def test_expand_mapping(data):

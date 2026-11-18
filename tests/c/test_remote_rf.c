@@ -158,7 +158,7 @@ static hp_rf_spi_ops_t fake_ops(fake_t *f) {
 
 typedef struct { uint8_t remote, key, action; } hkey_t;
 typedef struct { uint8_t remote, pct; uint16_t mv; uint64_t at; int ord; } hbatt_t;
-typedef struct { uint8_t remote, fmt, caps, icons; uint64_t at; int ord; } hinfo_t;
+typedef struct { uint8_t remote, fmt, caps, icons, gen, pages; uint64_t at; int ord; } hinfo_t;
 
 static fk_t fk;
 static app_t app;
@@ -190,9 +190,11 @@ static void hub_deliver(void *ctx, const hp_rf_msg_t *m) {
   } else if (m->type == HP_MSG_BATTERY && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
     if (nhbatt < 32) hbatt[nhbatt++] = (hbatt_t){(uint8_t)v[0].u, (uint8_t)v[1].u, (uint16_t)v[2].u, fk.now, hord++};
   } else if (m->type == HP_MSG_REMOTE_INFO) {
-    hp_rf_val_t r[4];
-    CT_EQ(hp_rf_unpack(m->type, m->payload, m->len, r, 4), 0);
-    if (nhinfo < 32) hinfo[nhinfo++] = (hinfo_t){(uint8_t)r[0].u, (uint8_t)r[1].u, (uint8_t)r[2].u, (uint8_t)r[3].u, fk.now, hord++};
+    hp_rf_val_t r[6];
+    CT_EQ(hp_rf_unpack(m->type, m->payload, m->len, r, 6), 0);
+    if (nhinfo < 32)
+      hinfo[nhinfo++] = (hinfo_t){(uint8_t)r[0].u, (uint8_t)r[1].u, (uint8_t)r[2].u, (uint8_t)r[3].u, (uint8_t)r[4].u,
+                                  (uint8_t)r[5].u, fk.now, hord++};
   } else {
     nhother++;
   }
@@ -255,6 +257,7 @@ static int setup_ex(int hal, int soc_missing) {
   rf_link_init(&rf, &ops, RF_LINK_REMOTE_ID);
   app_link_t link = rf_link_app(&rf);
   CT_EQ(app_init(&app, &ops, &link, NULL), 0);
+  rf_link_set_store(&rf, &app.store); /* as main.c does */
   hp_rf_spi_ops_t ro = fake_ops(&fr);
   hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL};
   return rf_link_open(&rf, &rc);
@@ -393,8 +396,8 @@ static void test_tile_state_applies_and_unknown_types_are_dropped(void) {
   CT_EQ(hub_push_page(PAGE2, sizeof PAGE2), 0);
   WAIT_FOR(app.ui.page.page_id == 2);
   uint64_t before = fb_hash();
-  hp_rf_val_t r[4] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}};
-  CT_EQ(hub_send(HP_MSG_REMOTE_INFO, r, 4), 0); /* a type the remote does not act on: dropped, not an error */
+  hp_rf_val_t r[6] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}, {.u = 0}, {.u = 0}};
+  CT_EQ(hub_send(HP_MSG_REMOTE_INFO, r, 6), 0); /* a type the remote does not act on: dropped, not an error */
   hp_rf_val_t t[5] = {{.u = 1}, {.u = 2}, {.u = 5}, {.u = 2}, {.p = (const uint8_t *)"On", .len = 2}};
   CT_EQ(hub_send(HP_MSG_TILE_STATE, t, 5), 0);
   hp_rf_val_t s[2] = {{.u = 3}, {.u = 1}};
@@ -417,6 +420,67 @@ static void test_remote_info_is_first_uplink(void) {
   CT_EQ(hinfo[0].icons, RA_ICON_MAX);
   CT_CHECK(hinfo[0].ord < hbatt[0].ord);
   CT_EQ(nhinfo, 1);
+  teardown();
+}
+
+/* A v2 page `id` of `total`: one button (the bytes of test_link_v2.c's mkpage). */
+static size_t v2raw(uint8_t *o, uint8_t id, uint8_t total, uint8_t gen) {
+  const uint8_t b[] = {2, id, 2, 2, 1, gen, total, 0, 0, 0, 0, 0, 1, 0x00, 0x11, 1, 'X'};
+  memcpy(o, b, sizeof b);
+  return sizeof b;
+}
+
+/* remote_info says what the page store holds, so the hub (and Home Assistant) can skip a push that changes nothing:
+ * empty at the first announcement, then the new set once it is complete (one more message, not one per page). */
+static void test_remote_info_reports_the_page_store(void) {
+  setup();
+  WAIT_FOR(nhinfo >= 1);
+  CT_EQ(hinfo[0].gen, 0);
+  CT_EQ(hinfo[0].pages, 0);
+  uint8_t raw[300];
+  size_t n = v2raw(raw, 0, 2, 0xA7);
+  CT_EQ(hub_push_page(raw, n), 0);
+  WAIT_FOR(app.store.count == 1);
+  DRAIN();
+  tick(200);
+  CT_EQ(nhinfo, 1); /* a partial set is not announced */
+  n = v2raw(raw, 1, 2, 0xA7);
+  CT_EQ(hub_push_page(raw, n), 0);
+  WAIT_FOR(nhinfo == 2);
+  CT_EQ(hinfo[1].gen, 0xA7);
+  CT_EQ(hinfo[1].pages, 2);
+  tick(400);
+  CT_EQ(nhinfo, 2); /* announced once */
+  teardown();
+}
+
+static void test_remote_info_reports_a_store_it_already_holds(void) {
+  fk_init(&fk);
+  fake_init(&fh, 0);
+  fake_init(&fr, 1);
+  fh.peer = &fr;
+  fr.peer = &fh;
+  nhkeys = nhbatt = nhinfo = nhother = hord = 0;
+  hp_rf_spi_ops_t ho = fake_ops(&fh);
+  hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
+  CT_EQ(hp_rf_spi_open(&hc, &hub_tp), 0);
+  CT_EQ(hub_tp->claim(hub_tp->self), 0);
+  hp_rf_link_init(&hub_link, hub_tp, false, 1, hub_deliver, NULL);
+  ra_ops_t ops = fk_ops(&fk);
+  ops.wait = rec_wait;
+  rf_link_init(&rf, &ops, RF_LINK_REMOTE_ID);
+  app_link_t link = rf_link_app(&rf);
+  CT_EQ(app_init(&app, &ops, &link, NULL), 0);
+  rf_link_set_store(&rf, &app.store);
+  uint8_t raw[300];
+  size_t n = v2raw(raw, 0, 1, 0x3C);
+  CT_EQ(hp_store_put(&app.store, raw, n), HP_STORE_OK); /* a set kept across the link, as after a hub restart */
+  hp_rf_spi_ops_t ro = fake_ops(&fr);
+  hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL};
+  CT_EQ(rf_link_open(&rf, &rc), 0);
+  WAIT_FOR(nhinfo >= 1);
+  CT_EQ(hinfo[0].gen, 0x3C);
+  CT_EQ(hinfo[0].pages, 1);
   teardown();
 }
 
@@ -774,6 +838,8 @@ int main(void) {
   CT_RUN(test_tile_update_changes_render);
   CT_RUN(test_tile_state_applies_and_unknown_types_are_dropped);
   CT_RUN(test_remote_info_is_first_uplink);
+  CT_RUN(test_remote_info_reports_the_page_store);
+  CT_RUN(test_remote_info_reports_a_store_it_already_holds);
   CT_RUN(test_dropped_ack_delivers_once);
   CT_RUN(test_peer_that_never_acks_shows_fallback_only);
   CT_RUN(test_polls_only_while_awake);

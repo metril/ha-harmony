@@ -336,17 +336,19 @@ def test_remote_info_and_tile_state_round_trip():
     assert ns["MESSAGES"]["remote_info"][1:] == (
         "both",
         (("remote", "u8", False), ("page_fmt", "u8", False), ("caps", "u8", False),
-         ("icons", "u8", False)),
+         ("icons", "u8", False), ("gen", "u8", False), ("pages", "u8", False)),
     )  # fmt: skip
     assert ns["MESSAGES"]["tile_state"][1:] == (
         "rf",
         (("remote", "u8", False), ("page", "u8", False), ("tile", "u8", False),
          ("state", "u8", False), ("text", "str", False)),
     )  # fmt: skip
-    d = {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50}
+    d = {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50, "gen": 167, "pages": 12}
     assert ns["decode_ws"](ns["encode_ws"](T.REMOTE_INFO, d)) == (T.REMOTE_INFO, d)
     assert T.REMOTE_INFO == 18 and T.TILE_STATE == 19
     with pytest.raises(ns["ProtoError"]):
         ns["encode_ws"](T.REMOTE_INFO, {**d, "icons": 256})
+    with pytest.raises(ns["ProtoError"]):  # the stored-set fields are not optional
+        ns["encode_ws"](T.REMOTE_INFO, {k: v for k, v in d.items() if k != "gen"})
     with pytest.raises(ns["ProtoError"]):  # rf-only: not a ws message
         ns["encode_ws"](T.TILE_STATE, {"remote": 1, "page": 0, "tile": 1, "state": 2, "text": "x"})

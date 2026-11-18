@@ -8,7 +8,10 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
-from .coordinator import HarmonyCoordinator
+from .const import CONF_HOLD_EVENTS
+from .coordinator import TOPIC_CONFIG, HarmonyCoordinator
+
+PARALLEL_UPDATES = 0  # push-based: commands go through the hub client, which pipelines them
 
 
 async def async_setup_entry(
@@ -22,8 +25,9 @@ async def async_setup_entry(
 
 class HarmonyKeyEvent(HarmonyEntity, EventEntity):
     def __init__(self, coordinator: HarmonyCoordinator, remote: int) -> None:
-        super().__init__(coordinator, f"key_{remote}")
+        super().__init__(coordinator, f"key_{remote}", topics=(TOPIC_CONFIG,))
         self._remote = remote
+        self._attr_translation_key = "keys"
         self._attr_name = f"Remote {remote} keys"
 
     @property
@@ -38,7 +42,7 @@ class HarmonyKeyEvent(HarmonyEntity, EventEntity):
     def _on_key(self, remote: int, key: int, action: str) -> None:
         if remote != self._remote:
             return
-        self._trigger_event(
-            self.coordinator.key_name(key), {"key": key, "action": action, "remote": remote}
-        )
+        if action == "hold" and not self.coordinator.config_entry.options.get(CONF_HOLD_EVENTS):
+            return  # a 3 s hold would be ~9 recorder rows; the actions path (repeat: true) is unaffected
+        self._trigger_event(self.coordinator.key_name(key), {"key": key, "action": action})
         self.async_write_ha_state()

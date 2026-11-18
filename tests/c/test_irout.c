@@ -345,6 +345,67 @@ static void test_send_modes(void) {
     CT_EQ(nrec, 8); /* the remaining SIRC copies */
 }
 
+/* Per-command `repeats` (config format 2): N frames one frame period apart, the line is busy for all of
+ * them, a deferred press keeps its count, SIRC keeps at least 3, out-of-range values are load errors. */
+static void test_repeats_per_command(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8,\"repeats\":3},"
+              "\"2\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":9},"
+              "\"3\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21,\"repeats\":5},"
+              "\"4\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":22,\"repeats\":2}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    uint32_t t0 = g_now;
+    CT_EQ(nrec, 1);
+    advance(t0 + 400);
+    CT_EQ(nrec, 3); /* three full frames, no more */
+    CT_EQ(recs[1].n, 68);
+    CT_EQ(recs[2].t - recs[1].t, recs[1].t - recs[0].t); /* evenly spaced */
+    CT_EQ(recs[1].h, recs[0].h);
+    CT_EQ(hp_sched_pending(&sched), 0);
+    key(1, HP_KEY_ACTION_RELEASE);
+    /* no `repeats`: one frame, exactly as before */
+    advance(g_now + 500);
+    nrec = 0;
+    key(2, HP_KEY_ACTION_PRESS);
+    advance(g_now + 500);
+    CT_EQ(nrec, 1);
+    /* SIRC: repeats above 3 win, below 3 never reduce the three copies */
+    advance(g_now + 500);
+    nrec = 0;
+    key(3, HP_KEY_ACTION_PRESS);
+    advance(g_now + 1000);
+    CT_EQ(nrec, 5);
+    advance(g_now + 500);
+    nrec = 0;
+    key(4, HP_KEY_ACTION_PRESS);
+    advance(g_now + 1000);
+    CT_EQ(nrec, 3);
+    /* a deferred press keeps its repeat count */
+    advance(g_now + 500);
+    nrec = 0;
+    key(3, HP_KEY_ACTION_PRESS);
+    key(1, HP_KEY_ACTION_PRESS); /* the line is busy with the SIRC copies: queued */
+    advance(g_now + 3000);
+    CT_EQ(nrec, 5 + 3);
+    CT_EQ(hp_sched_pending(&sched), 0);
+}
+
+static void test_repeats_validation(void) {
+    hp_map_t m;
+    hp_map_init(&m);
+    const char *bad[] = {
+        CFG("\"1\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8,\"repeats\":0}"),
+        CFG("\"1\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8,\"repeats\":9}"),
+        CFG("\"1\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8,\"repeats\":\"2\"}"),
+        CFG("\"1\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8,\"repeats\":1.5}"),
+    };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        hp_map_free(&m);
+        hp_map_init(&m);
+        CT_CHECK(hp_map_load(&m, bad[i], strlen(bad[i])) < 0);
+    }
+    hp_map_free(&m);
+}
+
 int main(void) {
     CT_RUN(test_nec_hold_repeat_and_cap);
     CT_RUN(test_periodic_hold_extends_cap);
@@ -358,6 +419,8 @@ int main(void) {
     CT_RUN(test_press_deferred_while_line_busy);
     CT_RUN(test_line_stale_after_idle);
     CT_RUN(test_send_modes);
+    CT_RUN(test_repeats_per_command);
+    CT_RUN(test_repeats_validation);
     hp_map_free(&map);
     return CT_DONE();
 }

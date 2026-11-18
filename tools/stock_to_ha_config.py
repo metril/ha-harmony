@@ -130,7 +130,9 @@ def convert_ir(entry: dict[str, Any], mode: str) -> tuple[int, list[int], list[s
             notes.append("repeat_frame_not_expressible")
         if fin:
             notes.append("finish_not_expressible")
-        if not once and mr > 1 or once and mr:
+        if not once and mr > 1:
+            notes.append("min_repeats_as_repeats")  # `repeats: N` on the command (hub config format 2)
+        elif once and mr:
             notes.append("min_repeats_not_expressed")
     else:
         n = mr if once else max(mr, 1)
@@ -240,6 +242,8 @@ def convert(
                     )
                     hz, us, r.notes = convert_ir(entry, mode)
                     converted[command_name(cname)] = {"raw": {"hz": hz, "us": us}}
+                    if "min_repeats_as_repeats" in r.notes:  # frame-only signal sent N times
+                        converted[command_name(cname)]["repeats"] = min(entry["min_repeats"], 8)
                     r.emitted_us = len(us)
                 elif entry.get("transport") in SKIP_TRANSPORTS:
                     r.status = "skipped"

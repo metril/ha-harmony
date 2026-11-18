@@ -82,8 +82,7 @@ static void burst_cb(void *arg, uint32_t now) {
     b->used = 0;
 }
 
-static void start_burst(hp_irout_t *o, const hp_ir_signal_t *sig, uint8_t port) {
-    uint8_t extra = HP_IROUT_SIRC_COPIES - 1;
+static void start_burst(hp_irout_t *o, const hp_ir_signal_t *sig, uint8_t port, uint8_t extra) {
     uint32_t ms = period_ms(sig);
     for (int i = 0; i < HP_IROUT_BURSTS; i++) {
         hp_irout_burst_t *b = &o->burst[i];
@@ -104,7 +103,7 @@ static void start_burst(hp_irout_t *o, const hp_ir_signal_t *sig, uint8_t port) 
 }
 
 /* Sends o->cand now (the frame is already encoded there) and books the line. */
-static int emit_cand(hp_irout_t *o, hp_ir_sink *ir, uint8_t port_mask, int key, bool sirc) {
+static int emit_cand(hp_irout_t *o, hp_ir_sink *ir, uint8_t port_mask, int key, bool sirc, uint8_t copies) {
     hp_ir_signal_t *sig = &o->cand;
     uint32_t now = hp_sched_now(o->sched);
     o->ir = ir;
@@ -113,9 +112,10 @@ static int emit_cand(hp_irout_t *o, hp_ir_sink *ir, uint8_t port_mask, int key, 
     uint32_t dur_us = 0;
     for (size_t i = 0; i < sig->once_n; i++) dur_us += sig->us[i];
     o->busy_ms = (dur_us + 999u) / 1000u;
-    if (sirc) {
-        start_burst(o, sig, port_mask);
-        o->busy_ms += (uint32_t)(HP_IROUT_SIRC_COPIES - 1) * period_ms(sig);
+    if (sirc && copies < HP_IROUT_SIRC_COPIES) copies = HP_IROUT_SIRC_COPIES;
+    if (copies > 1) {
+        start_burst(o, sig, port_mask, (uint8_t)(copies - 1));
+        o->busy_ms += (uint32_t)(copies - 1) * period_ms(sig);
     }
     line_busy(o, now, o->busy_ms);
     if (key >= 0) {
@@ -139,7 +139,7 @@ static void pend_cb(void *arg, uint32_t now) {
     hp_irout_pend_t *p = &o->pend[o->pend_head];
     o->cand_key = -1;
     memcpy(&o->cand, &p->sig, sizeof o->cand);
-    (void)emit_cand(o, p->ir, p->port, p->key, p->sirc);
+    (void)emit_cand(o, p->ir, p->port, p->key, p->sirc, p->copies);
     o->pend_head = (uint8_t)((o->pend_head + 1) % HP_IROUT_PEND);
     o->pend_n--;
     if (o->pend_n) {
@@ -155,14 +155,20 @@ static void pend_arm(hp_irout_t *o, uint32_t delay) {
     while (o->pend_n) {
         hp_irout_pend_t *p = &o->pend[o->pend_head];
         memcpy(&o->cand, &p->sig, sizeof o->cand);
-        (void)emit_cand(o, p->ir, p->port, p->key, p->sirc);
+        (void)emit_cand(o, p->ir, p->port, p->key, p->sirc, p->copies);
         o->pend_head = (uint8_t)((o->pend_head + 1) % HP_IROUT_PEND);
         o->pend_n--;
     }
 }
 
 int hp_irout_send(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key) {
+    return hp_irout_send_n(o, ir, code, port_mask, key, 1);
+}
+
+int hp_irout_send_n(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key, uint8_t copies) {
     if (!o || !ir || !code) return -HP_E_INVAL;
+    if (copies < 1) copies = 1;
+    if (copies > HP_IROUT_MAX_COPIES) copies = HP_IROUT_MAX_COPIES;
     stop_hold(o);
     o->cand_key = -1;
     uint32_t now = hp_sched_now(o->sched);
@@ -178,11 +184,12 @@ int hp_irout_send(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8
     int rc = hp_ir_encode(code, t, sig);
     if (rc < 0) return rc;
     int k = key < 0 ? -1 : key;
-    if (!defer) return emit_cand(o, ir, port_mask, k, is_sirc(code));
+    if (!defer) return emit_cand(o, ir, port_mask, k, is_sirc(code), copies);
     o->pend[slot].ir = ir;
     o->pend[slot].port = port_mask;
     o->pend[slot].key = k;
     o->pend[slot].sirc = is_sirc(code);
+    o->pend[slot].copies = copies;
     o->pend_n++;
     if (!o->pend_h) pend_arm(o, w ? w : 1);
     return 0;

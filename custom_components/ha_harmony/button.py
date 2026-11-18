@@ -11,6 +11,8 @@ from .base_entity import HarmonyEntity
 from .coordinator import HarmonyCoordinator
 from .entity_sync import setup_dynamic
 
+PARALLEL_UPDATES = 0  # push-based: commands go through the hub client, which pipelines them
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -34,6 +36,7 @@ class HarmonyCommandButton(HarmonyEntity, ButtonEntity):
             coordinator, f"cmd_{device}:{command}", device=device
         )  # ids never contain ":"
         self._device, self._command = device, command
+        self._attr_translation_key = "command"
         self._attr_name = command.replace("_", " ").capitalize()
 
     async def async_press(self) -> None:

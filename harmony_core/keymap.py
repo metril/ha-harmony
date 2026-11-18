@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import ha_actions
 from .config_model import Model
 from .keys import KEY_CODES, key_code
 
@@ -33,6 +34,8 @@ def summarize(action: dict[str, Any]) -> dict[str, Any]:
             "activity": action["activity"],
             "label": f"Start {action['activity']}" if action["activity"] != "off" else "Power off",
         }
+    if kind == "ha_call":
+        return ha_actions.summary(action)
     if kind == "ha":
         return {"kind": "ha", "event": action["event"], "label": f"HA event {action['event']}"}
     if kind == "bt":
@@ -47,7 +50,7 @@ def summarize(action: dict[str, Any]) -> dict[str, Any]:
     return {"kind": "ir", "form": form, "label": f"IR {form}"}
 
 
-def _by_code(keys: dict[str, Any]) -> dict[int, dict[str, Any]]:
+def by_code(keys: dict[str, Any]) -> dict[int, dict[str, Any]]:
     out: dict[int, dict[str, Any]] = {}
     for name, action in keys.items():
         code = key_code(name)
@@ -56,13 +59,25 @@ def _by_code(keys: dict[str, Any]) -> dict[int, dict[str, Any]]:
     return out
 
 
+def effective(
+    own: dict[int, dict[str, Any]], default: dict[int, dict[str, Any]] | None
+) -> dict[int, tuple[str, dict[str, Any]]]:
+    """THE inheritance rule: code -> (source, action). An activity's own entry wins, else the
+    default layer's; `source` is "activity", or "default" for the default layer and inherited
+    entries. The hub's lookup, the editor's X-ray view and the integration's Home Assistant
+    action table all come from this one function."""
+    out = {c: ("default" if default is None else "activity", a) for c, a in own.items()}
+    for c, a in (default or {}).items():
+        out.setdefault(c, ("default", a))
+    return out
+
+
 def _layer(own: dict[int, dict[str, Any]], default: dict[int, dict[str, Any]] | None) -> list:
     rows = []
+    eff = effective(own, default)
     for name, code in sorted(KEY_CODES.items(), key=lambda kv: kv[1]):
-        if code in own:
-            src, act = ("default" if default is None else "activity"), own[code]
-        elif default is not None and code in default:
-            src, act = "default", default[code]
+        if code in eff:
+            src, act = eff[code]
         else:
             src, act = "none", None
         rows.append(
@@ -79,14 +94,14 @@ def _layer(own: dict[int, dict[str, Any]], default: dict[int, dict[str, Any]] | 
 def resolve_keymaps(model: Model) -> dict[str, Any]:
     """`{default: [row...], activities: [{id, name, keys: [row...]}]}`; one row per hard key.
     `source` is "activity" (own entry), "default" (inherited / the default layer) or "none"."""
-    default = _by_code(model["keys"])
+    default = by_code(model["keys"])
     return {
         "default": _layer(default, None),
         "activities": [
             {
                 "id": a["id"],
                 "name": a.get("name", a["id"]),
-                "keys": _layer(_by_code(a["keys"]), default),
+                "keys": _layer(by_code(a["keys"]), default),
             }
             for a in model["activities"]
         ],

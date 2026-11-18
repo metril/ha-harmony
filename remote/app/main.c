@@ -36,6 +36,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "harmony_remote: init failed (%d)\n", r);
     return 1;
   }
+  rf_link_set_store(&rf, &app.store);
   app.display.ui_debug = cli.ui_debug;
   if (cli.rf_spi) {
     /* After the panel checks, so a refused start never touches the radio. A failed open (stock hal
