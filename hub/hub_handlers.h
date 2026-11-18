@@ -76,12 +76,15 @@
 /* 40 held messages: a full v2 config is up to 32 pages plus a few tile updates, all of which must survive a
  * remote that is away. 40 * sizeof(hub_pend_t) (~270 B) = ~10.8 KB of static hub memory, fixed, never grown. */
 #define HUB_PEND_MAX 40
+#define HUB_PAGE_RESENDS 3 /* a page_push that exhausts its RF retries is held and resent this many times */
 /* An RF message held back while the remote's link is down; the latest per key wins. */
 typedef struct {
     uint8_t type, remote, page, tile; /* the key: page_push (remote,page), tile_update / tile_state (remote,page,tile; one
                                        * shared key), state_update () */
     uint8_t gen;                      /* page_push of a v2 page: its gen byte (a push of another gen drops this one) */
     bool has_gen;
+    bool wait;                        /* a page_push that failed its retries: resent after the next frame heard from the remote */
+    uint32_t rx_mark;                 /* link rx_frames when it failed */
     size_t len;
     uint8_t payload[HP_RF_MSG_MAX];
 } hub_pend_t;
@@ -118,6 +121,12 @@ typedef struct {
     uint8_t npending_dev;
     hub_pend_t pend[HUB_PEND_MAX]; /* oldest first */
     uint8_t npend;
+    uint8_t page_tries[256]; /* resends of an unacked page_push per page id (bounded by HUB_PAGE_RESENDS); reset by a fresh push or an ack */
+    uint8_t page_out[256];   /* page_push objects of a page id handed to the link and not yet resolved */
+    uint8_t last_gen;        /* gen of the newest v2 page pushed: an older page that failed is not resent */
+    bool has_last_gen;
+    bool info_fresh;         /* a link-up was seen: the next remote_info is broadcast even if identical (one per link-up) */
+    uint32_t info_bcast;     /* remote_info broadcasts sent (diagnostics, tests) */
     uint32_t pend_dropped; /* held messages lost to a full queue (a tile that found only pages, or the oldest page) */
     hub_info_t info[HUB_INFO_MAX]; /* remote_info per remote; dropped when the RF link is lost */
 } hub_ctx_t;

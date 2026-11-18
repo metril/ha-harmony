@@ -283,6 +283,70 @@ static void test_full_queue_of_pages_refuses_tiles_and_drops_oldest_page(void) {
     CT_EQ(H.pend_dropped, 2u);
 }
 
+/* A page_push that exhausts its RF retries while the remote stays attached is held and resent: not silently lost. */
+static void test_failed_page_push_is_resent_while_attached(void) {
+    remote_hook = store_hook;
+    world_reset_hook = store_reset;
+    world_init(true, MODEL_S3);
+    run(400);
+    CT_CHECK(R.up);
+    uint8_t raw[40];
+    R.drop_dl = 1000; /* everything the hub transmits is lost on the air */
+    CT_CHECK(push_raw(0, raw, mkpage(raw, 0, 1, 0x31, 0, 0)));
+    run(3000);
+    CT_CHECK(hp_rf_link_status(&H.link).failures >= 1u);
+    CT_EQ(norder, 0);
+    CT_CHECK(R.up); /* the remote never went away */
+    R.drop_dl = 0;
+    run(3000);
+    CT_EQ(norder, 1);
+    CT_CHECK(hp_store_complete(&ST));
+    CT_EQ(H.npend, 0);
+}
+
+/* Bounded: a remote that never answers gets HUB_PAGE_RESENDS resends, then the page is dropped (counted). */
+static void test_page_resends_are_bounded(void) {
+    world();
+    uint8_t raw[40];
+    R.drop_dl = 100000;
+    CT_CHECK(push_raw(0, raw, mkpage(raw, 0, 1, 0x32, 0, 0)));
+    run(20000);
+    CT_EQ(hp_rf_link_status(&H.link).failures, 1u + HUB_PAGE_RESENDS);
+    CT_EQ(H.npend, 0);
+    CT_CHECK(H.pend_dropped >= 1u);
+    /* a newer gen supersedes the failed older page: it is not resent */
+    R.drop_dl = 1000;
+    CT_CHECK(push_raw(0, raw, mkpage(raw, 0, 1, 0x33, 0, 0)));
+    run(500);
+    R.drop_dl = 100000;
+    CT_CHECK(push_raw(1, raw, mkpage(raw, 0, 1, 0x34, 0, 0))); /* gen 0x34 on the air; 0x33 is older */
+    run(20000);
+    CT_EQ(H.npend, 0);
+}
+
+/* remote_info: identical heartbeats are not broadcast; the first one after a seen link-up is, once. */
+static void test_remote_info_broadcast_once_per_link_up(void) {
+    world();
+    send_info(3);
+    CT_EQ(H.info_bcast, 1u);
+    send_info(3); /* the 5-minute heartbeat */
+    send_info(3);
+    CT_EQ(H.info_bcast, 1u);
+    H.rf_attached = false; /* the hub sees the link come up (without having seen it go down: the cache survives) */
+    run(100);
+    send_info(3);
+    CT_EQ(H.info_bcast, 2u);
+    send_info(3);
+    CT_EQ(H.info_bcast, 2u); /* no storm: one per link-up */
+    hp_rf_link_set_awake(&RL, false, R.now);
+    run(900);
+    CT_CHECK(!R.up);
+    hp_rf_link_set_awake(&RL, true, R.now);
+    run(600);
+    send_info(3);
+    CT_EQ(H.info_bcast, 3u);
+}
+
 int main(void) {
     test_remote_info_cached_and_cleared_on_link_loss();
     test_unknown_and_unexpected_types_are_dropped();
@@ -292,5 +356,8 @@ int main(void) {
     test_forty_held_pages_fill_the_store_in_order();
     test_tile_burst_never_evicts_pages();
     test_full_queue_of_pages_refuses_tiles_and_drops_oldest_page();
+    test_failed_page_push_is_resent_while_attached();
+    test_page_resends_are_bounded();
+    test_remote_info_broadcast_once_per_link_up();
     return CT_DONE();
 }

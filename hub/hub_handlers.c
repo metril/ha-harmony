@@ -72,12 +72,16 @@ void hub_shutdown(hub_ctx_t *c) {
 static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m);
 static void link_deliver(void *ctx, const hp_rf_msg_t *m) { handle_rf_msg(ctx, m); }
 
+static void link_result(void *ctx, hp_msg_type_t type, const uint8_t *body, size_t len, bool ok);
+
 /* The link is bound lazily: callers install sinks.rf (and rf_inner_blocks) after hub_ctx_init. */
 static void rf_link_ensure(hub_ctx_t *h) {
     if (h->link_bound) return;
     hp_rf_link_init(&h->link, h->sinks.rf, !h->rf_inner_blocks, HUB_RF_SLOT, link_deliver, h);
     h->link.strict = true; /* one downlink frame in the radio at a time (only where TX status exists) */
     if (h->rf_debug) hp_rf_link_set_log(&h->link, hp_rf_log_stderr, NULL);
+    h->link.result = link_result;
+    h->link.result_ctx = h;
     h->link_bound = true;
 }
 
@@ -146,7 +150,42 @@ static bool pend_make_room(hub_ctx_t *h, hp_msg_type_t incoming) {
     return true;
 }
 
+static void pend_add(hub_ctx_t *h, const hub_pend_t *src) {
+    if (h->npend == HUB_PEND_MAX && !pend_make_room(h, (hp_msg_type_t)src->type)) return; /* a tile that found only pages: dropped */
+    h->pend[h->npend++] = *src;
+}
+
 static bool rf_up(const hub_ctx_t *h) { return !h->sinks.rf->attached || h->sinks.rf->attached(h->sinks.rf->self); }
+
+/* A page_push finished on the link. Acked: forget its resend count. Abandoned after its RF retries while the remote is
+ * still attached: held again and resent after the next frame heard from the remote, at most HUB_PAGE_RESENDS times (then
+ * dropped, counted, logged). Not held again when it is stale: a newer push of that page is held or still with the link
+ * (it would be overwritten by this older one), or a newer gen has been pushed since. */
+static void link_result(void *ctx, hp_msg_type_t type, const uint8_t *body, size_t len, bool ok) {
+    hub_ctx_t *h = ctx;
+    hp_rf_val_t v[3];
+    if (type != HP_MSG_PAGE_PUSH || hp_rf_unpack(type, body, len, v, 3) != 0 || v[1].u > 255 || v[0].u > 255) return;
+    uint8_t pg = (uint8_t)v[1].u;
+    if (h->page_out[pg]) h->page_out[pg]--;
+    if (ok) {
+        h->page_tries[pg] = 0;
+        return;
+    }
+    bool has_gen = v[2].len >= HP_PAGE_V2_HEADER && v[2].p[0] == 2;
+    for (uint8_t i = 0; i < h->npend; i++)
+        if (pend_match(&h->pend[i], (uint8_t)type, (uint8_t)v[0].u, pg, 0)) return;
+    if (h->page_out[pg] || !rf_up(h) || (has_gen && h->has_last_gen && v[2].p[5] != h->last_gen)) return;
+    if (h->page_tries[pg] >= HUB_PAGE_RESENDS) {
+        fprintf(stderr, "hub: page %u not delivered after %d resends; giving up\n", pg, HUB_PAGE_RESENDS);
+        h->pend_dropped++;
+        return;
+    }
+    h->page_tries[pg]++;
+    hub_pend_t n = {.type = (uint8_t)type, .remote = (uint8_t)v[0].u, .page = pg, .has_gen = has_gen,
+                    .gen = has_gen ? v[2].p[5] : 0, .wait = true, .rx_mark = h->link.rx_frames, .len = len};
+    memcpy(n.payload, body, len);
+    pend_add(h, &n);
+}
 
 /* Packs and queues one RF message on the link (stop-and-wait, driven by hub_pump_rf). While the remote
  * is not attached the message is held instead (latest per key) and sent when the link comes up: that
@@ -164,20 +203,22 @@ static int rf_send_keyed(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, si
     bool has_gen = t == HP_MSG_PAGE_PUSH && nv == 3 && v[2].len >= HP_PAGE_V2_HEADER && v[2].p[0] == 2;
     uint8_t gen = has_gen ? v[2].p[5] : 0;
     if (has_gen) pend_drop_old_gen(h, remote, gen);
+    if (t == HP_MSG_PAGE_PUSH) {
+        h->page_tries[page] = 0;
+        if (has_gen) {
+            h->last_gen = gen;
+            h->has_last_gen = true;
+        }
+    }
     if (rf_up(h)) {
         rc = hp_rf_link_send(&h->link, t, payload, plen, hp_sched_now(&h->sched));
+        if (rc == 0 && t == HP_MSG_PAGE_PUSH) h->page_out[page]++;
         if (rc != -HP_E_NOENT) return rc;
     }
-    if (h->npend == HUB_PEND_MAX && !pend_make_room(h, t)) return 0; /* a tile that found only pages: dropped */
-    hub_pend_t *p = &h->pend[h->npend++];
-    p->type = (uint8_t)t;
-    p->remote = remote;
-    p->page = page;
-    p->tile = tile;
-    p->has_gen = has_gen;
-    p->gen = gen;
-    p->len = plen;
-    memcpy(p->payload, payload, plen);
+    hub_pend_t n = {.type = (uint8_t)t, .remote = remote, .page = page, .tile = tile, .has_gen = has_gen, .gen = gen,
+                    .len = plen};
+    memcpy(n.payload, payload, plen);
+    pend_add(h, &n);
     return 0;
 }
 
@@ -187,11 +228,16 @@ static int rf_send_msg(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, size
 
 /* The link is up: send what was held, oldest first, until the link queue is full. */
 static void pend_flush(hub_ctx_t *h) {
-    while (h->npend && rf_up(h)) {
-        const hub_pend_t *p = &h->pend[0];
+    for (uint8_t i = 0; i < h->npend && rf_up(h);) {
+        const hub_pend_t *p = &h->pend[i];
+        if (p->wait && h->link.rx_frames == p->rx_mark) { /* a failed page: after the remote is heard from again */
+            i++;
+            continue;
+        }
         int rc = hp_rf_link_send(&h->link, (hp_msg_type_t)p->type, p->payload, p->len, hp_sched_now(&h->sched));
         if (rc == -HP_E_BUSY || rc == -HP_E_NOENT) return; /* later */
-        pend_remove(h, 0); /* sent, or unsendable */
+        if (rc == 0 && p->type == HP_MSG_PAGE_PUSH) h->page_out[p->page]++;
+        pend_remove(h, i); /* sent, or unsendable */
     }
 }
 
@@ -559,7 +605,11 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
         bool changed = !slot->valid || slot->remote != n.remote || slot->page_fmt != n.page_fmt || slot->caps != n.caps ||
                        slot->icons != n.icons;
         *slot = n;
-        if (changed) {
+        /* Broadcast on a change, and for the first remote_info after a link-up even when identical (Home Assistant
+         * re-pushes its pages after a reattach). The 5-minute heartbeat repeats are not: one broadcast per link-up. */
+        if (changed || h->info_fresh) {
+            h->info_fresh = false;
+            h->info_bcast++;
             cJSON *d = info_json(&n);
             if (d) hub_broadcast(h, "remote_info", d);
         }
@@ -569,10 +619,13 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
 void hub_pump_rf(hub_ctx_t *h) {
     if (!h->sinks.rf) return;
     rf_link_ensure(h);
+    if (h->sinks.rf->attached && h->sinks.rf->attached(h->sinks.rf->self) && !h->rf_attached) h->info_fresh = true; /* seen before anything is delivered */
     /* Received objects are delivered (and acked) from inside the pump; a peer that went away
      * resets reassembly and drops what was queued for it. */
     if (hp_rf_link_pump(&h->link, hp_sched_now(&h->sched)) == -HP_E_NOENT) {
         h->rf_attached = false;
+        h->info_fresh = true;
+        memset(h->page_out, 0, sizeof h->page_out); /* the link dropped what was in flight without a result */
         memset(h->info, 0, sizeof h->info); /* the remote may come back as another firmware: ask again */
     }
     uint32_t failures = hp_rf_link_status(&h->link).failures;
@@ -587,7 +640,11 @@ void hub_pump_rf(hub_ctx_t *h) {
             cJSON *d = cJSON_CreateObject();
             if (d) hub_broadcast(h, "remote_attached", d);
         }
-        if (!now && h->rf_attached) memset(h->info, 0, sizeof h->info); /* link lost: its remote_info is stale */
+        if (!now && h->rf_attached) { /* link lost: its remote_info is stale, and nothing in flight will report */
+            memset(h->info, 0, sizeof h->info);
+            memset(h->page_out, 0, sizeof h->page_out);
+            h->info_fresh = true;
+        }
         h->rf_attached = now;
     }
     pend_flush(h);
