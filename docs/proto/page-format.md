@@ -41,8 +41,12 @@ golden vectors: `tests/vectors/pages.json`.
   status bar is not hit-testable. Wire format unchanged.
 - Presentation (remote-side only, nothing on the wire): a label widget at
   x=0, y=0 spanning all `cols` with h=1 is shown as the status-bar title
-  instead of in the grid (its row stays empty); a page without one is titled
-  "Harmony". Widgets are drawn inset 8 px from the screen edge and 8 px apart.
+  instead of in the grid, and the remaining rows are laid out over the whole
+  240x288 area as if the page had rows-1 rows (widget row y draws and hits as
+  row y-1; hit: (py-32)*(rows-1)/288 + 1). Without such a label, or with
+  rows=1, the plain rule above applies and the page is titled "Harmony". A
+  button labelled exactly "Power Off" (case-insensitive) is drawn in the
+  danger colour. Widgets are drawn inset 8 px from the screen edge and 8 px apart.
   Labels that do not fit end in "..." instead of wrapping.
 - Tiles show live text set by `tile_update` (remote, page, tile id, text);
   text starts empty and is truncated to 31 bytes at a UTF-8 boundary.

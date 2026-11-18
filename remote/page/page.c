@@ -75,9 +75,19 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
     return 0;
 }
 
+int hp_page_title(const hp_page_t *p) {
+    for (unsigned i = 0; i < p->count; i++) {
+        const hp_widget_t *w = &p->widgets[i];
+        if (w->kind == HP_WIDGET_LABEL && w->x == 0 && w->y == 0 && w->w == p->cols && w->h == 1) return (int)i;
+    }
+    return -1;
+}
+
+int hp_page_row_shift(const hp_page_t *p) { return p->rows > 1 && hp_page_title(p) >= 0 ? 1 : 0; }
+
 const hp_widget_t *hp_page_hit(const hp_page_t *p, int x_px, int y_px) {
     if (x_px < 0 || y_px < HP_PAGE_BAR_H || x_px >= HP_PAGE_SCREEN_W || y_px >= HP_PAGE_SCREEN_H) return NULL;
-    int cx = x_px * p->cols / HP_PAGE_SCREEN_W, cy = (y_px - HP_PAGE_BAR_H) * p->rows / HP_PAGE_CONTENT_H;
+    int cx = x_px * p->cols / HP_PAGE_SCREEN_W, cy = (y_px - HP_PAGE_BAR_H) * (p->rows - hp_page_row_shift(p)) / HP_PAGE_CONTENT_H + hp_page_row_shift(p);
     for (unsigned i = 0; i < p->count; i++) {
         const hp_widget_t *w = &p->widgets[i];
         if (cx >= w->x && cx < w->x + w->w && cy >= w->y && cy < w->y + w->h) return w;

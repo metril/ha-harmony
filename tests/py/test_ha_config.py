@@ -7,7 +7,7 @@ import subprocess
 
 import aiohttp
 import pytest
-from conftest import HUB_ID, free_port, make_entry, push_config, rf_attach
+from conftest import HUB_ID, free_port, make_entry, page_tap_y, push_config, rf_attach
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
@@ -391,7 +391,9 @@ def start_remote(built_binaries, rf, *args):
 
 async def test_page_tap_runs_button_action(hass, hub_rf, write_yaml, built_binaries):
     write_yaml(BASE)
-    r = start_remote(built_binaries, hub_rf.rf, "--tap", "30,90")  # the Mute button (row 1 of 6, below the 32 px bar)
+    r = start_remote(
+        built_binaries, hub_rf.rf, "--tap", f"30,{page_tap_y(6, 1, titled=True)}"
+    )  # the Mute button (row 1; row-0 label is the title)
     entry = await setup(hass, hub_rf)
     code, out = await asyncio.to_thread(r.result)
     assert code == 0 and json.loads(out) == {"hit": True, "id": 1, "key": 129}
@@ -569,8 +571,12 @@ async def test_services(hass, hub_rf, write_yaml):
         )
     with pytest.raises(ServiceValidationError):
         await call(const.DOMAIN, "push_pages", {"config_entry": "missing"}, blocking=True)
-    await call(const.DOMAIN, "push_pages", {}, blocking=True)  # no remote attached: held by the hub, no error
-    assert not entry.runtime_data._pages_pending  # the hub holds the pages until the remote links up
+    await call(
+        const.DOMAIN, "push_pages", {}, blocking=True
+    )  # no remote attached: held by the hub, no error
+    assert (
+        not entry.runtime_data._pages_pending
+    )  # the hub holds the pages until the remote links up
     await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -693,7 +699,9 @@ async def test_hub_restart_recovery(hass, start_hub, write_yaml, tmp_path, keep_
 async def test_send_command_and_set_device_state_accept_aliases(hass, hub_rf, write_yaml):
     """An automation written for the stock integration addresses a device by the stock hub's
     numeric id; with that id configured as an alias it works after only an entity swap."""
-    write_yaml(BASE.replace("    name: TV\n", "    name: TV\n    aliases: ['51886472', Samsung TV]\n"))
+    write_yaml(
+        BASE.replace("    name: TV\n", "    name: TV\n    aliases: ['51886472', Samsung TV]\n")
+    )
     entry = await setup(hass, hub_rf)
     remote = "remote.harmony_hub_sim_hub"
     for alias in ("51886472", "Samsung TV"):

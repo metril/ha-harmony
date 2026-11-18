@@ -155,7 +155,7 @@ static void sc_home(void) {
 }
 static void sc_home_pressed(void) {
   sc_home();
-  ra_ui_press_at(&app.ui, 120, 100); /* "Watch TV" */
+  ra_ui_press_at(&app.ui, 120, 60); /* "Watch TV" */
 }
 static void sc_home_lowbatt(void) {
   sc_home();
@@ -284,7 +284,11 @@ static void test_title_bar(void) {
   CT_CHECK(rect_has_ink(12, 6, 140, 26));  /* title drawn in the bar... */
   CT_EQ(px(100, 31), RGB565(RA_HEX_S2));   /* ...above a 1 px hairline */
   CT_CHECK(app.ui.obj[0] == NULL);         /* no grid widget was built for the title label */
-  CT_CHECK(!rect_has_ink(0, 32, 239, 32 + 47)); /* row 0 of the grid stays empty */
+  int x1, y1, x2, y2; /* the grid starts right under the bar: 5 rows of 57.6 px, first button at 40 */
+  ra_ui_widget_rect(&app.ui.page, &app.ui.page.widgets[1], &x1, &y1, &x2, &y2);
+  CT_EQ(y1, 40);
+  CT_EQ(hp_page_row_shift(&app.ui.page), 1);
+  CT_CHECK(hp_page_hit(&app.ui.page, 120, 33) == &app.ui.page.widgets[1]);
   /* a page without a full-width row-0 label keeps the app name */
   uint8_t raw[] = {1, 9, 4, 6, 1, 1, 7, 0x00, 0x22, 0};
   hp_page_t q;
@@ -387,10 +391,8 @@ static void test_pressed_partial_redraw(void) {
       if (!in1 && !in2 && px(x, y) != 0xA5A5) outside++;
     }
   CT_EQ(outside, 0);
-  /* a title row, the bar or an empty spot presses nothing */
-  ra_ui_press_at(&app.ui, 120, 40);
-  CT_EQ(app.ui.pressed, -1);
-  ra_ui_press_at(&app.ui, 120, 100);
+  /* the bar presses nothing */
+  ra_ui_press_at(&app.ui, 120, 60);
   CT_EQ(app.ui.pressed, 1);
   ra_ui_press_at(&app.ui, 120, 10);
   CT_EQ(app.ui.pressed, -1);

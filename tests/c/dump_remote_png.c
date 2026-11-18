@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
   hp_page_t p;
   fresh();
   p = home_page(); ra_ui_show_page(&app.ui, &p); ra_ui_set_battery(&app.ui, 72, 0); shot(d, "home");
-  ra_ui_press_at(&app.ui, 120, 100); shot(d, "pressed");
+  ra_ui_press_at(&app.ui, 120, 60); shot(d, "pressed");
   p = activity_page(); ra_ui_show_page(&app.ui, &p); shot(d, "activity");
   p = device_page(); ra_ui_show_page(&app.ui, &p); shot(d, "device");
   p = tiles_page(); ra_ui_show_page(&app.ui, &p); shot(d, "tiles");

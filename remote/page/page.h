@@ -38,6 +38,12 @@ typedef struct {
  * or len > HP_PAGE_MAX_BYTES (251). *out is only written on success. */
 int hp_page_decode(const uint8_t *data, size_t len, hp_page_t *out);
 
+/* Index of the title label (a label at x=0,y=0 spanning all columns with h=1), or -1. The remote shows it in
+ * the status bar; the other rows are then laid out over the whole 240x288 area as if the page had rows-1 rows
+ * (hp_page_row_shift() = 1). Without a title, or with a 1-row page, the shift is 0. */
+int hp_page_title(const hp_page_t *p);
+int hp_page_row_shift(const hp_page_t *p);
+
 /* Widget under pixel (x,y), or NULL (also for pixels outside the screen and in the status bar). */
 const hp_widget_t *hp_page_hit(const hp_page_t *p, int x_px, int y_px);
 

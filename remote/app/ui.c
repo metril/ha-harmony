@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "hub/hp_errors.h"
 
@@ -12,8 +13,9 @@ static int edge(int i, int n, int total) { return (i * total + n - 1) / n; }
 void ra_ui_widget_box(const hp_page_t *p, const hp_widget_t *w, int *x1, int *y1, int *x2, int *y2) {
   *x1 = edge(w->x, p->cols, HP_PAGE_SCREEN_W);
   *x2 = edge(w->x + w->w, p->cols, HP_PAGE_SCREEN_W) - 1;
-  *y1 = HP_PAGE_BAR_H + edge(w->y, p->rows, HP_PAGE_CONTENT_H);
-  *y2 = HP_PAGE_BAR_H + edge(w->y + w->h, p->rows, HP_PAGE_CONTENT_H) - 1;
+  int sh = hp_page_row_shift(p), rows = p->rows - sh;
+  *y1 = HP_PAGE_BAR_H + edge(w->y - sh, rows, HP_PAGE_CONTENT_H);
+  *y2 = HP_PAGE_BAR_H + edge(w->y + w->h - sh, rows, HP_PAGE_CONTENT_H) - 1;
 }
 
 /* Inset one axis [lo,hi]: `a` at the low edge, `b` at the high edge, relaxed for tiny cells so a
@@ -134,10 +136,6 @@ void ra_ui_set_battery(ra_ui_t *ui, int soc, int charging) {
 
 /* ---- pages ---- */
 
-static int is_title(const hp_page_t *p, const hp_widget_t *w) {
-  return w->kind == HP_WIDGET_LABEL && w->x == 0 && w->y == 0 && w->w == p->cols && w->h == 1;
-}
-
 static void screen_reset(ra_ui_t *ui, const char *title) {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_clean(scr);
@@ -166,13 +164,8 @@ static void build(ra_ui_t *ui) {
   lv_obj_t *scr = lv_screen_active();
   const hp_page_t *p = &ui->page;
   const char *title = "Harmony";
-  int title_idx = -1;
-  for (unsigned i = 0; i < p->count; i++)
-    if (is_title(p, &p->widgets[i])) {
-      title_idx = (int)i;
-      if (p->widgets[i].label[0]) title = p->widgets[i].label;
-      break;
-    }
+  int title_idx = hp_page_title(p);
+  if (title_idx >= 0 && p->widgets[title_idx].label[0]) title = p->widgets[title_idx].label;
   screen_reset(ui, title);
   ui->title_idx = title_idx;
   int interactive_or_text = 0;
@@ -201,6 +194,7 @@ static void build(ra_ui_t *ui) {
     const lv_style_t *ts = btn ? (bw >= 100 ? &ra_st_txt_body : &ra_st_txt_btn) : (bw >= 80 ? &ra_st_txt_display : &ra_st_txt_btn);
     lv_obj_t *l = make_label(o, txt, ts, NULL, bw - 8);
     lv_obj_center(l);
+    if (btn && !strcasecmp(w->label, "Power Off")) lv_obj_set_style_text_color(l, RA_COLOR(RA_HEX_BAD), 0);
     ui->obj[i] = o;
     ui->lbl[i] = l;
   }
