@@ -454,7 +454,7 @@ export const TEMPLATES: { id: TemplateId; name: string; note: string }[] = [
   { id: 'devices', name: 'Device list', note: 'One row per device command' },
   { id: 'blank', name: 'Blank', note: 'Empty 4x6 grid' },
 ];
-export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { entity_id: string; name?: string }[]; activity?: string } = {}): Page {
+export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { entity_id: string; name?: string }[]; activity?: string; device?: string } = {}): Page {
   const devices = cfg.devices ?? [];
   const pid = uniquePageId(cfg, id === 'activities' ? 'home' : id);
   const used = new Set((cfg.pages ?? []).flatMap((pg) => pg.widgets.map((w) => w.id)));
@@ -474,7 +474,7 @@ export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { en
       return { id: pid, cols: 4, rows: 6, ...(hasHome ? {} : { kind: 'home' as const }), title: 'Activities', widgets };
     }
     case 'activity': {
-      const d = devices[0];
+      const d = devices.find((x) => x.id === ctx.device) ?? devices[0];
       const names = new Set(Object.keys(d?.commands ?? {}));
       const pick = (...c: string[]) => c.find((n) => names.has(n));
       const slots: [string, string | undefined][] = [['Vol +', pick('vol_up', 'volume_up')], ['Vol -', pick('vol_down', 'volume_down')], ['Mute', pick('mute')], ['Play', pick('play', 'play_pause')], ['Pause', pick('pause')], ['Stop', pick('stop')]];
