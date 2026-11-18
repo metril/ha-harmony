@@ -75,7 +75,8 @@ editor disables the Home Assistant action picker (with a reason) when `ha_action
 - `POST config/apply?hub=` body `{}` -> `{ok:true, ...meta}`; `409 no_draft`; `422 {ok:false, errors}`.
   Apply is strict; the preview's tolerance does not apply to it.
 - `POST config/revert?hub=` body `{target: "applied"|"previous"}` -> `{ok, ...meta}`; `409 store`
-  when there is no previous version.
+  when there is no previous version. `previous` pushes the config it replaces onto `history` (cap
+  `history_max`), so a revert can itself be reverted.
 - `POST config/import_yaml?hub=` YAML body (max 1 MB, no anchors) -> `{ok, hub, draft_updated, ...meta}`;
   `422 ir_files_unresolvable | invalid_config`; `400 bad_yaml | yaml_alias | too_large`. Honours `If-Match`.
 - `GET config/export_yaml?hub=&source=draft|applied` -> `text/yaml`; `404 empty`.

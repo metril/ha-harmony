@@ -119,7 +119,23 @@ async def test_history_cap_and_previous_revert(client):
     assert [h["rev"] for h in meta["history"]] == list(range(HISTORY_MAX + 2, 2, -1))
     r = await client.post("/api/v1/config/revert", json={"target": "previous"}, headers=H)
     meta = await r.json()
-    assert meta["applied"]["rev"] == HISTORY_MAX + 2 and len(meta["history"]) == HISTORY_MAX - 1
+    assert meta["applied"]["rev"] == HISTORY_MAX + 2 and len(meta["history"]) == HISTORY_MAX
+    assert meta["history"][0]["rev"] == HISTORY_MAX + 3  # the version left is on top: a redo
+
+
+async def test_revert_previous_can_itself_be_reverted(client):
+    revs = []
+    for i in range(3):
+        await put_draft(
+            client, {**CONFIG, "devices": [{**CONFIG["devices"][0], "settle_ms": 100 + i}]}
+        )
+        r = await client.post("/api/v1/config/apply", json={}, headers=H)
+        revs.append((await r.json())["applied"]["rev"])
+    for want in (revs[1], revs[2], revs[1]):  # back, forward again, back
+        r = await client.post("/api/v1/config/revert", json={"target": "previous"}, headers=H)
+        meta = await r.json()
+        assert meta["applied"]["rev"] == want
+    assert sorted(h["rev"] for h in meta["history"]) == [revs[0], revs[2]]
 
 
 async def test_revert_previous_without_history(client):

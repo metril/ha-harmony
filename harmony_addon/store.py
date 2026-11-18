@@ -132,7 +132,8 @@ class Store:
         return state
 
     def revert(self, hub: str, target: str) -> dict[str, Any]:
-        """`applied`: discard the draft. `previous`: re-apply the newest history entry."""
+        """`applied`: discard the draft. `previous`: re-apply the newest history entry; the applied
+        config it replaces becomes the newest history entry (so it can be reverted again)."""
         state = self.load(hub)
         state["draft_rev"] += 1
         if target == "applied":
@@ -140,7 +141,10 @@ class Store:
         elif target == "previous":
             if not state["history"]:
                 raise StoreError("no previous version to revert to")
-            state["applied"], *state["history"] = state["history"]
+            current = state["applied"]
+            state["applied"], *rest = state["history"]
+            # the version being left goes onto history (cap applies): a revert can itself be reverted
+            state["history"] = ([current, *rest] if current is not None else rest)[:HISTORY_MAX]
             state["draft"] = None
         else:
             raise StoreError("unknown revert target")
