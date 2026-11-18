@@ -355,4 +355,29 @@ hook log 4 lines, 0 oops/jffs2. Log cap never fired.
 5. `remote_sim` and `rf_probe` are still on /data (prune not run; 2620 KB free).
 6. Hook and daemon still differ on CR in conf values (hook stricter: safe direction). From review, not bench-tested.
 7. Factory-reset/Pair button is probably unavailable while armed (from probe, not bench-tested).
-8. T7 remote boot hook not yet installed.
+8. ~~T7 remote boot hook not yet installed.~~ Done 2026-11-18, see the T7 bench section below.
+
+## Bench: T7 remote boot hook (2026-11-18, 05:34-~06:00 UTC)
+
+Fixed before installing (commit 7cbf552): `install-hook --slot/--powermode` so start.sh passes the app's real args; the candidate
+rcS.local is `sh -n`-checked on the device before the mv; on-device `selftest` (stub app, volatile only).
+- `selftest --yes` on the Elite: 22 PASS / 0 FAIL.
+- Install: rcS.local md5 5b8b77b2...b859 (117 B) -> 99e6d462...c3 (216 B). Backup `/data/app/rcS.local.orig` (same md5 as before).
+  Hook line: `[ -x /data/app/start.sh ] && [ ! -e /data/app/DISABLE ] && /data/app/start.sh &  # ha-harmony-hook`, after dropbear, before the final `exit 0`.
+  Verified over ssh: 755, `sh -n` ok, order, trailing `exit 0`; start.sh 1705 B, 755, `--slot 1 --powermode 0x30`.
+- 3 reboots: SSH ~33 s after the command each time; app pid 403, argv `--slot 1 --powermode 0x30`; counter 0 at ~25 s later; DISABLE absent;
+  remote log `link lost` then `link up (slot 1, status 0x07, wpid 880b)`.
+- Kill switch: DISABLE created by hand (`: > /data/app/DISABLE`; the tool has no command): reboot -> SSH up, app not running, counter unchanged (0);
+  removed, reboot -> app running again.
+- Joint power-cycle (hub mains pulled ~10 s, Elite rebooted at 05:52:58): both up unattended; hub hook log "boot strike 1 of 3", daemon pid 176,
+  "healthy after 120s - strikes cleared" (seen by uptime 249 s), counter gone, HA connected on :8099, no hal/lua, no oops. Remote `link up` within ~3.5 min of boot.
+  User pressed Vol Up on the remote: the TV reacted (key -> hub -> IR confirmed end to end). **T7 gate passed.**
+- 6 Elite reboots in total (3 + 2 kill-switch + 1 joint).
+
+### Follow-ups
+1. `deploy_remote.py disable` / `enable` subcommands (DISABLE was made by hand).
+2. The boot counter's intermediate value (1 during boot) was never observed; only 0 at ~25 s.
+3. The app under the hook runs without `--rf-debug`, so it logs no rx counts; neither daemon log has timestamps.
+4. Which unionfs layer holds rcS.local, and rename atomicity there, remain unknown.
+5. Exact boot timings for the joint cycle are missing (polling loop stuck; hub first-contact uptime not captured).
+6. The Elite has only run on USB power since hooking: cradle/battery behaviour and the battery guard are untested under the hook.

@@ -120,6 +120,18 @@ ends in `exit 0`, so `rcS` stops there: no `hal`, no stock UI, no watchdog daemo
 processes: init, syslogd, klogd, dropbear. `/etc` and `/data` write through the unionfs to ubifs and
 persist; `/var/volatile` is tmpfs. The boot hook is `tools/deploy_remote.py install-hook`.
 
+### Boot hook: install / disable / uninstall / recovery
+
+Commands as run on 2026-11-18 (`uv run python tools/deploy_remote.py ...`):
+- Install: `selftest --yes`, then `install-hook --yes --slot 1 --powermode 0x30`, then `status`. The previous rcS.local is kept at
+  `/data/app/rcS.local.orig`; the new one is `sh -n`-checked on the device before the mv.
+- Disable (kill switch): `ssh harmony-remote ': > /data/app/DISABLE'`, reboot; the app is not started and the counter is left alone.
+  Re-enable: `ssh harmony-remote 'rm /data/app/DISABLE'`, reboot. After 3 boots the app never marked healthy, start.sh writes DISABLE itself.
+- Uninstall: `uninstall --yes` restores rcS.local from the backup (md5-verified); confirm md5 5b8b77b26f01b22db520f05bf3b4b859.
+- If SSH does not return: dropbear starts from rcS.local, so do nothing else on the device; check host side (`ip -br link | grep enx`,
+  re-apply `nmcli dev modify <if> ipv4.method manual ipv4.addresses 192.168.2.2/24`, ping 192.168.2.1, host dmesg for the gadget). Wait up to ~4 min.
+  Last resort is Menu+Off (factory reset).
+
 **rcS.local probe (RO, 2026-11-18) [MEASURED]:** `/` is `none on / type unionfs (dirs=/mnt/data=rw:/mnt/root=ro)`
 (rw branch `ubi0:data` ubifs, ro branch squashfs `mtdblock6`); the branch mounts are not visible
 in the running namespace, so whether `rcS.local` sits in the rw layer is not directly observable

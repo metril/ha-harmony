@@ -136,6 +136,8 @@ kill switch; the app starts backgrounded after dropbear so it can never block SS
 `/dev/mtd*`, `/dev/rffw`, `/dev/mspfw`, `/dev/watchdog`. Fake-ssh tests with a brick-safety command
 log assertion.
 
+**Status 2026-11-18:** the hook is installed on the Elite and passed its bench gate (see the T7 section in `phase4-persistence.md`).
+
 ### Task 6 — real key map
 
 `proto/schema.yaml` and generated code: `key_event.code` becomes `u16` evdev; a single key table
