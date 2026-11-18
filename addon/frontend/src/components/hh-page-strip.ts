@@ -22,23 +22,23 @@ export class HhPageStrip extends LitElement {
     shared,
     css`
       :host { display: block; background: var(--sf); border-top: 1px solid var(--line); }
-      .strip { display: flex; gap: 8px; align-items: stretch; padding: 8px 12px 8px; overflow-x: auto; }
+      .strip { display: flex; gap: 8px; align-items: stretch; padding: 6px 12px 6px; overflow-x: auto; }
       .pg { position: relative; display: grid; gap: 3px; width: 84px; flex: none; justify-items: center; padding: 6px 4px 4px; border-radius: var(--r2); border: 1.5px solid transparent; background: transparent; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: pan-x; }
       .pg:hover { background: var(--sf2); }
       .pg[aria-current="true"] { border-color: var(--acc); background: var(--accs); }
       .pg.drop::before { content: ""; position: absolute; left: -8px; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--acc); }
       .pg.dragging { opacity: 0.5; }
-      .thumb { width: 60px; height: 80px; border-radius: 6px; overflow: hidden; background: #101820; box-shadow: 0 0 0 1px var(--line); display: block; }
+      .thumb { width: 54px; height: 72px; border-radius: 6px; overflow: hidden; background: #101820; box-shadow: 0 0 0 1px var(--line); display: block; }
       .name { font-size: 12px; font-weight: 600; max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx); }
       .sub { font-size: 11px; color: var(--tx3); display: flex; gap: 6px; align-items: center; }
-      .bar { width: 60px; height: 4px; }
+      .bar { width: 54px; height: 4px; }
       .err { position: absolute; top: 4px; right: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--sf); }
       .tools { display: none; position: absolute; top: 2px; left: 2px; gap: 2px; }
       .pg:hover .tools, .pg:focus-within .tools { display: flex; }
       .tools button { width: 24px; height: 24px; border-radius: 12px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); cursor: pointer; display: grid; place-items: center; padding: 0; }
       .tools button:hover { background: var(--sf3); color: var(--tx); }
       .tools .ic { width: 14px; height: 14px; }
-      .add { width: 84px; flex: none; display: grid; place-items: center; align-content: center; gap: 4px; border: 1.5px dashed var(--line); border-radius: var(--r2); color: var(--tx2); background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; min-height: 110px; }
+      .add { width: 84px; flex: none; display: grid; place-items: center; align-content: center; gap: 4px; border: 1.5px dashed var(--line); border-radius: var(--r2); color: var(--tx2); background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; min-height: 100px; }
       .add:hover { background: var(--sf2); color: var(--tx); }
       .add .ic { width: 22px; height: 22px; }
       .menu { position: absolute; z-index: 9; bottom: calc(100% + 4px); left: 14px; width: min(300px, calc(100vw - 32px)); background: var(--sf); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--sh); padding: 6px; display: grid; gap: 2px; }
@@ -142,7 +142,7 @@ export class HhPageStrip extends LitElement {
             @pointerdown=${(e: PointerEvent) => this.down(e, i)} @keydown=${(e: KeyboardEvent) => this.key(e, i, pages.length)}>
             <svg class="thumb" viewBox="0 0 240 320" aria-hidden="true">${v2 ? pageGroup(v2, { noStatus: true }) : svg`<rect width="240" height="320" fill="#101820"></rect>`}</svg>
             <span class="name">${name}</span>
-            <span class="sub">${p.kind ? `${p.kind} · ` : ''}${screens > 1 ? `${screens} screens` : `${p.widgets.length} widgets`}</span>
+            ${p.kind || screens > 1 ? html`<span class="sub">${p.kind ?? ''}${p.kind && screens > 1 ? ' · ' : ''}${screens > 1 ? `${screens} screens` : ''}</span>` : nothing}
             <div class="bar" role="img" aria-label="${bytes} of ${limit} bytes"><div class="bar"><i class=${classMap({ warn: ratio >= 0.85 && ratio < 1, full: ratio >= 1 })} style=${setStyle({ width: `${Math.min(100, ratio * 100)}%` })}></i></div></div>
             ${bad ? html`<span class="err" role="img" aria-label="Error"></span>` : nothing}
             <div class="tools">

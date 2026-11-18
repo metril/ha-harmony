@@ -30,7 +30,7 @@ export class HhRemote extends LitElement {
   static override styles = css`
     :host { display: block; min-width: 0; }
     :host([fit]) { height: 100%; min-height: 360px; }
-    svg.remote { display: block; margin: 0 auto; max-width: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+    svg.remote { display: block; margin: 0 auto; max-width: none; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     :host([fit]) svg.remote { width: 100%; height: 100%; }
     .body { fill: url(#bodyg); stroke: #0a0d10; stroke-width: 2; }
     .rim { fill: none; stroke: rgba(255, 255, 255, 0.07); stroke-width: 1.5; }
@@ -59,7 +59,7 @@ export class HhRemote extends LitElement {
     .grid line { stroke: rgba(255, 255, 255, 0.07); stroke-width: 0.6; }
     .wh { fill: transparent; stroke: none; cursor: grab; outline: none; }
     .wh:hover { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1.2; }
-    .wh.sel { stroke: #fff; stroke-width: 1.8; }
+    .wh.sel { stroke: #fff; stroke-width: 2.6; filter: drop-shadow(0 0 3px #20c8b0); }
     .wh:focus-visible { stroke: #5fe3cf; stroke-width: 2.2; }
     .wh.bad { stroke: #f85848; stroke-width: 1.8; stroke-dasharray: 4 2; }
     .wh.tgt { stroke: rgba(32, 200, 176, 0.7); stroke-dasharray: 4 3; stroke-width: 1.4; }
@@ -69,7 +69,7 @@ export class HhRemote extends LitElement {
     .ghost { fill: rgba(32, 200, 176, 0.22); stroke: #20c8b0; stroke-width: 1.6; stroke-dasharray: 4 3; pointer-events: none; }
     .ghost.invalid { fill: rgba(248, 88, 72, 0.25); stroke: #f85848; }
     .handle { fill: #fff; stroke: #20c8b0; stroke-width: 1.6; cursor: nwse-resize; }
-    .xl { fill: var(--tx, #14202a); font: 600 14px system-ui, sans-serif; }
+    .xl { fill: var(--tx, #14202a); font: 600 16.5px system-ui, sans-serif; }
     .xl.inh { fill: var(--tx3, #5f6c78); font-weight: 500; }
     .xline { stroke: var(--tx3, #5f6c78); stroke-width: 0.8; opacity: 0.55; }
     .xkey { fill: var(--tx, #14202a); font: 700 8.5px system-ui, sans-serif; opacity: 0.6; }
@@ -402,7 +402,7 @@ export class HhRemote extends LitElement {
     return svg`<g aria-hidden="true">${labels.map((l) => {
       const left = l.side === 'left';
       return svg`<line class="xline" x1=${l.x1} y1=${l.y1} x2=${left ? l.x + 6 : l.x - 6} y2=${l.y}></line>
-        <text class=${inherit.get(l.key) ? 'xl inh' : 'xl'} x=${l.x} y=${l.y + 5} text-anchor=${left ? 'end' : 'start'}>${l.text}</text>`;
+        <text class=${inherit.get(l.key) ? 'xl inh' : 'xl'} x=${l.x} y=${l.y + 6} text-anchor=${left ? 'end' : 'start'}>${l.text}</text>`;
     })}</g>`;
   }
 
@@ -419,7 +419,7 @@ export class HhRemote extends LitElement {
     }
     const screenMode = st.mode === 'screen';
     const pad = st.xray && !screenMode ? XRAY_PAD : 0;
-    const vb = screenMode ? { x: 12, y: 0, w: 276, h: 436 } : { x: -pad, y: 0, w: VIEW.w + pad * 2, h: VIEW.h };
+    const vb = screenMode ? { x: 14, y: 36, w: 272, h: 358 } : { x: -pad, y: 0, w: VIEW.w + pad * 2, h: VIEW.h };
     // pixels per viewBox unit: Screen mode uses an integer scale that fits; the whole remote uses its zoom
     const fitScale = this.avail > 0 ? Math.max(1, Math.floor(this.avail / vb.w)) : 1;
     const z = screenMode ? Math.min(st.scale, fitScale) : st.zoom === '2' ? 2 : st.zoom === '1' ? 1 : 0;

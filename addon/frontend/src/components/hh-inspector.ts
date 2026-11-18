@@ -134,7 +134,7 @@ export class HhInspector extends LitElement {
       <h2>${keyTitle(name)} <span class="chip">${this.st.layerName(layer)}</span></h2>
       <div class="muted">${state}${row?.action ? ` · ${row.action.label}` : ''}</div>
       ${this.errorsFor((t) => t.kind === 'key' && t.key === name)}
-      <hh-action-picker .host=${this.host} .value=${raw ?? (row?.source === 'default' ? null : null)} mode="key" ?inherits=${layer !== DEFAULT_LAYER} @pick=${(e: CustomEvent<Source>) => this.fireSource({ ...e.detail })}></hh-action-picker>
+      <hh-action-picker .host=${this.host} .value=${raw} .current=${row?.action ? `${row.action.label}${row.source === 'default' && layer !== DEFAULT_LAYER ? ' (from Default)' : ''}` : ''} mode="key" ?inherits=${layer !== DEFAULT_LAYER} @pick=${(e: CustomEvent<Source>) => this.fireSource({ ...e.detail })}></hh-action-picker>
     </div>`;
   }
 

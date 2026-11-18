@@ -38,6 +38,8 @@ export class HhActionPicker extends LitElement {
   @property() mode: 'key' | 'widget' = 'key';
   /** the key layer is an activity: offer "Use Default" */
   @property({ type: Boolean }) inherits = false;
+  /** what the key does now when it is not set in this layer (inherited from Default) */
+  @property() current = '';
   @state() private kind: Kind = 'command';
   @state() private device = '';
   @state() private name = '';
@@ -150,7 +152,7 @@ export class HhActionPicker extends LitElement {
   protected override render() {
     if (!this.host) return nothing;
     const sug = this.suggestions();
-    const cur = this.value ? describeAction(this.cfg, this.value) : 'Nothing';
+    const cur = this.value ? describeAction(this.cfg, this.value) : this.current || 'Nothing';
     return html`
       <div class="cur"><span class="muted">Now</span> <b>${cur}</b></div>
       <label>Search

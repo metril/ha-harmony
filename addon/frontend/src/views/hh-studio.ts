@@ -8,7 +8,7 @@ import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import {
-  DEFAULT_LAYER, addPage, assign, deletePage, describeSource, duplicatePage, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePage,
+  DEFAULT_LAYER, addPage, assign, deletePage, describeSource, duplicatePage, errorTarget, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePage,
   type Source, type Target,
 } from '../lib/studio-model';
 import { StoreElement, confirmAction } from '../components/base';
@@ -44,7 +44,7 @@ export class HhStudio extends StoreElement implements StudioHost {
       .insp { border-left: 1px solid var(--line); }
       .pal > *, .insp > * { flex: 1; min-height: 0; }
       .mid { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--cv); }
-      .tb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 12px 8px; background: var(--sf); border-bottom: 1px solid var(--line); z-index: 2; }
+      .tb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 12px 6px; background: var(--sf); border-bottom: 1px solid var(--line); z-index: 2; }
       .layers { display: flex; gap: 4px; overflow-x: auto; flex: 1 1 100%; min-width: 0; padding: 2px; scrollbar-width: thin; }
       .layers button { flex: none; height: 30px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
       .layers button:hover { background: var(--sf2); }
@@ -54,12 +54,15 @@ export class HhStudio extends StoreElement implements StudioHost {
       .grp button[aria-pressed="true"], .grp button[aria-selected="true"] { background: var(--sf); color: var(--tx); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); }
       .grp button:disabled { opacity: 0.4; cursor: default; }
       .grp .ic { width: 16px; height: 16px; }
+      .cw { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+      .tools { position: absolute; top: 10px; right: 12px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+      .tools .grp { background: var(--sf); border: 1px solid var(--line); box-shadow: var(--sh); }
       .canvas { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background-color: var(--cv); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 18px 18px; padding: 14px 16px 16px; position: relative; scroll-behavior: auto; }
       hh-remote { flex: 1 1 auto; min-height: 0; }
       .banner2 { position: sticky; top: 0; z-index: 3; margin: -14px -16px 10px; flex: none; padding: 8px 14px; background: var(--acc); color: var(--onacc); font-weight: 600; display: flex; gap: 10px; align-items: center; }
       .banner2 .sp { flex: 1; }
       .banner2 button { height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid currentColor; background: transparent; color: inherit; cursor: pointer; font-weight: 600; }
-      .ghost { position: fixed; z-index: 50; pointer-events: none; padding: 6px 12px; border-radius: 16px; background: var(--acc); color: var(--onacc); font-weight: 600; font-size: 13px; box-shadow: var(--lift); max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .ghost { position: fixed; z-index: 50; pointer-events: none; padding: 6px 12px; border-radius: 16px; background: var(--acc); color: var(--onacc); font-weight: 600; font-size: 13px; box-shadow: var(--lift); max-width: 460px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .ghost.bad { background: var(--bad); color: #fff; }
       .ghost small { font-weight: 400; opacity: 0.9; margin-left: 6px; }
       .pop { position: absolute; z-index: 8; width: 308px; max-height: 80%; overflow: auto; background: var(--sf); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--lift); padding: 12px; display: grid; gap: 10px; }
@@ -71,9 +74,15 @@ export class HhStudio extends StoreElement implements StudioHost {
       .first { flex: none; max-width: 420px; margin: 0 auto 14px; padding: 14px 16px; background: var(--sf); border: 1px solid var(--line); border-radius: var(--r2); display: grid; gap: 6px; justify-items: start; box-shadow: var(--sh); }
       .first h2 { margin: 0; font-size: 16px; }
       .first p { margin: 0; color: var(--tx2); }
+      .errbar { flex: none; margin: 0 0 10px; padding: 8px 12px; border-radius: var(--r2); background: var(--bads); border: 1px solid var(--bad); color: var(--tx); display: grid; gap: 4px; font-size: 13px; max-width: 520px; align-self: center; width: 100%; }
+      .errbar div { display: flex; gap: 10px; align-items: center; }
+      .errbar span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+      .errbar button { height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--bad); background: var(--sf); color: var(--tx); cursor: pointer; font-weight: 600; flex: none; }
+      .pager { display: inline-flex; align-items: center; gap: 2px; }
       .sheetbtns { display: none; }
       .scrim { display: none; }
       @media (max-width: 1100px) { :host { --pw: 244px; --iw: 264px; } }
+      @media (max-width: 1100px) { .tools .grp button { min-width: 30px; padding: 0 7px; } }
       @media (max-width: 860px) {
         :host { --pw: 0px; --iw: 0px; }
         .studio { grid-template-columns: minmax(0, 1fr); height: max(520px, calc(100dvh - 132px)); }
@@ -82,6 +91,8 @@ export class HhStudio extends StoreElement implements StudioHost {
         :host([sheet="palette"]) .insp, :host([sheet="inspector"]) .pal { display: none; }
         :host([sheet]) .scrim { display: block; position: fixed; inset: 0; z-index: 39; background: var(--scrim); }
         .sheetbtns { display: inline-flex; }
+        .tools { position: static; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 6px 12px; background: var(--sf); border-bottom: 1px solid var(--line); }
+        .tools .grp { border: 0; box-shadow: none; background: var(--sf2); }
         .pop { position: fixed; left: 8px; right: 8px; bottom: 8px; top: auto !important; width: auto; max-height: 62vh; z-index: 41; }
         .canvas { padding: 16px 8px 20px; }
         .banner2 { margin: -16px -8px 12px; }
@@ -241,7 +252,7 @@ export class HhStudio extends StoreElement implements StudioHost {
   }
   openPopover(): void {
     const sel = this.st.sel;
-    const wrap = this.renderRoot.querySelector<HTMLElement>('.mid');
+    const wrap = this.renderRoot.querySelector<HTMLElement>('.cw');
     const root = this.remote?.shadowRoot;
     if (!wrap || !root || !sel || sel.kind === 'page') return;
     const el = root.querySelector<SVGGraphicsElement>(sel.kind === 'key' ? `[data-key="${sel.name}"]` : `[data-widget="${sel.index}"]`);
@@ -251,7 +262,7 @@ export class HhStudio extends StoreElement implements StudioHost {
     let x = a.right - c.left + 14;
     if (x + 308 > c.width - 8) x = a.left - c.left - 322;
     if (x < 8) x = Math.max(8, (c.width - 308) / 2);
-    const y = Math.max(52, Math.min(a.top - c.top - 30, c.height - 340));
+    const y = Math.max(8, Math.min(a.top - c.top - 30, c.height - 340));
     this.pop = { x, y };
   }
 
@@ -484,6 +495,9 @@ export class HhStudio extends StoreElement implements StudioHost {
         <section class="mid" aria-label="Remote canvas">
           <div class="tb">
             ${this.layers()}
+          </div>
+          <div class="cw">
+            <div class="tools">
             <div class="grp" role="group" aria-label="View">
               <button aria-pressed=${!screenMode} @click=${() => st.set({ mode: 'remote' })}>Remote</button>
               <button aria-pressed=${screenMode} @click=${() => st.set({ mode: 'screen' })}>Screen</button>
@@ -498,15 +512,17 @@ export class HhStudio extends StoreElement implements StudioHost {
               <button aria-label="Undo" title="Undo (Ctrl+Z)" ?disabled=${!s.canUndo} @click=${() => s.undo() && st.say('Undone')}>${icon('undo')}Undo</button>
               <button aria-label="Redo" title="Redo (Ctrl+Shift+Z)" ?disabled=${!s.canRedo} @click=${() => s.redo() && st.say('Redone')}>Redo</button>
             </div>
+            ${this.pager()}
             <div class="grp sheetbtns" role="group" aria-label="Panels">
               <button @click=${() => (this.sheet = this.sheet === 'palette' ? '' : 'palette')}>Palette</button>
               <button @click=${() => (this.sheet = this.sheet === 'inspector' ? '' : 'inspector')}>Inspector</button>
             </div>
-          </div>
+            </div>
           <div class="canvas" @pointerdown=${(e: PointerEvent) => { if ((e.target as HTMLElement).closest('hh-remote') === null && this.pop) this.pop = null; }} @scroll=${() => (this.pop = null)}>
             ${picked
               ? html`<div class="banner2" role="status"><span>Click a key or the screen for ${describeSource(s.config, picked)}</span><span class="sp"></span><button @click=${() => this.assigner.cancel()}>Cancel</button></div>`
               : nothing}
+            ${this.errorBar()}
             ${s.isFirstRun
               ? html`<div class="first" role="status">
                   <h2>Set up your first hub config</h2>
@@ -517,6 +533,7 @@ export class HhStudio extends StoreElement implements StudioHost {
             <hh-remote .host=${this} .assigner=${this.assigner}></hh-remote>
           </div>
           ${this.pop && popKind && popKind !== 'page' ? this.renderPop() : nothing}
+          </div>
           <hh-page-strip .host=${this}></hh-page-strip>
         </section>
         <aside class="insp" aria-label="Inspector"><hh-inspector .host=${this} .assigner=${this.assigner}></hh-inspector></aside>
@@ -526,18 +543,53 @@ export class HhStudio extends StoreElement implements StudioHost {
       <div class="vh" role="status" aria-live="polite" aria-atomic="true">${st.announcement}</div>`;
   }
 
+  private showError(path: (string | number)[]): void {
+    const t = errorTarget(path);
+    if (!t) return;
+    this.pop = null;
+    if (t.kind === 'key') {
+      const idx = t.layer.startsWith('#') ? Number(t.layer.slice(1)) : -1;
+      const layer = idx >= 0 ? ((this.store.config.activities ?? [])[idx]?.id ?? DEFAULT_LAYER) : DEFAULT_LAYER;
+      this.st.setLayer(layer);
+      this.st.set({ sel: { kind: 'key', name: t.key } });
+    } else if (t.kind === 'widget') {
+      this.st.setPage(t.page, false);
+      this.st.set({ sel: { kind: 'widget', page: t.page, index: t.index } });
+    } else this.st.setPage(t.page);
+    this.st.say('Showing the problem');
+  }
+  private errorBar() {
+    const errs = this.store.errors;
+    if (!errs.length) return nothing;
+    const shown = errs.slice(0, 2);
+    return html`<div class="errbar" role="alert">${shown.map((e) => html`<div><span>${e.msg}</span>${errorTarget(e.path) ? html`<button @click=${() => this.showError(e.path)}>Show</button>` : nothing}</div>`)}
+      ${errs.length > 2 ? html`<span class="muted">and ${errs.length - 2} more in the draft bar</span>` : nothing}</div>`;
+  }
+  private pager() {
+    const pp = this.st.previewOf(this.st.page);
+    const n = pp?.wire_pages.length ?? 0;
+    if (n < 2) return nothing;
+    const i = Math.min(this.st.wire, n - 1);
+    return html`<div class="grp pager" role="group" aria-label="Screens of this list page">
+      <button aria-label="Previous screen" ?disabled=${i === 0} @click=${() => this.st.set({ wire: i - 1 })}>‹</button><span class="muted" aria-live="polite">${i + 1}/${n}</span>
+      <button aria-label="Next screen" ?disabled=${i >= n - 1} @click=${() => this.st.set({ wire: i + 1 })}>›</button></div>`;
+  }
+
   private renderPop() {
     const sel = this.st.sel;
     const pop = this.pop;
     if (!pop || !sel || sel.kind === 'page') return nothing;
     const cfg = this.store.config;
     let title = '';
+    let current = '';
     let value: unknown = null;
     let mode: 'key' | 'widget' = 'key';
     if (sel.kind === 'key') {
       title = keyTitle(sel.name);
       const layer = this.st.layer;
       value = (layer === DEFAULT_LAYER ? cfg.keys : (cfg.activities ?? []).find((a) => a.id === layer)?.keys)?.[sel.name] ?? null;
+      const row = this.st.rows().find((r) => r.key === (sel as { name: string }).name);
+      current = row?.action ? `${row.action.label}${row.source === 'default' && layer !== DEFAULT_LAYER ? ' (from Default)' : ''}` : '';
     } else {
       const w = cfg.pages?.[sel.page]?.widgets[sel.index];
       title = `${w?.type ?? 'widget'} ${w?.label ?? ''}`.trim();
@@ -546,7 +598,7 @@ export class HhStudio extends StoreElement implements StudioHost {
     }
     return html`<div class="pop" role="dialog" aria-label="Action for ${title}" style=${setStyle({ left: `${pop.x}px`, top: `${pop.y}px` })}>
       <h3>${title}<span class="sp"></span><button class="x" aria-label="Close" @click=${() => (this.pop = null)}>${icon('x')}</button></h3>
-      <hh-action-picker .host=${this} .value=${value} mode=${mode} ?inherits=${this.st.layer !== DEFAULT_LAYER} @pick=${(e: CustomEvent<Source>) => this.pickForSelection({ ...e.detail })}></hh-action-picker>
+      <hh-action-picker .host=${this} .value=${value} .current=${current} mode=${mode} ?inherits=${this.st.layer !== DEFAULT_LAYER} @pick=${(e: CustomEvent<Source>) => this.pickForSelection({ ...e.detail })}></hh-action-picker>
     </div>`;
   }
 }

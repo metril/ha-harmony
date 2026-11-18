@@ -12,8 +12,8 @@ export interface XrayLabel {
   y1: number;
   text: string;
 }
-export const XRAY_PAD = 215;
-const MIN_GAP = 18;
+export const XRAY_PAD = 250;
+const MIN_GAP = 22;
 
 /** Place one label per key that has text. Keys left of the centre label on the left, the others on the right;
  *  labels are pushed apart vertically so none overlap. */
@@ -40,7 +40,7 @@ export function xrayLabels(items: { key: string; text: string }[], centre = 150)
       const y = Math.max(v.cy, prev + MIN_GAP);
       prev = y;
       const edge = side === 'left' ? v.g.x : v.g.x + v.g.w;
-      out.push({ key: v.it.key, side, x: side === 'left' ? -12 : 312, y, x1: edge, y1: v.cy, text: v.it.text });
+      out.push({ key: v.it.key, side, x: side === 'left' ? -14 : 314, y, x1: edge, y1: v.cy, text: v.it.text });
     }
   }
   return out;
