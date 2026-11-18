@@ -231,3 +231,96 @@ async def test_first_report_after_ha_starts_is_only_a_baseline(hass, rig, clock)
     _hub, c = await rig(state={"activity": 1, "power": True})  # already running at HA start
     await settle(hass)
     assert c.current_activity == "Stream" and on == []
+
+
+# 7: a flapping hub (accepts, then drops) is met with growing, jittered waits; a stable link resets
+async def test_flapping_hub_backs_off_exponentially_with_jitter(fake_hub):
+    import aiohttp
+
+    from custom_components.ha_harmony.api import HarmonyHubClient
+
+    async def handler(ws, env):
+        if env["t"] == "hello":
+            await ws.send_json(
+                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": []}}
+            )
+            await ws.close()  # accepted, then dropped at once
+
+    hub = await fake_hub(handler)
+    now = 0.0
+    waits: list[float] = []
+
+    async def sleep(seconds):
+        nonlocal now
+        waits.append(seconds)
+        now += seconds
+        await asyncio.sleep(0.001)
+
+    session = aiohttp.ClientSession()
+    c = HarmonyHubClient(
+        "127.0.0.1",
+        hub.port,
+        "t",
+        session,
+        backoff_min=1.0,
+        backoff_max=30.0,
+        clock=lambda: now,
+        rand=lambda: 1.0,  # the top of the jitter range
+        sleep=sleep,
+    )
+    await c.async_connect()
+    try:
+        async with asyncio.timeout(10):
+            while len(waits) < 8:
+                await asyncio.sleep(0.01)
+    finally:
+        await c.async_close()
+        await session.close()
+    base = [1, 2, 4, 8, 16, 30, 30, 30]  # grows although every handshake succeeded; capped
+    assert [round(w / 1.2, 3) for w in waits[:8]] == base
+    assert hub.connections >= 8
+
+
+async def test_stable_connection_resets_the_backoff(fake_hub):
+    import aiohttp
+
+    from custom_components.ha_harmony.api import HarmonyHubClient
+
+    conns = 0
+    now = 0.0
+
+    async def handler(ws, env):
+        nonlocal conns, now
+        if env["t"] == "hello":
+            await ws.send_json(
+                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": []}}
+            )
+            conns += 1
+            if conns == 3:
+                await asyncio.sleep(0.05)  # the client has noted the link as up
+                now += 40  # this link stayed up for 40 s
+            await ws.close()
+
+    hub = await fake_hub(handler)
+    waits: list[float] = []
+
+    async def sleep(seconds):
+        nonlocal now
+        waits.append(seconds)
+        now += seconds
+        await asyncio.sleep(0.001)
+
+    session = aiohttp.ClientSession()
+    c = HarmonyHubClient(
+        "127.0.0.1", hub.port, "t", session, backoff_min=1.0, backoff_max=30.0,
+        clock=lambda: now, rand=lambda: 0.5, sleep=sleep,
+    )  # fmt: skip
+    await c.async_connect()
+    try:
+        async with asyncio.timeout(10):
+            while len(waits) < 4:
+                await asyncio.sleep(0.01)
+    finally:
+        await c.async_close()
+        await session.close()
+    assert waits[:4] == [1.0, 2.0, 1.0, 2.0]  # rand 0.5 = the middle of the jitter range
