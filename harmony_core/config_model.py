@@ -1,4 +1,4 @@
-"""User config file `<HA config dir>/ha_harmony/<hub_id>.yaml`: schema, IR resolution, validation.
+"""Config document: schema, IR resolution, validation (YAML text or JSON, shared add-on/integration).
 
 `parse_model` returns a plain validated dict (the "model"); every IR code in it is already
 resolved to a config-format-2 IR action, so `compiler.compile_config` is a pure function of it.
@@ -7,6 +7,7 @@ Errors are `ConfigError`s that name the file, line and YAML location. No Home As
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -302,8 +303,75 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             vol.Optional("activities", default=list): [activity],
             vol.Optional("keys", default=dict): keys,
             vol.Optional("pages", default=list): [page],
+            # Opaque editor metadata: bounded, never compiled, never sent to the hub.
+            vol.Optional("editor"): _editor,
         }
     )
+
+
+EDITOR_MAX_BYTES = 65536
+EDITOR_MAX_NODES = 5000
+EDITOR_MAX_DEPTH = 8
+
+
+def _editor(v: Any) -> dict[str, Any]:
+    """`editor:` is a JSON-shaped mapping with capped size, node count and depth."""
+    if not isinstance(v, dict):
+        raise vol.Invalid("editor must be a mapping")
+    nodes = 0
+    stack: list[tuple[Any, int]] = [(v, 1)]
+    while stack:
+        cur, depth = stack.pop()
+        nodes += 1
+        if nodes > EDITOR_MAX_NODES:
+            raise vol.Invalid("editor metadata is too large")
+        if depth > EDITOR_MAX_DEPTH:
+            raise vol.Invalid(f"editor metadata is nested deeper than {EDITOR_MAX_DEPTH}")
+        if isinstance(cur, dict):
+            for k, x in cur.items():
+                if not isinstance(k, str) or len(k) > 100:
+                    raise vol.Invalid("editor keys must be short text")
+                stack.append((x, depth + 1))
+        elif isinstance(cur, list):
+            stack.extend((x, depth + 1) for x in cur)
+        elif isinstance(cur, str):
+            if len(cur) > 2000:
+                raise vol.Invalid("editor text is too long")
+        elif cur is not None and not isinstance(cur, (bool, int, float)):
+            raise vol.Invalid("editor metadata must be plain JSON data")
+    try:
+        size = len(json.dumps(v, allow_nan=False))
+    except TypeError, ValueError:
+        raise vol.Invalid("editor metadata must be plain JSON data") from None
+    if size > EDITOR_MAX_BYTES:
+        raise vol.Invalid(f"editor metadata is over {EDITOR_MAX_BYTES} bytes")
+    return v
+
+
+def validate_pages(config: dict[str, Any]) -> list[tuple[dict[str, Any] | None, list[ConfigError]]]:
+    """Per page: (its validated model, []) or (None, [errors]). Shape only: references to
+    devices and activities are NOT checked, so this is for rendering previews, never for apply."""
+    pages = config.get("pages")
+    if not isinstance(pages, list):
+        return []
+    schema = _build_schema(_Resolver(None))
+    out: list[tuple[dict[str, Any] | None, list[ConfigError]]] = []
+    for i, page in enumerate(pages):
+        try:
+            model = schema({"pages": [page]})
+            out.append((model["pages"][0], []))
+        except vol.Invalid as exc:
+            errs = exc.errors if isinstance(exc, vol.MultipleInvalid) else [exc]
+            out.append(
+                (
+                    None,
+                    [
+                        ConfigError("<config>", ["pages", i, *list(e.path)[2:]], e.error_message)
+                        for e in errs
+                    ],
+                )
+            )
+    return out
 
 
 def _check_power(p: dict[str, Any]) -> dict[str, Any]:
@@ -326,8 +394,16 @@ def _check_widget(w: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- cross references
-def _check_refs(model: Model) -> None:
-    """Raises (path, message) tuples via _RefError for dangling or duplicate references."""
+def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
+    """Dangling or duplicate references: raises _RefError at the first, or (with `sink`)
+    appends every one found and carries on."""
+
+    def fail(path: list[Any], msg: str) -> None:
+        err = _RefError(path, msg)
+        if sink is None:
+            raise err
+        sink.append(err)
+
     devs = {d["id"]: d for d in model["devices"]}
     acts = {a["id"] for a in model["activities"]}
 
@@ -335,7 +411,7 @@ def _check_refs(model: Model) -> None:
         seen: set[str] = set()
         for i, it in enumerate(items):
             if it["id"] in seen:
-                raise _RefError([section, i, "id"], f"duplicate {what} id {it['id']!r}")
+                fail([section, i, "id"], f"duplicate {what} id {it['id']!r}")
             seen.add(it["id"])
 
     uniq(model["devices"], "devices", "device")
@@ -349,34 +425,36 @@ def _check_refs(model: Model) -> None:
         for j, alias in enumerate(d["aliases"]):
             path = ["devices", i, "aliases", j]
             if alias in devs and alias != d["id"]:
-                raise _RefError(path, f"alias {alias!r} is another device's id")
+                fail(path, f"alias {alias!r} is another device's id")
             if alias in owner and owner[alias] != d["id"]:
-                raise _RefError(path, f"alias {alias!r} is also used by {owner[alias]!r}")
+                fail(path, f"alias {alias!r} is also used by {owner[alias]!r}")
             owner[alias] = d["id"]
 
     def check_action(a: dict[str, Any], path: list[Any]) -> None:
         if a["type"] == "device":
             d = devs.get(a["device"])
             if d is None:
-                raise _RefError([*path, "device"], f"unknown device {a['device']!r}")
+                fail([*path, "device"], f"unknown device {a['device']!r}")
+                return
             if "command" in a:
                 ok = a["command"] in d["commands"] or (
                     a["command"] in ("power_on", "power_off") and "power" in d
                 )
                 if not ok:
-                    raise _RefError([*path, "command"], f"{a['device']} has no {a['command']!r}")
+                    fail([*path, "command"], f"{a['device']} has no {a['command']!r}")
             elif a["input"] not in d["inputs"]:
-                raise _RefError([*path, "input"], f"{a['device']} has no input {a['input']!r}")
+                fail([*path, "input"], f"{a['device']} has no input {a['input']!r}")
         elif a["type"] == "activity" and a["activity"] != "off" and a["activity"] not in acts:
-            raise _RefError([*path, "activity"], f"unknown activity {a['activity']!r}")
+            fail([*path, "activity"], f"unknown activity {a['activity']!r}")
 
     for i, a in enumerate(model["activities"]):
         base = ["activities", i]
         for j, ad in enumerate(a["devices"]):
             if ad["device"] not in devs:
-                raise _RefError([*base, "devices", j, "device"], f"unknown device {ad['device']!r}")
+                fail([*base, "devices", j, "device"], f"unknown device {ad['device']!r}")
+                continue
             if "input" in ad and ad["input"] not in devs[ad["device"]]["inputs"]:
-                raise _RefError([*base, "devices", j, "input"], f"no input {ad['input']!r}")
+                fail([*base, "devices", j, "input"], f"no input {ad['input']!r}")
         for sect in ("steps", "off"):
             for j, s in enumerate(a[sect]):
                 check_action(s, [*base, sect, j])
@@ -389,9 +467,7 @@ def _check_refs(model: Model) -> None:
         for j, w in enumerate(p["widgets"]):
             if "id" in w:
                 if w["id"] in seen:
-                    raise _RefError(
-                        ["pages", i, "widgets", j, "id"], f"duplicate widget id {w['id']!r}"
-                    )
+                    fail(["pages", i, "widgets", j, "id"], f"duplicate widget id {w['id']!r}")
                 seen.add(w["id"])
             if "action" in w:
                 check_action(w["action"], ["pages", i, "widgets", j, "action"])
@@ -405,7 +481,29 @@ class _RefError(Exception):
 
 # ---------------------------------------------------------------- entry points
 def parse_model(text: str, file: str = "<config>", base_dir: Path | None = None) -> Model:
-    """Validate YAML `text`. `file` is only used in messages; `base_dir` anchors IR file refs."""
+    """Validate YAML `text`. `file` is only used in messages; `base_dir` anchors IR file refs.
+    Fail-fast: raises ConfigError for the first problem."""
+    model = _parse(text, file, base_dir, None)
+    assert model is not None
+    return model
+
+
+def validate_all(
+    text: str, file: str = "<config>", base_dir: Path | None = None
+) -> list[ConfigError]:
+    """Every problem the model can report in one pass (empty = valid). Schema errors come all at
+    once; the cross-reference checks only run on a document that passes the schema."""
+    errors: list[ConfigError] = []
+    try:
+        _parse(text, file, base_dir, errors)
+    except ConfigError as exc:
+        errors.append(exc)
+    return errors
+
+
+def _parse(
+    text: str, file: str, base_dir: Path | None, errors: list[ConfigError] | None
+) -> Model | None:
     check_yaml_depth(text, file)
     try:
         root = yaml.compose(text, Loader=_Loader)
@@ -424,13 +522,50 @@ def parse_model(text: str, file: str = "<config>", base_dir: Path | None = None)
         data = {}
     if not isinstance(data, dict):
         raise ConfigError(file, [], "the top level must be a mapping", 1)
+    return _parse_data(data, root, file, base_dir, errors)
+
+
+def parse_data(data: dict[str, Any], base_dir: Path | None = None) -> Model:
+    """Like parse_model for an already-loaded JSON-shaped dict (no YAML pass: much faster).
+    Messages carry no line numbers. Fail-fast."""
+    model = _parse_data(data, None, "<config>", base_dir, None)
+    assert model is not None
+    return model
+
+
+def validate_data(data: dict[str, Any], base_dir: Path | None = None) -> list[ConfigError]:
+    """`validate_all` for an already-loaded dict."""
+    errors: list[ConfigError] = []
+    try:
+        _parse_data(data, None, "<config>", base_dir, errors)
+    except ConfigError as exc:
+        errors.append(exc)
+    return errors
+
+
+def _parse_data(
+    data: dict[str, Any],
+    root: yaml.Node | None,
+    file: str,
+    base_dir: Path | None,
+    errors: list[ConfigError] | None,
+) -> Model | None:
     try:
         model = _build_schema(_Resolver(base_dir))(data)
-        _check_refs(model)
+        refs: list[_RefError] | None = None if errors is None else []
+        _check_refs(model, refs)
+        if refs:
+            errors.extend(ConfigError(file, e.path, e.msg, _line_of(root, e.path)) for e in refs)
+            return None
     except vol.MultipleInvalid as exc:
-        err = exc.errors[0]
-        path = list(err.path)
-        raise ConfigError(file, path, err.error_message, _line_of(root, path)) from None
+        found = [
+            ConfigError(file, list(e.path), e.error_message, _line_of(root, list(e.path)))
+            for e in exc.errors
+        ]
+        if errors is None:
+            raise found[0] from None
+        errors.extend(found)
+        return None
     except vol.Invalid as exc:
         path = list(exc.path)
         raise ConfigError(file, path, exc.error_message, _line_of(root, path)) from None

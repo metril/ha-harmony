@@ -291,14 +291,63 @@ async def push_config(url: str, token: str = TOKEN, config: dict | None = None) 
         assert (await ws.receive_json())["d"]["ok"] is True
 
 
-def make_entry(host: str, port: int, token: str = TOKEN):
+def make_entry(host: str, port: int, token: str = TOKEN, addon=None):
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-    return MockConfigEntry(
-        domain="ha_harmony",
-        unique_id=HUB_ID,
-        data={"host": host, "port": port, "token": token},
+    data = {"host": host, "port": port, "token": token}
+    if addon is not None:
+        data |= addon.link_data()
+    return MockConfigEntry(domain="ha_harmony", unique_id=HUB_ID, data=data)
+
+
+ADDON_TOKEN = "cd" * 32
+
+
+class FakeAddon:
+    """The real add-on app (NoAuth ingress + bearer bundle routes) on an ephemeral loopback port.
+    `apply()` stores a config as applied WITHOUT the add-on's validation, so tests can make it
+    serve configs the real editor would never apply."""
+
+    def __init__(self, server, app):
+        from harmony_addon.app import NOTIFIER_KEY, STORE_KEY
+
+        self.server, self.app = server, app
+        self.store, self._notifier = app[STORE_KEY], app[NOTIFIER_KEY]
+        self._now = 1_000
+
+    @property
+    def port(self) -> int:
+        return self.server.port
+
+    def link_data(self) -> dict:
+        return {"addon_host": "127.0.0.1", "addon_port": self.port, "addon_token": ADDON_TOKEN}
+
+    def apply(self, config: dict, hub: str = HUB_ID) -> None:
+        self._now += 1
+        self.store.apply(hub, config, "unchecked", self._now)
+        self._notifier.notify(hub)
+
+    def apply_yaml(self, text: str, hub: str = HUB_ID) -> None:
+        import json
+
+        from harmony_core.config_model import load_source
+
+        self.apply(json.loads(json.dumps(load_source(text) or {})), hub)
+
+
+@pytest.fixture
+async def fake_addon(aiohttp_server, tmp_path):
+    from harmony_addon.app import create_app
+    from harmony_addon.auth import NoAuth
+
+    app = create_app(
+        tmp_path / "addon",
+        auth=NoAuth(),
+        bundle_token=ADDON_TOKEN,
+        bundle_networks=None,
+        wait_seconds=2.0,
     )
+    return FakeAddon(await aiohttp_server(app), app)
 
 
 class FakeHub:

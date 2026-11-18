@@ -16,6 +16,10 @@
         "data": {
           "token": "Token"
         }
+      },
+      "hassio_confirm": {
+        "title": "Link the Harmony Editor add-on",
+        "description": "The Harmony Editor add-on was found. Link it so this hub gets its configuration from the add-on? The add-on only feeds the config; this integration stays the hub's only client."
       }
     },
     "error": {
@@ -27,23 +31,38 @@
     "abort": {
       "already_configured": "This hub is already configured.",
       "reauth_successful": "Re-authentication was successful.",
-      "wrong_hub": "The token belongs to a different hub."
+      "wrong_hub": "The token belongs to a different hub.",
+      "addon_linked": "The Harmony Editor add-on is linked.",
+      "addon_updated": "The Harmony Editor add-on address was updated.",
+      "no_hub": "Set up a Harmony hub first, then restart the Harmony Editor add-on so it announces itself again.",
+      "invalid_auth": "The add-on refused the discovery token. Restart the add-on and try again.",
+      "cannot_connect": "Could not reach the Harmony Editor add-on.",
+      "invalid_discovery": "The add-on sent an unusable discovery message.",
+      "not_our_addon": "Only the Harmony Editor add-on can link to this integration."
     }
   },
   "issues": {
     "config_invalid": {
-      "title": "Harmony config file is invalid",
-      "description": "The YAML for hub {hub} could not be used and the previous config stays active: {error}"
+      "title": "Harmony config from the add-on was rejected",
+      "description": "The add-on's applied config for hub {hub} failed validation here and the previous config stays active: {error}"
     },
     "config_rejected": {
       "title": "The hub rejected the Harmony config",
       "description": "Hub {hub} refused the pushed config and keeps running its previous one: {error}"
+    },
+    "bundle_schema": {
+      "title": "Harmony add-on and integration versions do not match",
+      "description": "Hub {hub}: {error}. Update the Harmony Editor add-on and the Harmony integration to matching versions; the previous config stays active."
+    },
+    "yaml_unused": {
+      "title": "Upload your Harmony YAML in the Harmony Editor add-on",
+      "description": "Integration 0.3.0 no longer reads {path} for hub {hub}. Upload that file in the Harmony Editor add-on (import YAML, then apply). The file is untouched; delete it once imported."
     }
   },
   "services": {
     "reload_config": {
       "name": "Reload config",
-      "description": "Re-read the hub's YAML file, recompile it and push it if it changed.",
+      "description": "Pull the applied config from the Harmony Editor add-on now, recompile it and push it if it changed.",
       "fields": {
         "config_entry": {
           "name": "Config entry",
@@ -71,7 +90,7 @@
         },
         "ir": {
           "name": "IR action",
-          "description": "A config-format-2 IR action, e.g. {proto: nec, addr: 4, cmd: 8}, or a flipper/smartir reference."
+          "description": "A config-format-2 IR action, e.g. {proto: nec, addr: 4, cmd: 8}. File references are not accepted."
         }
       }
     },
@@ -85,7 +104,7 @@
         },
         "device": {
           "name": "Device",
-          "description": "Device id from the YAML."
+          "description": "Device id from the config."
         },
         "power": {
           "name": "Power",
@@ -94,6 +113,22 @@
         "input": {
           "name": "Input",
           "description": "Selected input name; empty for unknown."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "addon_link": {
+        "name": "Add-on link",
+        "state": {
+          "not_linked": "Not linked",
+          "connecting": "Connecting",
+          "ok": "Connected",
+          "unreachable": "Add-on unreachable",
+          "auth_failed": "Token refused",
+          "nothing_applied": "Nothing applied yet",
+          "rejected": "Config rejected"
         }
       }
     }

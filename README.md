@@ -55,9 +55,10 @@ gone, with Home Assistant as the source of truth for devices, activities and rem
 2. Download *Harmony* and restart Home Assistant.
 3. *Settings → Devices & services → Add integration*, then enter the hub's host, port (default
    `8099`) and the token the daemon was started with.
-4. Put the device config at `<config>/ha_harmony/<hub_id>.yaml`; the format is in
-   [`docs/ha-config.md`](docs/ha-config.md). The integration pushes it to the hub only when it
-   changes.
+4. Install the **Harmony Editor** add-on (`addon/`); confirm its discovery card so the hub is linked,
+   then apply a config there. The format is in [`docs/ha-config.md`](docs/ha-config.md). The
+   integration pushes it to the hub only when it changes. (Upgrading from < 0.3.0: upload your old
+   YAML in the add-on, see the migration note there.)
 
 The integration does nothing useful against a stock hub: it needs this firmware's daemon running.
 

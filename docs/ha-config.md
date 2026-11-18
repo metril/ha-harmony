@@ -1,11 +1,15 @@
 # Home Assistant as the source of truth
 
-Each hub is configured by one YAML file, `<HA config dir>/ha_harmony/<hub_id>.yaml` (the hub id is
-the config entry's unique id, e.g. `sim-hub`). The integration validates it, compiles it to
-[config format 2](proto/config-format-2.md) plus remote pages ([page format](proto/page-format.md)),
-and pushes it to the hub. No file = the integration loads, logs one line, and leaves the hub's
-current config alone. Errors name the file, line and YAML path, e.g.
-`.../sim-hub.yaml:14: devices[0].commands.vol_up: nec cmd 999 outside 0..255`.
+Each hub is configured by one document in the schema below, kept in the **Harmony Editor add-on**
+(draft, applied, last 5 versions per hub id). The integration (0.3.0+) pulls the *applied* config
+over Supervisor discovery + long-poll, **re-validates and compiles it itself** (never trusting the
+add-on) to [config format 2](proto/config-format-2.md) plus pages ([page format](proto/page-format.md)),
+pushes it to the hub, and caches it in `.storage` so the remote stays configured while the add-on is
+stopped. A refused config (bad schema, wrong hub, IR file references, too large) keeps the previous
+one and raises a repair issue; the *Add-on link* sensor shows `ok`/`unreachable`/`rejected`/...
+Nothing applied yet = the hub's own config is left alone.
+**Migrating from `<config>/ha_harmony/<hub_id>.yaml`** (no longer read; one repair issue, file left
+alone): import it in the add-on, then apply. See [CHANGELOG](../CHANGELOG.md).
 
 ```yaml
 devices:
@@ -71,7 +75,8 @@ pages:
 - **IR action** (devices and anywhere an action is expected): exactly one of `{proto, addr, cmd}`
   (`nec necext samsung32 rc5 rc6 sirc12 sirc15 sirc20`), `{raw: {hz, us: [...]}}`, `{pronto: "..."}`,
   `{flipper: {file, signal}}` or `{smartir: {file, command: "cool.24.auto"}}`; optional `port_mask` 1..255.
-  Files are read relative to the YAML file's directory and may not leave it.
+  File references are only accepted by the add-on's importer, which inlines them; the integration
+  refuses any that remain.
 - **Action** in `keys`, `steps`, `off` and page buttons: an IR action; `{device, command}` (a command,
   `power_on`/`power_off`); `{device, input}`; `{activity: <id>|"off"}` (not in `steps`/`off`);
   `{event: name}` (HA only); `{bt: usage}`; `{none: true}`.
@@ -107,6 +112,7 @@ pages:
 
 ## Operation
 The config is pushed on connect only if the hub's `config_hash` differs from the compiled one. Services:
-`ha_harmony.reload_config` (re-read, recompile, push if changed), `push_pages`, `send_ir`,
-`set_device_state` (tell the hub a device was switched by hand). Rejections by the hub raise a
-repair issue and a log error; the previous config keeps running.
+`ha_harmony.reload_config` (pull from the add-on now, recompile, push if changed; fails when the hub is
+not linked), `push_pages`, `send_ir` (no file references), `set_device_state` (tell the hub a device was
+switched by hand). Rejections by the hub raise a repair issue and a log error; the previous config
+keeps running.

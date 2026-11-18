@@ -2,36 +2,58 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+import hashlib
 import html
 import json
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import aiohttp
 import voluptuous as vol
 import yaml
 from aiohttp import web
 
 import harmony_core
 from harmony_core.compiler import (
-    LIMITS,
     CompileError,
-    _pool_words,
-    compact_json,
     compile_config,
 )
-from harmony_core.config_model import ConfigError, check_yaml_depth, load_source, parse_model
+from harmony_core.config_model import (
+    ConfigError,
+    check_yaml_depth,
+    load_source,
+    parse_data,
+    validate_data,
+    validate_ir,
+    validate_pages,
+)
+from harmony_core.keymap import resolve_keymaps
 from harmony_core.page_codec import decode_page
+from harmony_irdb.archive import IrdbArchive
 
-from . import __version__, schemas
-from .auth import Auth, IngressAuth
+from . import __version__, ir_routes, schemas
+from .auth import (
+    BUNDLE_PREFIX,
+    HASSIO_NETWORK,
+    Auth,
+    BundleAuth,
+    IngressAuth,
+    RouteAuth,
+    load_or_create_token,
+)
+from .ha_client import Catalog, HaApi, HaUnavailable
+from .ir_tester import IrSender, SendLimiter, SendRefused
 from .options import Options, load_options
-from .store import HISTORY_MAX, Store, StoreError
+from .store import HISTORY_MAX, RevConflict, Store, StoreError
+from .supervisor import Discovery
+from .web_util import CLOCK_KEY, error, jresp, query, read_body
 
 log = logging.getLogger(__name__)
 
@@ -47,23 +69,15 @@ CSRF_HEADER = "X-HH-CSRF"
 
 OPTIONS_KEY = web.AppKey("options", Options)
 STORE_KEY = web.AppKey("store", Store)
-CLOCK_KEY = web.AppKey("clock", Callable)
-
-
-def _json(data: Any, status: int = 200) -> web.Response:
-    return web.json_response(data, status=status)
-
-
-def _error(status: int, code: str, msg: str, **extra: Any) -> web.HTTPException:
-    body = json.dumps({"error": {"code": code, "msg": msg, **extra}})
-    cls = {
-        400: web.HTTPBadRequest,
-        403: web.HTTPForbidden,
-        404: web.HTTPNotFound,
-        409: web.HTTPConflict,
-        422: web.HTTPUnprocessableEntity,
-    }[status]
-    return cls(text=body, content_type="application/json")
+NOTIFIER_KEY = web.AppKey("notifier", object)
+WAIT_KEY = web.AppKey("wait_s", float)
+CATALOG_KEY = web.AppKey("catalog", Catalog)
+SEEN_KEY = web.AppKey("bundle_seen", dict)
+ACKS_KEY = web.AppKey("acks", dict)
+MEMO_KEY = web.AppKey("preview_memo", dict)
+SENDER_KEY = web.AppKey("ir_sender", object)
+LIMITER_KEY = web.AppKey("ir_limiter", SendLimiter)
+WAIT_SECONDS = 55.0
 
 
 # ------------------------------------------------------------------ middlewares
@@ -108,56 +122,60 @@ def make_auth_mw(auth: Auth):
         try:
             auth.check(request)
         except web.HTTPForbidden:
-            raise _error(403, "forbidden", "forbidden") from None
+            raise error(403, "forbidden", "forbidden") from None
+        except web.HTTPUnauthorized:
+            raise error(401, "unauthorized", "unauthorized") from None
+        except web.HTTPTooManyRequests:
+            raise error(
+                429, "rate_limited", "too many attempts", headers={"Retry-After": "60"}
+            ) from None
+        bundle = request.path == BUNDLE_PREFIX or request.path.startswith(BUNDLE_PREFIX + "/")
+        if bundle:  # authenticated (auth.check passed): remember that the integration is linked
+            request.app[SEEN_KEY]["last_seen"] = int(request.app[CLOCK_KEY]())
         if request.method in MUTATING:
-            allowed = YAML_TYPES if request.path == "/api/v1/config/import_yaml" else JSON_TYPES
-            if (
-                request.content_type not in allowed
-                or request.headers.get(CSRF_HEADER) != "1"
-                or not _same_origin(request)
-            ):
-                raise _error(403, "csrf", "forbidden")
+            if bundle:  # bearer-authenticated machine client: no ambient credential, so no CSRF
+                if request.content_type not in JSON_TYPES:
+                    raise error(403, "csrf", "forbidden")
+            else:
+                allowed = YAML_TYPES if request.path == "/api/v1/config/import_yaml" else JSON_TYPES
+                if (
+                    request.content_type not in allowed
+                    or request.headers.get(CSRF_HEADER) != "1"
+                    or not _same_origin(request)
+                ):
+                    raise error(403, "csrf", "forbidden")
         return await handler(request)
 
     return auth_mw
 
 
 # ------------------------------------------------------------------ helpers
-async def _body(request: web.Request, schema: vol.Schema) -> dict[str, Any]:
-    raw = await request.read()  # 413 beyond client_max_size
-    try:
-        data = json.loads(raw)
-    except (ValueError, RecursionError):
-        raise _error(400, "bad_json", "body is not valid JSON") from None
-    return _validate(schema, data)
+MAX_ERRORS = 100
 
 
-def _validate(schema: vol.Schema, data: Any) -> dict[str, Any]:
-    try:
-        return schema(data)
-    except vol.Invalid as exc:
-        path = ".".join(str(p) for p in exc.path)
-        if not re.fullmatch(r"[A-Za-z0-9_.]{1,40}", path):
-            path = "body"  # never echo raw input
-        raise _error(400, "bad_request", f"invalid request: {path}") from None
+def _check(config: dict[str, Any], *, all_errors: bool = True) -> tuple[Any, list[dict[str, Any]]]:
+    """(model, []) or (None, [{path, msg, line}]). `all_errors=False` keeps the integration's
+    fail-fast behaviour (one error). Works on the loaded dict: no YAML pass (about 100x faster)."""
+    if not all_errors:
+        try:
+            return parse_data(config), []
+        except ConfigError as exc:
+            return None, [_err(exc)]
+    errors = validate_data(config)
+    if errors:
+        return None, [_err(e) for e in errors[:MAX_ERRORS]]
+    return parse_data(config), []
 
 
-def _query(request: web.Request, schema: vol.Schema) -> dict[str, Any]:
-    return _validate(schema, dict(request.query))
-
-
-def _check(config: dict[str, Any]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    try:
-        return parse_model(json.dumps(config), "config"), []
-    except ConfigError as exc:
-        return None, [{"path": list(exc.path), "msg": exc.msg[:300], "line": None}]
+def _err(exc: ConfigError) -> dict[str, Any]:
+    return {"path": list(exc.path), "msg": exc.msg[:300], "line": None}
 
 
 def _pick_config(state: dict[str, Any], given: dict[str, Any] | None) -> dict[str, Any]:
     if given is not None:
         return given
     if state["draft"] is None:
-        raise _error(409, "no_draft", "there is no draft; send a config")
+        raise error(409, "no_draft", "there is no draft; send a config")
     return state["draft"]["config"]
 
 
@@ -167,22 +185,36 @@ def _meta(state: dict[str, Any]) -> dict[str, Any]:
         "applied": None if a is None else {k: a[k] for k in ("rev", "at", "hash")},
         "history": [{k: h[k] for k in ("rev", "at", "hash")} for h in state["history"]],
         "history_max": HISTORY_MAX,
+        "rev": state["draft_rev"],
     }
+
+
+def _if_match(request: web.Request) -> int | None:
+    """`If-Match: <rev>` (bare, quoted or weak). Absent = unconditional write."""
+    raw = request.headers.get("If-Match")
+    if raw is None:
+        return None
+    m = re.fullmatch(r'(?:W/)?"?(\d{1,12})"?', raw.strip())
+    if not m:
+        raise error(400, "bad_request", "invalid request: If-Match")
+    return int(m.group(1))
 
 
 def _store_call(fn, *args):
     try:
         return fn(*args)
+    except RevConflict as exc:
+        raise error(409, "conflict", str(exc), rev=exc.rev) from None
     except StoreError as exc:
-        raise _error(409, "store", str(exc)) from None
+        raise error(409, "store", str(exc)) from None
     except OSError:
         log.exception("storage failure")
-        raise _error(409, "store", "storage failure") from None
+        raise error(409, "store", "storage failure") from None
 
 
 # ------------------------------------------------------------------ routes
 async def health(request: web.Request) -> web.Response:
-    return _json(
+    return jresp(
         {
             "ok": True,
             "addon_version": __version__,
@@ -193,28 +225,30 @@ async def health(request: web.Request) -> web.Response:
 
 
 async def get_config(request: web.Request) -> web.Response:
-    q = _query(request, schemas.GET_CONFIG_QUERY)
+    q = query(request, schemas.GET_CONFIG_QUERY)
     state = _store_call(request.app[STORE_KEY].load, q["hub"])
     out = {"hub": q["hub"], "draft": state["draft"], **_meta(state)}
     if q["full"] == "1" and state["applied"]:
         out["applied"] = state["applied"]
-    return _json(out)
+    return jresp(out)
 
 
 async def put_draft(request: web.Request) -> web.Response:
-    q = _query(request, schemas.QUERY)
-    body = await _body(request, schemas.PUT_DRAFT)
+    q = query(request, schemas.QUERY)
+    body = await read_body(request, schemas.PUT_DRAFT)
     now = int(request.app[CLOCK_KEY]())
-    state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], body["config"], now)
-    return _json({"hub": q["hub"], "draft_updated": now, **_meta(state)})
+    state = _store_call(
+        request.app[STORE_KEY].set_draft, q["hub"], body["config"], now, _if_match(request)
+    )
+    return jresp({"hub": q["hub"], "draft_updated": now, **_meta(state)})
 
 
 async def validate(request: web.Request) -> web.Response:
-    q = _query(request, schemas.QUERY)
-    body = await _body(request, schemas.OPT_CONFIG)
+    q = query(request, schemas.VALIDATE_QUERY)
+    body = await read_body(request, schemas.OPT_CONFIG)
     state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    _, errors = _check(_pick_config(state, body.get("config")))
-    return _json({"ok": not errors, "errors": errors})
+    _, errors = _check(_pick_config(state, body.get("config")), all_errors=q["all"] == "1")
+    return jresp({"ok": not errors, "errors": errors})
 
 
 def _compile(config: dict[str, Any]):
@@ -227,52 +261,134 @@ def _compile(config: dict[str, Any]):
         return None, None, [{"path": [], "msg": str(exc)[:300], "line": None}]
 
 
-async def preview(request: web.Request) -> web.Response:
-    q = _query(request, schemas.QUERY)
-    body = await _body(request, schemas.OPT_CONFIG)
-    state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    _, compiled, errors = _compile(_pick_config(state, body.get("config")))
-    if errors:
-        return _json({"ok": False, "errors": errors}, 422)
-    hub = compiled.hub_json
-    return _json(
-        {
-            "ok": True,
-            "hash": compiled.config_hash,
-            "pages": [dataclasses.asdict(decode_page(p)) for p in compiled.pages],
-            "usage": {
-                "json_bytes": len(compact_json(hub).encode()),
-                "json_max": LIMITS["MAX_JSON"],
-                "pool_words": _pool_words(hub),
-                "pool_max": LIMITS["POOL_WORDS"],
-                "devices": len(compiled.devices),
-                "devices_max": LIMITS["MAX_DEVICES"],
-                "activities": len(compiled.activities),
-                "activities_max": LIMITS["MAX_ACTIVITIES"],
-            },
+PREVIEW_MEMO_MAX = 8
+
+
+def _page_error(errors: list[dict[str, Any]], i: int) -> str | None:
+    for e in errors:
+        if e["path"][:2] == ["pages", i]:
+            return e["msg"]
+    return None
+
+
+def _preview(config: dict[str, Any]) -> dict[str, Any]:
+    """Blocking (CPU). Always answers: pages that compile are returned even when the draft has
+    errors elsewhere; apply stays strict because it uses `_compile`, not this."""
+    raw_pages = config.get("pages") if isinstance(config.get("pages"), list) else []
+    _, errors = _check(config)
+    problems: list[tuple[list[Any], str]] = []
+    if not errors:
+        model = parse_data(config)
+        compiled = compile_config(model, collect=problems)
+        errors = [{"path": p, "msg": m[:300], "line": None} for p, m in problems]
+        total_ok = not problems
+    else:  # compile what can be compiled: valid pages only, by shape (references unchecked)
+        shaped = validate_pages(config)
+        for i, (_, errs) in enumerate(shaped):
+            have = any(e["path"][:2] == ["pages", i] for e in errors)
+            if errs and not have:  # the whole-config pass stopped before reaching this page
+                errors.extend(_err(e) for e in errs[: MAX_ERRORS - len(errors)])
+        blank = {"id": "x", "cols": 1, "rows": 1, "widgets": []}
+        partial = {
+            "devices": [],
+            "activities": [],
+            "keys": {},
+            "pages": [m if m is not None else blank for m, _ in shaped],
         }
-    )
+        compiled = compile_config(partial, collect=problems)
+        for path, msg in problems:
+            if path[:1] == ["pages"]:
+                errors.append({"path": path, "msg": msg[:300], "line": None})
+        model, total_ok = None, False
+    pages = []
+    for i, data in enumerate(compiled.pages):
+        raw = raw_pages[i] if i < len(raw_pages) and isinstance(raw_pages[i], dict) else {}
+        pu = compiled.usage["pages"][i]
+        err = _page_error(errors, i)
+        ok = bool(data) and err is None
+        pid = raw.get("id") if isinstance(raw.get("id"), str) else None
+        pages.append(
+            {
+                "index": i,
+                "id": pid,
+                "ok": ok,
+                "error": None if ok else (err or "page does not compile"),
+                "page": dataclasses.asdict(decode_page(data)) if ok else None,
+                "bytes": pu["bytes"] if (model is not None or ok) else None,
+                "limit": pu["limit"],
+                "widgets": len(raw["widgets"]) if isinstance(raw.get("widgets"), list) else None,
+                "widget_limit": pu["widget_limit"],
+            }
+        )
+    usage = {k: v for k, v in compiled.usage.items() if k != "pages"} if model is not None else None
+    return {
+        "ok": not errors,
+        "hash": compiled.config_hash if total_ok else None,
+        "errors": errors,
+        "missing_pages": [{"index": p["index"], "id": p["id"]} for p in pages if not p["ok"]],
+        "pages": pages,
+        "usage": usage,
+    }
+
+
+async def preview(request: web.Request) -> web.Response:
+    q = query(request, schemas.QUERY)
+    body = await read_body(request, schemas.OPT_CONFIG)
+    state = _store_call(request.app[STORE_KEY].load, q["hub"])
+    config = _pick_config(state, body.get("config"))
+    # editor metadata cannot change a preview: leave it out of the memo key
+    key = hashlib.sha256(
+        json.dumps(_public(config), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    memo: dict[str, dict[str, Any]] = request.app[MEMO_KEY]
+    out = memo.pop(key, None)
+    if out is None:
+        out = await asyncio.get_running_loop().run_in_executor(None, _preview, _public(config))
+    memo[key] = out  # most recently used last
+    while len(memo) > PREVIEW_MEMO_MAX:
+        memo.pop(next(iter(memo)))
+    return jresp(out)
+
+
+def _keymap_sync(config: dict[str, Any]):
+    model, errors = _check(config)
+    return None if errors else resolve_keymaps(model), errors
+
+
+async def keymap(request: web.Request) -> web.Response:
+    """Per layer, every hard key's effective action, from the one lookup rule in harmony_core."""
+    q = query(request, schemas.QUERY)
+    body = await read_body(request, schemas.OPT_CONFIG)
+    state = _store_call(request.app[STORE_KEY].load, q["hub"])
+    config = _pick_config(state, body.get("config"))
+    maps, errors = await asyncio.get_running_loop().run_in_executor(None, _keymap_sync, config)
+    if errors:
+        return jresp({"ok": False, "errors": errors}, 422)
+    return jresp({"ok": True, **maps})
 
 
 async def apply(request: web.Request) -> web.Response:
-    q = _query(request, schemas.QUERY)
-    await _body(request, schemas.EMPTY)
+    q = query(request, schemas.QUERY)
+    await read_body(request, schemas.EMPTY)
     store = request.app[STORE_KEY]
     state = _store_call(store.load, q["hub"])
     config = _pick_config(state, None)
     _, compiled, errors = _compile(config)
     if errors:
-        return _json({"ok": False, "errors": errors}, 422)
+        return jresp({"ok": False, "errors": errors}, 422)
     now = int(request.app[CLOCK_KEY]())
     state = _store_call(store.apply, q["hub"], config, compiled.config_hash, now)
-    return _json({"ok": True, **_meta(state)})
+    request.app[NOTIFIER_KEY].notify(q["hub"])
+    return jresp({"ok": True, **_meta(state)})
 
 
 async def revert(request: web.Request) -> web.Response:
-    q = _query(request, schemas.QUERY)
-    body = await _body(request, schemas.REVERT)
+    q = query(request, schemas.QUERY)
+    body = await read_body(request, schemas.REVERT)
     state = _store_call(request.app[STORE_KEY].revert, q["hub"], body["target"])
-    return _json({"ok": True, **_meta(state)})
+    if body["target"] == "previous":  # discarding a draft changes nothing the integration sees
+        request.app[NOTIFIER_KEY].notify(q["hub"])
+    return jresp({"ok": True, **_meta(state)})
 
 
 def _ir_file_refs(data: Any) -> list[str]:
@@ -293,40 +409,41 @@ def _ir_file_refs(data: Any) -> list[str]:
 def _yaml_to_config(raw: bytes) -> dict[str, Any]:
     """YAML upload -> the same plain-JSON config a PUT /draft would carry, or an HTTP error."""
     if len(raw) > schemas.YAML_MAX:
-        raise _error(400, "too_large", "YAML is too large")
+        raise error(400, "too_large", "YAML is too large")
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise _error(400, "bad_yaml", "YAML must be UTF-8") from None
+        raise error(400, "bad_yaml", "YAML must be UTF-8") from None
     try:
         check_yaml_depth(text)
     except ConfigError as exc:
-        raise _error(400, "bad_yaml", exc.msg[:200]) from None
+        raise error(400, "bad_yaml", exc.msg[:200]) from None
     try:
         if any(isinstance(e, yaml.AliasEvent) for e in yaml.parse(text, Loader=yaml.SafeLoader)):
-            raise _error(400, "yaml_alias", "YAML anchors and aliases are not accepted")
-    except (yaml.YAMLError, RecursionError):
+            raise error(400, "yaml_alias", "YAML anchors and aliases are not accepted")
+    except yaml.YAMLError, RecursionError:
         pass  # load_source reports the syntax / nesting error below
     try:
         loaded = load_source(text)
     except ConfigError as exc:
-        raise _error(400, "bad_yaml", exc.msg[:200]) from None
+        raise error(400, "bad_yaml", exc.msg[:200]) from None
     try:  # non-JSON YAML types (timestamps, sets, ...) and NaN are refused, int keys become str
         data = json.loads(json.dumps({} if loaded is None else loaded, allow_nan=False))
-    except (TypeError, ValueError, RecursionError):
-        raise _error(400, "bad_yaml", "YAML holds values a config cannot contain") from None
+    except TypeError, ValueError, RecursionError:
+        raise error(400, "bad_yaml", "YAML holds values a config cannot contain") from None
     try:
         return schemas.bounded_config(data)
     except vol.Invalid as exc:
-        raise _error(400, "bad_request", f"YAML rejected: {exc.error_message}"[:100]) from None
+        raise error(400, "bad_request", f"YAML rejected: {exc.error_message}"[:100]) from None
 
 
 async def import_yaml(request: web.Request) -> web.Response:
-    q = _query(request, schemas.QUERY)
+    q = query(request, schemas.QUERY)
+    if_rev = _if_match(request)
     config = _yaml_to_config(await request.read())
     refs = _ir_file_refs(config)
     if refs:
-        raise _error(
+        raise error(
             422,
             "ir_files_unresolvable",
             "IR file references cannot be resolved here; inline the codes or import them in the "
@@ -335,21 +452,235 @@ async def import_yaml(request: web.Request) -> web.Response:
         )
     _, errors = _check(config)
     if errors:
-        raise _error(422, "invalid_config", "the YAML is not a valid config", errors=errors)
+        raise error(422, "invalid_config", "the YAML is not a valid config", errors=errors)
     now = int(request.app[CLOCK_KEY]())
-    state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], config, now)
-    return _json({"ok": True, "hub": q["hub"], "draft_updated": now, **_meta(state)})
+    state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], config, now, if_rev)
+    return jresp({"ok": True, "hub": q["hub"], "draft_updated": now, **_meta(state)})
 
 
 async def export_yaml(request: web.Request) -> web.Response:
-    q = _query(request, schemas.EXPORT_QUERY)
+    q = query(request, schemas.EXPORT_QUERY)
     state = _store_call(request.app[STORE_KEY].load, q["hub"])
     src = q.get("source") or ("draft" if state["draft"] else "applied")
     entry = state[src]
     if entry is None:
-        raise _error(404, "empty", f"there is no {src} config")
+        raise error(404, "empty", f"there is no {src} config")
     text = yaml.safe_dump(entry["config"], sort_keys=False, allow_unicode=True)
     return web.Response(text=text, content_type="text/yaml", charset="utf-8")
+
+
+# ------------------------------------------------------------------ Home Assistant catalog (GET only)
+def _ha_unavailable() -> web.HTTPException:
+    return error(503, "ha_unavailable", "Home Assistant is not reachable from the add-on")
+
+
+async def ha_entities(request: web.Request) -> web.Response:
+    q = query(request, schemas.HA_ENTITIES_QUERY)
+    try:
+        rows = await request.app[CATALOG_KEY].entities(q.get("domain"), q["q"])
+    except HaUnavailable:
+        raise _ha_unavailable() from None
+    return jresp({"entities": rows})
+
+
+async def ha_services(request: web.Request) -> web.Response:
+    q = query(request, schemas.HA_SERVICES_QUERY)
+    try:
+        rows = await request.app[CATALOG_KEY].services(q.get("domain"))
+    except HaUnavailable:
+        raise _ha_unavailable() from None
+    return jresp({"services": rows})
+
+
+# ------------------------------------------------------------------ IR test-fire
+async def ir_test(request: web.Request) -> web.Response:
+    """Fire one inline IR code via Home Assistant's own `ha_harmony.send_ir` service."""
+    body = await read_body(request, schemas.TEST_IR)
+    ir = dict(body["ir"])
+    if "port_mask" in body:
+        if "port_mask" in ir:
+            raise error(400, "bad_request", "invalid request: port_mask")
+        ir["port_mask"] = body["port_mask"]
+    try:  # no base dir: flipper/smartir file references are refused, sizes are checked
+        action = validate_ir(ir)
+    except vol.Invalid as exc:
+        msg = exc.error_message[:200]
+        raise error(422, "invalid_ir", msg, errors=[{"path": [], "msg": msg}]) from None
+    sender = request.app[SENDER_KEY]
+    if sender is None:
+        raise _ha_unavailable()
+    wait_ms = request.app[LIMITER_KEY].acquire()
+    if wait_ms is not None:
+        raise error(
+            429,
+            "rate_limited",
+            "slow down: test sends are limited",
+            headers={"Retry-After": str(-(-wait_ms // 1000))},
+            retry_after_ms=wait_ms,
+        )
+    try:
+        await sender.send(body["hub"], action)
+    except SendRefused as exc:
+        raise error(
+            502, "send_failed", "Home Assistant refused the test send", http_status=exc.status
+        ) from None
+    except HaUnavailable:
+        raise _ha_unavailable() from None
+    return jresp({"ok": True, "action": action})
+
+
+# ------------------------------------------------------------------ hubs and apply status
+async def list_hubs(request: web.Request) -> web.Response:
+    store = request.app[STORE_KEY]
+    out = []
+    for hub in store.hubs():
+        state = _store_call(store.load, hub)
+        a = state["applied"]
+        out.append(
+            {
+                "id": hub,
+                "has_draft": state["draft"] is not None,
+                "has_applied": a is not None,
+                "applied_rev": None if a is None else _rev(a["config"]),
+                "applied_at": None if a is None else a["at"],
+            }
+        )
+    return jresp({"hubs": out})
+
+
+async def config_status(request: web.Request) -> web.Response:
+    q = query(request, schemas.QUERY)
+    state = _store_call(request.app[STORE_KEY].load, q["hub"])
+    bundle = _bundle(q["hub"], state)
+    ack = request.app[ACKS_KEY].get(q["hub"]) or state["ack"] or {}
+    last_seen = request.app[SEEN_KEY].get("last_seen")
+    return jresp(
+        {
+            "hub": q["hub"],
+            "applied_rev": None if bundle is None else bundle["rev"],
+            "acked_rev": ack.get("rev"),
+            "result": ack.get("result"),
+            "detail": ack.get("detail"),
+            "acked_at": ack.get("at"),
+            "linked": last_seen is not None,
+            "last_seen": last_seen,
+        }
+    )
+
+
+async def post_ack(request: web.Request) -> web.Response:
+    """The integration reports what it did with a pulled bundle (bearer auth, like the feed)."""
+    body = await read_body(request, schemas.ACK)
+    store, hub = request.app[STORE_KEY], body["hub"]
+    state = _store_call(store.load, hub)
+    bundle = _bundle(hub, state)
+    if bundle is None:
+        raise _nothing_applied()
+    if body["rev"] != bundle["rev"]:  # an answer about an older bundle: not what is applied now
+        raise error(409, "stale_rev", "that rev is not the applied one", rev=bundle["rev"])
+    ack = {"rev": body["rev"], "result": body["result"], "at": int(request.app[CLOCK_KEY]())}
+    if "detail" in body:
+        ack["detail"] = body["detail"]
+    prev = state["ack"] or {}
+    if any(prev.get(k) != ack.get(k) for k in ("rev", "result", "detail")):  # no write per repeat
+        _store_call(store.set_ack, hub, ack)
+        request.app[ACKS_KEY][hub] = ack
+    return jresp({"ok": True})
+
+
+# ------------------------------------------------------------------ bundle (integration feed)
+class ApplyNotifier:
+    """Wakes long-poll waiters when a hub's applied config changes."""
+
+    def __init__(self) -> None:
+        self._events: dict[str, asyncio.Event] = {}
+        self.closing = False
+
+    def event(self, hub: str) -> asyncio.Event:
+        if self.closing:
+            ev = asyncio.Event()
+            ev.set()
+            return ev
+        return self._events.setdefault(hub, asyncio.Event())
+
+    def close(self) -> None:
+        """Shutdown: wake every waiter now (they answer 204) so stop never waits out a poll."""
+        self.closing = True
+        for hub in list(self._events):
+            self.notify(hub)
+
+    def notify(self, hub: str) -> None:
+        ev = self._events.pop(hub, None)
+        if ev is not None:
+            ev.set()
+
+
+def _public(config: dict[str, Any]) -> dict[str, Any]:
+    """What the integration may see: editor-only metadata never leaves the add-on, so editing
+    it can neither change the bundle rev nor trigger a hub push (nor break an older integration)."""
+    return {k: v for k, v in config.items() if k != "editor"}
+
+
+def _rev(config: dict[str, Any]) -> str:
+    config = _public(config)
+    canon = json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canon.encode()).hexdigest()[:16]
+
+
+def _bundle(hub: str, state: dict[str, Any]) -> dict[str, Any] | None:
+    a = state["applied"]
+    if a is None:
+        return None
+    return {
+        "schema": harmony_core.BUNDLE_SCHEMA,
+        "core_version": harmony_core.__version__,
+        "hub_id": hub,
+        "applied_at": a["at"],
+        "rev": _rev(a["config"]),
+        "config": _public(a["config"]),
+    }
+
+
+def _bundle_response(bundle: dict[str, Any]) -> web.Response:
+    return web.json_response(bundle, headers={"ETag": f'"{bundle["rev"]}"'})
+
+
+def _nothing_applied() -> web.HTTPException:
+    return error(404, "nothing_applied", "no config has been applied for this hub")
+
+
+async def get_bundle(request: web.Request) -> web.Response:
+    q = query(request, schemas.QUERY)
+    bundle = _bundle(q["hub"], _store_call(request.app[STORE_KEY].load, q["hub"]))
+    if bundle is None:
+        raise _nothing_applied()
+    if request.headers.get("If-None-Match") == f'"{bundle["rev"]}"':
+        return web.Response(status=304, headers={"ETag": f'"{bundle["rev"]}"'})
+    return _bundle_response(bundle)
+
+
+async def wait_bundle(request: web.Request) -> web.Response:
+    """Long-poll: answer when the applied rev differs from `rev`; 204 after the bounded wait."""
+    q = query(request, schemas.WAIT_QUERY)
+    app, hub, known = request.app, q["hub"], q["rev"]
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + app[WAIT_KEY]
+    while True:
+        ev = app[NOTIFIER_KEY].event(hub)  # taken before the read: no lost wake-up
+        if app[NOTIFIER_KEY].closing:
+            return web.Response(status=204)
+        bundle = _bundle(hub, _store_call(app[STORE_KEY].load, hub))
+        if bundle is not None and bundle["rev"] != known:
+            return _bundle_response(bundle)
+        if bundle is None and known:
+            raise _nothing_applied()
+        left = deadline - loop.time()
+        if left <= 0:
+            return web.Response(status=204)
+        try:
+            await asyncio.wait_for(ev.wait(), left)
+        except TimeoutError:
+            return web.Response(status=204)
 
 
 async def index(request: web.Request) -> web.Response:
@@ -373,17 +704,67 @@ def create_app(
     options: Options | None = None,
     clock: Callable[[], float] = time.time,
     auth: Auth | None = None,
+    bundle_token: str | None = None,
+    bundle_networks: Collection[str] | None = (HASSIO_NETWORK,),
+    bundle_auth: BundleAuth | None = None,
+    discovery: Discovery | None = None,
+    wait_seconds: float = WAIT_SECONDS,
+    ha_api: HaApi | None = None,
+    irdb: IrdbArchive | None = None,
+    ir_sender: IrSender | None = None,
+    send_clock: Callable[[], float] = time.monotonic,
+    irdb_dir: Path | str | None = None,
 ) -> web.Application:
+    """`auth` guards the ingress routes; the bundle routes always need `bundle_token` (default:
+    the 0600 token file under data_dir) from a peer in `bundle_networks` (None: any, for tests)."""
     data_dir = Path(data_dir)
+    route_auth = RouteAuth(
+        auth or IngressAuth(),
+        bundle_auth or BundleAuth(bundle_token or load_or_create_token(data_dir), bundle_networks),
+    )
     app = web.Application(
         client_max_size=MAX_BODY,
-        middlewares=[headers_mw, make_auth_mw(auth or IngressAuth())],
+        middlewares=[headers_mw, make_auth_mw(route_auth)],
     )
     app[OPTIONS_KEY] = options or load_options(
         Path(options_path) if options_path else data_dir / "options.json"
     )
     app[STORE_KEY] = Store(data_dir)
     app[CLOCK_KEY] = clock
+    app[NOTIFIER_KEY] = ApplyNotifier()
+    app[WAIT_KEY] = wait_seconds
+    app[CATALOG_KEY] = Catalog(ha_api, clock)
+    app[SEEN_KEY] = {}
+    app[MEMO_KEY] = {}
+    app[SENDER_KEY] = ir_sender
+    app[LIMITER_KEY] = SendLimiter(send_clock)
+    if irdb is not None:
+        app[ir_routes.IRDB_KEY] = irdb
+    else:  # one archive for the process: its own aiohttp session, cache under /data/irdb
+
+        async def _irdb_ctx(app: web.Application):
+            session = aiohttp.ClientSession(raise_for_status=False)
+            app[ir_routes.IRDB_KEY] = IrdbArchive(session, irdb_dir or data_dir / "irdb")
+            yield
+            await session.close()
+
+        app.cleanup_ctx.append(_irdb_ctx)
+    app[ACKS_KEY] = {}
+
+    async def _wake_waiters(_: web.Application) -> None:
+        app[NOTIFIER_KEY].close()
+
+    app.on_shutdown.append(_wake_waiters)
+    if discovery is not None:
+
+        async def _announce(_: web.Application) -> None:
+            await discovery.announce()
+
+        async def _withdraw(_: web.Application) -> None:
+            await discovery.withdraw()
+
+        app.on_startup.append(_announce)
+        app.on_shutdown.append(_withdraw)
     api = "/api/v1"
     app.router.add_get("/", index)
     app.router.add_get(f"{api}/health", health)
@@ -391,8 +772,18 @@ def create_app(
     app.router.add_put(f"{api}/config/draft", put_draft)
     app.router.add_post(f"{api}/config/validate", validate)
     app.router.add_post(f"{api}/config/preview", preview)
+    app.router.add_post(f"{api}/config/keymap", keymap)
     app.router.add_post(f"{api}/config/apply", apply)
     app.router.add_post(f"{api}/config/revert", revert)
     app.router.add_post(f"{api}/config/import_yaml", import_yaml)
     app.router.add_get(f"{api}/config/export_yaml", export_yaml)
+    app.router.add_get(f"{api}/ha/entities", ha_entities)
+    app.router.add_get(f"{api}/ha/services", ha_services)
+    ir_routes.add_routes(app, api)
+    app.router.add_post(f"{api}/ir/test", ir_test)
+    app.router.add_get(f"{api}/hubs", list_hubs)
+    app.router.add_get(f"{api}/config/status", config_status)
+    app.router.add_post(f"{api}/bundle/ack", post_ack)
+    app.router.add_get(f"{api}/bundle", get_bundle)
+    app.router.add_get(f"{api}/bundle/wait", wait_bundle)
     return app

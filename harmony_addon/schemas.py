@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import voluptuous as vol
 
+from .ha_client import ACTION_DOMAINS, ENTITY_DOMAINS
 from .store import HUB_ID
 
 MAX_NODES = 60_000  # JSON values in one config document
@@ -50,6 +51,20 @@ def _hub(v: object) -> str:
 
 
 QUERY = vol.Schema({vol.Optional("hub", default="default"): _hub}, extra=vol.PREVENT_EXTRA)
+VALIDATE_QUERY = vol.Schema(
+    {
+        vol.Optional("hub", default="default"): _hub,
+        vol.Optional("all", default="1"): vol.In(["0", "1"]),  # 0: first error only
+    },
+    extra=vol.PREVENT_EXTRA,
+)
+WAIT_QUERY = vol.Schema(
+    {
+        vol.Optional("hub", default="default"): _hub,
+        vol.Optional("rev", default=""): vol.All(str, vol.Length(max=64)),
+    },
+    extra=vol.PREVENT_EXTRA,
+)
 GET_CONFIG_QUERY = vol.Schema(
     {
         vol.Optional("hub", default="default"): _hub,
@@ -70,4 +85,33 @@ OPT_CONFIG = vol.Schema({vol.Optional("config"): bounded_config}, extra=vol.PREV
 EMPTY = vol.Schema({}, extra=vol.PREVENT_EXTRA)
 REVERT = vol.Schema(
     {vol.Required("target"): vol.In(["applied", "previous"])}, extra=vol.PREVENT_EXTRA
+)
+
+_Q = vol.All(str, vol.Length(max=64))
+HA_ENTITIES_QUERY = vol.Schema(
+    {vol.Optional("domain"): vol.In(sorted(ENTITY_DOMAINS)), vol.Optional("q", default=""): _Q},
+    extra=vol.PREVENT_EXTRA,
+)
+HA_SERVICES_QUERY = vol.Schema(
+    {vol.Optional("domain"): vol.In(sorted(ACTION_DOMAINS))}, extra=vol.PREVENT_EXTRA
+)
+
+_REV = vol.All(str, vol.Match(r"^[A-Za-z0-9._-]{1,64}$"))
+ACK = vol.Schema(
+    {
+        vol.Required("hub"): _hub,
+        vol.Required("rev"): _REV,
+        vol.Required("result"): vol.In(["ok", "error"]),
+        vol.Optional("detail"): vol.All(str, vol.Length(max=200)),
+    },
+    extra=vol.PREVENT_EXTRA,
+)
+
+TEST_IR = vol.Schema(
+    {
+        vol.Required("hub"): _hub,
+        vol.Required("ir"): bounded_config,
+        vol.Optional("port_mask"): vol.All(int, vol.Range(min=1, max=255)),
+    },
+    extra=vol.PREVENT_EXTRA,
 )

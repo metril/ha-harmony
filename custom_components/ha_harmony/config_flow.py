@@ -1,4 +1,4 @@
-"""Config flow: manual setup, zeroconf discovery, reauth."""
+"""Config flow: manual setup, zeroconf discovery, add-on (Supervisor) discovery, reauth."""
 
 from __future__ import annotations
 
@@ -10,10 +10,24 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
+from .addon_link import AddonAuthError, AddonClient, AddonError, BundleRejected, NothingApplied
 from .api import HarmonyAuthError, HarmonyConnectionError, HarmonyHubClient, HarmonyVersionError
-from .const import CONF_TOKEN, DEFAULT_PORT, DOMAIN
+from .const import (
+    ADDON_SLUG,
+    CONF_ADDON_HOST,
+    CONF_ADDON_PORT,
+    CONF_ADDON_SLUG,
+    CONF_ADDON_TOKEN,
+    CONF_ADDON_UUID,
+    CONF_TOKEN,
+    DEFAULT_PORT,
+    DOMAIN,
+)
+
+HASSIO_UNIQUE_ID = "hassio_ha_harmony_editor"
 
 
 async def _probe(hass: HomeAssistant, host: str, port: int, token: str) -> str:
@@ -42,6 +56,7 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._host: str | None = None
         self._port: int = DEFAULT_PORT
+        self._addon: dict[str, Any] = {}
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -104,3 +119,67 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required(CONF_TOKEN): str}),
             errors=errors,
         )
+
+    # -- Harmony Editor add-on (Supervisor discovery). The add-on serves every hub, so this flow
+    # never creates an entry: it stores the add-on's address and token on the existing hub entries.
+    async def async_step_hassio(self, discovery_info: HassioServiceInfo) -> ConfigFlowResult:
+        slug = discovery_info.slug
+        if not isinstance(slug, str) or not (slug == ADDON_SLUG or slug.endswith(f"_{ADDON_SLUG}")):
+            return self.async_abort(reason="not_our_addon")  # only our add-on may offer a token
+        cfg = discovery_info.config
+        try:
+            addon = {
+                CONF_ADDON_HOST: str(cfg["host"]),
+                CONF_ADDON_PORT: int(cfg["port"]),
+                CONF_ADDON_TOKEN: str(cfg["token"]),
+                CONF_ADDON_SLUG: slug,
+                CONF_ADDON_UUID: str(discovery_info.uuid),
+            }
+        except KeyError, TypeError, ValueError:
+            return self.async_abort(reason="invalid_discovery")
+        await self.async_set_unique_id(HASSIO_UNIQUE_ID, raise_on_progress=False)
+        self._abort_if_unique_id_configured()  # an ignored discovery stays ignored
+        entries = self._async_current_entries(include_ignore=False)
+        if not entries:
+            return self.async_abort(reason="no_hub")
+        self._addon = addon
+        linked = [e for e in entries if e.data.get(CONF_ADDON_HOST)]
+        if linked and all(e.data.get(CONF_ADDON_SLUG) == slug for e in linked):
+            # same add-on again (restart/reinstall): a new host/token needs no ask
+            self._link_entries(entries)
+            return self.async_abort(reason="addon_updated")
+        self.context["title_placeholders"] = {"name": discovery_info.name}
+        return await self.async_step_hassio_confirm()
+
+    async def async_step_hassio_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is None:
+            return self.async_show_form(step_id="hassio_confirm")
+        entries = self._async_current_entries(include_ignore=False)
+        if not entries:
+            return self.async_abort(reason="no_hub")
+        a = self._addon
+        client = AddonClient(
+            async_get_clientsession(self.hass),
+            a[CONF_ADDON_HOST],
+            a[CONF_ADDON_PORT],
+            a[CONF_ADDON_TOKEN],
+        )
+        try:  # "nothing applied yet" still proves host and token
+            await client.fetch(entries[0].unique_id or "")
+        except AddonAuthError:
+            return self.async_abort(reason="invalid_auth")
+        except NothingApplied, BundleRejected:
+            pass
+        except AddonError:
+            return self.async_abort(reason="cannot_connect")
+        self._link_entries(entries)
+        return self.async_abort(reason="addon_linked")
+
+    def _link_entries(self, entries: list[Any]) -> None:
+        for entry in entries:
+            if all(entry.data.get(k) == v for k, v in self._addon.items() if k != CONF_ADDON_UUID):
+                continue
+            self.hass.config_entries.async_update_entry(entry, data={**entry.data, **self._addon})
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)

@@ -11,12 +11,14 @@ CFG = yaml.safe_load((ROOT / "addon/config.yaml").read_text())
 def test_least_privilege_manifest():
     assert CFG["slug"] == "ha_harmony_editor"
     assert CFG["ingress"] is True and CFG["panel_admin"] is True
-    assert CFG["homeassistant_api"] is False and CFG["hassio_api"] is False
+    assert CFG["homeassistant_api"] is True and CFG["hassio_api"] is False
     assert set(CFG["arch"]) == {"aarch64", "amd64"}
     for forbidden in ("ports", "map", "host_network", "full_access", "privileged", "devices"):
         assert forbidden not in CFG
+    # discovery needs `discovery:` only; /discovery and /addons/self need no hassio_api (Supervisor docs)
+    assert CFG["discovery"] == ["ha_harmony"]
     assert CFG["ingress_port"] == 8099
-    assert any("ircache" in p for p in CFG["backup_exclude"])
+    assert any("irdb" in p for p in CFG["backup_exclude"])
 
 
 def test_options_schema_matches_options_reader():

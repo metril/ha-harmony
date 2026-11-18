@@ -1,8 +1,7 @@
-"""YAML config as source of truth, against the real `hub --sim` and `remote_sim`."""
+"""Add-on config as source of truth, against the real `hub --sim` and `remote_sim`."""
 
 import asyncio
 import json
-import logging
 import subprocess
 
 import aiohttp
@@ -55,6 +54,7 @@ BASE_UIDS = {
     f"{HUB_ID}_{k}"
     for k in [
         "remote",
+        "addon_link",
         "activity",
         "key_1",
         "battery_1",
@@ -74,16 +74,26 @@ BASE_UIDS = {
 SELECT = f"select.harmony_hub_{HUB_ID.replace('-', '_')}_activity"
 
 
+class _Source:
+    """Stands for the old per-hub YAML file: write_text() applies that text in the fake add-on."""
+
+    def __init__(self, addon):
+        self.addon = addon
+
+    def write_text(self, text, encoding=None):
+        self.addon.apply_yaml(text)
+
+
 @pytest.fixture
-def write_yaml(hass, tmp_path):
-    """write_yaml(text) -> path of <config dir>/ha_harmony/sim-hub.yaml (per-test dir)."""
-    hass.config.config_dir = str(tmp_path / "cfg")
-    path = tmp_path / "cfg" / "ha_harmony" / f"{HUB_ID}.yaml"
-    path.parent.mkdir(parents=True)
+def write_yaml(hass, fake_addon):
+    """write_yaml(text) applies `text` in the fake add-on (served to the integration as a bundle);
+    the returned object's write_text() applies a new one. Entries made by `setup` link to it."""
+    hass.data["fake_addon"] = fake_addon
+    src = _Source(fake_addon)
 
     def _write(text: str):
-        path.write_text(text, encoding="utf-8")
-        return path
+        fake_addon.apply_yaml(text)
+        return src
 
     return _write
 
@@ -101,7 +111,7 @@ async def until(hass, predicate, timeout=5.0):
 
 
 async def setup(hass, hub, ok=True):
-    entry = make_entry("127.0.0.1", hub.port)
+    entry = make_entry("127.0.0.1", hub.port, addon=hass.data.get("fake_addon"))
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id) is ok
     await hass.async_block_till_done()
@@ -171,7 +181,7 @@ async def test_pushed_on_first_connect_not_when_unchanged(hass, hub_rf, write_ya
 
         entry2 = await setup(hass, hub_rf)  # same hub, same YAML: nothing to push
         assert entry2.runtime_data.config_pushes == 0
-        await entry2.runtime_data.async_reload_config()
+        await entry2.runtime_data.async_refresh_from_addon()
         assert entry2.runtime_data.config_pushes == 0
         await asyncio.sleep(0.2)
         assert len(obs.lists) == 1
@@ -585,7 +595,9 @@ async def test_reload_service_rejects_bad_yaml_and_keeps_previous(hass, hub_rf, 
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
     path.write_text(BASE.replace("hdmi1: {proto: nec, addr: 4, cmd: 10}", "hdmi1: {proto: nec}"))
-    with pytest.raises(HomeAssistantError, match=r"sim-hub\.yaml:7: devices\[0\]\.inputs\.hdmi1"):
+    with pytest.raises(
+        HomeAssistantError, match=r"devices\[0\]\.inputs\.hdmi1: proto needs addr and cmd"
+    ):
         await hass.services.async_call(const.DOMAIN, "reload_config", {}, blocking=True)
     assert ir.async_get(hass).async_get_issue(const.DOMAIN, f"config_invalid_{HUB_ID}")
     assert uids(hass, entry) == BASE_UIDS  # previous config still in force
@@ -597,17 +609,18 @@ async def test_reload_service_rejects_bad_yaml_and_keeps_previous(hass, hub_rf, 
 
 
 # ------------------------------------------------------------------ failure modes
-async def test_invalid_yaml_at_startup_falls_back_to_last_good_config(hass, hub_rf, write_yaml):
+async def test_bad_bundle_at_startup_keeps_the_cached_config(hass, hub_rf, write_yaml):
     path = write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     assert uids(hass, entry) == BASE_UIDS
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    path.write_text("devices: [oops", encoding="utf-8")  # HA restarts with a broken file
+    path.write_text("devices: [{id: tv, inputs: {hdmi1: {proto: nec}}}]")  # add-on now serves junk
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     coord = entry.runtime_data
-    assert coord.managed and coord.last_error and "sim-hub.yaml" in coord.last_error
+    await until(hass, lambda: coord.last_error is not None)
+    assert coord.managed and "inputs.hdmi1" in coord.last_error and coord.link_state == "rejected"
     assert ir.async_get(hass).async_get_issue(const.DOMAIN, f"config_invalid_{HUB_ID}")  # kept
     assert uids(hass, entry) == BASE_UIDS and coord.config_pushes == 0  # hub keeps its config
     assert hass.states.get(SELECT).attributes["options"] == ["Télé", "Music", "Off"]
@@ -615,16 +628,16 @@ async def test_invalid_yaml_at_startup_falls_back_to_last_good_config(hass, hub_
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_missing_yaml_loads_with_empty_config(hass, hub_rf, write_yaml, caplog):
-    caplog.set_level(logging.INFO)
+async def test_nothing_applied_loads_with_hub_config_untouched(hass, hub_rf, write_yaml):
     await push_config(hub_rf.url)
-    entry = await setup(hass, hub_rf)  # write_yaml fixture made the dir but no file
+    entry = await setup(hass, hub_rf)  # the fake add-on has nothing applied (404)
     coord = entry.runtime_data
     assert entry.state is ConfigEntryState.LOADED and not coord.managed
-    assert coord.config_pushes == 0 and "No config file at" in caplog.text
+    assert coord.config_pushes == 0 and coord.link_state == "nothing_applied"
     assert hass.states.get(SELECT).attributes["options"] == ["TV", "Music", "Off"]
     assert uids(hass, entry) == {
-        f"{HUB_ID}_{k}" for k in ["remote", "activity", "key_1", "battery_1", "voltage_1"]
+        f"{HUB_ID}_{k}"
+        for k in ["remote", "activity", "key_1", "battery_1", "voltage_1", "addon_link"]
     }
     await hass.config_entries.async_unload(entry.entry_id)
 

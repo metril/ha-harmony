@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
-from .coordinator import HarmonyCoordinator
+from .coordinator import LINK_STATES, HarmonyCoordinator
 from .entity_sync import setup_dynamic
 
 
@@ -26,6 +26,8 @@ async def async_setup_entry(
         ents: list[HarmonyEntity] = [HarmonyDeviceInput(c, d) for d in c.compiled.devices]
         for r in c.remotes:
             ents += [HarmonyRemoteBattery(c, r), HarmonyRemoteVoltage(c, r)]
+        if c.has_addon_link:
+            ents.append(HarmonyAddonLink(c))
         return ents
 
     setup_dynamic(entry, async_add_entities, build)
@@ -79,3 +81,28 @@ class HarmonyRemoteVoltage(HarmonyEntity, SensorEntity):
     def native_value(self) -> int | None:
         b = self.coordinator.battery.get(self._remote)
         return b[1] if b else None
+
+
+class HarmonyAddonLink(HarmonyEntity, SensorEntity):
+    """Where the applied config comes from and whether the add-on is answering."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "addon_link"
+
+    def __init__(self, coordinator: HarmonyCoordinator) -> None:
+        super().__init__(coordinator, "addon_link")
+        self._attr_options = list(LINK_STATES)
+
+    @property
+    def available(self) -> bool:  # about the add-on, not the hub connection
+        return True
+
+    @property
+    def native_value(self) -> str:
+        return self.coordinator.link_state
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        c = self.coordinator
+        return {"rev": c.rev, "applied_at": c.applied_at, "last_error": c.last_error}

@@ -17,7 +17,7 @@ class Options:
 def load_options(path: Path) -> Options:
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return Options()
     level = raw.get("log_level") if isinstance(raw, dict) else None
     return Options(log_level=level if level in LOG_LEVELS else "info")
