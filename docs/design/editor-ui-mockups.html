@@ -1,0 +1,568 @@
+<title>Harmony Editor UI</title>
+<style>
+:root{
+--bg:#F3F5F6;--sf:#FFFFFF;--sf2:#EEF1F3;--sf3:#E2E7EB;--line:#D3DAE0;--tx:#14202A;--tx2:#4A5866;--tx3:#5F6C78;
+--acc:#0B7A6C;--onacc:#FFFFFF;--accs:#DCF2EE;--ir:#8A5300;--irs:#FFF0D2;--onir:#FFFFFF;--irbg:#B86E00;
+--bad:#B3261E;--bads:#FDE6E3;--ok:#1E7B3A;--oks:#E1F4E6;--focus:#0B7A6C;--scrim:rgba(16,24,32,.45);
+--r1:6px;--r2:10px;--r3:16px;--sh:0 1px 2px rgba(16,24,32,.06),0 4px 16px rgba(16,24,32,.06);
+/* remote screen palette = direction B, theme-independent */
+--rbg:#101820;--rs1:#182430;--rs2:#202C38;--rs3:#304050;--rtx:#F8FCF8;--rtx2:#A8B4C0;--racc:#20C8B0;--rwarm:#F8C040;--rbad:#F85848;
+--font:system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
+--mono:ui-monospace,"SF Mono","Cascadia Mono","Ubuntu Mono",Menlo,Consolas,monospace;
+color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+--bg:#0E151C;--sf:#162029;--sf2:#1D2934;--sf3:#273541;--line:#2E3D4B;--tx:#F2F6F8;--tx2:#AEBAC5;--tx3:#8B99A6;
+--acc:#20C8B0;--onacc:#06201C;--accs:#123A36;--ir:#F8C040;--irs:#3A2E12;--onir:#1A1404;--irbg:#F8C040;
+--bad:#FF7A6B;--bads:#3D1B19;--ok:#5BD58A;--oks:#16341F;--focus:#5FE3CF;--scrim:rgba(0,0,0,.6);
+--sh:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);color-scheme:dark}}
+:root[data-theme="dark"]{
+--bg:#0E151C;--sf:#162029;--sf2:#1D2934;--sf3:#273541;--line:#2E3D4B;--tx:#F2F6F8;--tx2:#AEBAC5;--tx3:#8B99A6;
+--acc:#20C8B0;--onacc:#06201C;--accs:#123A36;--ir:#F8C040;--irs:#3A2E12;--onir:#1A1404;--irbg:#F8C040;
+--bad:#FF7A6B;--bads:#3D1B19;--ok:#5BD58A;--oks:#16341F;--focus:#5FE3CF;--scrim:rgba(0,0,0,.6);
+--sh:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font:14px/1.45 var(--font);margin:0;padding:24px 16px 64px}
+.doc{max-width:1680px;margin:0 auto}
+.doc>h1{font-size:24px;margin:0 0 4px}.doc>p.lead{color:var(--tx2);margin:0 0 24px;max-width:72ch}
+h2.sec{font-size:16px;margin:40px 0 4px}.sec+p{color:var(--tx2);margin:0 0 12px;max-width:90ch}
+.frame{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r2);background:var(--bg);box-shadow:var(--sh)}
+.app{min-width:1240px;display:grid;grid-template-rows:48px auto 1fr;min-height:720px}
+.phone{width:400px;min-width:400px;min-height:780px;display:grid;grid-template-rows:52px 1fr auto;position:relative}
+.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic.s{width:16px;height:16px}
+/* header */
+.top{display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--sf);border-bottom:1px solid var(--line)}
+.brand{font-weight:650;display:flex;gap:8px;align-items:center}.brand .ic{color:var(--acc)}
+.sel{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid var(--line);border-radius:var(--r1);background:var(--sf);color:var(--tx);font-size:13px}
+.sel .ic{width:14px;height:14px;color:var(--tx3)}
+.sp{flex:1}
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:var(--r1);border:1px solid var(--line);background:var(--sf);color:var(--tx);font:500 13px var(--font);white-space:nowrap;cursor:pointer}
+.btn:hover{background:var(--sf2)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:var(--onacc)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.danger{color:var(--bad)}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn.icon{width:36px;padding:0;justify-content:center}.btn.icon.sm{width:28px}
+.btn[aria-disabled=true]{opacity:.5;cursor:not-allowed}
+.fx{outline:2px solid var(--focus);outline-offset:2px}
+.ir{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:14px;border:1.5px solid var(--ir);color:var(--ir);background:var(--irs);font:600 12px var(--font);white-space:nowrap}
+.ir.big{height:56px;padding:0 24px;border-radius:28px;font-size:16px;background:var(--irbg);color:var(--onir);border-color:var(--irbg)}
+.ir.big .ic{width:22px;height:22px}
+.ir.cool{opacity:.6}
+/* rail */
+.body{display:grid;grid-template-columns:216px 1fr;min-height:0}
+.rail{background:var(--sf);border-right:1px solid var(--line);padding:12px 8px;display:flex;flex-direction:column;gap:2px}
+.rail a{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:var(--r1);color:var(--tx2);text-decoration:none;font-weight:500}
+.rail a .n{margin-left:auto;font-size:12px;color:var(--tx3)}
+.rail a.on{background:var(--accs);color:var(--tx)}.rail a.on .ic{color:var(--acc)}
+.rail a .err{margin-left:auto;min-width:18px;height:18px;border-radius:9px;background:var(--bad);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;padding:0 5px}
+.rail hr{border:0;border-top:1px solid var(--line);margin:8px 4px}
+main{min-width:0;display:flex;flex-direction:column}
+/* draft bar */
+.dbar{display:flex;align-items:center;gap:16px;padding:8px 16px 8px 20px;background:var(--sf);border-bottom:1px solid var(--line);position:sticky;top:0}
+.dstate{display:flex;align-items:center;gap:8px;font-weight:600}
+.dot{width:8px;height:8px;border-radius:4px;background:var(--ir)}.dot.ok{background:var(--ok)}
+.muted{color:var(--tx3);font-weight:400;font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:12px;font-size:12px;font-weight:600;background:var(--sf2);color:var(--tx2)}
+.chip.ok{background:var(--oks);color:var(--ok)}.chip.bad{background:var(--bads);color:var(--bad)}.chip.acc{background:var(--accs);color:var(--acc)}.chip.ir{background:var(--irs);color:var(--ir)}
+.chip .ic{width:14px;height:14px}
+.meter{display:grid;gap:3px;min-width:120px;font-size:11px;color:var(--tx3)}
+.meter b{color:var(--tx2);font-weight:600}
+.bar{height:6px;border-radius:3px;background:var(--sf3);overflow:hidden}.bar i{display:block;height:100%;background:var(--acc);border-radius:3px}
+.bar i.w{background:var(--ir)}.bar i.x{background:var(--bad)}
+/* content */
+.content{padding:20px 24px 32px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.crumbs{font-size:12px;color:var(--tx3)}
+.ph{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.ph h3{font-size:20px;margin:0}
+.card{background:var(--sf);border:1px solid var(--line);border-radius:var(--r2);padding:16px}
+.card h4{margin:0 0 12px;font-size:14px;display:flex;align-items:center;gap:8px}
+.card h4 .sp{flex:1}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.stat{display:grid;gap:4px}.stat .v{font-size:22px;font-weight:650}.stat .l{font-size:12px;color:var(--tx3)}
+/* forms */
+.f{display:grid;gap:4px}.f label{font-size:12px;font-weight:600;color:var(--tx2)}
+.in{height:36px;border:1px solid var(--line);border-radius:var(--r1);background:var(--sf);color:var(--tx);padding:0 10px;display:flex;align-items:center;gap:6px;font-size:13px;min-width:0}
+.in.mono,.mono{font-family:var(--mono);font-size:12.5px}
+.in.err{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+.in .sfx{margin-left:auto;color:var(--tx3);font-size:12px}
+.in .ic{width:14px;height:14px;color:var(--tx3)}
+.hint{font-size:12px;color:var(--tx3)}.emsg{font-size:12px;color:var(--bad);display:flex;gap:4px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r1);overflow:hidden}
+.seg span{padding:0 12px;height:32px;display:flex;align-items:center;font-size:13px;color:var(--tx2);border-right:1px solid var(--line)}
+.seg span:last-child{border-right:0}.seg span.on{background:var(--accs);color:var(--tx);font-weight:600}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
+.tabs span{padding:8px 12px;font-weight:500;color:var(--tx2);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs span.on{color:var(--tx);border-color:var(--acc)}
+.tabs span .n{color:var(--tx3);font-size:12px;margin-left:4px}
+/* table */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--tx3);text-align:left;font-weight:600;padding:8px;border-bottom:1px solid var(--line)}
+.tbl td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle;height:44px}
+.tbl tr.sel td{background:var(--accs)}
+.tbl tr.erow td{background:var(--bads)}
+.cb{width:16px;height:16px;border:1.5px solid var(--tx3);border-radius:4px;display:inline-block;vertical-align:middle}
+.cb.on{background:var(--acc);border-color:var(--acc);position:relative}
+.cb.on:after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid var(--onacc);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.bulk{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--accs);border-radius:var(--r1);font-size:13px}
+.ports{display:inline-flex;gap:2px}.ports i{width:16px;height:16px;border-radius:3px;font:600 10px/16px var(--mono);text-align:center;font-style:normal;background:var(--sf3);color:var(--tx3)}.ports i.on{background:var(--acc);color:var(--onacc)}
+/* list rows */
+.lr{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r1);background:var(--sf)}
+.lr+.lr{margin-top:6px}
+.lr.lock{background:var(--sf2);color:var(--tx2)}
+.lr.drag{box-shadow:var(--sh);border-color:var(--acc)}
+.handle{color:var(--tx3)}
+.num{width:22px;height:22px;border-radius:11px;background:var(--sf3);font-size:11px;font-weight:700;display:grid;place-items:center;color:var(--tx2);flex:none}
+/* wizard */
+.steps{display:flex;gap:0;align-items:center}
+.st{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--tx3)}
+.st .num{background:var(--sf3)}.st.done .num{background:var(--acc);color:var(--onacc)}.st.cur{color:var(--tx);font-weight:600}.st.cur .num{background:var(--tx);color:var(--sf)}
+.st+.st:before{content:"";width:32px;height:1px;background:var(--line);margin:0 10px}
+.cand{display:grid;grid-template-columns:1fr 320px;gap:16px}
+.qa{display:flex;gap:12px;flex-wrap:wrap}
+.qa .btn{height:48px;padding:0 20px;font-size:14px}
+.tried{display:grid;gap:6px}
+/* remote silhouette */
+.rem svg text{font:600 7px var(--font);fill:var(--tx2)}
+.k{fill:var(--sf);stroke:var(--line);stroke-width:1.2}
+.k.ov{fill:var(--acc);stroke:var(--acc)}.k.inh{fill:var(--sf2);stroke:var(--tx3)}.k.none{fill:none;stroke:var(--tx3);stroke-dasharray:2 2}
+.k.selk{stroke:var(--focus);stroke-width:2.5}
+.rem text.on{fill:var(--onacc)}
+.lg{display:flex;gap:16px;font-size:12px;color:var(--tx2);flex-wrap:wrap}.lg span{display:flex;gap:6px;align-items:center}
+.sw{width:14px;height:14px;border-radius:4px;display:inline-block}
+/* page editor */
+.pe{display:grid;grid-template-columns:220px 1fr 300px;gap:16px;align-items:start}
+.canvaswrap{display:flex;flex-direction:column;align-items:center;gap:8px}
+.scr{width:480px;height:640px;background:var(--rbg);border-radius:8px;position:relative;font-family:var(--font);color:var(--rtx);box-shadow:0 0 0 10px #05080B,0 8px 30px rgba(0,0,0,.3);overflow:hidden}
+.scr.s1{width:300px;height:400px;box-shadow:0 0 0 6px #05080B}
+.sbar{height:64px;border-bottom:1px solid var(--rs2);display:flex;align-items:center;padding:0 24px;font-size:36px;font-weight:600;gap:12px}
+.s1 .sbar{height:40px;font-size:22px;padding:0 14px}
+.sbar .r{margin-left:auto;font-size:22px;color:var(--rtx2);display:flex;gap:10px;align-items:center}
+.s1 .sbar .r{font-size:14px}
+.batt{width:34px;height:18px;border:3px solid var(--rtx2);border-radius:4px;position:relative}.batt:after{content:"";position:absolute;inset:2px 8px 2px 2px;background:var(--rtx2)}
+.s1 .batt{width:22px;height:12px;border-width:2px}
+.grid{position:absolute;left:0;right:0;top:64px;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(5,1fr);padding:16px;gap:16px;
+background-image:linear-gradient(to right,rgba(32,200,176,.18) 1px,transparent 1px),linear-gradient(to bottom,rgba(32,200,176,.18) 1px,transparent 1px);background-size:25% 20%;background-position:0 0}
+.s1 .grid{top:40px;padding:10px;gap:10px}
+.w{background:var(--rs2);border-radius:20px;display:grid;place-items:center;font-size:30px;font-weight:500;position:relative}
+.s1 .w{font-size:18px;border-radius:12px}
+.w.tile{background:var(--rs1);place-items:start;padding:18px 22px;align-content:start;gap:4px;border-radius:20px}
+.w.tile small{font-size:22px;color:var(--rtx2)}.w.tile b{font-size:40px}
+.s1 .w.tile{padding:10px 12px}.s1 .w.tile small{font-size:13px}.s1 .w.tile b{font-size:22px}
+.w.danger{color:var(--rbad)}
+.w.selw{outline:3px solid var(--racc);outline-offset:4px}
+.w.selw i{position:absolute;width:14px;height:14px;background:var(--racc);border:2px solid var(--rbg);border-radius:3px}
+.w.ghost{background:transparent;border:3px dashed var(--racc);color:var(--racc);font-size:22px}
+.zoom{width:480px;font-size:12px;color:var(--tx3);line-height:1.8}
+.plist .lr{padding:8px 10px}
+.plist .lr.on{border-color:var(--acc);background:var(--accs)}
+.dis{opacity:.55}
+.v2{font-size:11px;font-weight:700;color:var(--tx3);border:1px solid var(--line);border-radius:10px;padding:1px 7px}
+.iconpick{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.iconpick span{height:36px;border:1px solid var(--line);border-radius:var(--r1);display:grid;place-items:center;color:var(--tx2)}
+.kbd{font:600 11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--sf2);color:var(--tx2)}
+/* dialog */
+.scrim{position:absolute;inset:0;background:var(--scrim);display:grid;place-items:center}
+.dlg{width:640px;background:var(--sf);border-radius:var(--r3);box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden}
+.dlg header{padding:20px 24px 8px}.dlg header h3{margin:0;font-size:18px}
+.dlg .bd{padding:8px 24px 16px;display:grid;gap:12px}
+.dlg footer{padding:16px 24px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;align-items:center}
+.diff{border:1px solid var(--line);border-radius:var(--r1)}
+.diff div{display:flex;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;align-items:center}
+.diff div:last-child{border:0}
+.diff .t{font-weight:700;font-size:11px;width:56px;flex:none;text-transform:uppercase}
+.add{color:var(--ok)}.chg{color:var(--ir)}.del{color:var(--bad)}
+.prog{display:grid;gap:8px}.prog div{display:flex;gap:10px;align-items:center;font-size:13px}
+.ring{width:18px;height:18px;border-radius:9px;border:2px solid var(--line)}.ring.done{background:var(--ok);border-color:var(--ok)}.ring.run{border-color:var(--acc);border-right-color:transparent}
+/* phone */
+.ptop{display:flex;align-items:center;gap:8px;padding:0 8px 0 4px;background:var(--sf);border-bottom:1px solid var(--line)}
+.pbody{padding:12px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.pbar{position:sticky;bottom:0;background:var(--sf);border-top:1px solid var(--line);padding:8px 16px 12px;display:flex;gap:8px;align-items:center}
+.crow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.crow .nm{font-weight:600}.crow .cd{font:12px var(--mono);color:var(--tx3)}
+.crow .ir{height:44px;padding:0 14px;border-radius:22px}
+.sheet{background:var(--sf);border:1px solid var(--line);border-radius:16px 16px 0 0;padding:8px 16px 16px;display:grid;gap:10px;box-shadow:0 -8px 24px rgba(0,0,0,.12)}
+.grab{width:36px;height:4px;border-radius:2px;background:var(--sf3);margin:0 auto 4px}
+.wrapcols{display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start}
+.note{font-size:12px;color:var(--tx3);max-width:400px}
+.kl{display:grid;grid-template-columns:110px 1fr auto;gap:8px;align-items:center;font-size:13px;padding:6px 0;border-bottom:1px solid var(--line)}
+.kl .src{font-size:11px}
+.toast{display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:var(--r1);background:var(--tx);color:var(--sf);font-size:13px;box-shadow:var(--sh)}
+.banner{display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:var(--r1);font-size:13px}
+.banner.bad{background:var(--bads);color:var(--bad)}.banner.ir{background:var(--irs);color:var(--ir)}.banner.acc{background:var(--accs);color:var(--tx)}
+.empty{display:grid;place-items:center;text-align:center;gap:12px;padding:48px 24px;border:1.5px dashed var(--line);border-radius:var(--r2);background:var(--sf)}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+<symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M5 7h14M9 11h2M13 11h2M9 15h2M13 15h2"/></symbol>
+<symbol id="i-remote" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="4"/><circle cx="12" cy="12" r="2.2"/><path d="M10 6h4M10 17h.01M14 17h.01"/></symbol>
+<symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+<symbol id="i-ir" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><path d="M10 8.5a5 5 0 0 1 0 7M14 6a8.5 8.5 0 0 1 0 12M18 3.5a12 12 0 0 1 0 17"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
+<symbol id="i-drag" viewBox="0 0 24 24"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17h.01"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></symbol>
+<symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M4 16v4h16v-4"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="3"/></symbol>
+<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8M6.5 6.5a8 8 0 1 0 11 0"/></symbol>
+<symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3z"/></symbol>
+<symbol id="i-vol" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9a4 4 0 0 1 0 6"/></symbol>
+<symbol id="i-input" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 12h6M11 10l2 2-2 2"/></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2 2l20 20M5 12.5a10 10 0 0 1 4-2.3M12 19h.01M8.5 15.5a5 5 0 0 1 5.6-1"/></symbol>
+<symbol id="i-sig" viewBox="0 0 24 24"><path d="M4 20v-3M9 20v-7M14 20v-11M19 20V4"/></symbol>
+</svg>
+
+<div class="doc">
+<h1>Harmony Editor: web UI mockups</h1>
+<p class="lead">The Home Assistant add-on editor. Desktop frames are 1240 px wide and scroll sideways if your window is narrower. Phone frames are 400 px. Colours follow your system theme; each frame uses the same tokens the real app will ship.</p>
+
+<!-- ============ 1 OVERVIEW ============ -->
+<h2 class="sec">1 · Overview, with the draft bar</h2>
+<p>The draft bar stays at the top of every screen. It shows whether the draft differs from what is applied, whether it is valid, and how full the hub is. It has two actions: Discard draft and Review &amp; apply.</p>
+<div class="frame"><div class="app">
+<header class="top"><span class="brand"><svg class="ic"><use href="#i-remote"/></svg>Harmony Editor</span>
+<span class="sel" role="combobox" aria-label="Hub">Living room hub <span class="muted">sim-hub</span><svg class="ic"><use href="#i-down"/></svg></span>
+<span class="sp"></span><span class="btn ghost sm"><svg class="ic s"><use href="#i-upload"/></svg>Import YAML</span><span class="btn ghost sm"><svg class="ic s"><use href="#i-dl"/></svg>Export YAML</span></header>
+<div class="body">
+<nav class="rail" aria-label="Sections">
+<a class="on" href="#"><svg class="ic"><use href="#i-home"/></svg>Overview</a>
+<a href="#"><svg class="ic"><use href="#i-tv"/></svg>Devices<span class="n">3</span></a>
+<a href="#"><svg class="ic"><use href="#i-play"/></svg>Activities<span class="n">2</span></a>
+<a href="#"><svg class="ic"><use href="#i-remote"/></svg>Hard keys</a>
+<a href="#"><svg class="ic"><use href="#i-grid"/></svg>Remote pages<span class="err" aria-label="1 error">1</span></a>
+<hr><a href="#"><svg class="ic"><use href="#i-db"/></svg>IR library</a>
+<a href="#"><svg class="ic"><use href="#i-clock"/></svg>History</a>
+</nav>
+<main>
+<div class="dbar" role="region" aria-label="Draft status">
+<span class="dstate"><span class="dot"></span>Draft · 4 changes not applied <span class="muted">saved 3 s ago</span></span>
+<span class="chip bad"><svg class="ic"><use href="#i-alert"/></svg>1 error · Show</span>
+<span class="sp"></span>
+<span class="meter"><span>Config <b>48.2 / 128 KiB</b></span><span class="bar"><i style="width:38%"></i></span></span>
+<span class="meter"><span>IR pool <b>22%</b></span><span class="bar"><i style="width:22%"></i></span></span>
+<span class="meter"><span>Commands <b>211 / 256</b></span><span class="bar"><i class="w" style="width:82%"></i></span></span>
+<span class="btn ghost sm"><svg class="ic s"><use href="#i-undo"/></svg>Discard draft</span>
+<span class="btn pri" aria-disabled="true" title="Fix 1 error to apply">Review &amp; apply</span>
+</div>
+<div class="content">
+<div class="ph"><h3>Living room hub</h3><span class="chip acc">Applied rev 12 · 18 Nov, 21:04</span></div>
+<div class="banner bad"><svg class="ic"><use href="#i-alert"/></svg><span><b>Remote pages › main › "Netflix" button:</b> label is 26 bytes; the limit is 24.</span><span class="sp"></span><span class="btn sm">Go to field</span></div>
+<div class="g4">
+<div class="card stat"><span class="l">Devices</span><span class="v">3 <span class="muted">/ 16</span></span><span class="bar"><i style="width:19%"></i></span></div>
+<div class="card stat"><span class="l">Activities</span><span class="v">2 <span class="muted">/ 16</span></span><span class="bar"><i style="width:12%"></i></span></div>
+<div class="card stat"><span class="l">Page widgets</span><span class="v">21 <span class="muted">/ 128</span></span><span class="bar"><i style="width:16%"></i></span></div>
+<div class="card stat"><span class="l">Inputs</span><span class="v">6 <span class="muted">/ 64</span></span><span class="bar"><i style="width:9%"></i></span></div>
+</div>
+<div class="g2">
+<div class="card"><h4>Activities<span class="sp"></span><span class="btn sm"><svg class="ic s"><use href="#i-plus"/></svg>Add activity</span></h4>
+<div class="lr"><svg class="ic"><use href="#i-play"/></svg><b>Watch TV</b><span class="muted">TV · AV receiver</span><span class="sp"></span><svg class="ic s"><use href="#i-right"/></svg></div>
+<div class="lr"><svg class="ic"><use href="#i-play"/></svg><b>Stream</b><span class="muted">TV · AV receiver · Streaming box</span><span class="sp"></span><span class="chip ir">changed</span><svg class="ic s"><use href="#i-right"/></svg></div>
+</div>
+<div class="card"><h4>Changes in this draft<span class="sp"></span><span class="muted">compared with rev 12</span></h4>
+<div class="diff"><div><span class="t add">Added</span>Device <b>Streaming box</b> (12 commands)</div><div><span class="t chg">Changed</span>Activity <b>Stream</b>: start sequence, 2 key overrides</div><div><span class="t chg">Changed</span>Page <b>main</b>: 2 widgets</div><div><span class="t del">Removed</span>Command <b>tv › sleep</b></div></div></div>
+</div>
+<div class="note">First run (no draft, nothing applied) replaces this screen with the empty state below.</div>
+<div class="empty"><svg class="ic" style="width:40px;height:40px;color:var(--acc)"><use href="#i-remote"/></svg><b style="font-size:16px">Set up this hub</b><span class="muted" style="max-width:52ch">Start from your existing <span class="mono">ha_harmony/sim-hub.yaml</span>, or add your first device and build from there. Nothing reaches the hub until you apply.</span><span style="display:flex;gap:8px"><span class="btn"><svg class="ic s"><use href="#i-upload"/></svg>Import YAML file</span><span class="btn pri"><svg class="ic s"><use href="#i-plus"/></svg>Add first device</span></span></div>
+</div></main></div></div></div>
+
+<!-- ============ 2 DEVICE EDITOR ============ -->
+<h2 class="sec">2 · Device editor</h2>
+<p>Commands are a dense table with inline test. "Send IR" is always amber, rounded and labelled, so you can always tell it apart from buttons that only edit. Selecting rows replaces the toolbar with bulk actions. The validation error is shown on the row and field it belongs to.</p>
+<div class="frame"><div class="app">
+<header class="top"><span class="brand"><svg class="ic"><use href="#i-remote"/></svg>Harmony Editor</span><span class="sel">Living room hub <svg class="ic"><use href="#i-down"/></svg></span><span class="sp"></span><span class="btn ghost sm">Import YAML</span><span class="btn ghost sm">Export YAML</span></header>
+<div class="body">
+<nav class="rail"><a href="#"><svg class="ic"><use href="#i-home"/></svg>Overview</a><a class="on" href="#"><svg class="ic"><use href="#i-tv"/></svg>Devices<span class="err">1</span></a><a href="#"><svg class="ic"><use href="#i-play"/></svg>Activities<span class="n">2</span></a><a href="#"><svg class="ic"><use href="#i-remote"/></svg>Hard keys</a><a href="#"><svg class="ic"><use href="#i-grid"/></svg>Remote pages</a><hr><a href="#"><svg class="ic"><use href="#i-db"/></svg>IR library</a><a href="#"><svg class="ic"><use href="#i-clock"/></svg>History</a></nav>
+<main>
+<div class="dbar"><span class="dstate"><span class="dot"></span>Draft · 5 changes</span><span class="chip bad"><svg class="ic"><use href="#i-alert"/></svg>1 error</span><span class="sp"></span><span class="meter"><span>Config <b>48.4 / 128 KiB</b></span><span class="bar"><i style="width:38%"></i></span></span><span class="btn ghost sm">Discard draft</span><span class="btn pri" aria-disabled="true">Review &amp; apply</span></div>
+<div class="content" style="display:grid;grid-template-columns:240px 1fr;gap:20px">
+<div>
+<div class="in" style="margin-bottom:8px"><svg class="ic"><use href="#i-search"/></svg><span class="muted">Filter devices</span></div>
+<div class="lr"><svg class="ic"><use href="#i-tv"/></svg><b>TV</b><span class="sp"></span><span class="muted">8</span></div>
+<div class="lr" style="border-color:var(--acc);background:var(--accs)"><svg class="ic"><use href="#i-vol"/></svg><b>AV receiver</b><span class="sp"></span><span class="err" style="background:var(--bad);color:#fff;border-radius:9px;font-size:11px;padding:0 6px">1</span></div>
+<div class="lr"><svg class="ic"><use href="#i-play"/></svg><b>Streaming box</b><span class="sp"></span><span class="muted">12</span></div>
+<span class="btn" style="width:100%;margin-top:12px;justify-content:center"><svg class="ic s"><use href="#i-plus"/></svg>Add device</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+<div class="ph"><h3>AV receiver</h3><span class="chip mono">id: avr</span><span class="chip">From IR archive · Denon AVR-X1600H</span><span class="sp"></span><span class="btn sm ghost danger"><svg class="ic s"><use href="#i-trash"/></svg>Delete device</span></div>
+<div class="tabs"><span class="on">Commands<span class="n">3</span></span><span>Power</span><span>Inputs<span class="n">2</span></span><span>Settings</span></div>
+<div style="display:flex;gap:8px;align-items:center"><div class="in" style="width:260px"><svg class="ic"><use href="#i-search"/></svg><span class="muted">Filter commands</span></div><span class="sp"></span><span class="btn sm"><svg class="ic s"><use href="#i-db"/></svg>Add from IR archive</span><span class="btn sm">Paste Pronto / upload file</span><span class="btn sm pri"><svg class="ic s"><use href="#i-plus"/></svg>Add command</span></div>
+<div class="bulk"><span class="cb on"></span><b>2 selected</b><span class="sp"></span><span class="btn sm">Set IR ports…</span><span class="btn sm">Rename…</span><span class="btn sm danger"><svg class="ic s"><use href="#i-trash"/></svg>Delete 2</span><span class="btn sm ghost">Clear selection</span></div>
+<table class="tbl"><thead><tr><th style="width:28px"></th><th>Command</th><th>Code</th><th>IR ports</th><th>Used by</th><th style="width:190px"></th></tr></thead><tbody>
+<tr class="sel"><td><span class="cb on"></span></td><td><div class="in" style="height:30px">vol_up</div></td><td class="mono">rc5 · addr 16 · cmd 16</td><td><span class="ports"><i class="on">1</i><i class="on">2</i><i>3</i></span></td><td class="muted">Vol + key (default)</td><td><span class="ir"><svg class="ic s"><use href="#i-ir"/></svg>Send IR</span> <span class="btn icon sm ghost"><svg class="ic s"><use href="#i-more"/></svg></span></td></tr>
+<tr class="sel"><td><span class="cb on"></span></td><td><div class="in" style="height:30px">vol_down</div></td><td class="mono">rc5 · addr 16 · cmd 17</td><td><span class="ports"><i class="on">1</i><i class="on">2</i><i class="on">3</i></span></td><td class="muted">Vol − key (default)</td><td><span class="ir cool"><svg class="ic s"><use href="#i-check"/></svg>Sent · wait 1 s</span> <span class="btn icon sm ghost"><svg class="ic s"><use href="#i-more"/></svg></span></td></tr>
+<tr class="erow"><td><span class="cb"></span></td><td><div class="in" style="height:30px">mute</div></td><td><div class="in err mono" style="height:30px">rc5 · addr 16 · cmd <b>999</b></div><div class="emsg"><svg class="ic s"><use href="#i-alert"/></svg>rc5 cmd must be 0–63</div></td><td><span class="ports"><i class="on">1</i><i class="on">2</i><i class="on">3</i></span></td><td class="muted">Mute key, page "main"</td><td><span class="ir" aria-disabled="true" style="opacity:.4">Send IR</span></td></tr>
+</tbody></table>
+<div class="g2">
+<div class="card"><h4>Power</h4><div class="seg"><span class="on">Separate on / off</span><span>Toggle</span><span>None</span></div>
+<div class="g2" style="margin-top:12px"><div class="f"><label>Power on</label><div class="in mono">rc5 · 16 · 12<span class="sp"></span><span class="ir">Send IR</span></div></div><div class="f"><label>Power off</label><div class="in mono">rc5 · 16 · 13<span class="sp"></span><span class="ir">Send IR</span></div></div></div></div>
+<div class="card"><h4>Timing</h4><div class="f"><label>Settle delay after power-on or input change</label><div class="in" style="width:180px">1500<span class="sfx">ms</span></div><span class="hint">The hub waits this long before sending the next step.</span></div></div>
+</div>
+</div></div></main></div></div></div>
+
+<!-- ============ 3 WIZARD ============ -->
+<h2 class="sec">3 · Add device: the power test step</h2>
+<p>Archive codes are grouped into distinct power codes, most common first. Each try fires one code. The answer moves the loop on, and "Yes" narrows the model list to the codesets that use that code. Sending is rate-limited, and the button shows a countdown while it waits.</p>
+<div class="frame"><div class="app">
+<header class="top"><span class="brand"><svg class="ic"><use href="#i-remote"/></svg>Harmony Editor</span><span class="sel">Living room hub <svg class="ic"><use href="#i-down"/></svg></span><span class="sp"></span></header>
+<div class="body">
+<nav class="rail"><a href="#"><svg class="ic"><use href="#i-home"/></svg>Overview</a><a class="on" href="#"><svg class="ic"><use href="#i-tv"/></svg>Devices</a><a href="#"><svg class="ic"><use href="#i-play"/></svg>Activities</a><a href="#"><svg class="ic"><use href="#i-remote"/></svg>Hard keys</a><a href="#"><svg class="ic"><use href="#i-grid"/></svg>Remote pages</a><hr><a href="#"><svg class="ic"><use href="#i-db"/></svg>IR library</a><a href="#"><svg class="ic"><use href="#i-clock"/></svg>History</a></nav>
+<main>
+<div class="dbar"><span class="dstate"><span class="dot ok"></span>No changes since rev 12</span><span class="chip ok"><svg class="ic"><use href="#i-check"/></svg>Valid</span><span class="sp"></span><span class="btn pri" aria-disabled="true">Review &amp; apply</span></div>
+<div class="content">
+<div class="ph"><h3>Add device</h3><span class="sp"></span><span class="btn ghost sm"><svg class="ic s"><use href="#i-x"/></svg>Cancel</span></div>
+<div class="steps"><span class="st done"><span class="num">1</span>Brand: Samsung</span><span class="st done"><span class="num">2</span>Type: TV</span><span class="st cur"><span class="num">3</span>Power test</span><span class="st"><span class="num">4</span>Model</span><span class="st"><span class="num">5</span>Review &amp; add</span></div>
+<div class="cand">
+<div class="card" style="display:grid;gap:16px;padding:24px">
+<div style="display:flex;gap:8px;align-items:center"><span class="chip">Code 2 of 7</span><span class="chip">Power toggle</span><span class="chip mono">samsung32 · 7 · 2</span><span class="sp"></span><span class="muted">Used by 1,204 models</span></div>
+<div class="muted">e.g. UE55KU6000, UE40H6400, QE65Q80T, UN55NU7100…</div>
+<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+<span class="ir big"><svg class="ic"><use href="#i-ir"/></svg>Send power code</span>
+<span class="f"><label>Blaster</label><span class="sel">All IR ports <svg class="ic"><use href="#i-down"/></svg></span></span>
+</div>
+<div class="banner ir"><svg class="ic"><use href="#i-ir"/></svg>Sent at 21:14:03. Point the TV at the hub. Next send allowed in <b>2 s</b>.</div>
+<div><b style="font-size:16px">Did the TV turn on or off?</b>
+<div class="qa" style="margin-top:12px"><span class="btn pri"><svg class="ic s"><use href="#i-check"/></svg>Yes, it reacted</span><span class="btn">No, try the next code</span><span class="btn ghost">Send again</span></div></div>
+<div class="hint">Keyboard: <span class="kbd">Space</span> send · <span class="kbd">Y</span> yes · <span class="kbd">N</span> next. Not sure? Send again; a toggle code turns the TV back the other way.</div>
+</div>
+<div style="display:grid;gap:16px;align-content:start">
+<div class="card"><h4>Tried</h4><div class="tried">
+<div class="lr lock"><span class="num">1</span><span class="mono">samsung32 7·152</span><span class="sp"></span><span class="chip">no reaction</span></div>
+<div class="lr" style="border-color:var(--acc)"><span class="num">2</span><span class="mono">samsung32 7·2</span><span class="sp"></span><span class="chip ir">waiting for answer</span></div>
+<div class="lr lock"><span class="num">3</span><span class="mono">nec 7·2</span><span class="sp"></span><span class="muted">next</span></div>
+</div></div>
+<div class="card"><h4>Skip the test</h4><span class="hint">Know the exact model? Search the 18,412 Samsung models instead.</span><div class="in" style="margin-top:8px"><svg class="ic"><use href="#i-search"/></svg><span class="muted">Model name, e.g. UE55</span></div></div>
+<div class="banner bad"><svg class="ic"><use href="#i-wifi"/></svg><span>Offline state (shown here for reference): "The IR archive can't be reached. Cached brands still work. <u>Retry</u>"</span></div>
+</div></div>
+</div></main></div></div></div>
+
+<!-- ============ 4 ACTIVITY ============ -->
+<h2 class="sec">4 · Activity editor</h2>
+<p>You pick the devices and their inputs, then the start sequence is built for you. The power and input steps are generated and locked, and your own steps follow. The "Who handles it" pickers fill the activity's key layer, and a key you override on the Hard keys screen wins.</p>
+<div class="frame"><div class="app">
+<header class="top"><span class="brand"><svg class="ic"><use href="#i-remote"/></svg>Harmony Editor</span><span class="sel">Living room hub <svg class="ic"><use href="#i-down"/></svg></span><span class="sp"></span></header>
+<div class="body">
+<nav class="rail"><a href="#"><svg class="ic"><use href="#i-home"/></svg>Overview</a><a href="#"><svg class="ic"><use href="#i-tv"/></svg>Devices</a><a class="on" href="#"><svg class="ic"><use href="#i-play"/></svg>Activities</a><a href="#"><svg class="ic"><use href="#i-remote"/></svg>Hard keys</a><a href="#"><svg class="ic"><use href="#i-grid"/></svg>Remote pages</a><hr><a href="#"><svg class="ic"><use href="#i-db"/></svg>IR library</a><a href="#"><svg class="ic"><use href="#i-clock"/></svg>History</a></nav>
+<main>
+<div class="dbar"><span class="dstate"><span class="dot"></span>Draft · 2 changes</span><span class="chip ok"><svg class="ic"><use href="#i-check"/></svg>Valid</span><span class="sp"></span><span class="meter"><span>Config <b>48.9 / 128 KiB</b></span><span class="bar"><i style="width:38%"></i></span></span><span class="btn ghost sm">Discard draft</span><span class="btn pri">Review &amp; apply</span></div>
+<div class="content">
+<div class="ph"><h3>Stream</h3><span class="chip mono">id: stream</span><span class="sp"></span><span class="btn sm">Duplicate</span><span class="btn sm ghost danger">Delete activity</span></div>
+<div class="g3" style="grid-template-columns:1.1fr 1fr 1fr">
+<div class="card"><h4>Devices and inputs<span class="sp"></span><span class="muted">3 / 8</span></h4>
+<div class="lr"><svg class="ic"><use href="#i-tv"/></svg><b style="width:110px">TV</b><span class="sel" style="flex:1"><svg class="ic"><use href="#i-input"/></svg>hdmi2<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span><span class="btn icon sm ghost"><svg class="ic s"><use href="#i-x"/></svg></span></div>
+<div class="lr"><svg class="ic"><use href="#i-vol"/></svg><b style="width:110px">AV receiver</b><span class="sel" style="flex:1"><svg class="ic"><use href="#i-input"/></svg>stream<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span><span class="btn icon sm ghost"><svg class="ic s"><use href="#i-x"/></svg></span></div>
+<div class="lr"><svg class="ic"><use href="#i-play"/></svg><b style="width:110px">Streaming box</b><span class="sel" style="flex:1;color:var(--tx3)">No input switch<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span><span class="btn icon sm ghost"><svg class="ic s"><use href="#i-x"/></svg></span></div>
+<span class="btn sm" style="margin-top:10px"><svg class="ic s"><use href="#i-plus"/></svg>Add device</span>
+</div>
+<div class="card"><h4>Start sequence<span class="sp"></span><span class="seg" style="transform:scale(.9)"><span class="on">Start</span><span>Stop</span></span></h4>
+<div class="lr lock"><span class="num">1</span>Power on TV, AV receiver, Streaming box<span class="sp"></span><span class="muted">auto</span></div>
+<div class="lr lock"><span class="num">2</span>TV → hdmi2 · AV receiver → stream<span class="sp"></span><span class="muted">auto</span></div>
+<div class="lr lock"><span class="num">3</span>Wait for settle (max 2000 ms)<span class="sp"></span><span class="muted">auto</span></div>
+<div class="lr drag"><svg class="ic handle"><use href="#i-drag"/></svg><span class="num">4</span>Streaming box · <span class="mono">ok</span><span class="sp"></span><span class="btn icon sm ghost" aria-label="Move up"><svg class="ic s"><use href="#i-up"/></svg></span><span class="btn icon sm ghost" aria-label="Move down"><svg class="ic s"><use href="#i-down"/></svg></span><span class="btn icon sm ghost" aria-label="Remove step"><svg class="ic s"><use href="#i-x"/></svg></span></div>
+<span class="btn sm" style="margin-top:10px"><svg class="ic s"><use href="#i-plus"/></svg>Add step</span><span class="hint" style="display:block;margin-top:6px">1 of 16 steps</span>
+</div>
+<div class="card"><h4>Who handles it</h4>
+<div class="kl"><span>Volume</span><span class="sel">AV receiver<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span><span class="muted">3 keys</span></div>
+<div class="kl"><span>Channels</span><span class="sel">TV<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span><span class="muted">3 keys</span></div>
+<div class="kl"><span>Navigation</span><span class="sel">Streaming box<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span><span class="muted">7 keys</span></div>
+<div class="kl"><span>Transport</span><span class="sel">Streaming box<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span><span class="muted">6 keys</span></div>
+<div class="hint" style="margin-top:8px">These fill 19 keys by matching command names (vol_up → Volume up). 2 keys have no matching command. <u>Open in Hard keys</u></div>
+</div></div>
+</div></main></div></div></div>
+
+<!-- ============ 5 HARD KEYS ============ -->
+<h2 class="sec">5 · Hard-key map</h2>
+<p>A schematic of the Elite's 35 physical keys. Choose a layer (Default, or one activity), then click a key or Tab through them. Filled keys are overridden in this layer, light keys inherit from Default, and dashed keys do nothing.</p>
+<div class="frame"><div class="app">
+<header class="top"><span class="brand"><svg class="ic"><use href="#i-remote"/></svg>Harmony Editor</span><span class="sel">Living room hub <svg class="ic"><use href="#i-down"/></svg></span><span class="sp"></span></header>
+<div class="body">
+<nav class="rail"><a href="#"><svg class="ic"><use href="#i-home"/></svg>Overview</a><a href="#"><svg class="ic"><use href="#i-tv"/></svg>Devices</a><a href="#"><svg class="ic"><use href="#i-play"/></svg>Activities</a><a class="on" href="#"><svg class="ic"><use href="#i-remote"/></svg>Hard keys</a><a href="#"><svg class="ic"><use href="#i-grid"/></svg>Remote pages</a><hr><a href="#"><svg class="ic"><use href="#i-db"/></svg>IR library</a><a href="#"><svg class="ic"><use href="#i-clock"/></svg>History</a></nav>
+<main>
+<div class="dbar"><span class="dstate"><span class="dot"></span>Draft · 2 changes</span><span class="chip ok"><svg class="ic"><use href="#i-check"/></svg>Valid</span><span class="sp"></span><span class="btn ghost sm">Discard draft</span><span class="btn pri">Review &amp; apply</span></div>
+<div class="content">
+<div class="ph"><h3>Hard keys</h3><span class="seg"><span>Default</span><span>Watch TV</span><span class="on">Stream</span></span><span class="sp"></span><div class="lg"><span><i class="sw" style="background:var(--acc)"></i>Override in Stream</span><span><i class="sw" style="background:var(--sf2);border:1px solid var(--tx3)"></i>From Default</span><span><i class="sw" style="border:1px dashed var(--tx3)"></i>Does nothing</span></div></div>
+<div style="display:grid;grid-template-columns:260px 1fr 340px;gap:20px;align-items:start">
+<div class="rem card" style="padding:12px;display:grid;place-items:center">
+<svg viewBox="0 0 200 600" width="220" height="660" role="group" aria-label="Elite remote keys">
+<rect x="6" y="4" width="188" height="592" rx="40" fill="var(--sf2)" stroke="var(--line)" stroke-width="2"/>
+<rect class="k inh" x="148" y="16" width="34" height="16" rx="8"/><text x="165" y="27" text-anchor="middle">OFF</text>
+<rect x="30" y="40" width="140" height="187" rx="6" fill="#101820"/><text x="100" y="138" text-anchor="middle" style="fill:#A8B4C0">touchscreen</text>
+<rect class="k inh" x="30" y="232" width="48" height="12" rx="6"/><text x="54" y="241" text-anchor="middle">HOME</text>
+<rect class="k none" x="122" y="232" width="48" height="12" rx="6"/><text x="146" y="241" text-anchor="middle">FAV</text>
+<g><rect class="k none" x="22" y="254" width="26" height="16" rx="4"/><text x="35" y="265" text-anchor="middle">HC1</text><rect class="k none" x="52" y="254" width="26" height="16" rx="4"/><text x="65" y="265" text-anchor="middle">HC2</text>
+<rect class="k none" x="86" y="254" width="28" height="16" rx="8"/><text x="100" y="265" text-anchor="middle">− +</text>
+<rect class="k none" x="122" y="254" width="26" height="16" rx="4"/><text x="135" y="265" text-anchor="middle">HC3</text><rect class="k none" x="152" y="254" width="26" height="16" rx="4"/><text x="165" y="265" text-anchor="middle">HC4</text></g>
+<rect class="k inh" x="28" y="280" width="40" height="16" rx="8"/><text x="48" y="291" text-anchor="middle">DVR</text>
+<rect class="k inh" x="80" y="280" width="40" height="16" rx="8"/><text x="100" y="291" text-anchor="middle">GUIDE</text>
+<rect class="k inh" x="132" y="280" width="40" height="16" rx="8"/><text x="152" y="291" text-anchor="middle">INFO</text>
+<rect class="k inh" x="20" y="306" width="36" height="16" rx="8"/><text x="38" y="317" text-anchor="middle">MENU</text>
+<rect class="k ov" x="144" y="306" width="36" height="16" rx="8"/><text class="on" x="162" y="317" text-anchor="middle">EXIT</text>
+<circle cx="100" cy="370" r="46" fill="var(--sf)" stroke="var(--line)" stroke-width="1.2"/>
+<path class="k ov" d="M80 336 h40 l-6 14 h-28z"/><text class="on" x="100" y="345" text-anchor="middle">UP</text>
+<path class="k ov" d="M80 404 h40 l-6 -14 h-28z"/><text class="on" x="100" y="400" text-anchor="middle">DN</text>
+<path class="k ov" d="M66 350 v40 l14 -6 v-28z"/><text class="on" x="72" y="373" text-anchor="middle">◀</text>
+<path class="k ov" d="M134 350 v40 l-14 -6 v-28z"/><text class="on" x="128" y="373" text-anchor="middle">▶</text>
+<circle class="k ov selk" cx="100" cy="370" r="17"/><text class="on" x="100" y="373" text-anchor="middle">OK</text>
+<rect class="k inh" x="16" y="330" width="22" height="64" rx="11"/><text x="27" y="345" text-anchor="middle">+</text><text x="27" y="365" text-anchor="middle">VOL</text><text x="27" y="387" text-anchor="middle">−</text>
+<rect class="k none" x="162" y="330" width="22" height="64" rx="11"/><text x="173" y="345" text-anchor="middle">+</text><text x="173" y="365" text-anchor="middle">CH</text><text x="173" y="387" text-anchor="middle">−</text>
+<rect class="k inh" x="14" y="402" width="28" height="14" rx="7"/><text x="28" y="412" text-anchor="middle">MUTE</text>
+<rect class="k none" x="158" y="402" width="28" height="14" rx="7"/><text x="172" y="412" text-anchor="middle">PREV</text>
+<g><rect class="k ov" x="24" y="430" width="44" height="18" rx="9"/><text class="on" x="46" y="442" text-anchor="middle">◀◀</text><rect class="k ov" x="78" y="430" width="44" height="18" rx="9"/><text class="on" x="100" y="442" text-anchor="middle">PLAY</text><rect class="k ov" x="132" y="430" width="44" height="18" rx="9"/><text class="on" x="154" y="442" text-anchor="middle">▶▶</text>
+<rect class="k none" x="24" y="456" width="44" height="18" rx="9"/><text x="46" y="468" text-anchor="middle">REC</text><rect class="k ov" x="78" y="456" width="44" height="18" rx="9"/><text class="on" x="100" y="468" text-anchor="middle">PAUSE</text><rect class="k ov" x="132" y="456" width="44" height="18" rx="9"/><text class="on" x="154" y="468" text-anchor="middle">STOP</text></g>
+<g><rect class="k none" x="22" y="490" width="34" height="12" rx="6" style="stroke:#E04848"/><rect class="k none" x="62" y="490" width="34" height="12" rx="6" style="stroke:#3AA050"/><rect class="k none" x="104" y="490" width="34" height="12" rx="6" style="stroke:#D0A020"/><rect class="k none" x="144" y="490" width="34" height="12" rx="6" style="stroke:#3870D8"/></g>
+<text x="100" y="530" text-anchor="middle" style="fill:var(--tx3)">schematic · not to scale</text>
+</svg></div>
+<div class="card"><h4>All keys in “Stream”<span class="sp"></span><div class="in" style="height:30px;width:180px"><svg class="ic"><use href="#i-search"/></svg><span class="muted">Filter</span></div></h4>
+<div class="kl" style="background:var(--accs);border-radius:6px;padding:6px 8px"><b>Select</b><span class="mono">Streaming box · ok</span><span class="chip acc src">override</span></div>
+<div class="kl"><span>Up / Down / Left / Right</span><span class="mono">Streaming box · up…right</span><span class="chip acc src">override</span></div>
+<div class="kl"><span>Exit</span><span class="mono">Streaming box · back</span><span class="chip acc src">override</span></div>
+<div class="kl"><span>Play · Pause · Stop</span><span class="mono">Streaming box · play_pause…</span><span class="chip acc src">override</span></div>
+<div class="kl"><span>Volume up / down</span><span class="mono">AV receiver · vol_up / vol_down</span><span class="chip src">default</span></div>
+<div class="kl"><span>Mute</span><span class="mono">AV receiver · mute</span><span class="chip src">default</span></div>
+<div class="kl"><span>Menu</span><span class="mono">TV · menu</span><span class="chip src">default</span></div>
+<div class="kl"><span>Home</span><span class="mono">Activity · off</span><span class="chip src">default</span></div>
+<div class="kl"><span>Channel up / down</span><span class="muted">does nothing</span><span class="btn sm">Assign</span></div>
+</div>
+<div class="card" style="display:grid;gap:12px"><h4>Select <span class="muted">· select · logical 4</span></h4>
+<div class="f"><label>In “Stream”, this key</label><div class="seg"><span>Uses Default</span><span class="on">Does something else</span><span>Does nothing</span></div></div>
+<div class="f"><label>Action</label><span class="sel">Device command<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span></div>
+<div class="g2"><div class="f"><label>Device</label><span class="sel">Streaming box<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span></div><div class="f"><label>Command</label><span class="sel mono">ok<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span></div></div>
+<div style="display:flex;gap:8px"><span class="ir"><svg class="ic s"><use href="#i-ir"/></svg>Send IR</span><span class="sp"></span><span class="btn sm"><svg class="ic s"><use href="#i-undo"/></svg>Use Default instead</span></div>
+<div class="hint">Default for this key: TV · ok</div>
+</div></div>
+</div></main></div></div></div>
+
+<!-- ============ 6 PAGE EDITOR ============ -->
+<h2 class="sec">6 · Remote page editor</h2>
+<p>The canvas is the compiler's decoded page, drawn at 2× in the remote's own colours. Cells show a faint grid. You can drag to move, drag the corner handles to resize, or use the keyboard: arrows move, Shift+arrows resize. The ghost cell marks where "Add widget" puts the new one. The byte and widget meters update as you type.</p>
+<div class="frame"><div class="app">
+<header class="top"><span class="brand"><svg class="ic"><use href="#i-remote"/></svg>Harmony Editor</span><span class="sel">Living room hub <svg class="ic"><use href="#i-down"/></svg></span><span class="sp"></span></header>
+<div class="body">
+<nav class="rail"><a href="#"><svg class="ic"><use href="#i-home"/></svg>Overview</a><a href="#"><svg class="ic"><use href="#i-tv"/></svg>Devices</a><a href="#"><svg class="ic"><use href="#i-play"/></svg>Activities</a><a href="#"><svg class="ic"><use href="#i-remote"/></svg>Hard keys</a><a class="on" href="#"><svg class="ic"><use href="#i-grid"/></svg>Remote pages<span class="err">1</span></a><hr><a href="#"><svg class="ic"><use href="#i-db"/></svg>IR library</a><a href="#"><svg class="ic"><use href="#i-clock"/></svg>History</a></nav>
+<main>
+<div class="dbar"><span class="dstate"><span class="dot"></span>Draft · 4 changes</span><span class="chip bad"><svg class="ic"><use href="#i-alert"/></svg>1 error</span><span class="sp"></span><span class="meter"><span>Widgets, all pages <b>21 / 128</b></span><span class="bar"><i style="width:16%"></i></span></span><span class="btn ghost sm">Discard draft</span><span class="btn pri" aria-disabled="true">Review &amp; apply</span></div>
+<div class="content">
+<div class="pe">
+<div class="card plist" style="padding:12px"><h4>Pages<span class="sp"></span><span class="btn icon sm" aria-label="Add page"><svg class="ic s"><use href="#i-plus"/></svg></span></h4>
+<div class="lr on"><svg class="ic handle s"><use href="#i-drag"/></svg><span class="num">0</span><div style="display:grid"><b>main</b><span class="muted">88 B · 7 widgets</span></div><span class="sp"></span><span class="err" style="background:var(--bad);color:#fff;border-radius:9px;font-size:11px;padding:0 6px">1</span></div>
+<div class="lr"><svg class="ic handle s"><use href="#i-drag"/></svg><span class="num">1</span><div style="display:grid"><b>lights</b><span class="muted">142 B · 9 widgets</span></div></div>
+<div class="lr"><svg class="ic handle s"><use href="#i-drag"/></svg><span class="num">2</span><div style="display:grid"><b>scenes</b><span class="muted">231 B · 5 widgets</span></div><span class="sp"></span><span class="chip ir" style="height:20px">92%</span></div>
+<div class="hint" style="margin-top:8px">The number is the page's id on the remote. Reorder with <span class="kbd">Alt</span>+<span class="kbd">↑↓</span>.</div>
+</div>
+<div class="canvaswrap">
+<div style="display:flex;gap:12px;align-items:center;width:480px"><span class="seg"><span>1×</span><span class="on">2×</span><span>3×</span></span><span class="sp"></span><span class="f" style="grid-auto-flow:column;align-items:center;gap:6px"><label>Grid</label><span class="sel">4 × 6</span></span><span class="btn sm"><svg class="ic s"><use href="#i-plus"/></svg>Add widget</span></div>
+<div class="scr" role="application" aria-label="Page main, 4 columns by 6 rows. Selected: Netflix button, column 1, row 4.">
+<div class="sbar">Living room<span class="r"><svg class="ic" style="width:22px;height:22px"><use href="#i-sig"/></svg>78%<span class="batt"></span></span></div>
+<div class="grid">
+<div class="w" style="grid-column:1/3;grid-row:1">Mute</div>
+<div class="w" style="grid-column:3/5;grid-row:1">All off</div>
+<div class="w tile" style="grid-column:1/5;grid-row:2/4"><small>Temp</small><b>21.5°</b></div>
+<div class="w selw" style="grid-column:1/3;grid-row:4">Netflix &amp; …<i style="left:-9px;top:-9px"></i><i style="right:-9px;top:-9px"></i><i style="left:-9px;bottom:-9px"></i><i style="right:-9px;bottom:-9px"></i></div>
+<div class="w" style="grid-column:3/4;grid-row:4">Lights</div>
+<div class="w ghost" style="grid-column:4/5;grid-row:4">+</div>
+<div class="w danger" style="grid-column:1/5;grid-row:5">Power Off</div>
+</div></div>
+<div class="zoom">Row 0 is the title label: it is drawn in the status bar. <span class="kbd">←↑→↓</span> move · <span class="kbd">Shift</span>+arrows resize · <span class="kbd">Del</span> remove</div>
+<div style="width:480px;display:grid;gap:6px"><span class="meter" style="min-width:0"><span>Page size <b>88 / 251 bytes</b></span><span class="bar"><i style="width:35%"></i></span></span><span class="meter" style="min-width:0"><span>Widgets on this page <b>7 / 32</b></span><span class="bar"><i style="width:22%"></i></span></span></div>
+</div>
+<div class="card" style="display:grid;gap:12px"><h4>Button<span class="sp"></span><span class="btn icon sm ghost danger" aria-label="Delete widget"><svg class="ic s"><use href="#i-trash"/></svg></span></h4>
+<div class="seg"><span class="on">Button</span><span>Tile</span><span>Label</span></div>
+<div class="f"><label>Label</label><div class="in err">Netflix &amp; streaming apps<span class="sfx" style="color:var(--bad);font-weight:600">26 / 24 bytes</span></div><div class="emsg"><svg class="ic s"><use href="#i-alert"/></svg>Shorten the label by 2 bytes. Accents and emoji count as 2–4 bytes.</div></div>
+<div class="f"><label>Widget id</label><div class="in mono">netflix<span class="sfx">tap_netflix</span></div></div>
+<div class="g4" style="grid-template-columns:repeat(4,1fr);gap:6px"><div class="f"><label>Col</label><div class="in">0</div></div><div class="f"><label>Row</label><div class="in">4</div></div><div class="f"><label>W</label><div class="in">2</div></div><div class="f"><label>H</label><div class="in">1</div></div></div>
+<div class="f"><label>When tapped</label><span class="sel">Start activity<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span><span class="sel">Stream<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span></div>
+<div style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:12px">
+<div style="display:flex;gap:8px;align-items:center"><b style="font-size:13px">Look</b><span class="v2">page format v2</span></div>
+<div class="f"><label>Role</label><div class="seg"><span class="on">Default</span><span>Primary</span><span>Secondary</span><span>Danger</span></div></div>
+<div class="f"><label>Shape</label><div class="seg"><span class="on">Card</span><span>Row</span><span>Pill</span><span>Monogram</span></div></div>
+<div class="f"><label>Navigate to</label><span class="sel">No (send the action)<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span></div>
+<div class="hint"><span class="cb"></span> Icon only (label kept for the editor, not drawn)</div>
+<div class="f"><label>Icon</label><div class="iconpick"><span><svg class="ic"><use href="#i-play"/></svg></span><span><svg class="ic"><use href="#i-tv"/></svg></span><span><svg class="ic"><use href="#i-bulb"/></svg></span><span><svg class="ic"><use href="#i-power"/></svg></span><span><svg class="ic"><use href="#i-vol"/></svg></span><span><svg class="ic"><use href="#i-more"/></svg></span></div></div>
+</div></div>
+</div></div></main></div></div></div>
+
+<!-- ============ 7 APPLY ============ -->
+<h2 class="sec">7 · Review &amp; apply</h2>
+<p>A dialog summarises what changes on the hub and on the remote, then shows progress in place. Esc and Cancel close it before you apply. Once you have applied, the dialog shows the result.</p>
+<div class="wrapcols">
+<div class="frame" style="flex:1 1 700px"><div style="min-width:720px;height:640px;position:relative;background:var(--bg)">
+<div class="scrim"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="ap1">
+<header><h3 id="ap1">Apply draft to Living room hub?</h3><span class="muted">Replaces rev 12. The previous config stays in History.</span></header>
+<div class="bd">
+<div class="diff">
+<div><span class="t add">Added</span>Device <b>Streaming box</b> · 12 commands, power toggle</div>
+<div><span class="t chg">Changed</span>Activity <b>Stream</b> · start sequence (+1 step), 6 key overrides</div>
+<div><span class="t chg">Changed</span>Remote page <b>main</b> · 2 widgets, 88 bytes</div>
+<div><span class="t del">Removed</span>Command <b>TV › sleep</b> (not used anywhere)</div>
+</div>
+<div class="g3" style="gap:12px">
+<span class="meter"><span>Config <b>48.9 / 128 KiB</b></span><span class="bar"><i style="width:38%"></i></span></span>
+<span class="meter"><span>IR pool <b>22%</b></span><span class="bar"><i style="width:22%"></i></span></span>
+<span class="meter"><span>Commands <b>223 / 256</b></span><span class="bar"><i class="w" style="width:87%"></i></span></span>
+</div>
+<div class="banner acc"><svg class="ic"><use href="#i-play"/></svg>If an activity is running, the hub keeps it running with the new keys. Devices are not switched.</div>
+</div>
+<footer><span class="muted" style="margin-right:auto">Config hash 3f9a…c21</span><span class="btn">Cancel</span><span class="btn pri fx">Apply to hub</span></footer>
+</div></div></div></div>
+<div class="frame" style="flex:0 1 520px"><div style="min-width:520px;height:640px;position:relative;background:var(--bg)">
+<div class="scrim"><div class="dlg" style="width:460px" role="dialog" aria-modal="true" aria-labelledby="ap2">
+<header><h3 id="ap2">Applying…</h3></header>
+<div class="bd"><div class="prog" role="status" aria-live="polite">
+<div><span class="ring done"></span>Validated and compiled</div>
+<div><span class="ring done"></span>Saved as rev 13</div>
+<div><span class="ring run"></span>Waiting for Home Assistant to push it to the hub…</div>
+<div><span class="ring"></span>Remote pages updated</div>
+</div>
+<div class="banner bad"><svg class="ic"><use href="#i-alert"/></svg><span>Failure state (shown here for reference): "The hub rejected the config: <i>too many keys in map</i>. The hub keeps running rev 12. <u>Revert to rev 12</u>"</span></div>
+</div>
+<footer><span class="btn">Close, keep going in background</span></footer>
+</div></div></div></div>
+</div>
+
+<!-- ============ 8 PHONE ============ -->
+<h2 class="sec">8 · Phone, 400 px</h2>
+<p>The left rail becomes a menu button, and the draft bar moves to the bottom as a compact status and Apply strip. Tables turn into rows with 44 px targets. On the page editor, the canvas drops to 1.25× and the inspector becomes a bottom sheet.</p>
+<div class="wrapcols">
+<div class="frame" style="flex:none"><div class="phone">
+<div class="ptop"><span class="btn icon ghost" aria-label="Menu"><svg class="ic"><use href="#i-menu"/></svg></span><b style="flex:1">AV receiver</b><span class="btn icon ghost" aria-label="More"><svg class="ic"><use href="#i-more"/></svg></span></div>
+<div class="pbody">
+<div class="tabs"><span class="on">Commands</span><span>Power</span><span>Inputs</span><span>More</span></div>
+<div class="in"><svg class="ic"><use href="#i-search"/></svg><span class="muted">Filter commands</span></div>
+<div>
+<div class="crow"><div style="flex:1;display:grid"><span class="nm">vol_up</span><span class="cd">rc5 · 16 · 16 · ports 1,2</span></div><span class="ir"><svg class="ic s"><use href="#i-ir"/></svg>Send</span><span class="btn icon ghost"><svg class="ic s"><use href="#i-more"/></svg></span></div>
+<div class="crow"><div style="flex:1;display:grid"><span class="nm">vol_down</span><span class="cd">rc5 · 16 · 17</span></div><span class="ir cool"><svg class="ic s"><use href="#i-check"/></svg>1 s</span><span class="btn icon ghost"><svg class="ic s"><use href="#i-more"/></svg></span></div>
+<div class="crow" style="background:var(--bads);margin:0 -16px;padding:10px 16px"><div style="flex:1;display:grid"><span class="nm">mute</span><span class="cd" style="color:var(--bad)">rc5 cmd 999: must be 0–63</span></div><span class="btn sm">Fix</span></div>
+<div class="crow"><div style="flex:1;display:grid"><span class="nm">input_next</span><span class="cd">pronto · 0000 006D…</span></div><span class="ir"><svg class="ic s"><use href="#i-ir"/></svg>Send</span><span class="btn icon ghost"><svg class="ic s"><use href="#i-more"/></svg></span></div>
+</div>
+<span class="btn" style="justify-content:center"><svg class="ic s"><use href="#i-plus"/></svg>Add command</span>
+</div>
+<div class="pbar"><span class="dot"></span><div style="display:grid;flex:1"><b style="font-size:13px">5 changes</b><span class="muted" style="color:var(--bad)">1 error</span></div><span class="btn pri" aria-disabled="true">Review &amp; apply</span></div>
+</div></div>
+
+<div class="frame" style="flex:none"><div class="phone">
+<div class="ptop"><span class="btn icon ghost" aria-label="Menu"><svg class="ic"><use href="#i-menu"/></svg></span><b style="flex:1">Page: main</b><span class="chip">88 / 251 B</span></div>
+<div class="pbody" style="align-items:center;padding-top:16px">
+<div class="scr s1"><div class="sbar">Living room<span class="r">78%<span class="batt"></span></span></div>
+<div class="grid"><div class="w" style="grid-column:1/3;grid-row:1">Mute</div><div class="w" style="grid-column:3/5;grid-row:1">All off</div><div class="w tile" style="grid-column:1/5;grid-row:2/4"><small>Temp</small><b>21.5°</b></div><div class="w selw" style="grid-column:1/3;grid-row:4">Netflix…</div><div class="w" style="grid-column:3/4;grid-row:4">Lights</div><div class="w danger" style="grid-column:1/5;grid-row:5">Power Off</div></div></div>
+</div>
+<div class="sheet"><div class="grab"></div>
+<div style="display:flex;align-items:center;gap:8px"><b>Button · netflix</b><span class="sp"></span><span class="btn icon sm ghost" aria-label="Move left">◀</span><span class="btn icon sm ghost" aria-label="Move up">▲</span><span class="btn icon sm ghost" aria-label="Move down">▼</span><span class="btn icon sm ghost" aria-label="Move right">▶</span></div>
+<div class="f"><label>Label</label><div class="in err">Netflix &amp; streaming apps<span class="sfx" style="color:var(--bad);font-weight:600">26/24</span></div></div>
+<div class="f"><label>When tapped</label><span class="sel">Start activity · Stream<span class="sp"></span><svg class="ic"><use href="#i-down"/></svg></span></div>
+<span class="btn" style="justify-content:center">More: size, id, look</span>
+</div>
+</div></div>
+</div>
+</div>
