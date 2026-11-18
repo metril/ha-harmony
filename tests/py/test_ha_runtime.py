@@ -496,7 +496,7 @@ async def test_key_event_to_service_call_is_scheduled_in_the_same_loop_iteration
 
     monkeypatch.setattr(type(hass.services), "async_call", spy)
     c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 1, "action": 0})
-    assert started == [("light", "toggle", False)]  # before any await: no loop iteration passed
+    assert started == [("light", "toggle", True)]  # blocking runs inside the task; started before any await
     await settle(hass)
 
 

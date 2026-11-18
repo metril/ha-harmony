@@ -37,6 +37,8 @@ CAP_TILE_STATE = 1  # remote_info.caps bit 0 (bit 1 = page store / paging)
 CAP_PAGING = 2
 TILE_TEXT_MAX = 31  # bytes, docs/proto/page-format.md
 
+HOLD_REPEAT = 0.4  # seconds between the resends of `remote.send_command hold_secs` (the remote's hold cadence)
+
 OFF_OPTION = "Off"
 HUB_DEVICE = "hub"
 CMD_START_ACTIVITY = "start_activity"

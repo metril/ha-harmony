@@ -13,7 +13,6 @@ from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryError,
     ConfigEntryNotReady,
-    ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
@@ -34,6 +33,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import ISSUE_YAML, HarmonyCoordinator
+from .errors import invalid
 from .harmony_core.config_model import validate_ir
 
 PLATFORMS = [
@@ -72,11 +72,11 @@ def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[HarmonyCoordin
     if (wanted := call.data.get("config_entry")) is not None:
         entries = [e for e in entries if wanted in (e.entry_id, e.unique_id)]
         if not entries:
-            raise ServiceValidationError(f"No loaded ha_harmony entry matches {wanted!r}")
+            raise invalid("no_matching_hub", hub=wanted)
     elif len(entries) > 1 and call.service in ("send_ir", "set_device_state"):
-        raise ServiceValidationError("Several hubs are configured: pass `config_entry`")
+        raise invalid("several_hubs")
     if not entries:
-        raise ServiceValidationError("No loaded ha_harmony hub")
+        raise invalid("no_loaded_hub")
     return [e.runtime_data for e in entries]
 
 
@@ -91,7 +91,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 try:  # no base dir: file references are refused (inline the codes)
                     action = validate_ir(call.data["ir"])
                 except vol.Invalid as exc:
-                    raise ServiceValidationError(f"Invalid IR action: {exc.error_message}") from exc
+                    raise invalid("invalid_ir", error=exc.error_message) from exc
                 await coord.async_send_ir(action)
             else:
                 args: dict[str, Any] = {}
@@ -100,7 +100,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 if "input" in call.data:
                     args["input"] = call.data["input"]
                 if not args:
-                    raise ServiceValidationError("Give `power` and/or `input`")
+                    raise invalid("need_power_or_input")
                 await coord.async_set_device_state(call.data["device"], **args)
 
     for name, schema in SERVICE_SCHEMAS.items():

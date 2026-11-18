@@ -132,5 +132,55 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "service_not_allowed": {
+      "message": "The service {service} is not allowed."
+    },
+    "service_missing": {
+      "message": "The service {service} does not exist."
+    },
+    "service_failed": {
+      "message": "The service {service} failed: {error}"
+    },
+    "hub_rejected": {
+      "message": "The hub rejected the command: {error}"
+    },
+    "hub_unreachable": {
+      "message": "The hub is unreachable: {error}"
+    },
+    "hub_failed": {
+      "message": "The hub command failed: {error}"
+    },
+    "ha_device_state": {
+      "message": "{device} is a Home Assistant device: its state is its entity's."
+    },
+    "unknown_command": {
+      "message": "{device} has no command {command}."
+    },
+    "not_linked": {
+      "message": "This hub is not linked to the Harmony Editor add-on."
+    },
+    "config_rejected": {
+      "message": "The hub rejected the config: {error}"
+    },
+    "no_activities": {
+      "message": "The hub has no activities configured."
+    },
+    "no_loaded_hub": {
+      "message": "No loaded ha_harmony hub."
+    },
+    "no_matching_hub": {
+      "message": "No loaded ha_harmony entry matches {hub}."
+    },
+    "several_hubs": {
+      "message": "Several hubs are configured: pass config_entry."
+    },
+    "invalid_ir": {
+      "message": "Invalid IR action: {error}"
+    },
+    "need_power_or_input": {
+      "message": "Give power and/or input."
+    }
   }
 }

@@ -57,6 +57,7 @@ from .const import (
     KEY_NAMES,
     UNKNOWN_KEY,
 )
+from .errors import ha_error, invalid
 from .harmony_core.compiler import Compiled, HaStep, compile_config
 from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
@@ -189,6 +190,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._tile_last: dict[tuple[int, int, int], tuple[bool, tuple[int, str]]] = {}
         self._ha_dev_unsub: Callable[[], None] | None = None
         self._ha_task: asyncio.Task[None] | None = None
+        self._calls: dict[tuple[str, tuple[str, ...]], int] = {}  # key-started calls in flight
+        self._released: set[int] = set()  # keys whose last event was a release: no more repeats
         self._act_known = False  # the first state_update after a connect is only a baseline
         self._warned: set[tuple[str, ...]] = set()
         self._unsubs = [
@@ -222,6 +225,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     @property
     def last_activity(self) -> str | None:
         return self._activity_name(self._last_idx)
+
+    async def async_sleep(self, seconds: float) -> None:
+        await self._sleep(seconds)
 
     def key_name(self, code: int) -> str:
         return self.compiled.key_names.get(code) or KEY_NAMES.get(code, UNKNOWN_KEY)
@@ -377,7 +383,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     async def async_refresh_from_addon(self) -> None:
         """Service entry point: pull now, apply, push what changed; raises with the reason."""
         if self._link is None:
-            raise HomeAssistantError("This hub is not linked to the Harmony Editor add-on")
+            raise ha_error("not_linked")
         try:
             await self.async_process_raw(await self._link.fetch(self.hub_id))
         except NothingApplied:
@@ -388,7 +394,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 self._note_link_failure(exc)
             raise
         if self.last_error:
-            raise HomeAssistantError(f"The hub rejected the config: {self.last_error}")
+            raise ha_error("config_rejected", error=self.last_error)
 
     def _note_link_failure(self, exc: AddonError) -> bool:
         """Record a failed pull; True when this changed the state (so it is logged once)."""
@@ -862,6 +868,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """A key press (or hold repeat) -> the HA service of the hub's current activity layer.
         Dict lookups only; the call is started in this very callback. Never raises."""
         try:
+            if action == "release":
+                self._released.add(key)
+            elif action == "press":
+                self._released.discard(key)
+            elif key in self._released:
+                return  # a stray hold after the release: repeats stop with the release
             tables = self.compiled.ha_keys
             table = tables.get(self.current_activity_id)
             if table is None:
@@ -872,7 +884,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # PRESS fires once; the remote sends HOLD every 400 ms while the key stays down, which
             # is the cadence of a `repeat: true` action. RELEASE does nothing.
             if action == "press" or (action == "hold" and call.repeat):
-                self._fire(call)
+                self._fire(call, hold=action == "hold")
         except Exception:
             _LOGGER.exception("Home Assistant action for key %s failed", key)
 
@@ -881,30 +893,71 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._warned.add(key)
             _LOGGER.warning(msg, *args)
 
-    @callback
-    def _fire(self, call: HaCall) -> None:
-        """Start one service call now, with the integration's own context, without waiting."""
+    def _call_problem(self, call: HaCall) -> tuple[str, dict[str, str]] | None:
         if not allowed(call.service):  # defence in depth: the bundle came from the add-on
-            self._warn_once((call.service,), "Refusing the service %s: not allowed", call.service)
-            return
+            return "service_not_allowed", {"service": call.service}
         if not self.hass.services.has_service(call.domain, call.name):
-            self._warn_once((call.service,), "Service %s does not exist; skipping it", call.service)
-            return
+            return "service_missing", {"service": call.service}
+        return None
+
+    def _warn_missing_entities(self, call: HaCall) -> None:
         for entity in call.entities:
             if self.hass.states.get(entity) is None:
                 self._warn_once(
                     (call.service, entity), "%s targets %s, which does not exist", call.service, entity
                 )
-        data = {**call.data, "entity_id": list(call.entities)}
-        self.hass.async_create_task(self._call_service(call, data), eager_start=True)
 
-    async def _call_service(self, call: HaCall, data: dict[str, Any]) -> None:
+    @staticmethod
+    def _call_data(call: HaCall) -> dict[str, Any]:
+        return {**call.data, "entity_id": list(call.entities)}
+
+    @callback
+    def _fire(self, call: HaCall, *, hold: bool = False) -> None:
+        """Start one service call now (a key event or an activity step): own context, not awaited
+        by the caller, run to completion in its own task and only logged when it fails. A hold
+        repeat is dropped while the same call is still running, so a slow service never queues."""
+        if (problem := self._call_problem(call)) is not None:
+            key, _ph = problem
+            text = "Refusing the service %s: not allowed" if key == "service_not_allowed" else (
+                "Service %s does not exist; skipping it"
+            )
+            self._warn_once((call.service,), text, call.service)
+            return
+        self._warn_missing_entities(call)
+        flight = (call.service, call.entities)
+        if hold and flight in self._calls:
+            return
+        self._calls[flight] = self._calls.get(flight, 0) + 1
+        self.hass.async_create_task(self._run_call(call, flight), eager_start=True)
+
+    async def _run_call(self, call: HaCall, flight: tuple[str, tuple[str, ...]]) -> None:
         try:
             await self.hass.services.async_call(
-                call.domain, call.name, data, blocking=False, context=Context()
+                call.domain, call.name, self._call_data(call), blocking=True, context=Context()
             )
-        except Exception as exc:  # noqa: BLE001  (any failure is only a warning)
+        except Exception as exc:  # noqa: BLE001  (a key event or step never raises)
             self._warn_once((call.service, "error"), "%s failed: %s", call.service, exc)
+        finally:
+            left = self._calls.get(flight, 1) - 1
+            if left > 0:
+                self._calls[flight] = left
+            else:
+                self._calls.pop(flight, None)
+
+    async def async_run_call(self, call: HaCall) -> None:
+        """A call the user asked for (button, remote.send_command): awaited, and a failure raises."""
+        if (problem := self._call_problem(call)) is not None:
+            key, ph = problem
+            raise invalid(key, **ph)
+        self._warn_missing_entities(call)
+        try:
+            await self.hass.services.async_call(
+                call.domain, call.name, self._call_data(call), blocking=True, context=Context()
+            )
+        except HomeAssistantError:
+            raise
+        except Exception as exc:
+            raise ha_error("service_failed", service=call.service, error=exc) from exc
 
     # -- activities with Home Assistant steps
     def _ha_power(self, device: str) -> bool | None:
@@ -971,11 +1024,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         try:
             res = await self.client.async_send(MsgType.COMMAND, payload)
         except HarmonyCommandError as exc:
-            raise HomeAssistantError(f"Hub rejected command: {exc.message}") from exc
+            raise ha_error("hub_rejected", error=exc.message) from exc
         except HarmonyConnectionError as exc:
-            raise HomeAssistantError(f"Hub unreachable: {exc}") from exc
+            raise ha_error("hub_unreachable", error=exc) from exc
         if not res.get("ok"):
-            raise HomeAssistantError(f"Hub command failed: {res.get('message', 'unknown error')}")
+            raise ha_error("hub_failed", error=res.get("message", "unknown error"))
 
     async def async_start_activity(self, name: str) -> None:
         await self.async_command(HUB_DEVICE, CMD_START_ACTIVITY, {"name": name})
@@ -1006,7 +1059,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """Tell the hub a device changed by hand (no IR). `input=None` = unknown, False = leave."""
         args: dict[str, Any] = {"device": self.resolve_device(device)}
         if args["device"] in self.compiled.ha_devices:
-            raise HomeAssistantError(f"{device} is a Home Assistant device: its state is its entity's")
+            raise invalid("ha_device_state", device=device)
         if power is not None:
             args["power"] = power
         if input is not False:
@@ -1022,8 +1075,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if (ha := self.compiled.ha_devices.get(device)) is not None:
             call = ha.lookup(command)
             if call is None:
-                raise HomeAssistantError(f"{device} has no command {command!r}")
-            self._fire(call)
+                raise invalid("unknown_command", device=device, command=command)
+            await self.async_run_call(call)
             return
         await self.async_command(
             HUB_DEVICE, CMD_DEVICE_COMMAND, {"device": device, "command": command}
