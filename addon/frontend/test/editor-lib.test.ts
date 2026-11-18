@@ -12,7 +12,7 @@ import { tvConfig } from './helpers';
 const full = (): Config => {
   const c = tvConfig();
   const tv = c.devices?.[0];
-  if (tv) tv.commands = { ...c.devices[0].commands, vol_up: { proto: 'nec', addr: 4, cmd: 1 }, vol_down: { proto: 'nec', addr: 4, cmd: 2 }, 'KEY_MUTE': { proto: 'nec', addr: 4, cmd: 3 }, ok: { proto: 'nec', addr: 4, cmd: 4 } };
+  if (tv) tv.commands = { ...tv.commands, vol_up: { proto: 'nec', addr: 4, cmd: 1 }, vol_down: { proto: 'nec', addr: 4, cmd: 2 }, 'KEY_MUTE': { proto: 'nec', addr: 4, cmd: 3 }, ok: { proto: 'nec', addr: 4, cmd: 4 } };
   c.activities = [{ id: 'watch_tv', name: 'Watch TV', devices: [{ device: 'tv', input: 'hdmi1' }, { device: 'hdmi_switch', input: 'port1' }], steps: [{ device: 'tv', command: 'vol_up' }], keys: { select: { device: 'tv', command: 'ok' } } }];
   c.keys = { volume_up: { device: 'tv', command: 'vol_up' } };
   c.pages = [{ id: 'main', kind: 'home', cols: 4, rows: 4, widgets: [{ type: 'button', id: 'b1', x: 0, y: 0, w: 2, label: 'Up', action: { device: 'tv', command: 'vol_up' } }] }];
