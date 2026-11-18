@@ -454,6 +454,30 @@ async def test_draft_survives_a_page_reload(browser, site):
     assert got["draft"]["config"]["devices"][0]["name"] == "Den TV"
 
 
+async def test_edit_then_immediate_reload_keeps_the_edit(browser, site):
+    from harmony_core.config_model import load_source
+
+    await api(site, "PUT", "/api/v1/config/draft", json={"config": load_source(YAML)}, headers=H)
+    page = await open_editor(browser, site)
+    await page.goto(f"{site}{PREFIX}/#/devices/tv")
+    name = page.get_by_label("Device name")
+    await name.fill("Quick TV")
+    await name.dispatch_event("change")
+    await page.reload()  # no wait: the 600 ms debounce has not fired
+    await page.get_by_label("Device name").wait_for()
+    prompt = page.get_by_role("button", name="Restore")
+    if await prompt.count():
+        await prompt.click()
+    await page.wait_for_function(
+        "() => document.querySelector('hh-app').store.config.devices[0].name === 'Quick TV'", timeout=8000
+    )
+    await page.wait_for_function(
+        "() => document.querySelector('hh-app').store.saveState === 'saved'", timeout=8000
+    )
+    _, got = await api(site, "GET", "/api/v1/config")
+    assert got["draft"]["config"]["devices"][0]["name"] == "Quick TV"
+
+
 async def test_wizard_likely_model_goes_candidates_to_model_files(
     browser, site_ir
 ):

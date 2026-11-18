@@ -18,6 +18,14 @@ type Applied = NonNullable<Meta['applied']> & { config?: Config };
 
 export const clone = <T>(v: T): T => (v == null ? v : (JSON.parse(JSON.stringify(v)) as T));
 
+export interface Stash {
+  config: Config;
+  /** the server rev the stashed edit was based on */
+  rev: number | null;
+  at: number;
+}
+const stashKey = (hub: string) => `hh-unsaved:${hub}`;
+
 export class Store extends EventTarget {
   loaded = false;
   loadError: string | null = null;
@@ -59,6 +67,60 @@ export class Store extends EventTarget {
   ) {
     super();
     this.queue = new DraftQueue(api, hub);
+  }
+
+  /** Unsaved edits from a moment ago, offered after a reload when the server never received them. */
+  stashed: Stash | null = null;
+  private store_(): Storage | null {
+    try {
+      return globalThis.sessionStorage ?? null;
+    } catch {
+      return null;
+    }
+  }
+  private clearStash() {
+    try {
+      this.store_()?.removeItem(stashKey(this.hub));
+    } catch { /* storage unavailable */ }
+  }
+  /** Page is going away (pagehide / tab hidden): send a pending draft save now and keep a copy in sessionStorage. */
+  flushOnUnload(): void {
+    if (this.saveState !== 'dirty' && this.saveState !== 'error' && this.saveState !== 'saving') return;
+    const stash: Stash = { config: this.config, rev: this.queue.rev, at: Date.now() };
+    try {
+      this.store_()?.setItem(stashKey(this.hub), JSON.stringify(stash));
+    } catch { /* quota or private mode: the keepalive save still goes */ }
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    void this.api.putDraftOnUnload(this.hub, this.config, this.queue.rev);
+  }
+  /** Read a stash left by the previous page; keep it only when the server's draft is older than it. */
+  private readStash(serverRev: number | null) {
+    this.stashed = null;
+    try {
+      const raw = this.store_()?.getItem(stashKey(this.hub));
+      if (!raw) return;
+      const s = JSON.parse(raw) as Stash;
+      const sameAsServer = JSON.stringify(s.config) === JSON.stringify(this.config);
+      if (sameAsServer || (s.rev != null && serverRev != null && serverRev > s.rev)) this.clearStash();
+      else this.stashed = s;
+    } catch {
+      this.clearStash();
+    }
+  }
+  restoreStash(): void {
+    const s = this.stashed;
+    if (!s) return;
+    this.stashed = null;
+    this.clearStash();
+    this.replace(clone(s.config));
+  }
+  discardStash(): void {
+    this.stashed = null;
+    this.clearStash();
+    this.emit();
   }
 
   private emit() {
@@ -106,6 +168,7 @@ export class Store extends EventTarget {
       this.queue.rev = r.rev;
       this.savedAt = r.draft?.updated ?? null;
       this.saveState = 'clean';
+      this.readStash(r.rev);
       this.loaded = true;
       this.emit();
       if (this.hasDraft || this.applied) await this.check();
@@ -199,7 +262,10 @@ export class Store extends EventTarget {
       this.confirmed = sent;
       this.confirmedHasDraft = true;
       this.savedAt = r.draft_updated;
-      if (this.saveState === 'saving') this.saveState = 'saved';
+      if (this.saveState === 'saving') {
+        this.saveState = 'saved';
+        this.clearStash();
+      }
       if (this.offline) {
         this.offline = false;
         this.toast('The add-on is back. Your edits are saved.');

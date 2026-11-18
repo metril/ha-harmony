@@ -205,6 +205,7 @@ export interface Health {
   capabilities?: { ha_actions?: boolean; page_format?: number };
 }
 
+export const KEEPALIVE_MAX = 60 * 1024;
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -248,7 +249,7 @@ export class Api {
   async request<T>(
     method: string,
     path: string,
-    opts: { query?: Record<string, string | undefined>; body?: unknown; yaml?: string; headers?: Record<string, string> } = {},
+    opts: { query?: Record<string, string | undefined>; body?: unknown; yaml?: string; headers?: Record<string, string>; keepalive?: boolean } = {},
   ): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json', ...opts.headers };
     let body: string | undefined;
@@ -265,7 +266,7 @@ export class Api {
     if (MUTATING.has(method)) headers['X-HH-CSRF'] = '1';
     let res: Response;
     try {
-      res = await this.doFetch(this.href(path, opts.query), { method, headers, body, credentials: 'same-origin' });
+      res = await this.doFetch(this.href(path, opts.query), { method, headers, body, credentials: 'same-origin', ...(opts.keepalive ? { keepalive: true } : {}) });
     } catch {
       throw new ApiError(0, 'network', 'Cannot reach the add-on. Check your connection and retry.');
     }
@@ -300,6 +301,15 @@ export class Api {
       body: { config },
       headers: rev != null ? { 'If-Match': String(rev) } : {},
     });
+  /** Fire-and-forget PUT for page unload: `keepalive` lets it outlive the page. Over KEEPALIVE_MAX bytes browsers refuse
+   *  keepalive bodies (64 KiB), so a normal fetch is used and may be cut off. */
+  putDraftOnUnload = (hub: string, config: Config, rev?: number | null): Promise<unknown> =>
+    this.request<PutResponse>('PUT', 'api/v1/config/draft', {
+      query: { hub },
+      body: { config },
+      headers: rev != null ? { 'If-Match': String(rev) } : {},
+      keepalive: JSON.stringify(config).length < KEEPALIVE_MAX,
+    }).catch(() => undefined);
   validate = (hub: string, config?: Config) =>
     this.request<{ ok: boolean; errors: ValidationError[] }>('POST', 'api/v1/config/validate', {
       query: { hub },

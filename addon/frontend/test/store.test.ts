@@ -166,3 +166,58 @@ describe('draft store', () => {
     expect(store.isFirstRun).toBe(true);
   });
 });
+
+describe('unsaved edits survive a reload', () => {
+  beforeEach(() => sessionStorage.clear());
+  it('pagehide sends the pending PUT now (CSRF + If-Match) and stashes it in sessionStorage; a confirmed save clears the stash', async () => {
+    const { store, calls } = setup();
+    await store.load();
+    store.edit((c) => (c.devices![0]!.name = 'Quick'));
+    store.flushOnUnload();
+    await vi.advanceTimersByTimeAsync(0);
+    const put = calls.find((c) => c.method === 'PUT')!;
+    expect(put.headers['X-HH-CSRF']).toBe('1');
+    expect(put.headers['If-Match']).toBe(String(META.rev));
+    expect(JSON.parse(put.body!).config.devices[0].name).toBe('Quick');
+    expect(JSON.parse(sessionStorage.getItem('hh-unsaved:h')!).config.devices[0].name).toBe('Quick');
+    expect(localStorage.getItem('hh-unsaved:h')).toBeNull();
+    await vi.advanceTimersByTimeAsync(700); // the debounce was cancelled; a later edit saves normally and clears the stash
+    store.edit((c) => (c.devices![0]!.name = 'Later'));
+    await vi.advanceTimersByTimeAsync(700);
+    expect(store.saveState).toBe('saved');
+    expect(sessionStorage.getItem('hh-unsaved:h')).toBeNull();
+  });
+  it('a clean store stashes and sends nothing', async () => {
+    const { store, calls } = setup();
+    await store.load();
+    store.flushOnUnload();
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(0);
+    expect(sessionStorage.getItem('hh-unsaved:h')).toBeNull();
+  });
+  it('a later load offers the stash when the server draft is older, and restoring brings the edit back as a draft', async () => {
+    const edited = tvConfig();
+    edited.devices![0]!.name = 'Quick';
+    sessionStorage.setItem('hh-unsaved:h', JSON.stringify({ config: edited, rev: META.rev, at: 1 }));
+    const { store } = setup({}, { config: tvConfig(), updated: 1 });
+    await store.load();
+    expect(store.stashed?.config.devices![0]!.name).toBe('Quick');
+    store.restoreStash();
+    expect(store.config.devices![0]!.name).toBe('Quick');
+    expect(store.saveState).toBe('dirty');
+    expect(store.stashed).toBeNull();
+    expect(sessionStorage.getItem('hh-unsaved:h')).toBeNull();
+  });
+  it('drops the stash when the server already has it or is newer', async () => {
+    const edited = tvConfig();
+    edited.devices![0]!.name = 'Quick';
+    sessionStorage.setItem('hh-unsaved:h', JSON.stringify({ config: edited, rev: META.rev - 1, at: 1 }));
+    const a = setup({}, { config: tvConfig(), updated: 1 });
+    await a.store.load();
+    expect(a.store.stashed).toBeNull();
+    sessionStorage.setItem('hh-unsaved:h', JSON.stringify({ config: edited, rev: META.rev, at: 1 }));
+    const b = setup({}, { config: edited, updated: 1 });
+    await b.store.load();
+    expect(b.store.stashed).toBeNull();
+    expect(sessionStorage.getItem('hh-unsaved:h')).toBeNull();
+  });
+});

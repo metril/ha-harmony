@@ -19,6 +19,10 @@ async function boot(): Promise<void> {
   const store = new Store(api, hub);
   setStore(store);
   void store.load();
+  addEventListener('pagehide', () => store.flushOnUnload());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') store.flushOnUnload();
+  });
   // Elements read the store when they are created, so the app element is only made once it exists
   // (the bundle is one chunk, so the class definitions themselves run before boot()).
   document.body.prepend(document.createElement('hh-app'));

@@ -216,6 +216,13 @@ export class HhApp extends StoreElement {
                   <button class="btn sm danger" @click=${() => void s.overwrite()}>Overwrite</button>
                 </div>`
               : nothing}
+            ${s.stashed
+              ? html`<div class="banner ir" role="alert">
+                  <span>Restore unsaved changes from a moment ago? They were not saved before the page closed.</span><span class="sp"></span>
+                  <button class="btn sm" @click=${() => s.restoreStash()}>Restore</button>
+                  <button class="btn sm" @click=${() => s.discardStash()}>Discard</button>
+                </div>`
+              : nothing}
             ${s.loadError
               ? html`<div class="banner bad" role="alert"><span>Could not load the config: ${s.loadError}</span><span class="sp"></span><button class="btn sm" @click=${() => void s.load()}>Retry</button></div>`
               : nothing}
