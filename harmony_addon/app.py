@@ -8,6 +8,7 @@ import hashlib
 import html
 import json
 import logging
+import re
 import time
 from collections.abc import Callable, Collection
 from pathlib import Path
@@ -26,7 +27,13 @@ from harmony_core.compiler import (
     compact_json,
     compile_config,
 )
-from harmony_core.config_model import ConfigError, check_yaml_depth, load_source, parse_model
+from harmony_core.config_model import (
+    ConfigError,
+    check_yaml_depth,
+    load_source,
+    parse_model,
+    validate_all,
+)
 from harmony_core.page_codec import decode_page
 
 from . import __version__, schemas
@@ -41,7 +48,7 @@ from .auth import (
 )
 from .ha_client import Catalog, HaApi, HaUnavailable
 from .options import Options, load_options
-from .store import HISTORY_MAX, Store, StoreError
+from .store import HISTORY_MAX, RevConflict, Store, StoreError
 from .supervisor import Discovery
 from .web_util import error, jresp, query, read_body
 
@@ -134,11 +141,26 @@ def make_auth_mw(auth: Auth):
 
 
 # ------------------------------------------------------------------ helpers
-def _check(config: dict[str, Any]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    try:
-        return parse_model(json.dumps(config), "config"), []
-    except ConfigError as exc:
-        return None, [{"path": list(exc.path), "msg": exc.msg[:300], "line": None}]
+MAX_ERRORS = 100
+
+
+def _check(config: dict[str, Any], *, all_errors: bool = True) -> tuple[Any, list[dict[str, Any]]]:
+    """(model, []) or (None, [{path, msg, line}]). `all_errors=False` keeps the integration's
+    fail-fast behaviour (one error)."""
+    text = json.dumps(config)
+    if not all_errors:
+        try:
+            return parse_model(text, "config"), []
+        except ConfigError as exc:
+            return None, [_err(exc)]
+    errors = validate_all(text, "config")
+    if errors:
+        return None, [_err(e) for e in errors[:MAX_ERRORS]]
+    return parse_model(text, "config"), []
+
+
+def _err(exc: ConfigError) -> dict[str, Any]:
+    return {"path": list(exc.path), "msg": exc.msg[:300], "line": None}
 
 
 def _pick_config(state: dict[str, Any], given: dict[str, Any] | None) -> dict[str, Any]:
@@ -155,12 +177,26 @@ def _meta(state: dict[str, Any]) -> dict[str, Any]:
         "applied": None if a is None else {k: a[k] for k in ("rev", "at", "hash")},
         "history": [{k: h[k] for k in ("rev", "at", "hash")} for h in state["history"]],
         "history_max": HISTORY_MAX,
+        "rev": state["draft_rev"],
     }
+
+
+def _if_match(request: web.Request) -> int | None:
+    """`If-Match: <rev>` (bare, quoted or weak). Absent = unconditional write."""
+    raw = request.headers.get("If-Match")
+    if raw is None:
+        return None
+    m = re.fullmatch(r'(?:W/)?"?(\d{1,12})"?', raw.strip())
+    if not m:
+        raise error(400, "bad_request", "invalid request: If-Match")
+    return int(m.group(1))
 
 
 def _store_call(fn, *args):
     try:
         return fn(*args)
+    except RevConflict as exc:
+        raise error(409, "conflict", str(exc), rev=exc.rev) from None
     except StoreError as exc:
         raise error(409, "store", str(exc)) from None
     except OSError:
@@ -193,15 +229,17 @@ async def put_draft(request: web.Request) -> web.Response:
     q = query(request, schemas.QUERY)
     body = await read_body(request, schemas.PUT_DRAFT)
     now = int(request.app[CLOCK_KEY]())
-    state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], body["config"], now)
+    state = _store_call(
+        request.app[STORE_KEY].set_draft, q["hub"], body["config"], now, _if_match(request)
+    )
     return jresp({"hub": q["hub"], "draft_updated": now, **_meta(state)})
 
 
 async def validate(request: web.Request) -> web.Response:
-    q = query(request, schemas.QUERY)
+    q = query(request, schemas.VALIDATE_QUERY)
     body = await read_body(request, schemas.OPT_CONFIG)
     state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    _, errors = _check(_pick_config(state, body.get("config")))
+    _, errors = _check(_pick_config(state, body.get("config")), all_errors=q["all"] == "1")
     return jresp({"ok": not errors, "errors": errors})
 
 
@@ -314,6 +352,7 @@ def _yaml_to_config(raw: bytes) -> dict[str, Any]:
 
 async def import_yaml(request: web.Request) -> web.Response:
     q = query(request, schemas.QUERY)
+    if_rev = _if_match(request)
     config = _yaml_to_config(await request.read())
     refs = _ir_file_refs(config)
     if refs:
@@ -328,7 +367,7 @@ async def import_yaml(request: web.Request) -> web.Response:
     if errors:
         raise error(422, "invalid_config", "the YAML is not a valid config", errors=errors)
     now = int(request.app[CLOCK_KEY]())
-    state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], config, now)
+    state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], config, now, if_rev)
     return jresp({"ok": True, "hub": q["hub"], "draft_updated": now, **_meta(state)})
 
 

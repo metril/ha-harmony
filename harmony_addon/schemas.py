@@ -51,6 +51,13 @@ def _hub(v: object) -> str:
 
 
 QUERY = vol.Schema({vol.Optional("hub", default="default"): _hub}, extra=vol.PREVENT_EXTRA)
+VALIDATE_QUERY = vol.Schema(
+    {
+        vol.Optional("hub", default="default"): _hub,
+        vol.Optional("all", default="1"): vol.In(["0", "1"]),  # 0: first error only
+    },
+    extra=vol.PREVENT_EXTRA,
+)
 WAIT_QUERY = vol.Schema(
     {
         vol.Optional("hub", default="default"): _hub,
