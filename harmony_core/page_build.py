@@ -138,7 +138,7 @@ def _spec(w: dict[str, Any], act_ids: list[str], act_names: dict[str, str], in_l
         elif target is not None:
             bind = act_ids.index(target) if target in act_ids else None  # unknown: validated elsewhere
             if icon is None:
-                icon = icon_for_text(f"{act_names[target]} {target}")
+                icon = icon_for_text(f"{act_names.get(target, target)} {target}")
         if icon is None:
             icon = icon_for_text(label)
     elif kind == "tile" and icon is None:

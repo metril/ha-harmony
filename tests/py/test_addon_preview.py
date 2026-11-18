@@ -455,3 +455,25 @@ async def test_ref_errors_for_pages_are_all_collected(c):
     paths = [e["path"] for e in (await r.json())["errors"]]
     for want in (["pages", 0, "activity"], ["pages", 0, "widgets", 0, "nav"], ["pages", 1, "kind"], ["pages", 1, "widgets", 0, "nav"]):
         assert want in paths, paths
+
+
+async def test_preview_survives_a_button_that_starts_an_unknown_activity(c):
+    """The studio previews on every edit, so a dangling activity reference must be a validation
+    error, not a 500."""
+    cfg = {
+        "devices": [{"id": "tv", "name": "TV", "commands": {"menu": {"proto": "nec", "addr": 1, "cmd": 1}}}],
+        "activities": [{"id": "watch", "name": "Watch", "devices": [{"device": "tv"}]}],
+        "keys": {"menu": {"device": "nope", "command": "x"}},
+        "pages": [
+            {
+                "id": "home",
+                "cols": 2,
+                "rows": 2,
+                "widgets": [
+                    {"type": "button", "id": "b", "x": 0, "y": 0, "label": "Gone", "action": {"activity": "gone"}}
+                ],
+            }
+        ],
+    }
+    st, body = await preview(c, cfg)
+    assert st == 200 and body["ok"] is False and body["errors"]
