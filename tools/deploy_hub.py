@@ -37,6 +37,8 @@ REMOTE_CONFIG = f"{REMOTE_DIR}/config.json"
 # does not fall back to argv[1], so any other name fails with "applet not found".
 REMOTE_BUSYBOX = "/tmp/busybox"
 RF_SOCKET = "/tmp/ha-harmony-rf.sock"
+DETACH_LOG = "/tmp/ha-harmony-hub.log"  # tmpfs; a detached daemon's output, gone on reboot
+DETACH_SETTLE_S = 3  # on-device `sleep` before asking pidof
 WRITE_ROOTS = (REMOTE_DIR, "/tmp")  # the only places this tool may write
 DATA_MOUNT = "/data"
 DEVICES = ("/dev/i2s", "/dev/rfspi")
@@ -267,27 +269,36 @@ class Deployer:
         return 0
 
     # -- push [WRITE] -------------------------------------------------------------------
-    def _put(self, local: Path, remote: str, mode: str | None) -> None:
+    def _put(self, local: Path, remote: str, mode: str | None, atomic: bool = False) -> None:
+        """Upload + md5 verify. With atomic, land on `<remote>.new` and `mv` over the target only
+        after verify and chmod, so any failure leaves the previous file untouched."""
         _need_write_path(remote)
+        dest = _need_write_path(f"{remote}.new") if atomic else remote
         data = local.read_bytes()
         want = hashlib.md5(data, usedforsecurity=False).hexdigest()
-        rc, _, err = self.r.run_input(["sh", "-c", f"cat > {shlex.quote(remote)}"], data)
+        rc, _, err = self.r.run_input(["sh", "-c", f"cat > {shlex.quote(dest)}"], data)
         if rc != 0:
-            self.r.run(["rm", "-f", remote])
+            self.r.run(["rm", "-f", dest])
             raise DeployError(
-                f"{remote}: upload failed (rc={rc}): {err.decode('utf-8', 'replace')}"
+                f"{dest}: upload failed (rc={rc}): {err.decode('utf-8', 'replace')}"
             )
-        rc, out, err = self.r.run(["md5sum", remote])
+        rc, out, err = self.r.run(["md5sum", dest])
         got = parse_hash(out, "md5") if rc == 0 else None
         if got != want:
-            self.r.run(["rm", "-f", remote])  # never leave an unverified file behind
+            self.r.run(["rm", "-f", dest])  # never leave an unverified file behind
             raise DeployError(
-                f"{remote}: md5 MISMATCH (local {want}, device {got or 'unreadable'}); removed"
+                f"{dest}: md5 MISMATCH (local {want}, device {got or 'unreadable'}); removed"
             )
         if mode:
-            rc, _, err = self.r.run(["chmod", mode, remote])
+            rc, _, err = self.r.run(["chmod", mode, dest])
             if rc != 0:
-                raise DeployError(f"{remote}: chmod failed: {err.decode('utf-8', 'replace')}")
+                self.r.run(["rm", "-f", dest])
+                raise DeployError(f"{dest}: chmod failed: {err.decode('utf-8', 'replace')}")
+        if atomic:
+            rc, _, err = self.r.run(["mv", dest, remote])
+            if rc != 0:
+                self.r.run(["rm", "-f", dest])
+                raise DeployError(f"{remote}: mv into place failed: {err.decode('utf-8', 'replace')}")
         self.out(f"  ok  {remote}  {len(data)} B  md5 {want}")
 
     def push(
@@ -310,6 +321,8 @@ class Deployer:
         for local, _, _ in items + ([(busybox, "", None)] if busybox else []):
             if not local.is_file():
                 raise DeployError(f"local file not found: {local}")
+        # The old files still exist while the new ones upload (hub lands as hub.new), so the
+        # full new size must fit in what is free now.
         need = sum(local.stat().st_size for local, _, _ in items)
         self.connect()
         if busybox:  # tmpfs, not counted against /data; also gives us `df`
@@ -330,7 +343,8 @@ class Deployer:
         if rc != 0:
             raise DeployError(f"mkdir {REMOTE_DIR} failed: {err.decode('utf-8', 'replace')}")
         for local, remote, mode in items:
-            self._put(local, remote, mode)
+            # The hub binary is what boot persistence runs: replace it atomically.
+            self._put(local, remote, mode, atomic=remote == REMOTE_HUB)
         self.out(f"push complete: {len(items)} file(s) verified by md5 on both ends")
         return 0
 
@@ -378,6 +392,47 @@ class Deployer:
             raise DeployError(f"{REMOTE_HUB} missing or not executable: run push first")
         self.out(f"running {REMOTE_HUB} {shlex.join(args)} (foreground; Ctrl-C stops it)")
         return self.r.run_foreground([REMOTE_HUB, *args])
+
+    def run_detached(self, args: list[str]) -> int:
+        """Start the daemon with no TTY, output to a tmpfs log, and report its pid.
+
+        Same safety gate as the foreground run. Unlike boot persistence this is not armed:
+        the process dies with the hub's next reboot.
+        """
+        self.connect()
+        if self.named_alive("hal"):
+            raise DeployError(
+                "stock hal is still alive and holds /dev/i2s: run `quiesce --yes` first"
+            )
+        if held := self.holders():
+            raise DeployError(f"devices still held by pids {sorted({p for p, _ in held})}")
+        if self.r.run(["test", "-x", REMOTE_HUB])[0] != 0:
+            raise DeployError(f"{REMOTE_HUB} missing or not executable: run push first")
+        script = (
+            f"({shlex.join([REMOTE_HUB, *args])} </dev/null >{DETACH_LOG} 2>&1 &); "
+            f"sleep {DETACH_SETTLE_S}; pidof hub"
+        )
+        rc, out, _ = self.r.run(["sh", "-c", script])
+        pid = out.decode("utf-8", "replace").split()
+        if rc != 0 or not pid:
+            _, log, _ = self.r.run(["cat", DETACH_LOG])
+            raise DeployError(
+                f"hub is not running {DETACH_SETTLE_S}s after start; log:\n"
+                + log.decode("utf-8", "replace")[-600:]
+            )
+        self.out(f"hub running detached, pid {' '.join(pid)}; log {DETACH_LOG}")
+        return 0
+
+    # -- prune [WRITE] ------------------------------------------------------------------
+    def prune(self) -> int:
+        """Delete only the two bench binaries; never the daemon, config, state or backups."""
+        self.connect()
+        for path in (REMOTE_SIM, REMOTE_RF_PROBE):
+            rc, _, err = self.r.run(["rm", "-f", _need_write_path(path)])
+            if rc != 0:
+                raise DeployError(f"rm {path} failed: {err.decode('utf-8', 'replace')}")
+            self.out(f"removed {path}")
+        return 0
 
     def named_alive(self, name: str) -> bool:
         return any(p.alive and p.name == name for p in self.procs())
@@ -490,7 +545,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("quiesce", "[WRITE] stop lua* then hal; verify devices unheld. BREAKS remote + HA")
     p.add_argument("--timeout", type=float, default=20.0)
     p = add("run", "[WRITE] run the hub in the foreground over ssh (args after --)")
+    p.add_argument("--detach", action="store_true", help="no TTY: background it, log to /tmp, print pid")
     p.add_argument("hub_args", nargs=argparse.REMAINDER)
+    p = add("prune", "[WRITE] delete only remote_sim and rf_probe from /data/ha-harmony")
     p = add("press", "[WRITE] run remote_sim --rf SOCK --press KEY (key name like VolumeUp, or a numeric logical code 0..255)")
     p.add_argument("key")
     p.add_argument("--sock", default=RF_SOCKET)
@@ -535,7 +592,9 @@ def main(
                 return d.quiesce(a.timeout)
             case "run":
                 args = a.hub_args[1:] if a.hub_args[:1] == ["--"] else a.hub_args
-                return d.run_hub(args)
+                return d.run_detached(args) if a.detach else d.run_hub(args)
+            case "prune":
+                return d.prune()
             case "press":
                 return d.press(a.key, a.sock)
             case "restore":

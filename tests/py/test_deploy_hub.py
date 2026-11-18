@@ -68,6 +68,8 @@ class FakeHub:
         self.booting_ps = 0  # remaining ps polls that show only init
         self.log: list[list[str]] = []
         self.fg: list[list[str]] = []
+        self.detach_alive = True
+        self.detached: list[str] = []
 
     def _boot(self) -> None:
         self.procs = stock_procs()
@@ -128,6 +130,16 @@ class FakeHub:
             if a[1] in self.corrupt:
                 data += b"!"
             return 0, f"{hashlib.md5(data).hexdigest()}  {a[1]}\n".encode(), b""
+        if a[0] == "mv":
+            if a[1] not in self.files:
+                return 1, b"", b"No such file"
+            self.files[a[2]] = self.files.pop(a[1])
+            return 0, b"", b""
+        if a[:2] == ["sh", "-c"] and a[2].startswith("(") and a[2].endswith("pidof hub"):
+            self.detached.append(a[2])
+            return (0, b"4242\n", b"") if self.detach_alive else (1, b"", b"")
+        if a == ["cat", dh.DETACH_LOG]:
+            return 0, b"hub: cannot listen on port 8099\n", b""
         if a[:2] == ["rm", "-f"]:
             self.files.pop(a[2], None)
             return 0, b"", b""
@@ -263,7 +275,8 @@ def test_push_happy_path(artifacts):
     assert hub.files[dh.REMOTE_CONFIG] == b'{"a": 1}'
     assert hub.files[dh.REMOTE_BUSYBOX] == b"B" * 2000
     assert any("push complete" in ln for ln in lines)
-    assert ["chmod", "755", dh.REMOTE_HUB] in hub.log
+    assert ["chmod", "755", dh.REMOTE_HUB + ".new"] in hub.log
+    assert ["mv", dh.REMOTE_HUB + ".new", dh.REMOTE_HUB] in hub.log
 
 
 def test_push_rf_probe_is_md5_verified_and_executable(artifacts, tmp_path):
@@ -517,7 +530,7 @@ def test_cli_write_steps_need_yes_and_help_marks_them(capsys):
 
 
 def test_cli_status_and_error_exit(capsys, artifacts):
-    d, _hub, _ = make(FakeHub(corrupt={dh.REMOTE_HUB}))
+    d, _hub, _ = make(FakeHub(corrupt={dh.REMOTE_HUB + ".new"}))
     assert dh.main(["status"], deployer=d) == 0
     cmd = ["push", "--yes", "--hub", str(artifacts["hub"]), "--no-space-check"]
     assert dh.main(cmd, deployer=d) == 1
@@ -543,6 +556,19 @@ NUM = r"\d+"
 
 def violations(remote: str) -> list[str]:
     """Allow-list check of one remote command line; empty list means permitted."""
+    try:
+        a0 = shlex.split(remote)
+    except ValueError:
+        a0 = []
+    if len(a0) == 3 and a0[0] == "mv":  # only an atomic replace inside the write root
+        ok = a0[1] == a0[2] + ".new" and dh.under_write_root(a0[2])
+        return [] if ok and a0[2] == dh.REMOTE_HUB else [f"not allowed: {remote!r}"]
+    if re.fullmatch(
+        re.escape(f"({dh.REMOTE_HUB}") + r"[^;&|`$]* </dev/null >" + re.escape(dh.DETACH_LOG)
+        + r" 2>&1 &\); sleep \d+; pidof hub",
+        a0[2] if a0[:2] == ["sh", "-c"] and len(a0) == 3 else "",
+    ):
+        return []
     if DENY.search(remote):
         return [f"denied token: {remote!r}"]
     if "&" in re.sub(r"&&|>&\d|2>&1", "", remote):
@@ -563,6 +589,8 @@ def violations(remote: str) -> list[str]:
         return []
     if prog == "chmod" and len(rest) == 2 and rest[0] == "755":
         return [] if dh.under_write_root(rest[1]) else bad
+    if a == ["cat", dh.DETACH_LOG]:
+        return []
     if prog == "rm" and len(rest) == 2 and rest[0] == "-f":
         ok = dh.under_write_root(rest[1]) and rest[1] not in dh.WRITE_ROOTS
         return [] if ok else bad
@@ -723,9 +751,14 @@ def test_every_emitted_command_is_allow_listed(artifacts):
     go(h, lambda d: d.quiesce())
     go(h, lambda d: d.run_hub(["--port", "8099", "--token", "a b; rm -rf /"]))
     go(h, lambda d: d.press(23))
+    go(h, lambda d: d.prune())
+    go(h, lambda d: d.run_detached(["--port", "8099"]))  # refused: hal alive
+    h2 = FakeHub()
+    go(h2, lambda d: (d.quiesce(), h2.files.update({dh.REMOTE_HUB: b"x"}), d.run_detached(["--token", "a b"])))
+    go(FakeHub(corrupt={dh.REMOTE_HUB + ".new"}), lambda d: push_all(d, artifacts))
     go(h, lambda d: d.restore())
     go(h, lambda d: d.clean())
-    go(FakeHub(corrupt={dh.REMOTE_HUB}), lambda d: push_all(d, artifacts))
+    go(FakeHub(corrupt={dh.REMOTE_HUB + ".new"}), lambda d: push_all(d, artifacts))
     go(FakeHub(free_kb=10), lambda d: push_all(d, artifacts))
     go(FakeHub(upload_rc=1), lambda d: push_all(d, artifacts))
     go(FakeHub(stuck={101}), lambda d: d.quiesce(timeout=4))
@@ -752,3 +785,99 @@ def test_internal_write_guard_rejects_outside_paths():
         with pytest.raises(dh.DeployError):
             dh._need_write_path(p)
     assert dh._need_write_path("/data/ha-harmony/hub")
+
+
+# --- atomic push, prune, run --detach ----------------------------------------------------------
+
+
+def test_push_hub_uploads_new_verifies_then_moves(artifacts):
+    d, hub, _ = make()
+    hub.files[dh.REMOTE_HUB] = b"OLD"
+    assert d.push(artifacts["hub"], check_space=False) == 0
+    new = dh.REMOTE_HUB + ".new"
+    seq = [c for c in hub.log if any(new in x for x in c)]
+    upload = next(i for i, c in enumerate(seq) if c[:2] == ["sh", "-c"])
+    md5 = next(i for i, c in enumerate(seq) if c == ["md5sum", new])
+    chmod = next(i for i, c in enumerate(seq) if c == ["chmod", "755", new])
+    mv = next(i for i, c in enumerate(seq) if c == ["mv", new, dh.REMOTE_HUB])
+    assert upload < md5 < chmod < mv
+    assert hub.files[dh.REMOTE_HUB] == b"H" * 4000 and new not in hub.files
+
+
+def test_push_md5_failure_leaves_old_hub_untouched(artifacts):
+    d, hub, _ = make(FakeHub(corrupt={dh.REMOTE_HUB + ".new"}))
+    hub.files[dh.REMOTE_HUB] = b"OLD"
+    with pytest.raises(dh.DeployError, match="MISMATCH"):
+        d.push(artifacts["hub"], check_space=False)
+    assert hub.files[dh.REMOTE_HUB] == b"OLD"
+    assert dh.REMOTE_HUB + ".new" not in hub.files
+    assert not any(c[0] == "mv" for c in hub.log)
+
+
+def test_push_upload_failure_leaves_old_hub_untouched(artifacts):
+    d, hub, _ = make(FakeHub(upload_rc=1))
+    hub.files[dh.REMOTE_HUB] = b"OLD"
+    with pytest.raises(dh.DeployError):
+        d.push(artifacts["hub"], check_space=False)
+    assert hub.files[dh.REMOTE_HUB] == b"OLD"
+
+
+def test_push_space_check_counts_full_new_size_while_old_exists(artifacts):
+    """hub.new coexists with hub, so the whole new binary must fit in current free space."""
+    d, hub, _ = make(FakeHub(free_kb=4))  # 4 KiB free < 4000 B + 512 KiB margin
+    hub.files[dh.REMOTE_HUB] = b"OLD"
+    with pytest.raises(dh.DeployError, match="insufficient"):
+        d.push(artifacts["hub"], busybox=artifacts["busybox"])
+    assert hub.files[dh.REMOTE_HUB] == b"OLD"
+    assert dh.REMOTE_HUB + ".new" not in hub.files
+
+
+def test_prune_deletes_only_the_two_bench_binaries():
+    d, hub, _ = make()
+    for f in (dh.REMOTE_SIM, dh.REMOTE_RF_PROBE, dh.REMOTE_HUB, dh.REMOTE_CONFIG,
+              dh.REMOTE_DIR + "/state.json", dh.REMOTE_DIR + "/backup/x"):  # fmt: skip
+        hub.files[f] = b"x"
+    assert dh.main(["prune", "--yes"], deployer=d) == 0
+    assert set(hub.files) == {dh.REMOTE_HUB, dh.REMOTE_CONFIG, dh.REMOTE_DIR + "/state.json",
+                              dh.REMOTE_DIR + "/backup/x"}  # fmt: skip
+    rms = [c for c in hub.log if c[0] == "rm"]
+    assert rms == [["rm", "-f", dh.REMOTE_SIM], ["rm", "-f", dh.REMOTE_RF_PROBE]]
+
+
+def test_prune_needs_yes():
+    d, hub, _ = make()
+    assert dh.main(["prune"], deployer=d) == 2
+    assert hub.log == []
+
+
+def test_run_detach_command_shape():
+    d, hub, lines = make()
+    d.quiesce()
+    hub.files[dh.REMOTE_HUB] = b"x"
+    rc = dh.main(["run", "--yes", "--detach", "--", "--port", "8099", "--rf-spi"], deployer=d)
+    assert rc == 0
+    assert hub.fg == [], "detach must not use the TTY foreground path"
+    assert hub.detached == [
+        f"({dh.REMOTE_HUB} --port 8099 --rf-spi </dev/null >{dh.DETACH_LOG} 2>&1 &); sleep 3; pidof hub"
+    ]
+    assert any("pid 4242" in ln for ln in lines)
+
+
+def test_run_detach_refused_while_hal_alive_and_reports_dead_daemon():
+    d, hub, _ = make()
+    hub.files[dh.REMOTE_HUB] = b"x"
+    with pytest.raises(dh.DeployError, match="hal"):
+        d.run_detached([])
+    assert hub.detached == []
+    d.quiesce()
+    hub.detach_alive = False
+    with pytest.raises(dh.DeployError, match="cannot listen"):
+        d.run_detached(["--port", "8099"])
+
+
+def test_run_detach_quotes_hostile_args():
+    d, hub, _ = make()
+    d.quiesce()
+    hub.files[dh.REMOTE_HUB] = b"x"
+    d.run_detached(["--token", "a b; rm -rf /"])
+    assert "'a b; rm -rf /'" in hub.detached[0]
