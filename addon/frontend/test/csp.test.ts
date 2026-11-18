@@ -29,7 +29,7 @@ describe('CSP-safe rendering rules', () => {
   const built = existsSync(DIST);
   it.skipIf(!built)('the built bundle has the unsafe directives tree-shaken out and no external URLs', () => {
     const files = readdirSync(DIST);
-    expect(files.filter((f) => f.endsWith('.js'))).toHaveLength(1);
+    expect(files.filter((f) => f.endsWith('.js')).length).toBeGreaterThanOrEqual(1); // the entry plus the lazy route chunks
     expect(files.filter((f) => f.endsWith('.css'))).toHaveLength(1);
     for (const f of files) {
       const t = readFileSync(join(DIST, f), 'utf8');

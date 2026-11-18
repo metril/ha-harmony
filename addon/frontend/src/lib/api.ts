@@ -1,5 +1,5 @@
 // Typed client for the add-on API. All URLs are relative to document.baseURI (ingress prefix).
-import type { Config, IrAction, ValidationError } from './model';
+import type { Config, Device, IrAction, ValidationError } from './model';
 
 export interface Meta {
   applied: { rev: number; at: number; hash: string } | null;
@@ -150,6 +150,52 @@ export interface Keymap {
   default: KeymapRow[];
   activities: { id: string; name: string; keys: KeymapRow[] }[];
 }
+export interface IrBrand {
+  name: string;
+  slug: string;
+  count: number;
+}
+export interface IrModel {
+  file: string;
+  name: string;
+  id: number;
+}
+export interface IrModels {
+  brand: { name: string; slug: string };
+  total: number;
+  offset: number;
+  limit: number;
+  models: IrModel[];
+}
+export interface IrDeviceResult {
+  device: Device;
+  forms: Record<string, string>;
+  notes: string[];
+  skipped: { name: string; reason: string }[];
+  skipped_total: number;
+  device_type: { id: string; name: string } | null;
+  source: Record<string, unknown>;
+}
+export interface IrCandidate {
+  kind: 'on' | 'off' | 'toggle';
+  action: IrAction;
+  form: string;
+  count: number;
+  models: string[];
+  codesets: number;
+}
+export interface IrCandidates {
+  candidates: IrCandidate[];
+  examined: number;
+  matched: number;
+  errors: number;
+  truncated?: boolean;
+}
+export interface IrParsed {
+  ok: boolean;
+  actions: { name: string; action: IrAction; form: string }[];
+  skipped: { name: string; reason: string }[];
+}
 export interface Health {
   ok: boolean;
   addon_version: string;
@@ -279,6 +325,14 @@ export class Api {
     this.request<{ entities: HaEntity[] }>('GET', 'api/v1/ha/entities', { query: { domain } });
   haServices = (domain?: string) =>
     this.request<{ services: HaService[] }>('GET', 'api/v1/ha/services', { query: { domain } });
+  irBrands = (q = '') => this.request<{ brands: IrBrand[] }>('GET', 'api/v1/ir/brands', { query: { q: q || undefined } });
+  irModels = (brand: string, q = '', offset = 0, limit = 50) =>
+    this.request<IrModels>('GET', 'api/v1/ir/models', { query: { brand, q: q || undefined, offset: String(offset), limit: String(limit) } });
+  irDevice = (brand: string, model: string) => this.request<IrDeviceResult>('GET', 'api/v1/ir/device', { query: { brand, model } });
+  irCandidates = (brand: string, type: string, limit = 60) =>
+    this.request<IrCandidates>('GET', 'api/v1/ir/candidates', { query: { brand, type, limit: String(limit) } });
+  irParse = (kind: 'pronto' | 'flipper' | 'smartir', text: string) =>
+    this.request<IrParsed>('POST', 'api/v1/ir/parse', { body: { kind, text } });
   /** Fire one inline code through Home Assistant. 429 carries retry_after_ms. */
   irTest = (hub: string, ir: IrAction, portMask?: number) =>
     this.request<{ ok: true; action: IrAction }>('POST', 'api/v1/ir/test', {

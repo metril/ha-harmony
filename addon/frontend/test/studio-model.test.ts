@@ -108,8 +108,23 @@ describe('assign (drop rules)', () => {
     expect(r.config.pages![0]!.widgets[0]!.action).toEqual({ device: 'avr', command: 'vol_up' });
     const c = cfg();
     c.pages![0]!.widgets.push({ type: 'tile', id: 't', x: 0, y: 1, entity: 'sensor.a' });
-    expect(isRefusal(assign(c, 'default', vol, { kind: 'widget', page: 0, index: 1 }))).toBe(true);
+    // an action on a tile sets its tap when the add-on can store it, and is refused with a reason otherwise
+    expect(isRefusal(assign(c, 'default', vol, { kind: 'widget', page: 0, index: 1 }, false))).toBe(true);
+    expect(ok(assign(c, 'default', vol, { kind: 'widget', page: 0, index: 1 })).config.pages![0]!.widgets[1]!['tap']).toEqual({ device: 'avr', command: 'vol_up' });
+    expect(ok(assign(c, 'default', { kind: 'none' }, { kind: 'widget', page: 0, index: 1 })).config.pages![0]!.widgets[1]!['tap']).toBe('none');
     expect(ok(assign(c, 'default', { kind: 'entity', entity_id: 'sensor.b' }, { kind: 'widget', page: 0, index: 1 })).config.pages![0]!.widgets[1]!['entity']).toBe('sensor.b');
+  });
+  it('a light or switch becomes a tile whose automatic tap toggles it; a scene or script becomes a button', () => {
+    const light = ok(assign(cfg(), 'default', { kind: 'entity', entity_id: 'light.lamp', name: 'Lamp' }, { kind: 'cell', page: 0, x: 0, y: 4 }));
+    const tile = light.config.pages![0]!.widgets[1]!;
+    expect(tile).toMatchObject({ type: 'tile', entity: 'light.lamp' });
+    expect('tap' in tile).toBe(false); // automatic: light.toggle
+    expect(light.message).toContain('light.toggle');
+    expect(ok(assign(cfg(), 'default', { kind: 'entity', entity_id: 'switch.plug' }, { kind: 'cell', page: 0, x: 0, y: 4 })).message).toContain('switch.toggle');
+    const scene = ok(assign(cfg(), 'default', { kind: 'entity', entity_id: 'scene.movie', name: 'Movie' }, { kind: 'cell', page: 0, x: 0, y: 4 }));
+    expect(scene.config.pages![0]!.widgets[1]).toMatchObject({ type: 'button', action: { ha: { service: 'scene.turn_on', target: { entity_id: 'scene.movie' } } } });
+    expect(ok(assign(cfg(), 'default', { kind: 'entity', entity_id: 'script.goodnight' }, { kind: 'cell', page: 0, x: 0, y: 4 })).config.pages![0]!.widgets[1]).toMatchObject({ type: 'button', action: { ha: { service: 'script.turn_on' } } });
+    expect(ok(assign(cfg(), 'default', { kind: 'entity', entity_id: 'sensor.t' }, { kind: 'cell', page: 0, x: 0, y: 4 })).message).not.toContain('a tap runs');
   });
   it('widget types make placeholder widgets', () => {
     const r = ok(assign(cfg(), 'default', { kind: 'widget', type: 'button' }, { kind: 'cell', page: 0, x: 0, y: 4 }));

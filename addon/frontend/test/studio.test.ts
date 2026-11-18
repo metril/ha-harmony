@@ -19,7 +19,7 @@ async function boot(ha: 'ok' | 'down' = 'ok', caps: { ha_actions?: boolean } = {
     'GET api/v1/hubs': () => ({ body: { hubs: [{ id: 'h', has_draft: true, has_applied: true, applied_rev: 'a', applied_at: 1 }] } }),
     'GET api/v1/health': () => ({ body: { ok: true, addon_version: '1', capabilities: caps } }),
     'GET api/v1/ha/entities': () => (ha === 'ok' ? { body: { entities: [{ entity_id: 'light.lamp', name: 'Lamp', domain: 'light', state: 'on' }, { entity_id: 'scene.movie', name: 'Movie', domain: 'scene' }] } } : { status: 503, body: { error: { code: 'ha_unavailable', msg: 'x' } } }),
-    'GET api/v1/ha/services': () => ({ body: { services: [{ domain: 'light', service: 'toggle', name: 'Toggle', fields: [] }] } }),
+    'GET api/v1/ha/services': () => ({ body: { services: [{ domain: 'light', service: 'toggle', name: 'Toggle', fields: [] }, { domain: 'light', service: 'turn_on', name: 'Turn on', fields: ['brightness_pct'] }] } }),
   });
   const store = new Store(f.api, 'h', 600);
   setStore(store);
@@ -145,5 +145,87 @@ describe('remote studio', () => {
     await tick(insp);
     expect(store.config.pages?.[0]?.widgets[0]?.label).toBe('Go ahead');
     expect(insp.shadowRoot.textContent).toMatch(/8\/24 B/);
+  });
+
+  async function inspectorFor(sel: unknown, caps?: { ha_actions?: boolean }) {
+    const b = await boot('ok', caps);
+    b.store.edit((c) => void c.pages![0]!.widgets.push({ type: 'tile', id: 'lamp', x: 0, y: 1, w: 2, h: 1, label: 'Lamp', entity: 'light.lamp' }));
+    await tick(b.remote);
+    (b.studio as unknown as { state0: { set: (p: object) => void } }).state0.set({ sel });
+    const insp = b.studio.shadowRoot.querySelector('hh-inspector') as El;
+    await tick(insp);
+    return { ...b, insp };
+  }
+  const press = async (insp: El, label: string) => {
+    ([...insp.shadowRoot.querySelectorAll('button')].find((x) => x.textContent?.trim() === label) as HTMLButtonElement).click();
+    await tick(insp);
+  };
+
+  it('tile "When tapped": Automatic by default and says what runs; Toggle, Action and Nothing write the tap schema', async () => {
+    const { insp, store } = await inspectorFor({ kind: 'widget', page: 0, index: 1 });
+    expect(insp.shadowRoot.textContent).toContain('Automatic: a tap runs light.toggle on light.lamp.');
+    await press(insp, 'Nothing');
+    expect(store.config.pages![0]!.widgets[1]!['tap']).toBe('none');
+    await press(insp, 'Toggle');
+    expect(store.config.pages![0]!.widgets[1]!['tap']).toBe('toggle');
+    await press(insp, 'Action');
+    expect(store.config.pages![0]!.widgets[1]!['tap']).toEqual({ ha: { service: 'light.toggle', target: { entity_id: 'light.lamp' } } });
+    await press(insp, 'Automatic');
+    expect('tap' in store.config.pages![0]!.widgets[1]!).toBe(false);
+  });
+
+  it('tile "When tapped" is disabled with a reason when the add-on cannot store taps', async () => {
+    const { insp } = await inspectorFor({ kind: 'widget', page: 0, index: 1 }, { ha_actions: false });
+    expect(insp.shadowRoot.textContent).toContain('Disabled: this add-on version cannot store tile taps yet');
+    expect([...insp.shadowRoot.querySelectorAll('button')].some((x) => x.textContent?.trim() === 'Toggle')).toBe(false);
+  });
+
+  it('Home Assistant action picker: service and entity from the add-on, a data field, repeat while held -> the ha action', async () => {
+    const { insp, store } = await inspectorFor({ kind: 'key', name: 'red' });
+    const picker = insp.shadowRoot.querySelector('hh-action-picker') as El;
+    await tick(picker);
+    const root = picker.shadowRoot;
+    ([...root.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant') as HTMLButtonElement).click();
+    await tick(picker);
+    const svc = root.querySelector('select') as HTMLSelectElement;
+    expect([...svc.options].map((o) => o.value)).toEqual(expect.arrayContaining(['light.toggle', 'light.turn_on']));
+    svc.value = 'light.turn_on';
+    svc.dispatchEvent(new Event('change'));
+    const ent = root.querySelector('input[list="hh-ents"]') as HTMLInputElement;
+    ent.value = 'light.lamp';
+    ent.dispatchEvent(new Event('input'));
+    await tick(picker);
+    const field = root.querySelector('input[aria-label="Field brightness_pct"]') as HTMLInputElement;
+    field.value = '50';
+    field.dispatchEvent(new Event('input'));
+    const rep = root.querySelector('.chk input') as HTMLInputElement;
+    rep.checked = true;
+    rep.dispatchEvent(new Event('change'));
+    await tick(picker);
+    ([...root.querySelectorAll('button')].find((x) => x.textContent === 'Set action') as HTMLButtonElement).click();
+    await tick(insp);
+    expect(store.config.keys!['red']).toEqual({ ha: { service: 'light.turn_on', target: { entity_id: 'light.lamp' }, data: { brightness_pct: 50 }, repeat: true } });
+  });
+
+  it('Home Assistant action picker is disabled with a reason when the add-on cannot store it', async () => {
+    const { insp } = await inspectorFor({ kind: 'key', name: 'red' }, { ha_actions: false });
+    const picker = insp.shadowRoot.querySelector('hh-action-picker') as El;
+    await tick(picker);
+    ([...picker.shadowRoot.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant') as HTMLButtonElement).click();
+    await tick(picker);
+    expect(picker.shadowRoot.textContent).toContain('this add-on version has no Home Assistant actions');
+    expect((([...picker.shadowRoot.querySelectorAll('button')].find((x) => x.textContent === 'Set action')) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('the key panel offers Send IR for the code the key sends, and palette chips carry a function icon', async () => {
+    const { insp, palette } = await inspectorFor({ kind: 'key', name: 'volume_up' });
+    const picker = insp.shadowRoot.querySelector('hh-action-picker') as El;
+    await tick(picker);
+    const send = picker.shadowRoot.querySelector('hh-send-ir') as El;
+    expect(send).toBeTruthy();
+    await send.updateComplete;
+    expect(send.shadowRoot.querySelector('button')!.getAttribute('aria-label')).toBe('Send IR for Living room TV · cmd_1');
+    await tick(palette);
+    expect(palette.shadowRoot.querySelectorAll('.chip2 svg.sic').length).toBeGreaterThan(5);
   });
 });

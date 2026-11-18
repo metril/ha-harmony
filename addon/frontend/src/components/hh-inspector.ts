@@ -9,9 +9,10 @@ import type { StudioHost } from '../lib/studio-state';
 import { meter } from './parts';
 import {
   DEFAULT_LAYER, LABEL_MAX, PAGE_BUDGET, describeAction, errorTarget, gridOf, isList, labelBytes, labelRoom, pageBytes, setPage, setWidget, trimToBytes,
-  type Source,
+  sourceAction, type Source,
 } from '../lib/studio-model';
-import type { Page } from '../lib/model';
+import type { Page, Widget } from '../lib/model';
+import { tileDefaultTap } from '../lib/permissions';
 
 const ROLES = ['default', 'primary', 'secondary', 'danger'] as const;
 const SHAPES = ['card', 'row', 'pill', 'monogram'] as const;
@@ -172,6 +173,7 @@ export class HhInspector extends LitElement {
             <datalist id="hh-tile-ents">${(this.st.entities ?? []).slice(0, 300).map((e) => html`<option value=${e.entity_id}>${e.name ?? ''}</option>`)}</datalist></label>
           ${String(w['entity'] ?? '') === 'sensor.choose_entity' ? html`<p class="why" role="note">Choose the entity this tile shows.</p>` : nothing}`
         : nothing}
+      ${w.type === 'tile' ? this.tileTap(pi, wi, w) : nothing}
       ${w.type !== 'label'
         ? html`<div class="sec"><h3>Look</h3>
             <div class="sw" role="group" aria-label="Role">${ROLES.map((r) => html`<button class="r-${r}" aria-pressed=${(w.role ?? 'default') === r} ?disabled=${!!navVal} @click=${() => this.widgetPatch(pi, wi, { role: r === 'default' ? undefined : r })}><i></i>${r}</button>`)}</div>
@@ -198,6 +200,28 @@ export class HhInspector extends LitElement {
         <p class="why">Id <code>${w.id ?? '(none)'}</code> · ${isList(page) ? 'list pages place rows themselves' : `grid ${gridOf(page).cols}x${gridOf(page).rows}`}</p>
       </details>
       <div class="seg"><button @click=${() => this.host.removeWidget(pi, wi)}>Delete widget</button></div>
+    </div>`;
+  }
+
+  /** "When tapped" for a tile: automatic (toggle / turn on / press by domain), toggle, an action, or nothing. */
+  private tileTap(pi: number, wi: number, w: Widget) {
+    const st = this.st;
+    const entity = String(w['entity'] ?? '');
+    const auto = tileDefaultTap(entity);
+    const tap = w['tap'];
+    const mode = tap === undefined ? 'auto' : tap === 'toggle' ? 'toggle' : tap === 'none' ? 'none' : 'action';
+    if (!st.haWritable)
+      return html`<div class="sec"><h3>When tapped</h3><p class="why" role="note">Disabled: this add-on version cannot store tile taps yet (it reports ha_actions: off). Tiles only show state.</p></div>`;
+    const set = (v: unknown) => this.widgetPatch(pi, wi, { tap: v });
+    return html`<div class="sec"><h3>When tapped</h3>
+      <div class="seg" role="group" aria-label="When tapped">
+        <button aria-pressed=${mode === 'auto'} @click=${() => set(undefined)}>Automatic</button>
+        <button aria-pressed=${mode === 'toggle'} ?disabled=${!auto} title=${auto ? '' : 'Nothing to toggle for this kind of entity'} @click=${() => set('toggle')}>Toggle</button>
+        <button aria-pressed=${mode === 'action'} @click=${() => { if (mode !== 'action') set({ ha: { service: auto ?? 'homeassistant.turn_on', target: { entity_id: entity } } }); }}>Action</button>
+        <button aria-pressed=${mode === 'none'} @click=${() => set('none')}>Nothing</button>
+      </div>
+      <p class="why">${mode === 'auto' ? (auto ? `Automatic: a tap runs ${auto} on ${entity}.` : 'Automatic: this kind of entity has no default tap, so a tap does nothing.') : mode === 'toggle' ? `A tap runs ${auto} on ${entity}.` : mode === 'none' ? 'A tap does nothing.' : `A tap runs ${describeAction(this.cfg, tap)}.`}</p>
+      ${mode === 'action' ? html`<hh-action-picker .host=${this.host} .value=${tap ?? null} mode="widget" @pick=${(e: CustomEvent<Source>) => { const a = sourceAction(e.detail); this.widgetPatch(pi, wi, { tap: e.detail.kind === 'none' ? 'none' : e.detail.kind === 'default' ? undefined : a }); }}></hh-action-picker>` : nothing}
     </div>`;
   }
 

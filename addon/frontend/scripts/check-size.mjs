@@ -1,22 +1,31 @@
-// Bundle-size budget: the built JS and CSS must stay under these gzip limits.
+// Bundle-size budget (gzip). The entry chunk is what every visit downloads: 90 KiB. The rarely opened
+// routes (add-device wizard, activities) are separate dynamic-import chunks, capped at 30 KiB each and
+// 135 KiB for all JS together. CSS is one file.
 import { readdirSync, readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 
-// JS raised from 60 to 90 KiB for the remote studio (visual editor, 50 stock icons, Elite drawing); CSS is unchanged
-const BUDGET = { js: 90 * 1024, css: 8 * 1024 }; // gzip bytes
+const KiB = 1024;
+const BUDGET = { entry: 90 * KiB, chunk: 30 * KiB, total: 135 * KiB, css: 8 * KiB };
 const dir = new URL('../dist/assets/', import.meta.url);
+const index = readFileSync(new URL('../dist/index.html', import.meta.url), 'utf8');
 let bad = false;
-for (const ext of ['js', 'css']) {
-  const files = readdirSync(dir).filter((f) => f.endsWith('.' + ext));
-  if (files.length !== 1) {
-    console.error(`expected exactly one .${ext}, found ${files.length}`);
-    bad = true;
-    continue;
-  }
-  const raw = readFileSync(new URL(files[0], dir));
-  const gz = gzipSync(raw).length;
-  const ok = gz <= BUDGET[ext];
-  console.log(`${files[0]}: ${raw.length} B raw, ${gz} B gzip (budget ${BUDGET[ext]}) ${ok ? 'ok' : 'OVER'}`);
+const check = (name, gz, max) => {
+  const ok = gz <= max;
+  console.log(`${name}: ${gz} B gzip (budget ${max}) ${ok ? 'ok' : 'OVER'}`);
   if (!ok) bad = true;
+};
+
+const js = readdirSync(dir).filter((f) => f.endsWith('.js'));
+const css = readdirSync(dir).filter((f) => f.endsWith('.css'));
+let total = 0;
+for (const f of js) {
+  const gz = gzipSync(readFileSync(new URL(f, dir))).length;
+  total += gz;
+  check(index.includes(f) ? `${f} (entry)` : f, gz, index.includes(f) ? BUDGET.entry : BUDGET.chunk);
 }
+check('all JS', total, BUDGET.total);
+if (css.length !== 1) {
+  console.error(`expected exactly one .css, found ${css.length}`);
+  bad = true;
+} else check(css[0], gzipSync(readFileSync(new URL(css[0], dir))).length, BUDGET.css);
 process.exit(bad ? 1 : 0);

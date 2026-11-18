@@ -69,7 +69,9 @@ async def open_editor(browser, origin, problems=None, **kw):
         page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: problems.append(str(e)))
 
-    async def to_real_server(route):  # the ingress proxy: strip the prefix, add what Supervisor adds
+    async def to_real_server(
+        route,
+    ):  # the ingress proxy: strip the prefix, add what Supervisor adds
         await route.continue_(
             url=route.request.url.replace(PREFIX, "", 1),
             headers={**route.request.headers, **INGRESS_HEADERS},
@@ -105,7 +107,9 @@ async def seed(origin, *configs):
 
     for text in configs:
         cfg = load_source(text)
-        assert (await api(origin, "PUT", "/api/v1/config/draft", json={"config": cfg}, headers=H))[0] == 200
+        assert (await api(origin, "PUT", "/api/v1/config/draft", json={"config": cfg}, headers=H))[
+            0
+        ] == 200
         assert (await api(origin, "POST", "/api/v1/config/apply", json={}, headers=H))[0] == 200
 
 
@@ -169,7 +173,9 @@ async def test_waiting_message_after_30s_is_reachable_and_late_ack_still_complet
         "document.querySelector('hh-app').store.edit(c => { c.devices[0].settle_ms = 250; })"
     )
     await page.get_by_text("saved just now").wait_for()
-    await page.evaluate("document.querySelector('hh-app').shadowRoot.querySelector('hh-apply-dialog').waitMs = 500")
+    await page.evaluate(
+        "document.querySelector('hh-app').shadowRoot.querySelector('hh-apply-dialog').waitMs = 500"
+    )
     await page.get_by_role("button", name="Review & apply").click()
     await page.get_by_role("button", name="Apply to hub").click()
     await page.get_by_text("Home Assistant has not picked it up yet").wait_for(timeout=8000)
@@ -329,7 +335,10 @@ async def test_studio_import_assign_drag_inspect_apply(browser, site):
     wid = got["draft"]["config"]["pages"][1]["widgets"][-1]
     assert wid["role"] == "primary" and wid["icon"] == "vol_down"
     assert wid["action"] == {"device": "avr", "command": "mute"}
-    assert got["draft"]["config"]["activities"][1]["keys"]["volume_down"] == {"device": "avr", "command": "vol_down"}
+    assert got["draft"]["config"]["activities"][1]["keys"]["volume_down"] == {
+        "device": "avr",
+        "command": "vol_down",
+    }
 
     # undo is one step per action
     await page.locator("hh-studio button[aria-label=Undo]").click()
@@ -338,4 +347,83 @@ async def test_studio_import_assign_drag_inspect_apply(browser, site):
     await page.get_by_role("button", name="Review & apply").click()
     await page.get_by_role("button", name="Apply to hub").click()
     await page.get_by_text("Saved as rev").wait_for()
+    assert [p for p in problems if "Failed to load resource" not in p] == []
+
+
+@pytest.fixture
+async def site_ir(aiohttp_server, tmp_path):
+    """Like `site`, with the fixture IR archive (no network) and a recording IR sender."""
+    from irdb_fake import FakeSession
+
+    from harmony_irdb.archive import IrdbArchive
+
+    class Sender:
+        async def send(self, hub, action):
+            return None
+
+    app = create_app(
+        tmp_path / "d",
+        options=Options("info"),
+        auth=NoAuth(),
+        static_dir=DIST,
+        bundle_token=TOKEN,
+        bundle_networks=None,
+        wait_seconds=1.0,
+        irdb=IrdbArchive(FakeSession(), tmp_path / "irc"),
+        ir_sender=Sender(),
+    )
+    server = await aiohttp_server(app)
+    return f"http://127.0.0.1:{server.port}"
+
+
+async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
+    site = site_ir
+    problems: list[str] = []
+    from harmony_core.config_model import load_source
+
+    avr = (
+        "devices:\n  - id: avr\n    name: AV receiver\n    power: {toggle: {proto: rc5, addr: 16, cmd: 12}}\n"
+        "    commands: {vol_up: {proto: rc5, addr: 16, cmd: 16}, vol_down: {proto: rc5, addr: 16, cmd: 17}, mute: {proto: rc5, addr: 16, cmd: 13}}\n"
+    )
+    assert (
+        await api(site, "PUT", "/api/v1/config/draft", json={"config": load_source(avr)}, headers=H)
+    )[0] == 200
+    page = await open_editor(browser, site, problems)
+    await page.goto(f"{site}{PREFIX}/#/devices/new")
+    await page.get_by_role("button", name="IR archive").click()
+    await page.locator(".brand", has_text="Sony").first.click()
+    await page.get_by_role("button", name="TV", exact=False).first.click()
+    await page.get_by_text("Code 1 of 2").wait_for()
+    await page.get_by_role("button", name="No, next code").click()
+    await page.get_by_text("Code 2 of 2").wait_for()
+    await page.get_by_role("button", name="Yes").click()
+    await page.get_by_text("Likely matches").wait_for()
+    await page.locator(".model", has_text="KDL-46V2501").first.click()
+    await page.get_by_text("Review Sony KDL-46V2501").wait_for()
+    await page.get_by_role("button", name="Add device").click()
+    # in the gallery, and in the studio palette
+    await page.get_by_text("Sony KDL-46V2501").first.wait_for()
+    await page.goto(f"{site}{PREFIX}/#/devices")
+    await page.locator(".dcard", has_text="Sony KDL-46V2501").wait_for()
+    await page.goto(f"{site}{PREFIX}/#/remote")
+    await page.locator("hh-palette").get_by_text("Sony KDL-46V2501").first.wait_for()
+    # an activity with it; who handles volume fills the keys
+    await page.goto(f"{site}{PREFIX}/#/activities")
+    await page.get_by_role("button", name="New activity").click()
+    await page.get_by_label("Activity name").fill("Watch TV")
+    await page.get_by_label("Sony KDL-46V2501").check()
+    await page.get_by_label("AV receiver").check()
+    await page.get_by_role("button", name="Create").click()
+    await page.get_by_text("Who handles it").wait_for()
+    await page.get_by_label("Who handles volume").select_option(label="AV receiver")
+    await page.get_by_text("Filled:").first.wait_for()
+    # X-ray in the studio shows an activity key from the archive device
+    await page.get_by_role("link", name="Open on remote").click()
+    await page.get_by_role("button", name="X-ray").click()
+    await page.locator("hh-remote").get_by_text("vol_up", exact=False).first.wait_for()
+    bar = page.get_by_role("region", name="Draft")
+    await bar.get_by_text("Valid").wait_for()
+    await bar.get_by_role("button", name="Review & apply").click()
+    await page.get_by_role("button", name="Apply to hub").click()
+    await page.get_by_text("Saved as rev 1").wait_for()
     assert [p for p in problems if "Failed to load resource" not in p] == []

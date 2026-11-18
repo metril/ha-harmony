@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { stockIconSvg } from '../lib/icon-shapes';
+import { commandIconId } from '../lib/device-art';
 import { shared } from '../lib/styles';
 import { HA_DOMAINS, type PaletteTab, type StudioHost } from '../lib/studio-state';
 import { GROUPS, HA_ENTITY_ID, deviceChips, entityDomain, layerKeys, pretty, sourceKey, type Source } from '../lib/studio-model';
@@ -134,7 +135,7 @@ export class HhPalette extends LitElement {
         const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
           ? html`<h4>${pretty(grp)}</h4><div class="chips" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
-              ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`)))}
+              ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), stockIconSvg(commandIconId(c.name, c.group))))}
             </div>`
           : nothing;
       });

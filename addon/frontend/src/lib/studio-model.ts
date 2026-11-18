@@ -1,7 +1,8 @@
 // Pure logic of the remote studio: command grouping, action descriptions, config edits for keys and
 // page widgets (grid maths, overlap, byte counter), and the assignment rules (what a drop on a
 // key / cell / widget does). No DOM here, so it is all unit-tested.
-import type { Config, Device, Page, Widget } from './model';
+import type { Config, Device, IrAction, Page, Widget } from './model';
+import { tileDefaultTap } from './permissions';
 
 export type Action = Record<string, unknown>;
 export type Layer = string; // 'default' or an activity id
@@ -172,6 +173,45 @@ export function sourceLabel(cfg: Config, s: Source): string {
     default:
       return '';
   }
+}
+
+/** A typed service field: numbers, booleans, lists and objects are read as JSON, anything else stays text. Empty means "not set". */
+export function parseField(v: string): unknown {
+  const t = v.trim();
+  if (!t) return undefined;
+  if (/^(-?\d+(\.\d+)?|true|false|\[.*\]|\{.*\})$/s.test(t)) {
+    try {
+      return JSON.parse(t);
+    } catch {
+      return t;
+    }
+  }
+  return t;
+}
+/** The data object of a service call from its typed fields (unset fields left out). */
+export function fieldData(fields: Record<string, string>): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    const p = parseField(v);
+    if (p !== undefined) out[k] = p;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** The IR code an action sends, when it is one: a device command, power or input, or an inline code. */
+export function resolveIr(cfg: Config, a: unknown): IrAction | null {
+  if (!a || typeof a !== 'object') return null;
+  const x = a as Action;
+  if ('device' in x) {
+    const d = (cfg.devices ?? []).find((v) => v.id === x['device']);
+    if (!d || d.kind === 'ha') return null;
+    if ('input' in x) return d.inputs?.[String(x['input'])] ?? null;
+    const c = String(x['command']);
+    if (c === 'power_on') return d.power?.on ?? d.power?.toggle ?? null;
+    if (c === 'power_off') return d.power?.off ?? d.power?.toggle ?? null;
+    return d.commands?.[c] ?? null;
+  }
+  return 'proto' in x || 'pronto' in x || 'raw' in x ? (x as IrAction) : null;
 }
 
 // ---------------------------------------------------------------- hard keys
@@ -373,14 +413,18 @@ export function assign(cfg: Config, layer: Layer, s: Source, t: Target, haOk = t
     const next = clone(cfg);
     const pg = next.pages?.[t.page] as Page;
     pg.widgets.push(w);
-    return { config: next, widget: { page: t.page, index: pg.widgets.length - 1 }, message: `Added ${w.type} ${w.label ?? ''} to page ${page.title || page.id} at column ${(w.x ?? 0) + 1}, row ${(w.y ?? 0) + 1}` };
+    const taps = w.type === 'tile' && typeof w.entity === 'string' ? tileDefaultTap(w.entity) : null;
+    return { config: next, widget: { page: t.page, index: pg.widgets.length - 1 }, message: `Added ${w.type} ${w.label ?? ''}${taps ? ` (a tap runs ${taps})` : ''} to page ${page.title || page.id} at column ${(w.x ?? 0) + 1}, row ${(w.y ?? 0) + 1}` };
   }
   const w = page.widgets[t.index];
   if (!w) return { refused: 'That widget is gone.' };
   if (s.kind === 'widget') return { refused: 'Drop a widget type on an empty cell.' };
   if (w.type === 'tile') {
-    if (s.kind !== 'entity') return { refused: 'A tile shows one Home Assistant entity: drop an entity on it.' };
-    return { config: setWidget(cfg, t.page, t.index, { entity: s.entity_id }), widget: { page: t.page, index: t.index }, message: `Tile now shows ${s.entity_id}` };
+    if (s.kind === 'entity') return { config: setWidget(cfg, t.page, t.index, { entity: s.entity_id }), widget: { page: t.page, index: t.index }, message: `Tile now shows ${s.entity_id}` };
+    const tap = s.kind === 'none' ? 'none' : sourceAction(s);
+    if (!tap || s.kind === 'default') return { refused: 'Drop an entity to change what the tile shows, or an action to change what a tap does.' };
+    if (!haOk) return { refused: 'This add-on version cannot store tile taps yet.' };
+    return { config: setWidget(cfg, t.page, t.index, { tap }), widget: { page: t.page, index: t.index }, message: `Tapping tile ${w.label ?? ''} now does ${describeSource(cfg, s)}`.replace('  ', ' ') };
   }
   if (w.type === 'label') return { refused: 'A label has no action.' };
   const action = sourceAction(s);
@@ -454,7 +498,7 @@ export const TEMPLATES: { id: TemplateId; name: string; note: string }[] = [
   { id: 'devices', name: 'Device list', note: 'One row per device command' },
   { id: 'blank', name: 'Blank', note: 'Empty 4x6 grid' },
 ];
-export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { entity_id: string; name?: string }[]; activity?: string } = {}): Page {
+export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { entity_id: string; name?: string }[]; activity?: string; device?: string } = {}): Page {
   const devices = cfg.devices ?? [];
   const pid = uniquePageId(cfg, id === 'activities' ? 'home' : id);
   const used = new Set((cfg.pages ?? []).flatMap((pg) => pg.widgets.map((w) => w.id)));
@@ -474,7 +518,7 @@ export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { en
       return { id: pid, cols: 4, rows: 6, ...(hasHome ? {} : { kind: 'home' as const }), title: 'Activities', widgets };
     }
     case 'activity': {
-      const d = devices[0];
+      const d = devices.find((x) => x.id === ctx.device) ?? devices[0];
       const names = new Set(Object.keys(d?.commands ?? {}));
       const pick = (...c: string[]) => c.find((n) => names.has(n));
       const slots: [string, string | undefined][] = [['Vol +', pick('vol_up', 'volume_up')], ['Vol -', pick('vol_down', 'volume_down')], ['Mute', pick('mute')], ['Play', pick('play', 'play_pause')], ['Pause', pick('pause')], ['Stop', pick('stop')]];

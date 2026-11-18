@@ -8,8 +8,22 @@ export interface IrAction {
   flipper?: { file: string; signal?: string };
   smartir?: { file: string; command: string };
   port_mask?: number;
+  /** 1..8 frames in total (needs `capabilities.ha_actions`) */
+  repeats?: number;
+  /** Home Assistant service action (HA-backed devices, keys, taps, steps) */
+  ha?: HaCall;
+}
+export interface HaCall {
+  service: string;
+  target: { entity_id: string | string[] };
+  data?: Record<string, unknown>;
+  repeat?: boolean;
 }
 export interface Device {
+  /** `ha`: no IR, power / inputs / commands are Home Assistant actions */
+  kind?: 'ir' | 'ha';
+  /** where an HA-backed device's state comes from */
+  entity?: string;
   id: string;
   name?: string;
   aliases?: string[];
@@ -23,8 +37,8 @@ export interface Activity {
   id: string;
   name?: string;
   devices?: { device: string; input?: string }[];
-  steps?: unknown[];
-  off?: unknown[];
+  steps?: Record<string, unknown>[];
+  off?: Record<string, unknown>[];
   keys?: Record<string, unknown>;
 }
 export interface Widget {
