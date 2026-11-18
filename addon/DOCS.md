@@ -23,10 +23,15 @@ Skeleton: the API works, the editor UI is a placeholder page.
 
 | Option | Meaning |
 | --- | --- |
-| `hub_host` | Hub address (optional). |
-| `hub_port` | Hub port, default 8099. |
-| `hub_token` | Hub pairing token (optional). Never returned by the API or written to logs. |
 | `log_level` | `debug`, `info`, `warning` or `error`. |
+
+## Installation note
+
+The add-on is installed from the prebuilt image named by `image:` in `config.yaml`
+(`ghcr.io/metril/ha-harmony-editor-{arch}`, published by the `addon-publish` workflow on
+`addon-v*` tags). Supervisor local builds are not supported: the image needs the repository's
+shared Python packages (`harmony_core`, `harmony_irdb`), which lie outside the `addon/` folder
+that is the only build context a local build receives.
 
 ## Limitations
 

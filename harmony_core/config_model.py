@@ -33,9 +33,30 @@ _Loader.add_implicit_resolver(
     "tag:yaml.org,2002:bool", re.compile(r"^(?:true|false|True|False|TRUE|FALSE)$"), list("tfTF")
 )
 
+MAX_FLOW_DEPTH = 64  # a real config nests ~10 deep; PyYAML's scanner is quadratic in flow depth
+
+
+def check_yaml_depth(text: str, file: str = "<config>") -> None:
+    """Refuse absurd `[`/`{` nesting with one linear scan (an over-approximation: quotes count)."""
+    depth = 0
+    for ch in text:
+        if ch in "[{":
+            depth += 1
+            if depth > MAX_FLOW_DEPTH:
+                raise ConfigError(file, [], "invalid YAML: nested too deeply")
+        elif ch in "]}" and depth:
+            depth -= 1
+
+
 def load_source(text: str) -> Any:
     """Parse config YAML to plain data with the loader `parse_model` uses (no validation)."""
-    return yaml.load(text, Loader=_Loader)
+    check_yaml_depth(text)
+    try:
+        return yaml.load(text, Loader=_Loader)
+    except yaml.YAMLError as exc:
+        raise ConfigError("<config>", [], f"invalid YAML: {getattr(exc, 'problem', exc)}") from None
+    except RecursionError:
+        raise ConfigError("<config>", [], "invalid YAML: nested too deeply") from None
 
 
 _SLUG = re.compile(r"^[a-z0-9_]{1,31}$")
@@ -385,9 +406,12 @@ class _RefError(Exception):
 # ---------------------------------------------------------------- entry points
 def parse_model(text: str, file: str = "<config>", base_dir: Path | None = None) -> Model:
     """Validate YAML `text`. `file` is only used in messages; `base_dir` anchors IR file refs."""
+    check_yaml_depth(text, file)
     try:
         root = yaml.compose(text, Loader=_Loader)
         data = yaml.load(text, Loader=_Loader)
+    except RecursionError:
+        raise ConfigError(file, [], "invalid YAML: nested too deeply") from None
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         raise ConfigError(

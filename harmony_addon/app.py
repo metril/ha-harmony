@@ -25,7 +25,7 @@ from harmony_core.compiler import (
     compact_json,
     compile_config,
 )
-from harmony_core.config_model import ConfigError, load_source, parse_model
+from harmony_core.config_model import ConfigError, check_yaml_depth, load_source, parse_model
 from harmony_core.page_codec import decode_page
 
 from . import __version__, schemas
@@ -127,7 +127,7 @@ async def _body(request: web.Request, schema: vol.Schema) -> dict[str, Any]:
     raw = await request.read()  # 413 beyond client_max_size
     try:
         data = json.loads(raw)
-    except ValueError, RecursionError:
+    except (ValueError, RecursionError):
         raise _error(400, "bad_json", "body is not valid JSON") from None
     return _validate(schema, data)
 
@@ -188,7 +188,6 @@ async def health(request: web.Request) -> web.Response:
             "addon_version": __version__,
             "core_version": harmony_core.__version__,
             "bundle_schema": harmony_core.BUNDLE_SCHEMA,
-            "hub": request.app[OPTIONS_KEY].public(),
         }
     )
 
@@ -276,11 +275,7 @@ async def revert(request: web.Request) -> web.Response:
     return _json({"ok": True, **_meta(state)})
 
 
-def _ir_file_refs(text: str) -> list[str]:
-    try:
-        data = load_source(text)
-    except yaml.YAMLError:
-        return []
+def _ir_file_refs(data: Any) -> list[str]:
     found: list[str] = []
     stack = [data]
     while stack and len(found) < 20:
@@ -295,20 +290,41 @@ def _ir_file_refs(text: str) -> list[str]:
     return found
 
 
-async def import_yaml(request: web.Request) -> web.Response:
-    q = _query(request, schemas.QUERY)
-    raw = await request.read()
+def _yaml_to_config(raw: bytes) -> dict[str, Any]:
+    """YAML upload -> the same plain-JSON config a PUT /draft would carry, or an HTTP error."""
     if len(raw) > schemas.YAML_MAX:
         raise _error(400, "too_large", "YAML is too large")
     try:
         text = raw.decode("utf-8")
-        if any(isinstance(e, yaml.AliasEvent) for e in yaml.parse(text, Loader=yaml.SafeLoader)):
-            raise _error(400, "yaml_alias", "YAML anchors and aliases are not accepted")
     except UnicodeDecodeError:
         raise _error(400, "bad_yaml", "YAML must be UTF-8") from None
-    except yaml.YAMLError:
-        pass  # parse_model reports the syntax error below
-    refs = _ir_file_refs(text)
+    try:
+        check_yaml_depth(text)
+    except ConfigError as exc:
+        raise _error(400, "bad_yaml", exc.msg[:200]) from None
+    try:
+        if any(isinstance(e, yaml.AliasEvent) for e in yaml.parse(text, Loader=yaml.SafeLoader)):
+            raise _error(400, "yaml_alias", "YAML anchors and aliases are not accepted")
+    except (yaml.YAMLError, RecursionError):
+        pass  # load_source reports the syntax / nesting error below
+    try:
+        loaded = load_source(text)
+    except ConfigError as exc:
+        raise _error(400, "bad_yaml", exc.msg[:200]) from None
+    try:  # non-JSON YAML types (timestamps, sets, ...) and NaN are refused, int keys become str
+        data = json.loads(json.dumps({} if loaded is None else loaded, allow_nan=False))
+    except (TypeError, ValueError, RecursionError):
+        raise _error(400, "bad_yaml", "YAML holds values a config cannot contain") from None
+    try:
+        return schemas.bounded_config(data)
+    except vol.Invalid as exc:
+        raise _error(400, "bad_request", f"YAML rejected: {exc.error_message}"[:100]) from None
+
+
+async def import_yaml(request: web.Request) -> web.Response:
+    q = _query(request, schemas.QUERY)
+    config = _yaml_to_config(await request.read())
+    refs = _ir_file_refs(config)
     if refs:
         raise _error(
             422,
@@ -317,18 +333,11 @@ async def import_yaml(request: web.Request) -> web.Response:
             "editor",
             files=refs,
         )
-    try:
-        parse_model(text, "import")
-        model = load_source(text)
-    except ConfigError as exc:
-        raise _error(
-            422,
-            "invalid_config",
-            "the YAML is not a valid config",
-            errors=[{"path": list(exc.path), "msg": exc.msg[:300], "line": exc.line}],
-        ) from None
+    _, errors = _check(config)
+    if errors:
+        raise _error(422, "invalid_config", "the YAML is not a valid config", errors=errors)
     now = int(request.app[CLOCK_KEY]())
-    state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], model, now)
+    state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], config, now)
     return _json({"ok": True, "hub": q["hub"], "draft_updated": now, **_meta(state)})
 
 
@@ -352,7 +361,6 @@ async def index(request: web.Request) -> web.Response:
         "<p>The editor UI is not built yet. The API is up.</p>"
         f"<ul><li>add-on {e(__version__)}</li>"
         f"<li>core {e(harmony_core.__version__)}, bundle schema {harmony_core.BUNDLE_SCHEMA}</li>"
-        f"<li>hub: {e(o.hub_host or 'not configured')}:{o.hub_port}</li>"
         f"<li>log level: {e(o.log_level)}</li></ul></body></html>"
     )
     return web.Response(text=body, content_type="text/html")

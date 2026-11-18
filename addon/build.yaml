@@ -1,3 +1,6 @@
+# Base images are pinned by digest. To bump: pick a new tag, then
+#   docker buildx imagetools inspect ghcr.io/home-assistant/<arch>-base-python:<tag>
+# and copy its "Digest:" here and into the ARG default in Dockerfile (amd64).
 build_from:
-  aarch64: ghcr.io/home-assistant/aarch64-base-python:3.14-alpine3.23
-  amd64: ghcr.io/home-assistant/amd64-base-python:3.14-alpine3.23
+  aarch64: ghcr.io/home-assistant/aarch64-base-python:3.14-alpine3.23@sha256:256c1449942f92709f17f9cbb35380116a02095e0883e12c7e706d440e64349a
+  amd64: ghcr.io/home-assistant/amd64-base-python:3.14-alpine3.23@sha256:af4b51f68688a99e6d5bf5d7a899af078ac093523c4632baa176ca5cb8a0eb1b

@@ -20,11 +20,23 @@ def test_least_privilege_manifest():
 
 
 def test_options_schema_matches_options_reader():
-    assert set(CFG["schema"]) == {"hub_host", "hub_port", "hub_token", "log_level"}
-    assert CFG["schema"]["hub_token"] == "password?" and CFG["schema"]["hub_port"] == "port"
+    assert set(CFG["schema"]) == {"log_level"} and set(CFG["options"]) == {"log_level"}
     from harmony_addon.options import LOG_LEVELS
 
     assert CFG["schema"]["log_level"] == f"list({'|'.join(LOG_LEVELS)})"
+
+
+def test_base_images_pinned_by_digest():
+    build = yaml.safe_load((ROOT / "addon/build.yaml").read_text())["build_from"]
+    assert all("@sha256:" in v for v in build.values())
+    assert build["amd64"] in (ROOT / "addon/Dockerfile").read_text()
+
+
+def test_publish_workflow_is_tag_or_manual_only():
+    wf = yaml.safe_load((ROOT / ".github/workflows/addon-publish.yml").read_text())
+    on = wf.get("on", wf.get(True))
+    assert set(on) == {"push", "workflow_dispatch"} and on["push"] == {"tags": ["addon-v*"]}
+    assert wf["jobs"]["publish"]["permissions"]["packages"] == "write"
 
 
 def test_repository_and_build_files():

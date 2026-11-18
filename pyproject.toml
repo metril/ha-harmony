@@ -22,6 +22,8 @@ package = false
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests/py"]
+# worksteal: the real-time sh selftests in test_deploy_remote (20+ s each) must not queue on one worker
+addopts = "--dist=worksteal"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

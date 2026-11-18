@@ -19,10 +19,6 @@ homeassistant_api: false
 backup_exclude:
   - ircache/*
 options:
-  hub_port: 8099
   log_level: info
 schema:
-  hub_host: str?
-  hub_port: port
-  hub_token: password?
   log_level: list(debug|info|warning|error)

@@ -1,7 +1,6 @@
 """Editor add-on server: routes, store, and the security requirements (S1, S2, S3, S8)."""
 
 import json
-import logging
 import os
 
 import pytest
@@ -38,7 +37,6 @@ pages:
 CONFIG = load_source(SMALL)
 parse_model(SMALL)
 H = {"X-HH-CSRF": "1"}
-SECRET = "s3cr3t-hub-token-XYZ"
 NOW = [1_000]
 
 
@@ -50,7 +48,7 @@ def clock():
 @pytest.fixture
 async def client(aiohttp_client, tmp_path):
     app = create_app(
-        tmp_path, options=Options("10.0.0.5", 8099, SECRET, "info"), clock=clock, auth=NoAuth()
+        tmp_path, options=Options("info"), clock=clock, auth=NoAuth()
     )
     return await aiohttp_client(app)
 
@@ -64,7 +62,6 @@ async def test_health_and_placeholder(client):
     r = await client.get("/api/v1/health")
     body = await r.json()
     assert r.status == 200 and body["ok"] and body["bundle_schema"] == 1
-    assert body["hub"] == {"hub_host": "10.0.0.5", "hub_port": 8099, "hub_token_set": True}
     page = await (await client.get("/")).text()
     assert "not built yet" in page and "<script" not in page
 
@@ -144,7 +141,7 @@ async def test_import_yaml_rejects_ir_file_refs_and_bad_yaml(client):
     body = await r.json()
     assert r.status == 422 and body["error"]["files"] == ["flipper:tv.ir"]
     r = await client.post("/api/v1/config/import_yaml", data="devices: [", headers=hy)
-    assert r.status == 422
+    assert r.status == 400
     r = await client.post("/api/v1/config/import_yaml", data="a: &x [1]\nb: *x", headers=hy)
     assert r.status == 400
 
@@ -295,22 +292,6 @@ async def test_security_headers(client):
     assert (await client.get("/api/v1/nope")).headers["Cache-Control"] == "no-store"
 
 
-async def test_s8_token_never_in_responses_or_logs(client, caplog):
-    caplog.set_level(logging.DEBUG)
-    seen = []
-    for method, path in ROUTES:
-        r = await client.request(
-            method, path, headers={**H, "Content-Type": "application/json"}, data="{}"
-        )
-        seen.append(await r.text() + str(dict(r.headers)))
-    await put_draft(client)
-    seen.append(await (await client.get("/api/v1/config?full=1")).text())
-    seen.append(await (await client.get("/")).text())
-    assert not any(SECRET in s for s in seen)
-    assert SECRET not in caplog.text
-    assert SECRET not in repr(Options("h", 1, SECRET, "info"))
-
-
 async def test_errors_do_not_echo_raw_input(client):
     evil = "<script>alert(1)</script>"
     r = await client.get("/api/v1/config", params={evil: "1"})
@@ -323,14 +304,13 @@ async def test_errors_do_not_echo_raw_input(client):
     assert evil not in await r.text() and r.content_type == "application/json"
 
 
-async def test_options_file_is_read(aiohttp_client, tmp_path):
+async def test_options_file_is_read_and_stray_keys_are_ignored(aiohttp_client, tmp_path):
     (tmp_path / "options.json").write_text(
-        json.dumps({"hub_host": "<b>h</b>", "hub_port": 99, "hub_token": SECRET, "log_level": "x"})
+        json.dumps({"hub_token": "leak-me", "log_level": "<b>x</b>"})
     )
     c = await aiohttp_client(create_app(tmp_path, auth=NoAuth()))
-    assert SECRET not in await (await c.get("/api/v1/health")).text()
-    page = await (await c.get("/")).text()
-    assert "<b>" not in page and "&lt;b&gt;h&lt;/b&gt;" in page
+    text = await (await c.get("/api/v1/health")).text() + await (await c.get("/")).text()
+    assert "leak-me" not in text and "<b>" not in text and "log level: info" in text
 
 
 # ---------------------------------------------------------------- store
@@ -374,3 +354,59 @@ async def test_yaml_export_is_plain_yaml(client):
     text = await (await client.get("/api/v1/config/export_yaml?source=draft")).text()
     assert load_source(text) == CONFIG
     assert (await client.get("/api/v1/config/export_yaml?source=applied")).status == 404
+
+
+# ---------------------------------------------------------------- import_yaml hardening
+YH = {**H, "Content-Type": "text/yaml"}
+
+
+async def imp(client, text):
+    r = await client.post("/api/v1/config/import_yaml", data=text, headers=YH)
+    body = await r.text()
+    assert "Traceback" not in body
+    return r
+
+
+async def test_import_enforces_bounds_like_put_draft(client):
+    r = await imp(client, "devices: []\nnone: [" + ",".join(["0"] * 70_000) + "]")
+    assert r.status == 400
+    deep = "x: " + "[" * 30 + "]" * 30
+    assert (await imp(client, deep)).status == 400
+    assert (await client.get("/api/v1/config")).status == 200
+    assert (await (await client.get("/api/v1/config")).json())["draft"] is None
+
+
+async def test_import_non_json_yaml_types_are_400(client):
+    for text in ("devices: []\nwhen: 2026-01-01", "devices: []\nwhen: 2026-01-01 10:00:00",
+                 "devices: []\nx: !!set {a, b}", "devices: []\nx: .nan", "devices: []\nx: .inf"):
+        assert (await imp(client, text)).status == 400, text
+
+
+async def test_import_int_keys_match_apply(client):
+    text = SMALL.replace("keys:\n  menu:", "keys:\n  5: {activity: watch}\n  menu:")
+    r = await imp(client, text)
+    # import and apply must agree: either both accept or import rejects (never import-OK, apply-422)
+    a = await client.post("/api/v1/config/apply", json={}, headers=H)
+    if r.status == 200:
+        assert a.status == 200
+    else:
+        assert r.status == 422 and a.status == 409
+    got = await (await client.get("/api/v1/config")).json()
+    draft = got["draft"] or {"config": {}}
+    assert all(isinstance(k, str) for k in draft["config"].get("keys", {}))
+
+
+async def test_import_deep_block_nesting_is_400(client):
+    block = "".join(" " * i + "a:\n" for i in range(1300))
+    assert (await imp(client, block)).status == 400
+
+
+async def test_import_alias_bomb_and_deep_nesting_are_400(client):
+    bomb = "a: &a [x, x, x, x, x, x, x, x, x]\n" + "".join(
+        f"{chr(98 + i)}: &{chr(98 + i)} [" + ", ".join([f"*{chr(97 + i)}"] * 9) + "]\n"
+        for i in range(8)
+    )
+    assert (await imp(client, bomb)).status == 400
+    assert (await imp(client, "[" * 900_000)).status == 400
+    assert (await imp(client, "x: " + "[" * 400_000 + "]" * 400_000)).status == 400
+    assert (await imp(client, "{" * 200_000)).status == 400
