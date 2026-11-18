@@ -8,12 +8,26 @@ script is parameterised by HAH_ROOT and driven against a temp tree.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+# The hub runs BusyBox ash; also exercise the hook under a host busybox when there is one.
+_BB = shutil.which("busybox")
+SHELLS = ["/bin/sh"] + ([f"{_BB}:sh"] if _BB else [])
+_CUR = {"shell": ["/bin/sh"]}
+
+
+@pytest.fixture(autouse=True, params=SHELLS, ids=lambda x: "busybox" if ":" in x else "sh")
+def _shell(request):
+    sh = request.param
+    _CUR["shell"] = sh.split(":") if ":" in sh else [sh]
+    yield
+
 
 HOOK = Path(__file__).resolve().parents[2] / "tools" / "boot" / "rcS.harmony"
 
@@ -52,24 +66,37 @@ def install_conf(root: Path, text: str = "token=benchtok\nport=8099\nhub_id=ha-h
 
 
 def source_hook(
-    root: Path, *, healthy: int = 1, limit: int = 3, restrict_path: bool = False, delay: int = 0
+    root: Path,
+    *,
+    healthy: int = 1,
+    limit: int = 3,
+    restrict_path: bool = False,
+    delay: int = 0,
+    extra_env: dict[str, str] | None = None,
+    prelude: str = "",
 ) -> tuple[str, str]:
     """Source the hook the way rcS.local does and report DEMO_MODE afterwards.
 
     Returns (stdout, demo_mode) where demo_mode is "1" or "unset".
     """
-    script = f'. "{HOOK}"; echo "__DEMO__=${{DEMO_MODE:-unset}}"'
+    # Shell FUNCTIONS, not just PATH stubs: busybox ash runs its own applets in preference to
+    # PATH, and a real `killall`/`reboot` must never reach the host.
+    guards = "".join(f'{n}() {{ echo "$@" >>"{root}/{n}.log"; }}; ' for n in ("killall", "reboot"))
+    script = f'{guards}{prelude}. "{HOOK}"; echo "__DEMO__=${{DEMO_MODE:-unset}}"'
     env = {
         "HAH_ROOT": str(root),
         "HAH_HEALTHY_SECS": str(healthy),
         "HAH_MAX_UNCLEAN": str(limit),
         "HAH_START_DELAY": str(delay),
+        "HAH_POLL_SECS": "1",
+        **(extra_env or {}),
     }
     # A logging killall stub always shadows the real one: never signal host processes.
     stub = root / "_stub"
     stub.mkdir(exist_ok=True)
-    (stub / "killall").write_text(f'#!/bin/sh\necho "$@" >>"{root}/killall.log"\n')
-    (stub / "killall").chmod(0o755)
+    for name in ("killall", "reboot"):
+        (stub / name).write_text(f'#!/bin/sh\necho "$@" >>"{root}/{name}.log"\n')
+        (stub / name).chmod(0o755)
     if restrict_path:
         # Only applets the hub actually has, so any use of a missing one fails loudly.
         bindir = root / "_bin"
@@ -85,7 +112,7 @@ def source_hook(
         env["PATH"] = f"{stub}:/usr/bin:/bin"
 
     p = subprocess.run(
-        ["/bin/sh", "-c", script], capture_output=True, text=True, env=env, timeout=60, check=False
+        [*_CUR["shell"], "-c", script], capture_output=True, text=True, env=env, timeout=60, check=False
     )
     assert p.returncode == 0, f"hook returned {p.returncode}: {p.stderr}"
     m = re.search(r"__DEMO__=(\S+)", p.stdout)
@@ -98,7 +125,7 @@ def source_hook(
 
 def test_hook_parses_as_posix_sh() -> None:
     """A syntax error here aborts rcS itself, before dropbear starts."""
-    p = subprocess.run(["/bin/sh", "-n", str(HOOK)], capture_output=True, text=True, check=False)
+    p = subprocess.run([*_CUR["shell"], "-n", str(HOOK)], capture_output=True, text=True, check=False)
     assert p.returncode == 0, p.stderr
 
 
@@ -115,21 +142,37 @@ def test_hook_uses_no_applet_the_hub_lacks() -> None:
     assert not offenders, f"hook uses applets absent on the hub: {sorted(offenders)}"
 
 
-def test_synchronous_path_does_no_blocking_work() -> None:
-    """Everything slow must be backgrounded; the sync path runs before dropbear.
-
-    `sleep` is allowed only inside a backgrounded subshell, and the daemon itself must
-    be launched with a trailing `&`.
-    """
+def _sync_code() -> str:
+    """The hook source before its backgrounded subshell opens, comments stripped."""
     code = re.sub(r"#.*", "", HOOK.read_text())
-    for line in code.splitlines():
-        if "sleep" in line:
-            # the only sleep is in the watcher subshell, which is backgrounded
-            assert line.strip().startswith("sleep"), f"unexpected sleep placement: {line!r}"
-    assert re.search(r'"\$hah_daemon".*?&\s*$', code, re.DOTALL | re.MULTILINE), "daemon must be backgrounded"
-    # No network or device access on the synchronous path.
-    for forbidden in ("ifconfig", "udhcpc", "ping", "/dev/i2s", "nc ", "wget", "curl"):
-        assert forbidden not in code, f"synchronous path must not touch {forbidden}"
+    m = re.search(r"^\t+\($", code, re.MULTILINE)
+    assert m, "background subshell opener not found"
+    return code[: m.start()]
+
+
+def test_synchronous_path_does_no_blocking_work() -> None:
+    sync = _sync_code()
+    for word in ("sleep", "wait", "reboot", "killall", "ifconfig", "udhcpc", "ping", "/dev/i2s",
+                 "nc ", "wget", "curl"):  # fmt: skip
+        assert not re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", sync), (
+            f"synchronous path must not use {word!r}"
+        )
+    assert not re.search(r'"\$hah_daemon" --', sync), "daemon exec must be inside the background"
+    code = re.sub(r"#.*", "", HOOK.read_text())
+    assert re.search(r'"\$hah_daemon".*?&\s*$', code, re.DOTALL | re.MULTILINE)
+
+
+def test_sync_path_has_no_redirect_on_a_special_builtin_or_arithmetic_on_file_data() -> None:
+    """A failed redirect on `:` `.` `export` `set` `eval` `exec` `unset`... exits a sourced shell."""
+    sync = _sync_code()
+    special = r"(?:^|[;&|(]\s*|\n\s*)(:|\.|export|set|eval|exec|readonly|unset|shift|break|continue|return|trap)\b[^\n]*[<>]"
+    hits = [m.group(0) for m in re.finditer(special, sync) if "2>/dev/null" not in m.group(0).split("<")[0]]
+    # `unset -f ... 2>/dev/null` is the only allowed shape, and it is at the very end (after the subshell).
+    assert not [h for h in hits if "/dev/null" not in h], hits
+    assert "$((" not in sync, "no arithmetic on the synchronous path"
+    for line in sync.splitlines():
+        stripped = line.strip()
+        assert not re.match(r":\s*[<>]", stripped), f"bare `: >file` on sync path: {line!r}"
 
 
 def test_config_is_parsed_not_sourced() -> None:
@@ -342,8 +385,7 @@ def test_launch_is_deferred_not_synchronous(root: Path) -> None:
     assert not (root / "data" / "ha-harmony" / "argv.txt").exists()
     assert not (root / "cache" / "ha-harmony.pid").exists()
     # and statically: no sleep before the backgrounded subshell opens
-    code = re.sub(r"#.*", "", HOOK.read_text())
-    assert "sleep" not in code.split("\n\t\t\t(\n")[0]
+    assert "sleep" not in _sync_code()
 
 
 def test_stop_lua_is_one_switch_default_on(root: Path) -> None:
@@ -351,7 +393,7 @@ def test_stop_lua_is_one_switch_default_on(root: Path) -> None:
     install_conf(root)
     source_hook(root)
     _wait_for(root / "cache" / "ha-harmony.pid")
-    assert (root / "killall.log").read_text().split() == ["luaworks", "luadraws"]
+    assert (root / "killall.log").read_text().split() == ["lua", "luaworks", "luadraws"]
 
 
 def test_stop_lua_off_leaves_lua_alone(root: Path) -> None:
@@ -366,3 +408,190 @@ def test_launcher_uses_only_hub_tools_for_lua_stop() -> None:
     code = re.sub(r"#.*", "", HOOK.read_text())
     assert "killall" in code
     assert not re.search(r"\b(pidof|pkill|killall -9|kill -9|kill -KILL)\b", code)
+
+
+# --- brick-safety audit: nothing on the sync path may kill or hang rcS ------------
+
+SENTINEL = "RCS_CONTINUES"
+
+
+def run_sourced(root: Path, **kw) -> tuple[str, str]:
+    """Source the hook; the shell must reach the sentinel afterwards (rcS would continue)."""
+    kw["prelude"] = kw.get("prelude", "")
+    out, demo = source_hook(root, **kw)
+    return out, demo
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_unwritable_cache_boots_stock(root: Path) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root)
+    (root / "cache").chmod(0o555)
+    try:
+        _, demo = source_hook(root)
+    finally:
+        (root / "cache").chmod(0o755)
+    assert demo == "unset", "strikes cannot be stored: stock must boot"
+    assert (root / "etc" / "ha-harmony-enable").exists()
+
+
+def test_missing_cache_dir_boots_stock_and_sourcing_survives(root: Path) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root)
+    shutil.rmtree(root / "cache")
+    _, demo = source_hook(root)  # source_hook asserts the shell finished and printed
+    assert demo == "unset"
+
+
+def test_failed_counter_write_never_sets_demo_mode(root: Path) -> None:
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root)
+    (root / "cache" / "ha-harmony-boot.n").mkdir()  # cannot be written or read as a file
+    _, demo = source_hook(root)
+    assert demo == "unset"
+    assert not (root / "data" / "ha-harmony" / "argv.txt").exists()
+
+
+@pytest.mark.parametrize("junk", ["08", "09", "007", "garbage", "-1", "1 2", "99999999999999999999", ""])
+def test_odd_counter_values_are_not_arithmetic_errors(root: Path, junk: str) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root)
+    (root / "cache" / "ha-harmony-boot.n").write_text(junk + "\n")
+    _, demo = source_hook(root)
+    assert demo == "1", f"counter {junk!r} must count as clean, not kill the shell"
+    assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
+
+
+def test_marker_removal_failure_boots_stock_and_keeps_counter(root: Path) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root)
+    marker = root / "etc" / "ha-harmony-enable"
+    marker.unlink()
+    marker.mkdir()  # `rm -f` cannot remove a non-empty directory
+    (marker / "x").write_text("")
+    (root / "cache" / "ha-harmony-boot.n").write_text("2\n")
+    out, demo = source_hook(root)
+    assert demo == "unset", "never DEMO_MODE when we could not disarm"
+    assert "cannot remove" in out
+    assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "2"
+    assert not (root / "killall.log").exists()
+
+
+def test_sourcing_leaks_no_state_into_the_caller(root: Path) -> None:
+    install_daemon(root, "exit 0")
+    install_conf(root)
+    probe = 'echo "S:$PWD|$#|$1|$(umask)|$-|$IFS" | od -c | cat; trap'
+    pre = "cd /; umask 027; set -- keep me; IFS=:; trap 'echo T' USR1; "
+    guards = "".join(f'{n}() {{ :; }}; ' for n in ("killall", "reboot"))
+    script_after = f"{guards}{pre}. \"{HOOK}\" >/dev/null 2>&1; {probe}"
+    env = {"HAH_ROOT": str(root), "HAH_START_DELAY": "0", "HAH_POLL_SECS": "1", "HAH_HEALTHY_SECS": "1", "PATH": f"{root}/_stub:/usr/bin:/bin"}
+    a = subprocess.run([*_CUR["shell"], "-c", script_after], capture_output=True, text=True, env=env, check=False)
+    b = subprocess.run([*_CUR["shell"], "-c", f"{pre}{probe}"], capture_output=True, text=True, env=env, check=False)
+    assert a.stdout == b.stdout, f"hook leaked caller state:\n{b.stdout}\n---\n{a.stdout}"
+
+
+# --- config hardening -----------------------------------------------------------
+
+
+def test_token_containing_equals_survives_intact(root: Path) -> None:
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root, "token=abc123==\nport=8099\n")
+    _, demo = source_hook(root)
+    assert demo == "1"
+    assert "--token abc123==" in _argv(root)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "token=ok\nhub_id=x;touch PWN\n",
+        "token=ok\nhub_id=a b\n",
+        "token=ok\nhub_id=$(touch PWN)\n",
+        "token=ok\nhub_id=\n",
+        "token=a b\n",
+        "token=ok;touch PWN\n",
+        "token=ok\r\n",
+        "token=ok\nport=80a\n",
+        "token=ok\nport=123456\n",
+        "token=ok\nrf=spi\nrf_slot=123\n",
+        "token=\n",
+    ],
+)
+def test_injection_and_crlf_in_conf_leave_stock_alone(root: Path, line: str) -> None:
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root, line)
+    _, demo = source_hook(root)
+    assert demo == "unset"
+    assert not (root / "PWN").exists() and not (Path.cwd() / "PWN").exists()
+    assert not (root / "cache" / "ha-harmony-boot.n").exists()
+
+
+def test_conf_without_trailing_newline_is_read(root: Path) -> None:
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root, "port=8099\ntoken=lastline")
+    _, demo = source_hook(root)
+    assert demo == "1"
+    assert "--token lastline" in _argv(root)
+
+
+# --- early death: reboot switch ---------------------------------------------------
+
+
+def test_early_death_reboots_by_default_only_with_a_persisted_strike(root: Path) -> None:
+    install_daemon(root, "exit 1")
+    install_conf(root)
+    source_hook(root, healthy=2)
+    _wait_for(root / "reboot.log")
+    assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
+
+
+def test_reboot_switch_off(root: Path) -> None:
+    import time
+
+    install_daemon(root, "exit 1")
+    install_conf(root, "token=t\nreboot_on_early_death=0\n")
+    source_hook(root, healthy=2)
+    time.sleep(3.5)
+    assert "died within" in (root / "cache" / "ha-harmony.log").read_text()
+    assert not (root / "reboot.log").exists()
+
+
+def test_no_reboot_after_the_health_mark(root: Path) -> None:
+    import time
+
+    install_daemon(root, "sleep 3")  # healthy window is 1 s, dies later
+    install_conf(root)
+    source_hook(root, healthy=1)
+    time.sleep(4.5)
+    assert not (root / "reboot.log").exists()
+
+
+def test_bad_reboot_switch_value_is_stock(root: Path) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root, "token=t\nreboot_on_early_death=2\n")
+    _, demo = source_hook(root)
+    assert demo == "unset"
+
+
+# --- daemon log cap ----------------------------------------------------------------
+
+
+def test_daemon_log_is_capped_without_corrupting_the_append_stream(root: Path) -> None:
+    import time
+
+    install_daemon(
+        root,
+        'i=0; while [ $i -lt 60 ]; do echo "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; i=$((i+1)); done;'
+        " sleep 4; echo AFTER-TRUNCATE; sleep 30",
+    )
+    install_conf(root)
+    source_hook(root, healthy=1, extra_env={"HAH_LOG_MAX": "500"})
+    vlog = root / "var" / "volatile" / "ha-harmony.log"
+    for _ in range(100):
+        if vlog.exists() and b"AFTER-TRUNCATE" in vlog.read_bytes():
+            break
+        time.sleep(0.2)
+    data = vlog.read_bytes()
+    assert b"AFTER-TRUNCATE" in data
+    assert b"\0" not in data, "truncation must not leave a hole under the daemon's O_APPEND fd"
+    assert len(data) < 500, "log was not capped"

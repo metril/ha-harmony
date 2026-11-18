@@ -33,6 +33,14 @@
 # do not retry). The counter lives in /cache (mtd5), a different partition from the
 # binaries in /data (mtd4), so wiping either one independently is a recovery path.
 #
+# FAILURE CLASSES THAT KILL A SOURCED SHELL (all audited; none may appear on the sync path):
+#   * a failed redirect on a POSIX special builtin (`:` `.` `export` `set` `eval` `exec`
+#     `unset` `shift` `break`...) exits a non-interactive shell -- so redirects only ever go
+#     on non-special commands or inside a ( subshell ) with 2>/dev/null;
+#   * `.` of a missing file, and arithmetic on file content (`08` is an error that exits) --
+#     file content is only ever matched with `case`, never fed to $(( ));
+#   * `exit`, `set -e`, `cd`, `trap`, `shift`, changed IFS/umask: none, so nothing leaks.
+#
 # BusyBox 1.13.4 floor: no timeout, no nohup, no setsid, no wc, no head, no find,
 # no `command` builtin, no `grep -E`. Nothing here may use them.
 
@@ -45,12 +53,24 @@ hah_pidfile="$hah_root/cache/ha-harmony.pid"
 hah_dir="$hah_root/data/ha-harmony"
 hah_daemon="$hah_dir/hub"
 hah_conf="$hah_dir/hub.conf"
-hah_limit="${HAH_MAX_UNCLEAN:-3}"
-hah_healthy="${HAH_HEALTHY_SECS:-120}"
-hah_delay="${HAH_START_DELAY:-20}"
+
+# Numeric knobs (test overrides) are matched, never trusted: digits only, else the default.
+hah_num() {
+	case "$1" in
+	'' | *[!0-9]*) echo "$2" ;;
+	*) echo "$1" ;;
+	esac
+}
+hah_limit=$(hah_num "${HAH_MAX_UNCLEAN:-}" 3)
+hah_healthy=$(hah_num "${HAH_HEALTHY_SECS:-}" 120)
+hah_delay=$(hah_num "${HAH_START_DELAY:-}" 20)
+hah_step=$(hah_num "${HAH_POLL_SECS:-}" 5)
+hah_logmax=$(hah_num "${HAH_LOG_MAX:-}" 262144)
+[ "$hah_step" -ge 1 ] 2>/dev/null || hah_step=1
+[ "$hah_limit" -ge 1 ] 2>/dev/null || hah_limit=3
 
 hah_say() {
-	echo "ha-harmony: $1" >>"$hah_log" 2>/dev/null
+	echo "ha-harmony: $1" 2>/dev/null >>"$hah_log"
 	echo "ha-harmony: $1"
 }
 
@@ -59,21 +79,49 @@ hah_say() {
 if [ ! -x "$hah_daemon" ] || [ ! -r "$hah_conf" ]; then
 	hah_say "daemon or config missing ($hah_daemon / $hah_conf) - leaving stock alone"
 else
-	# Read config without sourcing it: a stray command in a config file would run in
-	# rcS's shell. Only these keys are honoured; a bad value leaves stock alone and
-	# spends no strike (nothing was started).
+	# Read config without sourcing it. Split each line at the FIRST '=' with parameter
+	# expansion (values may themselves contain '='). Only these keys are honoured; any
+	# bad value leaves stock alone and spends no strike (nothing was started).
+	hah_cr=$(printf '\r' 2>/dev/null)
 	hah_token=''
 	hah_port=''
 	hah_id=''
 	hah_rf=''
 	hah_slot=''
 	hah_stoplua=1
+	hah_reboot=1
 	hah_bad=''
-	while IFS='=' read -r hah_k hah_v; do
+	while IFS= read -r hah_line || [ -n "$hah_line" ]; do
+		case "$hah_line" in
+		*=*) ;;
+		*) continue ;;
+		esac
+		hah_k="${hah_line%%=*}"
+		hah_v="${hah_line#*=}"
+		if [ -n "$hah_cr" ]; then
+			case "$hah_v" in
+			*"$hah_cr"*) hah_bad="$hah_k (carriage return)" ;;
+			esac
+		fi
 		case "$hah_k" in
-		token) hah_token="$hah_v" ;;
-		port) hah_port="$hah_v" ;;
-		hub_id) hah_id="$hah_v" ;;
+		token)
+			case "$hah_v" in
+			'' | *[!A-Za-z0-9._~+/=-]*) hah_bad="token (empty or outside [A-Za-z0-9._~+/=-])" ;;
+			*) hah_token="$hah_v" ;;
+			esac
+			;;
+		port)
+			case "$hah_v" in
+			'' | *[!0-9]* | ??????*) hah_bad="port=$hah_v" ;;
+			*) hah_port="$hah_v" ;;
+			esac
+			;;
+		hub_id)
+			case "$hah_v" in
+			'' | *[!A-Za-z0-9._-]*) hah_bad="hub_id (outside [A-Za-z0-9._-])" ;;
+			*) hah_id="$hah_v" ;;
+			esac
+			;;
 		rf)
 			case "$hah_v" in
 			spi) hah_rf=spi ;;
@@ -82,7 +130,7 @@ else
 			;;
 		rf_slot)
 			case "$hah_v" in
-			'' | *[!0-9]*) hah_bad="rf_slot=$hah_v" ;;
+			'' | *[!0-9]* | ???*) hah_bad="rf_slot=$hah_v" ;;
 			*) hah_slot="$hah_v" ;;
 			esac
 			;;
@@ -90,6 +138,12 @@ else
 			case "$hah_v" in
 			0 | 1) hah_stoplua="$hah_v" ;;
 			*) hah_bad="stop_lua=$hah_v" ;;
+			esac
+			;;
+		reboot_on_early_death)
+			case "$hah_v" in
+			0 | 1) hah_reboot="$hah_v" ;;
+			*) hah_bad="reboot_on_early_death=$hah_v" ;;
 			esac
 			;;
 		esac
@@ -101,70 +155,119 @@ else
 		hah_say "no token in $hah_conf - leaving stock alone"
 	else
 		# --- strike counter ---------------------------------------------------
+		# Only single digits are accepted from the file (no arithmetic on file content:
+		# `08` is an arithmetic error that exits the shell). Anything else counts as 0.
 		hah_n=$(cat "$hah_counter" 2>/dev/null)
 		case "$hah_n" in
-		'' | *[!0-9]*) hah_n=0 ;; # absent or corrupt counts as clean
+		0) hah_n=1 ;;
+		1) hah_n=2 ;;
+		2) hah_n=3 ;;
+		3) hah_n=4 ;;
+		4) hah_n=5 ;;
+		5) hah_n=6 ;;
+		6) hah_n=7 ;;
+		7) hah_n=8 ;;
+		8 | 9) hah_n=9 ;;
+		*) hah_n=1 ;; # absent or corrupt counts as clean
 		esac
-		hah_n=$((hah_n + 1))
 
 		if [ "$hah_n" -ge "$hah_limit" ]; then
-			# Three unclean boots. Disable ourselves and let stock have this boot:
-			# DEMO_MODE is deliberately NOT set below, so rcS:84 starts hal normally.
-			rm -f "$hah_marker"
-			rm -f "$hah_counter"
-			hah_say "DISABLED after $hah_n unclean boots - removed $hah_marker, booting stock"
-		else
-			echo "$hah_n" >"$hah_counter" 2>/dev/null
-
-			# Digits-only slot and a fixed flag, so unquoted word splitting is safe.
-			hah_rfargs=''
-			if [ -n "$hah_rf" ]; then
-				hah_rfargs="--rf-spi"
-				[ -n "$hah_slot" ] && hah_rfargs="$hah_rfargs --rf-slot $hah_slot"
+			# Too many unclean boots. Disable ourselves and let stock have this boot:
+			# DEMO_MODE is deliberately NOT set, so rcS:84 starts hal normally. The
+			# counter goes only once the marker is confirmed gone; if the marker cannot be
+			# removed we still boot stock and keep the counter, never DEMO_MODE.
+			rm -f "$hah_marker" 2>/dev/null
+			if [ -e "$hah_marker" ]; then
+				hah_say "cannot remove $hah_marker after $hah_n unclean boots - booting stock this time"
+			else
+				rm -f "$hah_counter" 2>/dev/null
+				hah_say "DISABLED after $hah_n unclean boots - removed $hah_marker, booting stock"
 			fi
-
-			# Past this point we own the radios: stock hal must not start.
-			DEMO_MODE=1
-			export DEMO_MODE
-
-			: >"$hah_log" 2>/dev/null
-			hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099}, rf=${hah_rf:-none}, launch in ${hah_delay}s)"
-
-			# Everything below runs in the background: the delay, the optional lua
-			# stop, the daemon and its watcher. Single-shot, no respawn.
-			(
-				sleep "$hah_delay"
-				if [ "$hah_stoplua" = 1 ]; then
-					killall luaworks luadraws >/dev/null 2>&1
-					echo "ha-harmony: stopped luaworks/luadraws" >>"$hah_log" 2>/dev/null
+		else
+			# Persist the strike FIRST and read it back: if strike accounting cannot be
+			# stored the bound on bad boots is gone, so leave stock alone.
+			( echo "$hah_n" >"$hah_counter" ) 2>/dev/null
+			hah_chk=$(cat "$hah_counter" 2>/dev/null)
+			if [ "$hah_chk" != "$hah_n" ]; then
+				hah_say "cannot persist the strike counter ($hah_counter) - leaving stock alone"
+			else
+				# Digits-only slot and fixed flags, so unquoted word splitting is safe.
+				hah_rfargs=''
+				if [ -n "$hah_rf" ]; then
+					hah_rfargs="--rf-spi"
+					[ -n "$hah_slot" ] && hah_rfargs="$hah_rfargs --rf-slot $hah_slot"
 				fi
-				: >"$hah_dlog" 2>/dev/null
-				# shellcheck disable=SC2086
-				"$hah_daemon" --token "$hah_token" \
-					--port "${hah_port:-8099}" \
-					${hah_id:+--hub-id "$hah_id"} \
-					$hah_rfargs \
-					>>"$hah_dlog" 2>&1 </dev/null &
-				hah_pid=$!
-				echo "$hah_pid" >"$hah_pidfile" 2>/dev/null
-				echo "ha-harmony: daemon started pid $hah_pid" >>"$hah_log" 2>/dev/null
 
-				# Health: still alive after the settle window means the port is bound
-				# and the radio held (the daemon exits non-zero otherwise), so this
-				# boot counts as clean. No `timeout` applet, hence the sleep.
-				sleep "$hah_healthy"
-				if kill -0 "$hah_pid" 2>/dev/null; then
-					rm -f "$hah_counter"
-					echo "ha-harmony: healthy after ${hah_healthy}s - strikes cleared" >>"$hah_log" 2>/dev/null
-				else
-					echo "ha-harmony: died within ${hah_healthy}s - strike $hah_n stands" >>"$hah_log" 2>/dev/null
-				fi
-			) >/dev/null 2>&1 &
+				# Past this point we own the radios: stock hal must not start.
+				DEMO_MODE=1
+				export DEMO_MODE
+
+				( : >"$hah_log" ) 2>/dev/null
+				hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099}, rf=${hah_rf:-none}, launch in ${hah_delay}s, reboot_on_early_death=$hah_reboot)"
+
+				# Everything below runs in the background: the delay, the optional lua
+				# stop, the daemon and its watcher. Single-shot, no respawn.
+				(
+					sleep "$hah_delay"
+					if [ "$hah_stoplua" = 1 ]; then
+						# stock lua appears in ps as `lua` (and `luaworks` before it execs)
+						killall lua luaworks luadraws >/dev/null 2>&1
+						echo "ha-harmony: stopped lua/luaworks/luadraws" >>"$hah_log" 2>/dev/null
+					fi
+					: >"$hah_dlog" 2>/dev/null
+					# shellcheck disable=SC2086
+					"$hah_daemon" --token "$hah_token" \
+						--port "${hah_port:-8099}" \
+						${hah_id:+--hub-id "$hah_id"} \
+						$hah_rfargs \
+						>>"$hah_dlog" 2>&1 </dev/null &
+					hah_pid=$!
+					echo "$hah_pid" >"$hah_pidfile" 2>/dev/null
+					echo "ha-harmony: daemon started pid $hah_pid" >>"$hah_log" 2>/dev/null
+
+					# Health window: poll (no `timeout` applet). Alive at the end means
+					# port bound and radio held (the daemon exits non-zero otherwise).
+					hah_t=0
+					hah_up=1
+					while [ "$hah_t" -lt "$hah_healthy" ]; do
+						sleep "$hah_step"
+						hah_t=$((hah_t + hah_step))
+						if ! kill -0 "$hah_pid" 2>/dev/null; then
+							hah_up=0
+							break
+						fi
+					done
+					if [ "$hah_up" = 1 ]; then
+						rm -f "$hah_counter"
+						echo "ha-harmony: healthy after ${hah_healthy}s - strikes cleared" >>"$hah_log" 2>/dev/null
+						# Cap the tmpfs daemon log. The daemon holds it open O_APPEND (>>),
+						# so truncating in place is safe: its next write lands at the new
+						# end, no hole. No `wc`/`stat` on the hub: size comes from `ls -ln` (numeric ids: names may contain spaces).
+						while kill -0 "$hah_pid" 2>/dev/null; do
+							sleep "$hah_step"
+							hah_sz=$(ls -ln "$hah_dlog" 2>/dev/null)
+							# shellcheck disable=SC2086
+							set -- $hah_sz
+							if [ "${5:-0}" -gt "$hah_logmax" ] 2>/dev/null; then
+								: >"$hah_dlog" 2>/dev/null
+							fi
+						done
+					else
+						echo "ha-harmony: died within ${hah_healthy}s - strike $hah_n stands" >>"$hah_log" 2>/dev/null
+						# Reboot only if THIS boot's strike is really persisted, so the
+						# strike counter bounds the reboot loop (boot 3 goes to stock).
+						if [ "$hah_reboot" = 1 ] && [ "$(cat "$hah_counter" 2>/dev/null)" = "$hah_n" ]; then
+							echo "ha-harmony: rebooting (reboot_on_early_death)" >>"$hah_log" 2>/dev/null
+							reboot
+						fi
+					fi
+				) >/dev/null 2>&1 &
+			fi
 		fi
 	fi
 fi
 
 unset hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
-unset hah_limit hah_healthy hah_delay hah_n hah_token hah_port hah_id hah_rf hah_slot
-unset hah_rfargs hah_stoplua hah_bad hah_k hah_v
-unset -f hah_say 2>/dev/null
+unset hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
+unset hah_rf hah_slot hah_rfargs hah_stoplua hah_reboot hah_bad hah_k hah_v hah_line hah_cr
+unset -f hah_say hah_num 2>/dev/null
