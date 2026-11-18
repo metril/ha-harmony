@@ -5,6 +5,7 @@ import asyncio
 
 import pytest
 from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import async_mock_service as async_mock_service_
 from test_ha_runtime import (  # noqa: F401  (fixtures)
     THREE_PAGES,
     V1_INFO,
@@ -195,3 +196,38 @@ async def test_failed_user_calls_raise_translated_errors_key_calls_only_log(
     c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 2, "action": 0})
     await settle(hass)
     assert "tv on fire" in caplog.text
+
+
+# 6: an activity change while HA and the hub were disconnected still runs the HA-side steps
+async def test_transition_during_a_disconnect_runs_the_ha_steps(hass, rig, clock):
+    from pytest_homeassistant_custom_component.common import async_mock_service
+
+    for e in ("media_player.shield", "light.room"):
+        hass.states.async_set(e, "off" if e.startswith("media") else "on")
+    async_mock_service(hass, "light", "turn_off")
+    hub, c = await rig()
+    async_mock_service(hass, "remote", "turn_on")
+    async_mock_service(hass, "remote", "send_command")
+    await hub.push("state_update", {"activity": 1, "power": True})  # Stream is running
+    await settle(hass, lambda: c.current_activity == "Stream")
+    clock.elapse()
+    await settle(hass)
+    hass.states.async_set("media_player.shield", "on")  # the shield is on for Stream
+    bye = async_mock_service(hass, "scene", "turn_on")
+    off = async_mock_service(hass, "remote", "turn_off")
+    hub.state = {"activity": 0, "power": False}  # the hub went off while we were disconnected
+    await hub.ws.close()
+    await settle(hass, lambda: c.available is False)
+    await settle(hass, lambda: c.available and c.current_activity is None)
+    await settle(hass, lambda: bye and off)
+    assert len(bye) == 1 and len(off) == 1
+
+
+async def test_first_report_after_ha_starts_is_only_a_baseline(hass, rig, clock):
+    hass.states.async_set("media_player.shield", "off")
+    on = async_mock_service_(hass, "remote", "turn_on")
+    async_mock_service_(hass, "remote", "send_command")
+    async_mock_service_(hass, "light", "turn_off")
+    _hub, c = await rig(state={"activity": 1, "power": True})  # already running at HA start
+    await settle(hass)
+    assert c.current_activity == "Stream" and on == []

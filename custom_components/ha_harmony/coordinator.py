@@ -192,7 +192,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._ha_task: asyncio.Task[None] | None = None
         self._calls: dict[tuple[str, tuple[str, ...]], int] = {}  # key-started calls in flight
         self._released: set[int] = set()  # keys whose last event was a release: no more repeats
-        self._act_known = False  # the first state_update after a connect is only a baseline
+        self._act_known = False  # the first state_update after HA starts is only a baseline
         self._warned: set[tuple[str, ...]] = set()
         self._unsubs = [
             client.async_subscribe(self._on_push),
@@ -800,9 +800,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.available = connected
         if connected:
             # hello was re-sent by the client: refresh what the hub told us. The hub re-announces
-            # its remotes (remote_info) right after hello_ack, and the next state_update is a
-            # baseline for the Home Assistant activity steps, not a transition.
-            self._act_known = False
+            # its remotes (remote_info) right after hello_ack. The next state_update is compared
+            # with the activity known before the drop: a change while disconnected still runs its
+            # Home Assistant steps (only the very first report after HA starts is a baseline).
             self._accepted_gen = None  # the hub may have rebooted: the resync confirms its config
             for link in self.links.values():
                 link.epoch += 1

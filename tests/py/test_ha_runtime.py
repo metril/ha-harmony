@@ -83,8 +83,9 @@ V1_INFO = {"remote": 1, "page_fmt": 1, "caps": 0, "icons": 0}
 class ScriptHub:
     """A hub that answers like the real one and lets the test push messages and hold replies."""
 
-    def __init__(self, activities=("TV", "Stream")):
+    def __init__(self, activities=("TV", "Stream"), state=None):
         self.activities = list(activities)
+        self.state = state or {"activity": 0, "power": False}  # what hello is answered with
         self.ws = None
         self.got: list[tuple[str, dict]] = []
         self.gate: asyncio.Event | None = None  # while cleared, page_push replies wait
@@ -100,7 +101,7 @@ class ScriptHub:
             await ws.send_json(
                 {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": self.activities}}
             )
-            await self.push("state_update", {"activity": 0, "power": False})
+            await self.push("state_update", dict(self.state))
             return
         self.got.append((t, d))
         if t == "set_config":
@@ -185,8 +186,8 @@ async def rig(hass, fake_hub, fake_addon, clock):
     made = []
     hubs = []
 
-    async def _setup(yaml=YAML, activities=("TV", "Stream")):
-        hub = ScriptHub(activities)
+    async def _setup(yaml=YAML, activities=("TV", "Stream"), state=None):
+        hub = ScriptHub(activities, state)
         hubs.append(hub)
         server = await fake_hub(hub.handler)
         fake_addon.apply_yaml(yaml)
