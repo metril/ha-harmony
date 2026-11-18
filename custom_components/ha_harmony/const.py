@@ -31,7 +31,10 @@ LINK_WAIT_TIMEOUT = 70.0  # the add-on holds a wait for 55 s
 LINK_BACKOFF_MIN = 5.0
 LINK_BACKOFF_MAX = 120.0
 STORE_VERSION = 1
-TILE_DEBOUNCE = 0.5  # seconds between a bound entity changing and its tile_update; tests shorten it
+TILE_DEBOUNCE = 0.1  # one tile flush per this many seconds (bursts coalesce); tests shorten it
+INFO_WAIT = 1.5  # seconds a fresh remote gets to announce its page format before v1 pages are pushed
+CAP_TILE_STATE = 1  # remote_info.caps bit 0 (bit 1 = page store / paging)
+CAP_PAGING = 2
 TILE_TEXT_MAX = 31  # bytes, docs/proto/page-format.md
 
 OFF_OPTION = "Off"

@@ -51,13 +51,14 @@ async def test_setup_creates_one_of_each(hass, hub_cfg, fast_client):
     assert entry.state is ConfigEntryState.LOADED
     reg = er.async_get(hass)
     ents = er.async_entries_for_config_entry(reg, entry.entry_id)
-    assert sorted(e.domain for e in ents) == ["event", "remote", "select", "sensor", "sensor"]
+    assert sorted(e.domain for e in ents) == ["event", "remote", "select", "sensor", "sensor", "sensor"]
     assert {e.unique_id for e in ents} == {
         f"{HUB_ID}_remote",
         f"{HUB_ID}_activity",
         f"{HUB_ID}_key_1",
         f"{HUB_ID}_battery_1",
         f"{HUB_ID}_voltage_1",
+        f"{HUB_ID}_pagefmt_1",
     }
     st = hass.states.get(SELECT)
     assert st.attributes["options"] == ["TV", "Music", "Off"] and st.state == "Off"
@@ -128,7 +129,7 @@ async def test_hub_restart_recovers_without_duplicates(hass, start_hub, fast_cli
     before = {
         e.entity_id: e.unique_id for e in er.async_entries_for_config_entry(reg, entry.entry_id)
     }
-    assert len(before) == 5
+    assert len(before) == 6
 
     await hass.services.async_call(
         "select", "select_option", {"entity_id": SELECT, "option": "TV"}, blocking=True
@@ -177,7 +178,7 @@ async def test_token_rotation_starts_reauth(hass, start_hub, fast_client, tmp_pa
     assert entry.data["token"] == "rotated"
     await hass.async_block_till_done()
     await _until(hass, lambda: _state(hass, SELECT) not in (STATE_UNAVAILABLE, None))
-    assert len(er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)) == 5
+    assert len(er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)) == 6
     await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -224,7 +225,7 @@ async def test_unload_closes_client_and_tasks(hass, hub_cfg, fast_client):
     assert await hass.config_entries.async_setup(entry.entry_id)  # re-setup: no duplicates
     await hass.async_block_till_done()
     reg = er.async_get(hass)
-    assert len(er.async_entries_for_config_entry(reg, entry.entry_id)) == 5
+    assert len(er.async_entries_for_config_entry(reg, entry.entry_id)) == 6
     await hass.config_entries.async_unload(entry.entry_id)
 
 

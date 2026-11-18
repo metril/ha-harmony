@@ -11,11 +11,11 @@ import asyncio
 import base64
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import Event, HomeAssistant, State, callback
+from homeassistant.core import Context, Event, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -57,11 +57,15 @@ from .const import (
     KEY_NAMES,
     UNKNOWN_KEY,
 )
-from .harmony_core.compiler import Compiled, compile_config
+from .harmony_core.compiler import Compiled, HaStep, compile_config
 from .harmony_core.config_model import parse_model
+from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
+from .tile_format import tile_state, tile_text
 
 _LOGGER = logging.getLogger(__name__)
+
+__all__ = ["HarmonyCoordinator", "tile_text"]
 
 KeyListener = Callable[[int, int, str], None]
 ISSUE_INVALID = "config_invalid"
@@ -87,15 +91,49 @@ class DeviceState:
     input: str | None = None
 
 
-def tile_text(state: State | None) -> str:
-    """Text for a tile: state (+ unit), at most TILE_TEXT_MAX bytes cut on a UTF-8 boundary."""
-    if state is None:
-        return ""
-    if state.state in ("unavailable", "unknown"):
-        return "--"
-    unit = state.attributes.get("unit_of_measurement")
-    text = f"{state.state} {unit}" if unit else state.state
-    return text.encode()[: const.TILE_TEXT_MAX].decode(errors="ignore")
+@dataclass
+class RemoteInfo:
+    """What a remote announced (`remote_info`): page format, capability bits, icon font reach."""
+
+    page_fmt: int
+    caps: int
+    icons: int
+
+
+@dataclass
+class RemoteLink:
+    """Per-remote page and tile bookkeeping (see docs/ha-config.md, "Which pages a remote gets")."""
+
+    info: RemoteInfo | None = None
+    epoch: int = 0  # bumped at every link-up: the remote may have lost its page store
+    pushed: tuple[int, int, int] | None = None  # (config gen, format, epoch) of the last complete set
+    inflight: tuple[int, int, int] | None = None
+    waiting: bool = False  # waiting for remote_info
+    attached: bool = True  # False after "no remote" until the remote shows signs of life
+    pending: bool = False  # a push failed for want of a remote: redo when it is back
+    task: asyncio.Task[None] | None = None
+    info_event: asyncio.Event = field(default_factory=asyncio.Event)
+
+    @property
+    def page_fmt(self) -> int:
+        return 2 if self.info is not None and self.info.page_fmt >= 2 else 1
+
+    @property
+    def tile_state(self) -> bool:
+        return self.info is not None and bool(self.info.caps & const.CAP_TILE_STATE)
+
+
+def _ha_device_state(state: State | None) -> DeviceState:
+    if state is None or state.state in ("unavailable", "unknown"):
+        return DeviceState()
+    source = state.attributes.get("source")
+    return DeviceState(state.state not in ("off", "standby"), source if isinstance(source, str) else None)
+
+
+async def _sleep_hook(seconds: float) -> None:
+    """The coordinator's only timer for waiting on the remote and HA settle times; tests swap it
+    for a manual clock."""
+    await asyncio.sleep(seconds)
 
 
 def _empty_compiled() -> Compiled:
@@ -116,6 +154,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.device_states: dict[str, DeviceState] = {}
         self.battery: dict[int, tuple[int, int]] = {}  # remote -> (percent, millivolts)
         self.remotes: tuple[int, ...] = DEFAULT_REMOTE_IDS
+        self.links: dict[int, RemoteLink] = {r: RemoteLink() for r in self.remotes}
+        self._cfg_gen = 0  # bumped whenever the compiled config changes
+        self._sleep = lambda seconds: _sleep_hook(seconds)
         # tracked by hub index, never by name: a rename keeps the index, a reorder gets a new
         # state_update from the hub
         self._current_idx: int | None = None
@@ -139,9 +180,15 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._key_listeners: list[KeyListener] = []
         self._config_listeners: list[Callable[[], None]] = []
         self._sync_lock = asyncio.Lock()
-        self._pages_pending = False
         self._tile_unsub: Callable[[], None] | None = None
-        self._tile_timers: dict[str, Any] = {}
+        self._tile_dirty: set[str] = set()
+        self._tile_timer: asyncio.TimerHandle | None = None
+        self._flush_task: asyncio.Task[None] | None = None
+        self._tile_last: dict[tuple[int, int, int], tuple[bool, tuple[int, str]]] = {}
+        self._ha_dev_unsub: Callable[[], None] | None = None
+        self._ha_task: asyncio.Task[None] | None = None
+        self._act_known = False  # the first state_update after a connect is only a baseline
+        self._warned: set[tuple[str, ...]] = set()
         self._unsubs = [
             client.async_subscribe(self._on_push),
             client.async_subscribe_state(self._on_state),
@@ -156,6 +203,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             unsub()
         self._unsubs = []
         self._untrack_tiles()
+        for t in [self._ha_task, self._flush_task, *(lk.task for lk in self.links.values())]:
+            if t is not None and not t.done():
+                t.cancel()
         await super().async_shutdown()
         await self.client.async_close()
 
@@ -193,7 +243,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if self._link is not None:
             ids.add(f"{h}_addon_link")
         for r in self.remotes:
-            ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}"}
+            ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}", f"{h}_pagefmt_{r}"}
         for dev in self.compiled.devices.values():
             ids |= {f"{h}_dev_{dev.id}_power", f"{h}_dev_{dev.id}_input"}
             ids |= {f"{h}_cmd_{dev.id}:{c}" for c in self.device_commands(dev.id)}
@@ -405,6 +455,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         changed = compiled != self.compiled
         self.compiled = compiled
         if changed:
+            self._cfg_gen += 1
+            self._warned.clear()  # one warning per (service, entity) per config revision
+            self._tile_last.clear()
             self._track_tiles()
             self._prune_registry()
             for cb in list(self._config_listeners):
@@ -419,7 +472,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             try:
                 if await self._push_config_locked():
                     self._ack_later(self.rev, "ok")
-                    await self._push_pages_locked()
+                    for remote in self.remotes:
+                        self._request_push(remote, wait=True)
                 else:
                     self._ack_later(
                         self.rev, "error", f"the hub rejected it: {self.last_error}"[:200]
@@ -468,25 +522,116 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.async_update_listeners()
 
     async def async_push_pages(self) -> None:
-        async with self._sync_lock:
-            await self._push_pages_locked()
+        """The `push_pages` service: resend the whole set to every remote and wait for it."""
+        tasks = [self._request_push(r, wait=True, force=True) for r in self.remotes]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _push_pages_locked(self) -> None:
-        self._pages_pending = False
+    # ------------------------------------------------------------ pages per remote
+    def remote_format(self, remote: int) -> int:
+        return self._rlink(remote).page_fmt
+
+    def _rlink(self, remote: int) -> RemoteLink:
+        return self.links.setdefault(remote, RemoteLink())
+
+    def _request_push(self, remote: int, *, wait: bool, force: bool = False) -> asyncio.Task[None]:
+        """(Re)start the page push of one remote; an older push of it is cancelled first and has
+        finished before the new one sends anything, so two sets never interleave."""
+        link = self._rlink(remote)
+        old = link.task
+        if old is not None and not old.done():
+            old.cancel()
+        link.task = self.config_entry.async_create_background_task(
+            self.hass, self._push_remote(remote, wait, force, old), name=f"{DOMAIN} pages {remote}"
+        )
+        return link.task
+
+    async def _push_remote(
+        self, remote: int, wait: bool, force: bool, old: asyncio.Task[None] | None
+    ) -> None:
+        link = self._rlink(remote)
+        if old is not None:
+            await asyncio.gather(old, return_exceptions=True)
+        if wait and link.info is None:
+            link.waiting = True
+            try:
+                await self._wait_info(link)
+            finally:
+                link.waiting = False
+        want = (self._cfg_gen, link.page_fmt, link.epoch)
+        if not force and link.pushed == want:
+            return
+        link.inflight = want
+        try:
+            if await self._push_set(remote, link, want[1]):
+                link.pushed, link.pending = want, False
+                await self._send_all_tiles(remote)
+        finally:
+            link.inflight = None
+            self.async_update_listeners()
+
+    async def _wait_info(self, link: RemoteLink) -> None:
+        """Up to INFO_WAIT seconds for the remote's `remote_info`; never blocks the loop."""
+        waiter = asyncio.ensure_future(link.info_event.wait())
+        timer = asyncio.ensure_future(self._sleep(const.INFO_WAIT))
+        try:
+            await asyncio.wait({waiter, timer}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            waiter.cancel()
+            timer.cancel()
+
+    async def _push_set(self, remote: int, link: RemoteLink, fmt: int) -> bool:
+        """Send every page of format `fmt`, one after the other (each command result is the
+        backpressure). False when it did not complete (no remote, link down, newer config)."""
+        gen = self._cfg_gen
+        for idx, data in enumerate(self.compiled.encoded_pages(fmt)):
+            if gen != self._cfg_gen:
+                return False
+            payload = {"remote": remote, "page": idx, "data": base64.b64encode(data).decode()}
+            try:
+                await self.client.async_send(MsgType.PAGE_PUSH, payload)
+            except HarmonyCommandError as exc:
+                if exc.code == "no_remote":
+                    link.pending, link.attached = True, False  # redone when the remote is alive
+                    _LOGGER.debug("No remote attached; page %s not delivered yet", idx)
+                    return False
+                _LOGGER.warning("Hub refused page %s: %s", idx, exc)
+            except HarmonyConnectionError as exc:
+                link.pending = True
+                _LOGGER.debug("Page push to remote %s interrupted: %s", remote, exc)
+                return False
+        return True
+
+    def _remote_seen(self) -> None:
+        """A key or battery message proves a remote is attached: redo what failed for want of it."""
         for remote in self.remotes:
-            for idx, data in enumerate(self.compiled.pages):
-                payload = {"remote": remote, "page": idx, "data": base64.b64encode(data).decode()}
-                try:
-                    await self.client.async_send(MsgType.PAGE_PUSH, payload)
-                except HarmonyCommandError as exc:
-                    if exc.code == "no_remote":
-                        self._pages_pending = True  # retried when the remote shows signs of life
-                        _LOGGER.debug("No remote attached; page %s not delivered yet", idx)
-                        return
-                    _LOGGER.warning("Hub refused page %s: %s", idx, exc)
-        if self.compiled.pages:
-            for tile in self.compiled.tiles:
-                await self._send_tile(tile.entity_id, only=tile)
+            link = self._rlink(remote)
+            link.attached = True
+            if link.pending and (link.task is None or link.task.done()):
+                self._request_push(remote, wait=False)
+
+    def _on_remote_attached(self) -> None:
+        for remote in self.remotes:
+            link = self._rlink(remote)
+            link.epoch += 1  # the remote may have rebooted and lost its store
+            link.info, link.pushed, link.attached = None, None, True
+            link.info_event.clear()
+            self._request_push(remote, wait=True)
+        self.async_update_listeners()
+
+    def _on_remote_info(self, data: dict[str, Any]) -> None:
+        remote = data["remote"]
+        link = self._rlink(remote)
+        new = RemoteInfo(data["page_fmt"], data["caps"], data["icons"])
+        changed = link.info != new
+        link.info, link.attached = new, True
+        link.info_event.set()
+        want = (self._cfg_gen, link.page_fmt, link.epoch)
+        # One push per link-up: a task still waiting for this message carries on by itself, and a
+        # set already sent (or being sent) in this format and epoch is not repeated.
+        if remote in self.remotes and not link.waiting and want not in (link.pushed, link.inflight):
+            self._request_push(remote, wait=False)
+        if changed:
+            self.async_update_listeners()
 
     def _prune_registry(self) -> None:
         """Remove entities/devices of this entry that the current config no longer defines."""
@@ -514,59 +659,117 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if self._tile_unsub:
             self._tile_unsub()
             self._tile_unsub = None
-        for timer in self._tile_timers.values():
-            timer.cancel()
-        self._tile_timers.clear()
+        if self._ha_dev_unsub:
+            self._ha_dev_unsub()
+            self._ha_dev_unsub = None
+        if self._tile_timer is not None:
+            self._tile_timer.cancel()
+            self._tile_timer = None
+        self._tile_dirty.clear()
 
     def _track_tiles(self) -> None:
+        """Subscribe to exactly the entities on pages (tiles) and behind HA devices."""
         self._untrack_tiles()
         entities = sorted({t.entity_id for t in self.compiled.tiles})
         if entities:
             self._tile_unsub = async_track_state_change_event(
                 self.hass, entities, self._on_tile_entity
             )
+        dev_of: dict[str, list[str]] = {}
+        for dev in self.compiled.ha_devices.values():
+            if dev.entity:
+                dev_of.setdefault(dev.entity, []).append(dev.id)
+                self.device_states[dev.id] = _ha_device_state(self.hass.states.get(dev.entity))
+        if dev_of:
+
+            @callback
+            def on_dev(event: Event[EventStateChangedData]) -> None:
+                for dev_id in dev_of.get(event.data["entity_id"], ()):
+                    self.device_states[dev_id] = _ha_device_state(event.data["new_state"])
+                self.async_update_listeners()
+
+            self._ha_dev_unsub = async_track_state_change_event(self.hass, list(dev_of), on_dev)
 
     @callback
     def _on_tile_entity(self, event: Event[EventStateChangedData]) -> None:
-        entity_id = event.data["entity_id"]
-        if (timer := self._tile_timers.pop(entity_id, None)) is not None:
-            timer.cancel()
-        self._tile_timers[entity_id] = self.hass.loop.call_later(
-            const.TILE_DEBOUNCE, self._fire_tile, entity_id
-        )
+        """Bursts coalesce: the entity is only marked, one flush per TILE_DEBOUNCE sends the
+        latest value of each marked entity."""
+        self._tile_dirty.add(event.data["entity_id"])
+        if self._tile_timer is None:
+            self._tile_timer = self.hass.loop.call_later(const.TILE_DEBOUNCE, self._start_flush)
 
     @callback
-    def _fire_tile(self, entity_id: str) -> None:
-        self._tile_timers.pop(entity_id, None)
-        self.config_entry.async_create_background_task(
-            self.hass, self._send_tile(entity_id), name=f"{DOMAIN} tile {entity_id}"
+    def _start_flush(self) -> None:
+        self._tile_timer = None
+        if self._flush_task is not None and not self._flush_task.done():
+            self._tile_timer = self.hass.loop.call_later(const.TILE_DEBOUNCE, self._start_flush)
+            return  # still sending the last batch; collect more
+        entities, self._tile_dirty = self._tile_dirty, set()
+        self._flush_task = self.config_entry.async_create_background_task(
+            self.hass, self._send_tiles(entities, self.remotes), name=f"{DOMAIN} tiles"
         )
 
-    async def _send_tile(self, entity_id: str, only: Any = None) -> None:
-        text = tile_text(self.hass.states.get(entity_id))
-        for tile in self.compiled.tiles:
-            if tile.entity_id != entity_id or (only is not None and tile is not only):
+    async def _send_all_tiles(self, remote: int) -> None:
+        """After a page push the remote knows no tile values: send every one again."""
+        for key in [k for k in self._tile_last if k[0] == remote]:
+            del self._tile_last[key]
+        await self._send_tiles({t.entity_id for t in self.compiled.tiles}, (remote,))
+
+    async def _send_tiles(self, entities: set[str], remotes: tuple[int, ...]) -> None:
+        """Send each tile whose rendered (state, text) pair changed since the last send. Nothing is
+        sent to a remote known to be away: the hub holds the latest per tile, and the page push
+        that follows its return resends everything."""
+        for remote in remotes:
+            link = self._rlink(remote)
+            if not link.attached or not self.client.connected:
                 continue
-            for remote in self.remotes:
-                args = {"remote": remote, "page": tile.page, "tile": tile.widget, "text": text}
+            for tile in self.compiled.tiles:
+                if tile.entity_id not in entities:
+                    continue
+                st = self.hass.states.get(tile.entity_id)
+                rich = link.tile_state
+                value = tile_state(st) if rich else (0, tile_text(st))
+                key = (remote, tile.page, tile.widget)
+                if self._tile_last.get(key) == (rich, value):
+                    continue
+                args: dict[str, Any] = {
+                    "remote": remote,
+                    "page": tile.page,
+                    "tile": tile.widget,
+                    "text": value[1],
+                }
+                if rich:
+                    args["state"] = value[0]
                 try:
                     await self.client.async_send(
                         MsgType.COMMAND,
                         {"device": HUB_DEVICE, "command": CMD_TILE_UPDATE, "args": args},
                     )
-                    self.tile_updates += 1
                 except HarmonyCommandError as exc:
-                    _LOGGER.debug("tile_update for %s not delivered: %s", entity_id, exc)
+                    _LOGGER.debug("tile_update for %s not delivered: %s", tile.entity_id, exc)
+                    if exc.code == "no_remote":
+                        link.attached = False
+                        break
                 except HarmonyConnectionError as exc:
-                    _LOGGER.debug("tile_update for %s failed: %s", entity_id, exc)
+                    _LOGGER.debug("tile_update for %s failed: %s", tile.entity_id, exc)
                     return
+                else:
+                    self._tile_last[key] = (rich, value)
+                    self.tile_updates += 1
 
     # ------------------------------------------------------------ hub -> HA
     @callback
     def _on_state(self, connected: bool, err: HarmonyError | None) -> None:
         self.available = connected
         if connected:
-            # hello was re-sent by the client: refresh what the hub told us.
+            # hello was re-sent by the client: refresh what the hub told us. The hub re-announces
+            # its remotes (remote_info) right after hello_ack, and the next state_update is a
+            # baseline for the Home Assistant activity steps, not a transition.
+            self._act_known = False
+            for link in self.links.values():
+                link.epoch += 1
+                link.info, link.pushed = None, None
+                link.info_event.clear()
             self._set_activities(self.client.activities)
             self.config_entry.async_create_background_task(
                 self.hass, self.async_sync_config(), name=f"{DOMAIN} resync"
@@ -579,28 +782,23 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
         self.async_update_listeners()
 
-    def _remote_alive(self) -> None:
-        if self._pages_pending:
-            self._pages_pending = False
-            self.config_entry.async_create_background_task(
-                self.hass, self.async_push_pages(), name=f"{DOMAIN} pages"
-            )
-
     @callback
     def _on_push(self, mtype: MsgType, data: dict[str, Any]) -> None:
         if mtype is MsgType.STATE_UPDATE:
             idx = data["activity"]
+            before = self.current_activity_id
             if not data["power"]:
                 self._current_idx = None
-                self.async_update_listeners()
-                return
-            # Stored even when beyond the activity list we know: after a reload that inserts an
-            # activity the hub's re-report can precede the new list (_activity_name range-checks).
-            self._last_idx = self._current_idx = idx
+            else:
+                # Stored even when beyond the activity list we know: after a reload that inserts an
+                # activity the hub's re-report can precede the new list (_activity_name range-checks).
+                self._last_idx = self._current_idx = idx
+            self._note_activity(before, self.current_activity_id)
             self.async_update_listeners()
         elif mtype is MsgType.KEY_EVENT:
-            self._remote_alive()
+            self._remote_seen()
             action = KEY_ACTIONS.get(data["action"], "press")
+            self._dispatch_ha(data["key"], action)  # first: nothing else delays the service call
             for cb in list(self._key_listeners):
                 cb(data["remote"], data["key"], action)
         elif mtype is MsgType.ACTIVITY_LIST:
@@ -608,18 +806,128 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             acts = data["activities"]
             self._set_activities([a for a in acts if isinstance(a, str)])
         elif mtype is MsgType.DEVICE_STATE:
-            self.device_states[data["device"]] = DeviceState(data["power"], data.get("input"))
+            if data["device"] not in self.compiled.ha_devices:  # those follow their entity
+                self.device_states[data["device"]] = DeviceState(data["power"], data.get("input"))
             self.async_update_listeners()
         elif mtype is MsgType.REMOTE_ATTACHED:
-            # a fresh remote knows no pages: push them and the tile texts now
-            self._pages_pending = False
-            self.config_entry.async_create_background_task(
-                self.hass, self.async_push_pages(), name=f"{DOMAIN} pages"
-            )
+            self._on_remote_attached()
+        elif mtype is MsgType.REMOTE_INFO:
+            self._on_remote_info(data)
         elif mtype is MsgType.BATTERY:
-            self._remote_alive()
+            self._remote_seen()
             self.battery[data["remote"]] = (data["percent"], data["millivolts"])
             self.async_update_listeners()
+
+    # ------------------------------------------------------------ Home Assistant actions
+    @property
+    def current_activity_id(self) -> str | None:
+        ids = self.compiled.activity_ids
+        idx = self._current_idx
+        return ids[idx] if idx is not None and 0 <= idx < len(ids) else None
+
+    @callback
+    def _dispatch_ha(self, key: int, action: str) -> None:
+        """A key press (or hold repeat) -> the HA service of the hub's current activity layer.
+        Dict lookups only; the call is started in this very callback. Never raises."""
+        try:
+            tables = self.compiled.ha_keys
+            table = tables.get(self.current_activity_id)
+            if table is None:
+                table = tables.get(None)
+            call = table.get(key) if table else None
+            if call is None:
+                return
+            # PRESS fires once; the remote sends HOLD every 400 ms while the key stays down, which
+            # is the cadence of a `repeat: true` action. RELEASE does nothing.
+            if action == "press" or (action == "hold" and call.repeat):
+                self._fire(call)
+        except Exception:
+            _LOGGER.exception("Home Assistant action for key %s failed", key)
+
+    def _warn_once(self, key: tuple[str, ...], msg: str, *args: Any) -> None:
+        if key not in self._warned:
+            self._warned.add(key)
+            _LOGGER.warning(msg, *args)
+
+    @callback
+    def _fire(self, call: HaCall) -> None:
+        """Start one service call now, with the integration's own context, without waiting."""
+        if not allowed(call.service):  # defence in depth: the bundle came from the add-on
+            self._warn_once((call.service,), "Refusing the service %s: not allowed", call.service)
+            return
+        if not self.hass.services.has_service(call.domain, call.name):
+            self._warn_once((call.service,), "Service %s does not exist; skipping it", call.service)
+            return
+        for entity in call.entities:
+            if self.hass.states.get(entity) is None:
+                self._warn_once(
+                    (call.service, entity), "%s targets %s, which does not exist", call.service, entity
+                )
+        data = {**call.data, "entity_id": list(call.entities)}
+        self.hass.async_create_task(self._call_service(call, data), eager_start=True)
+
+    async def _call_service(self, call: HaCall, data: dict[str, Any]) -> None:
+        try:
+            await self.hass.services.async_call(
+                call.domain, call.name, data, blocking=False, context=Context()
+            )
+        except Exception as exc:  # noqa: BLE001  (any failure is only a warning)
+            self._warn_once((call.service, "error"), "%s failed: %s", call.service, exc)
+
+    # -- activities with Home Assistant steps
+    def _ha_power(self, device: str) -> bool | None:
+        st = self.device_states.get(device)
+        return st.power if st else None
+
+    def _note_activity(self, before: str | None, after: str | None) -> None:
+        if not self._act_known:
+            self._act_known = True
+            return
+        if before == after:
+            return
+        c = self.compiled
+        if before not in c.ha_activities and after not in c.ha_activities:
+            return
+        if self._ha_task is not None and not self._ha_task.done():
+            self._ha_task.cancel()
+        self._ha_task = self.config_entry.async_create_background_task(
+            self.hass, self._run_transition(before, after), name=f"{DOMAIN} activity steps"
+        )
+
+    def _transition_steps(self, before: str | None, after: str | None) -> list[HaStep]:
+        """What Home Assistant does once the hub reports `after` running (or everything off):
+        power off the HA devices `before` used that `after` does not, then (on Off) before's `off`
+        steps, then after's power-on steps, inputs and extra steps (docs/ha-config.md)."""
+        c = self.compiled
+        steps: list[HaStep] = []
+        new = c.ha_activities.get(after)
+        keep = set(new.devices) if new else set()
+        old = c.ha_activities.get(before)
+        if old is not None:
+            for dev in old.devices:
+                off = c.ha_devices[dev].off
+                if dev not in keep and off is not None:
+                    steps.append(HaStep(off, dev, 0, "power_off"))
+            if after is None:
+                steps += old.off
+        if new is not None:
+            steps += new.start
+        return steps
+
+    async def _run_transition(self, before: str | None, after: str | None) -> None:
+        """Sequential and cancellable: a newer transition replaces it."""
+        ran_power: set[str | None] = set()
+        for step in self._transition_steps(before, after):
+            state = self._ha_power(step.device) if step.device else None
+            if step.kind == "power_on" and state is True:
+                continue  # already on: the entity is the truth
+            if step.kind == "power_off" and state is False:
+                continue
+            if step.kind == "power_on":
+                ran_power.add(step.device)
+            if step.wait_ms and (step.kind != "input" or step.device in ran_power):
+                await self._sleep(step.wait_ms / 1000)
+            self._fire(step.call)
 
     # ------------------------------------------------------------ HA -> hub
     async def async_command(
@@ -665,6 +973,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     ) -> None:
         """Tell the hub a device changed by hand (no IR). `input=None` = unknown, False = leave."""
         args: dict[str, Any] = {"device": self.resolve_device(device)}
+        if args["device"] in self.compiled.ha_devices:
+            raise HomeAssistantError(f"{device} is a Home Assistant device: its state is its entity's")
         if power is not None:
             args["power"] = power
         if input is not False:
@@ -676,6 +986,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         device = self.resolve_device(device)
         if device == HUB_DEVICE:
             await self.async_command(device, command)
+            return
+        if (ha := self.compiled.ha_devices.get(device)) is not None:
+            call = ha.lookup(command)
+            if call is None:
+                raise HomeAssistantError(f"{device} has no command {command!r}")
+            self._fire(call)
             return
         await self.async_command(
             HUB_DEVICE, CMD_DEVICE_COMMAND, {"device": device, "command": command}

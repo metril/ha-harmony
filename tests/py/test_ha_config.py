@@ -59,6 +59,7 @@ BASE_UIDS = {
         "key_1",
         "battery_1",
         "voltage_1",
+        "pagefmt_1",
         "dev_tv_power",
         "dev_tv_input",
         "dev_amp_power",
@@ -584,8 +585,8 @@ async def test_services(hass, hub_rf, write_yaml):
     await call(
         const.DOMAIN, "push_pages", {}, blocking=True
     )  # no remote attached: held by the hub, no error
-    assert (
-        not entry.runtime_data._pages_pending
+    assert not any(
+        lk.pending for lk in entry.runtime_data.links.values()
     )  # the hub holds the pages until the remote links up
     await hass.config_entries.async_unload(entry.entry_id)
 
@@ -637,7 +638,7 @@ async def test_nothing_applied_loads_with_hub_config_untouched(hass, hub_rf, wri
     assert hass.states.get(SELECT).attributes["options"] == ["TV", "Music", "Off"]
     assert uids(hass, entry) == {
         f"{HUB_ID}_{k}"
-        for k in ["remote", "activity", "key_1", "battery_1", "voltage_1", "addon_link"]
+        for k in ["remote", "activity", "key_1", "battery_1", "voltage_1", "pagefmt_1", "addon_link"]
     }
     await hass.config_entries.async_unload(entry.entry_id)
 

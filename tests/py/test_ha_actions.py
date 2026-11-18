@@ -245,3 +245,11 @@ pages:
     code = 128 + next(i for i in range(8) if c.key_names.get(128 + i) == "tap_ok")
     assert c.ha_keys[None][code].data == {"command": "DPAD_CENTER"}
     assert str(code) not in c.hub_json["keys"]
+
+
+def test_remote_info_wait_default_is_one_and_a_half_seconds():
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "custom_components/ha_harmony/const.py").read_text()
+    assert re.search(r"^INFO_WAIT = 1\.5\b", src, re.M)

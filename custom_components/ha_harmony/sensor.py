@@ -11,7 +11,7 @@ from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfElectricPotent
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import HarmonyConfigEntry
+from . import HarmonyConfigEntry, const
 from .base_entity import HarmonyEntity
 from .coordinator import LINK_STATES, HarmonyCoordinator
 from .entity_sync import setup_dynamic
@@ -25,7 +25,7 @@ async def async_setup_entry(
     def build(c: HarmonyCoordinator) -> list[HarmonyEntity]:
         ents: list[HarmonyEntity] = [HarmonyDeviceInput(c, d) for d in c.compiled.devices]
         for r in c.remotes:
-            ents += [HarmonyRemoteBattery(c, r), HarmonyRemoteVoltage(c, r)]
+            ents += [HarmonyRemoteBattery(c, r), HarmonyRemoteVoltage(c, r), HarmonyPageFormat(c, r)]
         if c.has_addon_link:
             ents.append(HarmonyAddonLink(c))
         return ents
@@ -106,3 +106,35 @@ class HarmonyAddonLink(HarmonyEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, object]:
         c = self.coordinator
         return {"rev": c.rev, "applied_at": c.applied_at, "last_error": c.last_error}
+
+
+class HarmonyPageFormat(HarmonyEntity, SensorEntity):
+    """Which page format a remote speaks (from its `remote_info`) and what it can do."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "Page format"
+
+    def __init__(self, coordinator: HarmonyCoordinator, remote: int) -> None:
+        super().__init__(coordinator, f"pagefmt_{remote}", remote=remote)
+        self._attr_options = ["unknown", "v1", "v2"]
+        self._remote = remote
+
+    @property
+    def native_value(self) -> str:
+        link = self.coordinator.links.get(self._remote)
+        return "unknown" if link is None or link.info is None else f"v{link.page_fmt}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        link = self.coordinator.links.get(self._remote)
+        info = link.info if link else None
+        if info is None:
+            return {"pages_sent_as": "v1", "caps": [], "icons": None}
+        names = {const.CAP_TILE_STATE: "tile_state", const.CAP_PAGING: "paging"}
+        return {
+            "pages_sent_as": f"v{link.page_fmt}",
+            "page_fmt": info.page_fmt,
+            "caps": [n for bit, n in names.items() if info.caps & bit],
+            "icons": info.icons,
+        }
