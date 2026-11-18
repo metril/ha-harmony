@@ -106,3 +106,12 @@ ACK = vol.Schema(
     },
     extra=vol.PREVENT_EXTRA,
 )
+
+TEST_IR = vol.Schema(
+    {
+        vol.Required("hub"): _hub,
+        vol.Required("ir"): bounded_config,
+        vol.Optional("port_mask"): vol.All(int, vol.Range(min=1, max=255)),
+    },
+    extra=vol.PREVENT_EXTRA,
+)

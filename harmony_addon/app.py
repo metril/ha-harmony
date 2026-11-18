@@ -34,6 +34,7 @@ from harmony_core.config_model import (
     load_source,
     parse_model,
     validate_all,
+    validate_ir,
 )
 from harmony_core.page_codec import decode_page
 from harmony_irdb.archive import IrdbArchive
@@ -49,6 +50,7 @@ from .auth import (
     load_or_create_token,
 )
 from .ha_client import Catalog, HaApi, HaUnavailable
+from .ir_tester import IrSender, SendLimiter, SendRefused
 from .options import Options, load_options
 from .store import HISTORY_MAX, RevConflict, Store, StoreError
 from .supervisor import Discovery
@@ -73,6 +75,8 @@ WAIT_KEY = web.AppKey("wait_s", float)
 CATALOG_KEY = web.AppKey("catalog", Catalog)
 SEEN_KEY = web.AppKey("bundle_seen", dict)
 ACKS_KEY = web.AppKey("acks", dict)
+SENDER_KEY = web.AppKey("ir_sender", object)
+LIMITER_KEY = web.AppKey("ir_limiter", SendLimiter)
 WAIT_SECONDS = 55.0
 
 
@@ -410,6 +414,43 @@ async def ha_services(request: web.Request) -> web.Response:
     return jresp({"services": rows})
 
 
+# ------------------------------------------------------------------ IR test-fire
+async def ir_test(request: web.Request) -> web.Response:
+    """Fire one inline IR code via Home Assistant's own `ha_harmony.send_ir` service."""
+    body = await read_body(request, schemas.TEST_IR)
+    ir = dict(body["ir"])
+    if "port_mask" in body:
+        if "port_mask" in ir:
+            raise error(400, "bad_request", "invalid request: port_mask")
+        ir["port_mask"] = body["port_mask"]
+    try:  # no base dir: flipper/smartir file references are refused, sizes are checked
+        action = validate_ir(ir)
+    except vol.Invalid as exc:
+        msg = exc.error_message[:200]
+        raise error(422, "invalid_ir", msg, errors=[{"path": [], "msg": msg}]) from None
+    sender = request.app[SENDER_KEY]
+    if sender is None:
+        raise _ha_unavailable()
+    wait_ms = request.app[LIMITER_KEY].acquire()
+    if wait_ms is not None:
+        raise error(
+            429,
+            "rate_limited",
+            "slow down: test sends are limited",
+            headers={"Retry-After": str(-(-wait_ms // 1000))},
+            retry_after_ms=wait_ms,
+        )
+    try:
+        await sender.send(body["hub"], action)
+    except SendRefused as exc:
+        raise error(
+            502, "send_failed", "Home Assistant refused the test send", http_status=exc.status
+        ) from None
+    except HaUnavailable:
+        raise _ha_unavailable() from None
+    return jresp({"ok": True, "action": action})
+
+
 # ------------------------------------------------------------------ hubs and apply status
 async def list_hubs(request: web.Request) -> web.Response:
     store = request.app[STORE_KEY]
@@ -585,6 +626,8 @@ def create_app(
     wait_seconds: float = WAIT_SECONDS,
     ha_api: HaApi | None = None,
     irdb: IrdbArchive | None = None,
+    ir_sender: IrSender | None = None,
+    send_clock: Callable[[], float] = time.monotonic,
     irdb_dir: Path | str | None = None,
 ) -> web.Application:
     """`auth` guards the ingress routes; the bundle routes always need `bundle_token` (default:
@@ -607,6 +650,8 @@ def create_app(
     app[WAIT_KEY] = wait_seconds
     app[CATALOG_KEY] = Catalog(ha_api, clock)
     app[SEEN_KEY] = {}
+    app[SENDER_KEY] = ir_sender
+    app[LIMITER_KEY] = SendLimiter(send_clock)
     if irdb is not None:
         app[ir_routes.IRDB_KEY] = irdb
     else:  # one archive for the process: its own aiohttp session, cache under /data/irdb
@@ -648,6 +693,7 @@ def create_app(
     app.router.add_get(f"{api}/ha/entities", ha_entities)
     app.router.add_get(f"{api}/ha/services", ha_services)
     ir_routes.add_routes(app, api)
+    app.router.add_post(f"{api}/ir/test", ir_test)
     app.router.add_get(f"{api}/hubs", list_hubs)
     app.router.add_get(f"{api}/config/status", config_status)
     app.router.add_post(f"{api}/bundle/ack", post_ack)
