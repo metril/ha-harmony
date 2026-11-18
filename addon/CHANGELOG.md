@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Editor: Home Assistant service actions and the older HA event action are labelled apart in the key
+  map ("HA light.toggle light.x" vs "HA event name"); the action picker offers "Home Assistant action".
 - `GET /api/v1/config/history?rev=` returns the source config of an applied or history version, so the
   editor can restore it as a draft and diff it.
 - Editor UI speaks the real API: nested errors, draft `rev` with `If-Match`, all-errors validation,

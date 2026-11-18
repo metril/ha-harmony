@@ -81,6 +81,11 @@ export function describeAction(cfg: Config, a: unknown): string {
   return 'IR code';
 }
 
+/** Key map label: a Home Assistant service action (has `service`) reads "HA light.toggle light.x"; the older event action keeps "HA event name". Both have kind "ha". */
+export function keyActionLabel(a: { kind: string; label: string } & Record<string, unknown>): string {
+  return a.kind === 'ha' && typeof a['service'] === 'string' && !a.label.startsWith('HA ') ? `HA ${a.label}` : a.label;
+}
+
 // ---------------------------------------------------------------- sources and targets
 export type Source =
   | { kind: 'command'; device: string; name: string }

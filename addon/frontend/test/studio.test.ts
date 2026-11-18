@@ -185,7 +185,7 @@ describe('remote studio', () => {
     const picker = insp.shadowRoot.querySelector('hh-action-picker') as El;
     await tick(picker);
     const root = picker.shadowRoot;
-    ([...root.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant') as HTMLButtonElement).click();
+    ([...root.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant action') as HTMLButtonElement).click();
     await tick(picker);
     const svc = root.querySelector('select') as HTMLSelectElement;
     expect([...svc.options].map((o) => o.value)).toEqual(expect.arrayContaining(['light.toggle', 'light.turn_on']));
@@ -211,7 +211,7 @@ describe('remote studio', () => {
     const { insp } = await inspectorFor({ kind: 'key', name: 'red' }, { ha_actions: false });
     const picker = insp.shadowRoot.querySelector('hh-action-picker') as El;
     await tick(picker);
-    ([...picker.shadowRoot.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant') as HTMLButtonElement).click();
+    ([...picker.shadowRoot.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant action') as HTMLButtonElement).click();
     await tick(picker);
     expect(picker.shadowRoot.textContent).toContain('this add-on version has no Home Assistant actions');
     expect((([...picker.shadowRoot.querySelectorAll('button')].find((x) => x.textContent === 'Set action')) as HTMLButtonElement).disabled).toBe(true);

@@ -1,0 +1,215 @@
+{
+ "activities": [
+  {
+   "devices": [
+    {
+     "device": "tv",
+     "input": "hdmi1"
+    },
+    {
+     "device": "avr"
+    }
+   ],
+   "id": "watch_tv",
+   "name": "Watch TV"
+  },
+  {
+   "devices": [
+    {
+     "device": "tv",
+     "input": "hdmi2"
+    },
+    {
+     "device": "avr",
+     "input": "stream"
+    },
+    {
+     "device": "box"
+    }
+   ],
+   "id": "stream",
+   "keys": {
+    "channel_up": {
+     "ha": {
+      "service": "light.toggle",
+      "target": {
+       "entity_id": "light.kitchen"
+      }
+     }
+    }
+   },
+   "name": "Stream"
+  }
+ ],
+ "devices": [
+  {
+   "commands": {
+    "menu": {
+     "addr": 4,
+     "cmd": 20,
+     "proto": "nec"
+    },
+    "ok": {
+     "addr": 4,
+     "cmd": 34,
+     "proto": "nec"
+    }
+   },
+   "id": "tv",
+   "inputs": {
+    "hdmi1": {
+     "addr": 4,
+     "cmd": 9,
+     "proto": "nec"
+    },
+    "hdmi2": {
+     "addr": 4,
+     "cmd": 10,
+     "proto": "nec"
+    }
+   },
+   "name": "Living room TV",
+   "power": {
+    "off": {
+     "addr": 4,
+     "cmd": 3,
+     "proto": "nec"
+    },
+    "on": {
+     "addr": 4,
+     "cmd": 2,
+     "proto": "nec"
+    }
+   }
+  },
+  {
+   "commands": {
+    "mute": {
+     "addr": 16,
+     "cmd": 13,
+     "proto": "rc5"
+    },
+    "vol_down": {
+     "addr": 16,
+     "cmd": 17,
+     "proto": "rc5"
+    },
+    "vol_up": {
+     "addr": 16,
+     "cmd": 16,
+     "proto": "rc5"
+    }
+   },
+   "id": "avr",
+   "inputs": {
+    "stream": {
+     "addr": 16,
+     "cmd": 57,
+     "proto": "rc5"
+    }
+   },
+   "name": "AV receiver",
+   "power": {
+    "toggle": {
+     "addr": 16,
+     "cmd": 12,
+     "proto": "rc5"
+    }
+   }
+  },
+  {
+   "commands": {
+    "pause": {
+     "addr": 1,
+     "cmd": 27,
+     "proto": "sirc12"
+    },
+    "play": {
+     "addr": 1,
+     "cmd": 26,
+     "proto": "sirc12"
+    }
+   },
+   "id": "box",
+   "name": "Streaming box"
+  }
+ ],
+ "keys": {
+  "menu": {
+   "command": "menu",
+   "device": "tv"
+  },
+  "volume_up": {
+   "command": "vol_up",
+   "device": "avr"
+  }
+ },
+ "pages": [
+  {
+   "cols": 4,
+   "id": "home",
+   "kind": "home",
+   "rows": 6,
+   "title": "Activities",
+   "widgets": [
+    {
+     "action": {
+      "activity": "watch_tv"
+     },
+     "h": 1,
+     "id": "a_tv",
+     "label": "Watch TV",
+     "type": "button",
+     "w": 4,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "action": {
+      "activity": "stream"
+     },
+     "h": 1,
+     "id": "a_st",
+     "label": "Stream",
+     "type": "button",
+     "w": 4,
+     "x": 0,
+     "y": 1
+    }
+   ]
+  },
+  {
+   "activity": "stream",
+   "back": true,
+   "cols": 4,
+   "id": "stream_ctl",
+   "rows": 6,
+   "title": "Stream",
+   "widgets": [
+    {
+     "action": {
+      "command": "play",
+      "device": "box"
+     },
+     "h": 1,
+     "id": "play",
+     "label": "Play",
+     "type": "button",
+     "w": 2,
+     "x": 0,
+     "y": 0
+    },
+    {
+     "entity": "light.kitchen",
+     "h": 1,
+     "id": "tile1",
+     "label": "Kitchen",
+     "type": "tile",
+     "w": 2,
+     "x": 2,
+     "y": 4
+    }
+   ]
+  }
+ ]
+}

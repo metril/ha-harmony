@@ -8,7 +8,7 @@ import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, entityDomain, fieldD
 import './hh-send-ir';
 
 type Kind = 'command' | 'input' | 'activity' | 'alloff' | 'ha';
-const KINDS: [Kind, string][] = [['command', 'Command'], ['input', 'Input'], ['activity', 'Activity'], ['alloff', 'All off'], ['ha', 'Home Assistant']];
+const KINDS: [Kind, string][] = [['command', 'Command'], ['input', 'Input'], ['activity', 'Activity'], ['alloff', 'All off'], ['ha', 'Home Assistant action']];
 
 /** Pick an action for a hard key or button: device command or input, start an activity, all off, or a Home Assistant service. */
 @customElement('hh-action-picker')

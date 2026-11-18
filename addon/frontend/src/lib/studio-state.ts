@@ -2,7 +2,7 @@
 // fetches around the draft: key map per layer, add-on capabilities, Home Assistant entities/services.
 import { ApiError, haEntitiesOrNull, haServicesOrNull, type HaEntity, type HaService, type Keymap, type KeymapRow, type PreviewPage } from './api';
 import type { Store } from './store';
-import { DEFAULT_LAYER, pageIndexForLayer, type Layer } from './studio-model';
+import { DEFAULT_LAYER, keyActionLabel, pageIndexForLayer, type Layer } from './studio-model';
 
 export type Sel = { kind: 'key'; name: string } | { kind: 'widget'; page: number; index: number } | { kind: 'page' } | null;
 export type PaletteTab = 'devices' | 'activities' | 'home' | 'widgets';
@@ -96,7 +96,8 @@ export class StudioState extends EventTarget {
     try {
       const km = await this.store.api.keymap(this.store.hub, structuredClone(this.store.config));
       if (seq !== this.kmSeq) return;
-      this.keymap = km;
+      const fix = (rows: typeof km.default) => rows.map((r) => (r.action ? { ...r, action: { ...r.action, label: keyActionLabel(r.action) } } : r));
+      this.keymap = { ...km, default: fix(km.default), activities: km.activities.map((a) => ({ ...a, keys: fix(a.keys) })) };
       this.keymapError = null;
     } catch (e) {
       if (seq !== this.kmSeq) return;

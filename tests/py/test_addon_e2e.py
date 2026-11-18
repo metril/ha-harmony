@@ -7,6 +7,7 @@ playwright, so this runs on developer machines:
 Set HH_SHOTS=<dir> to also write light/dark screenshots at 1280 and 400 px.
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -426,4 +427,109 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
     await bar.get_by_role("button", name="Review & apply").click()
     await page.get_by_role("button", name="Apply to hub").click()
     await page.get_by_text("Saved as rev 1").wait_for()
+    assert [p for p in problems if "Failed to load resource" not in p] == []
+
+
+HA_STATES = [
+    {"entity_id": "light.kitchen", "state": "on", "attributes": {"friendly_name": "Kitchen"}},
+    {"entity_id": "light.attic", "state": "off", "attributes": {"friendly_name": "Attic lamp"}},
+    {"entity_id": "switch.fan", "state": "off", "attributes": {"friendly_name": "Fan"}},
+]
+HA_SERVICES = [
+    {
+        "domain": "light",
+        "services": {
+            "toggle": {"name": "Toggle", "fields": {"brightness_pct": {}}},
+            "turn_on": {"name": "Turn on", "fields": {"brightness_pct": {}}},
+            "turn_off": {"name": "Turn off", "fields": {}},
+        },
+    },
+    {"domain": "switch", "services": {"toggle": {}, "turn_on": {}, "turn_off": {}}},
+]
+
+
+class FakeHaApi:
+    """The e2e seam for Home Assistant: a few entities and services, GET only like the real client."""
+
+    async def get(self, path):
+        return {"/states": HA_STATES, "/services": HA_SERVICES}[path]
+
+
+@pytest.fixture
+async def site_ha(aiohttp_server, tmp_path):
+    app = create_app(
+        tmp_path,
+        options=Options("info"),
+        auth=NoAuth(),
+        static_dir=DIST,
+        bundle_token=TOKEN,
+        bundle_networks=None,
+        wait_seconds=1.0,
+        ha_api=FakeHaApi(),
+    )
+    server = await aiohttp_server(app)
+    return f"http://127.0.0.1:{server.port}"
+
+
+FLOW_FIXTURE = Path(__file__).parent / "fixtures" / "ha_action_flow.json"
+
+
+async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
+    site = site_ha
+    problems: list[str] = []
+    page = await open_editor(browser, site, problems)
+    await page.get_by_text("Set up your first hub config").wait_for()
+    await page.get_by_role("button", name="Import YAML", exact=True).click()
+    await page.locator("textarea").fill(STUDIO_YAML)
+    await page.get_by_role("button", name="Import as draft").click()
+    await page.locator("hh-remote svg.scr").wait_for()
+
+    # a hard key of the Stream layer -> Home Assistant action -> light.toggle on light.kitchen
+    await page.get_by_role("tab", name="Stream", exact=True).click()
+    await page.locator("hh-remote [data-key=channel_up]").click()
+    insp = page.locator("hh-inspector")
+    await insp.get_by_role("button", name="Home Assistant action").click()
+    await insp.locator("label", has_text="Service").locator("select").select_option("light.toggle")
+    await insp.get_by_placeholder("Search entities").fill("light.kitchen")
+    await insp.get_by_role("button", name="Set action").click()
+    await page.get_by_role("button", name="X-ray").click()
+    await page.locator("hh-remote text.xl", has_text="light.toggle").wait_for()
+    await page.get_by_role("button", name="X-ray").click()
+
+    # drag a light from the palette's Home tab onto the screen: a tile with the automatic tap
+    await page.get_by_role("tab", name="Home", exact=True).click()
+    ent = page.locator("hh-palette .ent", has_text="light.kitchen").first
+    await ent.wait_for()
+    eb = await ent.bounding_box()
+    sb = await page.locator("hh-remote svg.scr").bounding_box()
+    await page.mouse.move(eb["x"] + 10, eb["y"] + 10)
+    await page.mouse.down()
+    await page.mouse.move(eb["x"] + 60, eb["y"] + 40, steps=5)
+    await page.mouse.move(sb["x"] + sb["width"] / 2, sb["y"] + sb["height"] * 0.8, steps=10)
+    await page.mouse.up()
+    await insp.get_by_text("Automatic: a tap runs light.toggle").wait_for()
+    await page.wait_for_timeout(900)  # autosave
+    _, got = await api(site, "GET", "/api/v1/config")
+    cfg = got["draft"]["config"]
+    tiles = [w for p in cfg["pages"] for w in p["widgets"] if w["type"] == "tile"]
+    assert [t["entity"] for t in tiles] == ["light.kitchen"] and "tap" not in tiles[0]
+    assert cfg["activities"][1]["keys"]["channel_up"] == {
+        "ha": {"service": "light.toggle", "target": {"entity_id": "light.kitchen"}}
+    }
+    await page.locator("hh-remote svg.scr text", has_text="Kitchen").first.wait_for()  # preview
+
+    bar = page.get_by_role("region", name="Draft")
+    await bar.get_by_text("Valid").wait_for()
+    await bar.get_by_role("button", name="Review & apply").click()
+    await page.get_by_role("button", name="Apply to hub").click()
+    await page.get_by_text("Saved as rev 1").wait_for()
+
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    status, bundle = await api(site, "GET", "/api/v1/bundle?hub=default", headers=auth)
+    assert status == 200 and "editor" not in bundle["config"]
+    assert bundle["config"]["activities"][1]["keys"]["channel_up"]["ha"]["service"] == "light.toggle"
+    assert [w for p in bundle["config"]["pages"] for w in p["widgets"] if w["type"] == "tile"]
+    if os.environ.get("HH_WRITE_FIXTURE"):
+        FLOW_FIXTURE.parent.mkdir(exist_ok=True)
+        FLOW_FIXTURE.write_text(json.dumps(got["draft"]["config"], indent=1, sort_keys=True) + "\n")
     assert [p for p in problems if "Failed to load resource" not in p] == []

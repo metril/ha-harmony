@@ -163,3 +163,36 @@ async def test_remote_holding_another_set_gets_the_pages(hass, hub_rf, fake_addo
     code, out = await asyncio.to_thread(r.result)
     assert code == 0 and json.loads(out)["data"]
     await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_editor_flow_config_runs_through_the_integration(
+    hass, hub_rf, fake_addon, run_remote
+):
+    """The config the e2e editor flow wrote (fixtures/ha_action_flow.json): a hard key of the Stream
+    layer runs `light.toggle`, and the tile dropped from the palette toggles on its soft key."""
+    from pathlib import Path
+
+    cfg = json.loads((Path(__file__).parent / "fixtures" / "ha_action_flow.json").read_text())
+    hass.states.async_set("light.kitchen", "off", {"friendly_name": "Kitchen"})
+    fake_addon.apply(cfg)
+    entry = make_entry("127.0.0.1", hub_rf.port, addon=fake_addon)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    if entry.runtime_data.first_sync is not None:
+        await entry.runtime_data.first_sync
+    await hass.async_block_till_done()
+    toggles = async_mock_service(hass, "light", "toggle")
+
+    # the tile (page stream_ctl, wire widget 3) -> soft key 128 + 3, "automatic" = toggle
+    assert (await asyncio.to_thread(run_remote, hub_rf.rf, "--press", "131")).returncode == 0
+    await until(hass, lambda: len(toggles) == 1)
+    assert toggles[0].data == {"entity_id": ["light.kitchen"]}
+
+    # the hard key only exists in the Stream layer: start it, then press ChannelUp
+    await hass.services.async_call(
+        "select", "select_option", {"entity_id": SELECT, "option": "Stream"}, blocking=True
+    )
+    await until(hass, lambda: entry.runtime_data.current_activity_id == "stream")
+    assert (await asyncio.to_thread(run_remote, hub_rf.rf, "--press", "ChannelUp")).returncode == 0
+    await until(hass, lambda: len(toggles) == 2)
+    await hass.config_entries.async_unload(entry.entry_id)

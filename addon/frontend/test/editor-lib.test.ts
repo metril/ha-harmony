@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { IrCandidate, IrDeviceResult } from '../src/lib/api';
 import { addActivity, addActivityDevice, addControlPage, addStartButton, addStep, applyHandler, chainOrder, deleteActivity, handlerOf, matchZone, moveChain, moveStep, normName, removeStep, timeline } from '../src/lib/activity-edit';
 import { deviceIdFor, duplicateCommand, nameProblem, powerStatus, setPowerMode, sourceLabel, withPorts, withRepeats } from '../src/lib/device-edit';
+import { keyActionLabel } from '../src/lib/studio-model';
 import { proposeFromEntity } from '../src/lib/ha-propose';
 import type { Config } from '../src/lib/model';
 import { permissions, tileDefaultTap } from '../src/lib/permissions';
@@ -312,5 +313,13 @@ describe('add-device wizard state machine', () => {
     expect(reduce(initial(), { t: 'source', source: 'paste' }).step).toBe('paste');
     expect(reduce(initial(), { t: 'source', source: 'ha' }).step).toBe('entity');
     expect(reduce(reduce(initial(), { t: 'source', source: 'ha' }), { t: 'draft', result: result() }).step).toBe('review');
+  });
+});
+
+describe('key map labels', () => {
+  it('tells a Home Assistant service action from the older event action (both kind "ha")', () => {
+    expect(keyActionLabel({ kind: 'ha', service: 'light.toggle', entity: 'light.k', label: 'light.toggle light.k' })).toBe('HA light.toggle light.k');
+    expect(keyActionLabel({ kind: 'ha', event: 'tv', label: 'HA event tv' })).toBe('HA event tv');
+    expect(keyActionLabel({ kind: 'device', label: 'avr: mute' })).toBe('avr: mute');
   });
 });
