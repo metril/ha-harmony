@@ -189,7 +189,10 @@ export class HhInspector extends LitElement {
       ${isBtn
         ? html`<label>Tap goes to page
             <select .value=${navVal} @change=${(e: Event) => this.setNav(pi, wi, (e.target as HTMLSelectElement).value)}>
-              <option value="">No</option><option value="next" ?selected=${navVal === 'next'}>Next page</option><option value="prev" ?selected=${navVal === 'prev'}>Previous page</option><option value="home" ?selected=${navVal === 'home'}>Home</option>
+              <option value="">No</option>
+              <option value="next" ?selected=${navVal === 'next'} ?disabled=${pi >= (this.cfg.pages ?? []).length - 1}>Next page${pi >= (this.cfg.pages ?? []).length - 1 ? ' (this is the last page)' : ''}</option>
+              <option value="prev" ?selected=${navVal === 'prev'} ?disabled=${pi === 0}>Previous page${pi === 0 ? ' (this is the first page)' : ''}</option>
+              <option value="home" ?selected=${navVal === 'home'} ?disabled=${!(this.cfg.pages ?? []).some((p) => p.kind === 'home')}>Home${(this.cfg.pages ?? []).some((p) => p.kind === 'home') ? '' : ' (no Home page yet)'}</option>
               ${(this.cfg.pages ?? []).map((p, i) => (i === pi ? nothing : html`<option value=${p.id} ?selected=${navVal === p.id}>${p.title || p.id}</option>`))}
             </select></label>`
         : nothing}

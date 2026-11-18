@@ -208,6 +208,7 @@ async def candidates(request: web.Request) -> web.Response:
                     "form": c.form,
                     "count": c.count,
                     "models": [m[:120] for m in c.models[:5]],
+                    "model_files": c.files[:5],
                     "codesets": c.codesets,
                 }
                 for c in res.candidates[:MAX_CANDIDATES]

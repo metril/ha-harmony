@@ -14,6 +14,8 @@ const PATHS: Record<string, string> = {
   upload: 'M12 16V4M7 9l5-5 5 5M4 20h16',
   download: 'M12 4v12M7 11l5 5 5-5M4 20h16',
   undo: 'M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-3',
+  redo: 'M15 14l5-5-5-5M20 9H9a5 5 0 000 10h3',
+  collapse: 'M4 5h16M4 12h8M4 19h16M20 9l-3 3 3 3',
   check: 'M5 12l5 5 9-10',
   alert: 'M12 4l9 16H3zM12 10v4M12 17v.01',
   x: 'M6 6l12 12M18 6L6 18',

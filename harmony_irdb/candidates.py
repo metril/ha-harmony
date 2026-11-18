@@ -24,6 +24,7 @@ class Candidate:
     form: str
     count: int  # models using this code
     models: list[str] = field(default_factory=list)  # a few example model names
+    files: list[str] = field(default_factory=list)  # their archive files, parallel to `models`
     codesets: int = 0
 
 
@@ -50,7 +51,9 @@ def _cost(cs: dict) -> int:
     return n
 
 
-def scan_codeset(cs: dict, entries: list[tuple[str, dict]]) -> list[tuple[str, str, dict, str, str]]:
+def scan_codeset(
+    cs: dict, entries: list[tuple[str, dict]]
+) -> list[tuple[str, str, dict, str, str]]:
     """CPU part, run in a worker thread: (kind, key, action, form, model name) for each power code
     the given (model name, device power block) pairs use. `by_name` is built once per codeset."""
     by_name = {c.get("name"): c for c in cs["commands"] if isinstance(c, dict)}
@@ -65,7 +68,9 @@ def scan_codeset(cs: dict, entries: list[tuple[str, dict]]) -> list[tuple[str, s
             )
             res = convert_command(by_name.get(first)) if first in by_name else None
             if isinstance(res, Converted):
-                out.append((kind, json.dumps(res.action, sort_keys=True), res.action, res.form, name))
+                out.append(
+                    (kind, json.dumps(res.action, sort_keys=True), res.action, res.form, name)
+                )
     return out
 
 
@@ -104,9 +109,11 @@ async def power_candidates(
     loaded = await asyncio.gather(*(load(m) for m in pool))
     matched = [(m, d) for m, d in loaded if d and d.get("deviceType") == want]
     by_cs: dict[str, list[tuple[str, dict]]] = {}
+    file_of: dict[tuple[str, str], str] = {}  # (codeset path, model name) -> file, no extra fetches
     for m, d in matched:
         if isinstance(d.get("codeset"), str) and isinstance(d.get("power"), dict):
             by_cs.setdefault(d["codeset"], []).append((m.name, d["power"]))
+            file_of.setdefault((d["codeset"], m.name), m.file)
     paths = sorted(by_cs)
 
     async def load_cs(p):
@@ -141,6 +148,7 @@ async def power_candidates(
                 c.count += 1
                 if len(c.models) < examples:
                     c.models.append(mname)
+                    c.files.append(file_of.get((p, mname), ""))
                 seen_cs.setdefault(k, set()).add(p)
         if truncated:
             break

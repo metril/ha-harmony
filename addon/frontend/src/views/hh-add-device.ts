@@ -10,7 +10,7 @@ import { proposeFromEntity, PROPOSAL_DOMAINS } from '../lib/ha-propose';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { LIMITS, type Device, type IrAction } from '../lib/model';
 import { hashFor } from '../lib/router';
-import { summarize } from '../lib/codes';
+import { summarize, trimBytes } from '../lib/codes';
 import { shared } from '../lib/styles';
 import { StudioState } from '../lib/studio-state';
 import { GROUPS, groupCommand, pretty, type Group } from '../lib/studio-model';
@@ -186,7 +186,7 @@ export class HhAddDevice extends StoreElement {
     try {
       const r = await this.api.irDevice(brand.slug, file);
       this.names = {};
-      this.devName = (r.device.name ?? r.device.id).slice(0, 31);
+      this.devName = trimBytes(r.device.name ?? r.device.id);
       this.notes = r.notes;
       this.dispatch({ t: 'device', result: r });
     } catch (e) {
@@ -278,7 +278,7 @@ export class HhAddDevice extends StoreElement {
     }
     const commands: Record<string, IrAction> = {};
     for (const n of this.w.selected) commands[this.finalName(n)] = (d.commands ?? {})[n] as IrAction;
-    const name = this.devName.trim().slice(0, 31) || d.name || d.id;
+    const name = trimBytes(this.devName.trim()) || d.name || d.id;
     const id = deviceIdFor(this.store.config, d.kind === 'ha' ? name : (d.id ?? name));
     const dev: Device = { ...d, id, name, commands };
     this.store.replace({ ...this.store.config, devices: [...(this.store.config.devices ?? []), dev] });
@@ -369,7 +369,7 @@ export class HhAddDevice extends StoreElement {
       <p class="lead">${w.confirmed ? 'The code that worked is shared by these models. Pick yours, or search below.' : w.exhausted ? 'No code reacted, or none was offered. Search for your model.' : 'Search for your model.'}</p>
       ${this.banner()}
       ${loading ? html`<p class="lead" role="status">Loading ${w.model?.name}…</p>` : nothing}
-      ${likely.length ? html`<h3>Likely matches</h3><div class="likely">${likely.map((n) => html`<button class="btn" @click=${() => void this.pickLikely(n)}>${n}</button>`)}</div>` : nothing}
+      ${likely.length ? html`<h3>Likely matches</h3><div class="likely">${likely.map((x) => html`<button class="btn" @click=${() => (x.file ? void this.pickModel(x.file, x.name) : void this.pickLikely(x.name))}>${x.name}</button>`)}</div>` : nothing}
       <input class="search" type="search" aria-label="Search models" placeholder="Model name or number" .value=${this.mq} @input=${(e: Event) => { this.mq = (e.target as HTMLInputElement).value; clearTimeout(this.timer); this.timer = setTimeout(() => void this.loadModels(0, this.mq.trim()), 250); }} />
       ${m
         ? html`<div class="models" role="list" aria-label="Models">${m.models.map((x) => html`<button class="model" role="listitem" ?disabled=${!!loading} @click=${() => void this.pickModel(x.file, x.name)}><b>${x.name}</b><span class="muted">${x.file.replace(/\.json$/, '') === x.name ? '' : x.file}</span></button>`)}</div>
@@ -403,7 +403,7 @@ export class HhAddDevice extends StoreElement {
           ${cmds.length === 0 ? html`<p class="why">No commands yet. Add them on the device page after adding it.</p>` : nothing}
         </div>
         <aside class="side card" aria-label="Summary">
-          <label>Device name<input class="namein" type="text" aria-label="Device name" .value=${this.devName} @input=${(e: Event) => (this.devName = (e.target as HTMLInputElement).value.slice(0, 31))} /></label>
+          <label>Device name<input class="namein" type="text" aria-label="Device name" .value=${this.devName} @input=${(e: Event) => (this.devName = trimBytes((e.target as HTMLInputElement).value))} /></label>
           <span class="muted">${w.selected.length} of ${cmds.length} commands${ha ? '' : ' · settle ' + (d.settle_ms ?? 0) + ' ms'}</span>
           ${this.notes.length || (ha && (r.notes?.length ?? 0)) ? html`<ul class="plain">${(ha ? r.notes : this.notes).map((n) => html`<li>${n}</li>`)}</ul>` : nothing}
           ${r.skipped.length ? html`<div><b>Left out (${r.skipped_total || r.skipped.length})</b><ul class="plain">${r.skipped.slice(0, 8).map((s) => html`<li>${s.name}: ${s.reason}</li>`)}</ul></div>` : nothing}
@@ -430,7 +430,7 @@ export class HhAddDevice extends StoreElement {
       const r = await this.api.irParse(this.kind, this.text);
       this.parsed = r;
       const commands: Record<string, IrAction> = {};
-      for (const a of r.actions) commands[a.name.slice(0, 31)] = a.action;
+      for (const a of r.actions) commands[trimBytes(a.name)] = a.action;
       if (!r.actions.length) return;
       this.names = {};
       this.devName = 'Imported device';
@@ -452,7 +452,7 @@ export class HhAddDevice extends StoreElement {
     const p = proposeFromEntity(this.store.config, e);
     if (!p) return;
     this.names = {};
-    this.devName = (p.device.name ?? '').slice(0, 31);
+    this.devName = trimBytes(p.device.name ?? '');
     this.notes = p.notes;
     this.dispatch({ t: 'draft', result: { device: p.device, forms: {}, notes: p.notes, skipped: [], skipped_total: 0, device_type: null, source: {} } });
   }

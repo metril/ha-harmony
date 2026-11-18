@@ -8,6 +8,19 @@ export type Sel = { kind: 'key'; name: string } | { kind: 'widget'; page: number
 export type PaletteTab = 'devices' | 'activities' | 'home' | 'widgets';
 export const HA_DOMAINS = ['light', 'switch', 'scene', 'script', 'media_player', 'remote', 'fan', 'cover', 'climate', 'input_boolean', 'input_button', 'button', 'number', 'select', 'sensor', 'binary_sensor'];
 
+/** The add-on's summary of a device / activity / none action (harmony_core/keymap.summarize); null: leave it to the add-on. */
+function clientSummary(a: unknown): KeymapRow['action'] {
+  if (!a || typeof a !== 'object') return null;
+  const x = a as Record<string, unknown>;
+  if (typeof x['device'] === 'string' && Object.keys(x).length === 2) {
+    if (typeof x['command'] === 'string') return { kind: 'device', device: x['device'], command: x['command'], label: `${x['device']}: ${x['command']}` };
+    if (typeof x['input'] === 'string') return { kind: 'device', device: x['device'], input: x['input'], label: `${x['device']} -> ${x['input']}` };
+  }
+  if (typeof x['activity'] === 'string' && Object.keys(x).length === 1) return { kind: 'activity', activity: x['activity'], label: x['activity'] === 'off' ? 'Power off' : `Start ${x['activity']}` };
+  if (x['none'] !== undefined && Object.keys(x).length === 1) return { kind: 'none', label: 'Does nothing' };
+  return null;
+}
+
 export class StudioState extends EventTarget {
   layer: Layer = DEFAULT_LAYER;
   /** config page index shown on the screen */
@@ -89,7 +102,31 @@ export class StudioState extends EventTarget {
   /** Re-resolve the key layers soon after the config changes (about 20 ms on the add-on). */
   scheduleKeymap(): void {
     if (this.kmTimer) clearTimeout(this.kmTimer);
-    this.kmTimer = setTimeout(() => void this.loadKeymap(), 120);
+    if (this.predictKeymap()) this.emit(); // show explicit key actions at once; the add-on's answer reconciles
+    this.kmTimer = setTimeout(() => void this.loadKeymap(), 60);
+  }
+  /** Optimistic key map: rows for keys the config sets itself, summarised the way the add-on does. */
+  predictKeymap(): boolean {
+    const km = this.keymap;
+    if (!km) return false;
+    const cfg = this.store.config;
+    let changed = false;
+    const patch = (rows: KeymapRow[], keys: Record<string, unknown> | undefined, source: 'default' | 'activity') => {
+      for (const row of rows) {
+        const a = keys?.[row.key];
+        if (a === undefined) continue;
+        const action = clientSummary(a);
+        if (!action) continue;
+        if (row.source !== source || JSON.stringify(row.action) !== JSON.stringify(action)) {
+          row.source = source;
+          row.action = action;
+          changed = true;
+        }
+      }
+    };
+    patch(km.default, cfg.keys, 'default');
+    for (const act of km.activities) patch(act.keys, (cfg.activities ?? []).find((x) => x.id === act.id)?.keys, 'activity');
+    return changed;
   }
   async loadKeymap(): Promise<void> {
     const seq = ++this.kmSeq;

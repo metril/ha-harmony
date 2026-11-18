@@ -1,12 +1,15 @@
 import { css, html, nothing } from 'lit';
+import { trimBytes } from '../lib/codes';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../components/hh-action-picker';
 import '../components/hh-chain-mini';
 import '../components/hh-dialog';
 import '../components/hh-mini-remote';
 import { StoreElement, confirmAction } from '../components/base';
+import { problemList } from '../components/parts';
+import { problemsFor } from '../lib/problems';
 import {
-  MAX_DEVICES, MAX_STEPS, isRefused, ZONES, ZONE_KEYS, addActivity, addActivityDevice, addControlPage, addStartButton, addStep, applyHandler, chainOrder, deleteActivity, handlerOf,
+  MAX_ACTIVITIES, MAX_DEVICES, MAX_STEPS, isRefused, ZONES, ZONE_KEYS, addActivity, addActivityDevice, addControlPage, addStartButton, addStep, applyHandler, chainOrder, deleteActivity, handlerOf,
   matchZone, moveChain, moveStep, removeActivityDevice, removeStep, renameActivity, setActivityInput, timeline, type TItem, type Zone,
 } from '../lib/activity-edit';
 import { art, deviceKind } from '../lib/device-art';
@@ -43,6 +46,7 @@ export class HhActivities extends StoreElement {
       .newcard .plus { width: 44px; height: 44px; border-radius: 50%; background: var(--accs); color: var(--acc); display: grid; place-items: center; }
       /* editor */
       .tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+      .tabs .tl { display: contents; }
       .tabs a { height: 32px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 600; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; }
       .tabs a[aria-selected="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
       .name { font-size: 20px; font-weight: 650; border: 1px solid transparent; border-radius: var(--r1); background: transparent; color: var(--tx); padding: 2px 8px; min-width: 0; flex: 1 1 200px; height: 40px; }
@@ -97,6 +101,15 @@ export class HhActivities extends StoreElement {
       .zone { display: grid; gap: 6px; padding: 12px; border: 1.5px dashed var(--line); border-radius: var(--r2); background: var(--sf); min-width: 0; cursor: pointer; }
       .zone.picked { border-color: var(--acc); background: var(--accs); }
       .zone h3 { margin: 0; font-size: 14px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+      .igrp { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; padding-right: 10px; }
+      .zsel { position: relative; }
+      .zbtn { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); cursor: pointer; text-align: left; }
+      .zbtn span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .zbtn .art { width: 24px; height: 18px; flex: none; }
+      .zbtn.nobody { color: var(--tx2); border-style: dashed; }
+      .zmenu { top: 100%; left: 0; transform: none; width: 100%; }
+      .wire.accepts, :host(.dragging-input) .wire, :host(.dragging-input) .first { outline: 2px dashed var(--acc); outline-offset: 2px; border-radius: var(--r1); }
+      .dchip.on { background: var(--acc); color: var(--onacc); }
       .zone select { height: 32px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 6px; min-width: 0; width: 100%; }
       .zone .rep { font-size: 12px; color: var(--tx2); }
       .zone .rep b { color: var(--ok); font-weight: 600; } .zone .rep em { color: var(--ir); font-style: normal; }
@@ -121,6 +134,10 @@ export class HhActivities extends StoreElement {
   @state() private when: 'start' | 'stop' = 'start';
   @state() private menu: string | null = null;
   @state() private picked: string | null = null;
+  /** an input chip picked up (click, then click a wire) */
+  @state() private pickedInput: { device: string; input: string } | null = null;
+  @state() private zoneMenu: Zone | null = null;
+  @state() private hoverZone: Zone | null = null;
   @state() private adding = false;
   @state() private newOpen = false;
   @state() private newName = '';
@@ -145,6 +162,7 @@ export class HhActivities extends StoreElement {
   private onHa = () => this.requestUpdate();
   private closeMenu = (e: Event) => {
     if (this.menu && !(e.composedPath() as HTMLElement[]).some((n) => n.classList?.contains('wire') || n.classList?.contains('dev'))) this.menu = null;
+    if (this.zoneMenu && !(e.composedPath() as HTMLElement[]).some((n) => n.classList?.contains('zsel'))) this.zoneMenu = null;
   };
   private get cfg() {
     return this.store.config;
@@ -160,6 +178,7 @@ export class HhActivities extends StoreElement {
   private create() {
     const name = this.newName.trim();
     if (!name) return;
+    if ((this.cfg.activities ?? []).length >= MAX_ACTIVITIES) return this.say(`The hub holds at most ${MAX_ACTIVITIES} activities.`, 'error');
     const r = addActivity(this.cfg, name, this.newDevs.map((device) => ({ device })));
     this.store.replace(r.config);
     this.newOpen = false;
@@ -191,6 +210,53 @@ export class HhActivities extends StoreElement {
   }
 
   // ------------------------------------------------------------ dragging device chips onto the slot / zones
+  private menuKey(e: KeyboardEvent) {
+    const items = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button')];
+    const i = items.indexOf(e.target as HTMLElement);
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      const owner = this.zoneMenu;
+      this.zoneMenu = null;
+      void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(`[data-drop="zone:${owner}"] .zbtn`)?.focus());
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+    }
+  }
+  private inputDown(e: PointerEvent, device: string, input: string) {
+    if (e.button !== 0) return;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 6) {
+        moved = true;
+        this.classList.add('dragging');
+        this.classList.add('dragging-input');
+      }
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      this.classList.remove('dragging', 'dragging-input');
+      if (!moved) {
+        const same = this.pickedInput?.device === device && this.pickedInput.input === input;
+        this.pickedInput = same ? null : { device, input };
+        return;
+      }
+      const t = (this.renderRoot as ShadowRoot).elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-drop^="wire:"]')?.dataset['drop'];
+      if (t) this.setInput(device, input, t.slice(5));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  /** An input chip belongs to one device: only that device's wire takes it. */
+  private setInput(device: string, input: string, wireDevice: string) {
+    this.pickedInput = null;
+    if (device !== wireDevice) return this.say(`${input} is an input of ${this.dev(device)?.name ?? device}; drop it on the wire into that device.`, 'error');
+    this.store.replace(setActivityInput(this.cfg, this.selected, device, input));
+    this.say(`${this.dev(device)?.name ?? device} switches to ${input}`);
+  }
   private chipDown(e: PointerEvent, device: string) {
     if (e.button !== 0) return;
     const x0 = e.clientX;
@@ -252,7 +318,7 @@ export class HhActivities extends StoreElement {
     const cur = a?.devices?.find((x) => x.device === dv)?.input;
     const names = Object.keys(d?.inputs ?? {});
     const open = this.menu === dv;
-    return html`<button class="pill ${cur ? '' : 'none'}" aria-haspopup="menu" aria-expanded=${open} aria-label="Input on ${d?.name ?? dv}: ${cur ?? 'no change'}. Click to choose." @click=${() => (this.menu = open ? null : dv)}>${cur ?? (names.length ? 'input?' : 'no inputs')}</button>
+    return html`<button class="pill ${cur ? '' : 'none'}" aria-haspopup="menu" aria-expanded=${open} aria-label="Input on ${d?.name ?? dv}: ${cur ?? 'no change'}. Click to choose." @click=${() => { if (this.pickedInput) return this.setInput(this.pickedInput.device, this.pickedInput.input, dv); this.menu = open ? null : dv; }}>${cur ?? (names.length ? 'input?' : 'no inputs')}</button>
       ${open ? html`<div class="menu" role="menu" aria-label="Input for ${d?.name ?? dv}">
         <button role="menuitemradio" aria-checked=${!cur} @click=${() => { this.store.replace(setActivityInput(this.cfg, id, dv, null)); this.menu = null; }}>No input change</button>
         ${names.map((n) => html`<button role="menuitemradio" aria-checked=${cur === n} @click=${() => { this.store.replace(setActivityInput(this.cfg, id, dv, n)); this.menu = null; }}>${n}</button>`)}
@@ -265,7 +331,7 @@ export class HhActivities extends StoreElement {
       <span aria-hidden="true" title="Drag to reorder" @pointerdown=${(e: PointerEvent) => this.chainDown(e, id, i)}>${art(d ? deviceKind(d) : 'other', 'art')}</span>
       <b title=${d?.name ?? dv}>${d?.name ?? dv}</b>
       <div class="chips">${ps ? html`<span class="chip ${ps.tone === 'ok' ? 'ok' : ps.tone === 'ir' ? 'ir' : ''}">${ps.text.replace('Power ', '')}</span>` : nothing}${d?.settle_ms ? html`<span class="chip">${d.settle_ms / 1000} s settle</span>` : nothing}</div>
-      ${i === 0 ? html`<div class="first">${this.inputPill(id, dv)}</div>` : nothing}
+      ${i === 0 ? html`<div class="first" data-drop="wire:${dv}">${this.inputPill(id, dv)}</div>` : nothing}
       <div class="tools" role="group" aria-label="${d?.name ?? dv}">
         <button aria-label="Move ${d?.name ?? dv} earlier" ?disabled=${i === 0} @click=${() => this.store.replace(moveChain(this.cfg, id, i, i - 1))}>◀</button>
         <button aria-label="Move ${d?.name ?? dv} later" ?disabled=${i === n - 1} @click=${() => this.store.replace(moveChain(this.cfg, id, i, i + 1))}>▶</button>
@@ -290,9 +356,12 @@ export class HhActivities extends StoreElement {
     return html`<section class="card" aria-label="Signal chain"><h2>Signal chain</h2>
       <p class="sub">Left to right, from the source to the screen. The pill on each wire is the input the next device switches to; click it to choose.</p>
       <div class="chain">
-        ${order.map((dv, i) => html`${i > 0 ? html`<div class="wire"><svg viewBox="0 0 96 22" aria-hidden="true"><path d="M2 11H86M78 4l8 7-8 7"></path></svg>${this.inputPill(id, dv)}</div>` : nothing}${this.card(id, dv, i, order.length)}`)}
+        ${order.map((dv, i) => html`${i > 0 ? html`<div class="wire ${this.pickedInput?.device === dv ? 'accepts' : ''}" data-drop="wire:${dv}"><svg viewBox="0 0 96 22" aria-hidden="true"><path d="M2 11H86M78 4l8 7-8 7"></path></svg>${this.inputPill(id, dv)}</div>` : nothing}${this.card(id, dv, i, order.length)}`)}
         ${order.length < MAX_DEVICES ? html`<div class="slot" data-drop="slot">${icon('plus')}<span>Drop a device</span><span class="muted">${order.length}/${MAX_DEVICES}</span></div>` : nothing}
       </div>
+      ${order.some((dv) => Object.keys(this.dev(dv)?.inputs ?? {}).length)
+        ? html`<div class="tray" role="group" aria-label="Inputs to drop on a wire"><span class="muted">Inputs: drag one onto its device's wire, or click it and then the wire.</span>${order.map((dv) => Object.keys(this.dev(dv)?.inputs ?? {}).length ? html`<span class="igrp"><span class="muted">${this.dev(dv)?.name ?? dv}</span>${Object.keys(this.dev(dv)?.inputs ?? {}).map((n) => html`<button class="dchip ${this.pickedInput?.device === dv && this.pickedInput.input === n ? 'on' : ''}" aria-pressed=${this.pickedInput?.device === dv && this.pickedInput.input === n} @pointerdown=${(e: PointerEvent) => this.inputDown(e, dv, n)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.setInput(dv, n, dv); } }} aria-label="Input ${n} of ${this.dev(dv)?.name ?? dv}. Press to switch to it.">${n}</button>`)}</span>` : nothing)}</div>`
+        : nothing}
       <div class="tray" role="group" aria-label="Devices to add">${free.length ? html`<span class="muted">Add:</span>${free.map((d) => html`<button class="dchip" @pointerdown=${(e: PointerEvent) => this.chipDown(e, d.id)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.addDev(id, d.id); } }} aria-label="Add ${d.name ?? d.id} to ${a?.name ?? id}. Click or drag to the slot.">${art(deviceKind(d), 'art')} ${d.name ?? d.id}</button>`)}` : html`<span class="muted">Every device is already in this activity.</span>`}</div>
     </section>`;
   }
@@ -356,11 +425,22 @@ export class HhActivities extends StoreElement {
       const kept = m ? Object.entries(m.matched).filter(([k, c]) => { const cur = a?.keys?.[k] as { device?: string; command?: string } | undefined; return !cur || cur.device !== dv || cur.command !== c; }).map(([k]) => k) : [];
       if (m) for (const k of ZONE_KEYS[z]) marks[k] = m.missing.includes(k) ? 'miss' : kept.includes(k) ? 'chg' : 'on';
       const sel = this.picked !== null;
-      return html`<div class="zone ${sel ? 'picked' : ''}" data-drop="zone:${z}" @click=${(e: Event) => { if (this.picked && !(e.target as HTMLElement).closest('select')) this.zoneApply(id, z, this.picked); }}>
+      if (this.hoverZone === z) for (const k of ZONE_KEYS[z]) marks[k] = marks[k] ?? 'pulse';
+      return html`<div class="zone ${sel ? 'picked' : ''}" data-drop="zone:${z}" @click=${(e: Event) => { if (this.picked && !(e.target as HTMLElement).closest('.zsel')) this.zoneApply(id, z, this.picked); }}
+        @pointerenter=${() => (this.hoverZone = z)} @pointerleave=${() => (this.hoverZone = null)} @focusin=${() => (this.hoverZone = z)} @focusout=${() => (this.hoverZone = null)}>
         <h3>${ZONE_NAME[z]}</h3>
         <span class="muted">${ZONE_NOTE[z]}</span>
-        <select aria-label="Who handles ${ZONE_NAME[z].toLowerCase()}" @change=${(e: Event) => this.zoneApply(id, z, (e.target as HTMLSelectElement).value || null)}>
-          <option value="">Nobody (keys stay free)</option>${order.map((x) => html`<option value=${x} ?selected=${x === dv}>${this.dev(x)?.name ?? x}</option>`)}</select>
+        <div class="zsel">
+          <button class="zbtn ${dv ? '' : 'nobody'}" aria-haspopup="menu" aria-expanded=${this.zoneMenu === z} aria-label="Who handles ${ZONE_NAME[z].toLowerCase()}: ${d?.name ?? dv ?? 'nobody'}. Choose a device."
+            @click=${(e: Event) => { e.stopPropagation(); this.zoneMenu = this.zoneMenu === z ? null : z; }}
+            @keydown=${(e: KeyboardEvent) => { if (e.key === 'ArrowDown' && this.zoneMenu !== z) { e.preventDefault(); this.zoneMenu = z; } }}>
+            ${d ? html`${art(deviceKind(d), 'art')}<span>${d.name ?? d.id}</span>` : html`<span>Nobody (keys stay free)</span>`}<span aria-hidden="true">▾</span></button>
+          ${this.zoneMenu === z
+            ? html`<div class="menu zmenu" role="menu" aria-label="Device for ${ZONE_NAME[z].toLowerCase()}" @keydown=${(e: KeyboardEvent) => this.menuKey(e)}>
+                <button role="menuitemradio" aria-checked=${!dv} @click=${(e: Event) => { e.stopPropagation(); this.zoneApply(id, z, null); this.zoneMenu = null; }}>Nobody (keys stay free)</button>
+                ${order.map((x) => html`<button role="menuitemradio" aria-checked=${x === dv} @click=${(e: Event) => { e.stopPropagation(); this.zoneApply(id, z, x); this.zoneMenu = null; }}>${this.dev(x)?.name ?? x}</button>`)}</div>`
+            : nothing}
+        </div>
         ${m ? html`<div class="rep">${Object.keys(m.matched).length ? html`<b>Filled:</b> ${Object.entries(m.matched).map(([k, c]) => `${keyTitle(k)} → ${c}`).join(', ')}.` : nothing}${kept.length ? html` <em>Kept your own for ${kept.map(keyTitle).join(', ')}.</em>` : nothing}
             ${m.missing.length ? html` <em>No match for ${m.missing.map(keyTitle).join(', ')}: ${m.missing.length === 1 ? 'it' : 'they'} stay free.</em> <a href=${hashFor('remote', id, m.missing[0] as string)}>Open on the remote</a>` : nothing}</div>` : html`<span class="rep">Pick a device, or drop one here.</span>`}
       </div>`;
@@ -380,13 +460,14 @@ export class HhActivities extends StoreElement {
     if (!a) return html`<div class="card"><h2>That activity is gone</h2><a class="btn" href=${hashFor('activities')}>All activities</a></div>`;
     const o = this.offer?.id === id ? this.offer : null;
     return html`
-      <div class="tabs" role="tablist" aria-label="Activities">${(this.cfg.activities ?? []).map((x) => html`<a role="tab" href=${hashFor('activities', x.id)} aria-selected=${x.id === id}>${x.name ?? x.id}</a>`)}<button class="btn sm" @click=${() => (this.newOpen = true)}>+ New</button></div>
-      <div class="head"><input class="name" aria-label="Activity name" .value=${a.name ?? a.id} @change=${(e: Event) => this.store.replace(renameActivity(this.cfg, id, (e.target as HTMLInputElement).value.trim().slice(0, 31) || id), `an${id}`)} />
+      <div class="tabs"><div role="tablist" aria-label="Activities" class="tl">${(this.cfg.activities ?? []).map((x) => html`<a role="tab" href=${hashFor('activities', x.id)} aria-selected=${x.id === id}>${x.name ?? x.id}</a>`)}</div><button class="btn sm" @click=${() => (this.newOpen = true)}>+ New</button></div>
+      <div class="head"><input class="name" aria-label="Activity name" .value=${a.name ?? a.id} @change=${(e: Event) => this.store.replace(renameActivity(this.cfg, id, trimBytes((e.target as HTMLInputElement).value.trim()) || id), `an${id}`)} />
         <a class="btn" href=${hashFor('remote', id)}>Open on remote</a><button class="btn danger" @click=${() => void this.removeActivity(id)}>Delete</button></div>
       ${o ? html`<div class="banner" role="status"><span><b>${a.name ?? id}</b> is new. Make it easy to start?</span><span class="sp"></span><span class="offer">
         ${o.button ? html`<button class="btn sm pri" @click=${() => this.offerStart(id)}>Add start button to Home</button>` : nothing}
         ${o.page ? html`<button class="btn sm pri" @click=${() => { this.store.replace(addControlPage(this.cfg, id)); this.say('Added a control page from the Activity control template'); this.offer = o.button ? { ...o, page: false } : null; }}>Add a control page</button>` : nothing}
         <button class="btn sm" @click=${() => (this.offer = null)}>Not now</button></span></div>` : nothing}
+      ${problemList(problemsFor(this.store.errors, 'activities', (this.cfg.activities ?? []).findIndex((x) => x.id === id)))}
       ${this.chain(id)}${this.timeline(id)}${this.who(id)}${this.newDialog()}`;
   }
   private offerStart(id: string) {

@@ -3,6 +3,7 @@ import { classMap } from 'lit/directives/class-map.js';
 import { setStyle } from '../lib/set-style';
 import type { Store } from '../lib/store';
 import { LIMITS, counts } from '../lib/model';
+import type { Problem } from '../lib/problems';
 
 export function meter(label: string, text: string, value: number, max: number): TemplateResult {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
@@ -40,4 +41,13 @@ export function ago(sec: number | null, nowMs = Date.now()): string {
 }
 export function when(sec: number): string {
   return new Date(sec * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/** The errors of one device or activity, each in words with the backend's own message. */
+export function problemList(list: Problem[], onOpen?: (p: Problem) => void): TemplateResult | typeof nothing {
+  if (!list.length) return nothing;
+  return html`<section class="card problems" role="alert" aria-label="Problems">
+    <h2>${list.length} problem${list.length === 1 ? '' : 's'} to fix before applying</h2>
+    <ul>${list.map((p) => html`<li id=${'f-' + p.path.join('.').replace(/[^A-Za-z0-9_.-]/g, '_')}><b>${p.label}</b> <span>${p.msg}</span>${p.open && onOpen ? html`<button class="btn sm" @click=${() => onOpen(p)}>Open</button>` : nothing}</li>`)}</ul>
+  </section>`;
 }

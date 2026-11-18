@@ -263,6 +263,7 @@ export function pageGroup(p: V2Page, opts: RenderOpts = {}): TemplateResult {
 }
 
 /** A standalone <svg> of the page at an integer scale (1x, 2x, 3x) or an explicit pixel width. */
-export function pageSvg(p: V2Page, opts: RenderOpts = {}, scale = 2, label = ''): TemplateResult {
-  return svg`<svg class="page-svg" viewBox="0 0 240 320" width=${SCREEN_W * scale} height=${SCREEN_H * scale} role="img" aria-label=${label || `Page ${p.title || 'Harmony'}`}>${pageGroup(p, opts)}</svg>`;
+export function pageSvg(p: V2Page, opts: RenderOpts = {}, scale = 2, label = '', marks: Rect[] = []): TemplateResult {
+  const outlines = marks.map((r) => svg`<rect x=${r.x1 - 1} y=${r.y1 - 1} width=${r.x2 - r.x1 + 3} height=${r.y2 - r.y1 + 3} rx="6" fill="none" stroke="#f8c040" stroke-width="3" pointer-events="none"></rect>`);
+  return svg`<svg class="page-svg" viewBox="0 0 240 320" width=${SCREEN_W * scale} height=${SCREEN_H * scale} role="img" aria-label=${label || `Page ${p.title || 'Harmony'}`}>${pageGroup(p, opts)}${outlines}</svg>`;
 }

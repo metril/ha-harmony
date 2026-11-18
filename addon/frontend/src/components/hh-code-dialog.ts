@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { ApiError, type IrParsed } from '../lib/api';
-import { PROTOCOLS, byteCounter, kindOf, summarize, validateCode, type CodeKind } from '../lib/codes';
+import { PROTOCOLS, byteCounter, kindOf, summarize, validateCode, type CodeKind, trimBytes } from '../lib/codes';
 import { nameProblem, withPorts, withRepeats } from '../lib/device-edit';
 import type { Device, IrAction } from '../lib/model';
 import { describeRef, findRefs } from '../lib/refs';
@@ -117,7 +117,7 @@ export class HhCodeDialog extends LitElement {
   private use(a: IrAction, name: string) {
     this.code = { ...a, ...(this.code.port_mask ? { port_mask: this.code.port_mask } : {}) };
     this.tab = kindOf(a) === 'pronto' ? 'pronto' : kindOf(a) === 'raw' ? 'raw' : 'proto';
-    if (!this.name && this.edit?.where !== 'power') this.name = name.slice(0, 31);
+    if (!this.name && this.edit?.where !== 'power') this.name = trimBytes(name);
   }
   private num(k: 'addr' | 'cmd', v: string) {
     this.code = { ...this.code, [k]: v === '' ? undefined : Number(v) };

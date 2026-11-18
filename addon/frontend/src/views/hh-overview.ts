@@ -1,12 +1,11 @@
 import { css, html, nothing } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { customElement } from 'lit/decorators.js';
 import '../components/hh-chain-mini';
 import '../components/hh-mini-remote';
 import { StoreElement } from '../components/base';
-import type { PreviewPage } from '../lib/api';
+import '../components/hh-page-diff';
 import { changedKeys, changedPages, type KeyChange } from '../lib/diff';
 import { LIMITS, counts } from '../lib/model';
-import { pageSvg } from '../lib/page-renderer';
 import { permissions } from '../lib/permissions';
 import { keyTitle } from '../lib/remote-layout';
 import { hashFor } from '../lib/router';
@@ -64,8 +63,6 @@ export class HhOverview extends StoreElement {
       @media (max-width: 760px) { .top { grid-template-columns: minmax(0, 1fr); } .pg { grid-template-columns: auto auto; } .pg > :last-child { grid-column: 1 / -1; } }
     `,
   ];
-  @state() private beforePages: PreviewPage[] | null = null;
-  private beforeFor = '';
   private ha = new StudioState(this.store);
 
   override connectedCallback(): void {
@@ -79,18 +76,6 @@ export class HhOverview extends StoreElement {
   }
   private onHa = () => this.requestUpdate();
 
-  /** the applied config's pages, decoded once per applied version, for the "before" thumbnails */
-  protected override willUpdate(): void {
-    const s = this.store;
-    const key = s.applied?.hash ?? '';
-    if (!s.hasDraft || !s.appliedConfig || key === this.beforeFor) return;
-    this.beforeFor = key;
-    void s.api.preview(s.hub, s.appliedConfig).then((p) => (this.beforePages = p.pages)).catch(() => (this.beforePages = null));
-  }
-
-  private thumb(label: string, p: PreviewPage | undefined | null) {
-    return html`<figure>${p?.page ? pageSvg(p.page, {}, 0.5, `${label} page`) : html`<span class="muted">none</span>`}<figcaption>${label}</figcaption></figure>`;
-  }
   private keyRemotes(changes: KeyChange[]) {
     const layers = [...new Set(changes.map((c) => c.layer))];
     return html`<div class="xr">${layers.slice(0, 4).map((l) => {
@@ -167,12 +152,7 @@ export class HhOverview extends StoreElement {
               <h2 id="hc">${applied ? `Since rev ${s.applied?.rev}` : 'Changes in this draft'}</h2>
               ${diff.length
                 ? html`
-                  <div class="chg">${pages.length ? html`<div class="pages">${pages.map((p) => {
-                    const ai = (applied?.pages ?? []).findIndex((x) => x.id === p.id);
-                    const bi = (s.config.pages ?? []).findIndex((x) => x.id === p.id);
-                    return html`<div class="pg"><b class="vh">${p.title}</b>${this.thumb('Before', ai >= 0 ? this.beforePages?.[ai] : null)}${this.thumb('After', bi >= 0 ? s.pages[bi] : null)}
-                      <div><b>${p.title}</b> <span class="chip ${p.kind === 'added' ? 'ok' : p.kind === 'removed' ? 'bad' : 'ir'}">${KIND_LABEL[p.kind]}</span>${p.widgets.length ? html`<div class="muted">Widgets: ${p.widgets.slice(0, 6).join(', ')}${p.widgets.length > 6 ? ` and ${p.widgets.length - 6} more` : ''}</div>` : nothing}</div></div>`;
-                  })}</div>` : nothing}
+                  <div class="chg">${pages.length ? html`<hh-page-diff></hh-page-diff>` : nothing}
                   ${keys.length ? html`<div class="kk"><h3>Keys</h3>${this.keyRemotes(keys)}</div>` : nothing}</div>
             ${keys.length ? html`<ul>${keys.slice(0, 10).map((k) => html`<li class="row"><span class="k ${k.kind}">${KIND_LABEL[k.kind]}</span><span>${keyTitle(k.key)} <span class="muted">in ${k.layerName}</span></span></li>`)}</ul>` : nothing}
                   <h3>Everything that changed</h3>

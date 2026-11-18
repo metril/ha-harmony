@@ -1,5 +1,6 @@
 // Pure edits and models for activities: devices and inputs, the start/stop timeline, "who handles it".
 import type { Activity, Config, Device } from './model';
+import { trimBytes } from './codes';
 import { activityOf } from './refs';
 import { addPage, describeAction, firstFree, pageDims, templatePage, trimToBytes, uniqueWidgetId, LABEL_MAX, type Action } from './studio-model';
 
@@ -16,17 +17,18 @@ function edit(cfg: Config, id: string, fn: (a: Activity, next: Config) => void):
   return next;
 }
 export function activityId(cfg: Config, name: string): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'activity';
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'activity';
   const base = slug === 'off' ? 'off_activity' : slug;
   const used = new Set((cfg.activities ?? []).map((a) => a.id));
   let id = base;
   for (let i = 2; used.has(id); i++) id = `${base}_${i}`;
   return id;
 }
+export const MAX_ACTIVITIES = 16;
 export function addActivity(cfg: Config, name: string, devices: Activity['devices'] = []): { config: Config; id: string } {
   const id = activityId(cfg, name);
   const next = clone(cfg);
-  next.activities = [...(next.activities ?? []), { id, name: name.trim().slice(0, 31) || id, devices }];
+  next.activities = [...(next.activities ?? []), { id, name: trimBytes(name.trim()) || id, devices }];
   return { config: next, id };
 }
 export const renameActivity = (cfg: Config, id: string, name: string): Config => edit(cfg, id, (a) => void (a.name = name));

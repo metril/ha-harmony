@@ -101,7 +101,7 @@ export type Target = { kind: 'key'; name: string } | { kind: 'cell'; page: numbe
 
 export const sourceKey = (s: Source): string => JSON.stringify(s);
 export const entityDomain = (id: string): string => id.split('.')[0] ?? '';
-export const HA_ENTITY_ID = /^[a-z_]+\.[a-z0-9_]+$/;
+export const HA_ENTITY_ID = /^[a-z0-9_]+\.[a-z0-9_]+$/;
 
 const TOGGLE_DOMAINS = new Set(['light', 'switch', 'fan', 'cover', 'input_boolean', 'media_player', 'climate']);
 const BUTTON_SERVICE: Record<string, string> = { scene: 'turn_on', script: 'turn_on', button: 'press', input_button: 'press', automation: 'trigger' };
@@ -343,6 +343,21 @@ export function removeWidget(cfg: Config, page: number, index: number): Config {
   next.pages?.[page]?.widgets.splice(index, 1);
   return next;
 }
+export const MAX_PAGES = 32;
+export const MAX_PAGE_WIDGETS = 32;
+export const MAX_SOFT_KEYS = 128;
+/** Why one more widget cannot go on page `pi` (page, soft-key caps), or null. Labels take no soft key. */
+export function widgetCap(cfg: Config, pi: number): string | null {
+  const page = cfg.pages?.[pi];
+  if (page && page.widgets.length >= MAX_PAGE_WIDGETS) return `A page holds at most ${MAX_PAGE_WIDGETS} widgets.`;
+  const soft = (cfg.pages ?? []).reduce((n, p) => n + p.widgets.filter((w) => w.type !== 'label').length, 0);
+  if (soft >= MAX_SOFT_KEYS) return `The remote has ${MAX_SOFT_KEYS} soft keys for all pages together; remove a button or tile first.`;
+  return null;
+}
+export function pageCap(cfg: Config): string | null {
+  return (cfg.pages?.length ?? 0) >= MAX_PAGES ? `The remote holds at most ${MAX_PAGES} pages.` : null;
+}
+
 export function placeWidget(cfg: Config, page: number, index: number, b: Box): Config {
   return setWidget(cfg, page, index, { x: b.x, y: b.y, w: b.w, h: b.h });
 }
@@ -399,6 +414,8 @@ export function assign(cfg: Config, layer: Layer, s: Source, t: Target, haOk = t
   if (!page) return { refused: 'There is no page to put that on.' };
   if (needsHa && !haOk && !(s.kind === 'entity' && isStateEntity(s.entity_id))) return { refused: 'This add-on version cannot store Home Assistant actions yet.' };
   if (t.kind === 'cell') {
+    const cap = widgetCap(cfg, t.page);
+    if (cap) return { refused: cap };
     let at = { x: t.x, y: t.y };
     const bigger = s.kind === 'widget' && s.type === 'label' ? Math.min(2, pageDims(page).cols) : Math.min(2, pageDims(page).cols);
     if (!page.list && !fits(page, { ...at, w: 1, h: 1 })) {

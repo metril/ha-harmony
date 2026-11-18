@@ -1,5 +1,5 @@
-import { css, html } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { css, html, nothing } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { icon } from '../lib/icons';
 import { shared } from '../lib/styles';
@@ -21,6 +21,15 @@ export class HhDraftBar extends StoreElement {
       .dot.ok { background: var(--ok); }
       .dot.err { background: var(--bad); }
       .meters { display: flex; gap: 12px; flex-wrap: wrap; }
+      .usage { display: none; position: relative; }
+      .usage .pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 9; background: var(--sf); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--lift); padding: 12px; display: grid; gap: 10px; width: 220px; }
+      @media (max-width: 1100px) and (min-width: 721px) {
+        .db { padding: 4px 16px; flex-wrap: nowrap; }
+        .db .btn { height: 30px; }
+        .meters.long { display: none; }
+        .usage { display: block; }
+        .state .muted { display: none; }
+      }
       .meters .meter { min-width: 92px; }
       .chipbtn { border: 0; cursor: pointer; }
       .short { display: none; }
@@ -36,6 +45,7 @@ export class HhDraftBar extends StoreElement {
       }
     `,
   ];
+  @state() private usageOpen = false;
   private timer?: ReturnType<typeof setInterval>;
   override connectedCallback(): void {
     super.connectedCallback();
@@ -83,7 +93,9 @@ export class HhDraftBar extends StoreElement {
       s.saveState === 'saving' || s.saveState === 'dirty'
         ? 'saving…'
         : s.saveState === 'error'
-          ? 'not saved'
+          ? this.store.offline
+          ? 'not saved · retrying'
+          : 'not saved'
           : s.saveState === 'conflict'
             ? 'conflict'
             : s.hasDraft && s.savedAt
@@ -99,6 +111,10 @@ export class HhDraftBar extends StoreElement {
         ? html`<button class="chip bad chipbtn" @click=${() => this.showFirst()} aria-label="${errs} errors. Show the first one">${icon('alert')} ${errs} error${errs === 1 ? '' : 's'} · Show</button>`
         : html`<span class="chip ok">${icon('check')} Valid</span>`}
       <div class="meters long">${meters(s)}</div>
+      <div class="usage">
+        <button class="btn sm" aria-expanded=${this.usageOpen} aria-controls="usage-pop" @click=${() => (this.usageOpen = !this.usageOpen)}>Usage</button>
+        ${this.usageOpen ? html`<div class="pop" id="usage-pop" role="group" aria-label="Usage" @keydown=${(e: KeyboardEvent) => e.key === 'Escape' && (this.usageOpen = false)}>${meters(s)}</div>` : nothing}
+      </div>
       <span class="sp"></span>
       <div class="actions">
         <button class="btn ghost" ?hidden=${!s.hasDraft} @click=${() => this.discard()}>${icon('undo')}<span class="long">Discard draft</span><span class="vh">Discard draft</span></button>
