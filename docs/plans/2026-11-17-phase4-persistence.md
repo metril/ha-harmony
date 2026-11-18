@@ -258,9 +258,13 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
 | marker removed | next boot pure stock |
 | daemon missing/not executable, conf missing, no token, bad `rf`/`rf_slot`/`stop_lua` value | stock, no strike |
 | daemon exits non-zero (bind or radio open failure) | strike stands; third boot disables the hook |
+| daemon exits inside the 120 s health window | strike stands; `reboot_on_early_death` (default ON) reboots, only if this boot's strike read back from /cache; bounded by the counter (boot 3 = stock) |
+| daemon dies after the health mark | no reboot, no respawn; hub sits without hal until next boot |
+| /cache unwritable, counter write not read back, marker cannot be removed | stock this boot, never DEMO_MODE (strike accounting must persist) |
+| counter `08`, `09`, garbage | matched by `case`, no arithmetic: counts as clean |
 | daemon wedged but alive | counts as healthy; no watchdog (left off), recover by disarm |
 | hook syntax error | rcS aborts before dropbear: UART only (guarded by `sh -n` at install and tests) |
-| lua stop (`killall`) fails | logged, daemon still starts; `luaworks` retries `hal` forever |
+| lua stop (`killall lua luaworks luadraws`) fails | logged, daemon still starts; lua retries `hal` forever |
 | cold pull mid-boot before 120 s | strike stands (counter in /cache), clears or trips on later boots |
 | factory reset | wipes the rw layer; stock |
 
@@ -273,3 +277,24 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
 - G5: 1 h idle armed: RSS, fds and MemFree flat.
 - Then T7: remote hook via `deploy_remote.py install-hook`, with its own 3-reboot, DISABLE and joint
   power-cycle gate.
+
+**Review-fix findings (2026-11-17, read-only on the hub):**
+- Stock lua in `ps` is `/usr/bin/lua main.lua --syslog --datadir=/data tasks/...` (comm `lua`), not `luaworks`
+  or `luadraws` (the rcS-launched `luaworks` binary shows as `lua`). BusyBox `killall` matches by process name,
+  so the hook now runs `killall lua luaworks luadraws`. No respawn: `/etc/inittab` has only sysinit and
+  ctrlaltdel, and neither rcS nor `netmonitor` mentions lua. (Usage was read, not run.)
+- `/etc/init.d/rcS.local` lives in the LOWER squashfs layer: the extracted stock rootfs on this host contains
+  it, md5 711cb00b = the device's merged copy. Host `unsquashfs` cannot read the image (old lzma), so the
+  claim rests on that extraction. `ls -i` works on the hub (rcS.local inode 64). Therefore the first `mv`
+  over it on unionfs may be a copy-up (non-atomic). The installer compares the temp file's inode with
+  rcS.local's after the `mv`; on mismatch it restores the original, does not arm, and refuses unless
+  `--allow-nonatomic-rcs-local` is given. First install is the case that can trip; later ones act on an
+  upper-layer file where rename is atomic. Whether this unionfs keeps the inode is unmeasured until the bench.
+- A bare `sleep 30` (pid 1068) was running on the hub during the probe, not ours.
+- The real bench token is 32 chars, lowercase hex + digits only; the allowed charset is `[A-Za-z0-9._~+/=-]`
+  (token, 1-256) and `[A-Za-z0-9._-]` (hub_id, 1-63); CR, whitespace and `;$()` are refused by installer and hook.
+- Sync-path audit: no redirect on a special builtin (`: >f` now `( : >f ) 2>/dev/null`), no arithmetic on file
+  content, conf split at the first `=` by parameter expansion, nothing leaks into rcS (cwd, IFS, umask, traps,
+  positional params, `set` flags; tested under `/bin/sh` and host `busybox sh`).
+- Daemon log cap 256 KB: the watcher truncates `/var/volatile/ha-harmony.log` in place. The daemon holds it
+  `>>` (O_APPEND), so its next write lands at the new end with no hole; the test asserts no NULs.

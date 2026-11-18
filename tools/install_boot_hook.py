@@ -75,6 +75,14 @@ class InstallError(RuntimeError):
     """Refused or failed; the message is shown to the user verbatim."""
 
 
+class NonAtomicError(InstallError):
+    """The rcS.local replace was not a provable atomic rename."""
+
+
+TOKEN_RE = re.compile(r"[A-Za-z0-9._~+/=-]{1,256}")  # keep in step with rcS.harmony
+HUB_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,63}")
+
+
 def md5_bytes(b: bytes) -> str:
     return hashlib.md5(b, usedforsecurity=False).hexdigest()
 
@@ -100,7 +108,12 @@ class HookInstaller:
         rc, _, _ = self.r.run(["test", "-e", path])
         return rc == 0
 
-    def _write(self, path: str, data: bytes, mode: str) -> None:
+    def _inode(self, path: str) -> int | None:
+        rc, out, _ = self.r.run(["ls", "-i", path])
+        m = re.match(r"\s*(\d+)\s", out.decode(errors="replace")) if rc == 0 else None
+        return int(m.group(1)) if m else None
+
+    def _write(self, path: str, data: bytes, mode: str, atomic: str | None = None) -> None:
         """Write via a temp file then `mv`, so a half-written boot file never exists.
 
         `mv` within the same filesystem is atomic; /etc is the unionfs rw branch (mtd4),
@@ -111,7 +124,20 @@ class HookInstaller:
         if rc != 0:
             raise InstallError(f"writing {tmp} failed: {err.decode(errors='replace').strip()}")
         self._run(["chmod", mode, tmp], f"chmod {tmp}")
+        before = self._inode(tmp) if atomic else None
         self._run(["mv", tmp, path], f"mv into place {path}")
+        if atomic:
+            # /etc is a unionfs; when the target lives only in the read-only lower layer a
+            # rename may be a copy-up, which is NOT atomic. A rename keeps the inode.
+            after = self._inode(path)
+            if before is None or after is None or before != after:
+                msg = (
+                    f"{path}: mv was not provably an atomic rename (inode {before} -> {after}); "
+                    "on unionfs this can be a non-atomic copy-up"
+                )
+                if atomic == "strict":
+                    raise NonAtomicError(msg)
+                print(f"WARNING: {msg}")
         got = self._read(path)
         if got is None or md5_bytes(got) != md5_bytes(data):
             raise InstallError(f"verify failed for {path}: content differs after write")
@@ -190,9 +216,15 @@ class HookInstaller:
         rf_slot: int | None = None,
         expect_md5: str | None = None,
         stop_lua: bool = True,
+        reboot_on_early_death: bool = True,
+        allow_nonatomic: bool = False,
     ) -> int:
-        if not re.fullmatch(r"[^\s=]\S*", token or ""):
-            raise InstallError("token must be non-empty with no whitespace")
+        if not TOKEN_RE.fullmatch(token or ""):
+            raise InstallError("token must match [A-Za-z0-9._~+/=-]{1,256} (no whitespace or CR/LF)")
+        if hub_id is not None and not HUB_ID_RE.fullmatch(hub_id):
+            raise InstallError("hub id must match [A-Za-z0-9._-]{1,63}")
+        if not 1 <= port <= 65535:
+            raise InstallError("port must be 1..65535")
         if expect_md5 is None or not re.fullmatch(r"[0-9a-f]{32}", expect_md5):
             raise InstallError("--expect-md5 <md5 of the local hub build> is required")
         if rf_slot is not None and not 1 <= rf_slot <= 15:
@@ -246,6 +278,8 @@ class HookInstaller:
             conf += f"rf=spi\nrf_slot={rf_slot}\n"
         if not stop_lua:
             conf += "stop_lua=0\n"
+        if not reboot_on_early_death:
+            conf += "reboot_on_early_death=0\n"
         self._write(CONF, conf.encode(), "600")
         print(f"wrote {CONF}")
 
@@ -256,11 +290,19 @@ class HookInstaller:
             body = local.decode(errors="replace")
             if not body.endswith("\n"):
                 body += "\n"
-            self._write(RCS_LOCAL, (body + BLOCK + "\n").encode(), "755")
+            mode = "warn" if allow_nonatomic else "strict"
+            try:
+                self._write(RCS_LOCAL, (body + BLOCK + "\n").encode(), "755", atomic=mode)
+            except NonAtomicError as e:
+                self._write(RCS_LOCAL, local, "755", atomic="warn")  # best-effort restore
+                raise InstallError(
+                    f"{e}. Restored the original and did NOT arm. Re-run with "
+                    f"--allow-nonatomic-rcs-local only if you accept that window. Backup: {backup}"
+                ) from e
             ok, err = self._syntax_ok(RCS_LOCAL)
             if not ok:
                 # The dangerous case, and the whole reason for the backup.
-                self._write(RCS_LOCAL, local, "755")
+                self._write(RCS_LOCAL, local, "755", atomic="warn")
                 raise InstallError(
                     f"{RCS_LOCAL} stopped parsing after our edit ({err}); "
                     f"restored the original and did NOT arm. Backup: {backup}"
@@ -268,6 +310,9 @@ class HookInstaller:
             print(f"appended our block to {RCS_LOCAL}; syntax ok")
 
         # --- 5. arm, last ------------------------------------------------------
+        # A stale strike count from an earlier run must not make the first boot of a fresh
+        # install count as already struck.
+        self._run(["rm", "-f", COUNTER], "clear strike counter")
         self._write(MARKER, b"", "644")
         print(f"\nARMED: created {MARKER}")
         print(f"  next boot runs {DAEMON} instead of stock hal (DEMO_MODE=1)")
@@ -299,10 +344,10 @@ class HookInstaller:
                 if not skipping:
                     kept.append(line)
             new = ("\n".join(kept).rstrip("\n") + "\n").encode()
-            self._write(RCS_LOCAL, new, "755")
+            self._write(RCS_LOCAL, new, "755", atomic="warn")
             ok, err = self._syntax_ok(RCS_LOCAL)
             if not ok:
-                self._write(RCS_LOCAL, local, "755")
+                self._write(RCS_LOCAL, local, "755", atomic="warn")
                 raise InstallError(f"removing the block broke {RCS_LOCAL} ({err}); restored it")
             print(f"removed our block from {RCS_LOCAL}; syntax ok")
         else:
@@ -338,6 +383,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--token-file", type=Path, help="file holding the WS token (or set HAH_TOKEN)")
     p.add_argument("--rf-slot", type=int, default=None, help="enable the real radio, remote at HID++ slot N")
     p.add_argument("--expect-md5", required=True, help="md5 of the local hub build; arm only if the device matches")
+    p.add_argument("--no-reboot-on-early-death", action="store_true",
+                   help="do not reboot when the daemon dies inside the 120 s health window")
+    p.add_argument("--allow-nonatomic-rcs-local", action="store_true",
+                   help="accept a non-atomic (copy-up) replace of rcS.local on unionfs")
     p.add_argument("--keep-lua", action="store_true", help="do not stop luaworks/luadraws at boot")
     p.add_argument("--hub-port", type=int, default=8099, help="daemon WS port (default %(default)s)")
     p.add_argument("--hub-id", default=None)
@@ -383,6 +432,8 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
                     rf_slot=a.rf_slot,
                     expect_md5=a.expect_md5,
                     stop_lua=not a.keep_lua,
+                    reboot_on_early_death=not a.no_reboot_on_early_death,
+                    allow_nonatomic=a.allow_nonatomic_rcs_local,
                 )
             case "disarm":
                 return inst.disarm()

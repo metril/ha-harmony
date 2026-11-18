@@ -135,7 +135,7 @@ class FakeHub:
                 return 1, b"", b"No such file"
             self.files[a[2]] = self.files.pop(a[1])
             return 0, b"", b""
-        if a[:2] == ["sh", "-c"] and a[2].startswith("(") and a[2].endswith("pidof hub"):
+        if a[:2] == ["sh", "-c"] and a[2].startswith("p=$(") and a[2].endswith("echo $p"):
             self.detached.append(a[2])
             return (0, b"4242\n", b"") if self.detach_alive else (1, b"", b"")
         if a == ["cat", dh.DETACH_LOG]:
@@ -564,8 +564,8 @@ def violations(remote: str) -> list[str]:
         ok = a0[1] == a0[2] + ".new" and dh.under_write_root(a0[2])
         return [] if ok and a0[2] == dh.REMOTE_HUB else [f"not allowed: {remote!r}"]
     if re.fullmatch(
-        re.escape(f"({dh.REMOTE_HUB}") + r"[^;&|`$]* </dev/null >" + re.escape(dh.DETACH_LOG)
-        + r" 2>&1 &\); sleep \d+; pidof hub",
+        re.escape(f"p=$({dh.REMOTE_HUB}") + r"[^;&|`$]* </dev/null >" + re.escape(dh.DETACH_LOG)
+        + r" 2>&1 & echo \$!\); sleep \d+; kill -0 \$p && echo \$p",
         a0[2] if a0[:2] == ["sh", "-c"] and len(a0) == 3 else "",
     ):
         return []
@@ -858,8 +858,10 @@ def test_run_detach_command_shape():
     assert rc == 0
     assert hub.fg == [], "detach must not use the TTY foreground path"
     assert hub.detached == [
-        f"({dh.REMOTE_HUB} --port 8099 --rf-spi </dev/null >{dh.DETACH_LOG} 2>&1 &); sleep 3; pidof hub"
+        f"p=$({dh.REMOTE_HUB} --port 8099 --rf-spi </dev/null >{dh.DETACH_LOG} 2>&1 & echo $!); "
+        "sleep 3; kill -0 $p && echo $p"
     ]
+    assert "pidof" not in hub.detached[0], "must report the pid we started, not any hub"
     assert any("pid 4242" in ln for ln in lines)
 
 

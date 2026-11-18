@@ -12,8 +12,10 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
 3. `md5sum <build>/hub`, then:
    `tools/install_boot_hook.py install --yes --token-file F --rf-slot 2 --expect-md5 <md5>`
    Refuses if `/data/ha-harmony/hub` on the device differs from that md5. Keys written to `hub.conf`:
-   `token`, `port`, `hub_id`, `rf=spi`, `rf_slot=N`, `stop_lua=0|1` (default on: the boot subshell stops
-   `luaworks`/`luadraws` before starting the daemon; `--keep-lua` writes `stop_lua=0`).
+   `token`, `port`, `hub_id`, `rf=spi`, `rf_slot=N`, `stop_lua=0|1` (default on: the boot subshell runs `killall lua luaworks luadraws`
+   before starting the daemon; `--keep-lua` writes `stop_lua=0`), `reboot_on_early_death=0|1` (default 1;
+   `--no-reboot-on-early-death` writes 0). `install` clears the strike counter before arming. If the rcS.local
+   replace is not a provable atomic rename it restores and refuses unless `--allow-nonatomic-rcs-local`.
 4. Marker `/etc/ha-harmony-enable` is created last. Reboot to take effect.
 
 ## Status / disarm
@@ -27,7 +29,9 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
 ## Behaviour to expect
 
 Three unclean boots (daemon not alive 120 s after start) make the hook remove its own marker and boot stock.
-Single-shot: a daemon that dies stays dead until the next boot. A WS bind failure or radio-open failure makes
+Single-shot: a daemon that dies after the 120 s mark stays dead until the next boot (no reboot, no respawn).
+A daemon that dies BEFORE the mark makes the watcher `reboot` (default; bounded by the strike counter, boot 3 is stock),
+but only if this boot's strike was read back from /cache. If /cache cannot hold the counter, the hook leaves stock alone. A WS bind failure or radio-open failure makes
 the daemon exit 1 (`hub/main.c`), so "alive at 120 s" implies port bound and radio held.
 
 ## Recovery ladder (least invasive first)

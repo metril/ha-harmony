@@ -408,9 +408,11 @@ class Deployer:
             raise DeployError(f"devices still held by pids {sorted({p for p, _ in held})}")
         if self.r.run(["test", "-x", REMOTE_HUB])[0] != 0:
             raise DeployError(f"{REMOTE_HUB} missing or not executable: run push first")
+        # $! is the pid of the process WE started (pidof hub would also match a boot-launched
+        # daemon); confirm that exact pid is still alive after the settle time.
         script = (
-            f"({shlex.join([REMOTE_HUB, *args])} </dev/null >{DETACH_LOG} 2>&1 &); "
-            f"sleep {DETACH_SETTLE_S}; pidof hub"
+            f"p=$({shlex.join([REMOTE_HUB, *args])} </dev/null >{DETACH_LOG} 2>&1 & echo $!); "
+            f"sleep {DETACH_SETTLE_S}; kill -0 $p && echo $p"
         )
         rc, out, _ = self.r.run(["sh", "-c", script])
         pid = out.decode("utf-8", "replace").split()

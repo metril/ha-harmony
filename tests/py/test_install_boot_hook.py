@@ -43,12 +43,20 @@ class FakeHub:
         self.log: list[list[str]] = []
         self.syntax_bad = syntax_bad or set()  # paths whose `sh -n` should fail
         self.order: list[str] = []  # high-level milestones, for ordering assertions
+        self.inodes: dict[str, int] = {}
+        self.next_inode = 100
+        self.copyup = False  # True: an mv over an existing path yields a NEW inode (non-atomic)
 
     def run(self, argv):
         self.log.append(list(argv))
         if argv[:1] == ["cat"]:
             p = argv[1]
             return (0, self.files[p], b"") if p in self.files else (1, b"", b"No such file")
+        if argv[:2] == ["ls", "-i"]:
+            p = argv[2]
+            if p not in self.files:
+                return (1, b"", b"No such file")
+            return (0, f"{self.inodes.setdefault(p, 64)} {p}\n".encode(), b"")
         if argv[:1] == ["md5sum"]:
             p = argv[1]
             if p not in self.files:
@@ -73,7 +81,13 @@ class FakeHub:
             src, dst = argv[1], argv[2]
             if src not in self.files:
                 return (1, b"", b"No such file")
+            existed = dst in self.files
             self.files[dst] = self.files.pop(src)
+            if existed and self.copyup:
+                self.next_inode += 1
+                self.inodes[dst] = self.next_inode
+            else:
+                self.inodes[dst] = self.inodes.get(src, 64)
             if dst == ibh.MARKER:
                 self.order.append("arm")
             elif dst == ibh.RCS_HARMONY:
@@ -100,6 +114,8 @@ class FakeHub:
         m = re.match(r"cat > (\S+)$", argv[-1]) if argv[:2] == ["sh", "-c"] else None
         if m:
             self.files[m.group(1)] = data
+            self.next_inode += 1
+            self.inodes[m.group(1)] = self.next_inode
             return (0, b"", b"")
         return (127, b"", b"unexpected run_input")
 
@@ -453,3 +469,65 @@ def test_status_reports_md5_counter_and_both_log_tails(hub: FakeHub, capsys) -> 
     assert "hook19" in out and "hook0\n" not in out
     assert "daemon says hi" in out
     assert not any(c[0] in ("tail", "head", "wc") for c in hub.log)
+
+
+# --- review fixes: validation, counter clear, atomicity, reboot switch ------------
+
+
+@pytest.mark.parametrize("tok", ["a b", "a\nb", "a\r", "x;y", "$(id)", "", "t" * 300])
+def test_bad_token_charset_refused_before_any_write(hub: FakeHub, tok: str) -> None:
+    with pytest.raises(ibh.InstallError, match="token"):
+        install(hub, token=tok)
+    assert hub.log == []
+
+
+@pytest.mark.parametrize("hid", ["a b", "a\nb", "x;touch y", "a=b", "", "$(x)"])
+def test_bad_hub_id_refused(hub: FakeHub, hid: str) -> None:
+    with pytest.raises(ibh.InstallError, match="hub id"):
+        install(hub, hub_id=hid)
+    assert hub.log == []
+
+
+def test_real_shaped_token_and_base64_padding_accepted(hub: FakeHub) -> None:
+    install(hub, token="0123456789abcdef0123456789abcdef")
+    install(FakeHub(), token="YWJj+/Zg==")
+
+
+def test_install_clears_the_strike_counter_before_arming(hub: FakeHub) -> None:
+    hub.files[ibh.COUNTER] = b"2\n"
+    install(hub)
+    assert ibh.COUNTER not in hub.files
+    rm = next(i for i, c in enumerate(hub.log) if c == ["rm", "-f", ibh.COUNTER])
+    arm = next(i for i, c in enumerate(hub.log) if c[:1] == ["mv"] and c[2] == ibh.MARKER)
+    assert rm < arm
+
+
+def test_reboot_on_early_death_switch_written_only_when_off(hub: FakeHub) -> None:
+    install(hub)
+    assert "reboot_on_early_death" not in hub.files[ibh.CONF].decode()
+    h2 = FakeHub()
+    install(h2, reboot_on_early_death=False)
+    assert "reboot_on_early_death=0\n" in h2.files[ibh.CONF].decode()
+
+
+def test_nonatomic_rcs_local_replace_aborts_restores_and_does_not_arm() -> None:
+    hub = FakeHub()
+    hub.copyup = True
+    with pytest.raises(ibh.InstallError, match="atomic"):
+        install(hub)
+    assert hub.files[ibh.RCS_LOCAL] == STOCK_RCS_LOCAL, "original must be restored"
+    assert ibh.MARKER not in hub.files
+
+
+def test_nonatomic_can_be_accepted_explicitly(capsys) -> None:
+    hub = FakeHub()
+    hub.copyup = True
+    install(hub, allow_nonatomic=True)
+    assert ibh.MARKER in hub.files
+    assert "WARNING" in capsys.readouterr().out
+
+
+def test_atomic_rename_installs_silently(hub: FakeHub, capsys) -> None:
+    install(hub)
+    assert ibh.MARKER in hub.files and "WARNING" not in capsys.readouterr().out
+    assert any(c[:2] == ["ls", "-i"] for c in hub.log)
