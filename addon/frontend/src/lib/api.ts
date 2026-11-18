@@ -182,6 +182,8 @@ export interface IrCandidate {
   form: string;
   count: number;
   models: string[];
+  /** archive file of each example model (older add-ons omit it) */
+  model_files?: string[];
   codesets: number;
 }
 export interface IrCandidates {

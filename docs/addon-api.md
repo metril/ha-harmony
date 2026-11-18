@@ -150,7 +150,9 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
   notes, skipped: [{name, reason}], skipped_total, device_type: {id, name}|null, source}`; `device` is a
   config device block.
 - `GET ir/candidates?brand=&type=<tv|number|name>&limit=60` (limit 1..200) -> `{candidates: [{kind, action,
-  form, count, models, codesets}], examined, matched, errors, truncated}`; `truncated` is true when the
+  form, count, models, model_files, codesets}], examined, matched, errors, truncated}`; `model_files[i]` is
+  the archive file of `models[i]` (what `ir/device?model=` takes), so the wizard can open a likely model
+  without searching by name; `truncated` is true when the
   per-request budget (16 MiB of codeset text) ran out before every codeset was looked at.
 - `POST ir/parse` body `{kind: "pronto"|"flipper"|"smartir", text (<= 256 KiB)}` ->
   `{ok, actions: [{name, action, form}], skipped: [{name, reason}]}` (at most 256 actions);
@@ -203,7 +205,7 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
 - IR routes: brands `{brands:[{name,slug,count}]}` at most 50; models `{brand,total,offset,limit,
   models:[{file,name,id}]}` limit 1-200; device `{device,forms,notes,skipped:[{name,reason}],
   skipped_total,device_type:{id,name}|null,source}`; candidates `{candidates:[{kind,action,form,count,
-  models,codesets}],examined,matched,errors:<count>}`. `brand` is the slug from `/brands` and must be a
+  models,model_files,codesets}],examined,matched,errors:<count>}`. `brand` is the slug from `/brands` and must be a
   known brand; `model` is the `file` from `/models`, ending in `.json`. Archive failures: 504
   `archive_offline` or `archive_timeout`, 502 `archive_error`, 404 `unknown_brand`. An offline archive
   with a cache still answers.

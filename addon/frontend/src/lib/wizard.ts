@@ -137,4 +137,9 @@ export function draftDevice(s: WState): IrDeviceResult['device'] | null {
   return { ...d, commands };
 }
 /** Models worth showing first: the names the confirmed candidate came from. */
-export const likelyModels = (s: WState): string[] => s.confirmed?.models ?? [];
+/** Example models of the confirmed power code, with their archive file when the add-on sent it (no name search needed). */
+export const likelyModels = (s: WState): { name: string; file?: string }[] =>
+  (s.confirmed?.models ?? []).map((name, i) => {
+    const file = s.confirmed?.model_files?.[i];
+    return file ? { name, file } : { name };
+  });

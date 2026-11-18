@@ -122,7 +122,10 @@ async def test_candidates(ir):
     st, body = await get(ir, "/candidates?brand=Sony&type=tv&limit=50")
     assert st == 200 and body["matched"] >= 1
     c = body["candidates"][0]
-    assert set(c) == {"kind", "action", "form", "count", "models", "codesets"}
+    assert len(c["model_files"]) == len(c["models"]) and all(
+        f.endswith(".json") for f in c["model_files"]
+    )
+    assert set(c) == {"kind", "action", "form", "count", "models", "model_files", "codesets"}
     counts = [x["count"] for x in body["candidates"]]
     assert counts == sorted(counts, reverse=True)
     assert (await get(ir, "/candidates?brand=Sony&type=blender"))[0] == 400

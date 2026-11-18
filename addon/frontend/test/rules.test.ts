@@ -11,6 +11,8 @@ import { activityId } from '../src/lib/activity-edit';
 import { deviceIdFor, nameProblem } from '../src/lib/device-edit';
 import { MAX_PAGES, MAX_PAGE_WIDGETS, pageCap, widgetCap } from '../src/lib/studio-model';
 import type { Config } from '../src/lib/model';
+import { refHref } from '../src/lib/refs';
+import { initial, likelyModels, type WState } from '../src/lib/wizard';
 
 const rows = table as { rule: string; path: (string | number)[]; msg: string }[];
 
@@ -77,5 +79,18 @@ describe('the prevention behind the "prevented" rows', () => {
     expect(widgetCap({ pages: Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, widgets: w(22) })) }, 0)).toMatch(/soft keys/);
     expect(pageCap({ pages: Array.from({ length: MAX_PAGES }, (_, i) => ({ id: `p${i}`, widgets: [] })) })).toMatch(/at most 32/);
     expect(pageCap({ pages: [] })).toBeNull();
+  });
+});
+
+describe('links and the wizard', () => {
+  it('jumps from a use of a device to the key, widget or activity', () => {
+    expect(refHref({ kind: 'key', layer: 'default', layerName: 'Default', key: 'volume_up' })).toBe('#/remote/default/volume_up');
+    expect(refHref({ kind: 'key', layer: 'watch_tv', layerName: 'Watch TV', key: 'up' })).toBe('#/remote/watch_tv/up');
+    expect(refHref({ kind: 'widget', page: 2, pageName: 'p', index: 3, label: 'x' })).toBe('#/remote/default/w2.3');
+    expect(refHref({ kind: 'step', activity: 'watch_tv', activityName: 'Watch TV', list: 'steps', index: 0 })).toBe('#/activities/watch_tv');
+  });
+  it('likely models carry their archive file when the add-on sends it', () => {
+    const s = { ...initial(), confirmed: { kind: 'on', action: {}, form: 'proto', count: 2, models: ['A', 'B'], model_files: ['a.json'], codesets: 1 } } as unknown as WState;
+    expect(likelyModels(s)).toEqual([{ name: 'A', file: 'a.json' }, { name: 'B' }]);
   });
 });

@@ -369,7 +369,7 @@ export class HhAddDevice extends StoreElement {
       <p class="lead">${w.confirmed ? 'The code that worked is shared by these models. Pick yours, or search below.' : w.exhausted ? 'No code reacted, or none was offered. Search for your model.' : 'Search for your model.'}</p>
       ${this.banner()}
       ${loading ? html`<p class="lead" role="status">Loading ${w.model?.name}…</p>` : nothing}
-      ${likely.length ? html`<h3>Likely matches</h3><div class="likely">${likely.map((n) => html`<button class="btn" @click=${() => void this.pickLikely(n)}>${n}</button>`)}</div>` : nothing}
+      ${likely.length ? html`<h3>Likely matches</h3><div class="likely">${likely.map((x) => html`<button class="btn" @click=${() => (x.file ? void this.pickModel(x.file, x.name) : void this.pickLikely(x.name))}>${x.name}</button>`)}</div>` : nothing}
       <input class="search" type="search" aria-label="Search models" placeholder="Model name or number" .value=${this.mq} @input=${(e: Event) => { this.mq = (e.target as HTMLInputElement).value; clearTimeout(this.timer); this.timer = setTimeout(() => void this.loadModels(0, this.mq.trim()), 250); }} />
       ${m
         ? html`<div class="models" role="list" aria-label="Models">${m.models.map((x) => html`<button class="model" role="listitem" ?disabled=${!!loading} @click=${() => void this.pickModel(x.file, x.name)}><b>${x.name}</b><span class="muted">${x.file.replace(/\.json$/, '') === x.name ? '' : x.file}</span></button>`)}</div>
