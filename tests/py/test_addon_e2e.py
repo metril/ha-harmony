@@ -416,7 +416,8 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
     await page.get_by_label("AV receiver").check()
     await page.get_by_role("button", name="Create").click()
     await page.get_by_text("Who handles it").wait_for()
-    await page.get_by_label("Who handles volume").select_option(label="AV receiver")
+    await page.get_by_role("button", name="Who handles volume").click()
+    await page.get_by_role("menuitemradio", name="AV receiver").click()
     await page.get_by_text("Filled:").first.wait_for()
     # X-ray in the studio shows an activity key from the archive device
     await page.get_by_role("link", name="Open on remote").click()
