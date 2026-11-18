@@ -156,6 +156,22 @@ nl=0
 while read -r _l; do nl=$((nl + 1)); done <"$T/capped.log"
 if [ "$nl" -ge 1 ] && [ "$nl" -lt 40 ]; then pass "log capped in place ($nl of 41 lines left)"; else fail "log cap (lines=$nl)"; fi
 
+# 8b. every app line and start.sh's own line carry an uptime stamp
+mkapp "echo HELLO-APP; echo HELLO-ERR >&2"
+rm -f "$T/stamped.log"
+BOOT_LOG="$T/stamped.log" boot
+st=0
+bad=0
+if [ -r "$T/stamped.log" ]; then
+	while IFS= read -r _l; do
+		case "$_l" in
+		"[up "*"s] "*) st=$((st + 1)) ;;
+		*) bad=$((bad + 1)) ;;
+		esac
+	done <"$T/stamped.log"
+fi
+if [ "$st" -ge 3 ] && [ "$bad" = 0 ]; then pass "log lines carry uptime stamps ($st)"; else fail "log stamps (stamped=$st plain=$bad)"; fi
+
 # 9. the hook line: armed launches the stub, DISABLE and non-executable do not
 mkapp
 line=$(cat "$T/hookline.sh")

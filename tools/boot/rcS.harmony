@@ -26,8 +26,16 @@
 # DEFERRED LAUNCH. Even the daemon start is not synchronous: a background subshell waits
 # hah_delay seconds (dropbear and `ifup -a` come first), optionally stops luaworks/luadraws
 # (they retry a TCP connection to the now-absent hal forever), then starts the daemon and
-# watches it. Single-shot: no respawn. Daemon stdout/stderr go to tmpfs (/var/volatile),
+# watches it: bounded respawn after the health mark (see SUPERVISION). Daemon stdout/stderr go to tmpfs (/var/volatile),
 # never /cache, so a chatty daemon cannot wear or fill flash; only hook lines go to /cache.
+#
+# SUPERVISION. Before the health mark a death is a strike and may reboot (unchanged). After it, a
+# death respawns the daemon with backoff 5/30/120 s, at most respawn_max times per boot (conf
+# key, default 3; 0 = never respawn, no heartbeat flag either). The budget refills after 1 h of
+# continuous uptime; exhausted => log and stay inert. Respawns never reboot and never touch the
+# strike counter. Wedge cover: the daemon rewrites its uptime seconds into a heartbeat file in
+# tmpfs; one older than 60 s gets the daemon killed and respawned (same budget). The hardware
+# watchdog stays off. Every log line carries an uptime stamp (hook lines also the date).
 #
 # SELF-DISABLE. /cache/ha-harmony-boot.n counts boots that started our daemon but
 # were never confirmed healthy. Three strikes and we remove our own marker so the
@@ -79,9 +87,41 @@ esac
 hah_polls=$(hah_num "${HAH_HEALTHY_POLLS:-}" "")
 [ "$hah_limit" -ge 1 ] 2>/dev/null || hah_limit=3
 
+hah_hb="$hah_root/var/volatile/ha-harmony.hb"
+hah_uptf="${HAH_UPTIME_FILE:-/proc/uptime}"
+hah_stale=$(hah_num "${HAH_HB_STALE:-}" 60)
+hah_refill=$(hah_num "${HAH_REFILL_SECS:-}" 3600)
+# Respawn backoff (seconds; tests may pass fractions): 1st, 2nd, then every later respawn.
+hah_b1=5
+hah_b2=30
+hah_b3=120
+case "${HAH_BACKOFF1:-}" in '' | *[!0-9.]*) ;; *) hah_b1="$HAH_BACKOFF1" ;; esac
+case "${HAH_BACKOFF2:-}" in '' | *[!0-9.]*) ;; *) hah_b2="$HAH_BACKOFF2" ;; esac
+case "${HAH_BACKOFF3:-}" in '' | *[!0-9.]*) ;; *) hah_b3="$HAH_BACKOFF3" ;; esac
+hah_wall=''
+
+# Sets hah_now (whole seconds of uptime, or empty) and hah_ts, the log prefix. Pure `read`: no
+# fork, no arithmetic, safe on the synchronous path. The wall clock is added only in the
+# background (date forks), and it is untrusted before NTP, hence uptime comes first.
+hah_stamp() {
+	hah_now=''
+	read -r hah_now _ 2>/dev/null <"$hah_uptf"
+	hah_now="${hah_now%%.*}"
+	case "$hah_now" in '' | *[!0-9]* | 0[0-9]*) hah_now='' ;; esac
+	hah_ts="up ${hah_now:-?}s"
+	[ -n "$hah_wall" ] && hah_ts="$hah_ts $(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
+}
+
 hah_say() {
-	echo "ha-harmony: $1" 2>/dev/null >>"$hah_log"
+	hah_stamp
+	echo "[$hah_ts] ha-harmony: $1" 2>/dev/null >>"$hah_log"
 	echo "ha-harmony: $1"
+}
+
+# Same line, log file only (the background watcher).
+hah_blog() {
+	hah_stamp
+	echo "[$hah_ts] ha-harmony: $1" >>"$hah_log" 2>/dev/null
 }
 
 # Refuse to suppress stock unless everything we need is actually present. A missing
@@ -104,6 +144,8 @@ else
 	hah_slot=''
 	hah_stoplua=1
 	hah_reboot=1
+	hah_rmax=3
+	hah_rdebug=0
 	hah_bad=''
 	hah_cap=''
 	# `hah_line=''` first: some shells leave the old value at EOF, which would loop forever.
@@ -174,6 +216,18 @@ else
 			*) hah_bad="reboot_on_early_death=$hah_v" ;;
 			esac
 			;;
+		respawn_max)
+			case "$hah_v" in
+			0 | [1-9] | [1-9][0-9]) hah_rmax="$hah_v" ;;
+			*) hah_bad="respawn_max=$hah_v" ;;
+			esac
+			;;
+		rf_debug)
+			case "$hah_v" in
+			0 | 1) hah_rdebug="$hah_v" ;;
+			*) hah_bad="rf_debug=$hah_v" ;;
+			esac
+			;;
 		esac
 	done <"$hah_conf"
 
@@ -219,39 +273,61 @@ else
 			if [ "$hah_chk" != "$hah_n" ]; then
 				hah_say "cannot persist the strike counter ($hah_counter) - leaving stock alone"
 			else
-				# Digits-only slot and fixed flags, so unquoted word splitting is safe.
-				hah_rfargs=''
-				if [ -n "$hah_rf" ]; then
-					hah_rfargs="--rf-spi"
-					[ -n "$hah_slot" ] && hah_rfargs="$hah_rfargs --rf-slot $hah_slot"
-				fi
-
 				# Past this point we own the radios: stock hal must not start.
 				DEMO_MODE=1
 				export DEMO_MODE
 
 				( : >"$hah_log" ) 2>/dev/null
-				hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099}, rf=${hah_rf:-none}, launch in ${hah_delay}s, reboot_on_early_death=$hah_reboot)"
+				hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099}, rf=${hah_rf:-none}, launch in ${hah_delay}s, reboot_on_early_death=$hah_reboot, respawn_max=$hah_rmax, rf_debug=$hah_rdebug)"
 
 				# Everything below runs in the background: the delay, the optional lua
-				# stop, the daemon and its watcher. Single-shot, no respawn.
+				# stop, the daemon and its watcher. Before the health mark a death is a
+				# strike (and may reboot); after it the daemon is respawned a bounded number
+				# of times, never rebooting and never touching the strike counter.
 				(
+					hah_wall=1
+					# Fixed, quoted argv built with `set --`: no word splitting of paths.
+					set -- --token-file "$hah_conf" --port "${hah_port:-8099}"
+					[ -n "$hah_id" ] && set -- "$@" --hub-id "$hah_id"
+					if [ -n "$hah_rf" ]; then
+						set -- "$@" --rf-spi
+						[ -n "$hah_slot" ] && set -- "$@" --rf-slot "$hah_slot"
+					fi
+					[ "$hah_rmax" != 0 ] && set -- "$@" --heartbeat "$hah_hb"
+					[ "$hah_rdebug" = 1 ] && set -- "$@" --rf-debug
+
+					# Daemon output is prefixed with uptime, line by line.
+					hah_tsloop() {
+						while hah_l=''; IFS= read -r hah_l || [ -n "$hah_l" ]; do
+							read -r hah_lu _ 2>/dev/null <"$hah_uptf"
+							printf '[up %ss] %s\n' "${hah_lu%%.*}" "$hah_l"
+						done
+					}
+					# Start the daemon through a tiny exec wrapper that records its own pid
+					# ($! of a pipeline is the timestamper, not the daemon), then read it back.
+					hah_launch() {
+						rm -f "$hah_pidfile" 2>/dev/null
+						sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$hah_pidfile" "$hah_daemon" "$@" 2>&1 </dev/null |
+							hah_tsloop >>"$hah_dlog" 2>/dev/null &
+						hah_pid=''
+						hah_i=0
+						while [ -z "$hah_pid" ] && [ "$hah_i" -lt 40 ]; do
+							read -r hah_pid 2>/dev/null <"$hah_pidfile"
+							case "$hah_pid" in '' | *[!0-9]*) hah_pid='' ;; esac
+							[ -n "$hah_pid" ] || sleep "$hah_nap"
+							hah_i=$((hah_i + 1))
+						done
+						hah_blog "daemon started pid ${hah_pid:-none}"
+					}
+
 					sleep "$hah_delay"
 					if [ "$hah_stoplua" = 1 ]; then
 						# stock lua appears in ps as `lua` (and `luaworks` before it execs)
 						killall lua luaworks luadraws >/dev/null 2>&1
-						echo "ha-harmony: stopped lua/luaworks/luadraws" >>"$hah_log" 2>/dev/null
+						hah_blog "stopped lua/luaworks/luadraws"
 					fi
 					: >"$hah_dlog" 2>/dev/null
-					# shellcheck disable=SC2086
-					"$hah_daemon" --token-file "$hah_conf" \
-						--port "${hah_port:-8099}" \
-						${hah_id:+--hub-id "$hah_id"} \
-						$hah_rfargs \
-						>>"$hah_dlog" 2>&1 </dev/null &
-					hah_pid=$!
-					echo "$hah_pid" >"$hah_pidfile" 2>/dev/null
-					echo "ha-harmony: daemon started pid $hah_pid" >>"$hah_log" 2>/dev/null
+					hah_launch "$@"
 
 					# Health window: poll (no `timeout` applet). Alive at the end means
 					# port bound and radio held (the daemon exits non-zero otherwise).
@@ -268,39 +344,91 @@ else
 					done
 					if [ "$hah_up" = 1 ]; then
 						rm -f "$hah_counter"
-						echo "ha-harmony: healthy after ${hah_healthy}s - strikes cleared" >>"$hah_log" 2>/dev/null
-						# Cap the tmpfs daemon log by LINE count. The daemon holds it open
-						# O_APPEND (>>), so truncating in place is safe: its next write lands
-						# at the new end, no hole. Byte size cannot be read portably: BusyBox
-						# 1.13 `ls -l` has no date columns and `ls -ln` has extra ones, while
-						# host `ls -l` has dates; there is no wc/stat. Counting lines with
-						# `read` works everywhere (counting stops once over the cap).
-						while kill -0 "$hah_pid" 2>/dev/null; do
-							sleep "$hah_nap"
-							hah_nl=0
-							# shellcheck disable=SC2034
-							while IFS= read -r hah_l; do
-								hah_nl=$((hah_nl + 1))
-								[ "$hah_nl" -gt "$hah_logmax" ] && break
-							done <"$hah_dlog" 2>/dev/null
-							if [ "$hah_nl" -gt "$hah_logmax" ]; then
-								: >"$hah_dlog" 2>/dev/null
+						hah_blog "healthy after ${hah_healthy}s - strikes cleared"
+						# Supervision (after the health mark only). hah_used is the respawn
+						# budget spent; it refills after hah_refill s of continuous uptime.
+						hah_used=0
+						hah_rs=''
+						while :; do
+							hah_stamp
+							hah_rs="$hah_now"
+							hah_hl=0
+							hah_why=died
+							while kill -0 "$hah_pid" 2>/dev/null; do
+								sleep "$hah_nap"
+								# Cap the tmpfs daemon log by LINE count. The daemon holds it open
+								# O_APPEND (>>), so truncating in place is safe: its next write lands
+								# at the new end, no hole. Byte size cannot be read portably: BusyBox
+								# 1.13 `ls -l` has no date columns and `ls -ln` has extra ones, while
+								# host `ls -l` has dates; there is no wc/stat. Counting lines with
+								# `read` works everywhere (counting stops once over the cap).
+								hah_nl=0
+								# shellcheck disable=SC2034
+								while IFS= read -r hah_l; do
+									hah_nl=$((hah_nl + 1))
+									[ "$hah_nl" -gt "$hah_logmax" ] && break
+								done <"$hah_dlog" 2>/dev/null
+								if [ "$hah_nl" -gt "$hah_logmax" ]; then
+									: >"$hah_dlog" 2>/dev/null
+								fi
+								[ "$hah_rmax" != 0 ] || continue
+								hah_stamp
+								[ -n "$hah_now" ] && [ -n "$hah_rs" ] || continue
+								if [ "$hah_used" -gt 0 ] && [ $((hah_now - hah_rs)) -ge "$hah_refill" ]; then
+									hah_used=0
+									hah_blog "respawn budget refilled after ${hah_refill}s of uptime"
+								fi
+								# Wedge cover: the daemon writes its uptime seconds to the heartbeat
+								# file; a stale (or never written) one means it is alive but stuck.
+								hah_h=''
+								read -r hah_h 2>/dev/null <"$hah_hb"
+								# An empty or unparsable read is no information: keep the last good value.
+								case "$hah_h" in '' | *[!0-9]* | 0[0-9]*) hah_h="$hah_hl" ;; *) hah_hl="$hah_h" ;; esac
+								hah_ref="$hah_rs"
+								[ "$hah_h" -gt "$hah_ref" ] && hah_ref="$hah_h"
+								if [ $((hah_now - hah_ref)) -gt "$hah_stale" ]; then
+									hah_blog "heartbeat stale for over ${hah_stale}s - killing the wedged daemon"
+									kill -9 "$hah_pid" 2>/dev/null
+									wait "$hah_pid" 2>/dev/null
+									hah_why=wedged
+									break
+								fi
+							done
+							if [ "$hah_rmax" = 0 ]; then
+								hah_blog "daemon died after health mark - no reboot, no respawn"
+								break
+							fi
+							if [ "$hah_used" -ge "$hah_rmax" ]; then
+								hah_blog "daemon $hah_why after health mark - respawn budget exhausted ($hah_used of $hah_rmax), leaving the hub inert (no reboot)"
+								break
+							fi
+							case "$hah_used" in
+							0) hah_bo="$hah_b1" ;;
+							1) hah_bo="$hah_b2" ;;
+							*) hah_bo="$hah_b3" ;;
+							esac
+							hah_used=$((hah_used + 1))
+							hah_blog "daemon $hah_why after health mark - respawn $hah_used of $hah_rmax in ${hah_bo}s (no reboot)"
+							sleep "$hah_bo"
+							hah_launch "$@"
+							if [ -z "$hah_pid" ]; then
+								hah_blog "respawn: no pid recorded (pid file unwritable?) - not supervising any further (no respawn, no reboot)"
+								break
 							fi
 						done
-						echo "ha-harmony: daemon died after health mark - no reboot, no respawn" >>"$hah_log" 2>/dev/null
 					else
-						echo "ha-harmony: died within ${hah_healthy}s - strike $hah_n stands" >>"$hah_log" 2>/dev/null
+						hah_blog "died within ${hah_healthy}s - strike $hah_n stands"
 						# Reboot only if THIS boot's strike is really persisted, so the
 						# strike counter bounds the reboot loop (boot 3 goes to stock).
 						if [ "$hah_reboot" = 1 ] && [ "$(cat "$hah_counter" 2>/dev/null)" = "$hah_n" ]; then
-							echo "ha-harmony: rebooting (reboot_on_early_death)" >>"$hah_log" 2>/dev/null
-							echo "ha-harmony: watcher done" >>"$hah_log" 2>/dev/null
+							hah_blog "rebooting (reboot_on_early_death)"
+							hah_blog "watcher done"
 							reboot
 						else
-							echo "ha-harmony: not rebooting (switch off or strike not persisted)" >>"$hah_log" 2>/dev/null
+							hah_blog "not rebooting (switch off or strike not persisted)"
 						fi
 					fi
-					echo "ha-harmony: watcher done" >>"$hah_log" 2>/dev/null
+					hah_blog "watcher done"
 				) >/dev/null 2>&1 &
 			fi
 		fi
@@ -309,5 +437,5 @@ fi
 
 unset hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
 unset hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
-unset hah_rf hah_slot hah_rfargs hah_stoplua hah_reboot hah_bad hah_k hah_v hah_line hah_cr
-unset -f hah_say hah_num 2>/dev/null
+unset hah_rf hah_slot hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr
+unset -f hah_say hah_blog hah_stamp hah_num 2>/dev/null

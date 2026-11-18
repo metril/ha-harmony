@@ -123,7 +123,7 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
       Gate: provable by test, not by hope — see §4.
 - [ ] **Supervision.** Stock has no respawn supervisor, so decide explicitly: a backgrounded shell
       respawn loop with backoff, or single-shot (daemon dies → hub is inert until next boot).
-      Recommend **single-shot for the first landing** — a respawn loop interacts badly with the boot
+      Single-shot was the first landing; bounded respawn (`respawn_max`) now sits on top, never touching the counter. Original recommendation: **single-shot for the first landing** — a respawn loop interacts badly with the boot
       counter and can mask a crash-loop as "working". Add supervision only once the guard is trusted.
 - [ ] **`luaworks`/`luadraws`.** Gated only on the binary being executable, so `DEMO_MODE=1` does not
       stop them, and they will run with no `hal` to talk to. Investigate what they do in that state
@@ -260,10 +260,10 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
 | daemon missing/not executable, conf missing, no token, bad `rf`/`rf_slot`/`stop_lua` value | stock, no strike |
 | daemon exits non-zero (bind or radio open failure) | strike stands; third boot disables the hook |
 | daemon exits inside the 120 s health window | strike stands; `reboot_on_early_death` (default ON) reboots, only if this boot's strike read back from /cache; bounded by the counter (boot 3 = stock) |
-| daemon dies after the health mark | no reboot, no respawn; hub sits without hal until next boot |
+| daemon dies after the health mark | no reboot; respawned 5/30/120 s apart, at most `respawn_max` (default 3, 0 = none) per boot, refilled after 1 h uptime; exhausted => inert until next boot; strike counter never touched |
 | /cache unwritable, counter write not read back, marker cannot be removed | stock this boot, never DEMO_MODE (strike accounting must persist) |
 | counter `08`, `09`, garbage | matched by `case`, no arithmetic: counts as clean |
-| daemon wedged but alive | counts as healthy; no watchdog (left off), recover by disarm |
+| daemon wedged but alive | heartbeat file older than 60 s => kill + respawn (same budget); hardware watchdog stays off |
 | hook syntax error | rcS aborts before dropbear: UART only (guarded by `sh -n` at install and tests) |
 | lua stop (`killall lua luaworks luadraws`) fails | logged, daemon still starts; lua retries `hal` forever |
 | cold pull mid-boot before 120 s | strike stands (counter in /cache), clears or trips on later boots |
@@ -377,7 +377,7 @@ rcS.local is `sh -n`-checked on the device before the mv; on-device `selftest` (
 ### Follow-ups
 1. `deploy_remote.py disable` / `enable` subcommands (DISABLE was made by hand).
 2. The boot counter's intermediate value (1 during boot) was never observed; only 0 at ~25 s.
-3. The app under the hook runs without `--rf-debug`, so it logs no rx counts; neither daemon log has timestamps.
+3. `rf_debug=1` in hub.conf enables `--rf-debug`; hook, daemon and remote start.sh log lines now carry uptime stamps. Respawn is covered by tests; the bench gate (runbook) is outstanding.
 4. Which unionfs layer holds rcS.local, and rename atomicity there, remain unknown.
 5. Exact boot timings for the joint cycle are missing (polling loop stuck; hub first-contact uptime not captured).
 6. The Elite has only run on USB power since hooking: cradle/battery behaviour and the battery guard are untested under the hook.

@@ -112,7 +112,18 @@ fi
 { true >> "$APP_LOG"; } 2>/dev/null || APP_LOG=/dev/null
 # The app (or `deploy_remote.py mark-good`) writes 0 here once it is healthy.
 export HARMONY_BOOTCOUNT_FILE="$COUNT_FILE"
-"$APP_BIN" @ARGV@ >> "$APP_LOG" 2>&1 &
+# Every app line (and ours) is prefixed with the uptime, so the log can be read against a
+# crash or a reboot. `$!` of a pipeline is the stamping loop: it ends when the app (and so the
+# pipe) closes, which is exactly the liveness the watcher below needs.
+stamp() {
+    while l=''; IFS= read -r l || [ -n "$l" ]; do
+        up=''
+        read -r up _ 2>/dev/null < /proc/uptime
+        printf '[up %ss] %s\n' "${up%%.*}" "$l"
+    done
+}
+echo "start.sh: launching the app (boot $n of @MAX@)" | stamp >> "$APP_LOG" 2>/dev/null
+"$APP_BIN" @ARGV@ 2>&1 < /dev/null | stamp >> "$APP_LOG" 2>/dev/null &
 pid=$!
 # Keep the tmpfs log bounded: truncate in place (the app writes O_APPEND) when over LOG_MAX lines.
 while kill -0 "$pid" 2>/dev/null; do

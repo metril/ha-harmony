@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <signal.h>
@@ -7,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "hub/hp_errors.h"
@@ -129,6 +131,24 @@ static const char *read_token_file(const char *path) {
     return res ? g_tokbuf : NULL;
 }
 
+/* Liveness file for the boot hook's watcher: our CLOCK_MONOTONIC seconds (the same scale as
+ * /proc/uptime), rewritten in one write(). A wedged main loop stops refreshing it. */
+static void heartbeat_touch(const char *path) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return;
+    char buf[32];
+    int n = snprintf(buf, sizeof buf, "%lld\n", (long long)ts.tv_sec);
+    /* tmp + rename: the watcher never sees an empty or half-written file */
+    char tmp[512];
+    if (snprintf(tmp, sizeof tmp, "%s.tmp", path) >= (int)sizeof tmp) return;
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return;
+    ssize_t w = write(fd, buf, (size_t)n);
+    close(fd);
+    if (w == n) rename(tmp, path);
+    else unlink(tmp);
+}
+
 int main(int argc, char **argv) {
     bool sim = false, rf_spi = false;
     bool rf_debug = false;
@@ -139,6 +159,8 @@ int main(int argc, char **argv) {
     const char *state = NULL;
     const char *rf_path = NULL;
     const char *hub_id = NULL, *fw_version = NULL;
+    const char *hb_path = NULL;
+    long hb_secs = 5;
     long ir_ports = HP_HW_DEFAULT_IR_PORTS;
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
     int mdns = -1; /* -1 = default: on for the real daemon, off under --sim */
@@ -163,6 +185,8 @@ int main(int argc, char **argv) {
                 return 2;
             }
         }
+        else if (!strcmp(argv[i], "--heartbeat") && i + 1 < argc) hb_path = argv[++i];
+        else if (!strcmp(argv[i], "--heartbeat-secs") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 60, &hb_secs)) return bad_num("--heartbeat-secs", argv[i]); }
         else if (!strcmp(argv[i], "--hub-id") && i + 1 < argc) hub_id = argv[++i];
         else if (!strcmp(argv[i], "--fw-version") && i + 1 < argc) fw_version = argv[++i];
         else if (!strcmp(argv[i], "--ir-ports") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 255, &ir_ports)) return bad_num("--ir-ports", argv[i]); }
@@ -175,7 +199,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
             fprintf(stderr, "usage: hub [--sim] [--port N] (--token T | --token-file PATH) [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
-                            "[--hub-id ID] [--fw-version V] [--ir-ports MASK] "
+                            "[--hub-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] "
                             "[--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P]\n");
             return 2;
@@ -285,7 +309,16 @@ int main(int argc, char **argv) {
     printf("listening port=%u\n", hp_ws_port(srv));
     if (g_mdns.fd >= 0) printf("mdns port=%u\n", hp_mdns_srv_port(&g_mdns));
     fflush(stdout);
+    long long hb_last = -1000;
+    if (hb_path) heartbeat_touch(hb_path); /* before the loop: the watcher sees us alive at once */
     while (!g_stop) {
+        if (hb_path) {
+            struct timespec t;
+            if (clock_gettime(CLOCK_MONOTONIC, &t) == 0 && (t.tv_sec < hb_last || t.tv_sec - hb_last >= hb_secs)) {
+                heartbeat_touch(hb_path);
+                hb_last = t.tv_sec;
+            }
+        }
         int wait = hub_next_timeout_ms(&g_hub); /* timers never sleep: they shorten the poll */
         if (wait < 0 || wait > 200) wait = 200;
         hp_ws_poll(srv, wait);
