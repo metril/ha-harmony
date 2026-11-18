@@ -1,12 +1,15 @@
 import { css, html, nothing } from 'lit';
+import { trimBytes } from '../lib/codes';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../components/hh-action-picker';
 import '../components/hh-chain-mini';
 import '../components/hh-dialog';
 import '../components/hh-mini-remote';
 import { StoreElement, confirmAction } from '../components/base';
+import { problemList } from '../components/parts';
+import { problemsFor } from '../lib/problems';
 import {
-  MAX_DEVICES, MAX_STEPS, isRefused, ZONES, ZONE_KEYS, addActivity, addActivityDevice, addControlPage, addStartButton, addStep, applyHandler, chainOrder, deleteActivity, handlerOf,
+  MAX_ACTIVITIES, MAX_DEVICES, MAX_STEPS, isRefused, ZONES, ZONE_KEYS, addActivity, addActivityDevice, addControlPage, addStartButton, addStep, applyHandler, chainOrder, deleteActivity, handlerOf,
   matchZone, moveChain, moveStep, removeActivityDevice, removeStep, renameActivity, setActivityInput, timeline, type TItem, type Zone,
 } from '../lib/activity-edit';
 import { art, deviceKind } from '../lib/device-art';
@@ -160,6 +163,7 @@ export class HhActivities extends StoreElement {
   private create() {
     const name = this.newName.trim();
     if (!name) return;
+    if ((this.cfg.activities ?? []).length >= MAX_ACTIVITIES) return this.say(`The hub holds at most ${MAX_ACTIVITIES} activities.`, 'error');
     const r = addActivity(this.cfg, name, this.newDevs.map((device) => ({ device })));
     this.store.replace(r.config);
     this.newOpen = false;
@@ -381,12 +385,13 @@ export class HhActivities extends StoreElement {
     const o = this.offer?.id === id ? this.offer : null;
     return html`
       <div class="tabs" role="tablist" aria-label="Activities">${(this.cfg.activities ?? []).map((x) => html`<a role="tab" href=${hashFor('activities', x.id)} aria-selected=${x.id === id}>${x.name ?? x.id}</a>`)}<button class="btn sm" @click=${() => (this.newOpen = true)}>+ New</button></div>
-      <div class="head"><input class="name" aria-label="Activity name" .value=${a.name ?? a.id} @change=${(e: Event) => this.store.replace(renameActivity(this.cfg, id, (e.target as HTMLInputElement).value.trim().slice(0, 31) || id), `an${id}`)} />
+      <div class="head"><input class="name" aria-label="Activity name" .value=${a.name ?? a.id} @change=${(e: Event) => this.store.replace(renameActivity(this.cfg, id, trimBytes((e.target as HTMLInputElement).value.trim()) || id), `an${id}`)} />
         <a class="btn" href=${hashFor('remote', id)}>Open on remote</a><button class="btn danger" @click=${() => void this.removeActivity(id)}>Delete</button></div>
       ${o ? html`<div class="banner" role="status"><span><b>${a.name ?? id}</b> is new. Make it easy to start?</span><span class="sp"></span><span class="offer">
         ${o.button ? html`<button class="btn sm pri" @click=${() => this.offerStart(id)}>Add start button to Home</button>` : nothing}
         ${o.page ? html`<button class="btn sm pri" @click=${() => { this.store.replace(addControlPage(this.cfg, id)); this.say('Added a control page from the Activity control template'); this.offer = o.button ? { ...o, page: false } : null; }}>Add a control page</button>` : nothing}
         <button class="btn sm" @click=${() => (this.offer = null)}>Not now</button></span></div>` : nothing}
+      ${problemList(problemsFor(this.store.errors, 'activities', (this.cfg.activities ?? []).findIndex((x) => x.id === id)))}
       ${this.chain(id)}${this.timeline(id)}${this.who(id)}${this.newDialog()}`;
   }
   private offerStart(id: string) {

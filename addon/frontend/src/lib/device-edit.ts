@@ -31,7 +31,7 @@ export function uniqueName(existing: string[], base: string): string {
 }
 
 export function deviceIdFor(cfg: Config, base: string): string {
-  const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'device';
+  const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'device';
   const used = new Set((cfg.devices ?? []).map((d) => d.id));
   if (!used.has(slug)) return slug;
   let i = 2;

@@ -38,7 +38,7 @@ export function summarizeErrors(errors: ValidationError[], config?: Config | nul
   for (const l of located) {
     const sec = l.route.split('/')[0] as string;
     bySection[sec] = (bySection[sec] ?? 0) + 1;
-    if (!l.path) unlocated.push(l);
+    if (!l.path || l.route === 'overview') unlocated.push(l);
     byField.set(l.field, [...(byField.get(l.field) ?? []), l.msg]);
   }
   return { located, bySection, byField, unlocated, total: errors.length, first: located[0] };

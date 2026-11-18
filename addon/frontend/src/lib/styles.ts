@@ -35,6 +35,11 @@ export const shared = css`
   .banner.bad { background: var(--bads); border-color: var(--bad); color: var(--tx); }
   .banner.ir { background: var(--irs); border-color: var(--ir); }
   .sp { flex: 1; }
+  .problems { border-color: var(--bad); background: var(--bads); }
+  .problems h2 { color: var(--bad); }
+  .problems ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .problems li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .problems li span { overflow-wrap: anywhere; min-width: 0; flex: 1 1 200px; }
   .meter { display: grid; gap: 3px; min-width: 110px; font-size: 11px; color: var(--tx3); }
   .meter b { color: var(--tx2); font-weight: 600; }
   .bar { height: 6px; border-radius: 3px; background: var(--sf3); overflow: hidden; }

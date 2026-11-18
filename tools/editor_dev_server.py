@@ -18,7 +18,18 @@ from harmony_addon.options import Options
 from harmony_core.config_model import load_source
 
 ROOT = Path(__file__).resolve().parents[1]
-DOMAINS = ["light", "switch", "fan", "cover", "climate", "media_player", "scene", "script", "sensor", "input_boolean"]
+DOMAINS = [
+    "light",
+    "switch",
+    "fan",
+    "cover",
+    "climate",
+    "media_player",
+    "scene",
+    "script",
+    "sensor",
+    "input_boolean",
+]
 
 
 class FakeHaApi:
@@ -27,13 +38,31 @@ class FakeHaApi:
             {
                 "entity_id": f"{DOMAINS[i % len(DOMAINS)]}.room_{i // len(DOMAINS)}_{DOMAINS[i % len(DOMAINS)]}",
                 "state": "on" if i % 3 else "off",
-                "attributes": {"friendly_name": f"Room {i // len(DOMAINS)} {DOMAINS[i % len(DOMAINS)]}"},
+                "attributes": {
+                    "friendly_name": f"Room {i // len(DOMAINS)} {DOMAINS[i % len(DOMAINS)]}"
+                },
             }
             for i in range(n)
         ]
         self.services = [
-            {"domain": d, "services": {"toggle": {"name": "Toggle", "fields": {}}, "turn_on": {"name": "Turn on", "fields": {"brightness_pct": {}}}, "turn_off": {}}}
-            for d in ("light", "switch", "fan", "cover", "media_player", "scene", "script", "climate")
+            {
+                "domain": d,
+                "services": {
+                    "toggle": {"name": "Toggle", "fields": {}},
+                    "turn_on": {"name": "Turn on", "fields": {"brightness_pct": {}}},
+                    "turn_off": {},
+                },
+            }
+            for d in (
+                "light",
+                "switch",
+                "fan",
+                "cover",
+                "media_player",
+                "scene",
+                "script",
+                "climate",
+            )
         ]
 
     async def get(self, path: str):
@@ -43,14 +72,22 @@ class FakeHaApi:
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config")
-    ap.add_argument("--applied", action="store_true", help="apply the config instead of leaving it as a draft")
+    ap.add_argument(
+        "--applied", action="store_true", help="apply the config instead of leaving it as a draft"
+    )
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--entities", type=int, default=300)
     a = ap.parse_args()
     data = Path(tempfile.mkdtemp(prefix="hh-dev-"))
     app = create_app(
-        data, options=Options("info"), auth=NoAuth(), static_dir=ROOT / "addon/frontend/dist", bundle_token="ab" * 32,
-        bundle_networks=None, wait_seconds=1.0, ha_api=FakeHaApi(a.entities),
+        data,
+        options=Options("info"),
+        auth=NoAuth(),
+        static_dir=ROOT / "addon/frontend/dist",
+        bundle_token="ab" * 32,
+        bundle_networks=None,
+        wait_seconds=1.0,
+        ha_api=FakeHaApi(a.entities),
     )
     runner = web.AppRunner(app)
     await runner.setup()

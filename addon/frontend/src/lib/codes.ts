@@ -97,3 +97,16 @@ export function summarize(a: IrAction | undefined): string {
       return 'no code';
   }
 }
+
+/** `s` cut to at most `max` UTF-8 bytes, never in the middle of a character. */
+export function trimBytes(s: string, max = NAME_MAX): string {
+  let out = '';
+  let n = 0;
+  for (const ch of s) {
+    const b = utf8Bytes(ch);
+    if (n + b > max) break;
+    out += ch;
+    n += b;
+  }
+  return out;
+}

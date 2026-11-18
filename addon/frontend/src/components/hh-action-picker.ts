@@ -4,6 +4,7 @@ import { repeat } from 'lit/directives/repeat.js';
 import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { HA_DOMAINS } from '../lib/studio-state';
+import { ACTION_DOMAINS, haProblem } from '../lib/ha-rules';
 import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, entityDomain, fieldData, groupCommand, pretty, resolveIr, type Source } from '../lib/studio-model';
 import './hh-send-ir';
 
@@ -85,7 +86,7 @@ export class HhActionPicker extends LitElement {
   private serviceOptions(): string[] {
     const sv = this.host.state.services;
     if (!sv) return [];
-    return sv.filter((s) => HA_DOMAINS.includes(s.domain)).map((s) => `${s.domain}.${s.service}`);
+    return sv.filter((s) => ACTION_DOMAINS.includes(s.domain)).map((s) => `${s.domain}.${s.service}`);
   }
 
   private commit() {
@@ -105,7 +106,10 @@ export class HhActionPicker extends LitElement {
     if (k === 'command' || k === 'input') return !!(this.device && this.name);
     if (k === 'activity') return !!this.activity;
     if (k === 'alloff') return true;
-    return this.host.state.haWritable && !!this.service && HA_ENTITY_ID.test(this.entity);
+    return this.host.state.haWritable && !!this.service && HA_ENTITY_ID.test(this.entity) && this.haIssue() === null;
+  }
+  private haIssue(): string | null {
+    return haProblem(this.service, this.entity, fieldData(this.fields));
   }
 
   private deviceFields() {
@@ -155,7 +159,7 @@ export class HhActionPicker extends LitElement {
         <datalist id="hh-ents">${ents.slice(0, 200).map((e) => html`<option value=${e.entity_id}>${e.name ?? ''}${e.state ? ` · ${e.state}` : ''}</option>`)}</datalist>
       </label>
       ${st.entities === null && st.haLoaded ? html`<p class="why">Home Assistant could not be read, so type the entity id.</p>` : nothing}
-      ${this.entity && !HA_ENTITY_ID.test(this.entity) ? html`<p class="why" role="alert">Entity ids look like light.living_room.</p>` : nothing}
+      ${this.entity && !HA_ENTITY_ID.test(this.entity) ? html`<p class="why" role="alert">Entity ids look like light.living_room.</p>` : this.haIssue() ? html`<p class="why" role="alert">${this.haIssue()}</p>` : nothing}
       ${this.serviceFields().map((f) => html`<label>${f}<input type="text" aria-label="Field ${f}" placeholder="optional" .value=${this.fields[f] ?? ''} @input=${(e: Event) => (this.fields = { ...this.fields, [f]: (e.target as HTMLInputElement).value })} /></label>`)}
       ${this.mode === 'key' ? html`<label class="chk"><input type="checkbox" .checked=${this.repeatHeld} @change=${(e: Event) => (this.repeatHeld = (e.target as HTMLInputElement).checked)} /> Repeat while held</label>` : nothing}`;
   }

@@ -5,7 +5,7 @@ import '../components/hh-code-dialog';
 import '../components/hh-send-ir';
 import { StoreElement, confirmAction } from '../components/base';
 import type { CodeEdit, CodeSave } from '../components/hh-code-dialog';
-import { summarize } from '../lib/codes';
+import { summarize, trimBytes } from '../lib/codes';
 import { KIND_LABEL, art, commandIconId, deviceKind, groupIconId } from '../lib/device-art';
 import { commandCount, duplicateCommand, isHaDevice, mapCodes, nameProblem, patchDevice, powerMode, powerStatus, setCommand, setInput, setPowerCode, setPowerMode, sourceLabel, withPorts, withRepeats, type PowerMode } from '../lib/device-edit';
 import { stockIconSvg } from '../lib/icon-shapes';
@@ -17,6 +17,8 @@ import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import { GROUPS, pretty, sourceAction, groupCommand, type Group, type Source } from '../lib/studio-model';
 import { byteCounter } from '../lib/codes';
+import { problemList } from '../components/parts';
+import { problemsFor, type Problem } from '../lib/problems';
 
 const HOST = (state: StudioState): StudioHost => ({ state }) as unknown as StudioHost;
 
@@ -120,6 +122,12 @@ export class HhDevices extends StoreElement {
   private put(cfg: ReturnType<typeof setCommand>, coalesce?: string, msg?: string) {
     this.store.replace(cfg, coalesce);
     if (msg) this.store.toast(msg, 'info', true);
+  }
+  private openProblem(d: Device, p: Problem) {
+    const o = p.open;
+    if (!o) return;
+    const code = o.where === 'power' ? d.power?.[o.name as 'on' | 'off' | 'toggle'] : d[o.where]?.[o.name];
+    if (code) this.edit = { where: o.where, name: o.name, code: JSON.parse(JSON.stringify(code)) as IrAction };
   }
   private errorsOf(index: number): number {
     return this.store.errors.filter((e) => e.path[0] === 'devices' && e.path[1] === index).length;
@@ -371,9 +379,10 @@ export class HhDevices extends StoreElement {
         ${ha ? nothing : html`<div class="seg" role="group" aria-label="View"><button aria-pressed=${this.view === 'keypad'} @click=${() => (this.view = 'keypad')}>Keypad</button><button aria-pressed=${this.view === 'list'} @click=${() => (this.view = 'list')}>List view</button></div>`}
         <button class="btn danger" @click=${() => void this.removeDev(d)}>Delete device</button>
       </div>
+      ${problemList(problemsFor(this.store.errors, 'devices', idx), (p) => p.open && this.openProblem(d, p))}
       <div class="dbar">
         <span class="chip acc">${KIND_LABEL[deviceKind(d)]}</span>
-        <input class="name" aria-label="Device name" .value=${d.name ?? d.id} @change=${(e: Event) => this.put(patchDevice(this.store.config, d.id, { name: (e.target as HTMLInputElement).value.trim().slice(0, 31) || undefined }), `name${d.id}`)} />
+        <input class="name" aria-label="Device name" .value=${d.name ?? d.id} @change=${(e: Event) => this.put(patchDevice(this.store.config, d.id, { name: trimBytes((e.target as HTMLInputElement).value.trim()) || undefined }), `name${d.id}`)} />
         <span class="muted">${bytes.used}/31 B · id <span class="mono">${d.id}</span> · ${sourceLabel(d)}${this.errorsOf(idx) ? ` · ${this.errorsOf(idx)} errors` : ''}</span>
       </div>
       ${ha

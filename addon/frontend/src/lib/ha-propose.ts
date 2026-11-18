@@ -1,6 +1,7 @@
 // Home Assistant entity -> a proposed device. Only what the domain's services can do is proposed;
 // source lists and send_command presets are not readable from the entity list, so the user fills them in.
 import type { Device, IrAction } from './model';
+import { trimBytes } from './codes';
 import { deviceIdFor } from './device-edit';
 import type { Config } from './model';
 
@@ -17,7 +18,7 @@ export const PROPOSAL_DOMAINS = ['media_player', 'remote', 'switch', 'light', 'f
 export function proposeFromEntity(cfg: Config, entity: { entity_id: string; name?: string }): Proposal | null {
   const id = entity.entity_id;
   const domain = id.split('.')[0] ?? '';
-  const name = (entity.name ?? id.split('.')[1] ?? id).slice(0, 31);
+  const name = trimBytes(entity.name ?? id.split('.')[1] ?? id);
   const base: Device = { id: deviceIdFor(cfg, name), kind: 'ha', name, entity: id, power: { on: act(`${domain}.turn_on`, id), off: act(`${domain}.turn_off`, id) }, inputs: {}, commands: {} };
   const notes: string[] = [];
   if (domain === 'media_player') {

@@ -1,0 +1,558 @@
+[
+ {
+  "rule": "device id pattern",
+  "path": [
+   "devices",
+   0,
+   "id"
+  ],
+  "msg": "must be 1-31 characters of a-z, 0-9 or _"
+ },
+ {
+  "rule": "device name 31 bytes",
+  "path": [
+   "devices",
+   0,
+   "name"
+  ],
+  "msg": "must be at most 31 bytes"
+ },
+ {
+  "rule": "command name 31 bytes",
+  "path": [
+   "devices",
+   0,
+   "commands",
+   "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
+  ],
+  "msg": "must be at most 31 bytes"
+ },
+ {
+  "rule": "reserved command power_on",
+  "path": [
+   "devices",
+   0,
+   "commands",
+   "power_on"
+  ],
+  "msg": "command name 'power_on' is reserved (power_on, power_off and input_<name> are built in); pick another name"
+ },
+ {
+  "rule": "reserved command input_x",
+  "path": [
+   "devices",
+   0,
+   "commands",
+   "input_x"
+  ],
+  "msg": "command name 'input_x' is reserved (power_on, power_off and input_<name> are built in); pick another name"
+ },
+ {
+  "rule": "power needs both or toggle",
+  "path": [
+   "devices",
+   0,
+   "power"
+  ],
+  "msg": "power needs both `on` and `off`, or just `toggle`"
+ },
+ {
+  "rule": "settle_ms 0..60000",
+  "path": [
+   "devices",
+   0,
+   "settle_ms"
+  ],
+  "msg": "must be an integer 0..60000"
+ },
+ {
+  "rule": "port mask 1..255",
+  "path": [
+   "devices",
+   0,
+   "commands",
+   "up"
+  ],
+  "msg": "port_mask must be 1..255"
+ },
+ {
+  "rule": "repeats 1..8",
+  "path": [
+   "devices",
+   0,
+   "commands",
+   "up"
+  ],
+  "msg": "repeats must be 1..8"
+ },
+ {
+  "rule": "IR form exactly one",
+  "path": [
+   "devices",
+   0,
+   "commands",
+   "up"
+  ],
+  "msg": "expected exactly one of proto/addr/cmd, raw, pronto, flipper, smartir"
+ },
+ {
+  "rule": "alias is another device id",
+  "path": [
+   "devices",
+   0,
+   "aliases",
+   0
+  ],
+  "msg": "alias 'avr' is another device's id"
+ },
+ {
+  "rule": "duplicate device id",
+  "path": [
+   "devices",
+   1,
+   "id"
+  ],
+  "msg": "duplicate device id 'tv'"
+ },
+ {
+  "rule": "max 16 devices",
+  "path": [],
+  "msg": "too many devices: 18 (the hub allows at most 16)"
+ },
+ {
+  "rule": "max 256 commands",
+  "path": [],
+  "msg": "too many commands: 296 (the hub allows at most 256)"
+ },
+ {
+  "rule": "HA device takes only ha actions",
+  "path": [
+   "devices",
+   4,
+   "commands",
+   "x"
+  ],
+  "msg": "a Home Assistant device takes `{ha: {service, target, ...}}` actions"
+ },
+ {
+  "rule": "HA device power needs on and off",
+  "path": [
+   "devices",
+   4,
+   "power"
+  ],
+  "msg": "a Home Assistant device's power needs both `on` and `off`"
+ },
+ {
+  "rule": "HA device entity pattern",
+  "path": [
+   "devices",
+   4,
+   "entity"
+  ],
+  "msg": "not an entity id"
+ },
+ {
+  "rule": "activity id `off` reserved",
+  "path": [
+   "activities",
+   0,
+   "id"
+  ],
+  "msg": "`off` is reserved"
+ },
+ {
+  "rule": "activity unknown device",
+  "path": [
+   "activities",
+   0,
+   "devices",
+   2,
+   "device"
+  ],
+  "msg": "unknown device 'ghost'"
+ },
+ {
+  "rule": "activity unknown input",
+  "path": [
+   "activities",
+   0,
+   "devices",
+   0,
+   "input"
+  ],
+  "msg": "no input 'nope'"
+ },
+ {
+  "rule": "step unknown command",
+  "path": [
+   "activities",
+   0,
+   "steps",
+   0,
+   "command"
+  ],
+  "msg": "tv has no 'nope'"
+ },
+ {
+  "rule": "step may not start an activity",
+  "path": [
+   "activities",
+   0,
+   "steps",
+   0
+  ],
+  "msg": "activity actions are only allowed in key maps and page buttons"
+ },
+ {
+  "rule": "max steps per activity",
+  "path": [
+   "activities",
+   0,
+   "steps"
+  ],
+  "msg": "activity 'watch_tv': too many `steps`: 40 (the hub allows at most 16)"
+ },
+ {
+  "rule": "key name",
+  "path": [
+   "keys",
+   "nokey"
+  ],
+  "msg": "unknown key 'nokey'; use one of up, down, left, right, select, menu, exit, volume_up, volume_down, volume_mute, channel_up, channel_down, prev_channel, play, pa"
+ },
+ {
+  "rule": "key action unknown device",
+  "path": [
+   "keys",
+   "play",
+   "device"
+  ],
+  "msg": "unknown device 'ghost'"
+ },
+ {
+  "rule": "bt usage 0..65535",
+  "path": [
+   "keys",
+   "play"
+  ],
+  "msg": "bt usage must be 0..65535"
+ },
+ {
+  "rule": "ha service domain allow-list",
+  "path": [
+   "keys",
+   "play"
+  ],
+  "msg": "service domain 'shell_command' is not allowed; use one of button, climate, cover, fan, input_boolean, input_button, light, media_player, number, remote, scene, "
+ },
+ {
+  "rule": "ha max 8 entities",
+  "path": [
+   "keys",
+   "play"
+  ],
+  "msg": "target.entity_id takes 1..8 entity ids"
+ },
+ {
+  "rule": "ha entity id pattern",
+  "path": [
+   "keys",
+   "play"
+  ],
+  "msg": "'Light.Lamp' is not an entity id"
+ },
+ {
+  "rule": "ha no templates",
+  "path": [
+   "keys",
+   "play"
+  ],
+  "msg": "data must not contain a template ({{ }}, {% %} or {# #})"
+ },
+ {
+  "rule": "ha data depth 4",
+  "path": [
+   "keys",
+   "play"
+  ],
+  "msg": "data is nested deeper than 4"
+ },
+ {
+  "rule": "ha data 1024 bytes",
+  "path": [
+   "keys",
+   "play"
+  ],
+  "msg": "data is over 1024 bytes"
+ },
+ {
+  "rule": "ha repeat is boolean",
+  "path": [
+   "keys",
+   "play"
+  ],
+  "msg": "repeat must be true or false"
+ },
+ {
+  "rule": "page id pattern",
+  "path": [
+   "pages",
+   4,
+   "id"
+  ],
+  "msg": "must be 1-31 characters of a-z, 0-9 or _"
+ },
+ {
+  "rule": "page title 24 bytes",
+  "path": [
+   "pages",
+   4,
+   "title"
+  ],
+  "msg": "must be at most 24 bytes"
+ },
+ {
+  "rule": "page cols 1..16",
+  "path": [
+   "pages",
+   4,
+   "cols"
+  ],
+  "msg": "must be an integer 1..16"
+ },
+ {
+  "rule": "duplicate page id",
+  "path": [
+   "pages",
+   5,
+   "id"
+  ],
+  "msg": "duplicate page id 'watch'"
+ },
+ {
+  "rule": "unknown activity on a page",
+  "path": [
+   "pages",
+   4,
+   "activity"
+  ],
+  "msg": "unknown activity 'ghost'"
+ },
+ {
+  "rule": "max 32 widgets per page",
+  "path": [
+   "pages",
+   4
+  ],
+  "msg": "page 'watch': too many widgets: 33 (max 32)"
+ },
+ {
+  "rule": "max 32 pages",
+  "path": [
+   "pages"
+  ],
+  "msg": "too many pages: 39 (at most 32)"
+ },
+ {
+  "rule": "max 128 soft keys",
+  "path": [
+   "pages",
+   15
+  ],
+  "msg": "too many widgets across all pages: more than 128 soft keys"
+ },
+ {
+  "rule": "widget label 24 bytes",
+  "path": [
+   "pages",
+   4
+  ],
+  "msg": "page 'watch': widget 49 label exceeds 24 bytes"
+ },
+ {
+  "rule": "page 251 bytes",
+  "path": [
+   "pages",
+   4
+  ],
+  "msg": "page 'watch': 728 bytes over; shorten labels, use icon_only, or make it a list"
+ },
+ {
+  "rule": "widget position 0..15",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   0,
+   "x"
+  ],
+  "msg": "must be an integer 0..15"
+ },
+ {
+  "rule": "widget id pattern",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   0,
+   "id"
+  ],
+  "msg": "must be 1-31 characters of a-z, 0-9 or _"
+ },
+ {
+  "rule": "duplicate widget id",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   1,
+   "id"
+  ],
+  "msg": "duplicate widget id 'w_sleep'"
+ },
+ {
+  "rule": "button needs action",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   0
+  ],
+  "msg": "a button needs an `action` (or `nav`)"
+ },
+ {
+  "rule": "tile needs entity",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   2
+  ],
+  "msg": "a tile needs an `entity`"
+ },
+ {
+  "rule": "tile entity pattern",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   2,
+   "entity"
+  ],
+  "msg": "not an entity id"
+ },
+ {
+  "rule": "tap toggle needs a toggleable entity",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   2
+  ],
+  "msg": "`tap: toggle` does not work on a sensor entity"
+ },
+ {
+  "rule": "unknown icon",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   0,
+   "icon"
+  ],
+  "msg": "unknown icon"
+ },
+ {
+  "rule": "role values",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   0,
+   "role"
+  ],
+  "msg": "value must be one of ['danger', 'default', 'primary', 'secondary']"
+ },
+ {
+  "rule": "shape values",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   0,
+   "shape"
+  ],
+  "msg": "value must be one of ['card', 'monogram', 'pill', 'row']"
+ },
+ {
+  "rule": "nav next on the last page",
+  "path": [
+   "pages",
+   13,
+   "widgets",
+   0,
+   "nav"
+  ],
+  "msg": "`next` on the last page"
+ },
+ {
+  "rule": "nav home needs a home page",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   0,
+   "nav"
+  ],
+  "msg": "`home` needs a page with `kind: home`"
+ },
+ {
+  "rule": "nav to unknown page",
+  "path": [
+   "pages",
+   4,
+   "widgets",
+   4,
+   "nav"
+  ],
+  "msg": "unknown page 'ghost'"
+ },
+ {
+  "rule": "one home page",
+  "path": [
+   "pages",
+   1,
+   "kind"
+  ],
+  "msg": "a second home page"
+ },
+ {
+  "rule": "list page has no x/y",
+  "path": [
+   "pages",
+   2,
+   "widgets",
+   0,
+   "x"
+  ],
+  "msg": "list pages place widgets themselves; drop x/y"
+ },
+ {
+  "rule": "list rows 1..16",
+  "path": [
+   "pages",
+   2,
+   "list",
+   "rows"
+  ],
+  "msg": "must be an integer 1..16"
+ },
+ {
+  "rule": "editor size",
+  "path": [
+   "editor"
+  ],
+  "msg": "editor metadata is over 65536 bytes"
+ }
+]
