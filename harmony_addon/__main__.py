@@ -9,7 +9,9 @@ from pathlib import Path
 from aiohttp import web
 
 from .app import create_app
+from .auth import load_or_create_token
 from .options import load_options
+from .supervisor import Discovery, default_supervisor
 
 
 def main() -> None:
@@ -19,8 +21,14 @@ def main() -> None:
     a = ap.parse_args()
     opts = load_options(Path(a.data_dir) / "options.json")
     logging.basicConfig(level=opts.log_level.upper(), format="%(levelname)s %(name)s: %(message)s")
+    token = load_or_create_token(a.data_dir)
     web.run_app(
-        create_app(a.data_dir, options=opts),
+        create_app(
+            a.data_dir,
+            options=opts,
+            bundle_token=token,
+            discovery=Discovery(default_supervisor(), a.port, token),
+        ),
         host="0.0.0.0",
         port=a.port,
         print=None,

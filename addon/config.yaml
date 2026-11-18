@@ -1,5 +1,5 @@
 name: Harmony Editor
-version: "0.1.0"
+version: "0.2.0"
 slug: ha_harmony_editor
 description: Visual editor, IR database and preview for the Harmony hub (feeds the Harmony integration)
 url: https://github.com/metril/ha-harmony
@@ -15,6 +15,8 @@ panel_icon: mdi:remote
 panel_title: Harmony
 panel_admin: true
 hassio_api: false
+discovery:
+  - ha_harmony
 homeassistant_api: false
 backup_exclude:
   - ircache/*

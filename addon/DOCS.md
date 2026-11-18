@@ -6,14 +6,29 @@ what it pulls, and keeps its own copy of the last applied config.
 
 ## Status
 
-Skeleton: the API works, the editor UI is a placeholder page.
+Skeleton: the API and the integration feed work, the editor UI is a placeholder page.
 
-## Security model
+## Moving from the integration's YAML file
 
-- Reachable only through Home Assistant ingress (the sidebar panel, admins only). No port is
-  published and the add-on only accepts connections from the Supervisor ingress gateway.
-- No Home Assistant Core API access, no Supervisor API access, no folder mappings. It cannot read
-  or write your Home Assistant configuration.
+The integration (0.3.0) no longer reads `<config>/ha_harmony/<hub>.yaml`. Upload that file once
+with `POST /api/v1/config/import_yaml` (the editor's import button), then apply it; the
+integration picks it up within moments.
+
+## What it can and cannot reach
+
+- Sidebar editor: reachable only through Home Assistant ingress (admins only), from the
+  Supervisor ingress gateway. No port is published to the host.
+- Integration feed: `GET /api/v1/bundle` and `/api/v1/bundle/wait` (long-poll) serve the applied
+  config. They need a bearer token (32 random bytes, generated at first start, stored `0600` in
+  `/data`, never logged or shown in the UI) and a peer on the Supervisor network; they refuse
+  anything arriving through ingress. Repeated failures are rate limited.
+- Discovery: at start the add-on tells the Supervisor "service `ha_harmony` is at
+  `<hostname>:8099` with this token", and withdraws it at stop; Home Assistant then offers to link
+  the Harmony integration. This uses the add-on's own Supervisor token and the `discovery:` entry
+  only: no `hassio_api`, no role (per the Supervisor API docs, `/discovery` and `/addons/self/*`
+  need no extra permission). The token is handed over only this way.
+- No Home Assistant Core API access, no Supervisor API beyond that, no folder mappings. It cannot
+  read or write your Home Assistant configuration.
 - Everything it stores lives in its own `/data` (draft, applied config, last 5 versions per hub).
 - State-changing requests need a JSON (or YAML for import) content type and a custom header, and
   cross-site requests are refused.

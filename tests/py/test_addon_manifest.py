@@ -15,6 +15,8 @@ def test_least_privilege_manifest():
     assert set(CFG["arch"]) == {"aarch64", "amd64"}
     for forbidden in ("ports", "map", "host_network", "full_access", "privileged", "devices"):
         assert forbidden not in CFG
+    # discovery needs `discovery:` only; /discovery and /addons/self need no hassio_api (Supervisor docs)
+    assert CFG["discovery"] == ["ha_harmony"]
     assert CFG["ingress_port"] == 8099
     assert any("ircache" in p for p in CFG["backup_exclude"])
 

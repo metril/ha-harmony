@@ -50,6 +50,13 @@ def _hub(v: object) -> str:
 
 
 QUERY = vol.Schema({vol.Optional("hub", default="default"): _hub}, extra=vol.PREVENT_EXTRA)
+WAIT_QUERY = vol.Schema(
+    {
+        vol.Optional("hub", default="default"): _hub,
+        vol.Optional("rev", default=""): vol.All(str, vol.Length(max=64)),
+    },
+    extra=vol.PREVENT_EXTRA,
+)
 GET_CONFIG_QUERY = vol.Schema(
     {
         vol.Optional("hub", default="default"): _hub,

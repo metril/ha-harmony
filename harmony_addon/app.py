@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+import hashlib
 import html
 import json
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -29,9 +31,17 @@ from harmony_core.config_model import ConfigError, check_yaml_depth, load_source
 from harmony_core.page_codec import decode_page
 
 from . import __version__, schemas
-from .auth import Auth, IngressAuth
+from .auth import (
+    HASSIO_NETWORK,
+    Auth,
+    BundleAuth,
+    IngressAuth,
+    RouteAuth,
+    load_or_create_token,
+)
 from .options import Options, load_options
 from .store import HISTORY_MAX, Store, StoreError
+from .supervisor import Discovery
 
 log = logging.getLogger(__name__)
 
@@ -48,22 +58,30 @@ CSRF_HEADER = "X-HH-CSRF"
 OPTIONS_KEY = web.AppKey("options", Options)
 STORE_KEY = web.AppKey("store", Store)
 CLOCK_KEY = web.AppKey("clock", Callable)
+NOTIFIER_KEY = web.AppKey("notifier", object)
+WAIT_KEY = web.AppKey("wait_s", float)
+WAIT_SECONDS = 55.0
 
 
 def _json(data: Any, status: int = 200) -> web.Response:
     return web.json_response(data, status=status)
 
 
-def _error(status: int, code: str, msg: str, **extra: Any) -> web.HTTPException:
+def _error(
+    status: int, code: str, msg: str, *, headers: dict[str, str] | None = None, **extra: Any
+) -> web.HTTPException:
+    kw = {"headers": headers} if headers else {}
     body = json.dumps({"error": {"code": code, "msg": msg, **extra}})
     cls = {
         400: web.HTTPBadRequest,
+        401: web.HTTPUnauthorized,
         403: web.HTTPForbidden,
         404: web.HTTPNotFound,
         409: web.HTTPConflict,
         422: web.HTTPUnprocessableEntity,
+        429: web.HTTPTooManyRequests,
     }[status]
-    return cls(text=body, content_type="application/json")
+    return cls(text=body, content_type="application/json", **kw)
 
 
 # ------------------------------------------------------------------ middlewares
@@ -109,6 +127,12 @@ def make_auth_mw(auth: Auth):
             auth.check(request)
         except web.HTTPForbidden:
             raise _error(403, "forbidden", "forbidden") from None
+        except web.HTTPUnauthorized:
+            raise _error(401, "unauthorized", "unauthorized") from None
+        except web.HTTPTooManyRequests:
+            raise _error(
+                429, "rate_limited", "too many attempts", headers={"Retry-After": "60"}
+            ) from None
         if request.method in MUTATING:
             allowed = YAML_TYPES if request.path == "/api/v1/config/import_yaml" else JSON_TYPES
             if (
@@ -127,7 +151,7 @@ async def _body(request: web.Request, schema: vol.Schema) -> dict[str, Any]:
     raw = await request.read()  # 413 beyond client_max_size
     try:
         data = json.loads(raw)
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         raise _error(400, "bad_json", "body is not valid JSON") from None
     return _validate(schema, data)
 
@@ -265,6 +289,7 @@ async def apply(request: web.Request) -> web.Response:
         return _json({"ok": False, "errors": errors}, 422)
     now = int(request.app[CLOCK_KEY]())
     state = _store_call(store.apply, q["hub"], config, compiled.config_hash, now)
+    request.app[NOTIFIER_KEY].notify(q["hub"])
     return _json({"ok": True, **_meta(state)})
 
 
@@ -272,6 +297,8 @@ async def revert(request: web.Request) -> web.Response:
     q = _query(request, schemas.QUERY)
     body = await _body(request, schemas.REVERT)
     state = _store_call(request.app[STORE_KEY].revert, q["hub"], body["target"])
+    if body["target"] == "previous":  # discarding a draft changes nothing the integration sees
+        request.app[NOTIFIER_KEY].notify(q["hub"])
     return _json({"ok": True, **_meta(state)})
 
 
@@ -305,7 +332,7 @@ def _yaml_to_config(raw: bytes) -> dict[str, Any]:
     try:
         if any(isinstance(e, yaml.AliasEvent) for e in yaml.parse(text, Loader=yaml.SafeLoader)):
             raise _error(400, "yaml_alias", "YAML anchors and aliases are not accepted")
-    except (yaml.YAMLError, RecursionError):
+    except yaml.YAMLError, RecursionError:
         pass  # load_source reports the syntax / nesting error below
     try:
         loaded = load_source(text)
@@ -313,7 +340,7 @@ def _yaml_to_config(raw: bytes) -> dict[str, Any]:
         raise _error(400, "bad_yaml", exc.msg[:200]) from None
     try:  # non-JSON YAML types (timestamps, sets, ...) and NaN are refused, int keys become str
         data = json.loads(json.dumps({} if loaded is None else loaded, allow_nan=False))
-    except (TypeError, ValueError, RecursionError):
+    except TypeError, ValueError, RecursionError:
         raise _error(400, "bad_yaml", "YAML holds values a config cannot contain") from None
     try:
         return schemas.bounded_config(data)
@@ -352,6 +379,81 @@ async def export_yaml(request: web.Request) -> web.Response:
     return web.Response(text=text, content_type="text/yaml", charset="utf-8")
 
 
+# ------------------------------------------------------------------ bundle (integration feed)
+class ApplyNotifier:
+    """Wakes long-poll waiters when a hub's applied config changes."""
+
+    def __init__(self) -> None:
+        self._events: dict[str, asyncio.Event] = {}
+
+    def event(self, hub: str) -> asyncio.Event:
+        return self._events.setdefault(hub, asyncio.Event())
+
+    def notify(self, hub: str) -> None:
+        ev = self._events.pop(hub, None)
+        if ev is not None:
+            ev.set()
+
+
+def _rev(config: dict[str, Any]) -> str:
+    canon = json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canon.encode()).hexdigest()[:16]
+
+
+def _bundle(hub: str, state: dict[str, Any]) -> dict[str, Any] | None:
+    a = state["applied"]
+    if a is None:
+        return None
+    return {
+        "schema": harmony_core.BUNDLE_SCHEMA,
+        "core_version": harmony_core.__version__,
+        "hub_id": hub,
+        "applied_at": a["at"],
+        "rev": _rev(a["config"]),
+        "config": a["config"],
+    }
+
+
+def _bundle_response(bundle: dict[str, Any]) -> web.Response:
+    return web.json_response(bundle, headers={"ETag": f'"{bundle["rev"]}"'})
+
+
+def _nothing_applied() -> web.HTTPException:
+    return _error(404, "nothing_applied", "no config has been applied for this hub")
+
+
+async def get_bundle(request: web.Request) -> web.Response:
+    q = _query(request, schemas.QUERY)
+    bundle = _bundle(q["hub"], _store_call(request.app[STORE_KEY].load, q["hub"]))
+    if bundle is None:
+        raise _nothing_applied()
+    if request.headers.get("If-None-Match") == f'"{bundle["rev"]}"':
+        return web.Response(status=304, headers={"ETag": f'"{bundle["rev"]}"'})
+    return _bundle_response(bundle)
+
+
+async def wait_bundle(request: web.Request) -> web.Response:
+    """Long-poll: answer when the applied rev differs from `rev`; 204 after the bounded wait."""
+    q = _query(request, schemas.WAIT_QUERY)
+    app, hub, known = request.app, q["hub"], q["rev"]
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + app[WAIT_KEY]
+    while True:
+        ev = app[NOTIFIER_KEY].event(hub)  # taken before the read: no lost wake-up
+        bundle = _bundle(hub, _store_call(app[STORE_KEY].load, hub))
+        if bundle is not None and bundle["rev"] != known:
+            return _bundle_response(bundle)
+        if bundle is None and known:
+            raise _nothing_applied()
+        left = deadline - loop.time()
+        if left <= 0:
+            return web.Response(status=204)
+        try:
+            await asyncio.wait_for(ev.wait(), left)
+        except TimeoutError:
+            return web.Response(status=204)
+
+
 async def index(request: web.Request) -> web.Response:
     o = request.app[OPTIONS_KEY]
     e = html.escape
@@ -373,17 +475,40 @@ def create_app(
     options: Options | None = None,
     clock: Callable[[], float] = time.time,
     auth: Auth | None = None,
+    bundle_token: str | None = None,
+    bundle_networks: Collection[str] | None = (HASSIO_NETWORK,),
+    bundle_auth: BundleAuth | None = None,
+    discovery: Discovery | None = None,
+    wait_seconds: float = WAIT_SECONDS,
 ) -> web.Application:
+    """`auth` guards the ingress routes; the bundle routes always need `bundle_token` (default:
+    the 0600 token file under data_dir) from a peer in `bundle_networks` (None: any, for tests)."""
     data_dir = Path(data_dir)
+    route_auth = RouteAuth(
+        auth or IngressAuth(),
+        bundle_auth or BundleAuth(bundle_token or load_or_create_token(data_dir), bundle_networks),
+    )
     app = web.Application(
         client_max_size=MAX_BODY,
-        middlewares=[headers_mw, make_auth_mw(auth or IngressAuth())],
+        middlewares=[headers_mw, make_auth_mw(route_auth)],
     )
     app[OPTIONS_KEY] = options or load_options(
         Path(options_path) if options_path else data_dir / "options.json"
     )
     app[STORE_KEY] = Store(data_dir)
     app[CLOCK_KEY] = clock
+    app[NOTIFIER_KEY] = ApplyNotifier()
+    app[WAIT_KEY] = wait_seconds
+    if discovery is not None:
+
+        async def _announce(_: web.Application) -> None:
+            await discovery.announce()
+
+        async def _withdraw(_: web.Application) -> None:
+            await discovery.withdraw()
+
+        app.on_startup.append(_announce)
+        app.on_shutdown.append(_withdraw)
     api = "/api/v1"
     app.router.add_get("/", index)
     app.router.add_get(f"{api}/health", health)
@@ -395,4 +520,6 @@ def create_app(
     app.router.add_post(f"{api}/config/revert", revert)
     app.router.add_post(f"{api}/config/import_yaml", import_yaml)
     app.router.add_get(f"{api}/config/export_yaml", export_yaml)
+    app.router.add_get(f"{api}/bundle", get_bundle)
+    app.router.add_get(f"{api}/bundle/wait", wait_bundle)
     return app

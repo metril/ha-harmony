@@ -169,7 +169,7 @@ async def test_s1_non_ingress_peer_is_forbidden_everywhere(aiohttp_client, tmp_p
         assert r.status == 403, (method, path)
     # every registered route is covered by the list above
     app_paths = {res.canonical for res in c.app.router.resources()}
-    assert app_paths <= {p for _, p in ROUTES}
+    assert app_paths - {"/api/v1/bundle", "/api/v1/bundle/wait"} <= {p for _, p in ROUTES}
 
 
 async def test_s1_ingress_peer_needs_header_for_ui(aiohttp_client, tmp_path):
@@ -346,7 +346,7 @@ def test_store_roundtrip_and_corruption(tmp_path):
 async def test_storage_only_under_data_dir(client, tmp_path):
     await put_draft(client)
     files = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
-    assert files == {"hubs/default.json"}
+    assert files == {"hubs/default.json", "bundle_token"}
 
 
 async def test_yaml_export_is_plain_yaml(client):
