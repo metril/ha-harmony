@@ -80,12 +80,34 @@ static int red_in_error_text(void) {
   return red;
 }
 
+#include "v2_screens.h"
+
+/* 32 widgets, all with icons and long labels, tiles with captions: the biggest v2 build. */
+static hp_page_t worst_page_v2(int id) {
+  hp_page_t p = worst_page(id, 0);
+  p.version = 2;
+  p.total = 50;
+  p.back = 1;
+  p.seq_idx = 1;
+  p.seq_cnt = 2;
+  for (unsigned i = 0; i < p.count; i++) {
+    p.widgets[i].icon = (uint8_t)(1 + i % RA_ICON_MAX);
+    p.widgets[i].shape = (uint8_t)(i % 4);
+  }
+  return p;
+}
+
+static int part = 3; /* argv[1]: 1 = the precheck squeeze, 2 = creation failures; ctest runs them in parallel */
+
 static void test_out_of_memory_survives(void) {
+  if (part & 1) {
   /* (a) the pool is nearly full: the free-memory precheck refuses the build and shows the error state */
   fresh_app();
-  hp_page_t w = worst_page(40, 0);
+  hp_page_t w = worst_page(40, 0), w2 = worst_page_v2(42);
   static void *hog[1024];
+  for (int v = 0; v < 2; v++)
   for (size_t keep = 56000; keep > 0; keep -= 3500) {
+    if (v) w = w2;
     ra_ui_show_boot(&app.ui);
     int n = 0;
     while (pool_free() > keep && n < 1024) hog[n++] = lv_malloc(128);
@@ -105,14 +127,16 @@ static void test_out_of_memory_survives(void) {
     refresh();
     CT_CHECK(!err_shown());
     CT_EQ(app.ui.oom, oom0 + refused);
-    CT_EQ(app.ui.page.page_id, 40);
+    CT_EQ(app.ui.page.page_id, v ? 42 : 40);
   }
   CT_CHECK(app.ui.oom > 0); /* the squeeze did trip it */
   app_destroy(&app);
+  }
+  if (part & 2) {
 
   /* (b) an object creation fails at every possible point of every kind of screen: no crash, error state shown */
-  void (*screens[])(void) = {sc_home, sc_boot, sc_receiving, sc_fallback};
-  for (int s = 0; s < 5; s++) {
+  void (*screens[])(void) = {sc_home, sc_boot, sc_receiving, sc_fallback, NULL, sc2_activity, sc2_tiles, sc2_receiving, sc2_paged};
+  for (int s = 0; s < 9; s++) {
     for (int n = 0; n < 200; n++) {
       if (s == 4 && n % 6) continue; /* the 33-object page: every 6th creation point is plenty */
       fresh_app();
@@ -141,6 +165,7 @@ static void test_out_of_memory_survives(void) {
       }
     }
   }
+  }
   /* a failing toast is simply skipped */
   fresh_app();
   ra_ui_test_fail_at = 1;
@@ -150,7 +175,8 @@ static void test_out_of_memory_survives(void) {
   app_destroy(&app);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+  if (argc > 1) part = atoi(argv[1]);
   CT_RUN(test_out_of_memory_survives);
   return CT_DONE();
 }

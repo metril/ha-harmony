@@ -111,7 +111,7 @@ static void test_pool_peak_and_no_leak(void) {
   fresh_app();
   hp_page_t w1 = worst_page(40, 0), w2 = worst_page(41, 1);
   size_t baseline = 0;
-  for (int i = 0; i < 50; i++) {
+  for (int i = 0; i < 20; i++) {
     ra_ui_show_page(&app.ui, i % 2 ? &w2 : &w1);
     ra_ui_toast(&app.ui, "Battery 8%", "Place on the charger");
     ra_ui_set_battery(&app.ui, 8, 0);

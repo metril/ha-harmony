@@ -45,7 +45,7 @@ static hp_page_t v2page(int id, int cols, int rows, const char *title, int kind)
 #define T HP_WIDGET_TILE
 
 /* Home: four big activity cards (32 px icons, bound to activities 0..3) and a danger pill. */
-static hp_page_t v2_home(void) {
+static __attribute__((unused)) hp_page_t v2_home(void) {
   hp_page_t p = v2page(0, 2, 3, "Activities", HP_PAGE_KIND_HOME);
   V2ADD(p, B, 0, 0, 0, 1, 1, "Watch TV", HP_ROLE_DEFAULT, HP_SHAPE_CARD, RA_ICON_TV, 0, 0);
   V2ADD(p, B, 1, 1, 0, 1, 1, "Music", HP_ROLE_DEFAULT, HP_SHAPE_CARD, RA_ICON_MUSIC, 0, 1);
@@ -56,7 +56,7 @@ static hp_page_t v2_home(void) {
 }
 
 /* An activity page: a header row, dense 3-column cards with 24 / 20 px icons, an icon-only strip, one of each role. */
-static hp_page_t v2_activity(void) {
+static __attribute__((unused)) hp_page_t v2_activity(void) {
   hp_page_t p = v2page(1, 3, 6, "Watch TV", HP_PAGE_KIND_NORMAL);
   p.act = 1;
   V2ADD(p, B, 0, 0, 0, 3, 1, "BBC One HD", HP_ROLE_SECONDARY, HP_SHAPE_ROW, RA_ICON_TV, 0, -1);
@@ -76,7 +76,7 @@ static hp_page_t v2_activity(void) {
 }
 
 /* HA entity tiles: on (warm), off, value, unavailable, and a small one. The states are applied by v2_tiles_states(). */
-static hp_page_t v2_tiles(void) {
+static __attribute__((unused)) hp_page_t v2_tiles(void) {
   hp_page_t p = v2page(2, 2, 3, "Living room", HP_PAGE_KIND_FAVORITES);
   V2ADD(p, T, 0, 0, 0, 1, 1, "Lamp", HP_ROLE_DEFAULT, HP_SHAPE_CARD, RA_ICON_BULB, 0, -1);
   V2ADD(p, T, 1, 1, 0, 1, 1, "Ceiling", HP_ROLE_DEFAULT, HP_SHAPE_CARD, RA_ICON_BULB, 0, -1);
@@ -86,7 +86,7 @@ static hp_page_t v2_tiles(void) {
   V2ADD(p, T, 5, 1, 2, 1, 1, "", HP_ROLE_DEFAULT, HP_SHAPE_CARD, 0, 0, -1);
   return p;
 }
-static void v2_tiles_states(app_t *a) {
+static __attribute__((unused)) void v2_tiles_states(app_t *a) {
   ra_ui_tile_state(&a->ui, 2, 0, HP_TILE_ON, "On", 2);
   ra_ui_tile_state(&a->ui, 2, 1, HP_TILE_OFF, "Off", 3);
   ra_ui_tile_state(&a->ui, 2, 2, HP_TILE_VALUE, "21.5 C", 6);
@@ -96,7 +96,7 @@ static void v2_tiles_states(app_t *a) {
 }
 
 /* Page 2 of a paged list (seq 2/3): five full-width rows. */
-static hp_page_t v2_paged(void) {
+static __attribute__((unused)) hp_page_t v2_paged(void) {
   hp_page_t p = v2page(3, 1, 5, "Scenes", HP_PAGE_KIND_NORMAL);
   p.seq_idx = 2;
   p.seq_cnt = 3;
@@ -107,7 +107,7 @@ static hp_page_t v2_paged(void) {
 }
 
 /* A BACK page: chevron in the bar, a device's buttons. */
-static hp_page_t v2_back(void) {
+static __attribute__((unused)) hp_page_t v2_back(void) {
   hp_page_t p = v2page(4, 2, 4, "Denon AVR", HP_PAGE_KIND_NORMAL);
   p.back = 1;
   V2ADD(p, B, 0, 0, 0, 2, 1, "Power", HP_ROLE_DANGER, HP_SHAPE_PILL, RA_ICON_POWER, 0, -1);
@@ -119,47 +119,47 @@ static hp_page_t v2_back(void) {
   return p;
 }
 
-static void sc2_home_active(void) {
+static __attribute__((unused)) void sc2_home_active(void) {
   hp_page_t p = v2_home();
   ra_ui_show_page(&app.ui, &p);
   ra_ui_set_battery(&app.ui, 72, 0);
   ra_ui_set_activity(&app.ui, 0, 1);
 }
-static void sc2_home_off(void) {
+static __attribute__((unused)) void sc2_home_off(void) {
   hp_page_t p = v2_home();
   ra_ui_show_page(&app.ui, &p);
   ra_ui_set_battery(&app.ui, 72, 0);
 }
-static void sc2_activity(void) {
+static __attribute__((unused)) void sc2_activity(void) {
   hp_page_t p = v2_activity();
   ra_ui_show_page(&app.ui, &p);
   ra_ui_set_battery(&app.ui, 72, 0);
 }
-static void sc2_tiles(void) {
+static __attribute__((unused)) void sc2_tiles(void) {
   hp_page_t p = v2_tiles();
   ra_ui_show_page(&app.ui, &p);
   ra_ui_set_battery(&app.ui, 72, 0);
   v2_tiles_states(&app);
 }
-static void sc2_tiles_stale(void) {
+static __attribute__((unused)) void sc2_tiles_stale(void) {
   sc2_tiles();
   ra_ui_set_link(&app.ui, 1);
 }
-static void sc2_paged(void) {
+static __attribute__((unused)) void sc2_paged(void) {
   hp_page_t p = v2_paged();
   ra_ui_show_page(&app.ui, &p);
   ra_ui_set_battery(&app.ui, 72, 0);
 }
-static void sc2_back(void) {
+static __attribute__((unused)) void sc2_back(void) {
   hp_page_t p = v2_back();
   ra_ui_show_page(&app.ui, &p);
   ra_ui_set_battery(&app.ui, 72, 0);
 }
-static void sc2_receiving(void) {
+static __attribute__((unused)) void sc2_receiving(void) {
   ra_ui_set_battery(&app.ui, 72, 0);
   ra_ui_show_receiving_n(&app.ui, 12, 40);
 }
-static void sc2_pressed(void) {
+static __attribute__((unused)) void sc2_pressed(void) {
   sc2_home_active();
   ra_ui_press_at(&app.ui, 180, 60); /* "Music" */
 }

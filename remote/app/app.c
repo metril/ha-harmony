@@ -187,7 +187,6 @@ static void heard(app_t *a, uint64_t now) {
  * nothing at all. */
 static void push_v2(app_t *a, const uint8_t *raw, size_t len) {
   if (hp_store_same(&a->store, raw, len)) return;
-  bool was_complete = a->v2 && hp_store_complete(&a->store);
   int r = hp_store_put(&a->store, raw, len);
   if (r < 0) {
     ra_logf(&a->sys, "page_push rejected (%d)", r);
@@ -198,23 +197,20 @@ static void push_v2(app_t *a, const uint8_t *raw, size_t len) {
     a->have_saved = false;
     a->cur = -1;
   }
-  if (r == HP_STORE_CLEARED) {
-    a->cur = -1;
-    was_complete = false;
-  }
+  if (r == HP_STORE_CLEARED) a->cur = -1;
   bool complete = hp_store_complete(&a->store);
   if (!complete) {
     if (a->ui.page.version != 2 || a->ui.page.page_id != a->cur || a->cur < 0) show_cur(a); /* progress */
     return;
   }
-  if (!was_complete || a->cur < 0) { /* the set just completed: pick what to show */
+  if (a->cur < 0) { /* the set just completed: pick what to show */
     a->cur = hp_store_start(&a->store);
     if (a->last_power) {
       int pg = hp_store_find_act(&a->store, (uint8_t)(a->last_activity + 1));
       if (pg >= 0) a->cur = pg;
     }
     show_cur(a);
-  } else if (raw[1] == a->cur) { /* the visible page (or the one being waited for) was replaced / arrived */
+  } else if (raw[1] == a->cur || !on_stored_page(a)) { /* the visible page was replaced, or the awaited page arrived */
     show_cur(a);
   }
 }
