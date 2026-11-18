@@ -266,17 +266,17 @@ def decode_page(data: bytes) -> Page:
             raise ValueError("truncated title")
         title = _text(data[off : off + tlen], "title")
         off += tlen
-        extra = dict(
-            version=2,
-            gen=data[5],
-            total=data[6],
-            kind=PAGE_KINDS[pflags & 3],
-            back=bool(pflags & _BACK),
-            seq_idx=seq >> 4,
-            seq_cnt=seq & 15,
-            act=act,
-            title=title,
-        )
+        extra = {
+            "version": 2,
+            "gen": data[5],
+            "total": data[6],
+            "kind": PAGE_KINDS[pflags & 3],
+            "back": bool(pflags & _BACK),
+            "seq_idx": seq >> 4,
+            "seq_cnt": seq & 15,
+            "act": act,
+            "title": title,
+        }
     widgets = []
     for _ in range(count):
         if len(data) - off < WIDGET_BYTES:
