@@ -15,9 +15,9 @@ int hp_store_put(hp_store_t *s, const uint8_t *raw, size_t len) {
     hp_page_t p; /* scratch decode: the validation is the decoder's */
     int rc = hp_page_decode(raw, len, &p);
     if (rc < 0 || p.version != 2) return -HP_E_INVAL;
-    if (p.page_id >= HP_STORE_MAX) return -HP_E_TOOBIG;
+    if (p.page_id >= HP_STORE_MAX || p.total > HP_STORE_MAX) return -HP_E_TOOBIG;
     int ret = HP_STORE_OK;
-    if (s->have_gen && s->gen != p.gen) {
+    if (s->have_gen && (s->gen != p.gen || s->total != p.total)) { /* gen is one byte: a changed total is a new set too */
         bool had = s->count > 0;
         hp_store_init(s);
         if (had) ret = HP_STORE_CLEARED;
@@ -58,14 +58,14 @@ int hp_store_get(const hp_store_t *s, uint8_t id, hp_page_t *out) {
 }
 
 int hp_store_find_kind(const hp_store_t *s, uint8_t kind) {
-    for (unsigned i = 0; i < HP_STORE_MAX; i++)
+    for (unsigned i = 0; i < hp_store_need(s); i++)
         if (s->meta[i].len && s->meta[i].kind == kind) return (int)i;
     return -1;
 }
 
 int hp_store_find_act(const hp_store_t *s, uint8_t act) {
     if (!act) return -1;
-    for (unsigned i = 0; i < HP_STORE_MAX; i++)
+    for (unsigned i = 0; i < hp_store_need(s); i++)
         if (s->meta[i].len && s->meta[i].act == act) return (int)i;
     return -1;
 }
@@ -73,7 +73,7 @@ int hp_store_find_act(const hp_store_t *s, uint8_t act) {
 int hp_store_start(const hp_store_t *s) {
     int h = hp_store_find_kind(s, HP_PAGE_KIND_HOME);
     if (h >= 0) return h;
-    return hp_store_has(s, 0) ? 0 : -1;
+    return hp_store_need(s) && hp_store_has(s, 0) ? 0 : -1;
 }
 
 int hp_store_tile(hp_store_t *s, uint8_t page, uint8_t tile, uint8_t state, const char *text, size_t len) {

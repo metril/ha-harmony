@@ -39,7 +39,7 @@ typedef struct {
 
 void hp_store_init(hp_store_t *);
 /* Validates `raw` with the page decoder and stores it. HP_STORE_OK / HP_STORE_CLEARED; -HP_E_INVAL (bad page, or not
- * version 2); -HP_E_TOOBIG (page id >= HP_STORE_MAX: it cannot be held). Storing a page drops its tile overlay. */
+ * version 2); -HP_E_TOOBIG (page id or total > HP_STORE_MAX: it cannot be held). A changed gen OR total clears the store first (gen is one byte). Storing a page drops its tile overlay. */
 int hp_store_put(hp_store_t *, const uint8_t *raw, size_t len);
 bool hp_store_has(const hp_store_t *, uint8_t id);
 /* The stored bytes of page `id` are exactly raw[0..len) (and the gen matches): a re-push that changes nothing. */
