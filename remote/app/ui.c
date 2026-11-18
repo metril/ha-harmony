@@ -141,7 +141,7 @@ static int bar_build(ra_ui_t *ui, lv_obj_t *scr, const char *title, const bar_ct
     ui->back = b;
   }
   if (bc && bc->seq_cnt) {
-    char sq[12];
+    char sq[24];
     snprintf(sq, sizeof sq, "%u/%u", bc->seq_idx, bc->seq_cnt);
     lv_obj_t *q = make_label(bar, sq, &ra_st_txt_cap, NULL, 40);
     if (!q) return -1;
