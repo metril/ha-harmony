@@ -138,10 +138,15 @@ static void heartbeat_touch(const char *path) {
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return;
     char buf[32];
     int n = snprintf(buf, sizeof buf, "%lld\n", (long long)ts.tv_sec);
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    /* tmp + rename: the watcher never sees an empty or half-written file */
+    char tmp[512];
+    if (snprintf(tmp, sizeof tmp, "%s.tmp", path) >= (int)sizeof tmp) return;
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) return;
-    if (write(fd, buf, (size_t)n) < 0) { /* best effort */ }
+    ssize_t w = write(fd, buf, (size_t)n);
     close(fd);
+    if (w == n) rename(tmp, path);
+    else unlink(tmp);
 }
 
 int main(int argc, char **argv) {

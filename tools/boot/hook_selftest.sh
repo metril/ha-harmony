@@ -251,6 +251,46 @@ unset SELFTEST_CLOCK
 sleep "$GAP"
 sleep "$GAP"
 
+# 13. an empty heartbeat read is no information (never 0): a healthy daemon is not killed
+mkroot 'token=abc\nrespawn_max=1\n'
+printf '#!/bin/sh\necho x >> "%s/runs"\ni=0\nwhile [ $i -lt 4 ]; do sleep "%s"; i=$((i+1)); done\n' "$T" "$GAP" >"$R/data/ha-harmony/hub"
+chmod 755 "$R/data/ha-harmony/hub"
+rm -f "$T/runs" "$T/reboot.log"
+printf '1000.00 1.00\n' >"$T/clock"
+SELFTEST_CLOCK="$T/clock"
+export SELFTEST_CLOCK
+run_hook
+wait_log "healthy"
+sleep "${HAH_SELFTEST_NAP:-1}"
+sleep "${HAH_SELFTEST_NAP:-1}"
+printf '1090\n' >"$R/var/volatile/ha-harmony.hb"
+printf '1100.00 1.00\n' >"$T/clock"
+sleep "${HAH_SELFTEST_NAP:-1}"
+: >"$R/var/volatile/ha-harmony.hb" # empty, as seen mid-rewrite
+sleep "${HAH_SELFTEST_NAP:-1}"
+sleep "${HAH_SELFTEST_NAP:-1}"
+if [ "$(runs)" = 1 ] && ! grep -q "heartbeat stale" "$(CLOG)" 2>/dev/null; then
+	pass "empty heartbeat read does not trigger a kill"
+else
+	fail "empty heartbeat read (runs=$(runs))"
+fi
+unset SELFTEST_CLOCK
+wait_log "budget exhausted" # let this watcher finish before the next case reuses the root
+
+# 14. respawn that records no pid: stop supervising, no further launches, no reboot
+mkroot 'token=abc\nrespawn_max=3\n'
+mortal
+run_hook
+wait_log "healthy"
+rm -rf "$R/cache/ha-harmony.pid" 2>/dev/null
+mkdir "$R/cache/ha-harmony.pid" # the pid file can no longer be written
+if wait_log "no pid recorded" && [ ! -e "$T/reboot.log" ]; then
+	sleep "$GAP"
+	if [ "$(runs)" -le 2 ]; then pass "no pid after respawn: supervision stops"; else fail "no-pid respawn kept launching (runs=$(runs))"; fi
+else
+	fail "no pid after respawn: not detected"
+fi
+
 sleep "${HAH_SELFTEST_FINAL:-3}" # let the 1 s watchers finish before the caller deletes the directory
 echo "selftest done: $fails failure(s)"
 [ "$fails" = 0 ]

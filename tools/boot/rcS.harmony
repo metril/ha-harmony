@@ -352,6 +352,7 @@ else
 						while :; do
 							hah_stamp
 							hah_rs="$hah_now"
+							hah_hl=0
 							hah_why=died
 							while kill -0 "$hah_pid" 2>/dev/null; do
 								sleep "$hah_nap"
@@ -381,7 +382,8 @@ else
 								# file; a stale (or never written) one means it is alive but stuck.
 								hah_h=''
 								read -r hah_h 2>/dev/null <"$hah_hb"
-								case "$hah_h" in '' | *[!0-9]* | 0[0-9]*) hah_h=0 ;; esac
+								# An empty or unparsable read is no information: keep the last good value.
+								case "$hah_h" in '' | *[!0-9]* | 0[0-9]*) hah_h="$hah_hl" ;; *) hah_hl="$hah_h" ;; esac
 								hah_ref="$hah_rs"
 								[ "$hah_h" -gt "$hah_ref" ] && hah_ref="$hah_h"
 								if [ $((hah_now - hah_ref)) -gt "$hah_stale" ]; then
@@ -409,6 +411,10 @@ else
 							hah_blog "daemon $hah_why after health mark - respawn $hah_used of $hah_rmax in ${hah_bo}s (no reboot)"
 							sleep "$hah_bo"
 							hah_launch "$@"
+							if [ -z "$hah_pid" ]; then
+								hah_blog "respawn: no pid recorded (pid file unwritable?) - not supervising any further (no respawn, no reboot)"
+								break
+							fi
 						done
 					else
 						hah_blog "died within ${hah_healthy}s - strike $hah_n stands"
