@@ -15,6 +15,7 @@ import '../views/hh-devices';
 import '../views/hh-history';
 import '../views/hh-overview';
 import '../views/hh-placeholder';
+import '../views/hh-studio';
 
 interface RailItem {
   id: string;
@@ -25,8 +26,6 @@ interface RailItem {
 
 const NOT_BUILT: Record<string, [string, string]> = {
   activities: ['Activities', 'Activities will be edited visually: pick devices and inputs, then arrange start and stop steps.'],
-  keys: ['Hard keys', 'Hard keys will be assigned on a drawing of the remote itself.'],
-  pages: ['Remote pages', 'Remote pages will be laid out on a preview of the remote screen.'],
   ir: ['IR library', 'The IR archive browser and add-device wizard need API endpoints that do not exist yet.'],
 };
 
@@ -53,10 +52,12 @@ export class HhApp extends StoreElement {
       nav .err { margin-left: auto; min-width: 18px; height: 18px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; padding: 0 5px; }
       nav hr { border: 0; border-top: 1px solid var(--line); margin: 8px 4px; width: calc(100% - 8px); }
       .col { min-width: 0; display: flex; flex-direction: column; }
+      main.wide { padding: 12px 12px 16px; }
       main { padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 16px; min-width: 0; outline: none; }
       .toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 30; max-width: min(380px, calc(100vw - 32px)); }
       .toast { display: flex; gap: 8px; align-items: flex-start; background: var(--tx); color: var(--bg); padding: 10px 12px; border-radius: var(--r2); box-shadow: var(--sh); }
       .toast.error { background: var(--bad); color: #fff; }
+      .toast .undo { font-weight: 700; text-decoration: underline; margin-left: 8px; }
       .toast button { background: none; border: 0; color: inherit; cursor: pointer; padding: 0; margin-left: auto; }
       @media (max-width: 720px) {
         .menu { display: inline-flex; }
@@ -113,11 +114,10 @@ export class HhApp extends StoreElement {
     const c = counts(this.store.config);
     const hist = this.store.history.length + (this.store.applied ? 1 : 0);
     return [
+      { id: 'remote', label: 'Remote', icon: 'keys' },
       { id: 'overview', label: 'Overview', icon: 'overview' },
       { id: 'devices', label: 'Devices', icon: 'devices', count: c.devices },
       { id: 'activities', label: 'Activities', icon: 'activities', count: c.activities },
-      { id: 'keys', label: 'Hard keys', icon: 'keys', count: c.keys },
-      { id: 'pages', label: 'Remote pages', icon: 'pages', count: c.pages },
       { id: '-', label: '', icon: '' },
       { id: 'ir', label: 'IR library', icon: 'ir' },
       { id: 'history', label: 'History', icon: 'history', count: hist },
@@ -127,6 +127,8 @@ export class HhApp extends StoreElement {
   private view() {
     const { section, parts } = this.router.route;
     switch (section) {
+      case 'remote':
+        return html`<hh-studio></hh-studio>`;
       case 'overview':
         return html`<hh-overview></hh-overview>`;
       case 'devices':
@@ -169,7 +171,7 @@ export class HhApp extends StoreElement {
         </nav>
         <div class="col">
           <hh-draft-bar></hh-draft-bar>
-          <main id="main" tabindex="-1">
+          <main id="main" tabindex="-1" class=${classMap({ wide: sec === 'remote' })}>
             ${s.saveState === 'conflict'
               ? html`<div class="banner ir" role="alert">
                   <span>Changed in another tab or session.</span><span class="sp"></span>
@@ -195,7 +197,7 @@ export class HhApp extends StoreElement {
         <button slot="footer" class="btn ${this.confirm?.danger ? 'danger' : 'pri'}" @click=${() => this.answer(true)}>${this.confirm?.ok}</button>
       </hh-dialog>
       <div class="toasts" role="status" aria-live="polite">
-        ${s.toasts.map((t) => html`<div class="toast ${t.kind}"><span>${t.text}</span><button aria-label="Dismiss" @click=${() => s.dismissToast(t.id)}>${icon('x')}</button></div>`)}
+        ${s.toasts.map((t) => html`<div class="toast ${t.kind}"><span>${t.text}</span>${t.undo ? html`<button class="undo" @click=${() => { s.undo(); s.dismissToast(t.id); }}>Undo</button>` : nothing}<button aria-label="Dismiss" @click=${() => s.dismissToast(t.id)}>${icon('x')}</button></div>`)}
       </div>
     `;
   }

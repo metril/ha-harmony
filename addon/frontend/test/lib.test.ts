@@ -95,8 +95,9 @@ describe('error path to field mapping', () => {
 describe('router', () => {
   it('parses and builds hash routes', () => {
     expect(parseHash('#/devices/tv/commands')).toEqual({ section: 'devices', parts: ['tv', 'commands'] });
-    expect(parseHash('')).toEqual({ section: 'overview', parts: [] });
-    expect(parseHash('#/nonsense').section).toBe('overview');
+    expect(parseHash('')).toEqual({ section: 'remote', parts: [] });
+    expect(parseHash('#/overview').section).toBe('overview');
+    expect(parseHash('#/nonsense').section).toBe('remote');
     expect(hashFor('devices', 'a b')).toBe('#/devices/a%20b');
   });
   it('reads the hub from the query and rejects junk', () => {

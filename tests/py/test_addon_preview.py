@@ -467,3 +467,25 @@ async def test_page_cap_is_in_usage_and_over_it_is_an_error(c):
     _, body = await preview(c, cfg)
     assert not body["ok"] and any("at most 32" in e["msg"] for e in body["errors"])
     assert body["usage"] is None or body["usage"]["pages"] == 33
+
+
+async def test_preview_survives_a_button_that_starts_an_unknown_activity(c):
+    """The studio previews on every edit, so a dangling activity reference must be a validation
+    error, not a 500."""
+    cfg = {
+        "devices": [{"id": "tv", "name": "TV", "commands": {"menu": {"proto": "nec", "addr": 1, "cmd": 1}}}],
+        "activities": [{"id": "watch", "name": "Watch", "devices": [{"device": "tv"}]}],
+        "keys": {"menu": {"device": "nope", "command": "x"}},
+        "pages": [
+            {
+                "id": "home",
+                "cols": 2,
+                "rows": 2,
+                "widgets": [
+                    {"type": "button", "id": "b", "x": 0, "y": 0, "label": "Gone", "action": {"activity": "gone"}}
+                ],
+            }
+        ],
+    }
+    st, body = await preview(c, cfg)
+    assert st == 200 and body["ok"] is False and body["errors"]

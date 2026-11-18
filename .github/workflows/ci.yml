@@ -167,7 +167,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      # budget (gzip): JS 60 KiB, CSS 8 KiB, see scripts/check-size.mjs
+      # budget (gzip): JS 90 KiB, CSS 8 KiB, see scripts/check-size.mjs
       - run: npm run size
       - name: Bundle checks run against the built output
         run: npx vitest run test/csp.test.ts

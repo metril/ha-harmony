@@ -25,7 +25,7 @@ the table below.
 | --- | --- | --- | --- |
 | GET | `/` | ingress | The editor UI (`index.html`; placeholder page when the frontend is not built) |
 | GET | `/assets` | ingress | Hashed UI assets under /assets/… (immutable cache; only present when the frontend is built) |
-| GET | `/api/v1/health` | ingress | Versions |
+| GET | `/api/v1/health` | ingress | Versions and capabilities |
 | GET | `/api/v1/config` | ingress | Draft, applied metadata, history, draft `rev` |
 | GET | `/api/v1/config/history` | ingress | Source config of one applied or history version |
 | PUT | `/api/v1/config/draft` | ingress | Store the draft (honours `If-Match`) |
@@ -51,6 +51,14 @@ the table below.
 | POST | `/api/v1/bundle/ack` | bearer | The integration reports what it did |
 
 Query/body details follow. `hub` is a query parameter wherever a hub applies.
+
+### Health
+
+`GET health` -> `{ok, addon_version, core_version, bundle_schema, capabilities: {ha_actions: bool,
+page_format: int}}`. `capabilities` says what this build can store: `ha_actions` is true when the
+config schema accepts a Home Assistant service action (`ha: {service, target: {entity_id}, ...}`),
+probed from the schema itself; `page_format` is the page format the compiler and editor speak. The
+editor disables the Home Assistant action picker (with a reason) when `ha_actions` is false.
 
 ### Config
 

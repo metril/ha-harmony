@@ -10,6 +10,8 @@ export interface Toast {
   id: number;
   kind: 'info' | 'error';
   text: string;
+  /** offer an Undo button (studio edits) */
+  undo?: boolean;
 }
 type Applied = NonNullable<Meta['applied']> & { config?: Config };
 
@@ -35,6 +37,11 @@ export class Store extends EventTarget {
   pages: Preview['pages'] = [];
   missingPages: Preview['missing_pages'] = [];
   toasts: Toast[] = [];
+  /** client-side edit history: configs before each edit (Ctrl+Z), and the ones undone (Ctrl+Shift+Z) */
+  private past: Config[] = [];
+  private future: Config[] = [];
+  private lastEditKey: { key: string; at: number } | null = null;
+  private previewTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: DraftQueue;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private seq = 0;
@@ -53,8 +60,8 @@ export class Store extends EventTarget {
     this.dispatchEvent(new Event('change'));
   }
 
-  toast(text: string, kind: Toast['kind'] = 'info') {
-    const t = { id: ++this.toastId, kind, text };
+  toast(text: string, kind: Toast['kind'] = 'info', undo = false) {
+    const t: Toast = { id: ++this.toastId, kind, text, ...(undo ? { undo } : {}) };
     this.toasts = [...this.toasts, t];
     this.emit();
     if (kind === 'info') setTimeout(() => this.dismissToast(t.id), 8000);
@@ -88,6 +95,8 @@ export class Store extends EventTarget {
       this.hasDraft = r.draft !== null;
       this.config = clone(r.draft?.config ?? r.applied?.config ?? {});
       this.confirmed = clone(this.config);
+      this.past = [];
+      this.future = [];
       this.confirmedHasDraft = this.hasDraft;
       this.queue.rev = r.rev;
       this.savedAt = r.draft?.updated ?? null;
@@ -109,20 +118,56 @@ export class Store extends EventTarget {
   }
 
   /** Optimistic edit: mutate a copy, show it now, save after the debounce. */
-  edit(mutate: (c: Config) => void): void {
+  edit(mutate: (c: Config) => void, coalesce?: string): void {
     const next = clone(this.config);
     mutate(next);
-    this.replace(next);
+    this.replace(next, coalesce);
   }
 
-  /** Swap in a whole config as an optimistic edit. */
-  replace(next: Config): void {
+  get canUndo(): boolean {
+    return this.past.length > 0;
+  }
+  get canRedo(): boolean {
+    return this.future.length > 0;
+  }
+  undo(): boolean {
+    const prev = this.past.pop();
+    if (!prev) return false;
+    this.future.push(this.config);
+    this.lastEditKey = null;
+    this.apply_(prev);
+    return true;
+  }
+  redo(): boolean {
+    const next = this.future.pop();
+    if (!next) return false;
+    this.past.push(this.config);
+    this.lastEditKey = null;
+    this.apply_(next);
+    return true;
+  }
+
+  /** Swap in a whole config as an optimistic edit. Edits sharing a `coalesce` key within 1.2 s are one undo step. */
+  replace(next: Config, coalesce?: string): void {
+    const now = Date.now();
+    if (!(coalesce && this.lastEditKey?.key === coalesce && now - this.lastEditKey.at < 1200)) {
+      this.past.push(this.config);
+      if (this.past.length > 80) this.past.shift();
+    }
+    this.lastEditKey = coalesce ? { key: coalesce, at: now } : null;
+    this.future = [];
+    this.apply_(next);
+  }
+
+  private apply_(next: Config): void {
     this.config = next;
     this.hasDraft = true;
     if (this.saveState !== 'conflict') this.saveState = 'dirty';
     this.emit();
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.save(), this.debounceMs);
+    if (this.previewTimer) clearTimeout(this.previewTimer);
+    this.previewTimer = setTimeout(() => void this.check(true), 150);
   }
 
   /** Save now (used by Apply and tests). */
@@ -165,11 +210,12 @@ export class Store extends EventTarget {
   }
 
   /** Preview the saved draft (or the applied config): errors, per-page results and usage meters. */
-  async check(): Promise<void> {
+  async check(live = false): Promise<void> {
     const seq = ++this.seq;
     try {
-      // no saved draft: the add-on has nothing to default to (409 no_draft), so send the applied config
-      const p = await this.api.preview(this.hub, this.hasDraft ? undefined : clone(this.config));
+      // no saved draft: the add-on has nothing to default to (409 no_draft), so send the applied config;
+      // a live check (right after an edit) sends the in-memory config so the canvas does not wait for the save
+      const p = await this.api.preview(this.hub, live || !this.hasDraft ? clone(this.config) : undefined);
       if (seq !== this.seq) return;
       this.errors = p.errors;
       this.usage = p.usage;

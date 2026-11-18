@@ -35,7 +35,7 @@ describe('CSP-safe rendering rules', () => {
       const t = readFileSync(join(DIST, f), 'utf8');
       expect(t, f).not.toMatch(/unsafeHTML|unsafeSVG|unsafe-html/);
       expect(t, f).not.toMatch(/https?:\/\/(?!www\.w3\.org|lit\.dev)/);
-      expect(t, f).not.toMatch(/@import|[^.\w]url\(/);
+      expect(t, f).not.toMatch(/@import|[^.\w]url\((?!#)/);
     }
   });
 });

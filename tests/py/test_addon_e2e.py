@@ -33,6 +33,8 @@ devices:
     commands: {menu: {proto: nec, addr: 4, cmd: 20}}
 """
 SHOTS = os.environ.get("HH_SHOTS")
+# what the Supervisor ingress proxy sends with every request
+INGRESS_HEADERS = {"X-Remote-User-Id": "test-user", "X-Ingress-Path": PREFIX}
 
 
 @pytest.fixture
@@ -67,8 +69,11 @@ async def open_editor(browser, origin, problems=None, **kw):
         page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: problems.append(str(e)))
 
-    async def to_real_server(route):  # the ingress proxy: strip the prefix
-        await route.continue_(url=route.request.url.replace(PREFIX, "", 1))
+    async def to_real_server(route):  # the ingress proxy: strip the prefix, add what Supervisor adds
+        await route.continue_(
+            url=route.request.url.replace(PREFIX, "", 1),
+            headers={**route.request.headers, **INGRESS_HEADERS},
+        )
 
     await page.route(f"{origin}{PREFIX}/**", to_real_server)
     await page.goto(f"{origin}{PREFIX}/")
@@ -76,6 +81,8 @@ async def open_editor(browser, origin, problems=None, **kw):
 
 
 async def api(origin, method, path, **kw):
+    if "/bundle" not in path:  # bearer routes are not ingress routes
+        kw["headers"] = {**INGRESS_HEADERS, **kw.get("headers", {})}
     async with aiohttp.ClientSession() as s, s.request(method, origin + path, **kw) as r:
         return r.status, await r.json()
 
@@ -197,3 +204,138 @@ async def test_screenshots(browser, site):
     await page.goto(f"{site}{PREFIX}/#/devices/tv")
     await page.get_by_text("Send IR").first.wait_for()
     await shots(page, "devices")
+
+
+STUDIO_YAML = """
+devices:
+  - id: tv
+    name: Living room TV
+    power: {on: {proto: nec, addr: 4, cmd: 2}, off: {proto: nec, addr: 4, cmd: 3}}
+    inputs: {hdmi1: {proto: nec, addr: 4, cmd: 9}, hdmi2: {proto: nec, addr: 4, cmd: 10}}
+    commands:
+      menu: {proto: nec, addr: 4, cmd: 20}
+      ok: {proto: nec, addr: 4, cmd: 34}
+  - id: avr
+    name: AV receiver
+    power: {toggle: {proto: rc5, addr: 16, cmd: 12}}
+    inputs: {stream: {proto: rc5, addr: 16, cmd: 57}}
+    commands:
+      vol_up: {proto: rc5, addr: 16, cmd: 16}
+      vol_down: {proto: rc5, addr: 16, cmd: 17}
+      mute: {proto: rc5, addr: 16, cmd: 13}
+  - id: box
+    name: Streaming box
+    commands:
+      play: {proto: sirc12, addr: 1, cmd: 26}
+      pause: {proto: sirc12, addr: 1, cmd: 27}
+activities:
+  - id: watch_tv
+    name: Watch TV
+    devices: [{device: tv, input: hdmi1}, {device: avr}]
+  - id: stream
+    name: Stream
+    devices: [{device: tv, input: hdmi2}, {device: avr, input: stream}, {device: box}]
+keys:
+  volume_up: {device: avr, command: vol_up}
+  menu: {device: tv, command: menu}
+pages:
+  - id: home
+    kind: home
+    title: Activities
+    cols: 4
+    rows: 6
+    widgets:
+      - {type: button, id: a_tv, x: 0, y: 0, w: 4, h: 1, label: Watch TV, action: {activity: watch_tv}}
+      - {type: button, id: a_st, x: 0, y: 1, w: 4, h: 1, label: Stream, action: {activity: stream}}
+  - id: stream_ctl
+    title: Stream
+    activity: stream
+    back: true
+    cols: 4
+    rows: 6
+    widgets:
+      - {type: button, id: play, x: 0, y: 0, w: 2, h: 1, label: Play, action: {device: box, command: play}}
+"""
+
+
+async def test_studio_import_assign_drag_inspect_apply(browser, site):
+    problems: list[str] = []
+    page = await open_editor(browser, site, problems)
+    await page.get_by_text("Set up your first hub config").wait_for()
+    await page.get_by_role("button", name="Import YAML", exact=True).click()
+    await page.locator("textarea").fill(STUDIO_YAML)
+    await page.get_by_role("button", name="Import as draft").click()
+
+    # the studio is the default route: the remote with its home page on the screen
+    screen = page.locator("hh-remote svg.scr")
+    await screen.wait_for()
+    await page.locator("hh-remote svg.scr text", has_text="Watch TV").first.wait_for()
+    assert await page.locator("hh-remote [data-key]").count() == 35
+    await page.get_by_role("tab", name="Default", exact=True).wait_for()
+
+    # click-click: pick a command, then a hard key of the Stream layer
+    await page.get_by_role("tab", name="Stream", exact=True).click()
+    await page.locator("hh-palette .chip2", has_text="vol_down").first.click()
+    await page.locator(".banner2", has_text="Click a key").wait_for()
+    await page.locator("hh-remote [data-key=volume_down]").click()
+    key = page.locator("hh-remote [data-key=volume_down]")
+    await page.wait_for_function(
+        "() => document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').shadowRoot"
+        ".querySelector('hh-remote').shadowRoot.querySelector('[data-key=volume_down]')"
+        ".getAttribute('aria-label').includes('override')"
+    )
+    assert "avr: vol_down" in (await key.get_attribute("aria-label"))
+
+    # X-ray labels every key with its action
+    await page.get_by_role("button", name="X-ray").click()
+    await page.locator("hh-remote text.xl", has_text="avr: vol_down").wait_for()
+    await page.get_by_role("button", name="X-ray").click()
+
+    # drag a command from the palette onto the screen: a button appears, the byte meter moves
+    meter = page.locator("hh-page-strip .pg[aria-current=true]")
+    before = await meter.get_attribute("aria-label")
+    widgets = page.locator("hh-remote [data-widget]")
+    n = await widgets.count()
+    chip = page.locator("hh-palette .chip2", has_text="mute").first
+    cb = await chip.bounding_box()
+    sb = await screen.bounding_box()
+    await page.mouse.move(cb["x"] + 10, cb["y"] + 10)
+    await page.mouse.down()
+    await page.mouse.move(cb["x"] + 60, cb["y"] + 40, steps=5)
+    await page.mouse.move(sb["x"] + sb["width"] / 2, sb["y"] + sb["height"] * 0.75, steps=10)
+    if SHOTS:
+        await shots(page, "studio-mid-drag")
+    await page.mouse.up()
+    await page.wait_for_function(
+        "n => document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').shadowRoot"
+        ".querySelector('hh-remote').shadowRoot.querySelectorAll('[data-widget]').length > n",
+        arg=n,
+    )
+    await page.wait_for_function(
+        "b => document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').shadowRoot"
+        ".querySelector('hh-page-strip').shadowRoot.querySelector('.pg[aria-current=true]').getAttribute('aria-label') !== b",
+        arg=before,
+    )
+
+    # the new widget is selected: change its role and icon in the inspector, the preview re-renders
+    insp = page.locator("hh-inspector")
+    await insp.get_by_role("button", name="primary").click()
+    await insp.get_by_role("button", name="vol_down", exact=True).click()
+    await page.locator("hh-remote svg.scr g[transform]").first.wait_for()
+    if SHOTS:
+        await shots(page, "studio-inspector")
+    await page.wait_for_timeout(900)  # autosave
+    _, got = await api(site, "GET", "/api/v1/config")
+    wid = got["draft"]["config"]["pages"][1]["widgets"][-1]
+    assert wid["role"] == "primary" and wid["icon"] == "vol_down"
+    assert wid["action"] == {"device": "avr", "command": "mute"}
+    assert got["draft"]["config"]["activities"][1]["keys"]["volume_down"] == {"device": "avr", "command": "vol_down"}
+
+    # undo is one step per action
+    await page.locator("hh-studio button[aria-label=Undo]").click()
+    await page.wait_for_timeout(200)
+
+    await page.get_by_role("button", name="Review & apply").click()
+    await page.get_by_role("button", name="Apply to hub").click()
+    await page.get_by_text("Saved as rev").wait_for()
+    assert [p for p in problems if "Failed to load resource" not in p] == []

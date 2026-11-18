@@ -1,0 +1,459 @@
+{
+ "ok": true,
+ "default": [
+  {
+   "key": "up",
+   "code": 1,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "down",
+   "code": 2,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "left",
+   "code": 3,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "right",
+   "code": 4,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "select",
+   "code": 5,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "menu",
+   "code": 6,
+   "source": "default",
+   "action": {
+    "kind": "device",
+    "device": "tv",
+    "command": "menu",
+    "label": "tv: menu"
+   }
+  },
+  {
+   "key": "exit",
+   "code": 7,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "volume_up",
+   "code": 8,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "volume_down",
+   "code": 9,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "volume_mute",
+   "code": 10,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "channel_up",
+   "code": 11,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "channel_down",
+   "code": 12,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "prev_channel",
+   "code": 13,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "play",
+   "code": 14,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "pause",
+   "code": 15,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "stop",
+   "code": 16,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "record",
+   "code": 17,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "rewind",
+   "code": 18,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "fast_forward",
+   "code": 19,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "dvr",
+   "code": 20,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "guide",
+   "code": 21,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "info",
+   "code": 22,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "red",
+   "code": 23,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "green",
+   "code": 24,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "yellow",
+   "code": 25,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "blue",
+   "code": 26,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "home_control_1",
+   "code": 27,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "home_control_2",
+   "code": 28,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "home_control_3",
+   "code": 29,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "home_control_4",
+   "code": 30,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "home_control_plus",
+   "code": 31,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "home_control_minus",
+   "code": 32,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "power_off_activity",
+   "code": 33,
+   "source": "none",
+   "action": null
+  },
+  {
+   "key": "home",
+   "code": 34,
+   "source": "default",
+   "action": {
+    "kind": "activity",
+    "activity": "stream",
+    "label": "Start stream"
+   }
+  },
+  {
+   "key": "favorites",
+   "code": 35,
+   "source": "none",
+   "action": null
+  }
+ ],
+ "activities": [
+  {
+   "id": "stream",
+   "name": "Stream",
+   "keys": [
+    {
+     "key": "up",
+     "code": 1,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "down",
+     "code": 2,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "left",
+     "code": 3,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "right",
+     "code": 4,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "select",
+     "code": 5,
+     "source": "activity",
+     "action": {
+      "kind": "device",
+      "device": "box",
+      "command": "ok",
+      "label": "box: ok"
+     }
+    },
+    {
+     "key": "menu",
+     "code": 6,
+     "source": "default",
+     "action": {
+      "kind": "device",
+      "device": "tv",
+      "command": "menu",
+      "label": "tv: menu"
+     }
+    },
+    {
+     "key": "exit",
+     "code": 7,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "volume_up",
+     "code": 8,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "volume_down",
+     "code": 9,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "volume_mute",
+     "code": 10,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "channel_up",
+     "code": 11,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "channel_down",
+     "code": 12,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "prev_channel",
+     "code": 13,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "play",
+     "code": 14,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "pause",
+     "code": 15,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "stop",
+     "code": 16,
+     "source": "activity",
+     "action": {
+      "kind": "none",
+      "label": "Does nothing"
+     }
+    },
+    {
+     "key": "record",
+     "code": 17,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "rewind",
+     "code": 18,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "fast_forward",
+     "code": 19,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "dvr",
+     "code": 20,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "guide",
+     "code": 21,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "info",
+     "code": 22,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "red",
+     "code": 23,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "green",
+     "code": 24,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "yellow",
+     "code": 25,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "blue",
+     "code": 26,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "home_control_1",
+     "code": 27,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "home_control_2",
+     "code": 28,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "home_control_3",
+     "code": 29,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "home_control_4",
+     "code": 30,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "home_control_plus",
+     "code": 31,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "home_control_minus",
+     "code": 32,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "power_off_activity",
+     "code": 33,
+     "source": "none",
+     "action": null
+    },
+    {
+     "key": "home",
+     "code": 34,
+     "source": "default",
+     "action": {
+      "kind": "activity",
+      "activity": "stream",
+      "label": "Start stream"
+     }
+    },
+    {
+     "key": "favorites",
+     "code": 35,
+     "source": "none",
+     "action": null
+    }
+   ]
+  }
+ ]
+}
