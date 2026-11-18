@@ -38,7 +38,7 @@ export class HhApp extends StoreElement {
       :host { display: block; min-height: 100vh; }
       .skip { position: absolute; left: 8px; top: -48px; z-index: 20; background: var(--acc); color: var(--onacc); padding: 8px 12px; border-radius: var(--r1); }
       .skip:focus { top: 8px; }
-      header { height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--sf); border-bottom: 1px solid var(--line); position: relative; z-index: 6; }
+      header { height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--sf); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 7; }
       .brand { font-weight: 650; display: flex; gap: 8px; align-items: center; }
       .brand .ic { color: var(--acc); }
       .menu { display: none; }

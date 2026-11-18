@@ -2,8 +2,7 @@ import { css } from 'lit';
 
 // Shared component styles, adopted by every component through `static styles`.
 export const shared = css`
-  :host { box-sizing: border-box; }
-  *, *::before, *::after { box-sizing: inherit; }
+  *, *::before, *::after { box-sizing: border-box; }
   .ic { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   button, a, input, select, textarea, summary { font: inherit; }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

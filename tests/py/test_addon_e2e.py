@@ -37,7 +37,7 @@ async def test_editor_loads_imports_and_applies_under_an_ingress_prefix(aiohttp_
     async with pw.async_playwright() as p:
         try:
             browser = await p.chromium.launch(executable_path=os.environ.get("HH_CHROMIUM"))
-        except Exception as exc:  # no browser binary on this machine
+        except pw.Error as exc:  # no browser binary on this machine
             pytest.skip(f"cannot launch chromium: {exc}")
         page = await browser.new_page()
         problems = []

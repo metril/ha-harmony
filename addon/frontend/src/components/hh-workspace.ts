@@ -8,7 +8,7 @@ import { customElement } from 'lit/decorators.js';
 @customElement('hh-workspace')
 export class HhWorkspace extends LitElement {
   static override styles = css`
-    :host { display: grid; grid-template-columns: 240px minmax(0, 1fr) 280px; gap: 16px; align-items: start; min-width: 0; }
+    :host { box-sizing: border-box; display: grid; grid-template-columns: 240px minmax(0, 1fr) 280px; gap: 16px; align-items: start; min-width: 0; }
     :host > * { min-width: 0; }
     .pane { min-width: 0; }
     @media (max-width: 1100px) { :host { grid-template-columns: 220px minmax(0, 1fr); } .insp { grid-column: 1 / -1; } }
