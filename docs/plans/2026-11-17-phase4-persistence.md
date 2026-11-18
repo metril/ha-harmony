@@ -234,3 +234,42 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
    custom component in HA and restarting it is a separate, user-facing decision.
 5. **UART access** — confirm the adapter and the header location before T2, since T2 is the first step
    that can plausibly need it.
+
+## 7. Probe results and failure modes (2026-11-17, host-side and read-only)
+
+**T1 probes** (hub stock stack running, nothing written):
+- (a) `rcS:40-90` still matches section 1 (rcS.local sourced at 42-43, dropbear 47, hal at 84).
+- (b) `/mnt/data/etc/init.d/rcS.local` is not visible from the unioned root (`/mnt/data` listing fails);
+  the merged `/etc/init.d/rcS.local` md5 is `711cb00baa096d829b8cfc74400c00d6`, as expected.
+- (c) `/data/ha-harmony`: `hub` 846,328 B, `remote_sim` 578,680, `rf_probe` 354,632, `cache.json` 35,018,
+  `state.json` 68, `backup/` (empty). `/cache`: only `ota-update.log` (438 B). mtd map unchanged (data and
+  cache 5 MB each). No `df` on the hub, so free space is unknown without a staged BusyBox.
+- (f) present: `/bin/sleep`, `/bin/kill`, `/usr/bin/killall`, `/bin/pidof`; absent: `df`.
+- (e) see `docs/runbooks/phase4-persistence.md`: Pair/Reset button probably handled by `hal` (lost while
+  armed, not proven); `luaworks` retries its TCP link to `hal`; no `luadraws` on this hub.
+- Static MIPS BusyBox with `df`: built earlier in the external clone, at
+  `/home/user/projects/upstream-ref/harmony-ng/build/tmp/busybox-1.36.1-mips/busybox`
+  (also `payload/bin/busybox`).
+
+**Failure modes**
+
+| failure | result |
+|---|---|
+| marker removed | next boot pure stock |
+| daemon missing/not executable, conf missing, no token, bad `rf`/`rf_slot`/`stop_lua` value | stock, no strike |
+| daemon exits non-zero (bind or radio open failure) | strike stands; third boot disables the hook |
+| daemon wedged but alive | counts as healthy; no watchdog (left off), recover by disarm |
+| hook syntax error | rcS aborts before dropbear: UART only (guarded by `sh -n` at install and tests) |
+| lua stop (`killall`) fails | logged, daemon still starts; `luaworks` retries `hal` forever |
+| cold pull mid-boot before 120 s | strike stands (counter in /cache), clears or trips on later boots |
+| factory reset | wipes the rw layer; stock |
+
+**Hardware gate (new):**
+- G1: three reboots: SSH up, no `hal`, daemon holds `/dev/rfspi`, HA reconnects, Elite key gives IR plus an HA
+  event, counter cleared at 120 s.
+- G2: forced failure with an exit-1 stub: stock on boot 3, then restore the real binary.
+- G3: cold power cycle, including a pull about 10 s into boot.
+- G4: `disarm`: pure stock; then re-arm.
+- G5: 1 h idle armed: RSS, fds and MemFree flat.
+- Then T7: remote hook via `deploy_remote.py install-hook`, with its own 3-reboot, DISABLE and joint
+  power-cycle gate.
