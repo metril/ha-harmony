@@ -92,6 +92,40 @@ static void test_tile_update(void) {
     CT_EQ(hp_rf_pack(HP_MSG_DEVICE_STATE, w, 3, buf, sizeof buf, &n), -HP_E_INVAL); /* ws-only */
 }
 
+static void test_remote_info(void) {
+    hp_rf_val_t v[4] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}}, o[4];
+    uint8_t buf[HP_RF_MSG_MAX];
+    size_t n = 0;
+    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 4, buf, sizeof buf, &n), 0);
+    const uint8_t want[] = {1, 2, 3, 50};
+    CT_EQ(n, sizeof want);
+    CT_MEM_EQ(buf, want, sizeof want);
+    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n, o, 4), 0);
+    CT_EQ(o[1].u, 2);
+    CT_EQ(o[3].u, 50);
+    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n - 1, o, 4), -HP_E_INVAL); /* truncated */
+    buf[n] = 0;
+    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n + 1, o, 4), -HP_E_INVAL); /* trailing */
+}
+
+static void test_tile_state(void) {
+    const char *txt = "On";
+    hp_rf_val_t v[5] = {{.u = 2}, {.u = 1}, {.u = 5}, {.u = 2}, {.p = (const uint8_t *)txt, .len = 2}}, o[5];
+    uint8_t buf[HP_RF_MSG_MAX];
+    size_t n = 0;
+    CT_EQ(hp_rf_pack(HP_MSG_TILE_STATE, v, 5, buf, sizeof buf, &n), 0);
+    const uint8_t want[] = {2, 1, 5, 2, 2, 'O', 'n'};
+    CT_EQ(n, sizeof want);
+    CT_MEM_EQ(buf, want, sizeof want);
+    CT_EQ(hp_rf_unpack(HP_MSG_TILE_STATE, buf, n, o, 5), 0);
+    CT_EQ(o[3].u, 2);
+    CT_EQ(o[4].len, 2);
+    CT_MEM_EQ(o[4].p, txt, 2);
+    CT_EQ(hp_rf_unpack(HP_MSG_TILE_STATE, buf, n - 1, o, 5), -HP_E_INVAL); /* truncated text */
+    /* the old 4-field tile_update shape is not a tile_state */
+    CT_EQ(hp_rf_unpack(HP_MSG_TILE_STATE, buf, 4, o, 5), -HP_E_INVAL);
+}
+
 static void test_rejects(void) {
     hp_rf_val_t v[3] = {{0}};
     uint8_t buf[8];
@@ -126,6 +160,8 @@ int main(void) {
     CT_RUN(test_state_update_bool);
     CT_RUN(test_page_push);
     CT_RUN(test_tile_update);
+    CT_RUN(test_remote_info);
+    CT_RUN(test_tile_state);
     CT_RUN(test_rejects);
     CT_RUN(test_split_budget);
     return CT_DONE();

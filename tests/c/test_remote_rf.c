@@ -380,6 +380,26 @@ static void test_keys_and_taps_reach_the_hub(void) {
   teardown();
 }
 
+/* Message types added after this firmware (tile_state, remote_info) are dropped without effect. */
+static void test_new_hub_types_are_dropped(void) {
+  setup();
+  CT_EQ(hub_push_page(PAGE2, sizeof PAGE2), 0);
+  WAIT_FOR(app.ui.page.page_id == 2);
+  uint64_t before = fb_hash();
+  hp_rf_val_t t[5] = {{.u = 1}, {.u = 2}, {.u = 5}, {.u = 2}, {.p = (const uint8_t *)"On", .len = 2}};
+  CT_EQ(hub_send(HP_MSG_TILE_STATE, t, 5), 0);
+  hp_rf_val_t r[4] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}};
+  CT_EQ(hub_send(HP_MSG_REMOTE_INFO, r, 4), 0);
+  hp_rf_val_t s[2] = {{.u = 3}, {.u = 1}};
+  CT_EQ(hub_send(HP_MSG_STATE_UPDATE, s, 2), 0); /* a later message still arrives, in order */
+  WAIT_FOR(app.state_updates == 1);
+  DRAIN();
+  CT_EQ(app.ui.page.widgets[0].text[0], 0);
+  CT_CHECK(fb_hash() == before);
+  CT_CHECK(!app.ui.fallback);
+  teardown();
+}
+
 static void test_tile_update_changes_render(void) {
   setup();
   CT_EQ(hub_push_page(PAGE2, sizeof PAGE2), 0);
@@ -731,6 +751,7 @@ int main(void) {
   CT_RUN(test_page_push_renders_golden);
   CT_RUN(test_keys_and_taps_reach_the_hub);
   CT_RUN(test_tile_update_changes_render);
+  CT_RUN(test_new_hub_types_are_dropped);
   CT_RUN(test_dropped_ack_delivers_once);
   CT_RUN(test_peer_that_never_acks_shows_fallback_only);
   CT_RUN(test_polls_only_while_awake);

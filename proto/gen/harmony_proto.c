@@ -92,6 +92,21 @@ static const hp_field_desc_t hp_fields_activity_list[] = {
     {"config_hash", HP_T_STR, true, NULL},
 };
 
+static const hp_field_desc_t hp_fields_remote_info[] = {
+    {"remote", HP_T_U8, false, NULL},
+    {"page_fmt", HP_T_U8, false, NULL},
+    {"caps", HP_T_U8, false, NULL},
+    {"icons", HP_T_U8, false, NULL},
+};
+
+static const hp_field_desc_t hp_fields_tile_state[] = {
+    {"remote", HP_T_U8, false, NULL},
+    {"page", HP_T_U8, false, NULL},
+    {"tile", HP_T_U8, false, NULL},
+    {"state", HP_T_U8, false, NULL},
+    {"text", HP_T_STR, false, NULL},
+};
+
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
     {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 4, hp_fields_hello_ack},
@@ -110,6 +125,8 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"tile_update", HP_MSG_TILE_UPDATE, HP_TRANSPORT_RF, 4, hp_fields_tile_update},
     {"activity_list", HP_MSG_ACTIVITY_LIST, HP_TRANSPORT_WS, 2, hp_fields_activity_list},
     {"remote_attached", HP_MSG_REMOTE_ATTACHED, HP_TRANSPORT_WS, 0, NULL},
+    {"remote_info", HP_MSG_REMOTE_INFO, HP_TRANSPORT_BOTH, 4, hp_fields_remote_info},
+    {"tile_state", HP_MSG_TILE_STATE, HP_TRANSPORT_RF, 5, hp_fields_tile_state},
 };
 
 const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT] = {
