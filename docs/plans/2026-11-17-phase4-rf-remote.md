@@ -241,4 +241,71 @@ transfer is proven. The rest was link behaviour, fixed as follows.
   link) and asserts first-try acks with polling, 2-frame page delivery, held page delivery after link
   up, and radio queue depth <= 1 with no ack pile-up.
 
-Not re-benched yet: all of the above is host-tested only.
+Re-benched in session 3 below.
+
+## Bench session 3 (2026-11-17, 23:07-00:16 UTC) — gate met, two follow-ups
+
+Hub quiesced 23:07:27; our daemon (HEAD df603a2) run from `/tmp/hub.new` (tmpfs: free space on the 5 MB
+jffs2 `/data` can't be measured) as `--rf-spi --rf-slot 2 --rf-debug`, default port 8099, cache/state
+under `/data/ha-harmony`; token not recorded. Elite app `--slot 1 --powermode 0x30 --rf-debug`, reached
+over the nmcli-addressed `enx` USB gadget interface (192.168.2.1), on USB power (not the cradle).
+Logs: `hub4.log` (hub `/tmp`), `app5.log` (remote `/var/volatile`). Hub restored 00:15:32 (stock UP;
+total outage ~69 min).
+
+**Met:**
+- Display lit with no manual unblank (confirmed by eye; the app logs only a failed `FBIOBLANK`).
+- Remote polls `20 31 12 01 80..` every 250 ms; one hub link-up (`10 02 41 04 87 21 40`), no link loss, no
+  "Hub unreachable", no FAILED, no `42 01` TX status, radio never held more than one frame.
+- `ha_harmony` reconnected; `push_pages` 2-frame page (type 12, 44 B) delivered and acked, twice.
+- On-screen Vol + tap and hard Vol Up: 8 presses, 16 key objects, all delivered once and acked, IR seen
+  on the TV by the user; HA's event entity showed the last event (`volume_down`, 23:43:55.7Z).
+- Idle soak, 30 min at 5 min samples (flat across all 7): hub RSS 972 kB, fds 9, MemFree 37548-37492 kB,
+  SUnreclaim 3424-3460 kB; remote RSS 344 kB, fds 9, MemFree 19944-19904 kB, SUnreclaim 1724-1736 kB;
+  no reboot (uptime continuous), no new oops (the remote's 2 boot-time gluebi oopses predate the app),
+  soc 100 / usb throughout. Logs grew ~90 B/min each (tmpfs, no risk).
+- Idle: polls stop once the remote sleeps (~36 min after start); a 4-byte status object (type 13, soc)
+  goes every 300 s and is acked first try; the hub link stays up.
+
+**Deviations from the gate wording:** soak on USB, not the cradle; IR and the earlier HA events are
+evidenced only by the user's observation and HA's last-event state (history was empty); a held push at
+link-up was not exercised (link was up at push time).
+
+**Follow-ups:**
+1. (Fixed, see session 4.) Downlink frames are released by the 300 ms "no TX status" timeout (the only `00` seen was the stale one at link-up),
+   so a 2-frame page takes ~600 ms (`frame 1/2` 33330 ms, `2/2` 33630 ms).
+2. (Fixed, see session 4.) The second object of each key down/up pair is acked only after a "retry 1 of 3" (6 of 8 pairs), caused
+   by (1). Hub: seq 8 rx at link 57602409 and its ack written (radio slot busy); seq 9 rx at 57602422 but
+   its ack is not written until the seq 8 frame times out, `57602712 no TX status ... taking it as done`,
+   `wrote ack frame`. Remote: seq 9 sent 67810503, retry at 67810653 (150 ms timer), ack rx 67810801 (~298 ms).
+   The retry reaches the hub as `rx duplicate seq 9 (ack only)` (57602574) and the coalesced ack goes out in
+   the same slot, so one more 300 ms wait follows. The first object of a pair (radio idle) is acked in ~13 ms.
+   Fix is (1), or retry timer > one frame-release time (~300 ms+); harmless meanwhile (dedup by seq works).
+3. Carried over from session 1: `deploy_hub.py run --detach` (the TTY forced by `ssh -tt`), and learning the
+   hub/remote slots from link status instead of `--rf-slot` / `--slot`.
+
+## Bench session 4 (2026-11-18, 02:00-02:07 UTC) — release-by-uplink fix verified
+
+Hub quiesced 02:00:16, restore started 02:03:40 (stock UP by 02:06:50), daemon from `/tmp/hub.new`, same flags as session 3; logs `hub5.log` / `app6.log`.
+**Fix:** the hub releases its single radio slot when an uplink from the peer slot ARRIVES at least 5 ms
+after the last write (arrival-stamped, so the radio's pre-queued status frames don't count), keeping the
+300 ms timeout only as a fallback. The remote fast-polls (30 ms) while a multi-frame object is partly received.
+
+**Results (before -> after):**
+- 2-frame `page_push`, remote awake: frame gap ~300 -> 9 ms, send->tx done ~600 -> 18-19 ms (seq 0, 1).
+- Remote asleep (polls stopped ~30 s after start): 310 ms, frame 1 released by timeout (no uplink exists).
+- Keys: 100 type-10 objects (50 down/up pairs) delivered once each, 0 duplicates on the hub. Remote
+  `send start` -> `rx ack`: first of pair 8/10/14 ms, second of pair 8/9/11 ms (min/median/max). Retries 0
+  (was 6 of 8 pairs), 0 FAILED/unreachable on either end.
+- Release reasons over the run (107 radio frames): 106 by uplink, 1 by timeout, 0 by status 00 / 01 / link loss.
+  K: 12-14 ms for frames followed immediately by an uplink (fast-poll), 160-252 ms for acks released at the
+  next 250 ms idle poll.
+- Depth: 107 writes, 107 releases, never two writes without a release. The only radio TX status seen was the
+  stale `00` at link-up; no `42` after link-up.
+- HA's last key event: `select` (key 5, release, remote 1) at 02:03:01Z. The user did not say whether the TV
+  reacted, so IR was not re-confirmed this session.
+
+**Open:**
+- The radio emits no per-frame `42` TX status in this mode (cause unknown); the uplink release replaces it.
+- Downlink to a sleeping remote still costs the 300 ms timeout per frame (310 ms per page).
+- Not exercised: cradle soak, held-push-at-link-up.
+- Tooling from session 1: `deploy_hub.py run --detach`; learning slots from link status.
