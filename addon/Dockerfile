@@ -5,9 +5,11 @@ ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.14-alpine3.23@sha256:a
 
 # Frontend build stage: node is pinned by digest (node:24-alpine); only dist/ reaches the image.
 FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS frontend
-WORKDIR /src
+# Same relative layout as the repo: vite aliases ../../harmony_addon/frontend-shared (icons.json).
+WORKDIR /repo/addon/frontend
 COPY addon/frontend/package.json addon/frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
+COPY harmony_addon/frontend-shared /repo/harmony_addon/frontend-shared
 COPY addon/frontend/ ./
 RUN npm run build
 
@@ -22,7 +24,7 @@ COPY --from=deps /opt/deps /opt/deps
 COPY harmony_core /opt/app/harmony_core
 COPY harmony_irdb /opt/app/harmony_irdb
 COPY harmony_addon /opt/app/harmony_addon
-COPY --from=frontend /src/dist /opt/app/frontend
+COPY --from=frontend /repo/addon/frontend/dist /opt/app/frontend
 # s6-overlay (the base image's init) stays root; only the server drops to this user.
 RUN adduser -D -H -u 10001 -s /sbin/nologin app \
  && python -m compileall -q /opt/app /opt/deps

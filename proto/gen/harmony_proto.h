@@ -25,10 +25,12 @@ typedef enum {
     HP_MSG_DEVICE_STATE = 14,
     HP_MSG_TILE_UPDATE = 15,
     HP_MSG_ACTIVITY_LIST = 16,
-    HP_MSG_REMOTE_ATTACHED = 17
+    HP_MSG_REMOTE_ATTACHED = 17,
+    HP_MSG_REMOTE_INFO = 18,
+    HP_MSG_TILE_STATE = 19
 } hp_msg_type_t;
 
-#define HP_MSG_COUNT 17
+#define HP_MSG_COUNT 19
 
 typedef enum {
     HP_KEY_ACTION_PRESS = 0,

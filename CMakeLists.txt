@@ -65,6 +65,9 @@ if(NOT CMAKE_CROSSCOMPILING OR HP_TARGET STREQUAL "remote")
     remote/app/fonts/ra_font_m16.c
     remote/app/fonts/ra_font_b13.c
     remote/app/fonts/ra_font_r12.c
+    remote/app/fonts/ra_icons_20.c
+    remote/app/fonts/ra_icons_24.c
+    remote/app/fonts/ra_icons_32.c
     remote/app/input.c
     remote/app/power.c
     remote/app/app.c

@@ -35,13 +35,54 @@ export interface Usage {
   soft_keys: number;
   soft_keys_max: number;
 }
+/** page-format-v2 model (harmony_core.page_to_dict): what the editor renders. */
+export interface V2Widget {
+  kind: 'button' | 'tile' | 'label';
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+  role: string;
+  shape: string;
+  icon_only: boolean;
+  icon: number;
+  bind: number | null;
+}
+export interface V2Page {
+  version: 2;
+  id: number;
+  cols: number;
+  rows: number;
+  gen: number;
+  total: number;
+  kind: 'normal' | 'home' | 'favorites';
+  back: boolean;
+  seq: { idx: number; cnt: number } | null;
+  act: number;
+  title: string;
+  widgets: V2Widget[];
+}
+/** One wire page of a config page; a long `list:` page compiles to several ("2/3"). */
+export interface WirePage {
+  page_id: number;
+  seq: { idx: number; cnt: number } | null;
+  bytes: number;
+  bytes_v1: number;
+  widgets: number;
+  page: V2Page;
+}
+/** One entry per config page. `bytes`/`limit` use the v2 size rule; `bytes_v1` is the v1 size. */
 export interface PreviewPage {
   index: number;
   id: string;
   ok: boolean;
   error: string | null;
-  page: unknown;
+  page: V2Page | null;
+  wire_pages: WirePage[];
   bytes: number | null;
+  bytes_v1: number | null;
   limit: number;
   widgets: number | null;
   widget_limit: number;

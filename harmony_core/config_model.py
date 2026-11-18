@@ -16,6 +16,7 @@ import voluptuous as vol
 import yaml
 
 from .harmony_proto import SOFT_KEY_BASE
+from .icons import ICON_IDS
 from .ir import IrCode, IrImportError, parse_flipper_file, parse_smartir_file
 from .keys import KEY_CODES, key_code
 
@@ -63,6 +64,10 @@ def load_source(text: str) -> Any:
 _SLUG = re.compile(r"^[a-z0-9_]{1,31}$")
 _ENTITY = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 _IR_FORMS = ("proto", "raw", "pronto", "flipper", "smartir")
+_NAV = re.compile(r"^(?:[a-z0-9_]{1,31})$")  # next | prev | home | <page id>
+ROLES = ("default", "primary", "secondary", "danger")  # `nav` comes only from the `nav:` key
+SHAPES = ("card", "row", "pill", "monogram")
+NAV_WORDS = ("next", "prev", "home")
 
 
 class ConfigError(ValueError):
@@ -229,6 +234,14 @@ def _cmd_name(v: Any) -> str:
     return v
 
 
+def _title(v: Any) -> str:
+    if not isinstance(v, str) or "\x00" in v:
+        raise vol.Invalid("must be text")
+    if len(v.encode()) > 24:
+        raise vol.Invalid("must be at most 24 bytes")
+    return v
+
+
 def _int(lo: int, hi: int):
     def check(v: Any) -> int:
         if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
@@ -283,18 +296,28 @@ def _build_schema(r: _Resolver) -> vol.Schema:
     widget = {
         vol.Required("type"): vol.In(["button", "tile", "label"]),
         vol.Optional("id"): _slug,
-        vol.Required("x"): _int(0, 15),
-        vol.Required("y"): _int(0, 15),
+        vol.Optional("x"): _int(0, 15),
+        vol.Optional("y"): _int(0, 15),
         vol.Optional("w", default=1): _int(1, 15),
         vol.Optional("h", default=1): _int(1, 15),
         vol.Optional("label", default=""): str,
         vol.Optional("action"): act,
         vol.Optional("entity"): vol.All(str, vol.Match(_ENTITY, msg="not an entity id")),
+        vol.Optional("icon"): vol.In(["none", *ICON_IDS], msg="unknown icon"),
+        vol.Optional("role"): vol.In(ROLES),
+        vol.Optional("shape"): vol.In(SHAPES),
+        vol.Optional("icon_only"): bool,
+        vol.Optional("nav"): vol.All(str, vol.Match(_NAV, msg="use next, prev, home or a page id")),
     }
     page = {
         vol.Required("id"): _slug,
-        vol.Required("cols"): _int(1, 16),
-        vol.Required("rows"): _int(1, 16),
+        vol.Optional("cols"): _int(1, 16),
+        vol.Optional("rows"): _int(1, 16),
+        vol.Optional("kind"): vol.In(["home", "favorites"]),
+        vol.Optional("title"): _title,
+        vol.Optional("activity"): _slug,
+        vol.Optional("back"): bool,
+        vol.Optional("list"): {vol.Required("rows"): _int(1, 16)},
         vol.Required("widgets"): [vol.All(widget, _check_widget)],
     }
     return vol.Schema(
@@ -302,7 +325,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             vol.Optional("devices", default=list): [device],
             vol.Optional("activities", default=list): [activity],
             vol.Optional("keys", default=dict): keys,
-            vol.Optional("pages", default=list): [page],
+            vol.Optional("pages", default=list): [vol.All(page, _check_page)],
             # Opaque editor metadata: bounded, never compiled, never sent to the hub.
             vol.Optional("editor"): _editor,
         }
@@ -382,15 +405,47 @@ def _check_power(p: dict[str, Any]) -> dict[str, Any]:
 
 def _check_widget(w: dict[str, Any]) -> dict[str, Any]:
     kind = w["type"]
-    if kind != "label" and "id" not in w:
+    nav = "nav" in w
+    if kind != "label" and not nav and "id" not in w:
         raise vol.Invalid(f"a {kind} widget needs an `id`")
-    if kind == "button" and "action" not in w:
-        raise vol.Invalid("a button needs an `action`")
+    if nav and kind != "button":
+        raise vol.Invalid("`nav` belongs on a button")
+    if nav and "action" in w:
+        raise vol.Invalid("a button takes `nav` or `action`, not both")
+    if kind == "button" and "action" not in w and not nav:
+        raise vol.Invalid("a button needs an `action` (or `nav`)")
     if kind == "tile" and "entity" not in w:
         raise vol.Invalid("a tile needs an `entity`")
     if kind != "button" and "action" in w or kind != "tile" and "entity" in w:
         raise vol.Invalid(f"unexpected `{'action' if 'action' in w else 'entity'}` on a {kind}")
+    if nav and "role" in w:
+        raise vol.Invalid("a `nav` button has the nav role; drop `role`")
     return w
+
+
+def _check_page(p: dict[str, Any]) -> dict[str, Any]:
+    if "list" in p:
+        if "rows" in p:
+            raise vol.Invalid("a list page takes its rows from `list.rows`", path=["rows"])
+        if p.get("cols", 1) > 15:
+            raise vol.Invalid("a list page needs cols 1..15", path=["cols"])
+        p["cols"] = p.get("cols", 1)
+        p["rows"] = p["list"]["rows"]
+        for j, w in enumerate(p["widgets"]):
+            for k in ("x", "y"):
+                if k in w:
+                    raise vol.Invalid(
+                        "list pages place widgets themselves; drop x/y", path=["widgets", j, k]
+                    )
+        return p
+    for k in ("cols", "rows"):
+        if k not in p:
+            raise vol.Invalid("required key not provided", path=[k])
+    for j, w in enumerate(p["widgets"]):
+        for k in ("x", "y"):
+            if k not in w:
+                raise vol.Invalid("required key not provided", path=["widgets", j, k])
+    return p
 
 
 # ---------------------------------------------------------------- cross references
@@ -462,9 +517,28 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
             check_action(v, [*base, "keys", k])
     for k, v in model["keys"].items():
         check_action(v, ["keys", k])
+    pages = model["pages"]
+    pids = {p["id"] for p in pages}
+    for kind in ("home", "favorites"):
+        of_kind = [i for i, p in enumerate(pages) if p.get("kind") == kind]
+        if len(of_kind) > 1:
+            fail(["pages", of_kind[1], "kind"], f"a second {kind} page")
     seen: set[str] = set()
-    for i, p in enumerate(model["pages"]):
+    for i, p in enumerate(pages):
+        if "activity" in p and p["activity"] not in acts:
+            fail(["pages", i, "activity"], f"unknown activity {p['activity']!r}")
         for j, w in enumerate(p["widgets"]):
+            nav = w.get("nav")
+            if nav is not None:
+                path = ["pages", i, "widgets", j, "nav"]
+                if nav == "next" and i + 1 >= len(pages):
+                    fail(path, "`next` on the last page")
+                if nav == "prev" and i == 0:
+                    fail(path, "`prev` on the first page")
+                if nav == "home" and not any(q.get("kind") == "home" for q in pages):
+                    fail(path, "`home` needs a page with `kind: home`")
+                if nav not in NAV_WORDS and nav not in pids:
+                    fail(path, f"unknown page {nav!r}")
             if "id" in w:
                 if w["id"] in seen:
                     fail(["pages", i, "widgets", j, "id"], f"duplicate widget id {w['id']!r}")

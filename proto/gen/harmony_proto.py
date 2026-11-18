@@ -32,6 +32,8 @@ class MsgType(IntEnum):
     TILE_UPDATE = 15
     ACTIVITY_LIST = 16
     REMOTE_ATTACHED = 17
+    REMOTE_INFO = 18
+    TILE_STATE = 19
 
 
 ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'hold': 2}}
@@ -55,6 +57,8 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'tile_update': (15, 'rf', (('remote', 'u8', False), ('page', 'u8', False), ('tile', 'u8', False), ('text', 'str', False), )),
     'activity_list': (16, 'ws', (('activities', 'json', False), ('config_hash', 'str', True), )),
     'remote_attached': (17, 'ws', ()),
+    'remote_info': (18, 'both', (('remote', 'u8', False), ('page_fmt', 'u8', False), ('caps', 'u8', False), ('icons', 'u8', False), )),
+    'tile_state': (19, 'rf', (('remote', 'u8', False), ('page', 'u8', False), ('tile', 'u8', False), ('state', 'u8', False), ('text', 'str', False), )),
 }
 
 _INT_RANGES = {

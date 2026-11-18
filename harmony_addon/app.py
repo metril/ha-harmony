@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import hashlib
 import html
 import json
@@ -35,7 +34,7 @@ from harmony_core.config_model import (
     validate_pages,
 )
 from harmony_core.keymap import resolve_keymaps
-from harmony_core.page_codec import decode_page
+from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, page_to_dict
 from harmony_irdb.archive import IrdbArchive
 
 from . import __version__, ir_routes, schemas
@@ -289,6 +288,55 @@ def _page_error(errors: list[dict[str, Any]], i: int) -> str | None:
     return None
 
 
+def _blank(page: dict[str, Any], i: int) -> dict[str, Any]:
+    """A page stand-in that always compiles, keeping what other pages may point at."""
+    out: dict[str, Any] = {"id": page.get("id", f"_{i}"), "cols": 1, "rows": 1, "widgets": []}
+    for k in ("kind", "activity"):
+        if k in page:
+            out[k] = page[k]
+    return out
+
+
+def _compile_tolerant(
+    model: dict[str, Any], problems: list[tuple[list[Any], str]]
+) -> tuple[Any, set[int]]:
+    """Compile in collect mode; pages that fail to build are blanked and the rest recompiled, so
+    one bad page never hides the others. Every problem found lands in `problems` (deduplicated)."""
+    pages = list(model["pages"])
+    blanked: set[int] = set()
+    seen: set[tuple[str, str]] = set()
+    for _ in range(len(pages) + 1):
+        trial: list[tuple[list[Any], str]] = []
+        compiled = compile_config({**model, "pages": pages}, collect=trial)
+        for path, msg in trial:
+            if (json.dumps(path), msg) not in seen:
+                seen.add((json.dumps(path), msg))
+                problems.append((path, msg))
+        new = {
+            path[1]
+            for path, _ in trial
+            if path[:1] == ["pages"] and len(path) > 1 and isinstance(path[1], int)
+        } - blanked - set(compiled.page_of)  # pages that built keep their (over-budget) model
+        new = {i for i in new if i < len(pages)}
+        if not new:
+            return compiled, blanked
+        for i in new:
+            pages[i] = _blank(pages[i], i)
+        blanked |= new
+    return compiled, blanked
+
+
+def _wire_entry(m: Any, u: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "page_id": m.page_id,
+        "seq": {"idx": m.seq_idx, "cnt": m.seq_cnt} if m.seq_cnt else None,
+        "bytes": u["bytes"],
+        "bytes_v1": u["bytes_v1"],
+        "widgets": u["widgets"],
+        "page": page_to_dict(m),
+    }
+
+
 def _preview(config: dict[str, Any]) -> dict[str, Any]:
     """Blocking (CPU). Always answers: pages that compile are returned even when the draft has
     errors elsewhere; apply stays strict because it uses `_compile`, not this."""
@@ -297,7 +345,7 @@ def _preview(config: dict[str, Any]) -> dict[str, Any]:
     problems: list[tuple[list[Any], str]] = []
     if not errors:
         model = parse_data(config)
-        compiled = compile_config(model, collect=problems)
+        compiled, blanked = _compile_tolerant(model, problems)
         errors = [{"path": p, "msg": m[:300], "line": None} for p, m in problems]
         total_ok = not problems
     else:  # compile what can be compiled: valid pages only, by shape (references unchecked)
@@ -306,36 +354,44 @@ def _preview(config: dict[str, Any]) -> dict[str, Any]:
             have = any(e["path"][:2] == ["pages", i] for e in errors)
             if errs and not have:  # the whole-config pass stopped before reaching this page
                 errors.extend(_err(e) for e in errs[: MAX_ERRORS - len(errors)])
-        blank = {"id": "x", "cols": 1, "rows": 1, "widgets": []}
         partial = {
             "devices": [],
             "activities": [],
             "keys": {},
-            "pages": [m if m is not None else blank for m, _ in shaped],
+            "pages": [
+                m if m is not None else _blank(raw_pages[i] if isinstance(raw_pages[i], dict) else {}, i)
+                for i, (m, _) in enumerate(shaped)
+            ],
         }
-        compiled = compile_config(partial, collect=problems)
+        compiled, blanked = _compile_tolerant(partial, problems)
         for path, msg in problems:
             if path[:1] == ["pages"]:
                 errors.append({"path": path, "msg": msg[:300], "line": None})
         model, total_ok = None, False
+    by_cfg: dict[int, list[dict[str, Any]]] = {}
+    for m, cfg, u in zip(compiled.models, compiled.page_of, compiled.usage["pages"], strict=True):
+        by_cfg.setdefault(cfg, []).append(_wire_entry(m, u))
     pages = []
-    for i, data in enumerate(compiled.pages):
-        raw = raw_pages[i] if i < len(raw_pages) and isinstance(raw_pages[i], dict) else {}
-        pu = compiled.usage["pages"][i]
+    for i in range(len(raw_pages)):
+        raw = raw_pages[i] if isinstance(raw_pages[i], dict) else {}
+        wires = by_cfg.get(i, [])
         err = _page_error(errors, i)
-        ok = bool(data) and err is None
+        ok = bool(wires) and err is None
         pid = raw.get("id") if isinstance(raw.get("id"), str) else None
+        sized = wires and i not in blanked and (model is not None or ok)  # an over-budget page still reports its size
         pages.append(
             {
                 "index": i,
                 "id": pid,
                 "ok": ok,
                 "error": None if ok else (err or "page does not compile"),
-                "page": dataclasses.asdict(decode_page(data)) if ok else None,
-                "bytes": pu["bytes"] if (model is not None or ok) else None,
-                "limit": pu["limit"],
+                "page": wires[0]["page"] if ok else None,
+                "wire_pages": wires if ok else [],
+                "bytes": max(w["bytes"] for w in wires) if sized else None,
+                "bytes_v1": max(w["bytes_v1"] for w in wires) if sized else None,
+                "limit": MAX_BYTES,
                 "widgets": len(raw["widgets"]) if isinstance(raw.get("widgets"), list) else None,
-                "widget_limit": pu["widget_limit"],
+                "widget_limit": MAX_WIDGETS,
             }
         )
     usage = {k: v for k, v in compiled.usage.items() if k != "pages"} if model is not None else None

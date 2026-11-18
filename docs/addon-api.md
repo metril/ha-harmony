@@ -84,16 +84,31 @@ when the draft has errors elsewhere:
 ```
 {ok, hash|null, errors: [{path,msg,line}],
  missing_pages: [{index, id}],
- pages: [{index, id, ok, error|null, page|null, bytes|null, limit, widgets|null, widget_limit}],
+ pages: [{index, id, ok, error|null, page|null, wire_pages: [...], bytes|null, bytes_v1|null, limit,
+          widgets|null, widget_limit}],
  usage: {json_bytes, json_max, pool_words, pool_max, keys, keys_max, devices, devices_max,
          activities, activities_max, commands, commands_max, inputs, inputs_max,
          soft_keys, soft_keys_max} | null}
 ```
 
-`page` is whatever the compiler's page decoder produces (opaque to the add-on). `usage` and `hash`
-are only present when the whole config validates. Widget wire ids on later pages are exact only
-when the draft is valid. Results are memoised by content (editor metadata excluded), computed off
-the event loop; a 12-page config answers in about 20 ms cold and a few ms from the memo.
+`pages` has one entry per **config** page. `page` is the page-format-v2 model of its first wire page
+(`harmony_core.page_codec.page_to_dict`, the editor's rendering contract: `version, id, cols, rows,
+gen, total, kind, back, seq, act, title, widgets: [{kind, id, x, y, w, h, label, role, shape,
+icon_only, icon, bind}]`; roles, shapes, icons and nav binds are already resolved). `wire_pages` lists
+every wire page the config page compiles to: one for an ordinary page, several when the compiler
+splits a `list:` page ("2/3" groups), each `{page_id, seq: {idx, cnt}|null, bytes, bytes_v1,
+widgets, page}` (`page` is the same model shape; `page_id` is the wire page number that nav `bind`s
+use). `bytes`/`limit` follow the **v2** size rule (the remote speaks v2 once deployed), `bytes_v1` is
+the v1 size of the same page; on the config page they are the largest over its wire pages. A page
+that does not fit still reports its sizes but is `ok:false` with `page:null`, `wire_pages:[]`. The
+integration still pushes v1 pages for now; this only affects what the editor shows. `usage` and
+`hash` are only present when the whole config validates. Widget wire ids on later pages are exact
+only when the draft is valid. Results are memoised by content (editor metadata excluded), computed
+off the event loop; a 12-page config answers in about 20 ms cold and a few ms from the memo.
+
+Page-level compile problems (a list too long, a nav target that does not exist, a page over its byte
+budget) are reported with the path of the config page (`["pages", i, ...]`); the other pages are still
+returned.
 
 `POST config/keymap?hub=` body `{config?}` -> `{ok:true, default: [row], activities: [{id, name, keys: [row]}]}`
 with one row per hard key (35, ordered by code): `{key, code, source: "default"|"activity"|"none",

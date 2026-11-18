@@ -406,7 +406,7 @@ async def test_page_tap_runs_button_action(hass, hub_rf, write_yaml, built_binar
     )  # the Mute button (row 1; row-0 label is the title)
     entry = await setup(hass, hub_rf)
     code, out = await asyncio.to_thread(r.result)
-    assert code == 0 and json.loads(out) == {"hit": True, "id": 1, "key": 129}
+    assert code == 0 and json.loads(out) == {"hit": True, "id": 0, "key": 128}
     assert read_lines(hub_rf, 1) == [ir_line(nec(9, 7))]
     ev = "event.harmony_hub_sim_hub_remote_1_keys"
     await until(hass, lambda: hass.states.get(ev).attributes.get("event_type") == "tap_mute")

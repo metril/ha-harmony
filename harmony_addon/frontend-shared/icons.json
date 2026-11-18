@@ -1,0 +1,526 @@
+{
+ "glyph_base": 57344,
+ "icons": [
+  {
+   "id": 1,
+   "name": "tv",
+   "keywords": [
+    "tv",
+    "television",
+    "screen",
+    "display",
+    "monitor"
+   ],
+   "svg": "<rect x=\"3\" y=\"5\" width=\"18\" height=\"12\" rx=\"2\"/><path d=\"M8 21h8M12 17v4\"/>"
+  },
+  {
+   "id": 2,
+   "name": "film",
+   "keywords": [
+    "movie",
+    "film",
+    "cinema",
+    "video"
+   ],
+   "svg": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4\"/>"
+  },
+  {
+   "id": 3,
+   "name": "music",
+   "keywords": [
+    "music",
+    "audio",
+    "song",
+    "spotify",
+    "sonos"
+   ],
+   "svg": "<path d=\"M9 18V5l11-2v13\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/><circle cx=\"17\" cy=\"16\" r=\"3\"/>"
+  },
+  {
+   "id": 4,
+   "name": "game",
+   "keywords": [
+    "game",
+    "gaming",
+    "console",
+    "playstation",
+    "xbox",
+    "nintendo"
+   ],
+   "svg": "<path d=\"M7 8h10a5 5 0 0 1 5 5v1a3 3 0 0 1-5.4 1.8L15 14H9l-1.6 1.8A3 3 0 0 1 2 14v-1a5 5 0 0 1 5-5zM7 10.5v4M5 12.5h4M16 11.5h.01M18 13.5h.01\"/>"
+  },
+  {
+   "id": 5,
+   "name": "radio",
+   "keywords": [
+    "radio",
+    "tuner",
+    "fm",
+    "am"
+   ],
+   "svg": "<rect x=\"3\" y=\"8\" width=\"18\" height=\"12\" rx=\"2\"/><path d=\"M7 8l9-5M6 12h4M6 16h4\"/><circle cx=\"16\" cy=\"14\" r=\"2.5\"/>"
+  },
+  {
+   "id": 6,
+   "name": "app",
+   "keywords": [
+    "app",
+    "apps",
+    "streaming",
+    "netflix",
+    "youtube"
+   ],
+   "svg": "<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"4\"/><path d=\"M10 9l5 3-5 3z\"/>"
+  },
+  {
+   "id": 7,
+   "name": "power",
+   "keywords": [
+    "power",
+    "off",
+    "on",
+    "shutdown",
+    "standby"
+   ],
+   "svg": "<path d=\"M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0\"/>"
+  },
+  {
+   "id": 8,
+   "name": "chev_right",
+   "keywords": [
+    "next",
+    "right",
+    "forward",
+    "more"
+   ],
+   "svg": "<path d=\"M9 5l7 7-7 7\"/>"
+  },
+  {
+   "id": 9,
+   "name": "chev_left",
+   "keywords": [
+    "left",
+    "previous"
+   ],
+   "svg": "<path d=\"M15 5l-7 7 7 7\"/>"
+  },
+  {
+   "id": 10,
+   "name": "back",
+   "keywords": [
+    "back",
+    "return",
+    "exit"
+   ],
+   "svg": "<path d=\"M19 12H5M11 6l-6 6 6 6\"/>"
+  },
+  {
+   "id": 11,
+   "name": "up",
+   "keywords": [
+    "up",
+    "raise"
+   ],
+   "svg": "<path d=\"M5 15l7-7 7 7\"/>"
+  },
+  {
+   "id": 12,
+   "name": "down",
+   "keywords": [
+    "down",
+    "lower"
+   ],
+   "svg": "<path d=\"M5 9l7 7 7-7\"/>"
+  },
+  {
+   "id": 13,
+   "name": "home",
+   "keywords": [
+    "home",
+    "house"
+   ],
+   "svg": "<path d=\"M4 11l8-7 8 7M6 10v10h12V10M10 20v-6h4v6\"/>"
+  },
+  {
+   "id": 14,
+   "name": "star",
+   "keywords": [
+    "favorite",
+    "favourite",
+    "star"
+   ],
+   "svg": "<path d=\"M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.2l-5.6 3 1.1-6.2L3 9.6l6.2-.9z\"/>"
+  },
+  {
+   "id": 15,
+   "name": "plus",
+   "keywords": [
+    "plus",
+    "add",
+    "increase"
+   ],
+   "svg": "<path d=\"M12 5v14M5 12h14\"/>"
+  },
+  {
+   "id": 16,
+   "name": "minus",
+   "keywords": [
+    "minus",
+    "less",
+    "decrease",
+    "remove"
+   ],
+   "svg": "<path d=\"M5 12h14\"/>"
+  },
+  {
+   "id": 17,
+   "name": "check",
+   "keywords": [
+    "ok",
+    "done",
+    "confirm",
+    "yes",
+    "check"
+   ],
+   "svg": "<path d=\"M5 12l5 5 9-10\"/>"
+  },
+  {
+   "id": 18,
+   "name": "menu",
+   "keywords": [
+    "menu",
+    "hamburger"
+   ],
+   "svg": "<path d=\"M4 6h16M4 12h16M4 18h16\"/>"
+  },
+  {
+   "id": 19,
+   "name": "guide",
+   "keywords": [
+    "guide",
+    "epg",
+    "schedule",
+    "listings"
+   ],
+   "svg": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M3 9h18M9 9v11\"/>"
+  },
+  {
+   "id": 20,
+   "name": "info",
+   "keywords": [
+    "info",
+    "information",
+    "details"
+   ],
+   "svg": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 11v6M12 7.5v.5\"/>"
+  },
+  {
+   "id": 21,
+   "name": "input",
+   "keywords": [
+    "input",
+    "source",
+    "hdmi"
+   ],
+   "svg": "<path d=\"M10 17l5-5-5-5M15 12H3M14 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5\"/>"
+  },
+  {
+   "id": 22,
+   "name": "cc",
+   "keywords": [
+    "subtitles",
+    "captions",
+    "cc"
+   ],
+   "svg": "<rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"2\"/><path d=\"M6 11h5M13 11h5M6 15h8\"/>"
+  },
+  {
+   "id": 23,
+   "name": "audio",
+   "keywords": [
+    "audio",
+    "sound",
+    "speaker",
+    "volume"
+   ],
+   "svg": "<path d=\"M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11\"/>"
+  },
+  {
+   "id": 24,
+   "name": "settings",
+   "keywords": [
+    "settings",
+    "setup",
+    "options",
+    "config"
+   ],
+   "svg": "<path d=\"M4 7h8M18 7h2M4 17h2M12 17h8\"/><circle cx=\"15\" cy=\"7\" r=\"3\"/><circle cx=\"9\" cy=\"17\" r=\"3\"/>"
+  },
+  {
+   "id": 25,
+   "name": "list",
+   "keywords": [
+    "list",
+    "playlist",
+    "queue"
+   ],
+   "svg": "<path d=\"M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01\"/>"
+  },
+  {
+   "id": 26,
+   "name": "play",
+   "keywords": [
+    "play",
+    "start"
+   ],
+   "svg": "<path d=\"M7 4l13 8-13 8z\"/>"
+  },
+  {
+   "id": 27,
+   "name": "pause",
+   "keywords": [
+    "pause"
+   ],
+   "svg": "<path d=\"M8 5v14M16 5v14\"/>"
+  },
+  {
+   "id": 28,
+   "name": "stop",
+   "keywords": [
+    "stop"
+   ],
+   "svg": "<rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"1.5\"/>"
+  },
+  {
+   "id": 29,
+   "name": "rewind",
+   "keywords": [
+    "rewind",
+    "rw"
+   ],
+   "svg": "<path d=\"M11 6l-8 6 8 6zM21 6l-8 6 8 6z\"/>"
+  },
+  {
+   "id": 30,
+   "name": "ffwd",
+   "keywords": [
+    "fast",
+    "forward",
+    "ffwd",
+    "ff"
+   ],
+   "svg": "<path d=\"M13 6l8 6-8 6zM3 6l8 6-8 6z\"/>"
+  },
+  {
+   "id": 31,
+   "name": "skip_next",
+   "keywords": [
+    "skip",
+    "next",
+    "track"
+   ],
+   "svg": "<path d=\"M6 5l10 7-10 7zM19 5v14\"/>"
+  },
+  {
+   "id": 32,
+   "name": "skip_prev",
+   "keywords": [
+    "skip",
+    "previous",
+    "prev",
+    "track"
+   ],
+   "svg": "<path d=\"M18 5L8 12l10 7zM5 5v14\"/>"
+  },
+  {
+   "id": 33,
+   "name": "record",
+   "keywords": [
+    "record",
+    "rec",
+    "dvr"
+   ],
+   "svg": "<circle cx=\"12\" cy=\"12\" r=\"8\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>"
+  },
+  {
+   "id": 34,
+   "name": "vol_up",
+   "keywords": [
+    "vol+",
+    "volume",
+    "up",
+    "louder"
+   ],
+   "svg": "<path d=\"M3 9h4l5-4v14l-5-4H3zM16 12h6M19 9v6\"/>"
+  },
+  {
+   "id": 35,
+   "name": "vol_down",
+   "keywords": [
+    "vol-",
+    "volume",
+    "down",
+    "quieter"
+   ],
+   "svg": "<path d=\"M3 9h4l5-4v14l-5-4H3zM16 12h6\"/>"
+  },
+  {
+   "id": 36,
+   "name": "mute",
+   "keywords": [
+    "mute",
+    "silence"
+   ],
+   "svg": "<path d=\"M3 9h4l5-4v14l-5-4H3zM16 9l6 6M22 9l-6 6\"/>"
+  },
+  {
+   "id": 37,
+   "name": "ch",
+   "keywords": [
+    "channel",
+    "channels",
+    "ch+",
+    "ch-",
+    "up",
+    "down"
+   ],
+   "svg": "<path d=\"M8 9l4-4 4 4M8 15l4 4 4-4\"/>"
+  },
+  {
+   "id": 38,
+   "name": "bulb",
+   "keywords": [
+    "light",
+    "lights",
+    "lamp",
+    "bulb"
+   ],
+   "svg": "<path d=\"M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z\"/>"
+  },
+  {
+   "id": 39,
+   "name": "scene",
+   "keywords": [
+    "scene",
+    "scenes",
+    "mood",
+    "brightness"
+   ],
+   "svg": "<path d=\"M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6\"/>"
+  },
+  {
+   "id": 40,
+   "name": "thermo",
+   "keywords": [
+    "temperature",
+    "thermostat",
+    "heating",
+    "climate"
+   ],
+   "svg": "<path d=\"M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z\"/>"
+  },
+  {
+   "id": 41,
+   "name": "blinds",
+   "keywords": [
+    "blinds",
+    "shutter",
+    "curtain",
+    "cover",
+    "shade"
+   ],
+   "svg": "<path d=\"M4 4h16M5 4v12M19 4v12M5 8h14M5 12h14M5 16h14M12 16v4\"/>"
+  },
+  {
+   "id": 42,
+   "name": "switch",
+   "keywords": [
+    "switch",
+    "plug",
+    "outlet",
+    "toggle"
+   ],
+   "svg": "<rect x=\"2\" y=\"7\" width=\"20\" height=\"10\" rx=\"5\"/><circle cx=\"16\" cy=\"12\" r=\"2\"/>"
+  },
+  {
+   "id": 43,
+   "name": "fan",
+   "keywords": [
+    "fan",
+    "ventilation"
+   ],
+   "svg": "<circle cx=\"12\" cy=\"12\" r=\"1.5\"/><path d=\"M12 10.5C11 6 12 3 14.5 3.5 17 4 16 8 13.3 10.8M13.5 12c4.5-1 7.5 0 7.5 2.5S17 17 13.3 13.2M12 13.5c1 4.5 0 7.5-2.5 7.5S7 17 10.7 13.2M10.5 12C6 13 3 12 3 9.5S7 7 10.7 10.8\"/>"
+  },
+  {
+   "id": 44,
+   "name": "lock",
+   "keywords": [
+    "lock",
+    "door",
+    "secure"
+   ],
+   "svg": "<rect x=\"5\" y=\"11\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"M8 11V8a4 4 0 0 1 8 0v3M12 15v2\"/>"
+  },
+  {
+   "id": 45,
+   "name": "rf",
+   "keywords": [
+    "signal",
+    "rf",
+    "link"
+   ],
+   "svg": "<path d=\"M4 20v-3M9 20v-7M14 20V9M19 20V4\"/>"
+  },
+  {
+   "id": 46,
+   "name": "rf_off",
+   "keywords": [
+    "no",
+    "signal",
+    "offline"
+   ],
+   "svg": "<path d=\"M4 20v-3M9 20v-7M14 20V9M19 20V4M3 3l18 18\"/>"
+  },
+  {
+   "id": 47,
+   "name": "sync",
+   "keywords": [
+    "sync",
+    "refresh",
+    "reload"
+   ],
+   "svg": "<path d=\"M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4\"/>"
+  },
+  {
+   "id": 48,
+   "name": "warn",
+   "keywords": [
+    "warning",
+    "alert",
+    "error"
+   ],
+   "svg": "<path d=\"M12 3l10 18H2zM12 10v5M12 18v.5\"/>"
+  },
+  {
+   "id": 49,
+   "name": "moon",
+   "keywords": [
+    "night",
+    "sleep",
+    "moon",
+    "bedtime"
+   ],
+   "svg": "<path d=\"M20 14A8 8 0 1 1 10 4a6 6 0 0 0 10 10z\"/>"
+  },
+  {
+   "id": 50,
+   "name": "sun",
+   "keywords": [
+    "day",
+    "morning",
+    "sun"
+   ],
+   "svg": "<circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5\"/>"
+  }
+ ]
+}

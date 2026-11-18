@@ -35,12 +35,24 @@ export interface Widget {
   w?: number;
   h?: number;
   label?: string;
+  role?: string;
+  shape?: string;
+  icon?: string;
+  icon_only?: boolean;
+  /** `next`, `prev`, `home` or a page id: a navigation button */
+  nav?: string;
   [k: string]: unknown;
 }
 export interface Page {
   id: string;
-  cols: number;
-  rows: number;
+  cols?: number;
+  rows?: number;
+  kind?: 'home' | 'favorites';
+  title?: string;
+  activity?: string;
+  back?: boolean;
+  /** a list page takes its rows from here and places widgets itself */
+  list?: { rows: number };
   widgets: Widget[];
 }
 export interface Config {

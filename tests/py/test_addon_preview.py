@@ -11,7 +11,7 @@ from harmony_addon.app import create_app
 from harmony_addon.auth import NoAuth
 from harmony_core.compiler import LIMITS, compile_config
 from harmony_core.config_model import parse_data, validate_pages
-from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, Widget, encoded_size
+from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, Page, Widget, page_size
 
 TOKEN = "ab" * 32
 BEARER = {"Authorization": f"Bearer {TOKEN}"}
@@ -120,7 +120,10 @@ async def test_page_and_total_usage_match_the_compiler(c):
     cfg = big()
     _, body = await preview(c, cfg)
     comp = compile_config(parse_data(cfg))
-    for p, pu, raw in zip(body["pages"], comp.usage["pages"], comp.pages, strict=True):
+    for p, pu, raw, raw1 in zip(
+        body["pages"], comp.usage["pages"], comp.pages_v2, comp.pages, strict=True
+    ):
+        assert p["bytes_v1"] == len(raw1) and p["wire_pages"][0]["bytes_v1"] == len(raw1)
         assert (p["bytes"], p["limit"], p["widgets"], p["widget_limit"]) == (
             len(raw),
             MAX_BYTES,
@@ -147,11 +150,11 @@ async def test_over_budget_page_reports_bytes_and_stays_missing(c):
     cfg["pages"][0]["widgets"][0]["action"] = {"activity": "off"}
     _, body = await preview(c, cfg)
     fat = body["pages"][1]
-    want = encoded_size([Widget("label", i, 0, 0, 1, 1, "L" * 22) for i in range(10)])
+    probe = Page(0, 1, 1, tuple([Widget("label", i, 0, 0, 1, 1, "L" * 22) for i in range(10)]))
+    want = page_size(probe, 2)
     assert want > MAX_BYTES
-    assert (
-        not fat["ok"] and fat["bytes"] == want and "bytes" in fat["error"] and fat["page"] is None
-    )
+    assert not fat["ok"] and fat["bytes"] == want and fat["page"] is None
+    assert "bytes" in fat["error"] and fat["bytes_v1"] == page_size(probe, 1)
     assert body["pages"][0]["ok"] and body["missing_pages"] == [{"index": 1, "id": "fat"}]
     assert not body["ok"] and body["errors"][0]["path"] == ["pages", 1]
     # and apply stays strict
@@ -347,3 +350,108 @@ async def test_keymap_needs_a_valid_config_and_uses_the_draft_by_default(c):
     await put_draft(c)
     r = await c.post("/api/v1/config/keymap", json={}, headers=H)
     assert r.status == 200 and len((await r.json())["default"]) == 35
+
+
+# ---------------------------------------------------------------- page format v2
+def _list_cfg(n=40):
+    base = json.loads(json.dumps(CONFIG))
+    base["pages"] = [
+        {
+            "id": "home",
+            "kind": "home",
+            "title": "Home",
+            "cols": 2,
+            "rows": 2,
+            "widgets": [{"type": "button", "x": 0, "y": 0, "label": "Next", "nav": "lst"}],
+        },
+        {
+            "id": "lst",
+            "title": "Scenes",
+            "list": {"rows": 4},
+            "widgets": [
+                {
+                    "type": "button",
+                    "id": f"s{i}",
+                    "label": f"Scene {i}",
+                    "icon": "bulb",
+                    "action": {"device": "tv", "command": "vol_up"},
+                }
+                for i in range(n)
+            ],
+        },
+    ]
+    return base
+
+
+async def test_preview_carries_the_v2_model_and_both_byte_counts(c):
+    _, body = await preview(c, _list_cfg())
+    assert body["ok"], body["errors"]
+    home, lst = body["pages"]
+    m = home["page"]
+    assert m["version"] == 2 and m["kind"] == "home" and m["title"] == "Home"
+    nav = m["widgets"][0]
+    assert nav["role"] == "nav" and nav["bind"] == lst["wire_pages"][0]["page_id"] and nav["icon"]
+    assert home["bytes"] > home["bytes_v1"] - 100 and home["limit"] == MAX_BYTES
+    assert [w["page_id"] for w in home["wire_pages"]] == [0]
+    # a 40-row list on 4-row pages becomes 10 wire pages, numbered 1/10 .. 10/10
+    assert len(lst["wire_pages"]) == 10
+    assert [w["seq"] for w in lst["wire_pages"]][:2] == [{"idx": 1, "cnt": 10}, {"idx": 2, "cnt": 10}]
+    assert lst["page"] == lst["wire_pages"][0]["page"] and lst["ok"]
+    assert lst["bytes"] == max(w["bytes"] for w in lst["wire_pages"])
+    assert lst["widgets"] == 40
+    comp = compile_config(parse_data(_list_cfg()))
+    assert len(comp.pages) == len(comp.pages_v2) == 11 == len(body["pages"][1]["wire_pages"]) + 1
+
+
+async def test_a_page_that_cannot_build_does_not_hide_the_others(c):
+    cfg = _list_cfg()
+    cfg["pages"].append(
+        {"id": "ok2", "cols": 2, "rows": 1, "widgets": [{"type": "label", "x": 0, "y": 0, "label": "Hi"}]}
+    )
+    cfg["pages"][1]["widgets"] = cfg["pages"][1]["widgets"] * 5  # 200 rows: too many page groups
+    _, body = await preview(c, cfg)
+    assert not body["ok"] and body["hash"] is None
+    paths = [e["path"] for e in body["errors"]]
+    assert ["pages", 1] in paths
+    assert [p["ok"] for p in body["pages"]] == [True, False, True]
+    assert body["missing_pages"] == [{"index": 1, "id": "lst"}]
+
+
+@pytest.mark.parametrize(
+    ("edit", "path"),
+    [
+        (lambda p: p["widgets"][0].update(role="loud"), ["pages", 0, "widgets", 0, "role"]),
+        (lambda p: p["widgets"][0].update(shape="blob"), ["pages", 0, "widgets", 0, "shape"]),
+        (lambda p: p["widgets"][0].update(icon="nope"), ["pages", 0, "widgets", 0, "icon"]),
+        (lambda p: p["widgets"][0].update(icon_only="yes"), ["pages", 0, "widgets", 0, "icon_only"]),
+        (lambda p: p["widgets"][0].update(nav="nowhere"), ["pages", 0, "widgets", 0, "nav"]),
+        (lambda p: p.update(kind="weird"), ["pages", 0, "kind"]),
+        (lambda p: p.update(activity="ghost"), ["pages", 0, "activity"]),
+        (lambda p: p.update(back="x"), ["pages", 0, "back"]),
+        (lambda p: p.update(title="x" * 200), ["pages", 0, "title"]),
+        (lambda p: p.update(list={"rows": 99}), ["pages", 0, "list", "rows"]),
+        (lambda p: p.update(list={"rows": 3}), ["pages", 0, "rows"]),
+    ],
+)
+async def test_validate_reports_v2_keys_with_precise_paths(c, edit, path):
+    cfg = json.loads(json.dumps(CONFIG))
+    cfg["pages"] = [
+        {"id": "p", "cols": 2, "rows": 2, "widgets": [{"type": "button", "x": 0, "y": 0, "label": "A", "nav": "next"}, {"type": "label", "x": 1, "y": 0, "label": "L"}]}
+    ]
+    cfg["pages"].append({"id": "q", "cols": 1, "rows": 1, "widgets": []})
+    edit(cfg["pages"][0])
+    r = await c.post("/api/v1/config/validate", json={"config": cfg}, headers=H)
+    paths = [e["path"] for e in (await r.json())["errors"]]
+    assert path in paths, paths
+
+
+async def test_ref_errors_for_pages_are_all_collected(c):
+    cfg = json.loads(json.dumps(CONFIG))
+    cfg["pages"] = [
+        {"id": "a", "kind": "home", "cols": 2, "rows": 1, "activity": "ghost", "widgets": [{"type": "button", "x": 0, "y": 0, "nav": "prev"}]},
+        {"id": "b", "kind": "home", "cols": 2, "rows": 1, "widgets": [{"type": "button", "x": 0, "y": 0, "nav": "zzz"}]},
+    ]
+    r = await c.post("/api/v1/config/validate", json={"config": cfg}, headers=H)
+    paths = [e["path"] for e in (await r.json())["errors"]]
+    for want in (["pages", 0, "activity"], ["pages", 0, "widgets", 0, "nav"], ["pages", 1, "kind"], ["pages", 1, "widgets", 0, "nav"]):
+        assert want in paths, paths

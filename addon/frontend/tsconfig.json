@@ -14,6 +14,8 @@
     "useDefineForClassFields": false,
     "skipLibCheck": true,
     "isolatedModules": true,
+    "resolveJsonModule": true,
+    "paths": { "@shared/*": ["../../harmony_addon/frontend-shared/*"] },
     "types": ["vite/client"]
   },
   "include": ["src", "test", "vite.config.ts"]

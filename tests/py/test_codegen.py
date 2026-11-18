@@ -175,7 +175,7 @@ def test_real_schema_has_phase2_messages():
     assert names == {
         "hello", "hello_ack", "error", "ping", "pong", "set_config", "config_ack",
         "command", "command_result", "key_event", "state_update", "page_push", "battery",
-        "device_state", "tile_update", "activity_list", "remote_attached",
+        "device_state", "tile_update", "activity_list", "remote_attached", "remote_info", "tile_state",
     }  # fmt: skip
 
 
@@ -258,7 +258,43 @@ def test_tile_update_is_rf_only():
         ns["encode_ws"](ns["MsgType"].TILE_UPDATE, {"remote": 1, "page": 0, "tile": 2, "text": "x"})
 
 
-STOCK_KEYS = ["Up", "Down", "Left", "Right", "Select", "Menu", "Exit", "VolumeUp", "VolumeDown", "VolumeMute", "ChannelUp", "ChannelDown", "PrevChannel", "Play", "Pause", "Stop", "Record", "Rewind", "FastForward", "DVR", "Guide", "Info", "Red", "Green", "Yellow", "Blue", "HomeControl1", "HomeControl2", "HomeControl3", "HomeControl4", "HomeControlPlus", "HomeControlMinus", "PowerOffActivity", "Home", "Favorites"]
+STOCK_KEYS = [
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+    "Select",
+    "Menu",
+    "Exit",
+    "VolumeUp",
+    "VolumeDown",
+    "VolumeMute",
+    "ChannelUp",
+    "ChannelDown",
+    "PrevChannel",
+    "Play",
+    "Pause",
+    "Stop",
+    "Record",
+    "Rewind",
+    "FastForward",
+    "DVR",
+    "Guide",
+    "Info",
+    "Red",
+    "Green",
+    "Yellow",
+    "Blue",
+    "HomeControl1",
+    "HomeControl2",
+    "HomeControl3",
+    "HomeControl4",
+    "HomeControlPlus",
+    "HomeControlMinus",
+    "PowerOffActivity",
+    "Home",
+    "Favorites",
+]
 
 
 def test_key_table_is_the_35_confirmed_keys():
@@ -292,3 +328,25 @@ def test_python_key_table_round_trips():
 def test_bad_key_tables_rejected(tmp_path, keys, msg):
     with pytest.raises(SchemaError, match=msg):
         load_schema(write(tmp_path, f"version: 1\nkeys: {keys}\n"))
+
+
+def test_remote_info_and_tile_state_round_trip():
+    ns = _real_py()
+    T = ns["MsgType"]
+    assert ns["MESSAGES"]["remote_info"][1:] == (
+        "both",
+        (("remote", "u8", False), ("page_fmt", "u8", False), ("caps", "u8", False),
+         ("icons", "u8", False)),
+    )  # fmt: skip
+    assert ns["MESSAGES"]["tile_state"][1:] == (
+        "rf",
+        (("remote", "u8", False), ("page", "u8", False), ("tile", "u8", False),
+         ("state", "u8", False), ("text", "str", False)),
+    )  # fmt: skip
+    d = {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50}
+    assert ns["decode_ws"](ns["encode_ws"](T.REMOTE_INFO, d)) == (T.REMOTE_INFO, d)
+    assert T.REMOTE_INFO == 18 and T.TILE_STATE == 19
+    with pytest.raises(ns["ProtoError"]):
+        ns["encode_ws"](T.REMOTE_INFO, {**d, "icons": 256})
+    with pytest.raises(ns["ProtoError"]):  # rf-only: not a ws message
+        ns["encode_ws"](T.TILE_STATE, {"remote": 1, "page": 0, "tile": 1, "state": 2, "text": "x"})
