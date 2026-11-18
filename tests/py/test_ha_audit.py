@@ -139,7 +139,9 @@ async def test_send_command_honours_repeats_delay_and_hold(hass, rig, clock):
             blocking=True,
         )
     )
-    sent = lambda: [d["command"] for t, d in hub.got if t == "command"]
+    sent = lambda: [
+        d["command"] for t, d in hub.got if t == "command" and d["command"] != "tile_update"
+    ]
     waits = 0
     while not task.done():
         await _until(lambda: task.done() or clock.active())

@@ -36,6 +36,8 @@ async def _setup(hass, hub, ok=True, **kw):
     entry = make_entry("127.0.0.1", hub.port, **kw)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id) is ok
+    if ok and entry.runtime_data.first_sync is not None:  # setup does not wait for the hub sync
+        await entry.runtime_data.first_sync
     await hass.async_block_till_done()
     return entry
 

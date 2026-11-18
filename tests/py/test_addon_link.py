@@ -160,6 +160,8 @@ async def setup(hass, hub, addon_data):
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(entry, data={**entry.data, **addon_data})
     assert await hass.config_entries.async_setup(entry.entry_id)
+    if entry.runtime_data.first_sync is not None:  # setup does not wait for the hub sync
+        await entry.runtime_data.first_sync
     await hass.async_block_till_done()
     return entry
 

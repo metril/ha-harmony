@@ -37,6 +37,8 @@ async def setup(hass, hub, fake_addon, yaml=YAML):
     entry = make_entry("127.0.0.1", hub.port, addon=fake_addon)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
+    if entry.runtime_data.first_sync is not None:  # setup does not wait for the hub sync
+        await entry.runtime_data.first_sync
     await hass.async_block_till_done()
     return entry
 

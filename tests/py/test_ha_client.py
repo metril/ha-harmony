@@ -43,6 +43,8 @@ async def test_missing_pong_is_a_dead_connection(fake_hub):
         async with asyncio.timeout(5):
             while hub.connections < 2:
                 await asyncio.sleep(0.05)
+            while True not in states:  # the hub counts the connection before the client reports it up
+                await asyncio.sleep(0.02)
         assert False in states and True in states  # dropped, then reconnected with a new hello
     finally:
         await c.async_close()

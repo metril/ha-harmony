@@ -217,6 +217,9 @@ async def rig(hass, fake_hub, fake_addon, clock):
             await settle(hass, clock.active)  # the start-up push waits for a remote_info
             clock.elapse()
             await settle(hass, lambda: len(hub.pages()) >= len(entry.runtime_data.compiled.pages))
+            # the push is over once its task is: its tile texts follow the last page's reply
+            links = entry.runtime_data.links
+            await settle(hass, lambda: all(lk.task is None or lk.task.done() for lk in links.values()))
         else:
             await settle(hass)
         made.append(entry)
