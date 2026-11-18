@@ -1,0 +1,13 @@
+configuration:
+  hub_host:
+    name: Hub host
+    description: Address of the Harmony hub (the integration is configured separately).
+  hub_port:
+    name: Hub port
+    description: Hub WebSocket port.
+  hub_token:
+    name: Hub token
+    description: Pairing token for the hub. Kept in the add-on options only; never shown in the UI or logs.
+  log_level:
+    name: Log level
+    description: Verbosity of the add-on log.

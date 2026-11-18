@@ -149,9 +149,18 @@ jobs:
           cmake --build build-cross-test -j
           ctest --test-dir build-cross-test --output-on-failure -j
 
+  addon-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build amd64 image and smoke test (ingress IP 200, other peer 403, non-root)
+        run: tools/addon_smoke.sh
+
   ci:
     if: always()
-    needs: [c-tests, py-tests, lint, cross-build]
+    needs: [c-tests, py-tests, lint, cross-build, addon-image]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
