@@ -11,7 +11,7 @@ CFG = yaml.safe_load((ROOT / "addon/config.yaml").read_text())
 def test_least_privilege_manifest():
     assert CFG["slug"] == "ha_harmony_editor"
     assert CFG["ingress"] is True and CFG["panel_admin"] is True
-    assert CFG["homeassistant_api"] is False and CFG["hassio_api"] is False
+    assert CFG["homeassistant_api"] is True and CFG["hassio_api"] is False
     assert set(CFG["arch"]) == {"aarch64", "amd64"}
     for forbidden in ("ports", "map", "host_network", "full_access", "privileged", "devices"):
         assert forbidden not in CFG

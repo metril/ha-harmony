@@ -17,7 +17,7 @@ panel_admin: true
 hassio_api: false
 discovery:
   - ha_harmony
-homeassistant_api: false
+homeassistant_api: true
 backup_exclude:
   - ircache/*
 options:
