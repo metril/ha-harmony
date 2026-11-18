@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 # built from parts so this file does not match itself
-FORBIDDEN = re.compile("|".join(("jaga" + "nnath", "OLYM" + "POS", r"10\.10\.7[67]\.")), re.I)
+FORBIDDEN = re.compile("|".join(("jaga" + "nnath", "OLYM" + "POS", r"10\.10\.7[67]\.")), re.IGNORECASE)
 
 
 def test_no_personal_strings_in_tracked_files():
