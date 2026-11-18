@@ -218,6 +218,22 @@ def _store_call(fn, *args):
 
 
 # ------------------------------------------------------------------ routes
+_HA_ACTION_PROBE = {
+    "keys": {"up": {"ha": {"service": "light.toggle", "target": {"entity_id": "light.probe"}}}}
+}
+
+
+def _capabilities() -> dict[str, Any]:
+    """What this build can store, probed from the schema itself so it cannot drift: the editor
+    disables the Home Assistant action picker when `ha_actions` is false."""
+    from harmony_core.config_model import validate_data
+
+    return {
+        "ha_actions": not validate_data(_HA_ACTION_PROBE),
+        "page_format": 2,
+    }
+
+
 async def health(request: web.Request) -> web.Response:
     return jresp(
         {
@@ -225,6 +241,7 @@ async def health(request: web.Request) -> web.Response:
             "addon_version": __version__,
             "core_version": harmony_core.__version__,
             "bundle_schema": harmony_core.BUNDLE_SCHEMA,
+            "capabilities": _capabilities(),
         }
     )
 
