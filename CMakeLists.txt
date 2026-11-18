@@ -27,6 +27,42 @@ target_compile_options(cjson PRIVATE -Wno-error -w)
 target_compile_definitions(cjson PRIVATE CJSON_NESTING_LIMIT=64)
 target_link_libraries(cjson PRIVATE m)
 
+# Signed OTA images (Ed25519 via vendored TweetNaCl): shared by hub and remote.
+# The compiled-in public key comes from HP_OTA_PUBKEY_HEADER; the default is the DEV/TEST key,
+# which release builds (CMAKE_BUILD_TYPE=Release or -DHP_RELEASE=ON) refuse.
+set(HP_OTA_PUBKEY_HEADER "${CMAKE_SOURCE_DIR}/common/ota/ota_pubkey_dev.h" CACHE FILEPATH
+    "Generated public-key header (ota_sign pubheader)")
+file(READ "${HP_OTA_PUBKEY_HEADER}" _ota_key_h)
+string(FIND "${_ota_key_h}" "#define OTA_PUBKEY_IS_DEV 1" _ota_dev_pos)
+set(_ota_is_dev OFF)
+if(NOT _ota_dev_pos EQUAL -1)
+  set(_ota_is_dev ON)
+endif()
+if(_ota_is_dev)
+  if(HP_RELEASE OR CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(FATAL_ERROR "OTA: the DEV/TEST public key is selected in a release build. "
+                        "Generate one with 'ota_sign pubheader' and pass -DHP_OTA_PUBKEY_HEADER=<file>.")
+  endif()
+  message(WARNING "OTA: building with the DEV/TEST public key; images signed with it are accepted. Never ship this build.")
+endif()
+add_library(tweetnacl STATIC vendor/tweetnacl/tweetnacl.c)
+target_include_directories(tweetnacl PUBLIC ${CMAKE_SOURCE_DIR}/vendor/tweetnacl)
+target_compile_options(tweetnacl PRIVATE -w -Wno-error -fno-sanitize=shift)  # third-party, unmodified (left-shifts negatives by design)
+add_library(hp_ota STATIC common/ota/ota_image.c common/ota/ota_apply.c)
+target_include_directories(hp_ota PUBLIC ${CMAKE_SOURCE_DIR}/common/ota)
+target_link_libraries(hp_ota PUBLIC tweetnacl)
+get_filename_component(_ota_key_dir "${HP_OTA_PUBKEY_HEADER}" DIRECTORY)
+get_filename_component(_ota_key_name "${HP_OTA_PUBKEY_HEADER}" NAME)
+target_include_directories(hp_ota PRIVATE ${_ota_key_dir})
+target_compile_definitions(hp_ota PRIVATE OTA_PUBKEY_HEADER="${_ota_key_name}")
+if(HP_RELEASE OR CMAKE_BUILD_TYPE STREQUAL "Release")
+  target_compile_definitions(hp_ota PRIVATE HP_RELEASE=1)
+endif()
+if(NOT CMAKE_CROSSCOMPILING)
+  add_executable(ota_sign tools/ota_sign.c)
+  target_link_libraries(ota_sign PRIVATE hp_ota)
+endif()
+
 # Protocol + RF core: shared by hub and remote.
 add_library(hp_core STATIC
   proto/gen/harmony_proto.c
@@ -39,7 +75,7 @@ add_library(hp_core STATIC
 )
 target_include_directories(hp_core PUBLIC ${CMAKE_SOURCE_DIR})
 find_package(Threads REQUIRED)
-target_link_libraries(hp_core PUBLIC m Threads::Threads)
+target_link_libraries(hp_core PUBLIC m Threads::Threads hp_ota)
 
 # Remote app: vendored LVGL (render only, remote/lv_conf.h) + our app (display, ui, input, power).
 # Built for the remote ARM target and for host tests; the hub MIPS build never needs it.
