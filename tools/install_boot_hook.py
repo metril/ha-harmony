@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -49,6 +51,7 @@ MARKER = "/etc/ha-harmony-enable"
 COUNTER = "/cache/ha-harmony-boot.n"
 PIDFILE = "/cache/ha-harmony.pid"
 LOG = "/cache/ha-harmony.log"
+DAEMON_LOG = "/var/volatile/ha-harmony.log"  # tmpfs; read-only here, the hook writes it
 
 # The only paths this tool may write. Asserted by tests over the recorded command log.
 WRITE_PATHS = (RCS_LOCAL, RCS_HARMONY, MARKER, REMOTE_DIR, COUNTER, PIDFILE, LOG)
@@ -119,6 +122,24 @@ class HookInstaller:
 
     # --- commands -----------------------------------------------------------------
 
+    def _md5_on_device(self, path: str) -> str | None:
+        rc, out, _ = self.r.run(["md5sum", path])
+        m = re.match(r"([0-9a-f]{32})\b", out.decode(errors="replace")) if rc == 0 else None
+        return m.group(1) if m else None
+
+    @staticmethod
+    def redact(conf: str) -> str:
+        return re.sub(r"(?m)^(token=).*$", r"\1<redacted>", conf)
+
+    def _tail(self, title: str, path: str, n: int = 8) -> None:
+        log = self._read(path)
+        print(f"--- {title} ({path}) ---")
+        if not log:
+            print("  (absent or empty)")
+            return
+        for line in log.decode(errors="replace").strip().splitlines()[-n:]:
+            print(f"  {line}")
+
     def status(self) -> int:
         rcs = self._read(RCS_LOCAL)
         armed = self._exists(MARKER)
@@ -126,19 +147,24 @@ class HookInstaller:
         print(f"hook {RCS_HARMONY}: {'present' if self._exists(RCS_HARMONY) else 'absent'}")
         hooked = rcs is not None and BEGIN.encode() in rcs
         print(f"{RCS_LOCAL}: {'contains our block' if hooked else 'clean (no block)'}")
-        print(f"config {CONF}: {'present' if self._exists(CONF) else 'absent'}")
-        print(f"daemon {DAEMON}: {'present' if self._exists(DAEMON) else 'absent'}")
+        conf = self._read(CONF)
+        if conf is None:
+            print(f"config {CONF}: absent")
+        else:
+            print(f"config {CONF} (token redacted):")
+            for line in self.redact(conf.decode(errors="replace")).strip().splitlines():
+                print(f"  {line}")
+        if self._exists(DAEMON):
+            print(f"daemon {DAEMON}: present, md5 {self._md5_on_device(DAEMON) or 'unreadable'}")
+        else:
+            print(f"daemon {DAEMON}: absent")
         n = self._read(COUNTER)
         print(f"strike counter: {n.decode().strip() if n else 'clear (no unclean boots pending)'}")
         if rcs is not None:
             ok, err = self._syntax_ok(RCS_LOCAL)
             print(f"{RCS_LOCAL} syntax: {'ok' if ok else 'BROKEN -- ' + err}")
-        log = self._read(LOG)
-        if log:
-            tail = log.decode(errors="replace").strip().splitlines()[-8:]
-            print("--- last boot log ---")
-            for line in tail:
-                print(f"  {line}")
+        self._tail("hook log, last boot", LOG)
+        self._tail("daemon log", DAEMON_LOG)
         print(
             "\narmed: our daemon replaces stock hal at boot"
             if armed
@@ -146,7 +172,31 @@ class HookInstaller:
         )
         return 0
 
-    def install(self, token: str, port: int, hub_id: str | None) -> int:
+    def disarm(self) -> int:
+        """Remove the marker and nothing else: next boot is pure stock."""
+        if self._exists(MARKER):
+            self._run(["rm", "-f", MARKER], "remove marker")
+            print(f"disarmed: removed {MARKER} (next boot is pure stock)")
+        else:
+            print(f"{MARKER} already absent (already disarmed)")
+        return 0
+
+    def install(
+        self,
+        token: str,
+        port: int,
+        hub_id: str | None,
+        *,
+        rf_slot: int | None = None,
+        expect_md5: str | None = None,
+        stop_lua: bool = True,
+    ) -> int:
+        if not re.fullmatch(r"[^\s=]\S*", token or ""):
+            raise InstallError("token must be non-empty with no whitespace")
+        if expect_md5 is None or not re.fullmatch(r"[0-9a-f]{32}", expect_md5):
+            raise InstallError("--expect-md5 <md5 of the local hub build> is required")
+        if rf_slot is not None and not 1 <= rf_slot <= 15:
+            raise InstallError("--rf-slot must be 1..15 (the remote's HID++ device index)")
         if not self.hook_src.is_file():
             raise InstallError(f"hook source missing: {self.hook_src}")
         hook = self.hook_src.read_bytes()
@@ -161,6 +211,12 @@ class HookInstaller:
         if rc != 0:
             raise InstallError(
                 f"{DAEMON} is missing or not executable -- run deploy_hub.py push first"
+            )
+        got = self._md5_on_device(DAEMON)
+        if got != expect_md5:
+            raise InstallError(
+                f"{DAEMON} md5 is {got or 'unreadable'}, expected {expect_md5}: "
+                "refusing to arm a binary that is not the verified build (run deploy_hub.py push)"
             )
         local = self._read(RCS_LOCAL)
         if local is None:
@@ -186,6 +242,10 @@ class HookInstaller:
 
         # --- 3. config: parsed by the hook, never sourced -----------------------
         conf = f"token={token}\nport={port}\n" + (f"hub_id={hub_id}\n" if hub_id else "")
+        if rf_slot is not None:
+            conf += f"rf=spi\nrf_slot={rf_slot}\n"
+        if not stop_lua:
+            conf += "stop_lua=0\n"
         self._write(CONF, conf.encode(), "600")
         print(f"wrote {CONF}")
 
@@ -263,7 +323,7 @@ class HookInstaller:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False
     )
     ap.add_argument("--host", default="harmony-hub")
     ap.add_argument("--port", type=int, default=None, help="ssh port")
@@ -273,15 +333,31 @@ def build_parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("status", help="[read-only] is the hook installed and armed?")
-    p = sub.add_parser("install", help="[WRITE] install and arm the boot hook")
+    p = sub.add_parser("install", help="[WRITE] install and arm the boot hook", allow_abbrev=False)
     p.add_argument("--yes", action="store_true")
-    p.add_argument("--token", required=True, help="WS auth token the daemon will require")
+    p.add_argument("--token-file", type=Path, help="file holding the WS token (or set HAH_TOKEN)")
+    p.add_argument("--rf-slot", type=int, default=None, help="enable the real radio, remote at HID++ slot N")
+    p.add_argument("--expect-md5", required=True, help="md5 of the local hub build; arm only if the device matches")
+    p.add_argument("--keep-lua", action="store_true", help="do not stop luaworks/luadraws at boot")
     p.add_argument("--hub-port", type=int, default=8099, help="daemon WS port (default %(default)s)")
     p.add_argument("--hub-id", default=None)
+    p = sub.add_parser("disarm", help="[WRITE] remove only the marker; next boot is pure stock")
+    p.add_argument("--yes", action="store_true")
     p = sub.add_parser("uninstall", help="[WRITE] disarm and remove the hook")
     p.add_argument("--yes", action="store_true")
     p.add_argument("--purge", action="store_true", help="also remove hub.conf and the boot log")
     return ap
+
+
+def read_token(path: Path | None) -> str:
+    """Token from a file or HAH_TOKEN, never from argv (visible in `ps` and shell history)."""
+    try:
+        tok = path.read_text().strip() if path else os.environ.get("HAH_TOKEN", "").strip()
+    except OSError as e:
+        raise InstallError(f"cannot read token file: {e.strerror}") from e
+    if not tok:
+        raise InstallError("no token: pass --token-file F or set HAH_TOKEN")
+    return tok
 
 
 def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
@@ -300,7 +376,16 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
             case "status":
                 return inst.status()
             case "install":
-                return inst.install(a.token, a.hub_port, a.hub_id)
+                return inst.install(
+                    read_token(a.token_file),
+                    a.hub_port,
+                    a.hub_id,
+                    rf_slot=a.rf_slot,
+                    expect_md5=a.expect_md5,
+                    stop_lua=not a.keep_lua,
+                )
+            case "disarm":
+                return inst.disarm()
             case "uninstall":
                 return inst.uninstall(a.purge)
     except InstallError as e:

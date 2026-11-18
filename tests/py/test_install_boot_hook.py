@@ -7,6 +7,7 @@ a hub that still boots stock.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -24,13 +25,17 @@ echo 1 > /proc/sys/vm/overcommit_memory
 """
 
 
+DAEMON_BYTES = b"\x7fELF-ish"
+DAEMON_MD5 = hashlib.md5(DAEMON_BYTES).hexdigest()
+
+
 class FakeHub:
     """A filesystem-ish fake: records every argv, serves cat/test/mv/chmod/rm and `sh -n`."""
 
     def __init__(self, *, files: dict[str, bytes] | None = None, syntax_bad: set[str] | None = None):
         self.files: dict[str, bytes] = {
             ibh.RCS_LOCAL: STOCK_RCS_LOCAL,
-            ibh.DAEMON: b"\x7fELF-ish",
+            ibh.DAEMON: DAEMON_BYTES,
         }
         if files is not None:
             self.files = dict(files)
@@ -44,6 +49,11 @@ class FakeHub:
         if argv[:1] == ["cat"]:
             p = argv[1]
             return (0, self.files[p], b"") if p in self.files else (1, b"", b"No such file")
+        if argv[:1] == ["md5sum"]:
+            p = argv[1]
+            if p not in self.files:
+                return (1, b"", b"No such file")
+            return (0, f"{hashlib.md5(self.files[p]).hexdigest()}  {p}\n".encode(), b"")
         if argv[:2] == ["test", "-e"]:
             return (0 if argv[2] in self.files else 1, b"", b"")
         if argv[:2] == ["test", "-x"]:
@@ -98,12 +108,18 @@ class FakeHub:
         return 0
 
 
+@pytest.fixture(autouse=True)
+def _token_env(monkeypatch) -> None:
+    monkeypatch.setenv("HAH_TOKEN", "s3cr3t-token-value")
+
+
 @pytest.fixture
 def hub() -> FakeHub:
     return FakeHub()
 
 
 def install(hub: FakeHub, **kw) -> int:
+    kw.setdefault("expect_md5", DAEMON_MD5)
     return ibh.HookInstaller(hub).install(kw.pop("token", "tok"), kw.pop("port", 8099), kw.pop("hub_id", None), **kw)
 
 
@@ -126,9 +142,9 @@ def test_never_touches_anything_outside_its_remit(action: str) -> None:
     hub = FakeHub()
     inst = ibh.HookInstaller(hub)
     if action == "install":
-        inst.install("tok", 8099, None)
+        inst.install("tok", 8099, None, expect_md5=DAEMON_MD5)
     elif action == "uninstall":
-        inst.install("tok", 8099, None)
+        inst.install("tok", 8099, None, expect_md5=DAEMON_MD5)
         inst.uninstall()
     else:
         inst.status()
@@ -141,7 +157,7 @@ def test_never_touches_anything_outside_its_remit(action: str) -> None:
 def test_uses_no_applet_the_hub_lacks(hub: FakeHub) -> None:
     """The hub's BusyBox 1.13.4 has no head/find/awk/timeout/df/dd/wc/readlink."""
     inst = ibh.HookInstaller(hub)
-    inst.install("tok", 8099, None)
+    inst.install("tok", 8099, None, expect_md5=DAEMON_MD5)
     inst.uninstall()
     inst.status()
     missing = (
@@ -220,7 +236,7 @@ def test_removes_the_hook_when_it_does_not_parse_on_device() -> None:
 
 
 def test_refuses_without_rcs_local() -> None:
-    hub = FakeHub(files={ibh.DAEMON: b"x"})
+    hub = FakeHub(files={ibh.DAEMON: DAEMON_BYTES})
     with pytest.raises(ibh.InstallError, match="not the expected stock firmware"):
         install(hub)
 
@@ -243,7 +259,7 @@ def test_there_is_no_way_to_install_without_a_daemon(capsys) -> None:
     real rehearsal (run on hardware 2026-11-17) used a daemon that is present but exits 1.
     """
     with pytest.raises(SystemExit):
-        ibh.main(["install", "--yes", "--token", "t", "--allow-missing-daemon"], runner=FakeHub())
+        ibh.main(["install", "--yes", "--expect-md5", DAEMON_MD5, "--allow-missing-daemon"], runner=FakeHub())
     assert "unrecognized arguments" in capsys.readouterr().err
 
 
@@ -326,7 +342,7 @@ def test_write_verifies_content_and_raises_on_mismatch(hub: FakeHub) -> None:
 
 @pytest.mark.parametrize("cmd", ["install", "uninstall"])
 def test_write_commands_require_yes(cmd: str, capsys) -> None:
-    args = [cmd] + (["--token", "t"] if cmd == "install" else [])
+    args = [cmd] + (["--expect-md5", DAEMON_MD5] if cmd == "install" else [])
     assert ibh.main(args, runner=FakeHub()) == 2
     assert "--yes" in capsys.readouterr().err
 
@@ -339,7 +355,7 @@ def test_status_needs_no_yes_and_reports_disarmed(capsys) -> None:
 
 def test_status_reports_armed_after_install(capsys) -> None:
     hub = FakeHub()
-    assert ibh.main(["install", "--yes", "--token", "t"], runner=hub) == 0
+    assert ibh.main(["install", "--yes", "--expect-md5", DAEMON_MD5], runner=hub) == 0
     capsys.readouterr()
     assert ibh.main(["status"], runner=hub) == 0
     out = capsys.readouterr().out
@@ -348,5 +364,92 @@ def test_status_reports_armed_after_install(capsys) -> None:
 
 def test_errors_exit_nonzero(capsys) -> None:
     hub = FakeHub(syntax_bad={ibh.RCS_LOCAL})
-    assert ibh.main(["install", "--yes", "--token", "t"], runner=hub) == 1
+    assert ibh.main(["install", "--yes", "--expect-md5", DAEMON_MD5], runner=hub) == 1
     assert "ERROR" in capsys.readouterr().err
+
+
+# --- T3: md5 gate, token handling, disarm, status, rf keys -----------------------
+
+
+def test_install_refuses_on_md5_mismatch_and_writes_nothing(hub: FakeHub) -> None:
+    with pytest.raises(ibh.InstallError, match="md5"):
+        install(hub, expect_md5="0" * 32)
+    assert hub.files[ibh.RCS_LOCAL] == STOCK_RCS_LOCAL
+    assert ibh.MARKER not in hub.files and ibh.CONF not in hub.files
+    assert not any(c[0] in ("mv", "rm") or c[:2] == ["sh", "-c"] for c in hub.log)
+
+
+def test_expect_md5_is_mandatory(hub: FakeHub) -> None:
+    with pytest.raises(ibh.InstallError, match="expect-md5"):
+        ibh.HookInstaller(hub).install("tok", 8099, None)
+
+
+def test_rf_slot_lands_in_conf(hub: FakeHub) -> None:
+    install(hub, rf_slot=2)
+    conf = hub.files[ibh.CONF].decode()
+    assert "rf=spi\nrf_slot=2\n" in conf
+    with pytest.raises(ibh.InstallError):
+        install(FakeHub(), rf_slot=16)
+
+
+def test_keep_lua_writes_the_switch(hub: FakeHub) -> None:
+    install(hub, stop_lua=False)
+    assert "stop_lua=0\n" in hub.files[ibh.CONF].decode()
+
+
+def test_token_never_in_commands_stdout_or_status(hub: FakeHub, tmp_path, capsys) -> None:
+    secret = "TOP-SECRET-TOKEN-9"
+    tf = tmp_path / "tok"
+    tf.write_text(secret + "\n")
+    args = ["install", "--yes", "--expect-md5", DAEMON_MD5, "--token-file", str(tf), "--rf-slot", "2"]
+    assert ibh.main(args, runner=hub) == 0
+    assert ibh.main(["status"], runner=hub) == 0
+    cap = capsys.readouterr()
+    assert secret not in cap.out + cap.err
+    assert "token=<redacted>" in cap.out
+    assert not any(secret in " ".join(c) for c in hub.log), "token leaked into a command line"
+    assert secret in hub.files[ibh.CONF].decode()  # it does reach the (600) conf, via stdin
+
+
+def test_token_comes_from_env_or_file_never_argv(capsys) -> None:
+    with pytest.raises(SystemExit):
+        ibh.main(["install", "--yes", "--token", "x", "--expect-md5", DAEMON_MD5], runner=FakeHub())
+    assert "unrecognized arguments" in capsys.readouterr().err
+
+
+def test_no_token_anywhere_is_refused(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("HAH_TOKEN")
+    hub = FakeHub()
+    assert ibh.main(["install", "--yes", "--expect-md5", DAEMON_MD5], runner=hub) == 1
+    assert ibh.CONF not in hub.files
+
+
+def test_disarm_touches_only_the_marker(hub: FakeHub, capsys) -> None:
+    install(hub)
+    before = dict(hub.files)
+    hub.log.clear()
+    assert ibh.main(["disarm", "--yes"], runner=hub) == 0
+    assert ibh.MARKER not in hub.files
+    assert {k: v for k, v in hub.files.items()} == {k: v for k, v in before.items() if k != ibh.MARKER}
+    writes = [c for c in hub.log if c[0] in ("rm", "mv", "chmod", "mkdir") or c[:2] == ["sh", "-c"]]
+    assert writes == [["rm", "-f", ibh.MARKER]]
+
+
+def test_disarm_needs_yes_and_is_idempotent(hub: FakeHub, capsys) -> None:
+    assert ibh.main(["disarm"], runner=hub) == 2
+    assert ibh.main(["disarm", "--yes"], runner=hub) == 0
+    assert "already" in capsys.readouterr().out
+
+
+def test_status_reports_md5_counter_and_both_log_tails(hub: FakeHub, capsys) -> None:
+    install(hub)
+    hub.files[ibh.COUNTER] = b"2\n"
+    hub.files[ibh.LOG] = b"\n".join(f"hook{i}".encode() for i in range(20))
+    hub.files[ibh.DAEMON_LOG] = b"daemon says hi\n"
+    assert ibh.main(["status"], runner=hub) == 0
+    out = capsys.readouterr().out
+    assert DAEMON_MD5 in out
+    assert "strike counter: 2" in out
+    assert "hook19" in out and "hook0\n" not in out
+    assert "daemon says hi" in out
+    assert not any(c[0] in ("tail", "head", "wc") for c in hub.log)
