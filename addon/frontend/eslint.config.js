@@ -13,7 +13,7 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
-          // `style=${styleMap(..)}` (unquoted) is the one allowed form; quoted or static style attributes are not.
+          // `style=${setStyle(..)}` (unquoted) is the one allowed form; quoted or static style attributes are not.
           selector: `TaggedTemplateExpression[tag.name="html"] TemplateElement[value.raw=/\\sstyle\\s*=\\s*["']/]`,
           message: 'No style="..." attributes: use Lit static styles or styleMap (CSP).',
         },
@@ -28,7 +28,12 @@ export default tseslint.config(
       ],
       'no-restricted-imports': [
         'error',
-        { patterns: [{ group: ['**/unsafe-html*', '**/unsafe-svg*'], message: 'No unsafeHTML/unsafeSVG.' }] },
+        {
+          patterns: [
+            { group: ['**/unsafe-html*', '**/unsafe-svg*'], message: 'No unsafeHTML/unsafeSVG.' },
+            { group: ['**/style-map*'], message: 'styleMap sets a style attribute on first render, which the CSP blocks. Use setStyle.' },
+          ],
+        },
       ],
     },
   },

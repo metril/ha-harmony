@@ -41,7 +41,8 @@ JSON_TYPES = {"application/json"}
 YAML_TYPES = {"text/yaml", "application/yaml"}
 CSP = (
     "default-src 'none'; base-uri 'none'; form-action 'none'; "
-    "frame-ancestors 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"
+    "frame-ancestors 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+    "connect-src 'self'"
 )
 CSRF_HEADER = "X-HH-CSRF"
 

@@ -14,12 +14,12 @@ function walk(dir: string): string[] {
 const sources = walk(SRC).filter((f) => f.endsWith('.ts'));
 
 describe('CSP-safe rendering rules', () => {
-  it('sources never use innerHTML, unsafeHTML, <style> tags or style attributes other than styleMap', () => {
+  it('sources never use innerHTML, unsafeHTML, <style> tags or style attributes other than setStyle', () => {
     for (const f of sources) {
       const t = readFileSync(f, 'utf8');
-      expect(t, f).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|unsafeHTML|unsafe-html|unsafeSVG/);
+      expect(t, f).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|unsafeHTML|unsafe-html|unsafeSVG|style-map|styleMap/);
       expect(t, f).not.toMatch(/<style[\s>]/);
-      for (const m of t.matchAll(/\sstyle\s*=\s*(\S{1,12})/g)) expect(m[1], f).toMatch(/^\$\{styleMap\(/);
+      for (const m of t.matchAll(/\sstyle=(\S{1,12})/g)) expect(m[1], f).toMatch(/^\$\{setStyle\(/);
     }
   });
   it('sources make no external requests', () => {

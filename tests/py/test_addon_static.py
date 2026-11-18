@@ -36,7 +36,10 @@ async def test_index_and_assets_with_cache_and_security_headers(ui):
     body = await r.text()
     assert r.status == 200 and r.content_type == "text/html" and "<hh-app>" in body
     assert r.headers["Cache-Control"] == "no-cache"
-    assert "script-src 'self'" in r.headers["Content-Security-Policy"]
+    csp = r.headers["Content-Security-Policy"]
+    assert "script-src 'self'" in csp and "style-src 'self'" in csp
+    assert "connect-src 'self'" in csp  # without it default-src 'none' blocks the UI's own fetch()
+    assert "unsafe" not in csp and "default-src 'none'" in csp
     assert r.headers["X-Content-Type-Options"] == "nosniff"
     for path, ctype in (("/assets/app-abc.js", "javascript"), ("/assets/app-abc.css", "text/css")):
         r = await ui.get(path)

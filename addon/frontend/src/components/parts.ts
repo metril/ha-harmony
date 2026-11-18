@@ -1,6 +1,6 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { classMap } from 'lit/directives/class-map.js';
-import { styleMap } from 'lit/directives/style-map.js';
+import { setStyle } from '../lib/set-style';
 import type { Store } from '../lib/store';
 import { LIMITS, counts } from '../lib/model';
 
@@ -10,7 +10,7 @@ export function meter(label: string, text: string, value: number, max: number): 
   const level = ratio >= 1 ? 'full' : ratio >= 0.8 ? 'warn' : '';
   return html`<div class="meter" role="group" aria-label="${label}: ${text}">
     <span><b>${label}</b> ${text}</span>
-    <div class="bar"><i class=${classMap({ warn: level === 'warn', full: level === 'full' })} style=${styleMap({ width: `${pct}%` })}></i></div>
+    <div class="bar"><i class=${classMap({ warn: level === 'warn', full: level === 'full' })} style=${setStyle({ width: `${pct}%` })}></i></div>
   </div>`;
 }
 
