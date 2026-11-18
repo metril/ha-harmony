@@ -621,3 +621,20 @@ async def test_ack_client_sends_only_bounded_fields(aiohttp_server):
         set(seen["body"]) == {"hub", "rev", "result", "detail"}
         and len(seen["body"]["detail"]) == 200
     )
+
+
+async def test_send_ir_selects_the_hub_by_its_id_as_the_add_on_sends_it(hass, fake_hub):
+    hub = await fake_hub(hub_handler([]))
+    entry = make_entry("127.0.0.1", hub.port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    bad = {"proto": "nec", "addr": 999, "cmd": 1}
+    with pytest.raises(ServiceValidationError, match="Invalid IR action"):  # entry was found
+        await hass.services.async_call(
+            const.DOMAIN, "send_ir", {"config_entry": HUB_ID, "ir": bad}, blocking=True
+        )
+    with pytest.raises(ServiceValidationError, match="No loaded ha_harmony entry"):
+        await hass.services.async_call(
+            const.DOMAIN, "send_ir", {"config_entry": "other-hub", "ir": bad}, blocking=True
+        )
+    await hass.config_entries.async_unload(entry.entry_id)
