@@ -183,8 +183,11 @@ steps still waiting. HA steps and IR steps of one list are not interleaved: IR s
 
 Each remote announces its page format (`remote_info`). After a link-up the integration waits up to 1.5 s for
 it: nothing arrives -> page format v1; `page_fmt` 2 -> v2. A later `remote_info` with another format re-pushes
-in that format. The hub's first `remote_info` after each link-up re-pushes the whole set (the remote may have
-rebooted), but one link-up causes one push. Pages go out one at a time (each command result is the
+in that format. The hub's first `remote_info` after each link-up is looked at again (the remote may have
+rebooted): it also reports the generation (`gen`) and page count (`pages`) of the set the remote holds, and when
+format, `gen` and `pages` equal what would be sent nothing is pushed (only tile values that changed meanwhile);
+otherwise the whole set is. So a Home Assistant restart, a websocket reconnect or a reload does not resend pages the remote
+already has, and one link-up causes at most one push. Pages are only pushed for a config the hub has accepted. Pages go out one at a time (each command result is the
 backpressure); a newer config cancels the running push and the new set starts only after it has stopped.
 The *Remote N page format* diagnostic sensor shows `unknown` / `v1` / `v2` with the capabilities. For a remote
 with the `tile_state` capability a tile also carries a state (on / off / unavailable / value) and a short

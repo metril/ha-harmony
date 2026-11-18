@@ -376,3 +376,63 @@ async def test_activity_change_writes_the_activity_entities_only(hass, rig, cloc
     await hub.push("state_update", {"activity": 1, "power": True})
     await settle(hass, lambda: writes)
     assert sorted(writes) == ["remote.harmony_hub_sim_hub", "select.harmony_hub_sim_hub_activity"]
+
+
+# 9: the remote's reported store decides whether pages are sent
+def _held(yaml=YAML, **over):
+    """remote_info of a v2 remote that holds exactly the set this config compiles to."""
+    import json
+
+    from custom_components.ha_harmony.addon_link import compile_source
+    from harmony_core.config_model import load_source
+
+    c = compile_source(json.loads(json.dumps(load_source(yaml))), "sim-hub")
+    return {**V2_INFO, "gen": c.gen, "pages": len(c.pages_v2), **over}
+
+
+async def test_a_remote_that_holds_the_set_gets_no_pages_on_setup_or_reconnect(hass, rig, clock):
+    hub, c = await rig(info=_held, pages=False)
+    await settle(hass, lambda: c.links[1].pushed is not None)
+    await asyncio.sleep(0.2)
+    await settle(hass)
+    assert hub.pages() == [] and c.config_pushes == 1
+    # the HA<->hub websocket drops and comes back: the hub resends the remote's info, nothing more
+    await hub.ws.close()
+    await settle(hass, lambda: c.available is False)
+    await settle(hass, lambda: c.available and c.links[1].info is not None)
+    await asyncio.sleep(0.3)
+    await settle(hass)
+    assert hub.pages() == [] and c.config_pushes == 1
+    assert c.links[1].pushed is not None
+
+
+async def test_a_remote_with_another_set_or_fewer_pages_is_pushed_to(hass, rig, clock):
+    hub, c = await rig(info=lambda y: _held(y, gen=(_held(y)["gen"] + 1) % 256), pages=False)
+    n = len(c.compiled.pages_v2)
+    await settle(hass, lambda: len(hub.pages()) >= n)  # another generation: the whole set
+    assert len(hub.pages()) == n
+    hub.got.clear()
+    await hub.push("remote_attached", {})
+    await hub.push("remote_info", {**_held(), "pages": n - 1})  # incomplete store
+    await settle(hass, lambda: len(hub.pages()) >= n)
+    await asyncio.sleep(0.1)
+    assert len(hub.pages()) == n
+    hub.got.clear()
+    await hub.push("remote_attached", {})
+    await hub.push("remote_info", _held())  # complete and current: nothing
+    await settle(hass)
+    await asyncio.sleep(0.2)
+    await settle(hass)
+    assert hub.pages() == []
+
+
+async def test_flapping_ws_link_pushes_nothing_per_reconnect(hass, rig, clock):
+    hub, c = await rig(info=_held, pages=False)
+    await settle(hass, lambda: c.links[1].pushed is not None)
+    for _ in range(4):
+        await hub.ws.close()
+        await settle(hass, lambda: c.available is False)
+        await settle(hass, lambda: c.available)
+    await asyncio.sleep(0.3)
+    await settle(hass)
+    assert hub.pages() == [] and c.config_pushes == 1  # bounded work per reconnect: a hello and a resync

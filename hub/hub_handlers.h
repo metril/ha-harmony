@@ -46,7 +46,7 @@
  *                                   tile_update (state ignored). Both share one held-message key. Replies like
  *                                   page_push (command_result ok / error no_remote | rf_error | too_big).
  *   remote_info   -> from RF: cached per remote (cleared when the RF link is lost) and broadcast on ws
- *                     {remote,page_fmt,caps,icons} when new or changed, and for the first one after a link-up even if identical; resent to every client right after
+ *                     {remote,page_fmt,caps,icons,gen,pages} when new or changed, and for the first one after a link-up even if identical; resent to every client right after
  *                     hello_ack (hub_send_state). Unknown RF message types are still dropped.
  *   hello_ack      -> also config_hash (8 lowercase hex chars, CRC-32 of the loaded config text;
  *                     omitted when no config is loaded).
@@ -94,6 +94,7 @@ typedef struct {
 typedef struct {
     bool valid;
     uint8_t remote, page_fmt, caps, icons;
+    uint8_t gen, pages; /* the v2 page set the remote holds: its generation and how many pages (0/0 none) */
 } hub_info_t;
 #define HUB_CAP_TILE_STATE 1 /* caps bit 0 */
 #define HUB_CAP_PAGE_STORE 2 /* caps bit 1 */

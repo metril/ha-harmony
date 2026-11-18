@@ -126,14 +126,25 @@ static int rf_send_key(void *ctx, uint8_t code, uint8_t action) {
   return rc;
 }
 
+static void store_view(const rf_link_t *l, uint8_t *gen, uint8_t *pages) {
+  bool have = l->store && l->store->have_gen && hp_store_count(l->store) > 0;
+  *gen = have ? l->store->gen : 0;
+  *pages = have ? (uint8_t)hp_store_count(l->store) : 0;
+}
+
 static void send_info(rf_link_t *l, uint64_t now) {
-  hp_rf_val_t v[4] = {{.u = l->remote}, {.u = RF_LINK_PAGE_FMT}, {.u = RF_LINK_CAPS}, {.u = RA_ICON_MAX}};
-  if (send_msg(l, HP_MSG_REMOTE_INFO, v, 4, now) < 0) {
+  uint8_t gen, pages;
+  store_view(l, &gen, &pages);
+  hp_rf_val_t v[6] = {{.u = l->remote}, {.u = RF_LINK_PAGE_FMT}, {.u = RF_LINK_CAPS}, {.u = RA_ICON_MAX},
+                      {.u = gen}, {.u = pages}};
+  if (send_msg(l, HP_MSG_REMOTE_INFO, v, 6, now) < 0) {
     l->next_info_ms = now + RF_LINK_RETRY_MS;
     return;
   }
   l->info_pending = false;
   l->info_sent_ms = now;
+  l->told_gen = gen;
+  l->told_pages = pages;
 }
 
 static void heartbeat(rf_link_t *l, uint64_t now) {
@@ -178,6 +189,14 @@ static void service(rf_link_t *l, uint64_t now) {
   }
   if (!att && l->was_attached) l->lost = true;
   l->was_attached = att;
+  if (l->store && !l->info_pending) { /* a finished (or emptied) page store the hub was not told about */
+    uint8_t gen, pages;
+    store_view(l, &gen, &pages);
+    if ((gen != l->told_gen || pages != l->told_pages) && (pages == 0 || hp_store_complete(l->store))) {
+      l->info_pending = true;
+      l->next_info_ms = now;
+    }
+  }
   if (l->info_pending && now >= l->next_info_ms) send_info(l, now); /* first uplink after a link-up */
   if (now >= l->next_batt_ms) {
     heartbeat(l, now);
@@ -254,6 +273,8 @@ int rf_link_open(rf_link_t *l, const hp_rf_spi_cfg_t *cfg) {
   l->dead_reported = false;
   return 0;
 }
+
+void rf_link_set_store(rf_link_t *l, const hp_store_t *store) { l->store = store; }
 
 void rf_link_close(rf_link_t *l) {
   if (!l->tp) return;

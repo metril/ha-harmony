@@ -27,6 +27,8 @@
  *   --info CAPS      (opt-in) first announce remote_info {remote, page_fmt 2, caps CAPS (default 3: tile_state +
  *                    page store), icons 50} the way the real remote does after link-up, then do the mode. The
  *                    hub caches it and relays it on ws; tile_update commands then arrive as tile_state.
+ *   --stored GEN,PAGES  with --info: the remote_info `gen` / `pages` fields, i.e. the v2 page set this simulated
+ *                    remote claims to hold (default 0,0 = none). The sim keeps no store of its own.
  *   --tap X,Y        As --dump-layout, then hit-test pixel X,Y (0..239, 0..319)
  *                    on that page. Button/tile hit: send key_event press then
  *                    release with key 128 + widget id, print {"hit":true,"id":N,
@@ -59,7 +61,7 @@
 
 static int usage(void) {
     fprintf(stderr, "usage: remote_sim --rf PATH (--press KEY | --hold KEY,MS | --dump-page | --dump-layout | --tap X,Y) "
-                    "[--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N] [--hold-interval-ms N] [--info CAPS]\n"
+                    "[--remote ID] [--action 0|1|2] [--timeout-ms N] [--settle-ms N] [--hold-interval-ms N] [--info CAPS] [--stored GEN,PAGES]\n"
                     "KEY is a key name (VolumeUp or volume_up; keys: in proto/schema.yaml) or a logical code 0..255\n");
     return 2;
 }
@@ -134,11 +136,14 @@ static int send_key(long remote, long key, long action) {
 }
 
 /* remote_info, as the real remote sends it after link-up. 0 ok, 1 on failure. */
+static long g_stored_gen, g_stored_pages; /* --stored */
+
 static int send_info(long remote, long caps) {
-    hp_rf_val_t v[4] = {{.u = (uint32_t)remote}, {.u = 2}, {.u = (uint32_t)caps}, {.u = 50}};
+    hp_rf_val_t v[6] = {{.u = (uint32_t)remote}, {.u = 2}, {.u = (uint32_t)caps}, {.u = 50},
+                        {.u = (uint32_t)g_stored_gen}, {.u = (uint32_t)g_stored_pages}};
     uint8_t payload[HP_RF_MSG_MAX];
     size_t plen = 0;
-    if (hp_rf_pack(HP_MSG_REMOTE_INFO, v, 4, payload, sizeof payload, &plen) < 0) return 1;
+    if (hp_rf_pack(HP_MSG_REMOTE_INFO, v, 6, payload, sizeof payload, &plen) < 0) return 1;
     uint32_t fails = hp_rf_link_status(&g_link).failures;
     if (hp_rf_link_send(&g_link, HP_MSG_REMOTE_INFO, payload, plen, (uint32_t)now_ms()) < 0) return 1;
     while (hp_rf_link_status(&g_link).queued) {
@@ -384,6 +389,13 @@ int main(int argc, char **argv) {
             *comma = 0;
             if (hp_parse_num(buf, 0, HP_PAGE_SCREEN_W - 1, &tx) || hp_parse_num(comma + 1, 0, HP_PAGE_SCREEN_H - 1, &ty)) return usage();
             do_tap = 1;
+        }
+        else if (!strcmp(argv[i], "--stored") && more) {
+            char buf[32], *comma;
+            snprintf(buf, sizeof buf, "%s", argv[++i]);
+            if (!(comma = strchr(buf, ',')) || strlen(argv[i]) >= sizeof buf) return usage();
+            *comma = 0;
+            if (hp_parse_num(buf, 0, 255, &g_stored_gen) || hp_parse_num(comma + 1, 0, 255, &g_stored_pages)) return usage();
         }
         else if (!strcmp(argv[i], "--info") && more) { if (hp_parse_num(argv[++i], 0, 255, &caps)) return usage(); info = 1; }
         else if (!strcmp(argv[i], "--dump-layout")) layout = 1;

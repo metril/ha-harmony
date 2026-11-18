@@ -61,11 +61,15 @@ default, icon 0) and `version=1`; renderers apply the two old guesses only when 
 `page_codec.page_to_dict()` is the JSON contract the TypeScript renderer mirrors.
 
 Handshake: new message `remote_info` (code 18, transport both):
-`{remote u8, page_fmt u8 (=2), caps u8 (bit 0 tile_state, bit 1 page store/paging), icons u8 (highest stock id known)}`.
+`{remote u8, page_fmt u8 (=2), caps u8 (bit 0 tile_state, bit 1 page store/paging), icons u8 (highest stock id known), gen u8, pages u8}`
+(`gen` = generation of the v2 set the remote's page store holds, `pages` = how many pages of it it holds; both 0 when the store is empty).
 The remote sends it as its first uplink after each link-up. The hub caches it, broadcasts it on ws
 and resends it to each client right after `hello_ack`. On `remote_attached`, HA waits up to 1.5 s
 for `remote_info`: none → v1 pages; `page_fmt>=2` → v2. A later `remote_info` with a different
-format triggers a re-push. HA never sends v2 without `page_fmt>=2`; a v1 remote that gets a v2 page
+format triggers a re-push. After a (re)link the integration sends nothing when the reported format, `gen` and
+`pages` equal the set it would send (and the hub has accepted that config); otherwise it pushes the whole set. The remote
+announces again (one message) when its store becomes complete or empty and differs from what it last said, so the hub's
+cache, and a client that reconnects, see the truth. HA never sends v2 without `page_fmt>=2`; a v1 remote that gets a v2 page
 anyway rejects it at the version byte.
 
 Budget: a plain widget costs 5 bytes as in v1. 32 plain widgets: 11+160 = 171 (80 left for title and

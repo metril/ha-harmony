@@ -117,6 +117,8 @@ class RemoteInfo:
     page_fmt: int
     caps: int
     icons: int
+    gen: int = 0  # generation of the v2 page set the remote holds (0 and pages 0: none)
+    pages: int = 0  # how many pages of it
 
 
 @dataclass
@@ -647,6 +649,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         want = (self._cfg_gen, link.page_fmt, link.epoch)
         if not force and link.pushed == want:
             return
+        if not force and self._remote_holds_set(link):
+            # the remote kept its page store (a HA<->hub reconnect, a hub restart): nothing to send
+            # but the tile values that changed meanwhile
+            link.pushed, link.pending = want, False
+            await self._send_tiles({t.entity_id for t in self.compiled.tiles}, (remote,))
+            return
         link.inflight = want
         try:
             if await self._push_set(remote, link, want[1]):
@@ -654,6 +662,17 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 await self._send_all_tiles(remote)
         finally:
             link.inflight = None
+
+    def _remote_holds_set(self, link: RemoteLink) -> bool:
+        """The remote reported exactly the v2 set we would send: same format, generation and count."""
+        c, info = self.compiled, link.info
+        return (
+            info is not None
+            and link.page_fmt == 2
+            and bool(c.pages_v2)
+            and info.gen == c.gen
+            and info.pages == len(c.pages_v2)
+        )
 
     async def _wait_info(self, link: RemoteLink) -> None:
         """Up to INFO_WAIT seconds for the remote's `remote_info`; never blocks the loop."""
@@ -707,7 +726,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def _on_remote_info(self, data: dict[str, Any]) -> None:
         remote = data["remote"]
         link = self._rlink(remote)
-        new = RemoteInfo(data["page_fmt"], data["caps"], data["icons"])
+        new = RemoteInfo(data["page_fmt"], data["caps"], data["icons"], data["gen"], data["pages"])
         changed = link.info != new
         link.info, link.attached = new, True
         link.info_event.set()

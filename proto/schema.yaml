@@ -128,7 +128,9 @@ messages:
 
   # Page format handshake (docs/plans/2026-11-18-page-format-v2.md): the remote's first uplink after
   # each link-up; the hub caches it and relays it on ws. page_fmt 2 = understands v2 pages; caps bit 0
-  # tile_state, bit 1 page store/paging; icons = highest stock icon id the remote's font knows.
+  # tile_state, bit 1 page store/paging; icons = highest stock icon id the remote's font knows;
+  # gen / pages = the generation of the v2 page set the remote holds and how many of its pages it holds
+  # (0 / 0 when none), so a client can skip a push that would change nothing.
   - name: remote_info
     code: 18
     transport: both
@@ -137,6 +139,8 @@ messages:
       - {name: page_fmt, type: u8}
       - {name: caps, type: u8}
       - {name: icons, type: u8}
+      - {name: gen, type: u8}
+      - {name: pages, type: u8}
 
   # tile_update plus a state: 0 value-only, 1 off, 2 on, 3 unavailable. Sent by a hub that knows the
   # remote has caps bit 0; older remotes only ever see tile_update.

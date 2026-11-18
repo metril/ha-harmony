@@ -66,12 +66,12 @@ async def test_remote_info_is_broadcast_cached_and_resent(hub_rf, start_remote):
         msgs = [await recv(ws1, keep_attached=True) for _ in range(2)]
         assert [m["t"] for m in msgs] == ["remote_attached", "remote_info"]
         assert msgs[1]["id"] == 0
-        assert msgs[1]["d"] == {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50}
+        assert msgs[1]["d"] == {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50, "gen": 0, "pages": 0}
         # a client connecting later gets it right after hello_ack
         async with s.ws_connect(hub_rf.url) as ws2:
             between = await hello_collect(ws2)
             assert [m["t"] for m in between] == ["remote_info"]
-            assert between[0]["d"] == {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50}
+            assert between[0]["d"] == {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50, "gen": 0, "pages": 0}
         await push(ws1, RAW)
         code, _, _ = finish(r)
         assert code == 0

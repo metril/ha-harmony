@@ -130,3 +130,34 @@ async def test_hub_sends_a_command_repeats_times_and_ignores_it_when_absent(hub_
     assert read_lines(hub_rf, 3) == [ir_line(nec(4, 8))] * 3  # three full frames
     assert (await asyncio.to_thread(run_remote, hub_rf.rf, "--press", "VolumeDown")).returncode == 0
     assert read_lines(hub_rf, 1) == [ir_line(nec(4, 9))]  # no repeats key: one frame
+
+
+async def _compiled_set():
+    from test_ha_audit import _held
+
+    held = _held()
+    return held["gen"], held["pages"]
+
+
+async def test_remote_that_holds_the_set_is_sent_no_pages(hass, hub_rf, fake_addon, built_binaries):
+    gen, pages = await _compiled_set()
+    entry = await setup(hass, hub_rf, fake_addon)
+    r = remote(
+        built_binaries, hub_rf.rf, "--info", "3", "--stored", f"{gen},{pages}",
+        "--dump-page", "--timeout-ms", "2500",
+    )  # fmt: skip
+    code, _out = await asyncio.to_thread(r.result)
+    assert code == 3  # remote_sim: timed out waiting for a page_push
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_remote_holding_another_set_gets_the_pages(hass, hub_rf, fake_addon, built_binaries):
+    gen, pages = await _compiled_set()
+    entry = await setup(hass, hub_rf, fake_addon)
+    r = remote(
+        built_binaries, hub_rf.rf, "--info", "3", "--stored", f"{(gen + 1) % 256},{pages}",
+        "--dump-page", "--timeout-ms", "5000",
+    )  # fmt: skip
+    code, out = await asyncio.to_thread(r.result)
+    assert code == 0 and json.loads(out)["data"]
+    await hass.config_entries.async_unload(entry.entry_id)

@@ -76,8 +76,8 @@ THREE_PAGES = YAML + "".join(
 """
     for i in range(2)
 )
-V2_INFO = {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50}
-V1_INFO = {"remote": 1, "page_fmt": 1, "caps": 0, "icons": 0}
+V2_INFO = {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50, "gen": 0, "pages": 0}  # empty store
+V1_INFO = {"remote": 1, "page_fmt": 1, "caps": 0, "icons": 0, "gen": 0, "pages": 0}
 
 
 class ScriptHub:
@@ -91,6 +91,8 @@ class ScriptHub:
         self.gate: asyncio.Event | None = None  # while cleared, page_push replies wait
         self.no_remote = False
         self.reject_config = False  # answer set_config with ok=false
+        self.config_hash: str | None = None  # of the last accepted set_config, as hello_ack reports it
+        self.info: dict | None = None  # the remote's cached remote_info, resent after hello_ack
         self._late: list[asyncio.Task] = []
 
     async def handler(self, ws, env):
@@ -98,9 +100,12 @@ class ScriptHub:
         reply = {"v": 1, "id": env["id"]}
         t, d = env["t"], env["d"]
         if t == "hello":
-            await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": self.activities}}
-            )
+            ack = {"hub_id": HUB_ID, "activities": self.activities}
+            if self.config_hash:
+                ack["config_hash"] = self.config_hash
+            await ws.send_json({**reply, "t": "hello_ack", "d": ack})
+            if self.info is not None:  # the real hub resends it before the state it refers to
+                await self.push("remote_info", self.info)
             await self.push("state_update", dict(self.state))
             return
         self.got.append((t, d))
@@ -108,7 +113,8 @@ class ScriptHub:
             if self.reject_config:
                 ack = {"ok": False, "message": "too many keys"}
             else:  # the real hub reports the CRC-32 of the config it runs
-                ack = {"ok": True, "config_hash": config_hash(d["config"])}
+                self.config_hash = config_hash(d["config"])
+                ack = {"ok": True, "config_hash": self.config_hash}
             await ws.send_json({**reply, "t": "config_ack", "d": ack})
         elif t == "ping":
             await ws.send_json({**reply, "t": "pong", "d": {}})
@@ -186,8 +192,9 @@ async def rig(hass, fake_hub, fake_addon, clock):
     made = []
     hubs = []
 
-    async def _setup(yaml=YAML, activities=("TV", "Stream"), state=None):
+    async def _setup(yaml=YAML, activities=("TV", "Stream"), state=None, info=None, pages=True):
         hub = ScriptHub(activities, state)
+        hub.info = info(yaml) if callable(info) else info
         hubs.append(hub)
         server = await fake_hub(hub.handler)
         fake_addon.apply_yaml(yaml)
@@ -195,9 +202,12 @@ async def rig(hass, fake_hub, fake_addon, clock):
         entry.add_to_hass(hass)
         assert await hass.config_entries.async_setup(entry.entry_id)
         await settle(hass, lambda: any(t == "set_config" for t, _ in hub.got))
-        await settle(hass, clock.active)  # the start-up push waits for a remote_info
-        clock.elapse()
-        await settle(hass, lambda: len(hub.pages()) >= len(entry.runtime_data.compiled.pages))
+        if pages:
+            await settle(hass, clock.active)  # the start-up push waits for a remote_info
+            clock.elapse()
+            await settle(hass, lambda: len(hub.pages()) >= len(entry.runtime_data.compiled.pages))
+        else:
+            await settle(hass)
         made.append(entry)
         return hub, entry.runtime_data
 

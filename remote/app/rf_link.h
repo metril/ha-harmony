@@ -35,6 +35,7 @@
 #include "hub/io/rf_spi.h"
 #include "hub/rf/link.h"
 #include "remote/app/app.h"
+#include "remote/page/store.h"
 
 #define RF_LINK_REMOTE_ID 1 /* key_event.remote, as remote_sim's default */
 /* remote_info (docs/plans/2026-11-18-page-format-v2.md): page format 2, caps bit 0 tile_state + bit 1 page store,
@@ -58,6 +59,8 @@ typedef struct {
   uint32_t seen_failures, seen_rx;
   uint64_t next_batt_ms, next_info_ms, info_sent_ms;
   bool info_pending;
+  const hp_store_t *store; /* the page store reported in remote_info (gen, pages); NULL = none */
+  uint8_t told_gen, told_pages; /* what the last remote_info said about it */
   int last_pct;
   bool was_attached, lost, dead_reported;
 } rf_link_t;
@@ -69,6 +72,9 @@ void rf_link_init(rf_link_t *l, const ra_ops_t *ops, uint8_t remote_id);
 int rf_link_open(rf_link_t *l, const hp_rf_spi_cfg_t *cfg);
 /* Stops the reader and closes the device exactly once; idempotent. */
 void rf_link_close(rf_link_t *l);
+/* The page store whose generation and page count go into remote_info. A completed or emptied store that no
+ * longer matches what the hub was told is announced again (one message), so the hub's cache stays true. */
+void rf_link_set_store(rf_link_t *l, const hp_store_t *store);
 app_link_t rf_link_app(rf_link_t *l);
 
 #endif

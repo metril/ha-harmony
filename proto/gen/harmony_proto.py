@@ -57,7 +57,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'tile_update': (15, 'rf', (('remote', 'u8', False), ('page', 'u8', False), ('tile', 'u8', False), ('text', 'str', False), )),
     'activity_list': (16, 'ws', (('activities', 'json', False), ('config_hash', 'str', True), )),
     'remote_attached': (17, 'ws', ()),
-    'remote_info': (18, 'both', (('remote', 'u8', False), ('page_fmt', 'u8', False), ('caps', 'u8', False), ('icons', 'u8', False), )),
+    'remote_info': (18, 'both', (('remote', 'u8', False), ('page_fmt', 'u8', False), ('caps', 'u8', False), ('icons', 'u8', False), ('gen', 'u8', False), ('pages', 'u8', False), )),
     'tile_state': (19, 'rf', (('remote', 'u8', False), ('page', 'u8', False), ('tile', 'u8', False), ('state', 'u8', False), ('text', 'str', False), )),
 }
 

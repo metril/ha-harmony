@@ -93,19 +93,22 @@ static void test_tile_update(void) {
 }
 
 static void test_remote_info(void) {
-    hp_rf_val_t v[4] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}}, o[4];
+    hp_rf_val_t v[6] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}, {.u = 0xA7}, {.u = 12}}, o[6];
     uint8_t buf[HP_RF_MSG_MAX];
     size_t n = 0;
-    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 4, buf, sizeof buf, &n), 0);
-    const uint8_t want[] = {1, 2, 3, 50};
+    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 6, buf, sizeof buf, &n), 0);
+    const uint8_t want[] = {1, 2, 3, 50, 0xA7, 12}; /* ..., gen of the stored v2 set, its page count */
     CT_EQ(n, sizeof want);
     CT_MEM_EQ(buf, want, sizeof want);
-    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n, o, 4), 0);
+    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n, o, 6), 0);
     CT_EQ(o[1].u, 2);
     CT_EQ(o[3].u, 50);
-    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n - 1, o, 4), -HP_E_INVAL); /* truncated */
+    CT_EQ(o[4].u, 0xA7);
+    CT_EQ(o[5].u, 12);
+    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n - 1, o, 6), -HP_E_INVAL); /* truncated */
     buf[n] = 0;
-    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n + 1, o, 4), -HP_E_INVAL); /* trailing */
+    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n + 1, o, 6), -HP_E_INVAL); /* trailing */
+    CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, 4, o, 6), -HP_E_INVAL); /* the 4-field form is gone */
 }
 
 static void test_tile_state(void) {

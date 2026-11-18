@@ -114,6 +114,11 @@ class Compiled:
     def config_hash(self) -> str:
         return config_hash(self.hub_json)
 
+    @property
+    def gen(self) -> int:
+        """The generation byte of the v2 page set (0 when there are no pages)."""
+        return self.models[0].gen if self.models else 0
+
 
 def compact_json(obj: Any) -> str:
     """The text the hub reconstructs with cJSON_PrintUnformatted (and hashes)."""

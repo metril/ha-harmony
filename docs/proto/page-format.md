@@ -91,5 +91,5 @@ ids; labels and nav widgets take page-local ids, so v1 bytes differ from pre-v2 
 a label precedes a button.
 
 ## New messages
-`remote_info` (18, both): `{remote, page_fmt, caps, icons}`; `tile_state` (19, rf): `{remote, page, tile,
+`remote_info` (18, both): `{remote, page_fmt, caps, icons, gen, pages}` (`gen`/`pages`: the v2 set held in the page store, 0/0 when none); `tile_state` (19, rf): `{remote, page, tile,
 state, text}` with state 0 value-only, 1 off, 2 on, 3 unavailable. Code that predates them drops both.
