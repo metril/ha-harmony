@@ -25,6 +25,14 @@ def _fast_tiles(monkeypatch):
     monkeypatch.setattr(const, "TILE_DEBOUNCE", 0.05)
 
 
+@pytest.fixture
+def info_wait(monkeypatch):
+    """A remote that announces itself (`--info`) is a v2 remote only if its remote_info beats the
+    integration's wait; the short fast_client wait is for remotes that never send one, and loses
+    that race on a loaded machine. The wait ends as soon as the info arrives, so this costs nothing."""
+    monkeypatch.setattr(const, "INFO_WAIT", 5.0)
+
+
 async def until(hass, predicate, timeout=5.0):
     async with asyncio.timeout(timeout):
         while not predicate():
@@ -54,7 +62,9 @@ def remote(built_binaries, rf, *args):
     return r
 
 
-async def test_v2_remote_gets_v2_pages_and_tile_state(hass, hub_rf, fake_addon, built_binaries):
+async def test_v2_remote_gets_v2_pages_and_tile_state(
+    hass, hub_rf, fake_addon, built_binaries, info_wait
+):
     hass.states.async_set("light.a", "on")
     hass.states.async_set("sensor.t", "20.5", {"unit_of_measurement": "°C"})
     entry = await setup(hass, hub_rf, fake_addon)
@@ -141,7 +151,9 @@ async def _compiled_set():
     return held["gen"], held["pages"]
 
 
-async def test_remote_that_holds_the_set_is_sent_no_pages(hass, hub_rf, fake_addon, built_binaries):
+async def test_remote_that_holds_the_set_is_sent_no_pages(
+    hass, hub_rf, fake_addon, built_binaries, info_wait
+):
     gen, pages = await _compiled_set()
     entry = await setup(hass, hub_rf, fake_addon)
     r = remote(
@@ -153,7 +165,9 @@ async def test_remote_that_holds_the_set_is_sent_no_pages(hass, hub_rf, fake_add
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_remote_holding_another_set_gets_the_pages(hass, hub_rf, fake_addon, built_binaries):
+async def test_remote_holding_another_set_gets_the_pages(
+    hass, hub_rf, fake_addon, built_binaries, info_wait
+):
     gen, pages = await _compiled_set()
     entry = await setup(hass, hub_rf, fake_addon)
     r = remote(
