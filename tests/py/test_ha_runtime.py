@@ -224,7 +224,8 @@ async def rig(hass, fake_hub, fake_addon, clock):
 
     yield _setup
     for entry in made:
-        await hass.config_entries.async_unload(entry.entry_id)
+        if hass.config_entries.async_get_entry(entry.entry_id) is not None:  # a test may remove it
+            await hass.config_entries.async_unload(entry.entry_id)
     for hub in hubs:
         for t in hub._late:
             t.cancel()

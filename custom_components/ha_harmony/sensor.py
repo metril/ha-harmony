@@ -24,6 +24,8 @@ from .coordinator import (
 )
 from .entity_sync import setup_dynamic
 
+PARALLEL_UPDATES = 0  # push-based: commands go through the hub client, which pipelines them
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -43,7 +45,7 @@ async def async_setup_entry(
 
 class HarmonyDeviceInput(HarmonyEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_name = "Input"
+    _attr_translation_key = "device_input"
 
     def __init__(self, coordinator: HarmonyCoordinator, device: str) -> None:
         super().__init__(
@@ -130,7 +132,7 @@ class HarmonyPageFormat(HarmonyEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_name = "Page format"
+    _attr_translation_key = "page_format"
 
     def __init__(self, coordinator: HarmonyCoordinator, remote: int) -> None:
         super().__init__(

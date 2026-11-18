@@ -623,3 +623,76 @@ async def test_tiles_follow_an_entity_rename(hass, rig, clock):
     hub.got.clear()
     hass.states.async_set("light.kitchen", "on")  # later changes of the renamed entity still arrive
     await _until(lambda: any(t.get("state") == 2 for t in hub.tiles()))
+
+
+# 12: diagnostics, entry removal, cleanup, static quality checks
+async def test_diagnostics_are_redacted_and_complete(hass, rig, clock):
+    import json
+
+    from custom_components.ha_harmony.diagnostics import async_get_config_entry_diagnostics
+
+    hub, c = await rig()
+    await hub.push("remote_info", {**V2_INFO, "gen": 9, "pages": 3})
+    await settle(hass, lambda: c.links[1].info is not None)
+    diag = await async_get_config_entry_diagnostics(hass, c.config_entry)
+    text = json.dumps(diag, default=str)
+    for secret in (c.config_entry.data["token"], c.config_entry.data["addon_token"], "127.0.0.1"):
+        assert secret not in text
+    assert diag["entry"]["data"]["token"] == "**REDACTED**"
+    r1 = diag["remotes"]["1"]
+    assert r1["announced"]["stored_gen"] == 9 and r1["announced"]["stored_pages"] == 3
+    assert r1["page_format"] == 2 and diag["config"]["pages_v2"] == len(c.compiled.pages_v2)
+    assert diag["addon_link"]["state"] == "ok" and diag["hub"]["config_accepted"] is True
+    assert diag["timings_ms"]["compile_ms"] >= 0 and "set_config_ms" in diag["timings_ms"]
+    assert diag["counters"]["config_pushes"] == 1
+
+
+async def test_removing_the_entry_deletes_its_cached_bundle(hass, rig, clock):
+    from homeassistant.helpers.storage import Store
+
+    _hub, c = await rig()
+    store = Store(hass, 1, f"ha_harmony.bundle.{c.hub_id}")
+    assert await store.async_load() is not None
+    await hass.config_entries.async_remove(c.config_entry.entry_id)
+    assert await Store(hass, 1, f"ha_harmony.bundle.{c.hub_id}").async_load() is None
+
+
+async def test_registry_entries_of_a_gone_remote_are_removed(hass, rig, clock, fake_addon):
+    from homeassistant.helpers import device_registry as dr
+
+    _hub, c = await rig()
+    ereg, dreg = er.async_get(hass), dr.async_get(hass)
+    entry_id = c.config_entry.entry_id
+    dev = dreg.async_get_or_create(
+        config_entry_id=entry_id, identifiers={("ha_harmony", f"{c.hub_id}_remote_2")}
+    )
+    ereg.async_get_or_create(
+        "sensor", "ha_harmony", f"{c.hub_id}_battery_2", config_entry=c.config_entry, device_id=dev.id
+    )
+    fake_addon.apply_yaml(YAML.replace("name: Stream", "name: Stream3"))  # any config change
+    await c.async_refresh_from_addon()
+    assert ereg.async_get_entity_id("sensor", "ha_harmony", f"{c.hub_id}_battery_2") is None
+    assert dreg.async_get(dev.id) is None or entry_id not in dreg.async_get(dev.id).config_entries
+
+
+def test_translations_icons_and_parallel_updates_are_complete():
+    import json
+    import re
+    from pathlib import Path
+
+    pkg = Path(__file__).resolve().parents[2] / "custom_components" / "ha_harmony"
+    strings = json.loads((pkg / "strings.json").read_text())
+    assert json.loads((pkg / "translations" / "en.json").read_text()) == strings
+    icons = json.loads((pkg / "icons.json").read_text())
+    for py in pkg.glob("*.py"):
+        text = py.read_text()
+        domain = py.stem
+        for key in re.findall(r'_attr_translation_key = "(\w+)"', text):
+            assert key in strings["entity"][domain], (py.name, key)
+            assert key in icons["entity"][domain], (py.name, key)
+        if domain in {"sensor", "binary_sensor", "select", "button", "event", "remote"}:
+            assert "PARALLEL_UPDATES = 0" in text, py.name
+    for key in re.findall(r'(?:ha_error|invalid)\(\s*"(\w+)"', "".join(p.read_text() for p in pkg.glob("*.py"))):
+        assert key in strings["exceptions"], key
+    for svc in ("reload_config", "push_pages", "send_ir", "set_device_state"):
+        assert svc in icons["services"] and svc in strings["services"]

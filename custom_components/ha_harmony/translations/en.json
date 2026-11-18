@@ -146,6 +146,32 @@
           "nothing_applied": "Nothing applied yet",
           "rejected": "Config rejected"
         }
+      },
+      "device_input": {
+        "name": "Input"
+      },
+      "page_format": {
+        "name": "Page format"
+      }
+    },
+    "select": {
+      "activity": {
+        "name": "Activity"
+      }
+    },
+    "binary_sensor": {
+      "device_power": {
+        "name": "Power"
+      }
+    },
+    "event": {
+      "keys": {
+        "name": "Keys"
+      }
+    },
+    "button": {
+      "command": {
+        "name": "Command"
       }
     }
   },

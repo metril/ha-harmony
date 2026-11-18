@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -132,6 +133,7 @@ class RemoteLink:
     waiting: bool = False  # waiting for remote_info
     attached: bool = True  # False after "no remote" until the remote shows signs of life
     pending: bool = False  # a push failed for want of a remote: redo when it is back
+    push_ms: float | None = None  # duration of the last complete page push (diagnostics)
     task: asyncio.Task[None] | None = None
     info_event: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -218,6 +220,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.first_sync: asyncio.Task[None] | None = None
         self._first_apply = asyncio.Event()  # the link loop's first pull has been handled
         self.last_error: str | None = None
+        self.timings: dict[str, float] = {}  # last compile / set_config round trip, in ms (diagnostics)
+        self.page_pushes = 0  # page_push requests sent
         self.config_pushes = 0  # set_config requests sent (observable by tests)
         self.tile_updates = 0
         self._topic_subs: dict[str, list[Callable[[], None]]] = {}
@@ -386,8 +390,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """Validate + compile a pulled bundle and, only if it is good, make it the config.
         A bad bundle changes nothing (cache, entities, hub); raises BundleRejected."""
         async with self._apply_lock:
+            t0 = time.monotonic()
             try:
                 bundle = await self.hass.async_add_executor_job(parse_bundle, raw, self.hub_id)
+                self.timings["compile_ms"] = round((time.monotonic() - t0) * 1000, 1)
             except BundleRejected as exc:
                 self._reject(exc)
                 raise
@@ -582,10 +588,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._accepted_gen = self._cfg_gen
             return True
         self.config_pushes += 1
+        t0 = time.monotonic()
         try:
             ack = await self.client.async_send(MsgType.SET_CONFIG, {"config": compiled.hub_json})
         except HarmonyCommandError as exc:
             ack = {"ok": False, "message": exc.message}
+        self.timings["set_config_ms"] = round((time.monotonic() - t0) * 1000, 1)
         if not ack.get("ok"):
             msg = str(ack.get("message") or "rejected without a reason")
             _LOGGER.error("The hub rejected the config: %s", msg)
@@ -689,9 +697,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             await self._send_tiles({self._cur(t.entity_id) for t in self.compiled.tiles}, (remote,))
             return
         link.inflight = want
+        t0 = time.monotonic()
         try:
             if await self._push_set(remote, link, want[1]):
                 link.pushed, link.pending = want, False
+                link.push_ms = round((time.monotonic() - t0) * 1000, 1)
                 await self._send_all_tiles(remote)
         finally:
             link.inflight = None
@@ -725,6 +735,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             if gen != self._cfg_gen:
                 return False
             payload = {"remote": remote, "page": idx, "data": b64}
+            self.page_pushes += 1
             try:
                 await self.client.async_send(MsgType.PAGE_PUSH, payload)
             except HarmonyCommandError as exc:
@@ -789,6 +800,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         for dev in dr.async_entries_for_config_entry(dreg, entry_id):
             ids = {i for dom, i in dev.identifiers if dom == DOMAIN}
             if any("_dev_" in i for i in ids) and not ids & keep:
+                dreg.async_update_device(dev.id, remove_config_entry_id=entry_id)
+        keep_remotes = {f"{self.hub_id}_remote_{r}" for r in self.remotes}
+        for dev in dr.async_entries_for_config_entry(dreg, entry_id):  # a remote that is gone
+            ids = {i for dom, i in dev.identifiers if dom == DOMAIN}
+            if any("_remote_" in i for i in ids) and not ids & keep_remotes:
                 dreg.async_update_device(dev.id, remove_config_entry_id=entry_id)
 
     # ------------------------------------------------------------ tiles

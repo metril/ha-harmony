@@ -11,6 +11,8 @@ from .base_entity import HarmonyEntity
 from .const import CONF_HOLD_EVENTS
 from .coordinator import TOPIC_CONFIG, HarmonyCoordinator
 
+PARALLEL_UPDATES = 0  # push-based: commands go through the hub client, which pipelines them
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -25,6 +27,7 @@ class HarmonyKeyEvent(HarmonyEntity, EventEntity):
     def __init__(self, coordinator: HarmonyCoordinator, remote: int) -> None:
         super().__init__(coordinator, f"key_{remote}", topics=(TOPIC_CONFIG,))
         self._remote = remote
+        self._attr_translation_key = "keys"
         self._attr_name = f"Remote {remote} keys"
 
     @property

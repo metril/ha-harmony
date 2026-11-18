@@ -24,6 +24,8 @@ from .const import HOLD_REPEAT, HUB_DEVICE
 from .coordinator import TOPIC_ACTIVITY, HarmonyCoordinator
 from .errors import ha_error
 
+PARALLEL_UPDATES = 0  # push-based: commands go through the hub client, which pipelines them
+
 
 async def async_setup_entry(
     hass: HomeAssistant,

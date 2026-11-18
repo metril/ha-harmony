@@ -18,6 +18,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .addon_link import AddonClient
@@ -31,8 +32,15 @@ from .const import (
     CONF_TOKEN,
     CONFIG_SUBDIR,
     DOMAIN,
+    STORE_VERSION,
 )
-from .coordinator import ISSUE_YAML, HarmonyCoordinator
+from .coordinator import (
+    ISSUE_INVALID,
+    ISSUE_REJECTED,
+    ISSUE_SCHEMA,
+    ISSUE_YAML,
+    HarmonyCoordinator,
+)
 from .errors import invalid
 from .harmony_core.config_model import validate_ir
 
@@ -189,6 +197,14 @@ def _device_kwargs(coordinator: HarmonyCoordinator) -> dict[str, Any]:
         "manufacturer": info["manufacturer"],
         "sw_version": info["sw_version"],
     }
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> None:
+    """The entry is deleted: drop its cached add-on bundle (`.storage`) and its repair issues."""
+    hub = entry.unique_id or ""
+    await Store(hass, STORE_VERSION, f"{DOMAIN}.bundle.{hub}").async_remove()
+    for key in (ISSUE_INVALID, ISSUE_REJECTED, ISSUE_SCHEMA, ISSUE_YAML):
+        ir.async_delete_issue(hass, DOMAIN, f"{key}_{hub}")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> bool:
