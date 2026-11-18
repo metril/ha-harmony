@@ -421,7 +421,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     self._ack_later(self.rev, "ok")
                     await self._push_pages_locked()
                 else:
-                    self._ack_later(self.rev, "error", f"the hub rejected it: {self.last_error}"[:200])
+                    self._ack_later(
+                        self.rev, "error", f"the hub rejected it: {self.last_error}"[:200]
+                    )
             except (HarmonyConnectionError, HomeAssistantError) as exc:
                 _LOGGER.warning("Could not sync the config to the hub (will retry): %s", exc)
 

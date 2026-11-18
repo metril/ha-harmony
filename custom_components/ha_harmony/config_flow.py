@@ -124,9 +124,7 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
     # never creates an entry: it stores the add-on's address and token on the existing hub entries.
     async def async_step_hassio(self, discovery_info: HassioServiceInfo) -> ConfigFlowResult:
         slug = discovery_info.slug
-        if not isinstance(slug, str) or not (
-            slug == ADDON_SLUG or slug.endswith(f"_{ADDON_SLUG}")
-        ):
+        if not isinstance(slug, str) or not (slug == ADDON_SLUG or slug.endswith(f"_{ADDON_SLUG}")):
             return self.async_abort(reason="not_our_addon")  # only our add-on may offer a token
         cfg = discovery_info.config
         try:
