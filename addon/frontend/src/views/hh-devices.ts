@@ -11,7 +11,7 @@ import { commandCount, duplicateCommand, isHaDevice, mapCodes, nameProblem, patc
 import { stockIconSvg } from '../lib/icon-shapes';
 import { icon } from '../lib/icons';
 import { LIMITS, type Device, type IrAction } from '../lib/model';
-import { deleteDevice, deleteItem, describeRef, findRefs, renameItem, type Ref } from '../lib/refs';
+import { deleteDevice, deleteItem, describeRef, findRefs, refHref, renameItem, type Ref } from '../lib/refs';
 import { hashFor } from '../lib/router';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
@@ -42,6 +42,10 @@ export class HhDevices extends StoreElement {
       .dcard .src { font-size: 12px; color: var(--tx3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chips { display: flex; flex-wrap: wrap; gap: 6px; }
       .addw { display: grid; }
+      .used summary { cursor: pointer; font-weight: 600; }
+      .used ul { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; max-height: 220px; overflow: auto; }
+      .used li a { display: block; padding: 4px 6px; border-radius: var(--r1); color: var(--tx); text-decoration: none; font-size: 13px; }
+      .used li a:hover { background: var(--sf2); text-decoration: underline; }
       .add { text-align: center; padding: 16px; display: grid; place-items: center; align-content: center; gap: 8px; min-height: 230px; border: 2px dashed var(--line); border-radius: var(--r3); color: var(--tx2); text-decoration: none; font-weight: 600; background: transparent; }
       .add:hover { background: var(--sf2); color: var(--tx); border-color: var(--acc); }
       .add .plus { width: 48px; height: 48px; border-radius: 50%; background: var(--accs); color: var(--acc); display: grid; place-items: center; }
@@ -335,7 +339,10 @@ export class HhDevices extends StoreElement {
       <div class="f mt">IR ports for all commands
         <div class="ports" role="group" aria-label="IR ports for all commands">${[1, 2, 4].map((bit, i) => html`<button aria-pressed=${mask !== 0 && (mask & bit) !== 0} aria-label="Port ${i + 1}" @click=${() => { const m = ((mask || 7) ^ bit) || 7; this.put(mapCodes(this.store.config, d.id, null, (c) => withPorts(c, m)), undefined, `IR ports set for every command`); }}>${i + 1}</button>`)}</div>
         <span class="hint">${mask === 0 ? 'Commands use different ports. Edit one to see its ports.' : mask === 7 ? 'All three ports.' : 'Only the lit ports send.'} Pick ports to aim the IR blasters.</span></div>
-      <p class="why mt">${refs.length ? `Used by ${refs.length} place${refs.length === 1 ? '' : 's'}: ${refs.slice(0, 3).map(describeRef).join('; ')}${refs.length > 3 ? '; …' : ''}.` : 'Not used by any activity or key yet.'}</p>
+      ${refs.length
+        ? html`<details class="used mt" open><summary>Used by ${refs.length} place${refs.length === 1 ? '' : 's'}</summary>
+            <ul>${refs.slice(0, 30).map((r) => html`<li><a href=${refHref(r)}>${describeRef(r)}</a></li>`)}${refs.length > 30 ? html`<li class="muted">and ${refs.length - 30} more</li>` : nothing}</ul></details>`
+        : html`<p class="why mt">Not used by any activity or key yet.</p>`}
     </section>`;
   }
 

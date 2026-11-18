@@ -157,6 +157,11 @@ export class HhStudio extends StoreElement implements StudioHost {
       if (layer && (layer === DEFAULT_LAYER || (s.config.activities ?? []).some((a) => a.id === layer))) {
         this.state0.setLayer(layer);
         if (key && keyByName.has(key)) this.state0.sel = { kind: 'key', name: key };
+        const w = /^w(\d+)\.(\d+)$/.exec(key ?? '');
+        if (w) {
+          this.state0.page = Number(w[1]);
+          this.state0.sel = { kind: 'widget', page: Number(w[1]), index: Number(w[2]) };
+        }
       }
     }
     if (s.config !== this.lastCfg) {

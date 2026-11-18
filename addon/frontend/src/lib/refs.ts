@@ -46,6 +46,18 @@ export function findRefs(cfg: Config, t: Target): Ref[] {
   return out;
 }
 
+/** The screen that shows this use: the studio (selecting the key or widget) or the activity. */
+export function refHref(r: Ref): string {
+  switch (r.kind) {
+    case 'key':
+      return `#/remote/${encodeURIComponent(r.layer === 'default' ? 'default' : r.layer)}/${encodeURIComponent(r.key)}`;
+    case 'widget':
+      return `#/remote/default/${encodeURIComponent(`w${r.page}.${r.index}`)}`;
+    default:
+      return `#/activities/${encodeURIComponent(r.activity)}`;
+  }
+}
+
 export function describeRef(r: Ref): string {
   switch (r.kind) {
     case 'key':
