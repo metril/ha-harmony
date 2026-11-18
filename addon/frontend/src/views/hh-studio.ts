@@ -39,15 +39,15 @@ export class HhStudio extends StoreElement implements StudioHost {
     shared,
     css`
       :host { display: block; --pw: 292px; --iw: 300px; }
-      .studio { display: grid; grid-template-columns: var(--pw) minmax(0, 1fr) var(--iw); height: max(640px, calc(100dvh - 112px)); border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; background: var(--sf); position: relative; }
+      .studio { display: grid; grid-template-columns: var(--pw) minmax(0, 1fr) var(--iw); height: max(560px, calc(100dvh - 108px)); border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; background: var(--sf); position: relative; }
       .pal, .insp { min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--sf); }
       .pal { border-right: 1px solid var(--line); }
       .insp { border-left: 1px solid var(--line); }
       .pal > *, .insp > * { flex: 1; min-height: 0; }
       .mid { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--cv); }
-      .tb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 12px 6px; background: var(--sf); border-bottom: 1px solid var(--line); z-index: 2; }
-      .layers { display: flex; gap: 4px; overflow-x: auto; flex: 1 1 100%; min-width: 0; padding: 2px; scrollbar-width: thin; }
-      .layers button { flex: none; height: 30px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
+      .tb { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 12px; padding: 4px 12px; background: var(--sf); border-bottom: 1px solid var(--line); z-index: 2; }
+      .layers { display: flex; gap: 4px; overflow-x: auto; flex: 1 1 0; min-width: 0; padding: 2px; scrollbar-width: thin; }
+      .layers button { flex: none; height: 28px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
       .layers button:hover { background: var(--sf2); }
       .layers button[aria-selected="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
       .grp { display: inline-flex; gap: 2px; padding: 2px; background: var(--sf2); border-radius: var(--r1); }
@@ -56,9 +56,9 @@ export class HhStudio extends StoreElement implements StudioHost {
       .grp button:disabled { opacity: 0.4; cursor: default; }
       .grp .ic { width: 16px; height: 16px; }
       .cw { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-      .tools { position: absolute; top: 10px; right: 12px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-      .tools .grp { background: var(--sf); border: 1px solid var(--line); box-shadow: var(--sh); }
-      .canvas { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background-color: var(--cv); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 18px 18px; padding: 8px 124px 8px 16px; position: relative; scroll-behavior: auto; }
+      .tools { flex: none; display: flex; align-items: center; gap: 6px; }
+      .tools .pager { background: var(--sf2); }
+      .canvas { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background-color: var(--cv); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 18px 18px; padding: 4px 16px; position: relative; scroll-behavior: auto; }
       hh-remote { flex: 1 1 auto; min-height: 0; }
       .banner2 { position: sticky; top: 0; z-index: 3; margin: -14px -16px 10px; flex: none; padding: 8px 14px; background: var(--acc); color: var(--onacc); font-weight: 600; display: flex; gap: 10px; align-items: center; }
       .banner2 .sp { flex: 1; }
@@ -82,12 +82,11 @@ export class HhStudio extends StoreElement implements StudioHost {
       .pager { display: inline-flex; align-items: center; gap: 2px; }
       .sheetbtns { display: none; }
       .scrim { display: none; }
-      @media (max-width: 1100px) { :host { --pw: 244px; --iw: 264px; } }
+      @media (max-width: 1100px) { :host { --pw: 224px; --iw: 236px; } .zoomg { display: none !important; } }
       /* X-ray is a reading mode: on narrower screens it takes the whole width so the labels stay legible */
       @media (max-width: 1280px) and (min-width: 861px) {
         .studio.xr { grid-template-columns: minmax(0, 1fr); }
         .studio.xr .pal, .studio.xr .insp { display: none; }
-        .studio.xr .canvas { padding-right: 124px; }
       }
       @media (max-width: 1100px) { .tools .grp button { min-width: 30px; padding: 0 7px; } }
       @media (max-width: 860px) {
@@ -98,8 +97,8 @@ export class HhStudio extends StoreElement implements StudioHost {
         :host([sheet="palette"]) .insp, :host([sheet="inspector"]) .pal { display: none; }
         :host([sheet]) .scrim { display: block; position: fixed; inset: 0; z-index: 39; background: var(--scrim); }
         .sheetbtns { display: inline-flex; }
-        .tools { position: static; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 6px 12px; background: var(--sf); border-bottom: 1px solid var(--line); }
-        .tools .grp { border: 0; box-shadow: none; background: var(--sf2); }
+        .tb { flex-wrap: wrap; }
+        .tools { flex-wrap: wrap; }
         .pop { position: fixed; left: 8px; right: 8px; bottom: 8px; top: auto !important; width: auto; max-height: 62vh; z-index: 41; }
         .canvas { padding: 16px 8px 20px; }
         .banner2 { margin: -16px -8px 12px; }
@@ -508,8 +507,6 @@ export class HhStudio extends StoreElement implements StudioHost {
         <section class="mid" aria-label="Remote canvas">
           <div class="tb">
             ${this.layers()}
-          </div>
-          <div class="cw">
             <div class="tools">
             <div class="grp" role="group" aria-label="View">
               <button aria-pressed=${!screenMode} @click=${() => st.set({ mode: 'remote' })}>Remote</button>
@@ -517,13 +514,13 @@ export class HhStudio extends StoreElement implements StudioHost {
             </div>
             ${screenMode
               ? html`<div class="grp" role="group" aria-label="Screen scale">${[1, 2, 3].map((n) => html`<button aria-pressed=${st.scale === n} @click=${() => st.set({ scale: n })}>${n}×</button>`)}</div>`
-              : html`<div class="grp" role="group" aria-label="Zoom">${(['fit', '1', '2'] as const).map((z) => html`<button aria-pressed=${st.zoom === z} @click=${() => st.set({ zoom: z })}>${z === 'fit' ? 'Fit' : `${z}×`}</button>`)}</div>`}
+              : html`<div class="grp zoomg" role="group" aria-label="Zoom">${(['fit', '1', '2'] as const).map((z) => html`<button aria-pressed=${st.zoom === z} @click=${() => st.set({ zoom: z })}>${z === 'fit' ? 'Fit' : `${z}×`}</button>`)}</div>`}
             <div class="grp">
               <button aria-pressed=${st.xray} ?disabled=${screenMode} title="Label every key with its action" @click=${() => st.set({ xray: !st.xray })}>X-ray</button>
             </div>
             <div class="grp" role="group" aria-label="History">
-              <button aria-label="Undo" title="Undo (Ctrl+Z)" ?disabled=${!s.canUndo} @click=${() => s.undo() && st.say('Undone')}>${icon('undo')}Undo</button>
-              <button aria-label="Redo" title="Redo (Ctrl+Shift+Z)" ?disabled=${!s.canRedo} @click=${() => s.redo() && st.say('Redone')}>Redo</button>
+              <button aria-label="Undo" title="Undo (Ctrl+Z)" ?disabled=${!s.canUndo} @click=${() => s.undo() && st.say('Undone')}>${icon('undo')}</button>
+              <button aria-label="Redo" title="Redo (Ctrl+Shift+Z)" ?disabled=${!s.canRedo} @click=${() => s.redo() && st.say('Redone')}>${icon('redo')}</button>
             </div>
             ${this.pager()}
             <div class="grp sheetbtns" role="group" aria-label="Panels">
@@ -531,6 +528,8 @@ export class HhStudio extends StoreElement implements StudioHost {
               <button @click=${() => (this.sheet = this.sheet === 'inspector' ? '' : 'inspector')}>Inspector</button>
             </div>
             </div>
+          </div>
+          <div class="cw">
           <div class="canvas" @pointerdown=${(e: PointerEvent) => { if ((e.target as HTMLElement).closest('hh-remote') === null && this.pop) this.pop = null; }} @scroll=${() => (this.pop = null)}>
             ${picked
               ? html`<div class="banner2" role="status"><span>Click a key or the screen for ${describeSource(s.config, picked)}</span><span class="sp"></span><button @click=${() => this.assigner.cancel()}>Cancel</button></div>`

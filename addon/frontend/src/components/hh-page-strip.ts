@@ -46,6 +46,15 @@ export class HhPageStrip extends LitElement {
       .menu button:hover { background: var(--sf2); }
       .menu small { font-weight: 400; color: var(--tx3); font-size: 12px; }
       :host { position: relative; }
+      @media (max-width: 1100px), (max-height: 820px) {
+        .strip { padding: 2px 10px; gap: 6px; }
+        .pg { width: 64px; padding: 4px 2px 2px; gap: 2px; }
+        .thumb { width: 38px; height: 50px; }
+        .name { font-size: 11px; max-width: 60px; }
+        .sub { display: none; }
+        .bar { width: 38px; height: 3px; }
+        .add { width: 56px; min-height: 0; }
+      }
     `,
   ];
   @property({ attribute: false }) host!: StudioHost;

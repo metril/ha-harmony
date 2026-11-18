@@ -37,6 +37,15 @@ export class HhApp extends StoreElement {
       .menu { display: none; }
       select { height: 32px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 8px; }
       .layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: calc(100vh - 48px); }
+      @media (min-width: 721px) {
+        .layout.slim { grid-template-columns: 56px minmax(0, 1fr); }
+        .layout.slim nav { padding: 12px 6px; align-items: center; }
+        .layout.slim nav a { width: 44px; justify-content: center; padding: 0; position: relative; }
+        .layout.slim nav a .lbl, .layout.slim nav a .n { display: none; }
+        .layout.slim nav a .err { position: absolute; top: 2px; right: 0; min-width: 16px; height: 16px; font-size: 10px; }
+      }
+      .collapse { margin-top: auto; }
+      @media (max-width: 720px) { .collapse { display: none; } }
       nav { background: var(--sf); border-right: 1px solid var(--line); padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
       nav a { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border-radius: var(--r1); color: var(--tx2); text-decoration: none; font-weight: 500; }
       nav a:hover { background: var(--sf2); }
@@ -44,9 +53,13 @@ export class HhApp extends StoreElement {
       nav a[aria-current="page"] .ic { color: var(--acc); }
       nav .n { margin-left: auto; font-size: 12px; color: var(--tx3); }
       nav .err { margin-left: auto; min-width: 18px; height: 18px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; padding: 0 5px; }
+      nav button.collapse { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border: 0; background: transparent; color: var(--tx2); border-radius: var(--r1); cursor: pointer; font-weight: 500; }
+      nav button.collapse:hover { background: var(--sf2); }
+      @media (min-width: 721px) { .layout.slim nav button.collapse { width: 44px; justify-content: center; padding: 0; }
+      .layout.slim nav button.collapse .lbl { display: none; } }
       nav hr { border: 0; border-top: 1px solid var(--line); margin: 8px 4px; width: calc(100% - 8px); }
       .col { min-width: 0; display: flex; flex-direction: column; }
-      main.wide { padding: 12px 12px 16px; }
+      main.wide { padding: 8px 12px 8px; }
       main { padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 16px; min-width: 0; outline: none; }
       .toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 30; max-width: min(380px, calc(100vw - 32px)); }
       .toast { display: flex; gap: 8px; align-items: flex-start; background: var(--tx); color: var(--bg); padding: 10px 12px; border-radius: var(--r2); box-shadow: var(--sh); }
@@ -67,6 +80,17 @@ export class HhApp extends StoreElement {
   ];
   private router = new Router();
   @state() private railOpen = false;
+  @state() private slim = ((): boolean => {
+    try {
+      const v = localStorage.getItem('hh-rail');
+      if (v) return v === 'slim';
+    } catch { /* storage unavailable */ }
+    return typeof matchMedia === 'function' && matchMedia('(max-width: 1100px)').matches;
+  })();
+  private toggleSlim() {
+    this.slim = !this.slim;
+    try { localStorage.setItem('hh-rail', this.slim ? 'slim' : 'wide'); } catch { /* ignore */ }
+  }
   @state() private applyOpen = false;
   @state() private importOpen = false;
   @state() private confirm: ConfirmRequest | null = null;
@@ -166,14 +190,15 @@ export class HhApp extends StoreElement {
         <button class="btn ghost hdr-btn" aria-label="Import YAML" @click=${() => (this.importOpen = true)}>${icon('upload')}<span>Import YAML</span></button>
         <a class="btn ghost hdr-btn" aria-label="Export YAML" aria-disabled=${s.isFirstRun ? 'true' : 'false'} href=${s.isFirstRun ? '#/overview' : s.api.exportUrl(s.hub)} download="harmony-${s.hub}.yaml">${icon('download')}<span>Export YAML</span></a>
       </header>
-      <div class="layout">
+      <div class=${classMap({ layout: true, slim: this.slim })}>
         <nav aria-label="Sections" class=${classMap({ open: this.railOpen })}>
           ${this.rail().map((r) =>
             r.id === '-'
               ? html`<hr />`
-              : html`<a href=${hashFor(r.id)} aria-current=${sec === r.id ? 'page' : 'false'}>${icon(r.icon)}${r.label}
-                  ${errs[r.id] ? html`<span class="err" aria-label="${errs[r.id]} errors">${errs[r.id]}</span>` : r.count !== undefined ? html`<span class="n">${r.count}</span>` : nothing}</a>`,
+              : html`<a href=${hashFor(r.id)} aria-current=${sec === r.id ? 'page' : 'false'} title=${r.label} aria-label=${r.label + (errs[r.id] ? `, ${errs[r.id]} errors` : '')}>${icon(r.icon)}<span class="lbl">${r.label}</span>
+                  ${errs[r.id] ? html`<span class="err" aria-hidden="true">${errs[r.id]}</span>` : r.count !== undefined ? html`<span class="n">${r.count}</span>` : nothing}</a>`,
           )}
+          <button class="collapse" aria-pressed=${this.slim} title=${this.slim ? 'Expand the menu' : 'Collapse the menu'} aria-label=${this.slim ? 'Expand the menu' : 'Collapse the menu'} @click=${() => this.toggleSlim()}>${icon('collapse')}<span class="lbl">Collapse</span></button>
         </nav>
         <div class="col">
           <hh-draft-bar></hh-draft-bar>
