@@ -154,6 +154,16 @@ const hp_widget_t *hp_page_hit(const hp_page_t *p, int x_px, int y_px) {
     return NULL;
 }
 
+size_t hp_text_cut(const char *s, size_t len, size_t max) {
+    size_t n = 0;
+    while (n < len) {
+        size_t k = utf8_seq((const uint8_t *)s + n, len - n);
+        if (!k || n + k > max) break;
+        n += k;
+    }
+    return n;
+}
+
 int hp_page_set_tile_text(hp_page_t *p, uint8_t tile_id, const char *text, size_t len) {
     hp_widget_t *w = NULL;
     for (unsigned i = 0; i < p->count; i++)

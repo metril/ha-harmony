@@ -35,6 +35,7 @@ add_library(hp_core STATIC
   hub/rf/rf_payload.c
   hub/io/rf_spi.c
   remote/page/page.c
+  remote/page/store.c
 )
 target_include_directories(hp_core PUBLIC ${CMAKE_SOURCE_DIR})
 find_package(Threads REQUIRED)

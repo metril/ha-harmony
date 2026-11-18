@@ -68,6 +68,9 @@ int hp_page_row_shift(const hp_page_t *p);
 /* Widget under pixel (x,y), or NULL (also for pixels outside the screen and in the status bar). */
 const hp_widget_t *hp_page_hit(const hp_page_t *p, int x_px, int y_px);
 
+/* Length of the longest prefix of s (len bytes) of whole valid UTF-8 characters that fits in max bytes. */
+size_t hp_text_cut(const char *s, size_t len, size_t max);
+
 /* Set live text of tile `tile_id`: truncated to HP_PAGE_MAX_TEXT bytes at a
  * UTF-8 boundary. 0 ok; -HP_E_NOENT no such tile; -HP_E_INVAL bad UTF-8 / NUL. */
 int hp_page_set_tile_text(hp_page_t *p, uint8_t tile_id, const char *text, size_t len);
