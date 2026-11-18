@@ -1,7 +1,7 @@
 # Runbook: root and back up the hub
 
-Device: Harmony Hub, USB `046d:c129` (`/dev/hidraw3`), LAN `192.0.2.11`, stock FW 4.15.600.
-External root tool: `/home/user/projects/upstream-ref/harmony-ng` (MIT, run as a tool).
+Device: Harmony Hub, USB `046d:c129` (`/dev/hidraw3`), LAN `<hub-ip>`, stock FW 4.15.600.
+External root tool: `~/projects/upstream-ref/harmony-ng` (MIT, run as a tool).
 Our key: `~/.ssh/harmony_owner_ed25519`.
 
 Run the steps in order. Each is marked `[RO]` (read-only on the hub) or `[WRITE]`.
@@ -50,12 +50,12 @@ partition itself — no partition is ever flashed.
       It is already at the latest version, so this is belt-and-braces.
 - [ ] Do not open MyHarmony or the Harmony phone app for the rest of Phase 1.
 - [ ] `ls -l /dev/hidraw3` shows `plugdev` (if not: `sudo tools/host_setup.sh`).
-- [ ] Hub reachable: `ping -c2 192.0.2.11`, port 8088 open, port 22 **closed**.
+- [ ] Hub reachable: `ping -c2 <hub-ip>`, port 8088 open, port 22 **closed**.
 
 ## Step 1 `[RO]` — confirm first contact
 
 ```sh
-cd /home/user/projects/upstream-ref/harmony-ng
+cd ~/projects/upstream-ref/harmony-ng
 uv run --no-project --python 3.13 python tools/harmony_firmware.py check
 ```
 
@@ -67,9 +67,9 @@ we already run, so `--skip-fw-check` below skips nothing we want.
 Needs an explicit go-ahead. Recovery for this step is the hardware factory reset, not UART.
 
 ```sh
-cd /home/user/projects/upstream-ref/harmony-ng
+cd ~/projects/upstream-ref/harmony-ng
 uv run --no-project --python 3.13 python tools/root_hub_usb.py \
-    --hub-ip 192.0.2.11 \
+    --hub-ip <hub-ip> \
     --pubkey ~/.ssh/harmony_owner_ed25519.pub
 ```
 
@@ -94,15 +94,15 @@ lacks it.
 ## Step 3 `[RO]` — gate: root and stock tar
 
 ```sh
-ssh -i ~/.ssh/harmony_owner_ed25519 root@192.0.2.11 "uname -a; id; cat /proc/mtd; mount"
-ls -l /home/user/projects/upstream-ref/harmony-ng/backups/
+ssh -i ~/.ssh/harmony_owner_ed25519 root@<hub-ip> "uname -a; id; cat /proc/mtd; mount"
+ls -l ~/projects/upstream-ref/harmony-ng/backups/
 ```
 
 Both must succeed before going further. If SSH works but the tar is missing (the tool has a short
 window for it), take it immediately — before anything else touches the hub:
 
 ```sh
-uv run --no-project --python 3.13 python tools/backup_hub.py 192.0.2.11
+uv run --no-project --python 3.13 python tools/backup_hub.py <hub-ip>
 # add --reset-host-key if ssh complains the host key changed
 ```
 
@@ -111,9 +111,9 @@ Record here: the real `/proc/mtd` output, `uname -a`, and the tar's size and sha
 ## Step 4 `[RO]` — full partition images
 
 ```sh
-cd /home/user/projects/ha-harmony
+cd ~/projects/ha-harmony
 TS=$(date -u +%Y%m%dT%H%M%SZ)
-uv run tools/device_backup.py --target hub --host 192.0.2.11 \
+uv run tools/device_backup.py --target hub --host <hub-ip> \
     --key ~/.ssh/harmony_owner_ed25519 \
     --out-dir backups/phase1/hub/$TS --dry-run
 ```
@@ -149,9 +149,9 @@ Learn the restore path before needing it. This command prompts for a typed `REST
 **abort there — answer anything else.**
 
 ```sh
-cd /home/user/projects/upstream-ref/harmony-ng
+cd ~/projects/upstream-ref/harmony-ng
 uv run --no-project --python 3.13 python tools/restore_stock.py \
-    --skip-usb-root --hub-ip 192.0.2.11 --backup backups/golden_hub_backup.tar
+    --skip-usb-root --hub-ip <hub-ip> --backup backups/golden_hub_backup.tar
 ```
 
 Caveats to remember when it is for real:
@@ -186,7 +186,7 @@ Caveats to remember when it is for real:
   reads identically to its `mtdblockN`. Our tool now probes `/dev/mtdNro` then `/dev/mtdrN`
   (`09c163f`), which likely matters for the remote too.
 - **Restore rehearsal passed, aborted at the prompt.** `restore_stock.py --skip-usb-root --hub-ip
-  192.0.2.11 --backup <golden tar>` accepted the tar (0.22 MB, 28 entries, contains `/data`) and
+  <hub-ip> --backup <golden tar>` accepted the tar (0.22 MB, 28 entries, contains `/data`) and
   printed "Confirmation string mismatch. Aborting restoration." without changing anything. What it
   *would* do: gain root SSH, kill all background processes except Dropbear, `rm -rf /cache/*`, then
   `tar -xf - -C /` to overwrite matching files under `/data`, `sync` twice, reboot. It writes **files
@@ -216,6 +216,6 @@ In order, least invasive first:
 | 2026-11-16 | host HID access | `usbhid` no-ignore quirk works: hidraw3 = hub `c129`, hidraw4 = remote `c12b`, both `0660 plugdev` |
 | 2026-11-16 | remote HID read `[RO]` | first real HID contact succeeded — skin 111, FW 4.15.330, up to date. Hub-side HID read still unproven (no read-only query exists) |
 | 2026-11-16 23:47 | ssh config fix | `~/.ssh/config` ended in `Host *` → `Port 48448`; the external tool never passes `-p`, so SSH verification after rooting would have failed. Added a `harmony-hub`/`harmony-remote` block above `Host *` (port 22, our key, `IdentitiesOnly`). Old config saved as `~/.ssh/config.pre-harmony-20261116T234710Z` |
-| 2026-11-16 23:49 | **hub rooted `[WRITE]`** | HID read confirmed FW 4.15.600 / skin 97 from the device (so `--skip-fw-check` was rightly omitted); Wi-Fi already connected (SSID redacted, 192.0.2.11) so no credentials were needed; payload 579,414 B staged to `/sys/dropbear` in 7.4 s; `/etc/tdeenable` armed; rebooted; **Dropbear online on 22**. Its stock tar backup **failed** — no MIPS BusyBox with `tar` locally. Superseded by full images below, which capture `/data`+`/cache` byte-exact |
+| 2026-11-16 23:49 | **hub rooted `[WRITE]`** | HID read confirmed FW 4.15.600 / skin 97 from the device (so `--skip-fw-check` was rightly omitted); Wi-Fi already connected (SSID redacted, <hub-ip>) so no credentials were needed; payload 579,414 B staged to `/sys/dropbear` in 7.4 s; `/etc/tdeenable` armed; rebooted; **Dropbear online on 22**. Its stock tar backup **failed** — no MIPS BusyBox with `tar` locally. Superseded by full images below, which capture `/data`+`/cache` byte-exact |
 | 2026-11-16 23:49 | hub facts `[RO]` | **7 partitions, not 6** — undocumented `mfg` at mtd6. Linux 2.6.31-g89d565c, host `pimentoblue`. `/` is unionfs: `/mnt/data` (jffs2 mtd4, rw) over `/mnt/root` (squashfs mtd3, ro) — so the root tool's `/usr/sbin` writes land in the factory-reset-wiped layer, as hoped. **No `dd`, no `sha256sum`, no `tar`/`find`/`head`/`df`/`sync`; `cat` and `md5sum` present.** No `command` builtin either, so our direct-probe fallback was exercised for real and got it right. Raw nodes are `/dev/mtdrN`, *not* `/dev/mtdNro` (our tool used `/dev/mtdN`, which works) |
 | 2026-11-16 23:51 | **hub images `[RO]`** | `backups/phase1/hub/20261116T234902Z/` — all 7 partitions `ok` via `cat` + `md5sum`, 33 MB incl. raw twins, `--verify` RESULT: OK. Magics as expected: uImage `27051956` on both kernels, `hsqs` squashfs on root, jffs2 `1985` on data+cache, `mfg` is all-`ff`. **Every block image is byte-identical to its `/dev/mtdN` raw twin**, so two independent read paths agree — which offsets md5 being the device's only hasher. `SHA256SUMS` written alongside |

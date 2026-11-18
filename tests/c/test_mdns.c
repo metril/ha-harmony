@@ -339,7 +339,7 @@ static void test_legacy_echo(void) {
 }
 
 static void test_on_link(void) {
-    uint32_t me = 0x0A0A4D7E, m24 = 0xFFFFFF00; /* 198.51.100.126/24 */
+    uint32_t me = 0x0A0A4D7E, m24 = 0xFFFFFF00; /* <host-ip>/24 */
     CT_CHECK(hp_mdns_on_link(0x0A0A4D01, me, m24));
     CT_CHECK(hp_mdns_on_link(me, me, m24));
     CT_CHECK(!hp_mdns_on_link(0x0A0A4E01, me, m24)); /* neighbouring /24 */

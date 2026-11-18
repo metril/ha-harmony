@@ -249,7 +249,7 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
 - (e) see `docs/runbooks/phase4-persistence.md`: Pair/Reset button probably handled by `hal` (lost while
   armed, not proven); `luaworks` retries its TCP link to `hal`; no `luadraws` on this hub.
 - Static MIPS BusyBox with `df`: built earlier in the external clone, at
-  `/home/user/projects/upstream-ref/harmony-ng/build/tmp/busybox-1.36.1-mips/busybox`
+  `~/projects/upstream-ref/harmony-ng/build/tmp/busybox-1.36.1-mips/busybox`
   (also `payload/bin/busybox`).
 
 **Failure modes**
@@ -315,7 +315,7 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
 
 ## Bench: hardware gate G1–G5 (2026-11-18, 03:03–05:10 UTC)
 
-Hub 192.0.2.11, remote app (slot 1) started by hand once and never restarted. 12 hub boots in total: 9 reboots (G1 3, G2 3 incl. 2 self-reboots, restore 1, G4 2) plus 3 boots after user power pulls (G3a 1, G3b 2 incl. the interrupted one). All of G1–G5 passed.
+Hub <hub-ip>, remote app (slot 1) started by hand once and never restarted. 12 hub boots in total: 9 reboots (G1 3, G2 3 incl. 2 self-reboots, restore 1, G4 2) plus 3 boots after user power pulls (G3a 1, G3b 2 incl. the interrupted one). All of G1–G5 passed.
 
 **Selftest (on the hub's own sh):** first run 11/12 at 02:58 (`ls -ln` on BusyBox 1.13 has two extra columns, so the size-based
 log cap read 0) -> cap changed to a line count; then 13/13 (03:03), then 15/15 (03:18, adds "token absent from daemon argv" and the 257-char token).

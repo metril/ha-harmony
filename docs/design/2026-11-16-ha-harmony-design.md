@@ -53,15 +53,14 @@ Known hardware (from harmony-ng docs):
   payload[25]`) instead of the invented header in `hub/rf/framing.h`, for stock-remote interop and
   so captured stock frames can validate our codec. Payload budget is 24–25 B, not 28.
 - **Remote UI is LVGL as planned, but the stock UI is gone**: rooting removes `/data/remote_ui`, so
-  the Elite's screen stays blank until our own app is deployed. The remote is out of service for the
-  living room from Phase 4 Stage A until Stage D.
+  the Elite's screen stays blank until our own app is deployed. The remote is out of service from Phase 4 Stage A until Stage D.
 - Root: USB HID path (no soldering), stock root untouched, factory reset restores.
 
 ## Current setup (verified 2026-11-16, read-only)
 - USB: hub `046d:c129` (bcd 11.06), Elite `046d:c12b` (bcd 11.11, shares Touch/Ultimate PID). Each one HID iface, interrupt EP 0x81 IN / 0x02 OUT, 64B. Kernel's HID ignore-list leaves them unbound → Phase 1 needs a udev rule (plugdev) for libusb access.
-- HA stock `harmony` integration: hub "Living Room", FW **4.15.600** ✓. Remote FW **4.15.330** ✓.
+- HA stock `harmony` integration: one hub, FW **4.15.600** ✓. Remote FW **4.15.330** ✓.
 - Devices: Samsung TV, NVIDIA Shield ("Game Console", BT), KVM 1, J-Tech AV switch, Roku stick, Audioengine A5+. Activities: "SHIELD TV", "Watch Roku".
-- HA consumers: `remote.harmony`, `select.living_room_activities`, `switch.living_room_watch_roku` + 7 automations/scripts/scenes/helpers referencing harmony → migration must map or preserve these.
+- HA consumers: the `remote`, activity `select` and activity `switch` entities of the stock integration + 7 automations/scripts/scenes/helpers referencing harmony → migration must map or preserve these.
 
 ## Decisions
 - **Model: middle-ground hub.** HA owns config/logic; HA compiles button→IR/BT mapping tables + activity steps and pushes them to hub; hub executes locally (instant, works when HA down), reports every press/gesture to HA as events. Non-IR/BT actions go through HA.

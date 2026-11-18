@@ -7,7 +7,7 @@ on both ends plus the external tool's tar backups; verify offline; extract stock
 config to JSON. This is the gate for Phase 3 hardware work.
 
 **Approach (user decision, 2026-11-16):** the external root tool — `iranl/harmony-ng`, MIT, read-only
-clone at `/home/user/projects/upstream-ref/harmony-ng` — is *run as a tool* to obtain
+clone at `~/projects/upstream-ref/harmony-ng` — is *run as a tool* to obtain
 root SSH and its tar backups. None of its code enters our firmware; our firmware stays clean-room.
 Our repo gains host preflight, hub discovery, full-image backup/verify, stock-config extraction, and
 two runbooks.
@@ -71,12 +71,12 @@ the `HID_QUIRK_NO_IGNORE` (`0x40000000`) override is available.
 The external root tool aborts if the host cannot reach the hub on 8088/22 *after* rooting — which
 would cost us the rooting window, not the device.
 
-- [x] **Hub is `192.0.2.11`** (user-supplied). Host is `198.51.100.126/24` on `enp5s0`; the hub is on
-      another subnet but **already routed** via `198.51.100.1` — no VLAN work, no Wi-Fi re-point, so
+- [x] **Hub is `<hub-ip>`** (user-supplied). Host is `<host-ip>/24` on `enp5s0`; the hub is on
+      another subnet but **already routed** via `<gateway-ip>` — no VLAN work, no Wi-Fi re-point, so
       reachability costs zero device writes. Verified read-only, 2026-11-16: ping 2/2, **8088 open**,
       **5222 open** (stock XMPP), **22 closed** (expected pre-root). A `setup.account?getProvisionInfo`
       POST to 8088 returned `an `activeRemoteId``, matching HA's `harmony` entry unique_id — so
-      `192.0.2.11` is confirmed as this hub, not another device.
+      `<hub-ip>` is confirmed as this hub, not another device.
 - [x] `tools/hubfind.py` **dropped** — the IP is known and routing works; a discovery tool would be
       dead code. Re-add only if the hub's address changes.
 - [ ] **Isolate the hub from WAN** for the rest of Phase 1 (MAC block or offline SSID) so it cannot
@@ -130,7 +130,7 @@ empties the root password, writes `/etc/nowatchdog`, reboots.
 
 **Partly done pre-root, 2026-11-16.** `tools/fetch_stock_config.py` pulls the stock config straight
 off the un-rooted hub over its local WebSocket API —
-`ws://192.0.2.11:8088/?domain=svcs.myharmony.com&hubId=<HUB_ID>`, envelope
+`ws://<hub-ip>:8088/?domain=svcs.myharmony.com&hubId=<HUB_ID>`, envelope
 `{"hubId","timeout","hbus":{"cmd","id","params"}}` — using only read-only queries (`engine?config`,
 `engine?getCurrentActivity`, `statedigest?get`, `setup.account?getProvisionInfo`). Output in
 `backups/phase1/hub/pre-root-config/` (gitignored): `devices.json`, `activities.json`,
@@ -221,7 +221,7 @@ removes `/data/remote_ui`, writes `/etc/nowatchdog`. All in the writable layer �
 
 ## Decisions recorded (2026-11-16)
 
-- **Hub reachability:** `192.0.2.11`, already routed — Task 2 done, no device writes. ✓
+- **Hub reachability:** `<hub-ip>`, already routed — Task 2 done, no device writes. ✓
 - **NAND imaging (remote):** main-area only is accepted. No `nanddump --oob`, nothing staged onto the
   remote to achieve it. Bad-block/OOB info is therefore not captured; acceptable because v1 never
   writes NAND and the hardware reset is the real recovery path. ✓

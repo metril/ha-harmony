@@ -2,7 +2,7 @@
 
 Device: Harmony Elite, USB `046d:c12b` (bottom micro-USB port, **not** the cradle), stock FW 4.15.330.
 After rooting it is reachable over USB Ethernet at `192.168.2.1` (host side `192.168.2.2/24`).
-External root tool: `/home/user/projects/upstream-ref/harmony-ng` (MIT, run as a tool).
+External root tool: `~/projects/upstream-ref/harmony-ng` (MIT, run as a tool).
 Our key: `~/.ssh/harmony_owner_ed25519`.
 
 Run the steps in order. Each is marked `[RO]` (read-only on the remote) or `[WRITE]`.
@@ -45,8 +45,8 @@ What the root writes (all wiped by Menu+Off):
       backup silently does not happen, because the stock BusyBox has no `tar`:
 
       ```sh
-      cd /home/user/projects/upstream-ref/harmony-ng
-      PATH=/home/user/projects/ha-harmony/vendor/toolchains/armv5-eabi/bin:$PATH \
+      cd ~/projects/upstream-ref/harmony-ng
+      PATH=~/projects/ha-harmony/vendor/toolchains/armv5-eabi/bin:$PATH \
         ./build/build_busybox.sh arm
       file remote/bin/busybox   # ELF 32-bit LSB, ARM EABI5, statically linked
       ```
@@ -57,7 +57,7 @@ What the root writes (all wiped by Menu+Off):
 ## Step 1 `[WRITE — go-ahead needed]` — arm the rooted boot path
 
 ```sh
-cd /home/user/projects/upstream-ref/harmony-ng
+cd ~/projects/upstream-ref/harmony-ng
 uv run --python 3.14 python remote/setup_remote.py --step 1 --skip-fw-check \
   --key ~/.ssh/harmony_owner_ed25519 < /dev/null
 ```
@@ -124,7 +124,7 @@ required on this path, but build it anyway — it is the fallback if step 2 ever
 ## Step 4 `[RO]` — full partition images
 
 ```sh
-cd /home/user/projects/ha-harmony
+cd ~/projects/ha-harmony
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 uv run python tools/device_backup.py --target remote --host 192.168.2.1 --user root \
   --key ~/.ssh/harmony_owner_ed25519 --out-dir backups/phase1/remote/$TS --dry-run

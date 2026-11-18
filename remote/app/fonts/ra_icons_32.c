@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 32 px
  * Bpp: 4
- * Opts: --font /tmp/tmp.mfHK6ZX3Zr/ra_icons.ttf --size 32 --bpp 4 --format lvgl --no-compress --no-kerning -r 0xE001-0xE032 --lv-font-name ra_icons_32 --lv-include lvgl.h -o /home/user/projects/ha-harmony/.claude/worktrees/agent-a983935da22558ceb/tools/../remote/app/fonts/ra_icons_32.c
+ * Opts: --font /tmp/tmp.mfHK6ZX3Zr/ra_icons.ttf --size 32 --bpp 4 --format lvgl --no-compress --no-kerning -r 0xE001-0xE032 --lv-font-name ra_icons_32 --lv-include lvgl.h -o <workspace>/tools/../remote/app/fonts/ra_icons_32.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

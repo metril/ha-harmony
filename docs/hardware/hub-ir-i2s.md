@@ -379,7 +379,7 @@ needs a device that uses one.
 Tool: `tools/ir_bench.c` (soft-float MIPS build, all parameters are arguments).
 Target: Samsung `PowerToggle` (NEC-like `0xE0E040BF`, 37900 Hz, 4500/4500 header,
 560/1690 bits, 46780 us final gap), 3 repeats. Oracle: HA
-`media_player.un55js9000` (was `off`). `hal`/`lua` were killed first, so the
+`media_player.tv` (was `off`). `hal`/`lua` were killed first, so the
 speaker slot was free. Computed stream for all attempts: X=26385 ns, N=12,
 duty 33 % (4 ones + 8 zeros per cycle), bit time 2199 ns, divider `0x0036f999`
 (54.975), 147,392 bits = 18,424 bytes, 324.1 ms.

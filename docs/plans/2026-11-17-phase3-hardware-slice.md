@@ -156,7 +156,7 @@ conflicts with the observed persistent fd).
 
 - [x] ~~**DONE — real IR emitted and proven, 2026-11-16 19:29 EST (`fffb1cd`).**~~ *(retracted)* `tools/ir_bench.c`
       (separate CMake target, never linked into `hub`) emitted a Samsung `PowerToggle` from the hub's
-      built-in emitter and **`media_player.un55js9000` went `off` → `on`** — an automated oracle, no
+      built-in emitter and **`media_player.tv` went `off` → `on`** — an automated oracle, no
       human watching needed. Succeeded on attempt 5 of a capped ladder, one variable per attempt.
       **Confirmed working parameters:** carrier 37900 Hz → period 26385 ns, **N=12**, duty 33 %
       (4 one-bits then 8 zero-bits per cycle), bit time **2199 ns**, `FREQ` divider **`0x0036f999`**
@@ -299,7 +299,7 @@ Options:
       `hub/engine/mapping.c:127-157` — so no new wire format, just a converter. Covers the 85 real IR
       commands; NVIDIA HID and Roku ECP entries are skipped **with an explicit warning each**, never
       silently. Tested against the real extracted file.
-- [ ] `[WRITE]` HA config entry against the real hub (`192.0.2.11:8099`, manual host/port/token).
+- [ ] `[WRITE]` HA config entry against the real hub (`<hub-ip>:8099`, manual host/port/token).
       Runs **alongside** the stock `harmony` entry — do not disturb it, it is the user's fallback.
       **Blocked:** the component is not installed in the user's HA. Installing a custom integration
       and restarting HA is a separate decision, not a bench-window item. Note **manual host/port is
@@ -345,7 +345,7 @@ turn the TV on**. So the emitter has line of sight from the hub's new position, 
 **ours**, not aim.
 
 **Two methodology lessons, both of which inverted a conclusion mid-session:**
-1. **`media_player.un55js9000` lags.** It still read `off` *after* the stock command had visibly
+1. **`media_player.tv` lags.** It still read `off` *after* the stock command had visibly
    turned the TV on. It was reliable at 19:29 and unreliable here, so it is **not a trustworthy
    oracle on its own** — confirm with the user's eyes, or poll for 30 s+ before concluding anything.
 2. A **physical change invalidated the baseline**: the hub was moved to a longer USB cable, which
@@ -461,12 +461,12 @@ nothing wedged. The documented bounded-blocking exception did not materialise in
 **3. mDNS discovery — does not work here, and it is not our bug.** The responder could not be
 reached from the host at all, by multicast or by unicast. Cause: `hub/net/mdns_srv.c:64`
 (`hp_mdns_on_link`) drops queries whose source is not on the hub's subnet, and the host is on
-`198.51.100.0/24` while the hub is on `192.0.2.0/24`. That guard is correct — mDNS is link-local by
+`<lan-subnet>` while the hub is on `<hub-subnet>`. That guard is correct — mDNS is link-local by
 definition and answering off-link queries is an amplification vector.
 
-The relevant finding is about **HA**, not the hub: HA has interfaces `enp86s0` (`198.51.100.101/24`)
-and `enp86s0.15` (`192.0.2.5/24`), so it *is* on-link with the hub via VLAN 15 — but its own network
-config lists `enp86s0.15` as **disabled** and announces only `198.51.100.101`. HA's zeroconf therefore
+The relevant finding is about **HA**, not the hub: HA has interfaces `enp86s0` (`<ha-lan-ip>/24`)
+and `enp86s0.15` (`<ha-vlan-ip>/24`), so it *is* on-link with the hub via VLAN 15 — but its own network
+config lists `enp86s0.15` as **disabled** and announces only `<ha-lan-ip>`. HA's zeroconf therefore
 never listens on the interface facing the hub. **Conclusion: zeroconf discovery of our hub cannot
 work until that interface is enabled in HA's network settings; manual host/port entry is the correct
 path meanwhile** (and the integration supports it). Nothing to fix in the responder, and this is why
