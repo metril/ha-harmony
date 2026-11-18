@@ -15,6 +15,7 @@ from typing import Any
 import voluptuous as vol
 import yaml
 
+from .ha_actions import default_tap, validate_ha
 from .harmony_proto import SOFT_KEY_BASE
 from .icons import ICON_IDS
 from .ir import IrCode, IrImportError, parse_flipper_file, parse_smartir_file
@@ -134,7 +135,7 @@ class _Resolver:
         if not isinstance(v, dict):
             raise vol.Invalid("an IR action must be a mapping")
         forms = [k for k in _IR_FORMS if k in v]
-        extra = set(v) - set(_IR_FORMS) - {"port_mask"}
+        extra = set(v) - set(_IR_FORMS) - {"port_mask", "repeats"}
         if "proto" not in v:
             extra = extra | ({"addr", "cmd"} & set(v))  # addr/cmd only belong to proto
         else:
@@ -147,7 +148,7 @@ class _Resolver:
         form = forms[0]
         try:
             if form == "proto":
-                if set(v) - {"proto", "addr", "cmd", "port_mask"} or not {"addr", "cmd"} <= set(v):
+                if set(v) - {"proto", "addr", "cmd", "port_mask", "repeats"} or not {"addr", "cmd"} <= set(v):
                     raise vol.Invalid("proto needs addr and cmd")
                 out = IrCode(proto=v["proto"], addr=v["addr"], cmd=v["cmd"]).to_hub_json()
             elif form == "raw":
@@ -177,6 +178,12 @@ class _Resolver:
             if isinstance(pm, bool) or not isinstance(pm, int) or not 1 <= pm <= 255:
                 raise vol.Invalid("port_mask must be 1..255")
             out["port_mask"] = pm
+        if "repeats" in v:
+            rp = v["repeats"]
+            if isinstance(rp, bool) or not isinstance(rp, int) or not 1 <= rp <= 8:
+                raise vol.Invalid("repeats must be 1..8")
+            if rp > 1:  # 1 is the default: keep the hub JSON (and its hash) unchanged
+                out["repeats"] = rp
         return out
 
     def action(self, v: Any, *, allow_activity: bool = True) -> dict[str, Any]:
@@ -204,9 +211,19 @@ class _Resolver:
             if not 0 <= usage <= 65535:
                 raise vol.Invalid("bt usage must be 0..65535")
             return {"type": "bt", "usage": usage}
+        if "ha" in v:
+            if set(v) != {"ha"}:
+                raise vol.Invalid("ha action takes only `ha`")
+            return validate_ha(v["ha"])
         if "none" in v:
             return {"type": "none"}
         return {"type": "ir", **self.ir(v)}
+
+    def ha_only(self, v: Any) -> dict[str, Any]:
+        """A step of a Home Assistant device: only `{ha: ...}` is accepted."""
+        if not isinstance(v, dict) or set(v) != {"ha"}:
+            raise vol.Invalid("a Home Assistant device takes `{ha: {service, target, ...}}` actions")
+        return validate_ha(v["ha"])
 
 
 def _slug(v: Any) -> str:
@@ -269,7 +286,26 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Schema({vol.Optional("on"): ir, vol.Optional("off"): ir, vol.Optional("toggle"): ir}),
         _check_power,
     )
+    ha = r.ha_only
+    ha_device = vol.Schema(
+        {
+            vol.Required("id"): _slug,
+            vol.Required("kind"): "ha",
+            vol.Optional("name"): _name,
+            vol.Optional("aliases", default=list): [_name],
+            # The entity whose state is the device's state (on = not off/standby/unavailable).
+            vol.Optional("entity"): vol.All(str, vol.Match(_ENTITY, msg="not an entity id")),
+            vol.Optional("power"): vol.All(
+                vol.Schema({vol.Optional("on"): ha, vol.Optional("off"): ha}), _check_ha_power
+            ),
+            vol.Optional("inputs", default=dict): {_name: ha},
+            vol.Optional("settle_ms"): _int(0, 60000),
+            vol.Optional("source"): {str: vol.Any(str, int, float, bool, None)},
+            vol.Optional("commands", default=dict): {_cmd_name: ha},
+        }
+    )
     device = {
+        vol.Optional("kind"): "ir",
         vol.Required("id"): _slug,
         vol.Optional("name"): _name,
         # Other names this device answers to in `remote.send_command` / `set_device_state`
@@ -283,6 +319,11 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("source"): {str: vol.Any(str, int, float, bool, None)},
         vol.Optional("commands", default=dict): {_cmd_name: ir},
     }
+    ir_device = vol.Schema(device)
+
+    def any_device(v: Any) -> dict[str, Any]:
+        return ha_device(v) if isinstance(v, dict) and v.get("kind") == "ha" else ir_device(v)
+
     activity = {
         vol.Required("id"): vol.All(_slug, vol.NotIn(["off"], msg="`off` is reserved")),
         vol.Optional("name"): _name,
@@ -302,6 +343,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("h", default=1): _int(1, 15),
         vol.Optional("label", default=""): str,
         vol.Optional("action"): act,
+        vol.Optional("tap"): _tap(act),
         vol.Optional("entity"): vol.All(str, vol.Match(_ENTITY, msg="not an entity id")),
         vol.Optional("icon"): vol.In(["none", *ICON_IDS], msg="unknown icon"),
         vol.Optional("role"): vol.In(ROLES),
@@ -322,7 +364,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
     }
     return vol.Schema(
         {
-            vol.Optional("devices", default=list): [device],
+            vol.Optional("devices", default=list): [any_device],
             vol.Optional("activities", default=list): [activity],
             vol.Optional("keys", default=dict): keys,
             vol.Optional("pages", default=list): [vol.All(page, _check_page)],
@@ -397,6 +439,19 @@ def validate_pages(config: dict[str, Any]) -> list[tuple[dict[str, Any] | None, 
     return out
 
 
+def _tap(act: Any):
+    def check(v: Any) -> Any:
+        return v if isinstance(v, str) and v in ("toggle", "none") else act(v)
+
+    return check
+
+
+def _check_ha_power(p: dict[str, Any]) -> dict[str, Any]:
+    if set(p) != {"on", "off"}:
+        raise vol.Invalid("a Home Assistant device's power needs both `on` and `off`")
+    return p
+
+
 def _check_power(p: dict[str, Any]) -> dict[str, Any]:
     if set(p) not in ({"on", "off"}, {"toggle"}):
         raise vol.Invalid("power needs both `on` and `off`, or just `toggle`")
@@ -416,6 +471,11 @@ def _check_widget(w: dict[str, Any]) -> dict[str, Any]:
         raise vol.Invalid("a button needs an `action` (or `nav`)")
     if kind == "tile" and "entity" not in w:
         raise vol.Invalid("a tile needs an `entity`")
+    if "tap" in w:
+        if kind != "tile":
+            raise vol.Invalid("`tap` belongs on a tile")
+        if w["tap"] == "toggle" and default_tap(w["entity"]) is None:
+            raise vol.Invalid(f"`tap: toggle` does not work on a {w['entity'].split('.')[0]} entity")
     if kind != "button" and "action" in w or kind != "tile" and "entity" in w:
         raise vol.Invalid(f"unexpected `{'action' if 'action' in w else 'entity'}` on a {kind}")
     if nav and "role" in w:
@@ -545,6 +605,8 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
                 seen.add(w["id"])
             if "action" in w:
                 check_action(w["action"], ["pages", i, "widgets", j, "action"])
+            if isinstance(w.get("tap"), dict):
+                check_action(w["tap"], ["pages", i, "widgets", j, "tap"])
 
 
 class _RefError(Exception):

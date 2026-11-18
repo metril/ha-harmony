@@ -9,7 +9,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config_model import Model
+from .ha_actions import HaCall, call_of
 from .harmony_proto import SOFT_KEY_BASE
+from .keymap import effective
 from .keys import KEY_NAMES, key_code
 from .page_build import MAX_PAGES, MAX_SOFT_KEYS, CompileError, Tile, build_pages, encode_pages
 from .page_codec import MAX_BYTES, MAX_WIDGETS, Page, page_size
@@ -39,6 +41,36 @@ class CompiledDevice:
     inputs: tuple[str, ...]
     commands: tuple[str, ...]
     aliases: tuple[str, ...] = ()  # HA-side only: resolved by the coordinator, never sent
+    ha: bool = False  # a Home Assistant device: no IR, run by the integration
+
+
+@dataclass(frozen=True)
+class HaDevice:
+    """A device run by Home Assistant services (never sent to the hub)."""
+
+    id: str
+    entity: str | None
+    settle_ms: int
+    on: HaCall | None
+    off: HaCall | None
+
+
+@dataclass(frozen=True)
+class HaStep:
+    call: HaCall
+    device: str | None = None  # the HA device it belongs to (power steps check its state)
+    wait_ms: int = 0  # settle time before this step
+    kind: str = "step"  # power_on | input | step
+
+
+@dataclass(frozen=True)
+class HaActivity:
+    """What the integration does around the hub's own IR sequence (docs/ha-config.md)."""
+
+    id: str
+    devices: tuple[str, ...]  # HA devices the activity uses, in order
+    start: tuple[HaStep, ...]  # power-on, inputs, then extra steps: after the hub reports it running
+    off: tuple[HaStep, ...]  # extra `off` steps: when the hub reports everything off
 
 
 @dataclass(frozen=True)
@@ -56,6 +88,12 @@ class Compiled:
         """The page set for a remote speaking page format `version` (1 or 2)."""
         return self.pages_v2 if version >= 2 else self.pages
     page_of: list[int] = field(default_factory=list)  # config page index behind each wire page
+    # Home Assistant side (never sent to the hub): the action table is flattened with the keymap's
+    # inheritance rule: layer (activity id, None = default / nothing running) -> key code -> call.
+    ha_keys: dict[str | None, dict[int, HaCall]] = field(default_factory=dict)
+    ha_devices: dict[str, HaDevice] = field(default_factory=dict)
+    ha_activities: dict[str, HaActivity] = field(default_factory=dict)
+    activity_ids: list[str] = field(default_factory=list)  # index = the hub's activity index
     # Measured sizes against the hub's and remote's limits (the editor's meters). Not part of
     # equality: two compiles of the same config are the same config.
     usage: dict[str, Any] = field(default_factory=dict, compare=False)
@@ -130,8 +168,25 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
         collect.append((path or [], msg))
 
     names: dict[int, str] = {}
+    ha_devs = {d["id"]: d for d in model["devices"] if d.get("kind") == "ha"}
+
+    def ha_of(a: dict[str, Any]) -> HaCall | None:
+        """The HA call behind an action: an `ha:` action, or a reference to an HA device."""
+        if a["type"] == "ha_call":
+            return call_of(a)
+        if a["type"] == "device" and a["device"] in ha_devs:
+            d = ha_devs[a["device"]]
+            if "input" in a:
+                return call_of(d["inputs"][a["input"]])
+            if a["command"] in ("power_on", "power_off"):
+                return call_of(d["power"]["on" if a["command"] == "power_on" else "off"])
+            return call_of(d["commands"][a["command"]])
+        return None
+
     devices: list[dict[str, Any]] = []
     for d in model["devices"]:
+        if d["id"] in ha_devs:
+            continue
         dev: dict[str, Any] = {"id": d["id"], "name": d.get("name", d["id"])}
         if d.get("power"):
             dev["power"] = d["power"]
@@ -143,35 +198,35 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
             dev["commands"] = d["commands"]
         devices.append(dev)
     _limit("devices", len(devices), "MAX_DEVICES", fail)
-    _limit("commands", sum(len(d["commands"]) for d in model["devices"]), "MAX_COMMANDS", fail)
-    _limit("inputs", sum(len(d["inputs"]) for d in model["devices"]), "MAX_INPUTS", fail)
+    ir_models = [d for d in model["devices"] if d["id"] not in ha_devs]
+    _limit("commands", sum(len(d["commands"]) for d in ir_models), "MAX_COMMANDS", fail)
+    _limit("inputs", sum(len(d["inputs"]) for d in ir_models), "MAX_INPUTS", fail)
 
     activities: list[dict[str, Any]] = []
+    act_keys: dict[int, dict[str, Any]] = {}
     for ai, a in enumerate(model["activities"]):
         where = ["activities", ai]
         out: dict[str, Any] = {"id": a["id"], "name": a.get("name", a["id"])}
-        if a["devices"]:
-            out["devices"] = a["devices"]
+        ir_act_devs = [x for x in a["devices"] if x["device"] not in ha_devs]
+        if ir_act_devs:
+            out["devices"] = ir_act_devs
         for sect in ("steps", "off"):
-            if a[sect]:
-                out[sect] = a[sect]
-                if len(a[sect]) > LIMITS["MAX_STEPS"]:
+            hub_steps = [x for x in a[sect] if ha_of(x) is None]  # HA steps run in the integration
+            if hub_steps:
+                out[sect] = hub_steps
+                if len(hub_steps) > LIMITS["MAX_STEPS"]:
                     fail(
-                        f"activity {a['id']!r}: too many `{sect}`: {len(a[sect])}"
+                        f"activity {a['id']!r}: too many `{sect}`: {len(hub_steps)}"
                         f" (the hub allows at most {LIMITS['MAX_STEPS']})",
                         [*where, sect],
                     )
-        if len(a["devices"]) > LIMITS["MAX_ACT_DEVS"]:
+        if len(ir_act_devs) > LIMITS["MAX_ACT_DEVS"]:
             fail(
-                f"activity {a['id']!r}: {len(a['devices'])} devices"
+                f"activity {a['id']!r}: {len(ir_act_devs)} devices"
                 f" (the hub allows at most {LIMITS['MAX_ACT_DEVS']})",
                 [*where, "devices"],
             )
-        keys = _keymap(a["keys"], f"activity {a['id']!r}", names, fail)
-        if len(keys) > LIMITS["MAX_KEYS"]:
-            fail(f"activity {a['id']!r}: too many keys: {len(keys)}", [*where, "keys"])
-        if keys:
-            out["keys"] = keys
+        act_keys[ai] = _keymap(a["keys"], f"activity {a['id']!r}", names, fail)
         activities.append(out)
     _limit("activities", len(activities), "MAX_ACTIVITIES", fail)
     if len({a["name"] for a in activities}) != len(activities):
@@ -187,6 +242,29 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
         fail(str(exc), exc.path or ["pages"])
         pages, cfg_ids, tiles = [], [], []
         wire_count = exc.count or 0
+
+    # Split off what Home Assistant runs: the hub only ever sees (and forwards) the rest. The
+    # table is flattened with keymap.effective, the same rule the hub and the X-ray view follow.
+    default_full = {int(c): x for c, x in keys.items()}
+    ha_keys: dict[str | None, dict[int, HaCall]] = {
+        None: {c: h for c, x in default_full.items() if (h := ha_of(x)) is not None}
+    }
+    keys = {c: x for c, x in keys.items() if ha_of(x) is None}
+    for ai, a in enumerate(model["activities"]):
+        own = {int(c): x for c, x in act_keys[ai].items()}
+        ha_keys[a["id"]] = {
+            c: h for c, (_s, x) in effective(own, default_full).items() if (h := ha_of(x)) is not None
+        }
+        hub_own: dict[str, Any] = {}
+        for c, x in own.items():
+            if ha_of(x) is None:
+                hub_own[str(c)] = x
+            elif str(c) in keys:  # an inherited hub action must not fire under the HA one
+                hub_own[str(c)] = {"type": "none"}
+        if len(hub_own) > LIMITS["MAX_KEYS"]:
+            fail(f"activity {a['id']!r}: too many keys: {len(hub_own)}", ["activities", ai, "keys"])
+        if hub_own:
+            activities[ai]["keys"] = hub_own
     if len(keys) > LIMITS["MAX_KEYS"]:
         fail(
             f"too many keys in the default map: {len(keys)} including page buttons"
@@ -238,9 +316,45 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
             tuple(d["inputs"]),
             tuple(d["commands"]),
             tuple(d.get("aliases", ())),
+            d["id"] in ha_devs,
         )
         for d in model["devices"]
     }
+    ha_devices = {
+        i: HaDevice(
+            i,
+            d.get("entity"),
+            d.get("settle_ms", 0),
+            call_of(d["power"]["on"]) if d.get("power") else None,
+            call_of(d["power"]["off"]) if d.get("power") else None,
+        )
+        for i, d in ha_devs.items()
+    }
+    ha_activities: dict[str, HaActivity] = {}
+    for a in model["activities"]:
+        used = [x for x in a["devices"] if x["device"] in ha_devs]
+        start = [
+            HaStep(ha_devices[x["device"]].on, x["device"], 0, "power_on")
+            for x in used
+            if ha_devices[x["device"]].on is not None
+        ]
+        powered = {s_.device for s_ in start}
+        start += [
+            HaStep(
+                call_of(ha_devs[x["device"]]["inputs"][x["input"]]),
+                x["device"],
+                ha_devices[x["device"]].settle_ms if x["device"] in powered else 0,
+                "input",
+            )
+            for x in used
+            if "input" in x
+        ]
+        start += [HaStep(h) for s_ in a["steps"] if (h := ha_of(s_)) is not None]
+        off = [HaStep(h) for s_ in a["off"] if (h := ha_of(s_)) is not None]
+        if used or start or off:
+            ha_activities[a["id"]] = HaActivity(
+                a["id"], tuple(x["device"] for x in used), tuple(start), tuple(off)
+            )
     usage = {
         "json_bytes": size,
         "json_max": LIMITS["MAX_JSON"],
@@ -252,9 +366,9 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
         "devices_max": LIMITS["MAX_DEVICES"],
         "activities": len(activities),
         "activities_max": LIMITS["MAX_ACTIVITIES"],
-        "commands": sum(len(d["commands"]) for d in model["devices"]),
+        "commands": sum(len(d["commands"]) for d in ir_models),
         "commands_max": LIMITS["MAX_COMMANDS"],
-        "inputs": sum(len(d["inputs"]) for d in model["devices"]),
+        "inputs": sum(len(d["inputs"]) for d in ir_models),
         "inputs_max": LIMITS["MAX_INPUTS"],
         "soft_keys": sum(1 for c in names if c >= SOFT_KEY_BASE),
         "soft_keys_max": MAX_SOFT_KEYS,
@@ -273,4 +387,8 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
         activities=[a["name"] for a in activities],
         devices=cdevs,
         usage=usage,
+        ha_keys=ha_keys,
+        ha_devices=ha_devices,
+        ha_activities=ha_activities,
+        activity_ids=[a["id"] for a in model["activities"]],
     )

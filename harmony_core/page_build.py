@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from .config_model import Model
+from .ha_actions import default_tap
 from .harmony_proto import SOFT_KEY_BASE
 from .icons import ICON_IDS, ICONS
 from .page_codec import (
@@ -289,6 +290,11 @@ def build_pages(
                 keys[str(code)] = s.cfg["action"]
             else:
                 tiles.append(Tile(pid, wire, s.cfg["entity"], s.label))
+                tap = s.cfg.get("tap")
+                if tap is None or tap == "toggle":
+                    tap = default_tap(s.cfg["entity"])
+                if tap not in (None, "none"):
+                    keys[str(code)] = tap  # an HA tap never reaches the hub (compiler splits it off)
             wire += 1
         free = (i for i in range(128) if i not in set(gids.values()))
         ws = []
