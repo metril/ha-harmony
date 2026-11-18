@@ -529,3 +529,39 @@ def test_encode_ws_does_not_decode_outgoing_pages():
     bad = {**payload, "data": "not base64!!"}
     with pytest.raises(hp.ProtoError):  # untrusted input is still checked in full
         hp.decode_ws(hp.encode_ws(hp.MsgType.PAGE_PUSH, bad, 7))
+
+
+# (c) a burst of tile updates is pipelined, not one round trip per tile
+TILES20 = """
+pages:
+  - id: main
+    cols: 4
+    rows: 6
+    widgets:
+""" + "".join(
+    f"      - {{type: tile, id: t{i}, x: {i % 4}, y: {i // 4}, label: T{i}, entity: sensor.s{i}}}\n"
+    for i in range(20)
+)
+
+
+async def test_twenty_tiles_flush_pipelined_within_the_window(hass, rig, clock):
+    import time
+
+    for i in range(20):
+        hass.states.async_set(f"sensor.s{i}", str(i))
+    hub, c = await rig(TILES20)
+    await hub.push("remote_info", V2_INFO)
+    await settle(hass, lambda: c.links[1].pushed and c.links[1].pushed[1] == 2)
+    await settle(hass, lambda: len(hub.tiles()) >= 20)
+    await asyncio.sleep(0.3)  # the start-up flushes are over
+    hub.tile_delay, hub.tiles_peak = 0.05, 0
+    hub.got.clear()
+    for i in range(20):
+        hass.states.async_set(f"sensor.s{i}", str(100 + i))
+    t0 = time.monotonic()
+    await _until(lambda: len(hub.tiles()) >= 20)
+    await _until(lambda: hub.tiles_inflight == 0)
+    elapsed = time.monotonic() - t0
+    assert {t["text"] for t in hub.tiles()} == {str(100 + i) for i in range(20)}
+    assert 1 < hub.tiles_peak <= const.TILE_WINDOW  # pipelined, and bounded
+    assert elapsed < 20 * 0.05 * 0.6, elapsed  # 20 serial round trips would take >= 1 s

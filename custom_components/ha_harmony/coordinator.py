@@ -837,16 +837,19 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     async def _send_tiles(self, entities: set[str], remotes: tuple[int, ...]) -> None:
         """Send each tile whose rendered (state, text) pair changed since the last send. Nothing is
         sent to a remote known to be away: the hub holds the latest per tile, and the page push
-        that follows its return resends everything."""
+        that follows its return resends everything. A burst is pipelined (TILE_WINDOW requests in
+        flight, each tile at most once per call so its order is kept) instead of one round trip
+        per tile."""
         for remote in remotes:
             link = self._rlink(remote)
             if not link.attached or not self.client.connected:
                 continue
+            rich = link.tile_state
+            todo: list[tuple[tuple[int, int, int], tuple[int, str], dict[str, Any], str]] = []
             for tile in self.compiled.tiles:
                 if tile.entity_id not in entities:
                     continue
                 st = self.hass.states.get(tile.entity_id)
-                rich = link.tile_state
                 value = tile_state(st) if rich else (0, tile_text(st))
                 key = (remote, tile.page, tile.widget)
                 if self._tile_last.get(key) == (rich, value):
@@ -859,22 +862,40 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 }
                 if rich:
                     args["state"] = value[0]
-                try:
-                    await self.client.async_send(
-                        MsgType.COMMAND,
-                        {"device": HUB_DEVICE, "command": CMD_TILE_UPDATE, "args": args},
-                    )
-                except HarmonyCommandError as exc:
-                    _LOGGER.debug("tile_update for %s not delivered: %s", tile.entity_id, exc)
-                    if exc.code == "no_remote":
-                        link.attached = False
-                        break
-                except HarmonyConnectionError as exc:
-                    _LOGGER.debug("tile_update for %s failed: %s", tile.entity_id, exc)
-                    return
-                else:
-                    self._tile_last[key] = (rich, value)
-                    self.tile_updates += 1
+                todo.append((key, value, args, tile.entity_id))
+            if not todo:
+                continue
+            window = asyncio.Semaphore(const.TILE_WINDOW)
+            stop = False
+
+            async def one(
+                key: tuple[int, int, int], value: tuple[int, str], args: dict[str, Any], entity: str,
+                link: RemoteLink = link, rich: bool = rich,
+            ) -> None:
+                nonlocal stop
+                async with window:
+                    if stop:
+                        return
+                    try:
+                        await self.client.async_send(
+                            MsgType.COMMAND,
+                            {"device": HUB_DEVICE, "command": CMD_TILE_UPDATE, "args": args},
+                        )
+                    except HarmonyCommandError as exc:
+                        _LOGGER.debug("tile_update for %s not delivered: %s", entity, exc)
+                        if exc.code == "no_remote":
+                            link.attached = False
+                            stop = True
+                    except HarmonyConnectionError as exc:
+                        _LOGGER.debug("tile_update for %s failed: %s", entity, exc)
+                        stop = True
+                    else:
+                        self._tile_last[key] = (rich, value)
+                        self.tile_updates += 1
+
+            await asyncio.gather(*(one(*item) for item in todo))
+            if not self.client.connected:
+                return
 
     # ------------------------------------------------------------ hub -> HA
     @callback

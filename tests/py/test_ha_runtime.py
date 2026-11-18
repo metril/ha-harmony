@@ -91,6 +91,8 @@ class ScriptHub:
         self.gate: asyncio.Event | None = None  # while cleared, page_push replies wait
         self.no_remote = False
         self.reject_config = False  # answer set_config with ok=false
+        self.tile_delay = 0.0  # seconds a tile_update reply is held
+        self.tiles_inflight = self.tiles_peak = 0
         self.config_hash: str | None = None  # of the last accepted set_config, as hello_ack reports it
         self.info: dict | None = None  # the remote's cached remote_info, resent after hello_ack
         self._late: list[asyncio.Task] = []
@@ -118,6 +120,10 @@ class ScriptHub:
             await ws.send_json({**reply, "t": "config_ack", "d": ack})
         elif t == "ping":
             await ws.send_json({**reply, "t": "pong", "d": {}})
+        elif t == "command" and d["command"] == "tile_update" and self.tile_delay:
+            self.tiles_inflight += 1
+            self.tiles_peak = max(self.tiles_peak, self.tiles_inflight)
+            self._late.append(asyncio.create_task(self._tile_reply_later(ws, reply)))
         elif t in ("page_push", "command"):
             if t == "page_push" and self.gate is not None and not self.gate.is_set():
                 self._late.append(asyncio.create_task(self._reply_when_open(ws, reply)))
@@ -127,6 +133,11 @@ class ScriptHub:
                 await ws.send_json({**reply, "t": "error", "d": err})
             else:
                 await ws.send_json({**reply, "t": "command_result", "d": {"ok": True}})
+
+    async def _tile_reply_later(self, ws, reply):
+        await asyncio.sleep(self.tile_delay)
+        self.tiles_inflight -= 1
+        await ws.send_json({**reply, "t": "command_result", "d": {"ok": True}})
 
     async def _reply_when_open(self, ws, reply):
         await self.gate.wait()
