@@ -101,6 +101,24 @@ static hp_page_t worst_page_v2(int id, int stale_tiles) {
   return p;
 }
 
+/* 32 widgets, all of one kind, every one with an icon and a maximum-length label / caption, laid out on a cols x rows grid
+ * (a cell may be too small for the icon, then it is not drawn). */
+static hp_page_t all_page_v2(int kind, unsigned cols, unsigned rows) {
+  hp_page_t p = worst_page_v2(12, 0);
+  p.cols = (uint8_t)cols;
+  p.rows = (uint8_t)rows;
+  for (unsigned i = 0; i < HP_PAGE_MAX_WIDGETS; i++) {
+    hp_widget_t *w = &p.widgets[i];
+    w->kind = (uint8_t)kind;
+    w->x = (uint8_t)(i % cols);
+    w->y = (uint8_t)(i / cols);
+    w->role = HP_ROLE_DEFAULT;
+    w->shape = HP_SHAPE_CARD;
+    w->has_bind = 0;
+  }
+  return p;
+}
+
 static size_t pool_free(void) {
   lv_mem_monitor_t m;
   lv_mem_monitor(&m);
@@ -166,10 +184,43 @@ static void test_v2_pool_peak_and_no_leak(void) {
   app_destroy(&app);
 }
 
+/* The true peak (precheck off) of legal 32-widget pages that are all tiles / all buttons with icons and captions, on
+ * grids of different cell sizes; and the precheck must let every one of them draw (no "Display error"). */
+static void test_v2_all_widgets_with_icons_and_captions(void) {
+  static const struct { int kind; unsigned cols, rows; const char *name; } L[] = {
+      {HP_WIDGET_TILE, 8, 4, "tiles 8x4"},   {HP_WIDGET_TILE, 4, 8, "tiles 4x8"},   {HP_WIDGET_TILE, 2, 16, "tiles 2x16"},
+      {HP_WIDGET_BUTTON, 8, 4, "buttons 8x4"}, {HP_WIDGET_BUTTON, 4, 8, "buttons 4x8"}, {HP_WIDGET_BUTTON, 2, 16, "buttons 2x16"},
+  };
+  size_t worst = 0;
+  for (unsigned i = 0; i < sizeof L / sizeof L[0]; i++) {
+    fresh_app();
+    lv_mem_monitor_t m0;
+    lv_mem_monitor(&m0);
+    hp_page_t p = all_page_v2(L[i].kind, L[i].cols, L[i].rows);
+    ra_ui_test_skip_precheck = 1;
+    ra_ui_show_page(&app.ui, &p);
+    ra_ui_toast(&app.ui, "Battery 8%", "Place on the charger");
+    refresh();
+    lv_mem_monitor_t m;
+    lv_mem_monitor(&m);
+    ra_ui_test_skip_precheck = 0;
+    fprintf(stderr, "%-13s peak %zu of %u bytes (%zu%%), free at idle %zu\n", L[i].name, m.max_used, (unsigned)LV_MEM_SIZE,
+            m.max_used * 100 / LV_MEM_SIZE, m0.free_size);
+    if (m.max_used > worst) worst = m.max_used;
+    ra_ui_show_page(&app.ui, &p); /* with the precheck ON: must draw */
+    CT_EQ(app.ui.oom, 0);
+    CT_EQ(app.ui.page.page_id, 12);
+    app_destroy(&app);
+  }
+  fprintf(stderr, "worst all-widgets v2 peak: %zu bytes (%zu%%)\n", worst, worst * 100 / LV_MEM_SIZE);
+  CT_CHECK(worst * 100 / LV_MEM_SIZE <= 60);
+}
+
 /* argv[1]: "v1" or "v2" runs one half (ctest runs them in parallel); no argument runs both. */
 int main(int argc, char **argv) {
   int v1 = argc < 2 || !strcmp(argv[1], "v1"), v2 = argc < 2 || !strcmp(argv[1], "v2");
   if (v1) CT_RUN(test_pool_peak_and_no_leak);
   if (v2) CT_RUN(test_v2_pool_peak_and_no_leak);
+  if (v2) CT_RUN(test_v2_all_widgets_with_icons_and_captions);
   return CT_DONE();
 }

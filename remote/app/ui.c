@@ -227,11 +227,13 @@ static void fail(ra_ui_t *ui) {
   if (ui->err) lv_obj_remove_flag(ui->err, LV_OBJ_FLAG_HIDDEN);
 }
 
-/* Free memory needed before building a page: ~0.9 KiB per widget measured (surface + text; 1.1 KiB budgeted), ~0.25 KiB
- * per extra object (a v2 icon glyph or tile caption; 0.3 KiB budgeted), plus the bar and the renderer's working set.
- * The worst v2 page (32 widgets, all with icons, tile captions, toast) peaks at 56 % of the pool and is budgeted 56 KiB of
- * the ~60 KiB free. Refusing early is what keeps LVGL's own allocations (which do not check for failure) safe. */
-#define BUILD_NEED(widgets, extra) (1100u * (widgets) + 300u * (extra) + 8192u)
+/* Free memory needed before building a page, an upper bound of what test_remote_mem measures: <= 0.94 KiB per widget
+ * (32 buttons with an icon and a label: 30 KiB above the 9 KiB idle use, i.e. 0.94 KiB each with the icon; budgeted 0.9
+ * KiB for surface + text plus 0.25 KiB per extra object), plus the bar and the renderer's working set. `extra` counts only
+ * objects that are really created (an icon glyph; a tile's icon only when its cell is big enough, and its caption), so a
+ * legal page is never refused for objects it will not draw. Refusing early is what keeps LVGL's own allocations (which do
+ * not check for failure) safe. */
+#define BUILD_NEED(widgets, extra) (900u * (widgets) + 250u * (extra) + 8192u)
 
 static int enough_memory(unsigned need) {
   if (ra_ui_test_skip_precheck) return 1;
@@ -460,7 +462,12 @@ static void build(ra_ui_t *ui) {
   unsigned extra = 0; /* icon glyph labels and tile captions */
   for (unsigned i = 0; v2 && i < p->count; i++) {
     const hp_widget_t *w = &p->widgets[i];
-    extra += (w->icon && w->icon <= RA_ICON_MAX) + (w->kind == HP_WIDGET_TILE && (w->label[0] || ui->link_lost));
+    int x1, y1, x2, y2;
+    ra_ui_widget_rect(p, w, &x1, &y1, &x2, &y2);
+    int bw = x2 - x1 + 1, bh = y2 - y1 + 1, icon = w->icon && w->icon <= RA_ICON_MAX;
+    if (w->kind == HP_WIDGET_TILE) /* as build_v2_content: the icon needs a 56 px cell, the caption 44 px of height */
+      extra += (icon && bh >= 56 && bw >= 56) + (bh >= 44 && (w->label[0] || ui->link_lost));
+    else if (w->kind == HP_WIDGET_BUTTON) extra += icon;
   }
   bar_ctx_t bc = {.back = v2 && p->back, .seq_idx = v2 ? p->seq_idx : 0, .seq_cnt = v2 ? p->seq_cnt : 0};
   if (screen_reset(ui, title, p->count, extra, &bc) < 0) return;
