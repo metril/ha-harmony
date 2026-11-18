@@ -361,3 +361,10 @@ plus `hp_rf_spi_set_pairing` and `hp_rf_spi_unpair`.
 reports: pass `0x12` data frames up with the 2-byte header stripped, treat
 `0x10`/`0x11` as control, and feed `attached()` from
 `10 <slot> 41 04 <status>` (`status & 0x40` = lost).
+
+### 8d. Passive findings from the live link, 2026-11-18 **[MEASURED]**
+- Probe 4: link events confirmed in both daemons' own logs: hub `link up (slot 2, status 0x87, wpid 4021)`; remote side
+  `link lost (status 0x47)` then `link up (slot 1, status 0x07, wpid 880b)`. So up = `..87`/`..07` (bit 7 hub-side, bit 7 clear on the
+  remote chip), lost = `..47`; the remote chip uses `0x07/0x47`.
+- Probes 2, 7 and 8 need `/dev/rfspi` opened or a mode change (not passive; the daemon holds it): skipped. The hub log shows one
+  `control report dropped (7 bytes)` at start and no write errors, but carries no counters, so probe 8 stays open.

@@ -381,3 +381,11 @@ rcS.local is `sh -n`-checked on the device before the mv; on-device `selftest` (
 4. Which unionfs layer holds rcS.local, and rename atomicity there, remain unknown.
 5. Exact boot timings for the joint cycle are missing (polling loop stuck; hub first-contact uptime not captured).
 6. The Elite has only run on USB power since hooking: cradle/battery behaviour and the battery guard are untested under the hook.
+
+### Follow-up probes, 2026-11-18 (read-only)
+- 4: Elite root is `unionfs dirs=/mnt/data=rw:/mnt/root=ro` with `/mnt/data` = ubifs `ubi0:data` (also holds `/data`) and `/mnt/root` = squashfs
+  mtdblock6. The modified `rcS.local` can only live in the ubifs rw layer (the original stays beneath in squashfs); `/mnt/*` are not visible from
+  userspace, so the layers cannot be listed directly. Rename atomicity on the union is still untested (needs a write).
+- 5: no new timings: neither daemon log has timestamps and both devices rebooted ~15 min before this probe (uptime ~960 s hub, ~880 s Elite),
+  both came up armed and healthy unattended; earlier figures stand (SSH ~24-33 s, hub healthy by uptime ~166 s).
+- 2: skipped (counter mid-boot cannot be read now).

@@ -149,3 +149,18 @@ has run for hours unfed). `/etc/nowatchdog` also stops `rcS` starting the stock 
 
 `/data` (ubifs, 405 LEBs ≈ 49 MB) has roughly 45 MB free **[INFERRED]** from mapped LEBs; there is
 no `df` on the device.
+
+## Suspend survey, 2026-11-18 **[MEASURED, read-only]** (upstream behaviour **[CODE]**)
+- `/sys/power/state` = `standby mem`; `/sys/power` has only `state`, `wakeup_count` (0), `pm_async`. No debugfs, so no `wakeup_sources`
+  table; per-device `power/wakeup` files exist (msp430 `1-0034` and `cc2544.1` expose `wakeup_count` etc.). Kernel 2.6.37 PREEMPT.
+- Input: `event0` msp430 (buttons), `event1` LIS3DH accelerometer (INT on GPIO 108), `event2` Synaptics Clearpad (touch, GPIO 118; masked at
+  suspend, touch does not wake a suspended remote). IRQs: msp430 GPIO 132, rfspi GPIO 112, tps6507x GPIO 170.
+- RTC: `rtc0` is the MSP430 (`name: msp430`, no `/dev/rtc0` node, no `wakealarm`). The wake alarm is the sysfs file
+  `/sys/bus/i2c/devices/1-0034/wakeup` (seconds; upstream writes `3600` before suspending); `1-0034/wakeup_event` says what woke it
+  (`alarm` or other); also `alarm`, `time` (epoch, set/read), `button`, `extbutton`, `status`, `version` 202.
+- Power: no `power_supply` class. Fuel gauge `1-0070`: `battery soc temperature ocv cur vbat` (read: soc 100.0, vbat 4.167, cur 0.005, 36 C).
+  PMIC `1-0048/tps6507x-juniper`: `powersource` (usb), `charger` (1), `vbat`, `battcharge`, `vsys`, `vdc`, `leds`. LED `tps6507x:white`.
+- Upstream sequence (`remote_power.c`): only on `powersource == battery`; flightlog SUSPEND_ENTER; button LED off; close the watchdog;
+  write `3600` to msp430 `wakeup`; write `mem` to `/sys/power/state`; on return read `wakeup_event`, reopen the watchdog; alarm wakes stay up
+  to report the battery, then suspend again. **`/dev/rfspi` is NOT closed or reopened around suspend** (the comment in `remote_rf.c`:
+  "a resume from suspend keeps it"); only the post-resume power thread re-queries. Never touch cpufreq (upstream PR #109).
