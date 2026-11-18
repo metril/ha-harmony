@@ -315,7 +315,7 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
 
 ## Bench: hardware gate G1–G5 (2026-11-18, 03:03–05:10 UTC)
 
-Hub 192.0.2.11, remote app (slot 1) started by hand once and never restarted. About 12 hub reboots in total. All of G1–G5 passed.
+Hub 192.0.2.11, remote app (slot 1) started by hand once and never restarted. 12 hub boots in total: 9 reboots (G1 3, G2 3 incl. 2 self-reboots, restore 1, G4 2) plus 3 boots after user power pulls (G3a 1, G3b 2 incl. the interrupted one). All of G1–G5 passed.
 
 **Selftest (on the hub's own sh):** first run 11/12 at 02:58 (`ls -ln` on BusyBox 1.13 has two extra columns, so the size-based
 log cap read 0) -> cap changed to a line count; then 13/13 (03:03), then 15/15 (03:18, adds "token absent from daemon argv" and the 257-char token).
@@ -346,13 +346,13 @@ hook log 4 lines, 0 oops/jffs2. Log cap never fired.
 **Remote app (pid 2687):** survived every hub reboot and pull without a restart; 0 "Hub unreachable"; its own link lost/up counts went 6/6 -> 10/10.
 
 ### Open items
-1. Hub daemon's `rf_spi: link up (slot 2...)` line is late or missing (seen at 155-260 s uptime on some boots, absent on others) while the remote
+1. Hub daemon's `rf_spi: link up (slot 2...)` line is late or missing (absent at ~155 s on boots 2-3; first confirmed by ~260 s on boot 3 and between ~10 and 20 min of uptime in G5) while the remote
    receives frames: logging bug or genuinely late link status. Needs timestamps in the daemon log.
 2. `usb 1-1 ... error -71` flood in hub dmesg (khubd in D state) and host-side enumeration failures on usb 1-10 (bursts that pre-date arming).
    No stock-boot dmesg to compare. Test with the cable unplugged and on a stock boot.
 3. Time to SSH not measured on boots 1-2 (the wait script hung on `ssh reboot`).
 4. /dev/i2s is opened on first use (not held at idle), so the "holds /dev/i2s" check does not apply while idle.
 5. `remote_sim` and `rf_probe` are still on /data (prune not run; 2620 KB free).
-6. Hook and daemon still differ on CR in conf values (hook stricter: safe direction).
-7. Factory-reset/Pair button is probably unavailable while armed (unverified).
+6. Hook and daemon still differ on CR in conf values (hook stricter: safe direction). From review, not bench-tested.
+7. Factory-reset/Pair button is probably unavailable while armed (from probe, not bench-tested).
 8. T7 remote boot hook not yet installed.
