@@ -31,7 +31,8 @@ export class HhRemote extends LitElement {
     :host { display: block; min-width: 0; }
     :host([fit]) { height: 100%; min-height: 360px; }
     svg.remote { display: block; margin: 0 auto; max-width: none; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-    :host([fit]) svg.remote { width: 100%; height: 100%; }
+    /* Fit: as large as the canvas allows (it fills the studio's height), but never past 1.25x */
+    :host([fit]) svg.remote { width: 100%; height: 100%; max-height: 1125px; }
     .body { fill: url(#bodyg); stroke: #0a0d10; stroke-width: 2; }
     .rim { fill: none; stroke: rgba(255, 255, 255, 0.07); stroke-width: 1.5; }
     .glass { fill: #05080b; stroke: #1b2229; stroke-width: 2; }

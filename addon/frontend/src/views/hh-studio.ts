@@ -39,7 +39,7 @@ export class HhStudio extends StoreElement implements StudioHost {
     shared,
     css`
       :host { display: block; --pw: 292px; --iw: 300px; }
-      .studio { display: grid; grid-template-columns: var(--pw) minmax(0, 1fr) var(--iw); height: max(640px, calc(100dvh - 128px)); border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; background: var(--sf); position: relative; }
+      .studio { display: grid; grid-template-columns: var(--pw) minmax(0, 1fr) var(--iw); height: max(640px, calc(100dvh - 112px)); border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; background: var(--sf); position: relative; }
       .pal, .insp { min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--sf); }
       .pal { border-right: 1px solid var(--line); }
       .insp { border-left: 1px solid var(--line); }
@@ -58,7 +58,7 @@ export class HhStudio extends StoreElement implements StudioHost {
       .cw { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
       .tools { position: absolute; top: 10px; right: 12px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
       .tools .grp { background: var(--sf); border: 1px solid var(--line); box-shadow: var(--sh); }
-      .canvas { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background-color: var(--cv); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 18px 18px; padding: 14px 124px 16px 16px; position: relative; scroll-behavior: auto; }
+      .canvas { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background-color: var(--cv); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 18px 18px; padding: 8px 124px 8px 16px; position: relative; scroll-behavior: auto; }
       hh-remote { flex: 1 1 auto; min-height: 0; }
       .banner2 { position: sticky; top: 0; z-index: 3; margin: -14px -16px 10px; flex: none; padding: 8px 14px; background: var(--acc); color: var(--onacc); font-weight: 600; display: flex; gap: 10px; align-items: center; }
       .banner2 .sp { flex: 1; }

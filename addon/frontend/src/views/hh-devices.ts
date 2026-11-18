@@ -39,7 +39,7 @@ export class HhDevices extends StoreElement {
       .dcard h2 { margin: 0; font-size: 15px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dcard .src { font-size: 12px; color: var(--tx3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-      .add { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 230px; border: 2px dashed var(--line); border-radius: var(--r3); color: var(--tx2); text-decoration: none; font-weight: 600; background: transparent; }
+      .add { text-align: center; padding: 16px; display: grid; place-items: center; align-content: center; gap: 8px; min-height: 230px; border: 2px dashed var(--line); border-radius: var(--r3); color: var(--tx2); text-decoration: none; font-weight: 600; background: transparent; }
       .add:hover { background: var(--sf2); color: var(--tx); border-color: var(--acc); }
       .add .plus { width: 48px; height: 48px; border-radius: 50%; background: var(--accs); color: var(--acc); display: grid; place-items: center; }
       .add .ic { width: 24px; height: 24px; }
