@@ -18,7 +18,7 @@ def test_least_privilege_manifest():
     # discovery needs `discovery:` only; /discovery and /addons/self need no hassio_api (Supervisor docs)
     assert CFG["discovery"] == ["ha_harmony"]
     assert CFG["ingress_port"] == 8099
-    assert any("ircache" in p for p in CFG["backup_exclude"])
+    assert any("irdb" in p for p in CFG["backup_exclude"])
 
 
 def test_options_schema_matches_options_reader():
