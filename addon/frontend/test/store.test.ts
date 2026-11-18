@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../src/lib/store';
-import { META, USAGE, fakeApi, previewBad, previewOk, tvConfig } from './helpers';
+import { META, USAGE, fakeApi, previewBad, previewOk, tvConfig, type Handler } from './helpers';
 
 const draftResp = { hub: 'h', draft_updated: 1_700_000_100, ...META };
-function setup(over: Record<string, () => { status?: number; body?: unknown }> = {}, draft: unknown = null) {
+function setup(over: Record<string, Handler> = {}, draft: unknown = null) {
   const puts: unknown[] = [];
   const f = fakeApi({
     'GET api/v1/config': () => ({ body: { hub: 'h', draft, ...META, applied: { ...META.applied, config: tvConfig() } } }),

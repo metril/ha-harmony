@@ -40,6 +40,8 @@ export class HhPalette extends LitElement {
       .chip2[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
       .chip2 .sic { width: 15px; height: 15px; flex: none; }
       .ent { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 4px 8px; border-radius: var(--r1); border: 1px solid transparent; background: transparent; color: var(--tx); text-align: left; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      /* a few hundred Home Assistant entities: rows outside the viewport are not laid out or painted */
+      .ent { content-visibility: auto; contain-intrinsic-size: auto 40px; }
       .ent:hover { background: var(--sf2); }
       .ent[aria-pressed="true"] { background: var(--acc); color: var(--onacc); }
       .ent .sic { width: 18px; height: 18px; color: var(--tx2); }
@@ -159,6 +161,12 @@ export class HhPalette extends LitElement {
       if (this.host?.state.tab === 'home' && !document.hidden) void this.host.state.loadHa(true);
     }, 10000);
   }
+  private qTimer?: ReturnType<typeof setTimeout>;
+  /** The palette re-renders hundreds of chips per query: wait for a pause in typing. */
+  private search(q: string) {
+    clearTimeout(this.qTimer);
+    this.qTimer = setTimeout(() => this.st.set({ query: q }), 120);
+  }
   private home() {
     const st = this.st;
     void st.loadHa();
@@ -207,7 +215,7 @@ export class HhPalette extends LitElement {
         <div class="tabs" role="tablist" aria-label="Palette">
           ${TABS.map(([id, label]) => html`<button role="tab" id=${`pt-${id}`} aria-selected=${st.tab === id} aria-controls="pbody" @click=${() => st.set({ tab: id })}>${label}</button>`)}
         </div>
-        <input type="search" aria-label="Search the palette" placeholder="Search commands, activities, entities" .value=${st.query} @input=${(e: Event) => st.set({ query: (e.target as HTMLInputElement).value })} />
+        <input type="search" aria-label="Search the palette" placeholder="Search commands, activities, entities" .value=${st.query} @input=${(e: Event) => this.search((e.target as HTMLInputElement).value)} />
       </div>
       <div class="body" id="pbody" role="tabpanel" aria-labelledby=${`pt-${st.tab}`}>
         ${st.tab === 'devices' ? this.devices() : st.tab === 'activities' ? this.activities() : st.tab === 'home' ? this.home() : this.widgets()}
