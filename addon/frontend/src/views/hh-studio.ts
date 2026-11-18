@@ -99,7 +99,7 @@ export class HhStudio extends StoreElement implements StudioHost {
         :host([sheet]) .scrim { display: block; position: fixed; inset: 0; z-index: 39; background: var(--scrim); }
         .sheetbtns { display: inline-flex; }
         .tb { flex-wrap: wrap; }
-        .tools { flex-wrap: wrap; }
+        .tools { flex: 1 1 100%; flex-wrap: wrap; }
         .pop { position: fixed; left: 8px; right: 8px; bottom: 8px; top: auto !important; width: auto; max-height: 62vh; z-index: 41; }
         .canvas { padding: 16px 8px 20px; }
         .banner2 { margin: -16px -8px 12px; }
