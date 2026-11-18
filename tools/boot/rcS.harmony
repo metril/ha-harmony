@@ -129,6 +129,10 @@ else
 		fi
 		case "$hah_k" in
 		token)
+			# Length cap (daemon accepts 1-256): `${#}` yields a count, never file content as arithmetic.
+			if [ "${#hah_v}" -gt 256 ]; then
+				hah_bad="token (over 256 chars)"
+			fi
 			case "$hah_v" in
 			'' | *[!A-Za-z0-9._~+/=-]*) hah_bad="token (empty or outside [A-Za-z0-9._~+/=-])" ;;
 			*) hah_token="$hah_v" ;;

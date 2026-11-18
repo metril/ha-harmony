@@ -73,37 +73,60 @@ static int bad_num(const char *flag, const char *val) {
 }
 
 #define TOKEN_MAX 256
+#define CONF_MAX_LINES 50 /* same bound as rcS.harmony */
 static char g_tokbuf[TOKEN_MAX + 1];
 
-/* Read the WS token from PATH: a `token=VALUE` line (so hub.conf itself works), else a bare
- * token as the only non-empty line. Never prints the value. Returns NULL if unusable. */
+/* memset the compiler may not elide (token material). */
+static void wipe(void *p, size_t n) {
+    volatile unsigned char *v = p;
+    while (n--) *v++ = 0;
+}
+
+/* Read the WS token from PATH, agreeing with rcS.harmony on a conf: the LAST `token=VALUE` line
+ * wins; over-long non-token lines are skipped; an over-long token line, or >50 lines, rejects.
+ * With no `token=` line, a bare token as the only non-empty line is accepted. Never prints the
+ * value. Returns NULL if unusable. */
 static const char *read_token_file(const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) return NULL;
-    char line[TOKEN_MAX + 16], first[TOKEN_MAX + 16] = "";
-    const char *val = NULL;
-    int nonempty = 0, ok = 1;
-    for (int n = 0; n < 64 && fgets(line, sizeof line, f); n++) {
+    static char iobuf[TOKEN_MAX + 16];
+    char line[TOKEN_MAX + 16], first[TOKEN_MAX + 16] = "", val[TOKEN_MAX + 16] = "";
+    setvbuf(f, iobuf, _IOFBF, sizeof iobuf);
+    int nonempty = 0, ok = 1, have = 0, at_start = 1, istok = 0, nlines = 0, bare_ok = 0;
+    while (ok && fgets(line, sizeof line, f)) {
         size_t l = strlen(line);
-        if (l == sizeof line - 1 && line[l - 1] != '\n') { ok = 0; break; } /* over-long line */
+        int full = l && line[l - 1] == '\n';
+        if (at_start) {
+            if (++nlines > CONF_MAX_LINES) { ok = 0; break; }
+            istok = !strncmp(line, "token=", 6);
+            if (!full && l == sizeof line - 1) { /* over-long line: skip unless it is the token */
+                if (istok) ok = 0;
+                else if (nonempty++ == 0) first[0] = 0; /* not a bare token candidate */
+                at_start = 0;
+                continue;
+            }
+        } else {
+            if (full) at_start = 1;
+            else if (l < sizeof line - 1) at_start = 1; /* final chunk at EOF */
+            if (istok && ok) ok = 0;
+            continue;
+        }
+        at_start = full || l < sizeof line - 1;
         while (l && (line[l - 1] == '\n' || line[l - 1] == '\r')) line[--l] = 0;
         if (!l) continue;
-        if (!strncmp(line, "token=", 6)) { memcpy(first, line + 6, l - 6 + 1); val = first; nonempty = 1; break; }
-        if (!nonempty++) memcpy(first, line, l + 1);
+        if (istok) { memcpy(val, line + 6, l - 6 + 1); have = 1; nonempty++; }
+        else if (nonempty++ == 0) { memcpy(first, line, l + 1); bare_ok = 1; }
     }
     fclose(f);
-    if (ok && !val && nonempty == 1) { /* a bare token may end in '=' padding, but `key=value` is some other conf line */
+    const char *res = NULL;
+    if (ok && have) res = val;
+    else if (ok && nonempty == 1 && bare_ok) { /* a bare token may end in '=' padding, but `key=value` is another conf line */
         const char *eq = strchr(first, '=');
-        if (!eq || !eq[strspn(eq, "=")]) val = first;
+        if (!eq || !eq[strspn(eq, "=")]) res = first;
     }
-    if (!ok || !val || !*val || strlen(val) > TOKEN_MAX) {
-        memset(line, 0, sizeof line);
-        memset(first, 0, sizeof first);
-        return NULL;
-    }
-    strcpy(g_tokbuf, val);
-    memset(first, 0, sizeof first);
-    return g_tokbuf;
+    if (res && *res && strlen(res) <= TOKEN_MAX) { strcpy(g_tokbuf, res); } else res = NULL;
+    wipe(line, sizeof line); wipe(first, sizeof first); wipe(val, sizeof val); wipe(iobuf, sizeof iobuf);
+    return res ? g_tokbuf : NULL;
 }
 
 int main(int argc, char **argv) {

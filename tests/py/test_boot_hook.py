@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 import pytest
+from test_hub_token_file import CONF_FIXTURES
 
 # The hub runs BusyBox ash; also exercise the hook under a host busybox when there is one.
 _BB = shutil.which("busybox")
@@ -50,15 +51,59 @@ HOOK = Path(__file__).resolve().parents[2] / "tools" / "boot" / "rcS.harmony"
 # BusyBox 1.13.4 on the hub. Anything not here either does not exist or is a builtin
 # we have confirmed: see docs/plans/2026-11-17-phase4-persistence.md section 1.
 HUB_APPLETS = {
-    "cat", "echo", "rm", "mkdir", "ls", "grep", "sed", "sleep", "kill", "ps",
-    "mount", "hostname", "insmod", "ifup", "mv", "cp", "ln", "chmod", "test",
-    "reboot", "md5sum", "sh", "touch", "date", "cut", "tr", "sort", "expr",
+    "cat",
+    "echo",
+    "rm",
+    "mkdir",
+    "ls",
+    "grep",
+    "sed",
+    "sleep",
+    "kill",
+    "ps",
+    "mount",
+    "hostname",
+    "insmod",
+    "ifup",
+    "mv",
+    "cp",
+    "ln",
+    "chmod",
+    "test",
+    "reboot",
+    "md5sum",
+    "sh",
+    "touch",
+    "date",
+    "cut",
+    "tr",
+    "sort",
+    "expr",
 }
 # Confirmed absent on the hub; using one in a boot script fails at boot, silently.
 HUB_MISSING = {
-    "timeout", "nohup", "setsid", "wc", "head", "find", "df", "dd", "sync",
-    "tar", "sha256sum", "command", "readlink", "uniq", "seq", "pgrep", "pkill",
-    "flock", "start-stop-daemon", "systemctl", "service", "awk",
+    "timeout",
+    "nohup",
+    "setsid",
+    "wc",
+    "head",
+    "find",
+    "df",
+    "dd",
+    "sync",
+    "tar",
+    "sha256sum",
+    "command",
+    "readlink",
+    "uniq",
+    "seq",
+    "pgrep",
+    "pkill",
+    "flock",
+    "start-stop-daemon",
+    "systemctl",
+    "service",
+    "awk",
 }
 
 
@@ -78,7 +123,9 @@ def install_daemon(root: Path, body: str) -> None:
     d.chmod(0o755)
 
 
-def install_conf(root: Path, text: str = "token=benchtok\nport=8099\nhub_id=ha-harmony-test\n") -> None:
+def install_conf(
+    root: Path, text: str = "token=benchtok\nport=8099\nhub_id=ha-harmony-test\n"
+) -> None:
     (root / "data" / "ha-harmony" / "hub.conf").write_text(text)
 
 
@@ -147,7 +194,9 @@ def source_hook(
 
 def test_hook_parses_as_posix_sh() -> None:
     """A syntax error here aborts rcS itself, before dropbear starts."""
-    p = subprocess.run([*_CUR["shell"], "-n", str(HOOK)], capture_output=True, text=True, check=False)
+    p = subprocess.run(
+        [*_CUR["shell"], "-n", str(HOOK)], capture_output=True, text=True, check=False
+    )
     assert p.returncode == 0, p.stderr
 
 
@@ -188,7 +237,11 @@ def test_sync_path_has_no_redirect_on_a_special_builtin_or_arithmetic_on_file_da
     """A failed redirect on `:` `.` `export` `set` `eval` `exec` `unset`... exits a sourced shell."""
     sync = _sync_code()
     special = r"(?:^|[;&|(]\s*|\n\s*)(:|\.|export|set|eval|exec|readonly|unset|shift|break|continue|return|trap)\b[^\n]*[<>]"
-    hits = [m.group(0) for m in re.finditer(special, sync) if "2>/dev/null" not in m.group(0).split("<")[0]]
+    hits = [
+        m.group(0)
+        for m in re.finditer(special, sync)
+        if "2>/dev/null" not in m.group(0).split("<")[0]
+    ]
     # `unset -f ... 2>/dev/null` is the only allowed shape, and it is at the very end (after the subshell).
     assert not [h for h in hits if "/dev/null" not in h], hits
     assert "$((" not in sync, "no arithmetic on the synchronous path"
@@ -367,7 +420,9 @@ def test_bad_conf_value_leaves_stock_alone_with_no_strike(root: Path, junk: str)
     install_conf(root, f"token=t\nrf=spi\n{junk}\n")
     _, demo = source_hook(root)
     assert demo == "unset"
-    assert not (root / "cache" / "ha-harmony-boot.n").exists(), "junk config must not spend a strike"
+    assert not (root / "cache" / "ha-harmony-boot.n").exists(), (
+        "junk config must not spend a strike"
+    )
     assert (root / "etc" / "ha-harmony-enable").exists()
     assert not (root / "data" / "ha-harmony" / "argv.txt").exists()
 
@@ -470,7 +525,9 @@ def test_failed_counter_write_never_sets_demo_mode(root: Path) -> None:
     assert not (root / "data" / "ha-harmony" / "argv.txt").exists()
 
 
-@pytest.mark.parametrize("junk", ["08", "09", "007", "garbage", "-1", "1 2", "99999999999999999999", ""])
+@pytest.mark.parametrize(
+    "junk", ["08", "09", "007", "garbage", "-1", "1 2", "99999999999999999999", ""]
+)
 def test_odd_counter_values_are_not_arithmetic_errors(root: Path, junk: str) -> None:
     install_daemon(root, "sleep 30")
     install_conf(root)
@@ -500,9 +557,15 @@ def test_sourcing_leaks_no_state_into_the_caller(root: Path) -> None:
     install_conf(root)
     probe = 'echo "S:$PWD|$#|$1|$(umask)|$-|$IFS" | od -c | cat; trap'
     pre = "cd /; umask 027; set -- keep me; IFS=:; trap 'echo T' USR1; "
-    guards = "".join(f'{n}() {{ :; }}; ' for n in ("killall", "reboot"))
-    script_after = f"{guards}{pre}. \"{HOOK}\" >/dev/null 2>&1; {probe}"
-    env = {"HAH_ROOT": str(root), "HAH_START_DELAY": "0", "HAH_POLL_SLEEP": "0.05", "HAH_HEALTHY_POLLS": "1", "PATH": f"{root}/_stub:/usr/bin:/bin"}
+    guards = "".join(f"{n}() {{ :; }}; " for n in ("killall", "reboot"))
+    script_after = f'{guards}{pre}. "{HOOK}" >/dev/null 2>&1; {probe}'
+    env = {
+        "HAH_ROOT": str(root),
+        "HAH_START_DELAY": "0",
+        "HAH_POLL_SLEEP": "0.05",
+        "HAH_HEALTHY_POLLS": "1",
+        "PATH": f"{root}/_stub:/usr/bin:/bin",
+    }
     runs = []
     for script in (script_after, f"{pre}{probe}"):
         pr = subprocess.Popen([*_CUR["shell"], "-c", script], stdout=subprocess.PIPE,
@@ -514,6 +577,26 @@ def test_sourcing_leaks_no_state_into_the_caller(root: Path) -> None:
 
 
 # --- config hardening -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("content", "want"),
+    [(c, w) for _, c, w in CONF_FIXTURES],
+    ids=[i for i, _, _ in CONF_FIXTURES],
+)
+def test_hook_verdict_matches_daemon_conf_fixtures(
+    root: Path, content: str, want: str | None
+) -> None:
+    """Same fixtures as test_hub_token_file.py: the hook arms iff the daemon would accept."""
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root, content)
+    _, demo = source_hook(root)
+    if want is None:
+        assert demo == "unset"
+        assert not (root / "cache" / "ha-harmony-boot.n").exists()
+    else:
+        assert demo == "1"
+        assert want not in _argv(root)
 
 
 def test_token_containing_equals_survives_intact(root: Path) -> None:
@@ -590,7 +673,9 @@ def test_no_reboot_after_the_health_mark(root: Path) -> None:
     install_conf(root)
     source_hook(root, healthy=1)
     log = _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
-    assert "daemon died after health mark" in log and "rebooting" not in log.replace("no reboot", "")
+    assert "daemon died after health mark" in log and "rebooting" not in log.replace(
+        "no reboot", ""
+    )
     assert not (root / "reboot.log").exists()
 
 
@@ -628,7 +713,7 @@ def test_conf_loop_terminates_when_read_never_clears_its_variable(root: Path) ->
     install_daemon(root, "sleep 30")
     install_conf(root, "token=abc\n")
     stub = (
-        'read() { for a; do v=$a; done; n=$((${n:-0}+1)); '
+        "read() { for a; do v=$a; done; n=$((${n:-0}+1)); "
         '[ "$n" = 1 ] && { eval "$v=\\"token=abc\\""; return 0; }; return 1; }; '
     )
     _, demo = source_hook(root, prelude=stub)

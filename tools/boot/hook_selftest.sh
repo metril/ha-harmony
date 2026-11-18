@@ -133,6 +133,22 @@ else
 	fail "bad value (DEMO=$DEMO)"
 fi
 
+# 6b. token over 256 chars: stock, no strike; exactly 256 arms
+long=x
+i=0
+while [ "$i" -lt 8 ]; do # 2^8 = 256 chars, then one more
+	long="$long$long"
+	i=$((i + 1))
+done
+long="${long}x"
+mkroot "token=${long}\n"
+run_hook
+if [ "$DEMO" = unset ] && [ ! -e "$R/cache/ha-harmony-boot.n" ]; then
+	pass "token over 256: stock, no strike"
+else
+	fail "token over 256 (DEMO=$DEMO)"
+fi
+
 # 7. printf '\r' yields one carriage return
 cr=$(printf '\r')
 if [ -n "$cr" ]; then pass "printf \\r"; else fail "printf \\r"; fi
