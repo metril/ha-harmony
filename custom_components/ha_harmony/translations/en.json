@@ -19,7 +19,20 @@
       },
       "hassio_confirm": {
         "title": "Link the Harmony Editor add-on",
-        "description": "The Harmony Editor add-on was found. Link it so this hub gets its configuration from the add-on? The add-on only feeds the config; this integration stays the hub's only client."
+        "description": "The Harmony Editor add-on was found: {slug} at {host}. Link it so this hub gets its configuration from the add-on? The add-on only feeds the config; this integration stays the hub's only client. Only continue if this is the add-on you installed."
+      },
+      "hub_moved": {
+        "title": "Hub moved?",
+        "description": "Hub {name} announced itself at {new_host}, but it is set up at {old_host}. Anyone on your network can send such an announcement, and confirming sends this hub's access token to the new address. Only continue if you moved the hub there yourself."
+      },
+      "reconfigure": {
+        "title": "Change the hub connection",
+        "description": "Change the hub address or access token.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "token": "Token"
+        }
       }
     },
     "error": {
@@ -38,7 +51,10 @@
       "invalid_auth": "The add-on refused the discovery token. Restart the add-on and try again.",
       "cannot_connect": "Could not reach the Harmony Editor add-on.",
       "invalid_discovery": "The add-on sent an unusable discovery message.",
-      "not_our_addon": "Only the Harmony Editor add-on can link to this integration."
+      "not_our_addon": "Only the Harmony Editor add-on can link to this integration.",
+      "reconfigure_successful": "The hub connection was updated.",
+      "unknown": "Unexpected error.",
+      "hub_moved_updated": "The hub's new address was saved."
     }
   },
   "issues": {
