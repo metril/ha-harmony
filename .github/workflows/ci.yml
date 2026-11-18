@@ -96,7 +96,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: toolchain
-          key: bootlin-${{ matrix.toolchain }}-${{ matrix.sha256 }}
+          key: tc-${{ matrix.toolchain }}-${{ matrix.sha256 }}
       - name: Download toolchain
         if: steps.tc-cache.outputs.cache-hit != 'true'
         run: |

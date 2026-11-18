@@ -2,6 +2,10 @@
 function(add_hp_test name)
   add_executable(test_${name} test_${name}.c)
   target_link_libraries(test_${name} PRIVATE hp_hub)
+  # 32-bit MIPS has no native 64-bit atomics (_Atomic uint64_t in fakes): libgcc's libatomic.
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "mips")
+    target_link_libraries(test_${name} PRIVATE atomic)
+  endif()
   add_test(NAME ${name} COMMAND test_${name})
 endfunction()
 

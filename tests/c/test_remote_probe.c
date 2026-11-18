@@ -113,7 +113,6 @@ static char *run_cmd(const rpr_ops_t *o, int argc, char **argv, int *rc) {
 
 static void set_event(struct input_event *e, unsigned type, unsigned code, int value) {
   memset(e, 0, sizeof *e);
-  e->time.tv_sec = 1;
   e->type = (uint16_t)type;
   e->code = (uint16_t)code;
   e->value = value;
