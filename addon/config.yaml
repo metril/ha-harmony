@@ -19,7 +19,7 @@ discovery:
   - ha_harmony
 homeassistant_api: true
 backup_exclude:
-  - ircache/*
+  - irdb/*
 options:
   log_level: info
 schema:

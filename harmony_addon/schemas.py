@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import voluptuous as vol
 
+from .ha_client import ACTION_DOMAINS, ENTITY_DOMAINS
 from .store import HUB_ID
 
 MAX_NODES = 60_000  # JSON values in one config document
@@ -77,4 +78,13 @@ OPT_CONFIG = vol.Schema({vol.Optional("config"): bounded_config}, extra=vol.PREV
 EMPTY = vol.Schema({}, extra=vol.PREVENT_EXTRA)
 REVERT = vol.Schema(
     {vol.Required("target"): vol.In(["applied", "previous"])}, extra=vol.PREVENT_EXTRA
+)
+
+_Q = vol.All(str, vol.Length(max=64))
+HA_ENTITIES_QUERY = vol.Schema(
+    {vol.Optional("domain"): vol.In(sorted(ENTITY_DOMAINS)), vol.Optional("q", default=""): _Q},
+    extra=vol.PREVENT_EXTRA,
+)
+HA_SERVICES_QUERY = vol.Schema(
+    {vol.Optional("domain"): vol.In(sorted(ACTION_DOMAINS))}, extra=vol.PREVENT_EXTRA
 )

@@ -31,6 +31,7 @@ from harmony_core.page_codec import decode_page
 
 from . import __version__, schemas
 from .auth import (
+    BUNDLE_PREFIX,
     HASSIO_NETWORK,
     Auth,
     BundleAuth,
@@ -38,6 +39,7 @@ from .auth import (
     RouteAuth,
     load_or_create_token,
 )
+from .ha_client import Catalog, HaApi, HaUnavailable
 from .options import Options, load_options
 from .store import HISTORY_MAX, Store, StoreError
 from .supervisor import Discovery
@@ -60,6 +62,7 @@ STORE_KEY = web.AppKey("store", Store)
 CLOCK_KEY = web.AppKey("clock", Callable)
 NOTIFIER_KEY = web.AppKey("notifier", object)
 WAIT_KEY = web.AppKey("wait_s", float)
+CATALOG_KEY = web.AppKey("catalog", Catalog)
 WAIT_SECONDS = 55.0
 
 
@@ -113,13 +116,18 @@ def make_auth_mw(auth: Auth):
                 429, "rate_limited", "too many attempts", headers={"Retry-After": "60"}
             ) from None
         if request.method in MUTATING:
-            allowed = YAML_TYPES if request.path == "/api/v1/config/import_yaml" else JSON_TYPES
-            if (
-                request.content_type not in allowed
-                or request.headers.get(CSRF_HEADER) != "1"
-                or not _same_origin(request)
-            ):
-                raise error(403, "csrf", "forbidden")
+            bundle = request.path == BUNDLE_PREFIX or request.path.startswith(BUNDLE_PREFIX + "/")
+            if bundle:  # bearer-authenticated machine client: no ambient credential, so no CSRF
+                if request.content_type not in JSON_TYPES:
+                    raise error(403, "csrf", "forbidden")
+            else:
+                allowed = YAML_TYPES if request.path == "/api/v1/config/import_yaml" else JSON_TYPES
+                if (
+                    request.content_type not in allowed
+                    or request.headers.get(CSRF_HEADER) != "1"
+                    or not _same_origin(request)
+                ):
+                    raise error(403, "csrf", "forbidden")
         return await handler(request)
 
     return auth_mw
@@ -335,6 +343,29 @@ async def export_yaml(request: web.Request) -> web.Response:
     return web.Response(text=text, content_type="text/yaml", charset="utf-8")
 
 
+# ------------------------------------------------------------------ Home Assistant catalog (GET only)
+def _ha_unavailable() -> web.HTTPException:
+    return error(503, "ha_unavailable", "Home Assistant is not reachable from the add-on")
+
+
+async def ha_entities(request: web.Request) -> web.Response:
+    q = query(request, schemas.HA_ENTITIES_QUERY)
+    try:
+        rows = await request.app[CATALOG_KEY].entities(q.get("domain"), q["q"])
+    except HaUnavailable:
+        raise _ha_unavailable() from None
+    return jresp({"entities": rows})
+
+
+async def ha_services(request: web.Request) -> web.Response:
+    q = query(request, schemas.HA_SERVICES_QUERY)
+    try:
+        rows = await request.app[CATALOG_KEY].services(q.get("domain"))
+    except HaUnavailable:
+        raise _ha_unavailable() from None
+    return jresp({"services": rows})
+
+
 # ------------------------------------------------------------------ bundle (integration feed)
 class ApplyNotifier:
     """Wakes long-poll waiters when a hub's applied config changes."""
@@ -449,6 +480,7 @@ def create_app(
     bundle_auth: BundleAuth | None = None,
     discovery: Discovery | None = None,
     wait_seconds: float = WAIT_SECONDS,
+    ha_api: HaApi | None = None,
 ) -> web.Application:
     """`auth` guards the ingress routes; the bundle routes always need `bundle_token` (default:
     the 0600 token file under data_dir) from a peer in `bundle_networks` (None: any, for tests)."""
@@ -468,6 +500,7 @@ def create_app(
     app[CLOCK_KEY] = clock
     app[NOTIFIER_KEY] = ApplyNotifier()
     app[WAIT_KEY] = wait_seconds
+    app[CATALOG_KEY] = Catalog(ha_api, clock)
 
     async def _wake_waiters(_: web.Application) -> None:
         app[NOTIFIER_KEY].close()
@@ -494,6 +527,8 @@ def create_app(
     app.router.add_post(f"{api}/config/revert", revert)
     app.router.add_post(f"{api}/config/import_yaml", import_yaml)
     app.router.add_get(f"{api}/config/export_yaml", export_yaml)
+    app.router.add_get(f"{api}/ha/entities", ha_entities)
+    app.router.add_get(f"{api}/ha/services", ha_services)
     app.router.add_get(f"{api}/bundle", get_bundle)
     app.router.add_get(f"{api}/bundle/wait", wait_bundle)
     return app

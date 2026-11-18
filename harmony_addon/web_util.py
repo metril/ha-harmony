@@ -54,4 +54,6 @@ def validate(schema: vol.Schema, data: Any) -> dict[str, Any]:
 
 
 def query(request: web.Request, schema: vol.Schema) -> dict[str, Any]:
+    if len(set(request.query.keys())) != len(request.query):
+        raise error(400, "bad_request", "invalid request: repeated parameter")
     return validate(schema, dict(request.query))

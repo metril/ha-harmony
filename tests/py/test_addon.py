@@ -2,6 +2,7 @@
 
 import json
 import os
+import tempfile
 
 import pytest
 from aiohttp import FormData
@@ -47,9 +48,7 @@ def clock():
 
 @pytest.fixture
 async def client(aiohttp_client, tmp_path):
-    app = create_app(
-        tmp_path, options=Options("info"), clock=clock, auth=NoAuth()
-    )
+    app = create_app(tmp_path, options=Options("info"), clock=clock, auth=NoAuth())
     return await aiohttp_client(app)
 
 
@@ -147,19 +146,26 @@ async def test_import_yaml_rejects_ir_file_refs_and_bad_yaml(client):
 
 
 # ---------------------------------------------------------------- S1
-ROUTES = [
-    ("GET", "/"),
-    ("GET", "/nope"),
-    ("GET", "/api/v1/health"),
-    ("GET", "/api/v1/config"),
-    ("PUT", "/api/v1/config/draft"),
-    ("POST", "/api/v1/config/validate"),
-    ("POST", "/api/v1/config/preview"),
-    ("POST", "/api/v1/config/apply"),
-    ("POST", "/api/v1/config/revert"),
-    ("POST", "/api/v1/config/import_yaml"),
-    ("GET", "/api/v1/config/export_yaml"),
-]
+def router_routes(app) -> list[tuple[str, str]]:
+    """Every (method, path) the app really serves, read from the router, so a new route cannot
+    slip past the protection tests below."""
+    return sorted(
+        {
+            (r.method, r.resource.canonical)
+            for r in app.router.routes()
+            if r.method != "HEAD" and r.resource is not None
+        }
+    )
+
+
+def _is_bundle(path: str) -> bool:
+    return path == "/api/v1/bundle" or path.startswith("/api/v1/bundle/")
+
+
+with tempfile.TemporaryDirectory() as _d:
+    _ALL = router_routes(create_app(_d, auth=NoAuth()))
+ROUTES = [("GET", "/"), ("GET", "/nope")] + [r for r in _ALL if not _is_bundle(r[1])]
+BUNDLE_ROUTES = [r for r in _ALL if _is_bundle(r[1])]
 
 
 async def test_s1_non_ingress_peer_is_forbidden_everywhere(aiohttp_client, tmp_path):
@@ -167,9 +173,7 @@ async def test_s1_non_ingress_peer_is_forbidden_everywhere(aiohttp_client, tmp_p
     for method, path in ROUTES:
         r = await c.request(method, path, headers={**H, "X-Ingress-Path": "/x"}, json={})
         assert r.status == 403, (method, path)
-    # every registered route is covered by the list above
-    app_paths = {res.canonical for res in c.app.router.resources()}
-    assert app_paths - {"/api/v1/bundle", "/api/v1/bundle/wait"} <= {p for _, p in ROUTES}
+    assert ("GET", "/api/v1/ha/entities") in ROUTES  # enumerated from the router
 
 
 async def test_s1_ingress_peer_needs_header_for_ui(aiohttp_client, tmp_path):
@@ -377,8 +381,13 @@ async def test_import_enforces_bounds_like_put_draft(client):
 
 
 async def test_import_non_json_yaml_types_are_400(client):
-    for text in ("devices: []\nwhen: 2026-01-01", "devices: []\nwhen: 2026-01-01 10:00:00",
-                 "devices: []\nx: !!set {a, b}", "devices: []\nx: .nan", "devices: []\nx: .inf"):
+    for text in (
+        "devices: []\nwhen: 2026-01-01",
+        "devices: []\nwhen: 2026-01-01 10:00:00",
+        "devices: []\nx: !!set {a, b}",
+        "devices: []\nx: .nan",
+        "devices: []\nx: .inf",
+    ):
         assert (await imp(client, text)).status == 400, text
 
 

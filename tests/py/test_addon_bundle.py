@@ -285,7 +285,9 @@ async def test_discovery_without_supervisor_is_a_noop():
 
 
 async def test_shutdown_wakes_long_poll_waiters_with_204(aiohttp_client, tmp_path):
-    app = create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None, wait_seconds=30)
+    app = create_app(
+        tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None, wait_seconds=30
+    )
     c = await aiohttp_client(app)
     ws = [asyncio.ensure_future(c.get("/api/v1/bundle/wait", headers=BEARER)) for _ in range(3)]
     await asyncio.sleep(0.1)
@@ -309,3 +311,18 @@ def test_main_passes_a_short_shutdown_timeout(monkeypatch, tmp_path):
     monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
     m.main()
     assert seen["shutdown_timeout"] <= 5
+
+
+async def test_every_bundle_route_needs_the_token_and_never_ingress(aiohttp_client, tmp_path):
+    from test_addon import BUNDLE_ROUTES
+
+    c = await aiohttp_client(
+        create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None)
+    )
+    ing = {"X-Ingress-Path": "/api/hassio_ingress/t"}
+    assert BUNDLE_ROUTES
+    for method, path in BUNDLE_ROUTES:
+        h = {"Content-Type": "application/json"}
+        assert (await c.request(method, path, json={}, headers=h)).status == 401, path
+        r = await c.request(method, path, json={}, headers={**h, **BEARER, **ing})
+        assert r.status == 401, path
