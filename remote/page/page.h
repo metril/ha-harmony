@@ -5,7 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HP_PAGE_VERSION 1
+#define HP_PAGE_VERSION 2 /* highest version decoded; version 1 pages still decode (defaults for the v2 fields) */
+#define HP_PAGE_MAX_TITLE 24
+#define HP_PAGE_V1_HEADER 5
+#define HP_PAGE_V2_HEADER 11
 #define HP_PAGE_MAX_WIDGETS 32
 #define HP_PAGE_MAX_LABEL 24
 #define HP_PAGE_MAX_TEXT 31
@@ -22,23 +25,41 @@
 
 typedef enum { HP_WIDGET_BUTTON = 0, HP_WIDGET_TILE = 1, HP_WIDGET_LABEL = 2 } hp_widget_kind_t;
 
+typedef enum { HP_ROLE_DEFAULT = 0, HP_ROLE_PRIMARY, HP_ROLE_SECONDARY, HP_ROLE_DANGER, HP_ROLE_NAV } hp_role_t;
+typedef enum { HP_SHAPE_CARD = 0, HP_SHAPE_ROW, HP_SHAPE_PILL, HP_SHAPE_MONOGRAM } hp_shape_t;
+typedef enum { HP_PAGE_KIND_NORMAL = 0, HP_PAGE_KIND_HOME, HP_PAGE_KIND_FAVORITES } hp_page_kind_t;
+/* Tile states (tile_state.state). */
+typedef enum { HP_TILE_VALUE = 0, HP_TILE_OFF, HP_TILE_ON, HP_TILE_UNAVAILABLE } hp_tile_state_t;
+
 typedef struct {
     uint8_t kind, id, x, y, w, h;
+    uint8_t role, shape, icon_only; /* v2; v1: default / card / 0 */
+    uint8_t icon;                   /* 0 none, 1..159 stock, 160..254 custom */
+    uint8_t has_bind, bind;         /* role nav: target page id; else the activity index that makes it "active" */
+    uint8_t tstate;                 /* live tile state (hp_tile_state_t), not on the wire in the page */
     char label[HP_PAGE_MAX_LABEL + 1]; /* NUL-terminated */
     char text[HP_PAGE_MAX_TEXT + 1];   /* live tile text, NUL-terminated */
 } hp_widget_t;
 
 typedef struct {
+    uint8_t version;            /* 1 or 2 */
     uint8_t page_id, cols, rows, count;
+    uint8_t gen, total;         /* v2: config generation (hash low byte), pages in the set; v1: 0, 0 (unknown) */
+    uint8_t kind, back;         /* v2: hp_page_kind_t, BACK flag */
+    uint8_t seq_idx, seq_cnt;   /* v2: paged group position; 0/0 = not paged */
+    uint8_t act;                /* v2: 0, or activity index + 1 */
+    char title[HP_PAGE_MAX_TITLE + 1]; /* v2 header title, "" = none */
     hp_widget_t widgets[HP_PAGE_MAX_WIDGETS];
 } hp_page_t;
 
-/* 0 ok; -HP_E_INVAL malformed (version, truncated/trailing, kind, UTF-8, bounds,
- * zero size, overlap, duplicate id); -HP_E_TOOBIG too many widgets, long label
- * or len > HP_PAGE_MAX_BYTES (251). *out is only written on success. */
+/* v1 and v2 (docs/plans/2026-11-18-page-format-v2.md). 0 ok; -HP_E_INVAL malformed (version, truncated/trailing,
+ * reserved bits, kind, UTF-8, bounds, zero size, overlap, duplicate id, bad paging / nav target / total);
+ * -HP_E_TOOBIG too many widgets, long label or title, or len > HP_PAGE_MAX_BYTES (251). *out is only written
+ * on success. Same verdicts as harmony_core/page_codec.py (tests/vectors/pages.json). */
 int hp_page_decode(const uint8_t *data, size_t len, hp_page_t *out);
 
-/* Index of the title label (a label at x=0,y=0 spanning all columns with h=1), or -1. The remote shows it in
+/* v1 ONLY (v2 pages carry the title in the header: -1 / 0 for them).
+ * Index of the title label (a label at x=0,y=0 spanning all columns with h=1), or -1. The remote shows it in
  * the status bar; the other rows are then laid out over the whole 240x288 area as if the page had rows-1 rows
  * (hp_page_row_shift() = 1). Without a title, or with a 1-row page, the shift is 0. */
 int hp_page_title(const hp_page_t *p);

@@ -28,6 +28,14 @@ add_test(NAME framing COMMAND test_framing ${CMAKE_SOURCE_DIR}/tests/vectors/rf/
 add_hp_test(page)
 target_compile_definitions(test_page PRIVATE HP_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json")
 
+# Decoder fuzz: every byte mutation / truncation of the valid vectors, split in 4 shards for ctest -j.
+add_executable(test_page_fuzz test_page_fuzz.c)
+target_link_libraries(test_page_fuzz PRIVATE hp_hub)
+target_compile_definitions(test_page_fuzz PRIVATE HP_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json")
+foreach(i RANGE 0 3)
+  add_test(NAME page_fuzz_${i} COMMAND test_page_fuzz ${i} 4)
+endforeach()
+
 # IR encoder: vectors dir passed as argv[1] (shared with tests/py/test_ir_vectors.py).
 add_executable(test_ir_encode test_ir_encode.c)
 target_link_libraries(test_ir_encode PRIVATE hp_hub)

@@ -12,6 +12,7 @@
 
 static const char *kind_name[] = {"button", "tile", "label"};
 
+
 static size_t unhex(const char *s, uint8_t *out, size_t cap) {
     size_t n = strlen(s) / 2;
     if (n > cap) n = cap;
@@ -37,36 +38,73 @@ static cJSON *load(void) {
     return j;
 }
 
-static void test_valid_vectors(const cJSON *root) {
+static const char *kind_str[] = {"normal", "home", "favorites"};
+static const char *role_str[] = {"default", "primary", "secondary", "danger", "nav"};
+static const char *shape_str[] = {"card", "row", "pill", "monogram"};
+
+static int jint(const cJSON *o, const char *k) { return cJSON_GetObjectItem(o, k)->valueint; }
+static const char *jstr(const cJSON *o, const char *k) { return cJSON_GetObjectItem(o, k)->valuestring; }
+
+/* One decoded page must equal the vector's `dict` model (the contract the TypeScript renderer mirrors) field for field. */
+static void check_dict(const char *name, const hp_page_t *p, const cJSON *m) {
+    int bad = ct_failures;
+    CT_EQ(p->version, jint(m, "version"));
+    CT_EQ(p->page_id, jint(m, "id"));
+    CT_EQ(p->cols, jint(m, "cols"));
+    CT_EQ(p->rows, jint(m, "rows"));
+    CT_EQ(p->gen, jint(m, "gen"));
+    CT_EQ(p->total, jint(m, "total"));
+    CT_CHECK(!strcmp(kind_str[p->kind], jstr(m, "kind")));
+    CT_EQ(p->back, cJSON_IsTrue(cJSON_GetObjectItem(m, "back")));
+    const cJSON *sq = cJSON_GetObjectItem(m, "seq");
+    if (cJSON_IsNull(sq)) {
+        CT_EQ(p->seq_cnt, 0);
+        CT_EQ(p->seq_idx, 0);
+    } else {
+        CT_EQ(p->seq_idx, jint(sq, "idx"));
+        CT_EQ(p->seq_cnt, jint(sq, "cnt"));
+    }
+    CT_EQ(p->act, jint(m, "act"));
+    CT_CHECK(!strcmp(p->title, jstr(m, "title")));
+    const cJSON *ws = cJSON_GetObjectItem(m, "widgets");
+    CT_EQ(p->count, cJSON_GetArraySize(ws));
+    for (int i = 0; i < cJSON_GetArraySize(ws) && i < p->count; i++) {
+        const cJSON *w = cJSON_GetArrayItem(ws, i);
+        const hp_widget_t *o = &p->widgets[i];
+        CT_CHECK(!strcmp(kind_name[o->kind], jstr(w, "kind")));
+        CT_EQ(o->id, jint(w, "id"));
+        CT_EQ(o->x, jint(w, "x"));
+        CT_EQ(o->y, jint(w, "y"));
+        CT_EQ(o->w, jint(w, "w"));
+        CT_EQ(o->h, jint(w, "h"));
+        CT_CHECK(!strcmp(o->label, jstr(w, "label")));
+        CT_CHECK(!strcmp(role_str[o->role], jstr(w, "role")));
+        CT_CHECK(!strcmp(shape_str[o->shape], jstr(w, "shape")));
+        CT_EQ(o->icon_only, cJSON_IsTrue(cJSON_GetObjectItem(w, "icon_only")));
+        CT_EQ(o->icon, jint(w, "icon"));
+        const cJSON *bd = cJSON_GetObjectItem(w, "bind");
+        CT_EQ(o->has_bind, !cJSON_IsNull(bd));
+        if (o->has_bind) CT_EQ(o->bind, bd->valueint);
+        CT_EQ(o->text[0], 0);
+        CT_EQ(o->tstate, 0);
+    }
+    if (ct_failures != bad) fprintf(stderr, "vector %s: model mismatch\n", name);
+}
+
+static void test_valid_vectors(const cJSON *root, const char *set) {
     const cJSON *v;
-    cJSON_ArrayForEach(v, cJSON_GetObjectItem(root, "valid")) {
+    cJSON_ArrayForEach(v, cJSON_GetObjectItem(root, set)) {
         uint8_t raw[300];
-        size_t n = unhex(cJSON_GetObjectItem(v, "hex")->valuestring, raw, sizeof raw);
+        size_t n = unhex(jstr(v, "hex"), raw, sizeof raw);
         hp_page_t p;
         CT_EQ(hp_page_decode(raw, n, &p), 0);
-        CT_EQ(p.page_id, cJSON_GetObjectItem(v, "page_id")->valueint);
-        CT_EQ(p.cols, cJSON_GetObjectItem(v, "cols")->valueint);
-        CT_EQ(p.rows, cJSON_GetObjectItem(v, "rows")->valueint);
-        const cJSON *ws = cJSON_GetObjectItem(v, "widgets");
-        CT_EQ(p.count, cJSON_GetArraySize(ws));
-        for (int i = 0; i < cJSON_GetArraySize(ws) && i < p.count; i++) {
-            const cJSON *w = cJSON_GetArrayItem(ws, i);
-            const hp_widget_t *o = &p.widgets[i];
-            CT_CHECK(!strcmp(kind_name[o->kind], cJSON_GetObjectItem(w, "kind")->valuestring));
-            CT_EQ(o->id, cJSON_GetObjectItem(w, "id")->valueint);
-            CT_EQ(o->x, cJSON_GetObjectItem(w, "x")->valueint);
-            CT_EQ(o->y, cJSON_GetObjectItem(w, "y")->valueint);
-            CT_EQ(o->w, cJSON_GetObjectItem(w, "w")->valueint);
-            CT_EQ(o->h, cJSON_GetObjectItem(w, "h")->valueint);
-            CT_CHECK(!strcmp(o->label, cJSON_GetObjectItem(w, "label")->valuestring));
-            CT_EQ(o->text[0], 0);
-        }
+        check_dict(jstr(v, "name"), &p, cJSON_GetObjectItem(v, "dict"));
     }
 }
 
-static void test_invalid_vectors(const cJSON *root) {
+static void test_invalid_vectors(const cJSON *root, const char *set) {
     const cJSON *v;
-    cJSON_ArrayForEach(v, cJSON_GetObjectItem(root, "invalid")) {
+    cJSON_ArrayForEach(v, cJSON_GetObjectItem(root, set)) {
         uint8_t raw[300];
         size_t n = unhex(cJSON_GetObjectItem(v, "hex")->valuestring, raw, sizeof raw);
         hp_page_t p;
@@ -140,8 +178,10 @@ static void test_out_untouched_on_error(void) {
 int main(int argc, char **argv) {
     if (argc > 1) vec_path = argv[1];
     cJSON *root = load();
-    test_valid_vectors(root);
-    test_invalid_vectors(root);
+    test_valid_vectors(root, "valid");
+    test_invalid_vectors(root, "invalid");
+    test_valid_vectors(root, "valid_v2");
+    test_invalid_vectors(root, "invalid_v2");
     cJSON_Delete(root);
     CT_RUN(test_hit);
     CT_RUN(test_tile_text);
