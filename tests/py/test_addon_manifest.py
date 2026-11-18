@@ -69,3 +69,26 @@ def test_service_logs_listening_on_the_ingress_port():
     assert f"--port {CFG['ingress_port']}" in run and "listening" in run
     main = (ROOT / "harmony_addon/__main__.py").read_text()
     assert "listening on" in main and '"0.0.0.0"' in main
+
+
+def test_run_script_uses_with_contenv_so_supervisor_token_reaches_python():
+    """0.3.2 regression: s6-overlay v3 services do not inherit the container environment."""
+    run = (ROOT / "addon/rootfs/etc/services.d/editor/run").read_text()
+    assert run.startswith("#!/command/with-contenv ")
+    assert "s6-setuidgid app python" in run  # setuidgid keeps the environment
+
+
+def test_grants_match_the_endpoints_the_code_calls():
+    src = lambda n: (ROOT / f"harmony_addon/{n}.py").read_text()
+    sup, ha, irt = src("supervisor"), src("ha_client"), src("ir_tester")
+    # Supervisor API: only /addons/self/* and /discovery, both open to every add-on (no hassio_api)
+    assert '"/addons/self/info"' in sup and '"/discovery"' in sup
+    assert "/hassio" not in sup and CFG["hassio_api"] is False
+    assert CFG["discovery"] == ["ha_harmony"]  # SERVICE announced must be a listed discovery domain
+    assert 'SERVICE = "ha_harmony"' in sup
+    # Core API through the Supervisor proxy needs homeassistant_api
+    assert 'CORE_API_URL = "http://supervisor/core/api"' in ha
+    assert CFG["homeassistant_api"] is True
+    for forbidden in ("auth_api", "hassio_role", "host_network"):
+        assert forbidden not in CFG
+    assert "SUPERVISOR_TOKEN" in irt

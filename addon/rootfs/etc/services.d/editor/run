@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/command/with-contenv sh
 # /data is created by the Supervisor as root; hand it to the unprivileged server user.
 chown -R app:app /data 2>/dev/null
 export PYTHONPATH=/opt/app:/opt/deps PYTHONUNBUFFERED=1

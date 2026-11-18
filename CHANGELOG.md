@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3 (2026-11-18)
+
+- Fix: the add-on never saw its SUPERVISOR_TOKEN (log: "SUPERVISOR_TOKEN is not set"), so discovery, the Home Assistant entity pickers and IR test-fire were all off. s6-overlay v3 does not pass the container environment to services; the editor run script now starts with `#!/command/with-contenv sh`. The manifest grants were checked against the endpoints the code calls and are unchanged.
+
 ## 0.3.2 (2026-11-18)
 
 - Fix: the editor service never started under a Supervisor (UI: "app seems to not be ready"). The AppArmor
