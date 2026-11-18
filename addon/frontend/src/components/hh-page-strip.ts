@@ -31,6 +31,12 @@ export class HhPageStrip extends LitElement {
       .thumb { width: 54px; height: 72px; border-radius: 6px; overflow: hidden; background: #101820; box-shadow: 0 0 0 1px var(--line); display: block; }
       .name { font-size: 12px; font-weight: 600; max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx); }
       .sub { font-size: 11px; color: var(--tx3); display: flex; gap: 6px; align-items: center; }
+      .tw { position: relative; display: block; }
+      .tw.multi .thumb { box-shadow: 0 0 0 1px var(--line), 4px 4px 0 -1px var(--sf3), 4px 4px 0 0 var(--line), 8px 8px 0 -2px var(--sf3), 8px 8px 0 -1px var(--line); margin: 0 8px 8px 0; }
+      .seq, .kd { position: absolute; font-size: 10px; line-height: 14px; font-weight: 700; padding: 0 4px; border-radius: 7px; background: var(--acc); color: var(--onacc); pointer-events: none; }
+      .seq { right: 8px; bottom: 10px; }
+      .tw:not(.multi) .seq { display: none; }
+      .kd { left: 2px; top: 2px; background: var(--ir); color: var(--sf); }
       .bar { width: 54px; height: 4px; }
       .err { position: absolute; top: 4px; right: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--sf); }
       .tools { display: none; position: absolute; top: 2px; left: 2px; gap: 2px; }
@@ -147,9 +153,13 @@ export class HhPageStrip extends LitElement {
           }) || pp?.ok === false;
           const name = p.title || p.id;
           const screens = pp?.wire_pages.length ?? 1;
-          return html`<div class=${classMap({ pg: true, drop: this.dropAt === i && this.dragFrom !== i && this.dragFrom + 1 !== i, dragging: this.dragFrom === i })} role="listitem" tabindex="0" aria-current=${st.page === i} aria-label="${name}, page ${i + 1} of ${pages.length}, ${bytes} of ${limit} bytes${bad ? ', has an error' : ''}"
+          return html`<div class=${classMap({ pg: true, drop: this.dropAt === i && this.dragFrom !== i && this.dragFrom + 1 !== i, dragging: this.dragFrom === i })} role="listitem" tabindex="0" aria-current=${st.page === i} aria-label="${name}, page ${i + 1} of ${pages.length}${p.kind ? `, ${p.kind} page` : ''}${screens > 1 ? `, ${screens} screens` : ''}, ${bytes} of ${limit} bytes${bad ? ', has an error' : ''}"
             @pointerdown=${(e: PointerEvent) => this.down(e, i)} @keydown=${(e: KeyboardEvent) => this.key(e, i, pages.length)}>
-            <svg class="thumb" viewBox="0 0 240 320" aria-hidden="true">${v2 ? pageGroup(v2, { noStatus: true }) : svg`<rect width="240" height="320" fill="#101820"></rect>`}</svg>
+            <span class=${classMap({ tw: true, multi: screens > 1 })}>
+              <svg class="thumb" viewBox="0 0 240 320" aria-hidden="true">${v2 ? pageGroup(v2, { noStatus: true }) : svg`<rect width="240" height="320" fill="#101820"></rect>`}</svg>
+              ${p.kind ? html`<span class="kd" aria-hidden="true">${p.kind === 'home' ? 'Home' : 'Fav'}</span>` : nothing}
+              <span class="seq" aria-hidden="true">${st.page === i ? `${Math.min(st.wire, screens - 1) + 1}/${screens}` : `×${screens}`}</span>
+            </span>
             <span class="name">${name}</span>
             ${p.kind || screens > 1 ? html`<span class="sub">${p.kind ?? ''}${p.kind && screens > 1 ? ' · ' : ''}${screens > 1 ? `${screens} screens` : ''}</span>` : nothing}
             <div class="bar" role="img" aria-label="${bytes} of ${limit} bytes"><div class="bar"><i class=${classMap({ warn: ratio >= 0.85 && ratio < 1, full: ratio >= 1 })} style=${setStyle({ width: `${Math.min(100, ratio * 100)}%` })}></i></div></div>

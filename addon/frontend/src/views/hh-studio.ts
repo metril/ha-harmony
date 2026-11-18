@@ -9,7 +9,7 @@ import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import {
-  DEFAULT_LAYER, addPage, assign, deletePage, describeSource, duplicatePage, errorTarget, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePage,
+  DEFAULT_LAYER, pageCap, addPage, assign, deletePage, describeSource, duplicatePage, errorTarget, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePage,
   type Source, type Target,
 } from '../lib/studio-model';
 import { StoreElement, confirmAction } from '../components/base';
@@ -55,6 +55,7 @@ export class HhStudio extends StoreElement implements StudioHost {
       .grp button[aria-pressed="true"], .grp button[aria-selected="true"] { background: var(--sf); color: var(--tx); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); }
       .grp button:disabled { opacity: 0.4; cursor: default; }
       .grp .ic { width: 16px; height: 16px; }
+      @media (min-width: 1101px) { .tb { flex-wrap: wrap; } .layers { flex: 1 1 100%; } }
       .cw { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
       .tools { flex: none; display: flex; align-items: center; gap: 6px; }
       .tools .pager { background: var(--sf2); }
@@ -282,6 +283,10 @@ export class HhStudio extends StoreElement implements StudioHost {
   private async pageOp(o: PageOp): Promise<void> {
     const cfg = this.store.config;
     const idx = o.index ?? this.st.page;
+    if ((o.op === 'add' || o.op === 'dup') && pageCap(cfg)) {
+      this.store.toast(pageCap(cfg) ?? '', 'error');
+      return;
+    }
     if (o.op === 'add') {
       if (o.template === 'lights' || o.template === 'activity') void this.st.loadHa();
       const page = templatePage(cfg, o.template ?? 'blank', { entities: this.st.entities ?? [], activity: this.st.layer === DEFAULT_LAYER ? undefined : this.st.layer });
