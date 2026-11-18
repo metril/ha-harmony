@@ -1,0 +1,2157 @@
+{
+ "devices": [
+  {
+   "id": "tv",
+   "name": "Living room TV",
+   "settle_ms": 1500,
+   "power": {
+    "on": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 2
+    },
+    "off": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 3
+    }
+   },
+   "inputs": {
+    "hdmi1": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 100
+    },
+    "hdmi2": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 101
+    },
+    "hdmi3": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 102
+    },
+    "tuner": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 103
+    },
+    "usb": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 104
+    }
+   },
+   "commands": {
+    "vol_up": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 10
+    },
+    "vol_down": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 11
+    },
+    "mute": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 12
+    },
+    "ch_up": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 13
+    },
+    "ch_down": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 14
+    },
+    "last": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 15
+    },
+    "up": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 16
+    },
+    "down": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 17
+    },
+    "left": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 18
+    },
+    "right": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 19
+    },
+    "ok": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 20
+    },
+    "back": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 21
+    },
+    "menu": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 22
+    },
+    "home": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 23
+    },
+    "info": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 24
+    },
+    "guide": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 25
+    },
+    "exit": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 26
+    },
+    "options": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 27
+    },
+    "num_0": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 28
+    },
+    "num_1": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 29
+    },
+    "num_2": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 30
+    },
+    "num_3": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 31
+    },
+    "num_4": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 32
+    },
+    "num_5": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 33
+    },
+    "num_6": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 34
+    },
+    "num_7": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 35
+    },
+    "num_8": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 36
+    },
+    "num_9": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 37
+    },
+    "sleep": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 38
+    },
+    "aspect": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 39
+    },
+    "picture_mode": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 40
+    },
+    "sound_mode": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 41
+    },
+    "subtitles": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 42
+    },
+    "teletext": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 43
+    },
+    "red": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 44
+    },
+    "green": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 45
+    },
+    "yellow": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 46
+    },
+    "blue": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 47
+    },
+    "source_toggle": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 48
+    },
+    "pip": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 49
+    },
+    "swap": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 50
+    },
+    "freeze": {
+     "proto": "nec",
+     "addr": 4,
+     "cmd": 51
+    }
+   },
+   "source": {
+    "kind": "harmony_archive",
+    "mfr": "Acme",
+    "model_file": "tv.ir"
+   }
+  },
+  {
+   "id": "avr",
+   "name": "AV receiver",
+   "settle_ms": 1500,
+   "power": {
+    "on": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 2
+    },
+    "off": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 3
+    }
+   },
+   "inputs": {
+    "tv": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 100
+    },
+    "bd": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 101
+    },
+    "game": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 102
+    },
+    "aux": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 103
+    },
+    "phono": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 104
+    },
+    "tuner": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 105
+    }
+   },
+   "commands": {
+    "vol_up": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 10
+    },
+    "vol_down": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 11
+    },
+    "mute": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 12
+    },
+    "up": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 13
+    },
+    "down": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 14
+    },
+    "left": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 15
+    },
+    "right": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 16
+    },
+    "ok": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 17
+    },
+    "back": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 18
+    },
+    "surround": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 19
+    },
+    "stereo": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 20
+    },
+    "direct": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 21
+    },
+    "bass_up": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 22
+    },
+    "bass_down": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 23
+    },
+    "treble_up": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 24
+    },
+    "treble_down": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 25
+    },
+    "dim": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 26
+    },
+    "tuner_up": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 27
+    },
+    "tuner_down": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 28
+    },
+    "preset_1": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 29
+    },
+    "preset_2": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 30
+    },
+    "preset_3": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 31
+    },
+    "night": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 32
+    },
+    "zone2": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 33
+    },
+    "eco": {
+     "proto": "nec",
+     "addr": 7,
+     "cmd": 34
+    }
+   },
+   "source": {
+    "kind": "harmony_archive",
+    "mfr": "Acme",
+    "model_file": "avr.ir"
+   }
+  },
+  {
+   "id": "streamer",
+   "name": "Streaming box",
+   "settle_ms": 1500,
+   "power": {
+    "on": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 2
+    },
+    "off": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 3
+    }
+   },
+   "inputs": {},
+   "commands": {
+    "up": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 10
+    },
+    "down": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 11
+    },
+    "left": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 12
+    },
+    "right": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 13
+    },
+    "ok": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 14
+    },
+    "back": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 15
+    },
+    "menu": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 16
+    },
+    "home": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 17
+    },
+    "play": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 18
+    },
+    "pause": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 19
+    },
+    "stop": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 20
+    },
+    "rewind": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 21
+    },
+    "fast_forward": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 22
+    },
+    "record": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 23
+    },
+    "next": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 24
+    },
+    "previous": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 25
+    },
+    "settings": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 26
+    },
+    "search": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 27
+    },
+    "voice": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 28
+    },
+    "app_a": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 29
+    },
+    "app_b": {
+     "proto": "nec",
+     "addr": 9,
+     "cmd": 30
+    }
+   },
+   "source": {
+    "kind": "harmony_archive",
+    "mfr": "Acme",
+    "model_file": "streamer.ir"
+   }
+  },
+  {
+   "id": "console",
+   "name": "Game console",
+   "settle_ms": 1500,
+   "power": {
+    "on": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 2
+    },
+    "off": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 3
+    }
+   },
+   "inputs": {},
+   "commands": {
+    "up": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 10
+    },
+    "down": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 11
+    },
+    "left": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 12
+    },
+    "right": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 13
+    },
+    "select": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 14
+    },
+    "ps": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 15
+    },
+    "options": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 16
+    },
+    "share": {
+     "proto": "nec",
+     "addr": 12,
+     "cmd": 17
+    }
+   },
+   "source": {
+    "kind": "harmony_archive",
+    "mfr": "Acme",
+    "model_file": "console.ir"
+   }
+  },
+  {
+   "id": "shield",
+   "kind": "ha",
+   "name": "Media shield",
+   "entity": "media_player.shield",
+   "power": {
+    "on": {
+     "ha": {
+      "service": "remote.turn_on",
+      "target": {
+       "entity_id": "remote.shield"
+      }
+     }
+    },
+    "off": {
+     "ha": {
+      "service": "remote.turn_off",
+      "target": {
+       "entity_id": "remote.shield"
+      }
+     }
+    }
+   },
+   "inputs": {
+    "home": {
+     "ha": {
+      "service": "media_player.select_source",
+      "target": {
+       "entity_id": "media_player.shield"
+      },
+      "data": {
+       "source": "Home"
+      }
+     }
+    }
+   },
+   "commands": {
+    "dpad_up": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "DPAD_UP"
+      }
+     }
+    },
+    "dpad_down": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "DPAD_DOWN"
+      }
+     }
+    },
+    "dpad_left": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "DPAD_LEFT"
+      }
+     }
+    },
+    "dpad_right": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "DPAD_RIGHT"
+      }
+     }
+    },
+    "dpad_center": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "DPAD_CENTER"
+      }
+     }
+    },
+    "back": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "BACK"
+      }
+     }
+    },
+    "home": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "HOME"
+      }
+     }
+    },
+    "play_pause": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "PLAY_PAUSE"
+      }
+     }
+    },
+    "rewind": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "REWIND"
+      }
+     }
+    },
+    "fast_forward": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "FAST_FORWARD"
+      }
+     }
+    }
+   }
+  }
+ ],
+ "activities": [
+  {
+   "id": "watch_tv",
+   "name": "Watch TV",
+   "devices": [
+    {
+     "device": "tv",
+     "input": "hdmi1"
+    },
+    {
+     "device": "avr",
+     "input": "tv"
+    }
+   ],
+   "steps": [
+    {
+     "device": "avr",
+     "command": "surround"
+    }
+   ],
+   "keys": {
+    "volume_up": {
+     "device": "avr",
+     "command": "vol_up"
+    },
+    "volume_down": {
+     "device": "avr",
+     "command": "vol_down"
+    },
+    "volume_mute": {
+     "device": "avr",
+     "command": "mute"
+    },
+    "up": {
+     "device": "tv",
+     "command": "up"
+    },
+    "down": {
+     "device": "tv",
+     "command": "down"
+    },
+    "select": {
+     "device": "tv",
+     "command": "ok"
+    }
+   }
+  },
+  {
+   "id": "stream",
+   "name": "Stream",
+   "devices": [
+    {
+     "device": "tv",
+     "input": "hdmi2"
+    },
+    {
+     "device": "shield"
+    },
+    {
+     "device": "avr",
+     "input": "bd"
+    }
+   ],
+   "keys": {
+    "up": {
+     "ha": {
+      "service": "remote.send_command",
+      "target": {
+       "entity_id": "remote.shield"
+      },
+      "data": {
+       "command": "DPAD_UP"
+      }
+     }
+    },
+    "play": {
+     "device": "shield",
+     "command": "play_pause"
+    },
+    "volume_up": {
+     "device": "avr",
+     "command": "vol_up"
+    },
+    "volume_down": {
+     "device": "avr",
+     "command": "vol_down"
+    }
+   }
+  },
+  {
+   "id": "game",
+   "name": "Game",
+   "devices": [
+    {
+     "device": "tv",
+     "input": "hdmi3"
+    },
+    {
+     "device": "console"
+    },
+    {
+     "device": "avr",
+     "input": "game"
+    }
+   ],
+   "keys": {
+    "volume_up": {
+     "device": "avr",
+     "command": "vol_up"
+    }
+   }
+  }
+ ],
+ "keys": {
+  "power_off_activity": {
+   "activity": "off"
+  },
+  "volume_up": {
+   "device": "avr",
+   "command": "vol_up"
+  },
+  "volume_down": {
+   "device": "avr",
+   "command": "vol_down"
+  },
+  "volume_mute": {
+   "device": "avr",
+   "command": "mute"
+  },
+  "channel_up": {
+   "device": "tv",
+   "command": "ch_up"
+  },
+  "channel_down": {
+   "device": "tv",
+   "command": "ch_down"
+  }
+ },
+ "pages": [
+  {
+   "id": "home",
+   "kind": "home",
+   "title": "Home",
+   "cols": 3,
+   "rows": 3,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "go_0",
+     "x": 0,
+     "y": 0,
+     "label": "Watch TV",
+     "action": {
+      "activity": "watch_tv"
+     }
+    },
+    {
+     "type": "button",
+     "id": "go_1",
+     "x": 1,
+     "y": 0,
+     "label": "Stream",
+     "action": {
+      "activity": "stream"
+     }
+    },
+    {
+     "type": "button",
+     "id": "go_2",
+     "x": 2,
+     "y": 0,
+     "label": "Game",
+     "action": {
+      "activity": "game"
+     }
+    }
+   ]
+  },
+  {
+   "id": "favs",
+   "kind": "favorites",
+   "title": "Favorites",
+   "list": {
+    "rows": 6
+   },
+   "widgets": [
+    {
+     "type": "button",
+     "id": "fch_1",
+     "label": "Channel 1",
+     "action": {
+      "device": "tv",
+      "command": "num_1"
+     }
+    },
+    {
+     "type": "button",
+     "id": "fch_2",
+     "label": "Channel 2",
+     "action": {
+      "device": "tv",
+      "command": "num_2"
+     }
+    },
+    {
+     "type": "button",
+     "id": "fch_3",
+     "label": "Channel 3",
+     "action": {
+      "device": "tv",
+      "command": "num_3"
+     }
+    },
+    {
+     "type": "button",
+     "id": "fch_4",
+     "label": "Channel 4",
+     "action": {
+      "device": "tv",
+      "command": "num_4"
+     }
+    },
+    {
+     "type": "button",
+     "id": "fch_5",
+     "label": "Channel 5",
+     "action": {
+      "device": "tv",
+      "command": "num_5"
+     }
+    },
+    {
+     "type": "button",
+     "id": "fch_6",
+     "label": "Channel 6",
+     "action": {
+      "device": "tv",
+      "command": "num_6"
+     }
+    },
+    {
+     "type": "button",
+     "id": "fch_7",
+     "label": "Channel 7",
+     "action": {
+      "device": "tv",
+      "command": "num_7"
+     }
+    },
+    {
+     "type": "button",
+     "id": "fch_8",
+     "label": "Channel 8",
+     "action": {
+      "device": "tv",
+      "command": "num_8"
+     }
+    }
+   ]
+  },
+  {
+   "id": "channels",
+   "title": "Channels",
+   "activity": "watch_tv",
+   "list": {
+    "rows": 8
+   },
+   "widgets": [
+    {
+     "type": "button",
+     "id": "ch_1",
+     "label": "Channel 1",
+     "action": {
+      "device": "tv",
+      "command": "num_1"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_2",
+     "label": "Channel 2",
+     "action": {
+      "device": "tv",
+      "command": "num_2"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_3",
+     "label": "Channel 3",
+     "action": {
+      "device": "tv",
+      "command": "num_3"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_4",
+     "label": "Channel 4",
+     "action": {
+      "device": "tv",
+      "command": "num_4"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_5",
+     "label": "Channel 5",
+     "action": {
+      "device": "tv",
+      "command": "num_5"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_6",
+     "label": "Channel 6",
+     "action": {
+      "device": "tv",
+      "command": "num_6"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_7",
+     "label": "Channel 7",
+     "action": {
+      "device": "tv",
+      "command": "num_7"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_8",
+     "label": "Channel 8",
+     "action": {
+      "device": "tv",
+      "command": "num_8"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_9",
+     "label": "Channel 9",
+     "action": {
+      "device": "tv",
+      "command": "num_9"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_10",
+     "label": "Channel 10",
+     "action": {
+      "device": "tv",
+      "command": "num_0"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_11",
+     "label": "Channel 11",
+     "action": {
+      "device": "tv",
+      "command": "num_1"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_12",
+     "label": "Channel 12",
+     "action": {
+      "device": "tv",
+      "command": "num_2"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_13",
+     "label": "Channel 13",
+     "action": {
+      "device": "tv",
+      "command": "num_3"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_14",
+     "label": "Channel 14",
+     "action": {
+      "device": "tv",
+      "command": "num_4"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_15",
+     "label": "Channel 15",
+     "action": {
+      "device": "tv",
+      "command": "num_5"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_16",
+     "label": "Channel 16",
+     "action": {
+      "device": "tv",
+      "command": "num_6"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_17",
+     "label": "Channel 17",
+     "action": {
+      "device": "tv",
+      "command": "num_7"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_18",
+     "label": "Channel 18",
+     "action": {
+      "device": "tv",
+      "command": "num_8"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_19",
+     "label": "Channel 19",
+     "action": {
+      "device": "tv",
+      "command": "num_9"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_20",
+     "label": "Channel 20",
+     "action": {
+      "device": "tv",
+      "command": "num_0"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_21",
+     "label": "Channel 21",
+     "action": {
+      "device": "tv",
+      "command": "num_1"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_22",
+     "label": "Channel 22",
+     "action": {
+      "device": "tv",
+      "command": "num_2"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_23",
+     "label": "Channel 23",
+     "action": {
+      "device": "tv",
+      "command": "num_3"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_24",
+     "label": "Channel 24",
+     "action": {
+      "device": "tv",
+      "command": "num_4"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_25",
+     "label": "Channel 25",
+     "action": {
+      "device": "tv",
+      "command": "num_5"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_26",
+     "label": "Channel 26",
+     "action": {
+      "device": "tv",
+      "command": "num_6"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_27",
+     "label": "Channel 27",
+     "action": {
+      "device": "tv",
+      "command": "num_7"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_28",
+     "label": "Channel 28",
+     "action": {
+      "device": "tv",
+      "command": "num_8"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_29",
+     "label": "Channel 29",
+     "action": {
+      "device": "tv",
+      "command": "num_9"
+     }
+    },
+    {
+     "type": "button",
+     "id": "ch_30",
+     "label": "Channel 30",
+     "action": {
+      "device": "tv",
+      "command": "num_0"
+     }
+    }
+   ]
+  },
+  {
+   "id": "lights",
+   "title": "Lights",
+   "list": {
+    "rows": 4
+   },
+   "widgets": [
+    {
+     "type": "tile",
+     "id": "lt_1",
+     "label": "Light 1",
+     "entity": "light.zone_1",
+     "tap": "toggle"
+    },
+    {
+     "type": "tile",
+     "id": "lt_2",
+     "label": "Light 2",
+     "entity": "light.zone_2",
+     "tap": "toggle"
+    },
+    {
+     "type": "tile",
+     "id": "lt_3",
+     "label": "Light 3",
+     "entity": "light.zone_3",
+     "tap": "toggle"
+    },
+    {
+     "type": "tile",
+     "id": "lt_4",
+     "label": "Light 4",
+     "entity": "light.zone_4",
+     "tap": "toggle"
+    },
+    {
+     "type": "tile",
+     "id": "lt_5",
+     "label": "Light 5",
+     "entity": "light.zone_5",
+     "tap": "toggle"
+    },
+    {
+     "type": "tile",
+     "id": "lt_6",
+     "label": "Light 6",
+     "entity": "light.zone_6",
+     "tap": "toggle"
+    },
+    {
+     "type": "tile",
+     "id": "lt_7",
+     "label": "Light 7",
+     "entity": "light.zone_7",
+     "tap": "toggle"
+    },
+    {
+     "type": "tile",
+     "id": "lt_8",
+     "label": "Light 8",
+     "entity": "light.zone_8",
+     "tap": "toggle"
+    }
+   ]
+  },
+  {
+   "id": "watch",
+   "title": "Watch TV",
+   "cols": 3,
+   "rows": 4,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "w_sleep",
+     "x": 0,
+     "y": 0,
+     "label": "Sleep",
+     "action": {
+      "device": "tv",
+      "command": "sleep"
+     }
+    },
+    {
+     "type": "button",
+     "id": "w_pic",
+     "x": 1,
+     "y": 0,
+     "label": "Picture",
+     "action": {
+      "device": "tv",
+      "command": "picture_mode"
+     }
+    },
+    {
+     "type": "tile",
+     "id": "w_temp",
+     "x": 0,
+     "y": 1,
+     "w": 2,
+     "label": "Room",
+     "entity": "sensor.living_room_temperature"
+    },
+    {
+     "type": "tile",
+     "id": "w_lamp",
+     "x": 2,
+     "y": 1,
+     "label": "Lamp",
+     "entity": "light.lamp",
+     "tap": {
+      "ha": {
+       "service": "light.turn_on",
+       "target": {
+        "entity_id": "light.lamp"
+       },
+       "data": {
+        "brightness": 120
+       }
+      }
+     }
+    },
+    {
+     "type": "button",
+     "id": "w_next",
+     "x": 2,
+     "y": 3,
+     "label": "More",
+     "nav": "next"
+    }
+   ]
+  },
+  {
+   "id": "stream_p",
+   "title": "Stream",
+   "activity": "stream",
+   "cols": 3,
+   "rows": 3,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "s_app_a",
+     "x": 0,
+     "y": 0,
+     "label": "App A",
+     "action": {
+      "device": "streamer",
+      "command": "app_a"
+     }
+    },
+    {
+     "type": "button",
+     "id": "s_shield",
+     "x": 1,
+     "y": 0,
+     "label": "Shield home",
+     "action": {
+      "device": "shield",
+      "command": "home"
+     }
+    },
+    {
+     "type": "button",
+     "id": "s_back",
+     "x": 2,
+     "y": 0,
+     "label": "Back",
+     "nav": "home"
+    }
+   ]
+  },
+  {
+   "id": "misc_1",
+   "title": "Page 1",
+   "cols": 4,
+   "rows": 4,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "m1_0",
+     "x": 0,
+     "y": 0,
+     "label": "B0",
+     "action": {
+      "device": "avr",
+      "command": "vol_up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m1_1",
+     "x": 1,
+     "y": 0,
+     "label": "B1",
+     "action": {
+      "device": "avr",
+      "command": "vol_down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m1_2",
+     "x": 2,
+     "y": 0,
+     "label": "B2",
+     "action": {
+      "device": "avr",
+      "command": "mute"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m1_3",
+     "x": 3,
+     "y": 0,
+     "label": "B3",
+     "action": {
+      "device": "avr",
+      "command": "up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m1_4",
+     "x": 0,
+     "y": 1,
+     "label": "B4",
+     "action": {
+      "device": "avr",
+      "command": "down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m1_5",
+     "x": 1,
+     "y": 1,
+     "label": "B5",
+     "action": {
+      "device": "avr",
+      "command": "left"
+     }
+    },
+    {
+     "type": "label",
+     "x": 0,
+     "y": 3,
+     "w": 4,
+     "label": "Section 1"
+    }
+   ]
+  },
+  {
+   "id": "misc_2",
+   "title": "Page 2",
+   "cols": 4,
+   "rows": 4,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "m2_0",
+     "x": 0,
+     "y": 0,
+     "label": "B0",
+     "action": {
+      "device": "avr",
+      "command": "vol_up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m2_1",
+     "x": 1,
+     "y": 0,
+     "label": "B1",
+     "action": {
+      "device": "avr",
+      "command": "vol_down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m2_2",
+     "x": 2,
+     "y": 0,
+     "label": "B2",
+     "action": {
+      "device": "avr",
+      "command": "mute"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m2_3",
+     "x": 3,
+     "y": 0,
+     "label": "B3",
+     "action": {
+      "device": "avr",
+      "command": "up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m2_4",
+     "x": 0,
+     "y": 1,
+     "label": "B4",
+     "action": {
+      "device": "avr",
+      "command": "down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m2_5",
+     "x": 1,
+     "y": 1,
+     "label": "B5",
+     "action": {
+      "device": "avr",
+      "command": "left"
+     }
+    },
+    {
+     "type": "label",
+     "x": 0,
+     "y": 3,
+     "w": 4,
+     "label": "Section 2"
+    }
+   ]
+  },
+  {
+   "id": "misc_3",
+   "title": "Page 3",
+   "cols": 4,
+   "rows": 4,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "m3_0",
+     "x": 0,
+     "y": 0,
+     "label": "B0",
+     "action": {
+      "device": "avr",
+      "command": "vol_up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m3_1",
+     "x": 1,
+     "y": 0,
+     "label": "B1",
+     "action": {
+      "device": "avr",
+      "command": "vol_down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m3_2",
+     "x": 2,
+     "y": 0,
+     "label": "B2",
+     "action": {
+      "device": "avr",
+      "command": "mute"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m3_3",
+     "x": 3,
+     "y": 0,
+     "label": "B3",
+     "action": {
+      "device": "avr",
+      "command": "up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m3_4",
+     "x": 0,
+     "y": 1,
+     "label": "B4",
+     "action": {
+      "device": "avr",
+      "command": "down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m3_5",
+     "x": 1,
+     "y": 1,
+     "label": "B5",
+     "action": {
+      "device": "avr",
+      "command": "left"
+     }
+    },
+    {
+     "type": "label",
+     "x": 0,
+     "y": 3,
+     "w": 4,
+     "label": "Section 3"
+    }
+   ]
+  },
+  {
+   "id": "misc_4",
+   "title": "Page 4",
+   "cols": 4,
+   "rows": 4,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "m4_0",
+     "x": 0,
+     "y": 0,
+     "label": "B0",
+     "action": {
+      "device": "avr",
+      "command": "vol_up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m4_1",
+     "x": 1,
+     "y": 0,
+     "label": "B1",
+     "action": {
+      "device": "avr",
+      "command": "vol_down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m4_2",
+     "x": 2,
+     "y": 0,
+     "label": "B2",
+     "action": {
+      "device": "avr",
+      "command": "mute"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m4_3",
+     "x": 3,
+     "y": 0,
+     "label": "B3",
+     "action": {
+      "device": "avr",
+      "command": "up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m4_4",
+     "x": 0,
+     "y": 1,
+     "label": "B4",
+     "action": {
+      "device": "avr",
+      "command": "down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m4_5",
+     "x": 1,
+     "y": 1,
+     "label": "B5",
+     "action": {
+      "device": "avr",
+      "command": "left"
+     }
+    },
+    {
+     "type": "label",
+     "x": 0,
+     "y": 3,
+     "w": 4,
+     "label": "Section 4"
+    }
+   ]
+  },
+  {
+   "id": "misc_5",
+   "title": "Page 5",
+   "cols": 4,
+   "rows": 4,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "m5_0",
+     "x": 0,
+     "y": 0,
+     "label": "B0",
+     "action": {
+      "device": "avr",
+      "command": "vol_up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m5_1",
+     "x": 1,
+     "y": 0,
+     "label": "B1",
+     "action": {
+      "device": "avr",
+      "command": "vol_down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m5_2",
+     "x": 2,
+     "y": 0,
+     "label": "B2",
+     "action": {
+      "device": "avr",
+      "command": "mute"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m5_3",
+     "x": 3,
+     "y": 0,
+     "label": "B3",
+     "action": {
+      "device": "avr",
+      "command": "up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m5_4",
+     "x": 0,
+     "y": 1,
+     "label": "B4",
+     "action": {
+      "device": "avr",
+      "command": "down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m5_5",
+     "x": 1,
+     "y": 1,
+     "label": "B5",
+     "action": {
+      "device": "avr",
+      "command": "left"
+     }
+    },
+    {
+     "type": "label",
+     "x": 0,
+     "y": 3,
+     "w": 4,
+     "label": "Section 5"
+    }
+   ]
+  },
+  {
+   "id": "misc_6",
+   "title": "Page 6",
+   "cols": 4,
+   "rows": 4,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "m6_0",
+     "x": 0,
+     "y": 0,
+     "label": "B0",
+     "action": {
+      "device": "avr",
+      "command": "vol_up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m6_1",
+     "x": 1,
+     "y": 0,
+     "label": "B1",
+     "action": {
+      "device": "avr",
+      "command": "vol_down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m6_2",
+     "x": 2,
+     "y": 0,
+     "label": "B2",
+     "action": {
+      "device": "avr",
+      "command": "mute"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m6_3",
+     "x": 3,
+     "y": 0,
+     "label": "B3",
+     "action": {
+      "device": "avr",
+      "command": "up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m6_4",
+     "x": 0,
+     "y": 1,
+     "label": "B4",
+     "action": {
+      "device": "avr",
+      "command": "down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m6_5",
+     "x": 1,
+     "y": 1,
+     "label": "B5",
+     "action": {
+      "device": "avr",
+      "command": "left"
+     }
+    },
+    {
+     "type": "label",
+     "x": 0,
+     "y": 3,
+     "w": 4,
+     "label": "Section 6"
+    }
+   ]
+  },
+  {
+   "id": "misc_7",
+   "title": "Page 7",
+   "cols": 4,
+   "rows": 4,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "m7_0",
+     "x": 0,
+     "y": 0,
+     "label": "B0",
+     "action": {
+      "device": "avr",
+      "command": "vol_up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m7_1",
+     "x": 1,
+     "y": 0,
+     "label": "B1",
+     "action": {
+      "device": "avr",
+      "command": "vol_down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m7_2",
+     "x": 2,
+     "y": 0,
+     "label": "B2",
+     "action": {
+      "device": "avr",
+      "command": "mute"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m7_3",
+     "x": 3,
+     "y": 0,
+     "label": "B3",
+     "action": {
+      "device": "avr",
+      "command": "up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m7_4",
+     "x": 0,
+     "y": 1,
+     "label": "B4",
+     "action": {
+      "device": "avr",
+      "command": "down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m7_5",
+     "x": 1,
+     "y": 1,
+     "label": "B5",
+     "action": {
+      "device": "avr",
+      "command": "left"
+     }
+    },
+    {
+     "type": "label",
+     "x": 0,
+     "y": 3,
+     "w": 4,
+     "label": "Section 7"
+    }
+   ]
+  },
+  {
+   "id": "misc_8",
+   "title": "Page 8",
+   "cols": 4,
+   "rows": 4,
+   "widgets": [
+    {
+     "type": "button",
+     "id": "m8_0",
+     "x": 0,
+     "y": 0,
+     "label": "B0",
+     "action": {
+      "device": "avr",
+      "command": "vol_up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m8_1",
+     "x": 1,
+     "y": 0,
+     "label": "B1",
+     "action": {
+      "device": "avr",
+      "command": "vol_down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m8_2",
+     "x": 2,
+     "y": 0,
+     "label": "B2",
+     "action": {
+      "device": "avr",
+      "command": "mute"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m8_3",
+     "x": 3,
+     "y": 0,
+     "label": "B3",
+     "action": {
+      "device": "avr",
+      "command": "up"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m8_4",
+     "x": 0,
+     "y": 1,
+     "label": "B4",
+     "action": {
+      "device": "avr",
+      "command": "down"
+     }
+    },
+    {
+     "type": "button",
+     "id": "m8_5",
+     "x": 1,
+     "y": 1,
+     "label": "B5",
+     "action": {
+      "device": "avr",
+      "command": "left"
+     }
+    },
+    {
+     "type": "label",
+     "x": 0,
+     "y": 3,
+     "w": 4,
+     "label": "Section 8"
+    }
+   ]
+  }
+ ],
+ "editor": {
+  "handlers": {
+   "watch_tv": {
+    "volume": "avr",
+    "nav": "tv"
+   }
+  }
+ }
+}
