@@ -69,7 +69,9 @@ async def open_editor(browser, origin, problems=None, **kw):
         page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: problems.append(str(e)))
 
-    async def to_real_server(route):  # the ingress proxy: strip the prefix, add what Supervisor adds
+    async def to_real_server(
+        route,
+    ):  # the ingress proxy: strip the prefix, add what Supervisor adds
         await route.continue_(
             url=route.request.url.replace(PREFIX, "", 1),
             headers={**route.request.headers, **INGRESS_HEADERS},
@@ -105,7 +107,9 @@ async def seed(origin, *configs):
 
     for text in configs:
         cfg = load_source(text)
-        assert (await api(origin, "PUT", "/api/v1/config/draft", json={"config": cfg}, headers=H))[0] == 200
+        assert (await api(origin, "PUT", "/api/v1/config/draft", json={"config": cfg}, headers=H))[
+            0
+        ] == 200
         assert (await api(origin, "POST", "/api/v1/config/apply", json={}, headers=H))[0] == 200
 
 
@@ -169,7 +173,9 @@ async def test_waiting_message_after_30s_is_reachable_and_late_ack_still_complet
         "document.querySelector('hh-app').store.edit(c => { c.devices[0].settle_ms = 250; })"
     )
     await page.get_by_text("saved just now").wait_for()
-    await page.evaluate("document.querySelector('hh-app').shadowRoot.querySelector('hh-apply-dialog').waitMs = 500")
+    await page.evaluate(
+        "document.querySelector('hh-app').shadowRoot.querySelector('hh-apply-dialog').waitMs = 500"
+    )
     await page.get_by_role("button", name="Review & apply").click()
     await page.get_by_role("button", name="Apply to hub").click()
     await page.get_by_text("Home Assistant has not picked it up yet").wait_for(timeout=8000)
@@ -329,7 +335,10 @@ async def test_studio_import_assign_drag_inspect_apply(browser, site):
     wid = got["draft"]["config"]["pages"][1]["widgets"][-1]
     assert wid["role"] == "primary" and wid["icon"] == "vol_down"
     assert wid["action"] == {"device": "avr", "command": "mute"}
-    assert got["draft"]["config"]["activities"][1]["keys"]["volume_down"] == {"device": "avr", "command": "vol_down"}
+    assert got["draft"]["config"]["activities"][1]["keys"]["volume_down"] == {
+        "device": "avr",
+        "command": "vol_down",
+    }
 
     # undo is one step per action
     await page.locator("hh-studio button[aria-label=Undo]").click()
@@ -376,7 +385,9 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
         "devices:\n  - id: avr\n    name: AV receiver\n    power: {toggle: {proto: rc5, addr: 16, cmd: 12}}\n"
         "    commands: {vol_up: {proto: rc5, addr: 16, cmd: 16}, vol_down: {proto: rc5, addr: 16, cmd: 17}, mute: {proto: rc5, addr: 16, cmd: 13}}\n"
     )
-    assert (await api(site, "PUT", "/api/v1/config/draft", json={"config": load_source(avr)}, headers=H))[0] == 200
+    assert (
+        await api(site, "PUT", "/api/v1/config/draft", json={"config": load_source(avr)}, headers=H)
+    )[0] == 200
     page = await open_editor(browser, site, problems)
     await page.goto(f"{site}{PREFIX}/#/devices/new")
     await page.get_by_role("button", name="IR archive").click()
