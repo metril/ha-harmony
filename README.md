@@ -47,7 +47,8 @@ gone, with Home Assistant as the source of truth for devices, activities and rem
   the hub to stock.
 - **The Elite remote.** Key names are the real Elite ones (`volume_up`, `select`, ...); the remote firmware itself is in progress.
 - **Zeroconf discovery** only works when Home Assistant listens on the same subnet as the hub;
-  manual host/port entry always works.
+  manual host/port entry always works. A hub already set up is never moved to a new address by an announcement
+  alone: you confirm *Hub moved to ...?* first.
 
 ## Installing the integration
 

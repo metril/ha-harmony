@@ -164,8 +164,12 @@ keys (default and per-activity layers), page buttons, tile taps, and the `steps`
 ### Home Assistant devices
 
 A device with `kind: ha` has no IR: its `power` (`on` and `off`), `inputs` and `commands` are `ha:` actions,
-and the optional `entity` is where its state comes from (power is on unless the entity is `off`, `standby`,
-`unavailable` or `unknown`; the `source` attribute is the input). Everything else works as for IR devices:
+and the optional `entity` is where its state comes from (the `source` attribute is the input; the entity may be
+renamed in Home Assistant, the device follows). Power by domain: `cover` open / opening = on, closed / closing =
+off; `lock` unlocked / unlocking / open = on, locked / locking = off; `media_player` anything but `off` and
+`standby` = on; every other domain (light, switch, fan, `climate` whose state is its hvac mode, ...) on unless
+`off`. `unavailable` and `unknown` (and a state a `cover` or `lock` has no rule for, such as `jammed`) are an
+unknown power. Everything else works as for IR devices:
 `{device: shield, command: ok}` on a key or button becomes that service call, the device gets its buttons,
 `remote.send_command` and a power sensor, and activities may list it with an `input`. It does not count
 against the hub's device limits and never reaches the hub.
@@ -176,7 +180,8 @@ activity B running, Home Assistant (1) powers off the HA devices of the previous
 (2) when everything went off, runs the previous activity's HA `off` steps, then for B (3) powers on its HA
 devices that are not already on (the entity is the truth), (4) selects their inputs, waiting the device's
 `settle_ms` first if it was just powered on, and (5) runs B's HA `steps`. The first `state_update` after a
-connection is only a baseline (no steps run when Home Assistant restarts). A newer transition cancels the
+start of Home Assistant is only a baseline (no steps run when it restarts); a change that happened while Home
+Assistant and the hub were disconnected is compared with the activity known before the drop and its steps run. A newer transition cancels the
 steps still waiting. HA steps and IR steps of one list are not interleaved: IR steps run first.
 
 ### Which pages a remote gets
@@ -252,4 +257,23 @@ The config is pushed on connect only if the hub's `config_hash` differs from the
 `ha_harmony.reload_config` (pull from the add-on now, recompile, push if changed; fails when the hub is
 not linked), `push_pages`, `send_ir` (no file references), `set_device_state` (tell the hub a device was
 switched by hand). Rejections by the hub raise a repair issue and a log error; the previous config
-keeps running.
+keeps running. Pages are only pushed for a config the hub has accepted (its reported hash equals the compiled one).
+
+**Service calls and errors.** A key press or step that calls a Home Assistant service only logs a failure (nothing
+waits for it); a held `repeat: true` key drops a repeat while the same call is still running, so a slow service never
+queues, and stops with the release. Calls the user starts (a device button, `remote.send_command`) raise a translated
+error. `remote.send_command` honours `num_repeats`, `delay_secs` (default 0.4 s) and `hold_secs` (the command is
+resent every 0.4 s until that time has passed).
+
+**Key events.** The *Remote N keys* event entity fires on press and release; hold repeats are an option (*Configure*
+on the integration, off by default: one recorder row per 0.4 s of holding). Home Assistant key actions with
+`repeat: true` are not affected. Event attributes are `key` and `action`.
+
+**Connection changes.** *Reconfigure* changes host, port and token. The hub's mDNS announcement never retargets a
+configured hub by itself: if a hub id is announced at another address Home Assistant offers *Hub moved to
+`<host>`?* and sends the token only after you confirm (anyone on the LAN can answer mDNS).
+
+**Linking the add-on.** The confirm step names the add-on (slug and address). The slug check (`*_ha_harmony_editor`)
+is the only authentication of the Supervisor's discovery message, so the residual risk is another installed add-on
+whose slug ends the same way; check the name and address shown before confirming. Diagnostics (*Download
+diagnostics*) redact tokens and addresses.
