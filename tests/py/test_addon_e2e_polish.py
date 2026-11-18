@@ -1,3 +1,4 @@
+# ruff: noqa: F811
 """Editor polish end-to-end, on the large synthetic fixture (5 devices, ~96 commands, 14 pages -> 19
 wire pages, a Home Assistant device, 300 fake entities): accessibility (axe-core, light and dark, every
 route), interaction timings, the 1024x768 layout, late-failure spot checks, keyboard-only tasks and
@@ -11,7 +12,7 @@ import os
 from pathlib import Path
 
 import pytest
-from test_addon_e2e import DIST, PREFIX, TOKEN, INGRESS_HEADERS, H, api, browser, open_editor  # noqa: F401
+from test_addon_e2e import DIST, INGRESS_HEADERS, PREFIX, TOKEN, H, api, browser, open_editor  # noqa: F401
 
 from harmony_addon.app import create_app
 from harmony_addon.auth import NoAuth
@@ -27,7 +28,18 @@ STUDIO = "document.querySelector('hh-app').shadowRoot.querySelector('hh-studio')
 
 class FakeHa:
     def __init__(self, n=300):
-        doms = ["light", "switch", "fan", "cover", "climate", "media_player", "scene", "script", "sensor", "input_boolean"]
+        doms = [
+            "light",
+            "switch",
+            "fan",
+            "cover",
+            "climate",
+            "media_player",
+            "scene",
+            "script",
+            "sensor",
+            "input_boolean",
+        ]
         self.states = [
             {
                 "entity_id": f"{doms[i % 10]}.room_{i // 10}_{doms[i % 10]}",
@@ -37,7 +49,13 @@ class FakeHa:
             for i in range(n)
         ]
         self.services = [
-            {"domain": d, "services": {"toggle": {"fields": {}}, "turn_on": {"fields": {"brightness_pct": {}}}}}
+            {
+                "domain": d,
+                "services": {
+                    "toggle": {"fields": {}},
+                    "turn_on": {"fields": {"brightness_pct": {}}},
+                },
+            }
             for d in ("light", "switch", "fan", "cover", "media_player", "scene", "script")
         ]
 
@@ -48,8 +66,14 @@ class FakeHa:
 @pytest.fixture
 async def large(aiohttp_server, tmp_path):
     app = create_app(
-        tmp_path, options=Options("info"), auth=NoAuth(), static_dir=DIST, bundle_token=TOKEN,
-        bundle_networks=None, wait_seconds=1.0, ha_api=FakeHa(),
+        tmp_path,
+        options=Options("info"),
+        auth=NoAuth(),
+        static_dir=DIST,
+        bundle_token=TOKEN,
+        bundle_networks=None,
+        wait_seconds=1.0,
+        ha_api=FakeHa(),
     )
     server = await aiohttp_server(app)
     origin = f"http://127.0.0.1:{server.port}"
@@ -59,7 +83,9 @@ async def large(aiohttp_server, tmp_path):
 
 
 async def open_large(browser, origin, width=1440, height=900, **kw):
-    ctx = await browser.new_context(viewport={"width": width, "height": height}, bypass_csp=True, **kw)
+    ctx = await browser.new_context(
+        viewport={"width": width, "height": height}, bypass_csp=True, **kw
+    )
     page = await ctx.new_page()
 
     async def to_server(route):
@@ -74,10 +100,22 @@ async def open_large(browser, origin, width=1440, height=900, **kw):
     return page
 
 
-ROUTES = ["overview", "remote", "activities", "activities/watch_tv", "devices", "devices/tv", "devices/shield", "devices/new", "history"]
+ROUTES = [
+    "overview",
+    "remote",
+    "activities",
+    "activities/watch_tv",
+    "devices",
+    "devices/tv",
+    "devices/shield",
+    "devices/new",
+    "history",
+]
 
 
-@pytest.mark.skipif(not AXE.is_file(), reason="axe-core is not installed (npm ci in addon/frontend)")
+@pytest.mark.skipif(
+    not AXE.is_file(), reason="axe-core is not installed (npm ci in addon/frontend)"
+)
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 async def test_axe_finds_no_violation_on_any_route(browser, large, scheme):
     bad = []
@@ -121,16 +159,19 @@ async def test_interaction_timings_on_the_large_config(browser, large):
     (name) => { window.__dt = null;
       window.addEventListener('pointerup', () => {
         const t0 = performance.now();
-        const key = () => %s.querySelector('hh-remote').shadowRoot.querySelector('[data-key=' + name + ']');
+        const key = () => STUDIO_ROOT.querySelector('hh-remote').shadowRoot.querySelector('[data-key=' + name + ']');
         const before = key().getAttribute('aria-label');
         const tick = () => key().getAttribute('aria-label') !== before
           ? requestAnimationFrame(() => { window.__dt = performance.now() - t0; }) : requestAnimationFrame(tick);
         tick();
       }, { capture: true, once: true }); }
-    """ % STUDIO
+    """.replace("STUDIO_ROOT", STUDIO)
     times = []
     for key, cmd in (("play", "num_3"), ("pause", "num_4"), ("stop", "num_5")):
-        await page.evaluate("() => { const s = " + STORE + "; s.edit(c => { delete c.keys['%s']; }); }" % key)
+        await page.evaluate(
+            "(k) => { " + STORE + ".edit(c => { delete c.keys[k]; }); }",
+            key,
+        )
         await page.wait_for_timeout(900)
         chip = page.locator("hh-palette .chip2", has_text=cmd).first
         await chip.scroll_into_view_if_needed()
@@ -189,9 +230,7 @@ async def test_five_late_failures_are_prevented_or_shown_before_apply(browser, l
         f"() => {STORE}.edit(c => {{ const p = c.pages[c.pages.length - 1]; p.widgets.push({{type: 'button', id: 'lastnav', x: 3, y: 3, label: 'N', nav: 'home'}}); }})"
     )
     await page.wait_for_timeout(400)
-    r = await page.evaluate(
-        f"() => {{ const s = {STORE}; return s.config.pages.length; }}"
-    )
+    r = await page.evaluate(f"() => {{ const s = {STORE}; return s.config.pages.length; }}")
     assert r == 14
 
 
@@ -242,14 +281,19 @@ async def test_long_press_drag_with_touch_emulation_does_not_scroll_the_page(bro
     cb = await chip.bounding_box()
     cdp = await page.context.new_cdp_session(page)
     cx, cy = cb["x"] + cb["width"] / 2, cb["y"] + cb["height"] / 2
-    await cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": cx, "y": cy}]})
+    await cdp.send(
+        "Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": cx, "y": cy}]}
+    )
     await page.wait_for_timeout(450)  # long press: the drag begins and the palette sheet closes
     kb = await page.locator("hh-remote [data-key=pause]").bounding_box()
     tx, ty = kb["x"] + kb["width"] / 2, kb["y"] + kb["height"] / 2
     for i in range(1, 9):
         await cdp.send(
             "Input.dispatchTouchEvent",
-            {"type": "touchMove", "touchPoints": [{"x": cx + (tx - cx) * i / 8, "y": cy + (ty - cy) * i / 8}]},
+            {
+                "type": "touchMove",
+                "touchPoints": [{"x": cx + (tx - cx) * i / 8, "y": cy + (ty - cy) * i / 8}],
+            },
         )
     await cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
     await page.wait_for_function(
