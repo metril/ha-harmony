@@ -7,12 +7,9 @@ add-on) to [config format 2](proto/config-format-2.md) plus pages ([page format]
 pushes it to the hub, and caches it in `.storage` so the remote stays configured while the add-on is
 stopped. A refused config (bad schema, wrong hub, IR file references, too large) keeps the previous
 one and raises a repair issue; the *Add-on link* sensor shows `ok`/`unreachable`/`rejected`/...
-Nothing applied yet = the hub's own config is left alone. Errors name the path, e.g.
-`bundle[sim-hub]:1: devices[0].commands.vol_up: nec cmd 999 outside 0..255`.
+Nothing applied yet = the hub's own config is left alone.
 **Migrating from `<config>/ha_harmony/<hub_id>.yaml`** (no longer read; one repair issue, file left
 alone): import it in the add-on, then apply. See [CHANGELOG](../CHANGELOG.md).
-
-The document (YAML in the importer, JSON on the wire; same schema):
 
 ```yaml
 devices:
