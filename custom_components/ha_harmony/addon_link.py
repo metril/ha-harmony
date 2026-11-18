@@ -66,7 +66,7 @@ def compile_source(source: Any, hub_id: str) -> Compiled:
         return compile_config(model)
     except (ConfigError, CompileError) as exc:
         raise BundleRejected(str(exc)[:300]) from None
-    except (ValueError, TypeError, RecursionError):
+    except ValueError, TypeError, RecursionError:
         raise BundleRejected("config is not valid JSON data") from None
 
 

@@ -595,7 +595,9 @@ async def test_reload_service_rejects_bad_yaml_and_keeps_previous(hass, hub_rf, 
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
     path.write_text(BASE.replace("hdmi1: {proto: nec, addr: 4, cmd: 10}", "hdmi1: {proto: nec}"))
-    with pytest.raises(HomeAssistantError, match=r"devices\[0\]\.inputs\.hdmi1: proto needs addr and cmd"):
+    with pytest.raises(
+        HomeAssistantError, match=r"devices\[0\]\.inputs\.hdmi1: proto needs addr and cmd"
+    ):
         await hass.services.async_call(const.DOMAIN, "reload_config", {}, blocking=True)
     assert ir.async_get(hass).async_get_issue(const.DOMAIN, f"config_invalid_{HUB_ID}")
     assert uids(hass, entry) == BASE_UIDS  # previous config still in force

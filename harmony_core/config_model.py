@@ -1,4 +1,4 @@
-"""User config file `<HA config dir>/ha_harmony/<hub_id>.yaml`: schema, IR resolution, validation.
+"""Config document: schema, IR resolution, validation (YAML text or JSON, shared add-on/integration).
 
 `parse_model` returns a plain validated dict (the "model"); every IR code in it is already
 resolved to a config-format-2 IR action, so `compiler.compile_config` is a pure function of it.
