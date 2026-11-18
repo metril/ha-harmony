@@ -3,7 +3,8 @@ import { customElement, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { Assigner, moveCursor } from '../lib/assigner';
 import { icon } from '../lib/icons';
-import { keyTitle } from '../lib/remote-layout';
+import { keyByName, keyTitle } from '../lib/remote-layout';
+import { parseHash } from '../lib/router';
 import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
@@ -151,6 +152,12 @@ export class HhStudio extends StoreElement implements StudioHost {
     if (!this.inited) {
       this.inited = true;
       this.state0.page = pageIndexForLayer(s.config, this.state0.layer);
+      // deep link from Activities: #/remote/<layer>/<key>
+      const [layer, key] = parseHash(location.hash).parts;
+      if (layer && (layer === DEFAULT_LAYER || (s.config.activities ?? []).some((a) => a.id === layer))) {
+        this.state0.setLayer(layer);
+        if (key && keyByName.has(key)) this.state0.sel = { kind: 'key', name: key };
+      }
     }
     if (s.config !== this.lastCfg) {
       this.lastCfg = s.config;

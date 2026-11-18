@@ -1,4 +1,4 @@
-import { css, html, nothing } from 'lit';
+import { css, html, nothing, type TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { icon } from '../lib/icons';
@@ -14,7 +14,6 @@ import './hh-import-dialog';
 import '../views/hh-devices';
 import '../views/hh-history';
 import '../views/hh-overview';
-import '../views/hh-placeholder';
 import '../views/hh-studio';
 
 interface RailItem {
@@ -23,11 +22,6 @@ interface RailItem {
   icon: string;
   count?: number;
 }
-
-const NOT_BUILT: Record<string, [string, string]> = {
-  activities: ['Activities', 'Activities will be edited visually: pick devices and inputs, then arrange start and stop steps.'],
-  ir: ['IR library', 'The IR archive browser and add-device wizard need API endpoints that do not exist yet.'],
-};
 
 @customElement('hh-app')
 export class HhApp extends StoreElement {
@@ -119,7 +113,6 @@ export class HhApp extends StoreElement {
       { id: 'devices', label: 'Devices', icon: 'devices', count: c.devices },
       { id: 'activities', label: 'Activities', icon: 'activities', count: c.activities },
       { id: '-', label: '', icon: '' },
-      { id: 'ir', label: 'IR library', icon: 'ir' },
       { id: 'history', label: 'History', icon: 'history', count: hist },
     ];
   }
@@ -132,14 +125,27 @@ export class HhApp extends StoreElement {
       case 'overview':
         return html`<hh-overview></hh-overview>`;
       case 'devices':
+        if (parts[0] === 'new') return this.lazy('add-device', () => import('../views/hh-add-device'), html`<hh-add-device></hh-add-device>`);
         return html`<hh-devices .selected=${parts[0] ?? ''}></hh-devices>`;
+      case 'ir':
+        return this.lazy('add-device', () => import('../views/hh-add-device'), html`<hh-add-device></hh-add-device>`);
+      case 'activities':
+        return this.lazy('activities', () => import('../views/hh-activities'), html`<hh-activities .selected=${parts[0] ?? ''}></hh-activities>`);
       case 'history':
         return html`<hh-history></hh-history>`;
-      default: {
-        const [h, n] = NOT_BUILT[section] ?? ['', ''];
-        return html`<hh-placeholder heading=${h} note=${n}></hh-placeholder>`;
-      }
+      default:
+        return nothing;
     }
+  }
+  private loaded = new Set<string>();
+  /** Routes that are rarely open (wizard, activities) load as separate chunks; the tag renders once its module has run. */
+  private lazy(name: string, load: () => Promise<unknown>, tpl: TemplateResult) {
+    if (this.loaded.has(name)) return tpl;
+    void load().then(() => {
+      this.loaded.add(name);
+      this.requestUpdate();
+    });
+    return html`<p class="muted" role="status">Loading…</p>`;
   }
 
   protected override render() {

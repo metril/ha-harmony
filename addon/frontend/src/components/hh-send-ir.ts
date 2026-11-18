@@ -59,7 +59,7 @@ export class HhSendIr extends LitElement {
     }, 250);
   }
 
-  private async send() {
+  async fire() {
     if (this.busy || this.blocked()) return;
     const store = getStore();
     const { port_mask, ...ir } = this.code as IrAction;
@@ -87,7 +87,7 @@ export class HhSendIr extends LitElement {
     const label = this.busy ? 'Sending…' : this.sent ? 'Sent' : this.wait > 0 ? `Wait ${Math.ceil(this.wait / 1000)} s` : 'Send IR';
     const what = this.name ? `Send IR for ${this.name}` : 'Send IR';
     const short = this.sent ? '✓' : this.wait > 0 ? `${Math.ceil(this.wait / 1000)}s` : '';
-    return html`<button type="button" aria-disabled=${why || this.busy ? 'true' : 'false'} title=${why ?? 'Send this code once through Home Assistant'} aria-label=${why ? `${what} (unavailable: ${why})` : what} @click=${(e: Event) => { e.stopPropagation(); void this.send(); }} @keydown=${(e: KeyboardEvent) => e.stopPropagation()}>
+    return html`<button type="button" aria-disabled=${why || this.busy ? 'true' : 'false'} title=${why ?? 'Send this code once through Home Assistant'} aria-label=${why ? `${what} (unavailable: ${why})` : what} @click=${(e: Event) => { e.stopPropagation(); void this.fire(); }} @keydown=${(e: KeyboardEvent) => e.stopPropagation()}>
       ${short && this.variant === 'round' ? html`<span class="w">${short}</span>` : html`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8a12 12 0 0116 0M7 12a7 7 0 0110 0M10 16a2.5 2.5 0 014 0M12 20v.01"></path></svg>`}
       <span class="t">${label}</span>
     </button>`;

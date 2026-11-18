@@ -5,11 +5,11 @@ import '../src/components/hh-import-dialog';
 import '../src/components/hh-draft-bar';
 import { Store, setStore } from '../src/lib/store';
 import { ApiError } from '../src/lib/api';
-import { META, fakeApi, previewBad, previewOk, status, tvConfig } from './helpers';
+import { META, fakeApi, previewBad, previewOk, status, tvConfig, type Handler } from './helpers';
 
-async function boot(opts: { draft?: boolean; applied?: boolean; errors?: boolean; hash?: string; statuses?: object[]; hubs?: { id: string }[] } = {}) {
+async function boot(opts: { draft?: boolean; applied?: boolean; errors?: boolean; hash?: string; statuses?: object[]; hubs?: { id: string }[]; routes?: Record<string, Handler>; config?: ReturnType<typeof tvConfig> } = {}) {
   const statuses = [...(opts.statuses ?? [status()])];
-  const cfg = tvConfig();
+  const cfg = opts.config ?? tvConfig();
   const f = fakeApi({
     'GET api/v1/config': () => ({
       body: {
@@ -29,6 +29,7 @@ async function boot(opts: { draft?: boolean; applied?: boolean; errors?: boolean
     'GET api/v1/config/status': () => ({ body: statuses.length > 1 ? statuses.shift() : statuses[0] }),
     'GET api/v1/config/history': () => ({ body: { hub: 'h', rev: 2, at: 1, hash: 'x', config: { ...tvConfig(), activities: [] } } }),
     'POST api/v1/ir/test': () => ({ body: { ok: true, action: {} } }),
+    ...(opts.routes ?? {}),
   });
   const store = new Store(f.api, 'h', 600);
   setStore(store);
@@ -43,6 +44,12 @@ const settle = async (el: HTMLElement) => {
   await (el as unknown as { updateComplete: Promise<unknown> }).updateComplete;
   await new Promise((r) => setTimeout(r, 0));
 };
+const lazyEl = (app: HTMLElement, tag: string) =>
+  vi.waitFor(() => {
+    const e = app.shadowRoot!.querySelector(tag);
+    if (!e) throw new Error(`no ${tag} yet`);
+    return e as HTMLElement;
+  });
 const text = (el: Element) => el.shadowRoot?.textContent?.replace(/\s+/g, ' ') ?? '';
 
 beforeEach(() => {
@@ -130,14 +137,98 @@ describe('screens render with a realistic config', () => {
     await vi.waitFor(() => expect(app.shadowRoot!.querySelector('select[aria-label="Hub"]')?.textContent).toContain('other'));
   });
 
-  it('unbuilt sections show a clear empty state, not a dead link', async () => {
-    for (const s of ['activities', 'ir']) {
-      const { app } = await boot({ hash: `#/${s}` });
-      const p = app.shadowRoot!.querySelector('hh-placeholder')!;
-      await settle(p as HTMLElement);
-      expect(text(p)).toContain('Not built yet');
-      document.body.replaceChildren();
-    }
+  it('activities: gallery card with its mini chain, and the editor shows chain, generated steps with settle gaps, and who handles it', async () => {
+    const { app } = await boot({ hash: '#/activities' });
+    const av = await lazyEl(app, 'hh-activities');
+    await settle(av as HTMLElement);
+    expect(av.shadowRoot!.querySelectorAll('.acard').length).toBe(1);
+    expect(text(av)).toContain('Watch TV');
+    expect(text(av)).toContain('port1');
+    expect(text(av)).toContain('New activity');
+    location.hash = '#/activities/watch_tv';
+    await vi.waitFor(() => expect(text(av)).toContain('Signal chain'));
+    await settle(av as HTMLElement);
+    const t = text(av);
+    expect(t).toContain('Power on Living room TV');
+    expect(t).toContain('2 s');
+    expect(t).toContain('Drop a device');
+    expect(t).toContain('Who handles it');
+    expect(av.shadowRoot!.querySelectorAll('.step.auto').length).toBeGreaterThan(3);
+    expect(av.shadowRoot!.querySelectorAll('.pill').length).toBe(2);
+  });
+
+  it('activities: choosing who handles volume fills the activity keys and survives in the editor block; own steps reorder with Alt+arrows', async () => {
+    const config = tvConfig();
+    (config.devices![0] as { commands: Record<string, unknown> }).commands['vol_up'] = { proto: 'nec', addr: 4, cmd: 1 };
+    (config.devices![0] as { commands: Record<string, unknown> }).commands['vol_down'] = { proto: 'nec', addr: 4, cmd: 2 };
+    config.activities![0]!.steps = [{ device: 'tv', command: 'cmd_1' }, { device: 'tv', command: 'cmd_2' }];
+    const { app, store } = await boot({ hash: '#/activities/watch_tv', config, draft: true });
+    const av = await lazyEl(app, 'hh-activities');
+    await vi.waitFor(() => expect(text(av)).toContain('Who handles it'));
+    await settle(av as HTMLElement);
+    const sel = av.shadowRoot!.querySelector<HTMLSelectElement>('select[aria-label="Who handles volume"]')!;
+    sel.value = 'tv';
+    sel.dispatchEvent(new Event('change'));
+    expect(store.config.activities![0]!.keys).toMatchObject({ volume_up: { device: 'tv', command: 'vol_up' }, volume_down: { device: 'tv', command: 'vol_down' } });
+    expect((store.config.editor as { activities: Record<string, { handlers: object }> }).activities['watch_tv']!.handlers).toEqual({ volume: 'tv' });
+    await settle(av as HTMLElement);
+    expect(text(av)).toContain('No match for Volume Mute');
+    const step = av.shadowRoot!.querySelector<HTMLElement>('.step[data-step="0"]')!;
+    step.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }));
+    expect(store.config.activities![0]!.steps!.map((x) => x['command'])).toEqual(['cmd_2', 'cmd_1']);
+  });
+
+  it('add-device wizard: brand, type, power test No then Yes, likely model, review, add writes the draft only', async () => {
+    const cand = (kind: string, cmd: number) => ({ kind, action: { proto: 'sirc12', addr: 1, cmd }, form: 'proto', count: 3, models: ['KDL-1'], codesets: 1 });
+    const { app, store, calls } = await boot({
+      hash: '#/devices/new',
+      routes: {
+        'GET api/v1/ir/brands': () => ({ body: { brands: [{ name: 'Sony', slug: 'Sony', count: 20109 }] } }),
+        'GET api/v1/ir/candidates': () => ({ body: { candidates: [cand('on', 46), cand('off', 47)], examined: 5, matched: 3, errors: 0, truncated: false } }),
+        'GET api/v1/ir/models': () => ({ body: { brand: { name: 'Sony', slug: 'Sony' }, total: 1, offset: 0, limit: 40, models: [{ file: 'KDL-1.json', name: 'KDL-1', id: 1 }] } }),
+        'GET api/v1/ir/device': () => ({ body: { device: { id: 'sony_kdl_1', name: 'Sony KDL-1', power: { on: { proto: 'sirc12', addr: 1, cmd: 46 }, off: { proto: 'sirc12', addr: 1, cmd: 47 } }, commands: { vol_up: { proto: 'sirc12', addr: 1, cmd: 18 }, ok: { proto: 'sirc12', addr: 1, cmd: 11 } } }, forms: {}, notes: ['12 gaps shortened'], skipped: [{ name: 'weird', reason: 'unsupported' }], skipped_total: 1, device_type: null, source: {} } }),
+      },
+    });
+    const w = await lazyEl(app, 'hh-add-device');
+    const click = async (sel: string, label?: string) => {
+      await settle(w as HTMLElement);
+      const els = [...w.shadowRoot!.querySelectorAll<HTMLElement>(sel)];
+      (label ? els.find((e) => e.textContent?.includes(label)) : els[0])!.click();
+    };
+    await click('.tile', 'IR archive');
+    await vi.waitFor(() => expect(w.shadowRoot!.querySelector('.brand')).toBeTruthy());
+    await click('.brand', 'Sony');
+    await click('.tile', 'TV');
+    await vi.waitFor(() => expect(text(w)).toContain('Code 1 of 2'));
+    await click('button', 'No, next code');
+    await vi.waitFor(() => expect(text(w)).toContain('Code 2 of 2'));
+    await click('button', 'Yes');
+    await vi.waitFor(() => expect(text(w)).toContain('Likely matches'));
+    await click('.likely .btn', 'KDL-1');
+    await vi.waitFor(() => expect(text(w)).toContain('12 gaps shortened'));
+    expect(text(w)).toContain('weird: unsupported');
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false);
+    await click('.side .btn.pri', 'Add device');
+    expect(store.config.devices!.map((d) => d.id)).toContain('sony_kdl_1');
+    expect(Object.keys(store.config.devices!.find((d) => d.id === 'sony_kdl_1')!.commands!)).toEqual(['vol_up', 'ok']);
+    expect(location.hash).toBe('#/devices/sony_kdl_1');
+  });
+
+  it('add-device wizard: an offline archive shows a banner with Retry, and N / Y / Space shortcuts drive the power test', async () => {
+    let up = false;
+    const { app } = await boot({
+      hash: '#/devices/new',
+      routes: {
+        'GET api/v1/ir/brands': () => (up ? { body: { brands: [{ name: 'Sony', slug: 'Sony', count: 1 }] } } : { status: 504, body: { error: { code: 'archive_offline', msg: 'down' } } }),
+      },
+    });
+    const w = await lazyEl(app, 'hh-add-device');
+    await settle(w as HTMLElement);
+    ([...w.shadowRoot!.querySelectorAll<HTMLElement>('.tile')].find((e) => e.textContent?.includes('IR archive')))!.click();
+    await vi.waitFor(() => expect(text(w)).toContain("The IR archive can't be reached"));
+    up = true;
+    ([...w.shadowRoot!.querySelectorAll<HTMLElement>('button')].find((e) => e.textContent === 'Retry'))!.click();
+    await vi.waitFor(() => expect(w.shadowRoot!.querySelector('.brand')).toBeTruthy());
   });
 
   it('the rail shows counts and an error badge from validation', async () => {

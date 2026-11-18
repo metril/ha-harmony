@@ -5,6 +5,7 @@ import { addPage, describeAction, firstFree, pageDims, templatePage, trimToBytes
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 type Rec = Record<string, unknown>;
+export const isRefused = (r: Config | { refused: string }): r is { refused: string } => typeof (r as { refused?: unknown }).refused === 'string';
 export const MAX_DEVICES = 8;
 export const MAX_STEPS = 16;
 
