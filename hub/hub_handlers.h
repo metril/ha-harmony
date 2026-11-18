@@ -40,9 +40,14 @@
  *                                   config ({proto,addr,cmd} | {raw:{hz,us}} | {pronto:"hex"},
  *                                   optional port_mask); sends it once. Bad action ->
  *                                   command_result {ok:false, message}.
- *                       tile_update args {remote,page,tile,text} (u8,u8,u8,str<=255) -> forwarded
- *                                   to the remote over RF as tile_update. Replies like page_push
- *                                   (command_result ok / error no_remote | rf_error | too_big).
+ *                       tile_update args {remote,page,tile,text,state?} (u8,u8,u8,str<=255,u8 0..3) ->
+ *                                   forwarded to the remote over RF: as tile_state {state default 0, text cut
+ *                                   to 31 bytes} when the remote's cached remote_info has caps bit 0, else as
+ *                                   tile_update (state ignored). Both share one held-message key. Replies like
+ *                                   page_push (command_result ok / error no_remote | rf_error | too_big).
+ *   remote_info   -> from RF: cached per remote (cleared when the RF link is lost) and broadcast on ws
+ *                     {remote,page_fmt,caps,icons} when new or changed, and for the first one after a link-up even if identical; resent to every client right after
+ *                     hello_ack (hub_send_state). Unknown RF message types are still dropped.
  *   hello_ack      -> also config_hash (8 lowercase hex chars, CRC-32 of the loaded config text;
  *                     omitted when no config is loaded).
  *   set_config     -> after the config_ack, every OTHER authenticated client gets
@@ -68,13 +73,30 @@
 #include "hub/net/jsonrpc.h"
 #include "hub/net/ws.h"
 
-#define HUB_PEND_MAX 8
+/* 40 held messages: a full v2 config is up to 32 pages plus a few tile updates, all of which must survive a
+ * remote that is away. 40 * sizeof(hub_pend_t) (~270 B) = ~10.8 KB of static hub memory, fixed, never grown. */
+#define HUB_PEND_MAX 40
+#define HUB_PAGE_RESENDS 3 /* a page_push that exhausts its RF retries is held and resent this many times */
 /* An RF message held back while the remote's link is down; the latest per key wins. */
 typedef struct {
-    uint8_t type, remote, page, tile; /* the key: page_push (remote,page), tile_update (remote,page,tile), state_update () */
+    uint8_t type, remote, page, tile; /* the key: page_push (remote,page), tile_update / tile_state (remote,page,tile; one
+                                       * shared key), state_update () */
+    uint8_t gen;                      /* page_push of a v2 page: its gen byte (a push of another gen drops this one) */
+    bool has_gen;
+    bool wait;                        /* a page_push that failed its retries: resent after the next frame heard from the remote */
+    uint32_t rx_mark;                 /* link rx_frames when it failed */
     size_t len;
     uint8_t payload[HP_RF_MSG_MAX];
 } hub_pend_t;
+
+/* What a remote announced in remote_info (docs/plans/2026-11-18-page-format-v2.md); cached while its link is up. */
+#define HUB_INFO_MAX 4
+typedef struct {
+    bool valid;
+    uint8_t remote, page_fmt, caps, icons;
+} hub_info_t;
+#define HUB_CAP_TILE_STATE 1 /* caps bit 0 */
+#define HUB_CAP_PAGE_STORE 2 /* caps bit 1 */
 
 typedef struct {
     hp_map_t map;
@@ -99,6 +121,14 @@ typedef struct {
     uint8_t npending_dev;
     hub_pend_t pend[HUB_PEND_MAX]; /* oldest first */
     uint8_t npend;
+    uint8_t page_tries[256]; /* resends of an unacked page_push per page id (bounded by HUB_PAGE_RESENDS); reset by a fresh push or an ack */
+    uint8_t page_out[256];   /* page_push objects of a page id handed to the link and not yet resolved */
+    uint8_t last_gen;        /* gen of the newest v2 page pushed: an older page that failed is not resent */
+    bool has_last_gen;
+    bool info_fresh;         /* a link-up was seen: the next remote_info is broadcast even if identical (one per link-up) */
+    uint32_t info_bcast;     /* remote_info broadcasts sent (diagnostics, tests) */
+    uint32_t pend_dropped; /* held messages lost to a full queue (a tile that found only pages, or the oldest page) */
+    hub_info_t info[HUB_INFO_MAX]; /* remote_info per remote; dropped when the RF link is lost */
 } hub_ctx_t;
 
 /* Initialises the context with a CLOCK_MONOTONIC millisecond clock for the timers. */
@@ -115,6 +145,8 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx);
  * tracked device to one connection; used right after a successful hello so a (re)connecting client
  * learns the live state. No activity running -> {activity:0, power:false}. */
 void hub_send_state(hub_ctx_t *, hp_ws_conn_t *);
+/* The cached remote_info of `remote`, or NULL. */
+const hub_info_t *hub_remote_info(const hub_ctx_t *, uint8_t remote);
 /* Flushes the engine's queued activity_list / device_state / state_update broadcasts. */
 void hub_flush_pending(hub_ctx_t *);
 /* Clean shutdown: writes the state file if a change is still pending. */

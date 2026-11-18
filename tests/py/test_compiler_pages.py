@@ -311,3 +311,13 @@ def test_encode_helper_roundtrip():
     c = comp(NAVCFG)
     for m, b in zip(c.models, c.pages_v2, strict=True):
         assert encode(m, 2) == b
+
+
+def test_more_than_32_pages_is_a_compile_error():
+    """The remote's store holds page ids 0..31."""
+    many = "pages:\n" + "".join(
+        f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(33)
+    )
+    with pytest.raises(CompileError, match="at most 32"):
+        comp(many)
+    comp("pages:\n" + "".join(f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(32)))

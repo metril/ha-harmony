@@ -215,6 +215,10 @@ static void on_frame(hp_rf_link_t *l, const uint8_t *f, size_t n) {
     }
 }
 
+static void report(hp_rf_link_t *l, const hp_rf_link_obj_t *o, bool ok) {
+    if (l->result) l->result(l->result_ctx, o->type, o->body, o->len, ok);
+}
+
 static void drive_tx(hp_rf_link_t *l, uint32_t now) {
     for (int guard = 0; guard < HP_LINK_QUEUE + 1 && l->qn; guard++) {
         hp_rf_link_obj_t *o = &l->q[l->qhead];
@@ -232,6 +236,7 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
             if (rc == -HP_E_IO) { /* transport refused the first frame (backoff, chip busy): retry later */
                 if (++l->start_tries > HP_RF_RETRIES) {
                     l->failures++;
+                    report(l, o, false);
                     l->start_tries = 0;
                     pop(l);
                     continue;
@@ -242,6 +247,7 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
             l->start_tries = 0;
             if (rc < 0) { /* unsendable object: drop it */
                 l->failures++;
+                report(l, o, false);
                 pop(l);
                 continue;
             }
@@ -264,8 +270,8 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
         }
         if (l->tx.retries != was) lg(l, now, "retry %u of %d (seq %u)", (unsigned)l->tx.retries, HP_RF_RETRIES, (unsigned)l->tx.seq);
         switch (st) {
-        case HP_RF_TX_OK: lg(l, now, "tx done: object acked (seq %u)", (unsigned)l->tx.seq); pop(l); continue;
-        case HP_RF_TX_FAILED: lg(l, now, "tx FAILED after retries (seq %u)", (unsigned)l->tx.seq); l->failures++; pop(l); continue;
+        case HP_RF_TX_OK: lg(l, now, "tx done: object acked (seq %u)", (unsigned)l->tx.seq); report(l, o, true); pop(l); continue;
+        case HP_RF_TX_FAILED: lg(l, now, "tx FAILED after retries (seq %u)", (unsigned)l->tx.seq); l->failures++; report(l, o, false); pop(l); continue;
         default: return;
         }
     }

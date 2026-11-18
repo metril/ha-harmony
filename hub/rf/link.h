@@ -36,6 +36,9 @@ typedef struct {
 } hp_rf_link_obj_t;
 
 typedef void (*hp_rf_link_log_fn)(void *ctx, const char *line);
+/* Called when a queued object is finished: acked (ok) or abandoned after its retries (!ok). Not for objects dropped
+ * because the peer went away (those are counted in `failures` only). */
+typedef void (*hp_rf_link_result_fn)(void *ctx, hp_msg_type_t type, const uint8_t *body, size_t len, bool ok);
 
 /* Default log sink: the line plus a newline on stderr. */
 void hp_rf_log_stderr(void *ctx, const char *line);
@@ -61,6 +64,8 @@ typedef struct {
     uint32_t gap_ms;       /* HP_LINK_GAP_MS; set after init to change (0 = no pacing) */
     uint8_t tx_slot;       /* HP_LINK_SLOT_ANY by default */
     bool released;         /* a TX status arrived since the last data frame was sent */
+    hp_rf_link_result_fn result; /* NULL = off */
+    void *result_ctx;
     hp_rf_link_log_fn log; /* NULL = off (per-object debug events) */
     void *log_ctx;
     uint32_t now_dbg;      /* last caller clock, for log lines only */

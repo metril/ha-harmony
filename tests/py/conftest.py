@@ -219,6 +219,33 @@ class RemoteDump:
 
 
 @pytest.fixture
+def start_remote(built_binaries):
+    procs: list[subprocess.Popen] = []
+
+    def _start(rf: str, *args: str) -> RemoteDump:
+        proc = subprocess.Popen(
+            [str(built_binaries / "remote_sim"), "--rf", rf, "--timeout-ms", "5000", *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        procs.append(proc)
+        return RemoteDump(proc)
+
+    yield _start
+    for p in procs:
+        if p.poll() is None:
+            p.kill()
+        p.wait()
+        p.stdout.close()
+        p.stderr.close()
+
+
+def finish(r: RemoteDump) -> tuple[int, str, str]:
+    out, err = r.proc.communicate(timeout=10)
+    return r.proc.returncode, out.decode(), err.decode()
+
+
+@pytest.fixture
 def start_remote_dump(built_binaries):
     """start_remote_dump(rf, timeout_ms=5000) -> RemoteDump (not yet attached-checked)."""
     procs: list[subprocess.Popen] = []

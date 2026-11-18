@@ -26,6 +26,11 @@ typedef struct {
   /* Optional (NULL = none). Finger down / moved at pixel (x,y): down true; lifted: down false.
    * Visual feedback only; never called for a touch the gate consumed. */
   void (*touch)(void *ctx, int x, int y, bool down);
+  /* Optional. A tap (release) on a button / tile: return true when the app handled it locally (a nav widget), so
+   * no key_event is sent. */
+  bool (*widget)(void *ctx, const hp_widget_t *w);
+  /* Optional. A tap (release) in the status bar (y < HP_PAGE_BAR_H). */
+  void (*bar)(void *ctx, int x, int y);
 } ra_input_sink_t;
 
 typedef struct {

@@ -20,6 +20,8 @@ add_hp_test(rf_payload)
 add_hp_test(rf_pair)
 add_hp_test(link)
 add_hp_test(link_radio)
+add_hp_test(link_v2)
+add_hp_test(store)
 add_hp_test(rf_spi)
 add_hp_test(mdns)
 add_hp_test(hwkeys)
@@ -31,6 +33,14 @@ add_test(NAME framing COMMAND test_framing ${CMAKE_SOURCE_DIR}/tests/vectors/rf/
 
 add_hp_test(page)
 target_compile_definitions(test_page PRIVATE HP_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json")
+
+# Decoder fuzz: every byte mutation / truncation of the valid vectors, split in 4 shards for ctest -j.
+add_executable(test_page_fuzz test_page_fuzz.c)
+target_link_libraries(test_page_fuzz PRIVATE hp_hub)
+target_compile_definitions(test_page_fuzz PRIVATE HP_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json")
+foreach(i RANGE 0 3)
+  add_test(NAME page_fuzz_${i} COMMAND test_page_fuzz ${i} 4)
+endforeach()
 
 # IR encoder: vectors dir passed as argv[1] (shared with tests/py/test_ir_vectors.py).
 add_executable(test_ir_encode test_ir_encode.c)
@@ -55,11 +65,21 @@ add_test(NAME remote_probe COMMAND test_remote_probe)
 
 # Remote app (LVGL render, evdev input, power): host-only through the injected syscall seam.
 if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
-  foreach(t remote_input remote_power remote_render remote_mem remote_oom remote_app remote_rf remote_latency)
+  foreach(t remote_input remote_power remote_render remote_mem remote_oom remote_app remote_rf remote_latency remote_v2 remote_fuzz)
     add_executable(test_${t} test_${t}.c)
     target_link_libraries(test_${t} PRIVATE hp_remote_app hp_hub)
-    add_test(NAME ${t} COMMAND test_${t})
+    if(NOT t STREQUAL "remote_mem" AND NOT t STREQUAL "remote_oom" AND NOT t STREQUAL "remote_fuzz")
+      add_test(NAME ${t} COMMAND test_${t})
+    endif()
   endforeach()
+  # the pool tests are the slowest: one ctest entry per half so they run in parallel
+  add_test(NAME remote_mem_v1 COMMAND test_remote_mem v1)
+  add_test(NAME remote_mem_v2 COMMAND test_remote_mem v2)
+  foreach(i RANGE 0 3) # fuzz of the v2 event path, 4 shards
+    add_test(NAME remote_fuzz_${i} COMMAND test_remote_fuzz ${i})
+  endforeach()
+  add_test(NAME remote_oom_precheck COMMAND test_remote_oom 1)
+  add_test(NAME remote_oom_creation COMMAND test_remote_oom 2)
   foreach(t remote_render remote_rf)
     target_compile_definitions(test_${t} PRIVATE
       HP_PAGES_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json"

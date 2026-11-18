@@ -1,5 +1,6 @@
 #include "remote/app/ui.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -7,6 +8,11 @@
 #include "hub/hp_errors.h"
 
 #define ELLIPSIS "\xe2\x80\xa6"
+
+static void paint(ra_ui_t *ui, unsigned i);
+static const char *tile_caption(const ra_ui_t *ui, const hp_widget_t *w);
+
+static void stale_caption(ra_ui_t *ui, unsigned i);
 
 static int edge(int i, int n, int total) { return (i * total + n - 1) / n; }
 
@@ -110,15 +116,44 @@ static void chrome_apply(ra_ui_t *ui) {
   }
 }
 
+#define SEQ_RIGHT 142 /* right edge of the "idx/cnt" label, left of the RF bars */
+#define BACK_W 24     /* back chevron cell; a tap on x < BACK_TAP_W goes Home (app.c) */
+
+/* The bar's page context: a back chevron (BACK pages) and "idx/cnt" (paged groups). */
+typedef struct {
+  int back;
+  unsigned seq_idx, seq_cnt;
+} bar_ctx_t;
+
 /* 0 ok, -1 out of memory (the caller shows the error state; chrome_apply ignores a partial bar). */
-static int bar_build(ra_ui_t *ui, lv_obj_t *scr, const char *title) {
-  ui->bar = ui->title = ui->pct = ui->batt = ui->batt_fill = NULL;
+static int bar_build(ra_ui_t *ui, lv_obj_t *scr, const char *title, const bar_ctx_t *bc) {
+  ui->bar = ui->title = ui->pct = ui->batt = ui->batt_fill = ui->back = ui->seq = NULL;
   ui->rf[0] = ui->rf[1] = ui->rf[2] = NULL;
   lv_obj_t *bar = rect(scr, 0, 0, HP_PAGE_SCREEN_W, RA_BAR_H, &ra_st_bar);
   if (!bar) return -1;
-  lv_obj_t *t = make_label(bar, title, &ra_st_txt_title, NULL, TITLE_W);
+  int tx = TITLE_X, tw = TITLE_W;
+  if (bc && bc->back) {
+    tx += BACK_W + 2;
+    tw -= BACK_W + 2;
+    lv_obj_t *b = make_label(bar, RA_GLYPH_BACK, &ra_st_txt_cap, &ra_icons_24, BACK_W);
+    if (!b) return -1;
+    lv_obj_set_pos(b, 4, 4);
+    ui->back = b;
+  }
+  if (bc && bc->seq_cnt) {
+    char sq[24];
+    snprintf(sq, sizeof sq, "%u/%u", bc->seq_idx, bc->seq_cnt);
+    lv_obj_t *q = make_label(bar, sq, &ra_st_txt_cap, NULL, 40);
+    if (!q) return -1;
+    lv_obj_set_style_text_align(q, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(q, RA_COLOR(RA_HEX_TX3), 0);
+    lv_obj_set_pos(q, SEQ_RIGHT - 40, 9);
+    ui->seq = q;
+    tw = SEQ_RIGHT - 40 - 4 - tx;
+  }
+  lv_obj_t *t = make_label(bar, title, &ra_st_txt_title, NULL, tw);
   if (!t) return -1;
-  lv_obj_set_pos(t, TITLE_X, 6);
+  lv_obj_set_pos(t, tx, 6);
   lv_obj_t *rf[3];
   for (int i = 0; i < 3; i++) {
     int h = 4 + 4 * i;
@@ -153,6 +188,13 @@ void ra_ui_set_link(ra_ui_t *ui, int lost) {
   if (ui->link_lost == lost) return;
   ui->link_lost = lost;
   chrome_apply(ui);
+  if (ui->page.version != 2) return;
+  for (unsigned i = 0; i < ui->page.count; i++) { /* v2 tiles say "stale" while the link is lost */
+    if (ui->page.widgets[i].kind != HP_WIDGET_TILE || !ui->obj[i]) continue;
+    if (!ui->wcap[i] && lost) stale_caption(ui, i); /* a tile without a name gets its caption now (optional: skipped when memory is tight) */
+    if (ui->wcap[i]) lv_label_set_text(ui->wcap[i], tile_caption(ui, &ui->page.widgets[i]));
+    paint(ui, i);
+  }
 }
 
 void ra_ui_set_battery(ra_ui_t *ui, int soc, int charging) {
@@ -171,7 +213,11 @@ static void fail(ra_ui_t *ui) {
   lv_obj_clean(lv_screen_active());
   memset(ui->obj, 0, sizeof ui->obj);
   memset(ui->lbl, 0, sizeof ui->lbl);
-  ui->msg = ui->cap = ui->bar = ui->title = ui->pct = ui->batt = ui->batt_fill = NULL;
+  memset(ui->ico, 0, sizeof ui->ico);
+  memset(ui->wcap, 0, sizeof ui->wcap);
+  ui->active = 0;
+  ui->msg = ui->cap = ui->prog_fill = ui->bar = ui->title = ui->pct = ui->batt = ui->batt_fill = ui->back = ui->seq = NULL;
+  ui->recv_total = 0;
   ui->rf[0] = ui->rf[1] = ui->rf[2] = NULL;
   ui->page.count = 0;
   ui->page.page_id = RA_UI_PAGE_ERROR;
@@ -181,9 +227,13 @@ static void fail(ra_ui_t *ui) {
   if (ui->err) lv_obj_remove_flag(ui->err, LV_OBJ_FLAG_HIDDEN);
 }
 
-/* Free memory needed before building `widgets` widgets: ~0.9 KiB each measured, plus the bar and the renderer's
- * working set. Refusing early is what keeps LVGL's own allocations (which do not check for failure) safe. */
-#define BUILD_NEED(widgets) (1100u * (widgets) + 8192u)
+/* Free memory needed before building a page, an upper bound of what test_remote_mem measures: <= 0.94 KiB per widget
+ * (32 buttons with an icon and a label: 30 KiB above the 9 KiB idle use, i.e. 0.94 KiB each with the icon; budgeted 0.9
+ * KiB for surface + text plus 0.25 KiB per extra object), plus the bar and the renderer's working set. `extra` counts only
+ * objects that are really created (an icon glyph; a tile's icon only when its cell is big enough, and its caption), so a
+ * legal page is never refused for objects it will not draw. Refusing early is what keeps LVGL's own allocations (which do
+ * not check for failure) safe. */
+#define BUILD_NEED(widgets, extra) (900u * (widgets) + 250u * (extra) + 8192u)
 
 static int enough_memory(unsigned need) {
   if (ra_ui_test_skip_precheck) return 1;
@@ -192,7 +242,7 @@ static int enough_memory(unsigned need) {
   return mon.free_size >= need;
 }
 
-static int screen_reset(ra_ui_t *ui, const char *title, unsigned widgets) {
+static int screen_reset(ra_ui_t *ui, const char *title, unsigned widgets, unsigned extra, const bar_ctx_t *bc) {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_clean(scr);
   lv_obj_remove_style_all(scr);
@@ -201,10 +251,14 @@ static int screen_reset(ra_ui_t *ui, const char *title, unsigned widgets) {
   if (ui->err) lv_obj_add_flag(ui->err, LV_OBJ_FLAG_HIDDEN);
   memset(ui->obj, 0, sizeof ui->obj);
   memset(ui->lbl, 0, sizeof ui->lbl);
-  ui->msg = ui->cap = NULL;
+  memset(ui->ico, 0, sizeof ui->ico);
+  memset(ui->wcap, 0, sizeof ui->wcap);
+  ui->active = 0;
+  ui->msg = ui->cap = ui->prog_fill = NULL;
+  ui->recv_total = 0;
   ui->title_idx = -1;
   ui->pressed = -1;
-  if (!enough_memory(BUILD_NEED(widgets)) || bar_build(ui, scr, title) < 0) {
+  if (!enough_memory(BUILD_NEED(widgets, extra)) || bar_build(ui, scr, title, bc) < 0) {
     fail(ui);
     return -1;
   }
@@ -226,13 +280,197 @@ static int message(ra_ui_t *ui, const char *head, const char *sub, uint32_t head
   return 0;
 }
 
+/* ---- v2 widgets: colours by role / state, icon, shape ---- */
+
+typedef struct {
+  uint32_t fill, ink, icon, cap;
+} wcol_t;
+
+static int is_stale_tile(const ra_ui_t *ui, const hp_widget_t *w) { return w->kind == HP_WIDGET_TILE && ui->link_lost; }
+
+static wcol_t widget_colors(const ra_ui_t *ui, const hp_widget_t *w, int active) {
+  if (w->kind == HP_WIDGET_TILE) {
+    wcol_t c;
+    switch (w->tstate) {
+    case HP_TILE_ON: c = (wcol_t){RA_HEX_WARM, RA_HEX_ONWARM, RA_HEX_ONWARM, RA_HEX_ONWARM}; break;
+    case HP_TILE_UNAVAILABLE: c = (wcol_t){RA_HEX_S1, RA_HEX_TX3, RA_HEX_TX3, RA_HEX_TX3}; break;
+    case HP_TILE_OFF: c = (wcol_t){RA_HEX_S1, RA_HEX_TX2, RA_HEX_TX3, RA_HEX_TX3}; break;
+    default: c = (wcol_t){RA_HEX_S1, RA_HEX_TX, RA_HEX_TX2, RA_HEX_TX2}; break;
+    }
+    if (is_stale_tile(ui, w) && w->tstate != HP_TILE_ON) c.ink = RA_HEX_TX3;
+    return c;
+  }
+  if (active) return (wcol_t){RA_HEX_ACC, RA_HEX_ONACC, RA_HEX_ONACC, RA_HEX_ONACC};
+  switch (w->role) {
+  case HP_ROLE_PRIMARY: return (wcol_t){RA_HEX_S2, RA_HEX_ACC, RA_HEX_ACC, RA_HEX_TX2};
+  case HP_ROLE_SECONDARY: return (wcol_t){RA_HEX_S1, RA_HEX_TX2, RA_HEX_TX3, RA_HEX_TX3};
+  case HP_ROLE_DANGER: return (wcol_t){RA_HEX_S2, RA_HEX_BAD, RA_HEX_BAD, RA_HEX_BAD};
+  case HP_ROLE_NAV: return (wcol_t){RA_HEX_S1, RA_HEX_TX, RA_HEX_ACC, RA_HEX_TX2};
+  default: return (wcol_t){RA_HEX_S2, RA_HEX_TX, RA_HEX_TX2, RA_HEX_TX2};
+  }
+}
+
+static int widget_active(const ra_ui_t *ui, const hp_widget_t *w) {
+  return ui->act_on && w->kind == HP_WIDGET_BUTTON && w->role != HP_ROLE_NAV && w->has_bind && w->bind == ui->act_idx;
+}
+
+/* The text a tile shows: "n/a" while unavailable. */
+static const char *tile_value(const hp_widget_t *w) { return w->tstate == HP_TILE_UNAVAILABLE ? "n/a" : w->text; }
+
+/* Caption of a v2 tile: "stale" while the link is lost, else its name. */
+static const char *tile_caption(const ra_ui_t *ui, const hp_widget_t *w) { return ui->link_lost ? "stale" : w->label; }
+
+/* (Re)paints widget i from its role, state and the activity / link state: fill and ink colours only, so only that
+ * widget's area is invalidated. */
+static void paint(ra_ui_t *ui, unsigned i) {
+  const hp_widget_t *w = &ui->page.widgets[i];
+  if (!ui->obj[i] || w->kind == HP_WIDGET_LABEL) return;
+  int act = widget_active(ui, w);
+  wcol_t c = widget_colors(ui, w, act);
+  lv_obj_set_style_bg_color(ui->obj[i], RA_COLOR(c.fill), 0);
+  if (ui->lbl[i]) lv_obj_set_style_text_color(ui->lbl[i], RA_COLOR(c.ink), 0);
+  if (ui->ico[i]) lv_obj_set_style_text_color(ui->ico[i], RA_COLOR(c.icon), 0);
+  if (ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], RA_COLOR(c.cap), 0);
+  if (act) ui->active |= 1u << i;
+  else ui->active &= ~(1u << i);
+}
+
+static const lv_font_t *icon_font(int px) { return px >= 32 ? &ra_icons_32 : px >= 24 ? &ra_icons_24 : &ra_icons_20; }
+
+/* UTF-8 of the icon-font glyph U+E000 + id; NULL for "no icon" and for ids this font does not know. */
+static const char *glyph(uint8_t id, char buf[4]) {
+  if (!id || id > RA_ICON_MAX) return NULL;
+  unsigned cp = RA_ICON_GLYPH_BASE + id;
+  buf[0] = (char)(0xE0 | (cp >> 12));
+  buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+  buf[2] = (char)(0x80 | (cp & 0x3F));
+  buf[3] = 0;
+  return buf;
+}
+
+static size_t first_char_len(const char *s) {
+  unsigned char c = (unsigned char)s[0];
+  size_t k = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2;
+  size_t n = 0;
+  while (n < k && s[n]) n++;
+  return n;
+}
+
+/* Builds the content of a v2 button / tile on its surface `o`. 0 ok, -1 out of memory. */
+static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh) {
+  const hp_widget_t *w = &ui->page.widgets[i];
+  int tile = w->kind == HP_WIDGET_TILE;
+  char gb[4];
+  const char *g = glyph(w->icon, gb);
+  int draw_label = !(w->icon_only && g) && w->label[0];
+  lv_obj_t *l = NULL, *ic = NULL;
+  if (tile) {
+    int big = bw >= 80;
+    int cap_h = bh >= 44 && (w->label[0] || ui->link_lost);
+    if (g && bh >= 56 && bw >= 56) {
+      ic = make_label(o, g, &ra_st_txt_cap, &ra_icons_20, 24);
+      if (!ic) return -1;
+      lv_obj_set_pos(ic, 8, 6);
+    }
+    l = make_label(o, tile_value(w), big ? &ra_st_txt_display : &ra_st_txt_btn, NULL, bw - 8);
+    if (!l) return -1;
+    lv_obj_align(l, LV_ALIGN_CENTER, 0, cap_h ? 6 : 0);
+    if (cap_h) {
+      lv_obj_t *c = make_label(o, tile_caption(ui, w), &ra_st_txt_cap, NULL, bw - (ic ? 38 : 8));
+      if (!c) return -1;
+      if (ic) {
+        lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_set_pos(c, 32, 8);
+      }
+      else lv_obj_align(c, LV_ALIGN_TOP_MID, 0, 6);
+      ui->wcap[i] = c;
+    }
+    ui->lbl[i] = l;
+    ui->ico[i] = ic;
+    return 0;
+  }
+  const char *txt = w->label;
+  char mono[8];
+  if (w->shape == HP_SHAPE_MONOGRAM) { /* a round badge: the icon, else the label's first letter */
+    draw_label = !g && w->label[0];
+    size_t k = first_char_len(w->label);
+    memcpy(mono, w->label, k);
+    mono[k] = 0;
+    if (k == 1) mono[0] = (char)toupper((unsigned char)mono[0]);
+    txt = mono;
+  }
+  int row = w->shape == HP_SHAPE_ROW || w->shape == HP_SHAPE_PILL || (bh < 44 && bw >= 100); /* wide and short: a row */
+  int big = w->shape == HP_SHAPE_CARD && !row && bw >= 100 && bh >= 80;
+  int mono_px = bw < bh ? bw : bh;
+  int px = w->shape == HP_SHAPE_MONOGRAM ? (mono_px >= 72 ? 32 : mono_px >= 44 ? 24 : 20)
+           : row ? 24 : big ? 32 : bh >= 64 ? 24 : 20;
+  if (g) {
+    ic = make_label(o, g, &ra_st_txt_cap, icon_font(px), px + 4);
+    if (!ic) return -1;
+  }
+  if (draw_label) {
+    const lv_style_t *ts = w->shape == HP_SHAPE_MONOGRAM ? &ra_st_txt_display : big ? &ra_st_txt_display
+                           : row ? &ra_st_txt_body : (bw >= 100 ? &ra_st_txt_body : &ra_st_txt_btn);
+    const lv_font_t *tf = big ? &ra_font_b18 : NULL;
+    int lw = big ? bw - 24 : bw - 8;
+    if (row && ic) lw = bw - 12 - px - 8 - 8;
+    else if (row) lw = bw - 24;
+    l = make_label(o, txt, ts, tf, lw);
+    if (!l) return -1;
+  }
+  /* placement */
+  if (ic && (w->icon_only || w->shape == HP_SHAPE_MONOGRAM || !draw_label)) {
+    lv_obj_align(ic, LV_ALIGN_CENTER, 0, 0);
+    if (l) { lv_obj_delete(l); l = NULL; }
+  } else if (row) {
+    if (ic) lv_obj_align(ic, LV_ALIGN_LEFT_MID, 12, 0);
+    if (l) {
+      lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_LEFT, 0);
+      lv_obj_align(l, LV_ALIGN_LEFT_MID, ic ? 12 + px + 8 : 12, 0);
+    }
+  } else if (big) {
+    if (ic) lv_obj_align(ic, LV_ALIGN_TOP_LEFT, 12, 12);
+    if (l) {
+      lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_LEFT, 0);
+      lv_obj_align(l, LV_ALIGN_BOTTOM_LEFT, 12, -12);
+    }
+  } else if (ic && l) { /* dense: icon over label, both centred */
+    int ih = lv_font_get_line_height(icon_font(px)), lh = lv_font_get_line_height(lv_obj_get_style_text_font(l, 0));
+    int gap = (bh - ih - lh) / 3;
+    if (gap < 0) gap = 0;
+    lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, gap + 1);
+    lv_obj_align(l, LV_ALIGN_BOTTOM_MID, 0, -gap);
+  } else if (l) {
+    lv_obj_center(l);
+  }
+  ui->lbl[i] = l;
+  ui->ico[i] = ic;
+  return 0;
+}
+
 static void build(ra_ui_t *ui) {
   lv_obj_t *scr = lv_screen_active();
   const hp_page_t *p = &ui->page;
+  int v2 = p->version == 2;
   const char *title = "Harmony";
-  int title_idx = hp_page_title(p);
-  if (title_idx >= 0 && p->widgets[title_idx].label[0]) title = p->widgets[title_idx].label;
-  if (screen_reset(ui, title, p->count) < 0) return;
+  int title_idx = v2 ? -1 : hp_page_title(p);
+  if (v2) {
+    if (p->title[0]) title = p->title;
+  } else if (title_idx >= 0 && p->widgets[title_idx].label[0]) {
+    title = p->widgets[title_idx].label;
+  }
+  unsigned extra = 0; /* icon glyph labels and tile captions */
+  for (unsigned i = 0; v2 && i < p->count; i++) {
+    const hp_widget_t *w = &p->widgets[i];
+    int x1, y1, x2, y2;
+    ra_ui_widget_rect(p, w, &x1, &y1, &x2, &y2);
+    int bw = x2 - x1 + 1, bh = y2 - y1 + 1, icon = w->icon && w->icon <= RA_ICON_MAX;
+    if (w->kind == HP_WIDGET_TILE) /* as build_v2_content: the icon needs a 56 px cell, the caption 44 px of height */
+      extra += (icon && bh >= 56 && bw >= 56) + (bh >= 44 && (w->label[0] || ui->link_lost));
+    else if (w->kind == HP_WIDGET_BUTTON) extra += icon;
+  }
+  bar_ctx_t bc = {.back = v2 && p->back, .seq_idx = v2 ? p->seq_idx : 0, .seq_cnt = v2 ? p->seq_cnt : 0};
+  if (screen_reset(ui, title, p->count, extra, &bc) < 0) return;
   ui->title_idx = title_idx;
   int interactive_or_text = 0;
   for (unsigned i = 0; i < p->count; i++) {
@@ -259,13 +497,21 @@ static void build(ra_ui_t *ui) {
     o = rect(scr, x1, y1, bw, bh, btn ? &ra_st_btn : &ra_st_card);
     if (!o) return fail(ui);
     lv_obj_add_style(o, btn ? &ra_st_btn_pr : &ra_st_card_pr, LV_STATE_PRESSED);
+    ui->obj[i] = o;
+    if (v2) {
+      int r = w->shape == HP_SHAPE_MONOGRAM ? LV_RADIUS_CIRCLE : w->shape == HP_SHAPE_PILL ? bh / 2
+              : w->shape == HP_SHAPE_ROW ? 12 : -1;
+      if (r >= 0) lv_obj_set_style_radius(o, r, 0);
+      if (build_v2_content(ui, i, o, bw, bh) < 0) return fail(ui);
+      paint(ui, i);
+      continue;
+    }
     const char *txt = btn ? w->label : w->text;
     const lv_style_t *ts = btn ? (bw >= 100 ? &ra_st_txt_body : &ra_st_txt_btn) : (bw >= 80 ? &ra_st_txt_display : &ra_st_txt_btn);
     l = make_label(o, txt, ts, NULL, bw - 8);
     if (!l) return fail(ui);
     lv_obj_center(l);
     if (btn && !strcasecmp(w->label, "Power Off")) lv_obj_set_style_text_color(l, RA_COLOR(RA_HEX_BAD), 0);
-    ui->obj[i] = o;
     ui->lbl[i] = l;
   }
   if (!interactive_or_text && message(ui, "No activities yet", "Add some in Home Assistant", RA_HEX_TX) < 0) fail(ui);
@@ -281,7 +527,7 @@ static void show_builtin(ra_ui_t *ui, uint8_t id, const char *head, const char *
   memset(&ui->page, 0, sizeof ui->page);
   ui->page.page_id = id;
   ui->page.cols = ui->page.rows = 1;
-  if (screen_reset(ui, "Harmony", 0) < 0) return;
+  if (screen_reset(ui, "Harmony", 0, 0, NULL) < 0) return;
   if (message(ui, head, sub, head_hex) < 0) fail(ui);
 }
 
@@ -314,9 +560,69 @@ void ra_ui_show_receiving(ra_ui_t *ui) {
   ui->fallback = 0;
 }
 
+#define PROG_X RA_MARGIN
+#define PROG_Y 208
+#define PROG_W (HP_PAGE_SCREEN_W - 2 * RA_MARGIN)
+#define PROG_H 6
+
+static void recv_texts(ra_ui_t *ui, unsigned k, unsigned n) {
+  char b[32];
+  snprintf(b, sizeof b, "%u of %u", k, n);
+  if (ui->cap) lv_label_set_text(ui->cap, b);
+  if (ui->prog_fill) lv_obj_set_width(ui->prog_fill, n ? (int)((unsigned)PROG_W * (k > n ? n : k) / n) + (k ? 0 : 0) : 0);
+  if (ui->prog_fill) set_hidden(ui->prog_fill, k == 0);
+}
+
+void ra_ui_show_receiving_n(ra_ui_t *ui, unsigned k, unsigned n) {
+  if (!n) n = 1;
+  if (ui->page.page_id == RA_UI_PAGE_RECEIVING && ui->recv_total && !ui->fallback && ui->msg) {
+    ui->recv_total = (int)n;
+    recv_texts(ui, k, n); /* same screen: only the numbers change */
+    return;
+  }
+  show_builtin(ui, RA_UI_PAGE_RECEIVING, "Receiving page", "", RA_HEX_TX);
+  if (ui->page.page_id != RA_UI_PAGE_RECEIVING) return; /* the error state */
+  lv_obj_t *scr = lv_screen_active();
+  lv_obj_t *track = rect(scr, PROG_X, PROG_Y, PROG_W, PROG_H, &ra_st_btn);
+  lv_obj_t *fill = track ? rect(track, 0, 0, 1, PROG_H, &ra_st_ink) : NULL;
+  if (!track || !fill) return fail(ui);
+  lv_obj_set_style_radius(track, 3, 0);
+  lv_obj_set_style_radius(fill, 3, 0);
+  lv_obj_set_style_bg_color(fill, RA_COLOR(RA_HEX_ACC), 0);
+  ui->prog_fill = fill;
+  ui->fallback = 0;
+  ui->recv_total = (int)n;
+  recv_texts(ui, k, n);
+}
+
 void ra_ui_show_fallback(ra_ui_t *ui) {
   show_builtin(ui, RA_UI_PAGE_FALLBACK, "Hub unreachable", "Reconnecting automatically", RA_HEX_BAD);
   ui->fallback = 1;
+}
+
+static void stale_caption(ra_ui_t *ui, unsigned i) {
+  const hp_widget_t *w = &ui->page.widgets[i];
+  int x1, y1, x2, y2;
+  ra_ui_widget_rect(&ui->page, w, &x1, &y1, &x2, &y2);
+  int bw = x2 - x1 + 1, bh = y2 - y1 + 1;
+  if (bh < 44 || !enough_memory(4096)) return;
+  lv_obj_t *c = make_label(ui->obj[i], "stale", &ra_st_txt_cap, NULL, bw - (ui->ico[i] ? 38 : 8));
+  if (!c) return;
+  if (ui->ico[i]) {
+    lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_pos(c, 32, 8);
+  } else {
+    lv_obj_align(c, LV_ALIGN_TOP_MID, 0, 6);
+  }
+  ui->wcap[i] = c;
+  lv_obj_align(ui->lbl[i], LV_ALIGN_CENTER, 0, 6);
+}
+
+/* Live text / state of a tile on screen: the label text and colours only. */
+static void tile_refresh(ra_ui_t *ui, unsigned i) {
+  const hp_widget_t *w = &ui->page.widgets[i];
+  if (ui->lbl[i]) lv_label_set_text(ui->lbl[i], ui->page.version == 2 ? tile_value(w) : w->text);
+  if (ui->page.version == 2) paint(ui, i);
 }
 
 int ra_ui_tile_text(ra_ui_t *ui, uint8_t page_id, uint8_t tile_id, const char *text, size_t len) {
@@ -324,9 +630,36 @@ int ra_ui_tile_text(ra_ui_t *ui, uint8_t page_id, uint8_t tile_id, const char *t
   int r = hp_page_set_tile_text(&ui->page, tile_id, text, len);
   if (r < 0) return r;
   for (unsigned i = 0; i < ui->page.count; i++)
-    if (ui->page.widgets[i].id == tile_id && ui->page.widgets[i].kind == HP_WIDGET_TILE && ui->lbl[i])
-      lv_label_set_text(ui->lbl[i], ui->page.widgets[i].text);
+    if (ui->page.widgets[i].id == tile_id && ui->page.widgets[i].kind == HP_WIDGET_TILE && ui->lbl[i]) tile_refresh(ui, i);
   return 0;
+}
+
+int ra_ui_tile_state(ra_ui_t *ui, uint8_t page_id, uint8_t tile_id, uint8_t state, const char *text, size_t len) {
+  if (page_id != ui->page.page_id) return -HP_E_NOENT;
+  int r = hp_page_set_tile_text(&ui->page, tile_id, text, len);
+  if (r < 0) return r;
+  for (unsigned i = 0; i < ui->page.count; i++) {
+    hp_widget_t *w = &ui->page.widgets[i];
+    if (w->id == tile_id && w->kind == HP_WIDGET_TILE) {
+      w->tstate = state;
+      if (ui->lbl[i]) tile_refresh(ui, i);
+    }
+  }
+  return 0;
+}
+
+void ra_ui_set_activity(ra_ui_t *ui, uint8_t activity, int power) {
+  power = power != 0;
+  if (ui->act_idx == activity && ui->act_on == power) return;
+  ui->act_idx = activity;
+  ui->act_on = power;
+  if (ui->page.version != 2) return;
+  for (unsigned i = 0; i < ui->page.count; i++) {
+    const hp_widget_t *w = &ui->page.widgets[i];
+    if (!ui->obj[i] || w->kind != HP_WIDGET_BUTTON) continue;
+    int now = widget_active(ui, w), was = (ui->active >> i) & 1;
+    if (now != was) paint(ui, i);
+  }
 }
 
 /* ---- pressed feedback ---- */

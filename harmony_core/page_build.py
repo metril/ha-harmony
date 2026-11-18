@@ -28,7 +28,7 @@ from .page_codec import (
 
 MAX_SOFT_KEYS = 256 - SOFT_KEY_BASE  # widget wire ids 0..127
 MAX_PAGE_GROUP = 15  # seq count is 4 bits
-MAX_PAGES = 255
+MAX_PAGES = 32  # the remote store holds page ids 0..31 (HP_STORE_MAX)
 
 _TOKEN = re.compile(r"[a-z0-9+\-]+")
 _DANGER_LABEL = re.compile(r"^(power ?off|all off)\b")

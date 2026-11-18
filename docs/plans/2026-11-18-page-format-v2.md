@@ -154,3 +154,40 @@ tiles on/off/unavailable/stale, paged "2/3".
 | T17 | labels and nav widgets stop using global soft-key ids | T9 | S | core |
 | T18 | docs: `page-format.md` v2, `ha-config.md`, handshake | each | S | docs |
 | T19 | add-on TypeScript renderer from the `page_to_dict` vectors | T3 | M | addon |
+
+## Implementation notes (device side)
+
+Where the remote and hub deviate from, or settle, the text above.
+
+- **Store**: `hp_store_t` is indexed by page id (< 32), raw wire bytes, tile overlay of 32 entries. A page with a changed
+  gen **or a changed total** clears the store (gen is one byte, so a total change with the same gen is a new set). `total`
+  > 32 is refused (`HP_E_TOOBIG`); the compiler caps a config at 32 pages ("at most 32 pages"). `find_kind`, `find_act`
+  and `start` only look at ids < total; nav / seq targets >= total are ignored. Start page: home, else page 0, else the
+  lowest stored id.
+- **Completeness**: the set is complete when `count >= min(total, 32)` distinct pages of the current gen/total are held.
+  Until then the screen is "Receiving page" with "k of N" below and a progress bar. **10 s after the last new page**
+  (`APP_PARTIAL_MS`) the start page is shown anyway (set "partial") and filling continues in the background; completion
+  does not move the user. Home / Exit / the bar's left corner (back chevron) go to the start page from every state, the
+  receiving and error screens included (on the error screen any tap does, once the touch is over); on a partial set they
+  also switch to partial mode. Exit on a non-BACK stored page still goes to the hub. A nav target that is not stored
+  shows the toast "Page not received yet" and stays; the receiving screen is never entered by navigation.
+- **Look**: role primary = teal ink on the secondary surface (not a teal fill; the teal fill is the active highlight);
+  monogram shape = round badge with the icon, else the label's first letter upper-cased; `icon_only` with an icon id the
+  font does not have falls back to drawing the label; a held Up / Down on a paged page is consumed at press, so hold and
+  release are not forwarded and it does not repeat.
+- **remote_info**: sent as the first uplink after a link-up and repeated on the 5-minute battery heartbeat. The hub
+  caches it per remote and clears the cache on link loss. It broadcasts to ws clients when it changed **and for the first
+  one after each observed link-up even if identical** (so Home Assistant re-pushes after a reattach); heartbeat repeats
+  are not broadcast, so there is one broadcast per link-up.
+- **Held queue** (`HUB_PEND_MAX` 40): when full, tile messages are evicted first (oldest first); a page is never evicted
+  while a tile message is held. With only pages held a new tile is dropped, and a new page drops the oldest page (pages of
+  an older gen and of the same id are already gone). Losses are counted (`pend_dropped`), the first is logged.
+- **page_push retries**: a page_push that exhausts its RF retries while the remote is still attached is held again and
+  resent after the next frame heard from the remote, at most 3 times (`HUB_PAGE_RESENDS`), then dropped (counted, logged).
+  It is not resent when a newer push of that page is held or in flight, or a newer gen has been pushed since.
+- **v1 vs v2 on one remote**: a v2 page always switches the remote to v2 mode (the identical-page shortcut applies only
+  in v2 mode). A v1 page replaces the display, leaves v2 mode and drops the v2 store, which is what a v1-only Home
+  Assistant needs and cannot strand the user (every pushed page of either format is shown); v1 pages are only sent by a
+  Home Assistant that does not see `page_fmt` 2, so a v2 session does not meet them. The next v2 page starts a fresh set.
+- **Memory**: the LVGL pool is 80 KiB. The worst legal v2 page (32 buttons with an icon and a label, plus a toast)
+  peaks at 39 KB (47 %); all-tile pages peak at 38 KB. The build precheck counts only objects a page really draws.
