@@ -57,6 +57,7 @@ def _empty() -> dict[str, Any]:
         "v": SCHEMA_VERSION,
         "next_rev": 1,
         "draft_rev": 0,
+        "ack": None,
         "draft": None,
         "applied": None,
         "history": [],
@@ -86,6 +87,21 @@ class Store:
             raise StoreError("stored state has an unsupported version")
         if not isinstance(state.get("draft_rev"), int):
             state["draft_rev"] = 0  # files written before draft revisions existed
+        state.setdefault("ack", None)
+        return state
+
+    def hubs(self, limit: int = 200) -> list[str]:
+        """Ids of the hubs that have a state file (sorted)."""
+        try:
+            names = sorted(p.stem for p in self.dir.glob("*.json"))
+        except OSError:
+            return []
+        return [n for n in names if HUB_ID.fullmatch(n)][:limit]
+
+    def set_ack(self, hub: str, ack: dict[str, Any]) -> dict[str, Any]:
+        state = self.load(hub)
+        state["ack"] = ack
+        self._save(hub, state)
         return state
 
     def _save(self, hub: str, state: dict[str, Any]) -> None:

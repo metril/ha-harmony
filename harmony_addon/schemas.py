@@ -95,3 +95,14 @@ HA_ENTITIES_QUERY = vol.Schema(
 HA_SERVICES_QUERY = vol.Schema(
     {vol.Optional("domain"): vol.In(sorted(ACTION_DOMAINS))}, extra=vol.PREVENT_EXTRA
 )
+
+_REV = vol.All(str, vol.Match(r"^[A-Za-z0-9._-]{1,64}$"))
+ACK = vol.Schema(
+    {
+        vol.Required("hub"): _hub,
+        vol.Required("rev"): _REV,
+        vol.Required("result"): vol.In(["ok", "error"]),
+        vol.Optional("detail"): vol.All(str, vol.Length(max=200)),
+    },
+    extra=vol.PREVENT_EXTRA,
+)

@@ -70,6 +70,8 @@ CLOCK_KEY = web.AppKey("clock", Callable)
 NOTIFIER_KEY = web.AppKey("notifier", object)
 WAIT_KEY = web.AppKey("wait_s", float)
 CATALOG_KEY = web.AppKey("catalog", Catalog)
+SEEN_KEY = web.AppKey("bundle_seen", dict)
+ACKS_KEY = web.AppKey("acks", dict)
 WAIT_SECONDS = 55.0
 
 
@@ -122,8 +124,10 @@ def make_auth_mw(auth: Auth):
             raise error(
                 429, "rate_limited", "too many attempts", headers={"Retry-After": "60"}
             ) from None
+        bundle = request.path == BUNDLE_PREFIX or request.path.startswith(BUNDLE_PREFIX + "/")
+        if bundle:  # authenticated (auth.check passed): remember that the integration is linked
+            request.app[SEEN_KEY]["last_seen"] = int(request.app[CLOCK_KEY]())
         if request.method in MUTATING:
-            bundle = request.path == BUNDLE_PREFIX or request.path.startswith(BUNDLE_PREFIX + "/")
             if bundle:  # bearer-authenticated machine client: no ambient credential, so no CSRF
                 if request.content_type not in JSON_TYPES:
                     raise error(403, "csrf", "forbidden")
@@ -405,6 +409,65 @@ async def ha_services(request: web.Request) -> web.Response:
     return jresp({"services": rows})
 
 
+# ------------------------------------------------------------------ hubs and apply status
+async def list_hubs(request: web.Request) -> web.Response:
+    store = request.app[STORE_KEY]
+    out = []
+    for hub in store.hubs():
+        state = _store_call(store.load, hub)
+        a = state["applied"]
+        out.append(
+            {
+                "id": hub,
+                "has_draft": state["draft"] is not None,
+                "has_applied": a is not None,
+                "applied_rev": None if a is None else _rev(a["config"]),
+                "applied_at": None if a is None else a["at"],
+            }
+        )
+    return jresp({"hubs": out})
+
+
+async def config_status(request: web.Request) -> web.Response:
+    q = query(request, schemas.QUERY)
+    state = _store_call(request.app[STORE_KEY].load, q["hub"])
+    bundle = _bundle(q["hub"], state)
+    ack = request.app[ACKS_KEY].get(q["hub"]) or state["ack"] or {}
+    last_seen = request.app[SEEN_KEY].get("last_seen")
+    return jresp(
+        {
+            "hub": q["hub"],
+            "applied_rev": None if bundle is None else bundle["rev"],
+            "acked_rev": ack.get("rev"),
+            "result": ack.get("result"),
+            "detail": ack.get("detail"),
+            "acked_at": ack.get("at"),
+            "linked": last_seen is not None,
+            "last_seen": last_seen,
+        }
+    )
+
+
+async def post_ack(request: web.Request) -> web.Response:
+    """The integration reports what it did with a pulled bundle (bearer auth, like the feed)."""
+    body = await read_body(request, schemas.ACK)
+    store, hub = request.app[STORE_KEY], body["hub"]
+    state = _store_call(store.load, hub)
+    bundle = _bundle(hub, state)
+    if bundle is None:
+        raise _nothing_applied()
+    if body["rev"] != bundle["rev"]:  # an answer about an older bundle: not what is applied now
+        raise error(409, "stale_rev", "that rev is not the applied one", rev=bundle["rev"])
+    ack = {"rev": body["rev"], "result": body["result"], "at": int(request.app[CLOCK_KEY]())}
+    if "detail" in body:
+        ack["detail"] = body["detail"]
+    prev = state["ack"] or {}
+    if any(prev.get(k) != ack.get(k) for k in ("rev", "result", "detail")):  # no write per repeat
+        _store_call(store.set_ack, hub, ack)
+        request.app[ACKS_KEY][hub] = ack
+    return jresp({"ok": True})
+
+
 # ------------------------------------------------------------------ bundle (integration feed)
 class ApplyNotifier:
     """Wakes long-poll waiters when a hub's applied config changes."""
@@ -540,6 +603,8 @@ def create_app(
     app[NOTIFIER_KEY] = ApplyNotifier()
     app[WAIT_KEY] = wait_seconds
     app[CATALOG_KEY] = Catalog(ha_api, clock)
+    app[SEEN_KEY] = {}
+    app[ACKS_KEY] = {}
 
     async def _wake_waiters(_: web.Application) -> None:
         app[NOTIFIER_KEY].close()
@@ -568,6 +633,9 @@ def create_app(
     app.router.add_get(f"{api}/config/export_yaml", export_yaml)
     app.router.add_get(f"{api}/ha/entities", ha_entities)
     app.router.add_get(f"{api}/ha/services", ha_services)
+    app.router.add_get(f"{api}/hubs", list_hubs)
+    app.router.add_get(f"{api}/config/status", config_status)
+    app.router.add_post(f"{api}/bundle/ack", post_ack)
     app.router.add_get(f"{api}/bundle", get_bundle)
     app.router.add_get(f"{api}/bundle/wait", wait_bundle)
     return app
