@@ -621,7 +621,14 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
 void hub_pump_rf(hub_ctx_t *h) {
     if (!h->sinks.rf) return;
     rf_link_ensure(h);
-    if (h->sinks.rf->attached && h->sinks.rf->attached(h->sinks.rf->self) && !h->rf_attached) h->info_fresh = true; /* seen before anything is delivered */
+    /* `remote_attached` goes out before anything this pump delivers: the remote's remote_info is sent right after
+     * link-up, and Home Assistant drops the info it holds on `remote_attached`, so the other order loses it. */
+    if (h->sinks.rf->attached && h->sinks.rf->attached(h->sinks.rf->self) && !h->rf_attached) {
+        h->info_fresh = true;
+        h->rf_attached = true;
+        cJSON *d = cJSON_CreateObject();
+        if (d) hub_broadcast(h, "remote_attached", d);
+    }
     /* Received objects are delivered (and acked) from inside the pump; a peer that went away
      * resets reassembly and drops what was queued for it. */
     if (hp_rf_link_pump(&h->link, hp_sched_now(&h->sched)) == -HP_E_NOENT) {
@@ -638,7 +645,7 @@ void hub_pump_rf(hub_ctx_t *h) {
     }
     if (h->sinks.rf->attached) {
         bool now = h->sinks.rf->attached(h->sinks.rf->self);
-        if (now && !h->rf_attached) {
+        if (now && !h->rf_attached) { /* a re-attach the pump itself noticed (it reset the state above) */
             cJSON *d = cJSON_CreateObject();
             if (d) hub_broadcast(h, "remote_attached", d);
         }
