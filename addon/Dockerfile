@@ -10,6 +10,8 @@ WORKDIR /repo/addon/frontend
 COPY addon/frontend/package.json addon/frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY harmony_addon/frontend-shared /repo/harmony_addon/frontend-shared
+# tsc type-checks the tests, which import the shared page vectors.
+COPY tests/vectors /repo/tests/vectors
 COPY addon/frontend/ ./
 RUN npm run build
 

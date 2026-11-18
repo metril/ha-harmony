@@ -2,6 +2,7 @@
 !addon/requirements.txt
 !addon/rootfs
 !addon/frontend
+!tests/vectors
 !harmony_core
 !harmony_irdb
 !harmony_addon
