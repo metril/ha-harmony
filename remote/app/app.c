@@ -35,6 +35,7 @@ static bool sink_gate(void *ctx, uint64_t now) {
 }
 static void sink_touch(void *ctx, int x, int y, bool down) {
   app_t *a = ctx;
+  ra_display_note(&a->display, down ? RA_WHY_PRESS : RA_WHY_RELEASE, a->input_ms);
   if (down) ra_ui_press_at(&a->ui, x, y);
   else ra_ui_release(&a->ui);
 }
@@ -91,12 +92,14 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
     } else {
       a->saved = p;
       a->have_saved = true;
+      ra_display_note(&a->display, RA_WHY_PAGE, 0);
       ra_ui_show_page(&a->ui, &p);
     }
     break;
   }
   case APP_LINK_EV_TILE_UPDATE:
     heard(a, now);
+    ra_display_note(&a->display, RA_WHY_STATUS, 0);
     if (a->have_saved && a->saved.page_id == ev->page) (void)hp_page_set_tile_text(&a->saved, ev->tile, ev->text, strlen(ev->text));
     if (ra_ui_tile_text(&a->ui, ev->page, ev->tile, ev->text, strlen(ev->text)) < 0)
       ra_logf(&a->sys, "tile_update %u/%u ignored", ev->page, ev->tile);
@@ -110,6 +113,7 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
     break;
   case APP_LINK_EV_ALIVE:
     heard(a, now);
+    if (a->ui.fallback) ra_display_note(&a->display, RA_WHY_PAGE, 0);
     if (a->ui.fallback) { /* the hub is back: the last real page, not a blank wait for the next push */
       if (a->have_saved) ra_ui_show_page(&a->ui, &a->saved);
       else ra_ui_show_receiving(&a->ui);
@@ -145,6 +149,7 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   int ready[3] = {0, 0, 0};
   int w = a->sys.ops.wait(a->sys.ops.ctx, fds, nfd, t, ready);
   now = a->sys.ops.now_ms(a->sys.ops.ctx);
+  a->input_ms = now;
   if (w > 0)
     for (int i = 0; i < 2; i++)
       if (ready[i]) ra_input_read(&a->input, i, now);
@@ -152,6 +157,7 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   ra_power_tick(&a->power, now);
   if (a->power.batt_polls != a->last_batt_polls) {
     a->last_batt_polls = a->power.batt_polls;
+    ra_display_note(&a->display, RA_WHY_STATUS, 0);
     ra_ui_set_battery(&a->ui, a->power.soc, a->power.external_power);
     /* Low-battery toast with hysteresis: queued at <= 10 % off the charger, once; re-armed only at >= 13 % or on
      * external power. It is shown when the screen is on (see below), not while asleep. */
@@ -165,6 +171,7 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   }
   bool awake = a->power.state != RA_PW_OFF;
   if (a->link.set_awake && (!a->awake_known || awake != a->last_awake)) a->link.set_awake(a->link.ctx, awake);
+  if (a->awake_known && awake && !a->last_awake) ra_display_note(&a->display, RA_WHY_WAKE, 0);
   a->awake_known = true;
   a->last_awake = awake;
   app_link_event_t ev;

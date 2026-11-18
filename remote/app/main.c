@@ -36,6 +36,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "harmony_remote: init failed (%d)\n", r);
     return 1;
   }
+  app.display.ui_debug = cli.ui_debug;
   if (cli.rf_spi) {
     /* After the panel checks, so a refused start never touches the radio. A failed open (stock hal
      * alive, no device) leaves the link dead: the fallback page shows and the app keeps running. */

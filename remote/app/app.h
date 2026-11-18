@@ -67,6 +67,7 @@ typedef struct {
   unsigned last_batt_polls; /* power.batt_polls already shown in the status bar */
   bool lowbatt_disarmed;    /* the low-battery toast was queued for this dip (re-arms at >= 13 % or on a charger) */
   bool lowbatt_pending;     /* queued, waiting for the screen to be on */
+  uint64_t input_ms;        /* when the current batch of input events was read (for --ui-debug) */
   unsigned oom_logged;      /* ui.oom already reported in the log */
 } app_t;
 

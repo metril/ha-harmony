@@ -602,6 +602,15 @@ static void test_cli(void) {
   CT_CHECK(c.rf_debug);
   CT_EQ(c.slot, 3);
   CT_EQ(c.powermode, 0x10);
+  CT_CHECK(!c.ui_debug);
+  char *u1[] = {"x", "--ui-debug"};
+  CT_EQ(ra_cli_parse(2, u1, &c), 0);
+  CT_CHECK(c.ui_debug);
+  char *u2[] = {"x", "--ui-debug", "--slot", "1", "--rf-debug"};
+  CT_EQ(ra_cli_parse(5, u2, &c), 0);
+  CT_CHECK(c.ui_debug && c.rf_debug);
+  char *u3[] = {"x", "--ui-debug=1"};
+  CT_EQ(ra_cli_parse(2, u3, &c), -1); /* a flag takes no value */
   char *d3[] = {"x", "--rf-debug=1"};
   CT_EQ(ra_cli_parse(2, d3, &c), -1); /* a flag takes no value */
   char *a5[] = {"x", "--slot", "2", "--rf", "bad"};
