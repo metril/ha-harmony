@@ -144,11 +144,29 @@ class RemoteLink:
         return self.info is not None and bool(self.info.caps & const.CAP_TILE_STATE)
 
 
+# Which entity states mean "on" for an HA device (docs/ha-config.md, "Home Assistant devices").
+# domain -> (states that are on, states that are off); any other state of those domains is unknown.
+_ON_OFF_STATES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "cover": (frozenset({"open", "opening"}), frozenset({"closed", "closing"})),
+    "lock": (frozenset({"unlocked", "unlocking", "open", "opening"}), frozenset({"locked", "locking"})),
+}
+_OFF_STATES = {"media_player": frozenset({"off", "standby"})}  # on = anything else known
+_DEFAULT_OFF = frozenset({"off"})  # light, switch, fan, remote, climate (hvac mode off), ...
+
+
 def _ha_device_state(state: State | None) -> DeviceState:
+    """Power (on / off / None = unknown) and the input (`source` attribute) of an HA device."""
     if state is None or state.state in ("unavailable", "unknown"):
         return DeviceState()
     source = state.attributes.get("source")
-    return DeviceState(state.state not in ("off", "standby"), source if isinstance(source, str) else None)
+    inp = source if isinstance(source, str) else None
+    domain = state.entity_id.split(".", 1)[0]
+    if domain in _ON_OFF_STATES:
+        on, off = _ON_OFF_STATES[domain]
+        power = True if state.state in on else False if state.state in off else None
+    else:
+        power = state.state not in _OFF_STATES.get(domain, _DEFAULT_OFF)
+    return DeviceState(power, inp)
 
 
 async def _sleep_hook(seconds: float) -> None:
@@ -208,6 +226,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._sync_lock = asyncio.Lock()
         self._tile_unsub: Callable[[], None] | None = None
         self._tile_dirty: set[str] = set()
+        self._renamed: dict[str, str] = {}  # config entity id -> its id after a rename in HA
         self._tile_timer: asyncio.TimerHandle | None = None
         self._flush_task: asyncio.Task[None] | None = None
         self._tile_last: dict[tuple[int, int, int], tuple[bool, tuple[int, str]]] = {}
@@ -221,6 +240,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             client.async_subscribe(self._on_push),
             client.async_subscribe_state(self._on_state),
         ]
+        self._unsubs.append(
+            hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, self._on_registry_update)
+        )
         self.async_set_updated_data(None)
 
     async def _async_update_data(self) -> None:  # push only
@@ -664,7 +686,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # the remote kept its page store (a HA<->hub reconnect, a hub restart): nothing to send
             # but the tile values that changed meanwhile
             link.pushed, link.pending = want, False
-            await self._send_tiles({t.entity_id for t in self.compiled.tiles}, (remote,))
+            await self._send_tiles({self._cur(t.entity_id) for t in self.compiled.tiles}, (remote,))
             return
         link.inflight = want
         try:
@@ -770,6 +792,31 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 dreg.async_update_device(dev.id, remove_config_entry_id=entry_id)
 
     # ------------------------------------------------------------ tiles
+    def _cur(self, entity_id: str) -> str:
+        """The entity id a configured one has now (tiles and HA devices follow a rename)."""
+        return self._renamed.get(entity_id, entity_id)
+
+    @callback
+    def _on_registry_update(self, event: Event[Any]) -> None:
+        data = event.data
+        old, new = data.get("old_entity_id"), data.get("entity_id")
+        if data.get("action") != "update" or not old or not new or old == new:
+            return
+        watched = {t.entity_id for t in self.compiled.tiles}
+        watched |= {d.entity for d in self.compiled.ha_devices.values() if d.entity}
+        moved = [cfg for cfg in watched if self._cur(cfg) == old]
+        if not moved:
+            return
+        for cfg in moved:
+            if new == cfg:
+                self._renamed.pop(cfg, None)  # back to the configured name
+            else:
+                self._renamed[cfg] = new
+        self._track_tiles()  # re-subscribe under the new ids
+        self._tile_dirty.add(new)
+        if self._tile_timer is None:
+            self._tile_timer = self.hass.loop.call_later(const.TILE_DEBOUNCE, self._start_flush)
+
     def _untrack_tiles(self) -> None:
         if self._tile_unsub:
             self._tile_unsub()
@@ -785,7 +832,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def _track_tiles(self) -> None:
         """Subscribe to exactly the entities on pages (tiles) and behind HA devices."""
         self._untrack_tiles()
-        entities = sorted({t.entity_id for t in self.compiled.tiles})
+        entities = sorted({self._cur(t.entity_id) for t in self.compiled.tiles})
         if entities:
             self._tile_unsub = async_track_state_change_event(
                 self.hass, entities, self._on_tile_entity
@@ -793,8 +840,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         dev_of: dict[str, list[str]] = {}
         for dev in self.compiled.ha_devices.values():
             if dev.entity:
-                dev_of.setdefault(dev.entity, []).append(dev.id)
-                self.device_states[dev.id] = _ha_device_state(self.hass.states.get(dev.entity))
+                cur = self._cur(dev.entity)
+                dev_of.setdefault(cur, []).append(dev.id)
+                self.device_states[dev.id] = _ha_device_state(self.hass.states.get(cur))
         if dev_of:
 
             @callback
@@ -832,7 +880,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """After a page push the remote knows no tile values: send every one again."""
         for key in [k for k in self._tile_last if k[0] == remote]:
             del self._tile_last[key]
-        await self._send_tiles({t.entity_id for t in self.compiled.tiles}, (remote,))
+        await self._send_tiles({self._cur(t.entity_id) for t in self.compiled.tiles}, (remote,))
 
     async def _send_tiles(self, entities: set[str], remotes: tuple[int, ...]) -> None:
         """Send each tile whose rendered (state, text) pair changed since the last send. Nothing is
@@ -847,9 +895,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             rich = link.tile_state
             todo: list[tuple[tuple[int, int, int], tuple[int, str], dict[str, Any], str]] = []
             for tile in self.compiled.tiles:
-                if tile.entity_id not in entities:
+                cur = self._cur(tile.entity_id)
+                if cur not in entities:
                     continue
-                st = self.hass.states.get(tile.entity_id)
+                st = self.hass.states.get(cur)
                 value = tile_state(st) if rich else (0, tile_text(st))
                 key = (remote, tile.page, tile.widget)
                 if self._tile_last.get(key) == (rich, value):

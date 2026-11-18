@@ -565,3 +565,61 @@ async def test_twenty_tiles_flush_pipelined_within_the_window(hass, rig, clock):
     assert {t["text"] for t in hub.tiles()} == {str(100 + i) for i in range(20)}
     assert 1 < hub.tiles_peak <= const.TILE_WINDOW  # pipelined, and bounded
     assert elapsed < 20 * 0.05 * 0.6, elapsed  # 20 serial round trips would take >= 1 s
+
+
+# 12: HA device on/off per domain
+@pytest.mark.parametrize(
+    "entity,state,want",
+    [
+        ("cover.garage", "open", True),
+        ("cover.garage", "opening", True),
+        ("cover.garage", "closed", False),
+        ("cover.garage", "closing", False),
+        ("cover.garage", "stopped", None),
+        ("media_player.tv", "playing", True),
+        ("media_player.tv", "idle", True),
+        ("media_player.tv", "on", True),
+        ("media_player.tv", "off", False),
+        ("media_player.tv", "standby", False),
+        ("media_player.tv", "unavailable", None),
+        ("media_player.tv", "unknown", None),
+        ("climate.hvac", "heat", True),
+        ("climate.hvac", "off", False),
+        ("lock.door", "unlocked", True),
+        ("lock.door", "locked", False),
+        ("lock.door", "jammed", None),
+        ("light.a", "on", True),
+        ("light.a", "off", False),
+        ("switch.s", "on", True),
+        ("fan.f", "off", False),
+    ],
+)
+def test_ha_device_power_per_domain(entity, state, want):
+    from homeassistant.core import State
+
+    from custom_components.ha_harmony.coordinator import _ha_device_state
+
+    assert _ha_device_state(State(entity, state)).power is want
+    assert _ha_device_state(None).power is None
+    assert _ha_device_state(State("media_player.tv", "on", {"source": "HDMI 1"})).input == "HDMI 1"
+
+
+# 12: tiles follow an entity rename
+async def test_tiles_follow_an_entity_rename(hass, rig, clock):
+    ereg = er.async_get(hass)
+    ereg.async_get_or_create("light", "test", "a1", suggested_object_id="a")
+    hass.states.async_set("light.a", "on")
+    hub, c = await rig()
+    await hub.push("remote_info", V2_INFO)
+    await settle(hass, lambda: c.links[1].pushed and c.links[1].pushed[1] == 2)
+    await settle(hass, lambda: hub.tiles())
+    await asyncio.sleep(0.2)
+    hub.got.clear()
+    ereg.async_update_entity("light.a", new_entity_id="light.kitchen")
+    hass.states.async_remove("light.a")  # what the entity platform does on a rename
+    hass.states.async_set("light.kitchen", "off")
+    await settle(hass)
+    await _until(lambda: any(t["state"] == 1 for t in hub.tiles() if "state" in t))
+    hub.got.clear()
+    hass.states.async_set("light.kitchen", "on")  # later changes of the renamed entity still arrive
+    await _until(lambda: any(t.get("state") == 2 for t in hub.tiles()))
