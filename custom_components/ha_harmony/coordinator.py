@@ -8,7 +8,6 @@ config hash differs) -> push pages -> keep tiles in sync with their bound entiti
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import logging
 from collections.abc import Callable, Iterable
@@ -700,10 +699,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """Send every page of format `fmt`, one after the other (each command result is the
         backpressure). False when it did not complete (no remote, link down, newer config)."""
         gen = self._cfg_gen
-        for idx, data in enumerate(self.compiled.encoded_pages(fmt)):
+        for idx, b64 in enumerate(self.compiled.encoded_pages_b64(fmt)):
             if gen != self._cfg_gen:
                 return False
-            payload = {"remote": remote, "page": idx, "data": base64.b64encode(data).decode()}
+            payload = {"remote": remote, "page": idx, "data": b64}
             try:
                 await self.client.async_send(MsgType.PAGE_PUSH, payload)
             except HarmonyCommandError as exc:

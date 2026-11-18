@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import zlib
 from collections.abc import Callable
@@ -115,6 +116,15 @@ class Compiled:
     def config_hash(self) -> str:
         """Computed once per compile (a compiled config is never mutated)."""
         return config_hash(self.hub_json)
+
+    @cached_property
+    def _pages_b64(self) -> tuple[list[str], list[str]]:
+        enc = base64.b64encode
+        return [enc(p).decode() for p in self.pages], [enc(p).decode() for p in self.pages_v2]
+
+    def encoded_pages_b64(self, version: int) -> list[str]:
+        """The same set as `encoded_pages`, as the base64 text the ws carries (built once)."""
+        return self._pages_b64[1 if version >= 2 else 0]
 
     @cached_property
     def event_types(self) -> list[str]:
