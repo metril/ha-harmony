@@ -57,6 +57,7 @@ static void key_event(ra_input_t *in, const struct input_event *ev, uint64_t now
 
 static void touch_release(ra_input_t *in, uint64_t now) {
   in->touching = false;
+  if (in->sink.touch && !in->touch_suppressed) in->sink.touch(in->sink.ctx, in->tx, in->ty, false);
   if (in->touch_suppressed) {
     in->touch_suppressed = false;
     return;
@@ -74,11 +75,14 @@ void ra_input_feed(ra_input_t *in, const struct input_event *ev, uint64_t now) {
   if (ev->type == EV_ABS) {
     if (ev->code == ABS_X) in->tx = ev->value;
     else if (ev->code == ABS_Y) in->ty = ev->value;
+    if (in->touching && !in->touch_suppressed && in->sink.touch && (ev->code == ABS_X || ev->code == ABS_Y))
+      in->sink.touch(in->sink.ctx, in->tx, in->ty, true);
   } else if (ev->type == EV_KEY) {
     if (ev->code == BTN_TOUCH) {
       if (ev->value == 1 && !in->touching) {
         in->touching = true;
         in->touch_suppressed = !in->sink.gate(in->sink.ctx, now);
+        if (in->sink.touch && !in->touch_suppressed) in->sink.touch(in->sink.ctx, in->tx, in->ty, true);
       } else if (ev->value == 0 && in->touching) {
         touch_release(in, now);
       }

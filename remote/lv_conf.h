@@ -9,10 +9,10 @@
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_BUILTIN
-/* Static pool, 64 KiB: a 240x320 page holds <= 32 widgets (each an object plus a label, ~0.4 KiB
- * with their local styles), the default theme's shared styles take ~10 KiB, and the software
+/* Static pool, 48 KiB: a 240x320 page holds <= 32 widgets (each an object plus a label, ~0.4 KiB
+ * with their local styles; a full 32-widget page measures ~28 KiB), and the software
  * renderer's layer scratch for partial rendering is the rest. */
-#define LV_MEM_SIZE (64 * 1024U)
+#define LV_MEM_SIZE (48 * 1024U)
 
 #define LV_DEF_REFR_PERIOD 33
 #define LV_DPI_DEF 130
@@ -22,6 +22,16 @@
 #define LV_USE_DRAW_SW 1
 #define LV_DRAW_SW_COMPLEX 1
 #define LV_USE_DRAW_SW_ASM LV_DRAW_SW_ASM_NONE
+/* Only the panel format (RGB565) and ARGB8888 (internal layers) are compiled into the software renderer. */
+#define LV_DRAW_SW_SUPPORT_RGB565 1
+#define LV_DRAW_SW_SUPPORT_RGB565A8 0
+#define LV_DRAW_SW_SUPPORT_RGB888 0
+#define LV_DRAW_SW_SUPPORT_XRGB8888 0
+#define LV_DRAW_SW_SUPPORT_ARGB8888 1
+#define LV_DRAW_SW_SUPPORT_L8 0
+#define LV_DRAW_SW_SUPPORT_AL88 0
+#define LV_DRAW_SW_SUPPORT_A8 0
+#define LV_DRAW_SW_SUPPORT_I1 0
 
 #define LV_USE_LOG 0
 
@@ -49,9 +59,11 @@
 #define LV_USE_OBJ_ID 0
 #define LV_USE_OBJ_PROPERTY 0
 
-#define LV_FONT_MONTSERRAT_14 1
-#define LV_FONT_MONTSERRAT_20 1
-#define LV_FONT_DEFAULT &lv_font_montserrat_14
+/* Ubuntu fonts live in remote/app/fonts (tools/gen_remote_fonts.sh); no Montserrat. */
+#define LV_FONT_MONTSERRAT_14 0
+#define LV_FONT_MONTSERRAT_20 0
+#define LV_FONT_CUSTOM_DECLARE LV_FONT_DECLARE(ra_font_m16)
+#define LV_FONT_DEFAULT &ra_font_m16
 
 /* Widgets: obj (always), label, button. Everything else off. */
 #define LV_USE_LABEL 1
@@ -86,7 +98,8 @@
 #define LV_USE_TILEVIEW 0
 #define LV_USE_WIN 0
 
-#define LV_USE_THEME_DEFAULT 1
+/* No theme: every style is ours (remote/app/theme.c, const), saving ~10 KiB of pool and the theme code. */
+#define LV_USE_THEME_DEFAULT 0
 #define LV_THEME_DEFAULT_DARK 1
 #define LV_THEME_DEFAULT_GROW 0
 #define LV_THEME_DEFAULT_TRANSITION_TIME 0

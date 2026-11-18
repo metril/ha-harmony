@@ -1,6 +1,7 @@
 #include "remote/app/app.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "hub/hp_errors.h"
@@ -28,7 +29,14 @@ static void sink_emit(void *ctx, uint8_t code, uint8_t action) {
 }
 static bool sink_gate(void *ctx, uint64_t now) {
   app_t *a = ctx;
-  return ra_power_input(&a->power, now);
+  bool pass = ra_power_input(&a->power, now);
+  if (pass) ra_ui_toast_dismiss(&a->ui); /* any touch or key clears the toast */
+  return pass;
+}
+static void sink_touch(void *ctx, int x, int y, bool down) {
+  app_t *a = ctx;
+  if (down) ra_ui_press_at(&a->ui, x, y);
+  else ra_ui_release(&a->ui);
 }
 static void sink_activity(void *ctx, uint64_t now) {
   app_t *a = ctx;
@@ -52,7 +60,8 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
     return r;
   }
   ra_ui_init(&a->ui);
-  ra_input_sink_t sink = {.ctx = a, .emit = sink_emit, .gate = sink_gate, .activity = sink_activity, .page = sink_page};
+  ra_input_sink_t sink = {.ctx = a, .emit = sink_emit, .gate = sink_gate, .activity = sink_activity, .page = sink_page,
+                       .touch = sink_touch};
   if (ra_input_open(&a->input, &a->sys, &sink) < 0) {
     ra_logf(&a->sys, "cannot open input devices");
     ra_display_destroy(&a->display);
@@ -68,6 +77,7 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
 static void heard(app_t *a, uint64_t now) {
   a->last_rx_ms = now;
   a->fail_run = 0;
+  ra_ui_set_link(&a->ui, 0);
 }
 
 static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now) {
@@ -96,16 +106,20 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
     a->state_updates++;
     a->last_activity = ev->activity;
     a->last_power = ev->power;
+    if (!a->have_saved && !a->ui.fallback && a->ui.page.page_id == RA_UI_PAGE_BOOT) ra_ui_show_receiving(&a->ui);
     break;
   case APP_LINK_EV_ALIVE:
     heard(a, now);
     if (a->ui.fallback) { /* the hub is back: the last real page, not a blank wait for the next push */
       if (a->have_saved) ra_ui_show_page(&a->ui, &a->saved);
-      else ra_ui_show_boot(&a->ui);
+      else ra_ui_show_receiving(&a->ui);
+    } else if (!a->have_saved && a->ui.page.page_id == RA_UI_PAGE_BOOT) {
+      ra_ui_show_receiving(&a->ui); /* the hub answers, its pages are on the way */
     }
     break;
   case APP_LINK_EV_FAILED:
     a->fail_run++;
+    ra_ui_set_link(&a->ui, 1);
     if (!a->ui.fallback &&
         (ev->fatal || (a->fail_run >= APP_FAIL_COUNT && now - a->last_rx_ms >= APP_FAIL_SILENCE_MS)))
       ra_ui_show_fallback(&a->ui);
@@ -136,6 +150,17 @@ void app_step(app_t *a, unsigned max_wait_ms) {
       if (ready[i]) ra_input_read(&a->input, i, now);
   ra_input_tick(&a->input, now);
   ra_power_tick(&a->power, now);
+  if (a->power.batt_polls != a->last_batt_polls) {
+    a->last_batt_polls = a->power.batt_polls;
+    ra_ui_set_battery(&a->ui, a->power.soc, a->power.external_power);
+    bool low = a->power.soc <= RA_LOWBATT_PCT && !a->power.external_power;
+    if (low && !a->lowbatt_toasted) {
+      char b[24];
+      snprintf(b, sizeof b, "Battery %d%%", a->power.soc);
+      ra_ui_toast(&a->ui, b, "Place on the charger");
+    }
+    a->lowbatt_toasted = low;
+  }
   bool awake = a->power.state != RA_PW_OFF;
   if (a->link.set_awake && (!a->awake_known || awake != a->last_awake)) a->link.set_awake(a->link.ctx, awake);
   a->awake_known = true;

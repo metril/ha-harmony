@@ -26,6 +26,11 @@ typedef struct {
   uint64_t last_input_ms, last_step_ms, next_batt_ms;
   int bl, bl_target, led;
   bool write_failed, poweroff_requested;
+  /* Last good gauge poll, for the status bar: soc percent (-1 until the first poll), whether a charger
+   * is attached (powersource is not "battery"), and the number of good polls. */
+  int soc;
+  bool external_power;
+  unsigned batt_polls;
 } ra_power_t;
 
 /* Backlight to normal and LEDs on immediately; first battery poll on the first tick. */

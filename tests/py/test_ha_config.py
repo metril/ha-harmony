@@ -391,7 +391,7 @@ def start_remote(built_binaries, rf, *args):
 
 async def test_page_tap_runs_button_action(hass, hub_rf, write_yaml, built_binaries):
     write_yaml(BASE)
-    r = start_remote(built_binaries, hub_rf.rf, "--tap", "30,70")  # the Mute button
+    r = start_remote(built_binaries, hub_rf.rf, "--tap", "30,90")  # the Mute button (row 1 of 6, below the 32 px bar)
     entry = await setup(hass, hub_rf)
     code, out = await asyncio.to_thread(r.result)
     assert code == 0 and json.loads(out) == {"hit": True, "id": 1, "key": 129}

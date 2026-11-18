@@ -92,7 +92,7 @@ async def test_remote_attach_is_announced_to_ws_clients(hub_rf):
 
 
 async def test_tap_button_sends_soft_key_press_release(hub_rf, start_remote):
-    r = start_remote(hub_rf.rf, "--tap", "70,10")
+    r = start_remote(hub_rf.rf, "--tap", "70,42")  # row 0 starts below the 32 px status bar
     r.wait_attached()
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_rf.url) as ws:
         await hello(ws)
@@ -106,7 +106,7 @@ async def test_tap_button_sends_soft_key_press_release(hub_rf, start_remote):
 async def test_tap_miss_and_label_send_nothing(hub_rf, start_remote, run_remote):
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_rf.url) as ws:
         await hello(ws)
-        for xy, what in (("10,10", "nothing"), ("10,300", "a label")):
+        for xy, what in (("10,10", "nothing"), ("10,300", "a label")):  # (10,10) is the status bar
             r = start_remote(hub_rf.rf, "--tap", xy)
             r.wait_attached()
             await push(ws, PAGE)

@@ -64,6 +64,8 @@ typedef struct {
   uint64_t last_rx_ms;
   hp_page_t saved; /* the last real page pushed, restored when the hub is heard again */
   bool have_saved, awake_known, last_awake;
+  unsigned last_batt_polls; /* power.batt_polls already shown in the status bar */
+  bool lowbatt_toasted;     /* the low-battery toast fired for this dip (re-arms above 10% or on a charger) */
 } app_t;
 
 /* 0 ok; <0 refused to start (bad panel, cannot open the framebuffer or input). One app per process. */

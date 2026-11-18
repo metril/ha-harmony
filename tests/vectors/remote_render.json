@@ -1,12 +1,21 @@
 {
  "hash": "fnv1a-64 over the 240x320 RGB565 framebuffer (153600 bytes, little-endian)",
  "pages": {
-  "empty": "8d6cf8f17a427325",
-  "one_button": "e4dd45c274cd86cf",
-  "mixed": "aa965748a6ca030c",
-  "max_widgets": "8d6cf8f17a427325",
-  "max_label": "5b375337970275e5",
-  "corner_16x16": "8334ea3d360ede29",
-  "max_size_15x15": "ac8f62d70bdb2f65"
+  "empty": "53b70c6bff8a18cc",
+  "one_button": "1efa6c97491fc1c0",
+  "mixed": "4dedd0a099a237ed",
+  "max_widgets": "49a51117375fdeae",
+  "max_label": "bca8b7e8676d28ce",
+  "corner_16x16": "bb502de8d7059abe",
+  "max_size_15x15": "db1666f2e84f6836"
+ },
+ "screens": {
+  "boot": "3715224771477ef6",
+  "receiving": "1c3d994578d05cc5",
+  "unreachable": "d154b0c5c512dd4d",
+  "home": "1c5d65021a16ceea",
+  "home_pressed": "9bdeb76ff06b5a64",
+  "home_lowbatt_toast": "1d117fd197c92ca1",
+  "home_charging_linkdown": "9c198a0ddd57c3ab"
  }
 }

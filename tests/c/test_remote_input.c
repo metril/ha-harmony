@@ -99,24 +99,25 @@ static void tap(int x, int y, uint64_t t) {
 
 static void test_touch(void) {
   begin();
-  tap(10, 10, 1000); /* button id 1 */
+  tap(10, 42, 1000); /* button id 1 (row 0 starts below the 32 px bar) */
   CT_EQ(rec.n, 2);
   CT_EQ(rec.e[0].code, HP_SOFT_KEY_BASE + 1);
   CT_EQ(rec.e[0].action, HP_KEY_ACTION_PRESS);
   CT_EQ(rec.e[1].code, HP_SOFT_KEY_BASE + 1);
   CT_EQ(rec.e[1].action, HP_KEY_ACTION_RELEASE);
   rec.n = 0;
-  tap(100, 10, 2000); /* tile id 2 (cells x 1..2) */
+  tap(100, 42, 2000); /* tile id 2 (cells x 1..2) */
   CT_EQ(rec.n, 2);
   CT_EQ(rec.e[0].code, HP_SOFT_KEY_BASE + 2);
   rec.n = 0;
-  tap(10, 60, 3000); /* label: not tappable */
+  tap(10, 90, 3000); /* label: not tappable */
   tap(230, 300, 3100); /* empty cell */
+  tap(10, 20, 3150); /* the status bar */
   tap(10, 320, 3200); /* ABS_Y max is 320: off-screen, no widget */
   CT_EQ(rec.n, 0);
   /* the release position decides: down on the button, slide off, release */
   feed(EV_ABS, ABS_X, 10, 4000);
-  feed(EV_ABS, ABS_Y, 10, 4000);
+  feed(EV_ABS, ABS_Y, 42, 4000);
   feed(EV_KEY, BTN_TOUCH, 1, 4000);
   feed(EV_ABS, ABS_X, 230, 4050);
   feed(EV_ABS, ABS_Y, 300, 4050);
@@ -185,10 +186,10 @@ static void test_wake_consumes(void) {
   /* touch: a consumed touch-down eats the whole tap */
   rec.n = 0;
   rec.pass = false;
-  tap(10, 10, 5000);
+  tap(10, 42, 5000);
   CT_EQ(rec.n, 0);
   rec.pass = true;
-  tap(10, 10, 6000);
+  tap(10, 42, 6000);
   CT_EQ(rec.n, 2);
   ra_input_close(&in);
 }
@@ -200,8 +201,8 @@ static void test_read_path(void) {
   fk_key(&fk, 0, 115, 0);
   fk_key(&fk, 1, 102, 1); /* Home from the touch node */
   fk_key(&fk, 1, 102, 0);
-  fk_touch(&fk, 10, 10, 1);
-  fk_touch(&fk, 10, 10, 0);
+  fk_touch(&fk, 10, 42, 1);
+  fk_touch(&fk, 10, 42, 0);
   int ready[2];
   CT_EQ(fk.fds[in.fd[0]].dev, 0);
   CT_EQ(fk_wait(&fk, in.fd, 2, 0, ready), 2);

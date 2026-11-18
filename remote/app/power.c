@@ -34,6 +34,7 @@ static void set_state(ra_power_t *p, ra_pw_state_t s) {
 void ra_power_init(ra_power_t *p, ra_sys_t *sys, uint64_t now) {
   memset(p, 0, sizeof *p);
   p->sys = sys;
+  p->soc = -1;
   p->last_input_ms = p->last_step_ms = p->next_batt_ms = now;
   p->state = RA_PW_ACTIVE;
   p->bl = p->bl_target = RA_BL_NORMAL;
@@ -96,6 +97,13 @@ static void battery_poll(ra_power_t *p) {
   if (!first_number(soc, &d)) {
     ra_logf(p->sys, "battery poll: unparsable soc, not powering off");
     return;
+  }
+  if (d >= 0.0 && d <= 100.0) {
+    size_t n = strlen(src);
+    while (n && isspace((unsigned char)src[n - 1])) n--;
+    p->soc = (int)(d + 0.5);
+    p->external_power = !(n == 7 && memcmp(src, "battery", 7) == 0);
+    p->batt_polls++;
   }
   if (!ra_battery_should_poweroff(soc, src, chg)) return;
   ra_logf(p->sys, "battery %.1f%% on battery, not charging: powering off", d);

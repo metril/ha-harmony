@@ -86,23 +86,26 @@ static hp_page_t mixed(void) {
 }
 
 static void test_hit(void) {
-    hp_page_t p = mixed(); /* 4x6 grid: cell 60 x 53 px */
-    const hp_widget_t *w = hp_page_hit(&p, 60, 0); /* first px of col 1 */
+    /* 4x6 grid in the 240x288 content area below the 32 px bar: cell 60 x 48 px, rows start at y=32+48r */
+    hp_page_t p = mixed();
+    const hp_widget_t *w = hp_page_hit(&p, 60, 32); /* first px of col 1, row 0 */
     CT_CHECK(w && w->id == 2);
-    w = hp_page_hit(&p, 179, 52);
+    w = hp_page_hit(&p, 179, 79);
     CT_CHECK(w && w->id == 2);
-    CT_CHECK(hp_page_hit(&p, 59, 0) == NULL);  /* col 0 row 0 empty */
-    CT_CHECK(hp_page_hit(&p, 180, 0) == NULL); /* col 3 empty */
-    w = hp_page_hit(&p, 0, 53); /* row 1 starts at 320/6 = 53.3 -> px 54 */
+    CT_CHECK(hp_page_hit(&p, 59, 32) == NULL);  /* col 0 row 0 empty */
+    CT_CHECK(hp_page_hit(&p, 180, 32) == NULL); /* col 3 empty */
+    CT_CHECK(hp_page_hit(&p, 100, 0) == NULL);  /* the status bar is never a widget... */
+    CT_CHECK(hp_page_hit(&p, 100, 31) == NULL); /* ...down to its last pixel */
+    w = hp_page_hit(&p, 0, 79); /* row 0 ends at 32+48-1 */
     CT_CHECK(w == NULL);
-    w = hp_page_hit(&p, 0, 54);
+    w = hp_page_hit(&p, 0, 80); /* row 1 starts at y=80 */
     CT_CHECK(w && w->id == 3 && w->kind == HP_WIDGET_TILE);
-    w = hp_page_hit(&p, 239, 319 - 54 * 3);
+    w = hp_page_hit(&p, 239, 319 - 48 * 3);
     CT_CHECK(w && w->id == 3);
     w = hp_page_hit(&p, 239, 319);
     CT_CHECK(w && w->id == 4 && w->kind == HP_WIDGET_LABEL);
-    CT_CHECK(hp_page_hit(&p, -1, 5) == NULL);
-    CT_CHECK(hp_page_hit(&p, 240, 5) == NULL);
+    CT_CHECK(hp_page_hit(&p, -1, 40) == NULL);
+    CT_CHECK(hp_page_hit(&p, 240, 40) == NULL);
     CT_CHECK(hp_page_hit(&p, 5, 320) == NULL);
 }
 
