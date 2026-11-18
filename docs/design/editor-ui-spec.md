@@ -285,3 +285,16 @@ Tasks 1–3 already give a usable editor for devices plus Apply.
 ## 7. Open items
 - Where the setup help that the apply timeout links to will live.
 - The exact wording of the Home Assistant approval step: it depends on how the integration asks the user.
+
+## Amendment 9 (user decision, 2026-11-18): the add-on may read Home Assistant
+
+The add-on now has Home Assistant API access (`homeassistant_api: true`). This supersedes the
+"entity ids are typed, the add-on cannot read the entity list" parts of amendment 6:
+
+- Entity pickers (tiles, Home Assistant actions) search the real entity list:
+  `GET api/v1/ha/entities?domain=&q=` → `[{entity_id, name, domain, area?, state?, device_class?}]`.
+  Show name + entity id + area; free-text entry stays as the fallback when the route answers 503.
+- The service picker for Home Assistant actions uses `GET api/v1/ha/services?domain=` (service names
+  and fields) for the allow-listed domains; data fields render from the service's field list.
+- The Overview "Permissions" panel becomes informational: it lists the entities and services the
+  draft uses. There is no approval step in Home Assistant.
