@@ -14,7 +14,7 @@
 #endif
 #include OTA_PUBKEY_HEADER
 
-#if OTA_PUBKEY_IS_DEV && defined(HP_RELEASE)
+#if OTA_PUBKEY_IS_DEV && defined(HP_RELEASE) && !defined(HP_ALLOW_DEV_OTA_KEY)
 #error "the OTA dev/test public key is baked into a release build: set HP_OTA_PUBKEY_HEADER"
 #endif
 
@@ -134,7 +134,7 @@ int ota_header_pack(uint8_t out[OTA_HDR_BYTES], int target, uint32_t build_id, c
     return OTA_OK;
 }
 
-static int verify_stream(FILE *f, const uint8_t pubkey[32], int want_target, uint32_t min_build, ota_hdr_t *out) {
+int ota_image_verify_stream(FILE *f, const uint8_t pubkey[32], int want_target, uint32_t min_build, ota_hdr_t *out) {
     uint8_t h[OTA_HDR_BYTES];
     if (fread(h, 1, OTA_HDR_BYTES, f) != OTA_HDR_BYTES) return ferror(f) ? OTA_E_IO : OTA_E_TRUNCATED;
     uint32_t len = get32(h + 12);
@@ -180,7 +180,7 @@ int ota_image_verify_file_key(const char *path, const uint8_t pubkey[32], int wa
                               ota_hdr_t *out) {
     FILE *f = fopen(path, "rb");
     if (!f) return OTA_E_IO;
-    int rc = verify_stream(f, pubkey, want_target, min_build, out);
+    int rc = ota_image_verify_stream(f, pubkey, want_target, min_build, out);
     fclose(f);
     return rc;
 }

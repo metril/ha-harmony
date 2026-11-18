@@ -24,8 +24,9 @@ streaming pass (4 KiB buffer). Checks, in order: header values, length cap, sign
 ## Keys
 
 The public key is compiled in from `HP_OTA_PUBKEY_HEADER` (default: `common/ota/ota_pubkey_dev.h`, the DEV/TEST key
-whose seed is bytes 1..32). A build with the dev key warns at configure time; `CMAKE_BUILD_TYPE=Release` or
-`-DHP_RELEASE=ON` refuses it (CMake error, plus `#error` in the C source). `ota_pubkey_is_dev()` reports it at runtime.
+whose seed is bytes 1..32). A build with the dev key warns loudly at configure time and the hub/remote print "dev OTA key built in" at startup.
+Cross builds, `HP_RELEASE=ON` and any non-Debug build type refuse it (CMake error, plus `#error`) unless
+`-DHP_ALLOW_DEV_OTA_KEY=ON` (CI and the documented dev cross-build pass it). `ota_pubkey_is_dev()` reports it at runtime.
 
 Release key: `ota_sign keygen` writes the seed to `~/.config/ha-harmony/ota_ed25519` (mode 0600, outside the repo,
 never committed; CI never signs; releases are signed by hand). `ota_sign pubheader > key.h`, then build with
@@ -40,7 +41,7 @@ ota_sign verify [-t hub|remote] [-m MINBUILD] [-p PUBHEX | -k KEY] out.img
 ## Hub apply (library only)
 
 `ota_apply_staged(staged, target, prev, min_build, pubkey, &build)` verifies, writes `<target>.new`, hard-links the
-current binary to `hub.prev`, then atomically renames over the target; `ota_rollback()` renames `hub.prev` back.
+current binary to `hub.prev`, then atomically renames over the target. Verify and copy share one open file and the copied bytes are re-hashed against the signed digest before the rename (no TOCTOU); `ota_rollback()` renames `hub.prev` back.
 Not wired into the boot hook.
 
 ## Remaining

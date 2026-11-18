@@ -98,6 +98,12 @@ def test_release_build_refuses_dev_key(tmp_path, tool):
     base = ["cmake", "-S", str(ROOT), "-B", str(tmp_path / "b")]
     r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=Release", "-DHP_BUILD_TESTS=OFF"], capture_output=True, text=True)
     assert r.returncode != 0 and "DEV/TEST public key" in r.stderr
+    allow = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DHP_BUILD_TESTS=OFF", "-DHP_ALLOW_DEV_OTA_KEY=ON"],
+                           capture_output=True, text=True)
+    assert allow.returncode == 0 and "DEV/TEST OTA PUBLIC KEY" in allow.stderr
+    r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DHP_BUILD_TESTS=OFF", "-DHP_ALLOW_DEV_OTA_KEY=OFF"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0
     gen = tmp_path / "gen.h"
     gen.write_text(run(tool, "pubheader", "--dev").stdout.replace("IS_DEV 1", "IS_DEV 0"))
     r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=Release", "-DHP_BUILD_TESTS=OFF", f"-DHP_OTA_PUBKEY_HEADER={gen}"],

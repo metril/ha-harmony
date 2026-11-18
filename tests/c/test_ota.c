@@ -239,6 +239,54 @@ static void test_apply(void) {
     CT_EQ(ota_apply_staged(img, nod, prev, 0, pk, &built), OTA_E_IO);
 }
 
+static char g_swap_path[300], g_swap_with[300];
+static int g_swap_inplace;
+static void swap_hook(void) {
+    if (g_swap_inplace) { /* same inode, different bytes */
+        FILE *f = fopen(g_swap_path, "r+b");
+        fseek(f, OTA_HDR_BYTES + 19000, SEEK_SET);
+        fputs("EVIL", f);
+        fclose(f);
+    } else { /* different file under the same path */
+        rename(g_swap_with, g_swap_path);
+    }
+}
+
+static void test_toctou(void) {
+    char hub[300], prev[300], img[300], other[300];
+    path(hub, "t_hub");
+    path(prev, "t_hub.prev");
+    path(img, "t.img");
+    path(other, "t_other.img");
+    static uint8_t good[20000], evil[20000], got[20000];
+    uint8_t oldb[] = "OLD";
+    memset(good, 'g', sizeof good);
+    memset(evil, 'e', sizeof evil);
+    uint32_t built = 0;
+    put(hub, oldb, sizeof oldb, NULL, 0);
+    make_image(img, OTA_TARGET_HUB, 5, good, sizeof good);
+    make_image(other, OTA_TARGET_HUB, 6, evil, sizeof evil);
+    ota_apply_test_hook = swap_hook;
+    /* path swapped after verify: the verified open file is what gets installed */
+    snprintf(g_swap_path, sizeof g_swap_path, "%s", img);
+    snprintf(g_swap_with, sizeof g_swap_with, "%s", other);
+    g_swap_inplace = 0;
+    CT_EQ(ota_apply_staged(img, hub, prev, 0, pk, &built), OTA_OK);
+    CT_EQ(built, 5);
+    slurp(hub, got, sizeof good);
+    CT_MEM_EQ(got, good, sizeof good);
+    /* bytes rewritten in place after verify: digest mismatch, target untouched */
+    make_image(img, OTA_TARGET_HUB, 5, good, sizeof good);
+    g_swap_inplace = 1;
+    CT_EQ(ota_apply_staged(img, hub, prev, 0, pk, &built), OTA_E_DIGEST);
+    slurp(hub, got, sizeof good);
+    CT_MEM_EQ(got, good, sizeof good);
+    char neu[300];
+    path(neu, "t_hub.new");
+    CT_CHECK(access(neu, F_OK) != 0);
+    ota_apply_test_hook = NULL;
+}
+
 int main(void) {
     if (!mkdtemp(dir)) return 1;
     uint8_t seed[32];
@@ -248,6 +296,7 @@ int main(void) {
     test_ed25519_vectors();
     test_verify();
     test_apply();
+    test_toctou();
     char cmd[400];
     snprintf(cmd, sizeof cmd, "rm -rf %s", dir);
     if (system(cmd) != 0) return 1;

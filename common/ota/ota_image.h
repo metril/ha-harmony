@@ -1,6 +1,7 @@
 #ifndef OTA_IMAGE_H
 #define OTA_IMAGE_H
 
+#include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -60,6 +61,9 @@ void ota_sha512_final(ota_sha512_t *c, uint8_t out[64]);
  * build_id < min_build are refused as downgrades (pass 0 to disable). On success fills *out. */
 int ota_image_verify_file_key(const char *path, const uint8_t pubkey[32], int want_target,
                               uint32_t min_build, ota_hdr_t *out);
+/* Same on an already-open file (seeks it); callers that go on to read the payload use this so
+ * verification and use share one file description. */
+int ota_image_verify_stream(FILE *f, const uint8_t pubkey[32], int want_target, uint32_t min_build, ota_hdr_t *out);
 /* Same with the public key compiled into this build. */
 int ota_image_verify_file(const char *path, int want_target, uint32_t min_build, ota_hdr_t *out);
 

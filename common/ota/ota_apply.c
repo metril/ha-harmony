@@ -7,51 +7,69 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static int copy_payload(const char *staged, const char *dst, uint32_t len, mode_t mode) {
-    FILE *in = fopen(staged, "rb");
-    if (!in) return -1;
+void (*ota_apply_test_hook)(void); /* tests only: runs between verify and copy */
+
+/* Copy the payload from the already-verified open file, hashing the bytes actually written;
+ * the digest must equal the signed one, so a staged file changed after verify is refused. */
+static int copy_payload(FILE *in, const char *dst, const ota_hdr_t *hdr, mode_t mode) {
     int fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, mode);
-    if (fd < 0 || fseek(in, OTA_HDR_BYTES, SEEK_SET) != 0) {
-        if (fd >= 0) close(fd);
-        fclose(in);
-        return -1;
+    if (fd < 0) return OTA_E_IO;
+    if (fseek(in, OTA_HDR_BYTES, SEEK_SET) != 0) {
+        close(fd);
+        return OTA_E_IO;
     }
+    ota_sha512_t c;
+    ota_sha512_init(&c);
     unsigned char buf[4096];
-    int rc = 0;
-    while (len && rc == 0) {
+    uint32_t len = hdr->payload_len;
+    int rc = OTA_OK;
+    while (len && rc == OTA_OK) {
         size_t n = fread(buf, 1, len < sizeof buf ? len : sizeof buf, in);
         if (n == 0) {
-            rc = -1;
+            rc = OTA_E_IO;
             break;
         }
+        ota_sha512_update(&c, buf, n);
         for (size_t off = 0; off < n;) {
             ssize_t w = write(fd, buf + off, n - off);
             if (w <= 0) {
-                rc = -1;
+                rc = OTA_E_IO;
                 break;
             }
             off += (size_t)w;
         }
         len -= (uint32_t)n;
     }
-    if (rc == 0 && fsync(fd) != 0) rc = -1;
-    if (close(fd) != 0) rc = -1;
-    fclose(in);
+    unsigned char dig[64];
+    ota_sha512_final(&c, dig);
+    if (rc == OTA_OK && memcmp(dig, hdr->sha512, 64) != 0) rc = OTA_E_DIGEST;
+    if (rc == OTA_OK && fsync(fd) != 0) rc = OTA_E_IO;
+    if (close(fd) != 0 && rc == OTA_OK) rc = OTA_E_IO;
     return rc;
 }
 
 int ota_apply_staged(const char *staged, const char *target, const char *prev_path, uint32_t min_build,
                      const uint8_t pubkey[32], uint32_t *build_out) {
+    FILE *in = fopen(staged, "rb");
+    if (!in) return OTA_E_IO;
     ota_hdr_t hdr;
-    int rc = ota_image_verify_file_key(staged, pubkey, OTA_TARGET_HUB, min_build, &hdr);
-    if (rc != OTA_OK) return rc;
+    int rc = ota_image_verify_stream(in, pubkey, OTA_TARGET_HUB, min_build, &hdr);
+    if (rc != OTA_OK) {
+        fclose(in);
+        return rc;
+    }
+    if (ota_apply_test_hook) ota_apply_test_hook();
     char neu[512], tmp[512];
     if (snprintf(neu, sizeof neu, "%s.new", target) >= (int)sizeof neu ||
-        snprintf(tmp, sizeof tmp, "%s.lnk", prev_path) >= (int)sizeof tmp)
+        snprintf(tmp, sizeof tmp, "%s.lnk", prev_path) >= (int)sizeof tmp) {
+        fclose(in);
         return OTA_E_IO;
-    if (copy_payload(staged, neu, hdr.payload_len, 0755) != 0) {
+    }
+    rc = copy_payload(in, neu, &hdr, 0755);
+    fclose(in);
+    if (rc != OTA_OK) {
         unlink(neu);
-        return OTA_E_IO;
+        return rc;
     }
     unlink(tmp);
     if (link(target, tmp) != 0 || rename(tmp, prev_path) != 0) {

@@ -14,4 +14,6 @@ int ota_apply_staged(const char *staged, const char *target, const char *prev_pa
 /* Restore prev_path over target (atomic rename). Returns 0 or -1. */
 int ota_rollback(const char *target, const char *prev_path);
 
+extern void (*ota_apply_test_hook)(void); /* tests only */
+
 #endif
