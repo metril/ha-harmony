@@ -140,12 +140,14 @@ none (`source:"none"`, `action:null`). Default-layer rows use `source:"default"`
   notes, skipped: [{name, reason}], skipped_total, device_type: {id, name}|null, source}`; `device` is a
   config device block.
 - `GET ir/candidates?brand=&type=<tv|number|name>&limit=60` (limit 1..200) -> `{candidates: [{kind, action,
-  form, count, models, codesets}], examined, matched, errors}`.
+  form, count, models, codesets}], examined, matched, errors, truncated}`; `truncated` is true when the
+  per-request budget (16 MiB of codeset text) ran out before every codeset was looked at.
 - `POST ir/parse` body `{kind: "pronto"|"flipper"|"smartir", text (<= 256 KiB)}` ->
   `{ok, actions: [{name, action, form}], skipped: [{name, reason}]}` (at most 256 actions);
   bad input -> `422 bad_ir` with `error.errors: [{path, msg}]`.
 - Errors: `404 unknown_brand`, `400 bad_request` (unsafe names), `504 archive_offline | archive_timeout`,
-  `502 archive_error`. The archive cache (`/data/irdb`) keeps it working offline.
+  `502 archive_error`, `502 archive_too_large` (a codeset with more than 2000 commands; its cache
+  entry is deleted). Work on archive data runs off the event loop. The archive cache (`/data/irdb`) keeps it working offline.
 
 ### IR test-fire
 

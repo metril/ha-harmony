@@ -77,7 +77,8 @@ async def test_ui_still_needs_ingress_peer_and_header(aiohttp_client, tmp_path, 
     c = await aiohttp_client(app)
     assert (await c.get("/")).status == 403  # no X-Ingress-Path
     assert (await c.get("/assets/app-abc.js")).status == 403
-    ok = {"X-Ingress-Path": "/x"}
+    assert (await c.get("/", headers={"X-Ingress-Path": "/x"})).status == 401  # no user id
+    ok = {"X-Ingress-Path": "/x", "X-Remote-User-Id": "u1"}
     assert (await c.get("/", headers=ok)).status == 200
     assert (await c.get("/assets/app-abc.js", headers=ok)).status == 200
 

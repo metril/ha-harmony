@@ -172,6 +172,12 @@ def _check(config: dict[str, Any], *, all_errors: bool = True) -> tuple[Any, lis
     return parse_data(config), []
 
 
+def _audit(request: web.Request, action: str, hub: str) -> None:
+    """One line per state-changing action: who (the Supervisor-vouched ingress user id) and what.
+    No config content, no tokens."""
+    log.info("audit user=%s action=%s hub=%s", request.get("user_id", "-"), action, hub)
+
+
 def _err(exc: ConfigError) -> dict[str, Any]:
     return {"path": list(exc.path), "msg": exc.msg[:300], "line": None}
 
@@ -369,7 +375,7 @@ def _preview(config: dict[str, Any]) -> dict[str, Any]:
                 errors.append({"path": path, "msg": msg[:300], "line": None})
         model, total_ok = None, False
     by_cfg: dict[int, list[dict[str, Any]]] = {}
-    for m, cfg, u in zip(compiled.models, compiled.page_of, compiled.usage["pages"], strict=True):
+    for m, cfg, u in zip(compiled.models, compiled.page_of, compiled.usage["page_detail"], strict=True):
         by_cfg.setdefault(cfg, []).append(_wire_entry(m, u))
     pages = []
     for i in range(len(raw_pages)):
@@ -394,7 +400,7 @@ def _preview(config: dict[str, Any]) -> dict[str, Any]:
                 "widget_limit": MAX_WIDGETS,
             }
         )
-    usage = {k: v for k, v in compiled.usage.items() if k != "pages"} if model is not None else None
+    usage = {k: v for k, v in compiled.usage.items() if k != "page_detail"} if model is not None else None
     return {
         "ok": not errors,
         "hash": compiled.config_hash if total_ok else None,
@@ -453,6 +459,7 @@ async def apply(request: web.Request) -> web.Response:
     now = int(request.app[CLOCK_KEY]())
     state = _store_call(store.apply, q["hub"], config, compiled.config_hash, now)
     request.app[NOTIFIER_KEY].notify(q["hub"])
+    _audit(request, "apply", q["hub"])
     return jresp({"ok": True, **_meta(state)})
 
 
@@ -462,6 +469,7 @@ async def revert(request: web.Request) -> web.Response:
     state = _store_call(request.app[STORE_KEY].revert, q["hub"], body["target"])
     if body["target"] == "previous":  # discarding a draft changes nothing the integration sees
         request.app[NOTIFIER_KEY].notify(q["hub"])
+    _audit(request, f"revert:{body['target']}", q["hub"])
     return jresp({"ok": True, **_meta(state)})
 
 
@@ -529,6 +537,7 @@ async def import_yaml(request: web.Request) -> web.Response:
         raise error(422, "invalid_config", "the YAML is not a valid config", errors=errors)
     now = int(request.app[CLOCK_KEY]())
     state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], config, now, if_rev)
+    _audit(request, "import_yaml", q["hub"])
     return jresp({"ok": True, "hub": q["hub"], "draft_updated": now, **_meta(state)})
 
 
@@ -600,6 +609,7 @@ async def ir_test(request: web.Request) -> web.Response:
         ) from None
     except HaUnavailable:
         raise _ha_unavailable() from None
+    _audit(request, "ir_test", body["hub"])
     return jresp({"ok": True, "action": action})
 
 

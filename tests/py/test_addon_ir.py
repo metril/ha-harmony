@@ -263,3 +263,114 @@ async def test_parse_too_long_signal_is_skipped_not_fatal(ir):
     st, body = await parse(ir, "flipper", text)
     assert st == 200 and [a["name"] for a in body["actions"]] == ["Ok"]
     assert body["skipped"][0]["name"] == "Long"
+
+
+# ---------------------------------------------------------------- adversarial archive data
+CS_PATH = "codesets/13/13f9d15a6b4cb70c.json"
+SMALL_CMD = "0000 0068 0001 0000 0060 0018"
+
+
+def _poisoned(n_small: int, n_big: int = 0, big_words: int = 510) -> dict[str, bytes]:
+    files = fixture_files()
+    big = f"0000 0068 {big_words:04X} 0000 " + " ".join(["0018 0018"] * (big_words // 2))
+    cmds = [{"name": f"B{i}", "pronto": big} for i in range(n_big)]
+    cmds += [{"name": f"c{i}", "pronto": SMALL_CMD} for i in range(n_small)]
+    files[CS_PATH] = jbytes({"commands": cmds})
+    return files
+
+
+async def _ticker(stop):
+    """Longest gap between loop turns while `stop` is unset (an unresponsive loop shows up here)."""
+    import asyncio
+    import time
+
+    worst, last = 0.0, time.perf_counter()
+    while not stop.is_set():
+        await asyncio.sleep(0.005)
+        now = time.perf_counter()
+        worst, last = max(worst, now - last), now
+    return worst
+
+
+async def test_a_huge_codeset_is_refused_fast_dropped_from_cache_and_loop_stays_responsive(
+    aiohttp_client, tmp_path
+):
+    import asyncio
+    import time
+
+    arc = archive(tmp_path, FakeSession(_poisoned(n_small=80_000, n_big=50)))
+    c = await aiohttp_client(create_app(tmp_path / "d", auth=NoAuth(), irdb=arc))
+    stop = asyncio.Event()
+    ticker = asyncio.create_task(_ticker(stop))
+    t = time.perf_counter()
+    health = asyncio.create_task(c.get("/api/v1/health"))
+    st, body = await get(c, "/device?brand=Sony&model=KV-32V42.json")
+    took = time.perf_counter() - t
+    assert (await health).status == 200
+    stop.set()
+    worst_gap = await ticker
+    assert st == 502 and body["error"]["code"] == "archive_too_large"
+    assert took < 2.0, f"took {took:.2f}s"
+    assert worst_gap < 0.5, f"event loop stalled for {worst_gap:.2f}s"
+    assert not arc._file(CS_PATH).exists()  # the poisoned entry is not served again
+
+
+async def test_a_codeset_at_the_limit_builds_off_the_loop_and_stays_within_hub_limits(
+    aiohttp_client, tmp_path
+):
+    import asyncio
+    import time
+
+    arc = archive(tmp_path, FakeSession(_poisoned(n_small=1900, n_big=50)))
+    c = await aiohttp_client(create_app(tmp_path / "d", auth=NoAuth(), irdb=arc))
+    stop = asyncio.Event()
+    ticker = asyncio.create_task(_ticker(stop))
+    t = time.perf_counter()
+    st, body = await get(c, "/device?brand=Sony&model=KV-32V42.json")
+    took = time.perf_counter() - t
+    stop.set()
+    assert st == 200 and took < 2.0, took
+    assert len(body["device"]["commands"]) <= 256
+    assert body["skipped_total"] >= 1900 - 256
+    assert len(json.dumps(body["device"]["commands"], separators=(",", ":"))) <= 131072
+    assert await ticker < 0.5
+
+
+async def test_oversized_names_and_prontos_are_skipped_before_conversion():
+    from harmony_irdb.device import build_device
+
+    cs = {
+        "commands": [
+            {"name": "N" * 500, "pronto": SMALL_CMD},
+            {"name": "ok", "pronto": "0000 " * 5000},
+            {"name": "fine", "pronto": SMALL_CMD},
+        ]
+    }
+    b = build_device({}, cs, mfr="M", model_file="m.json", codeset_path="p", imported_at="t")
+    assert list(b.device["commands"]) == ["fine"]
+    assert {r for _, r in b.skipped} == {"command name is too long", "IR data is too long"}
+
+
+async def test_candidates_stop_at_the_byte_budget_and_say_so(aiohttp_client, tmp_path, monkeypatch):
+    from harmony_irdb import candidates
+
+    arc = archive(tmp_path)
+    full = await candidates.power_candidates(arc, "Sony", "tv", limit=50)
+    assert not full.truncated and full.candidates
+    cut = await candidates.power_candidates(archive(tmp_path), "Sony", "tv", limit=50, budget=1)
+    assert cut.truncated and cut.candidates == []
+    monkeypatch.setattr(candidates, "BUDGET_BYTES", 1)
+    c = await aiohttp_client(create_app(tmp_path / "d", auth=NoAuth(), irdb=archive(tmp_path)))
+    _, body = await get(c, "/candidates?brand=Sony&type=tv&limit=50")
+    assert body["truncated"] is True
+
+
+async def test_by_name_is_built_once_per_codeset(monkeypatch):
+    from harmony_irdb import candidates
+
+    cs = {"commands": [{"name": "PowerOn", "pronto": SMALL_CMD}]}
+    seen = []
+    real = candidates.convert_command
+    monkeypatch.setattr(candidates, "convert_command", lambda c: seen.append(1) or real(c))
+    out = candidates.scan_codeset(cs, [(f"m{i}", {"on": ["PowerOn"]}) for i in range(500)])
+    assert len(out) == 500 and len(seen) == 500

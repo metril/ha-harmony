@@ -34,6 +34,9 @@ export interface Usage {
   inputs_max: number;
   soft_keys: number;
   soft_keys_max: number;
+  /** wire pages (a long list page counts each of its pages) and the remote's cap */
+  pages: number;
+  page_limit: number;
 }
 /** page-format-v2 model (harmony_core.page_to_dict): what the editor renders. */
 export interface V2Widget {

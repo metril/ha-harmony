@@ -20,6 +20,7 @@ from harmony_core.ir.pronto import normalise_pronto
 from harmony_core.ir.smartir import parse_smartir
 from harmony_irdb.archive import (
     ArchiveError,
+    ArchiveLimitError,
     IrdbArchive,
     OfflineError,
     safe_segment,
@@ -96,6 +97,11 @@ async def _archive(coro: Awaitable[Any]) -> Any:
         ) from None
     except TimeoutError:
         raise error(504, "archive_timeout", "the IR archive took too long") from None
+    except ArchiveLimitError as exc:
+        log.warning("IR archive entry over a limit: %s", str(exc)[:200])
+        raise error(
+            502, "archive_too_large", "that archive entry is too large to process"
+        ) from None
     except ArchiveError as exc:
         log.warning("IR archive error: %s", str(exc)[:200])
         raise error(502, "archive_error", "the IR archive answered something unusable") from None
@@ -157,7 +163,8 @@ async def device(request: web.Request) -> web.Response:
         raise error(502, "archive_error", "the archive entry has no codeset")
     codeset = await _archive(arc.codeset(path))
     clock = request.app[CLOCK_KEY]
-    built = build_device(
+    built = await asyncio.to_thread(  # CPU: off the event loop
+        build_device,
         dev,
         codeset,
         mfr=brand.name,
@@ -208,6 +215,7 @@ async def candidates(request: web.Request) -> web.Response:
             "examined": res.examined,
             "matched": res.matched,
             "errors": len(res.errors),
+            "truncated": res.truncated,
         }
     )
 

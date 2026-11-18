@@ -191,8 +191,37 @@ async def test_s1_non_ingress_peer_is_forbidden_everywhere(aiohttp_client, tmp_p
 async def test_s1_ingress_peer_needs_header_for_ui(aiohttp_client, tmp_path):
     c = await aiohttp_client(create_app(tmp_path, auth=IngressAuth(peers={"127.0.0.1"})))
     assert (await c.get("/")).status == 403
-    assert (await c.get("/", headers={"X-Ingress-Path": "/api/hassio_ingress/t"})).status == 200
-    assert (await c.get("/api/v1/health")).status == 200
+    ing = {"X-Ingress-Path": "/api/hassio_ingress/t", "X-Remote-User-Id": "u1"}
+    assert (await c.get("/", headers=ing)).status == 200
+    assert (await c.get("/api/v1/health", headers={"X-Remote-User-Id": "u1"})).status == 200
+
+
+async def test_s1_every_ingress_route_needs_the_supervisor_user_id(aiohttp_client, tmp_path, caplog):
+    import logging
+
+    c = await aiohttp_client(create_app(tmp_path, auth=IngressAuth(peers={"127.0.0.1"})))
+    ing = {"X-Ingress-Path": "/x"}
+    for method, path in ROUTES:
+        r = await c.request(method, path, headers={**H, **ing}, json={})
+        assert r.status == 401, (method, path)
+        assert (await r.json())["error"]["code"] == "unauthorized"
+    for bad in ("", "a b", "x" * 65, "<script>"):
+        r = await c.get("/api/v1/health", headers={"X-Remote-User-Id": bad})
+        assert r.status == 401, bad
+    # with an id the actions work, and the audit line names the user (and nothing secret)
+    hdr = {**H, **ing, "X-Remote-User-Id": "abc123"}
+    caplog.set_level(logging.INFO, logger="harmony_addon.app")
+    assert (await c.put("/api/v1/config/draft", json={"config": CONFIG}, headers=hdr)).status == 200
+    assert (await c.post("/api/v1/config/apply", json={}, headers=hdr)).status == 200
+    assert (await c.post("/api/v1/config/revert", json={"target": "applied"}, headers=hdr)).status == 200
+    hy = {**hdr, "Content-Type": "text/yaml"}
+    assert (await c.post("/api/v1/config/import_yaml", data=SMALL, headers=hy)).status == 200
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("audit ")]
+    assert lines == [
+        "audit user=abc123 action=apply hub=default",
+        "audit user=abc123 action=revert:applied hub=default",
+        "audit user=abc123 action=import_yaml hub=default",
+    ]
 
 
 def test_s1_default_peer_is_the_supervisor_gateway():

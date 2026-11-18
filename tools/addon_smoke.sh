@@ -23,12 +23,14 @@ docker volume create "$VOL" >/dev/null
 docker run -d --name "$CT" --network "$NET" --ip 172.30.32.10 -v "$VOL:/data" "$IMG" >/dev/null
 
 probe() { # <client ip> <method> <path> [body] -> prints the HTTP status
-  docker run --rm --network "$NET" --ip "$1" --entrypoint python "$IMG" -c '
-import sys, urllib.request, urllib.error
+  docker run --rm -e "NOUSER=${NOUSER:-}" --network "$NET" --ip "$1" --entrypoint python "$IMG" -c '
+import os, sys, urllib.request, urllib.error
 ip, method, path, body = sys.argv[1:5]
 req = urllib.request.Request("http://172.30.32.10:8099" + path, method=method,
     data=body.encode() if body else None,
     headers={"Content-Type": "application/json", "X-HH-CSRF": "1", "X-Ingress-Path": "/x"})
+if not os.environ.get("NOUSER"):
+    req.add_header("X-Remote-User-Id", "u1")
 try:
     print(urllib.request.urlopen(req, timeout=5).status)
 except urllib.error.HTTPError as e:
@@ -52,6 +54,7 @@ check "health from ingress IP" "$(probe 172.30.32.2 GET /api/v1/health)" 200
 check "health from other peer" "$(probe 172.30.32.3 GET /api/v1/health)" 403
 check "UI from other peer" "$(probe 172.30.32.3 GET /)" 403
 check "UI from ingress IP" "$(probe 172.30.32.2 GET /)" 200
+check "ingress without a user id" "$(NOUSER=1 probe 172.30.32.2 GET /api/v1/health)" 401
 asset="$(docker exec "$CT" sh -c 'ls /opt/app/frontend/assets | grep "\.js$"' | head -1)"
 check "built bundle present in image" "$([ -n "$asset" ] && echo yes || echo no)" yes
 check "bundle from ingress IP" "$(probe 172.30.32.2 GET "/assets/$asset")" 200

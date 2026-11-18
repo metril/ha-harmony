@@ -252,3 +252,26 @@ def test_default_sender_needs_the_supervisor_token(monkeypatch):
     assert ir_tester.default_ir_sender() is None
     monkeypatch.setenv("SUPERVISOR_TOKEN", "t")
     assert isinstance(ir_tester.default_ir_sender(), HttpIrSender)
+
+
+async def test_ir_test_is_audited_with_the_ingress_user_and_no_code(aiohttp_client, tmp_path, caplog):
+    import logging
+
+    from harmony_addon.app import create_app
+    from harmony_addon.auth import IngressAuth
+
+    class Sender:
+        async def send(self, hub, action):
+            return None
+
+    c = await aiohttp_client(
+        create_app(tmp_path, auth=IngressAuth(peers={"127.0.0.1"}), ir_sender=Sender())
+    )
+    caplog.set_level(logging.INFO, logger="harmony_addon.app")
+    hdr = {"X-HH-CSRF": "1", "X-Ingress-Path": "/x", "X-Remote-User-Id": "u9"}
+    r = await c.post(
+        "/api/v1/ir/test", json={"hub": "h1", "ir": {"proto": "nec", "addr": 1, "cmd": 2}}, headers=hdr
+    )
+    assert r.status == 200
+    lines = [m.getMessage() for m in caplog.records if m.getMessage().startswith("audit ")]
+    assert lines == ["audit user=u9 action=ir_test hub=h1"]

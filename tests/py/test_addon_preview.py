@@ -121,7 +121,7 @@ async def test_page_and_total_usage_match_the_compiler(c):
     _, body = await preview(c, cfg)
     comp = compile_config(parse_data(cfg))
     for p, pu, raw, raw1 in zip(
-        body["pages"], comp.usage["pages"], comp.pages_v2, comp.pages, strict=True
+        body["pages"], comp.usage["page_detail"], comp.pages_v2, comp.pages, strict=True
     ):
         assert p["bytes_v1"] == len(raw1) and p["wire_pages"][0]["bytes_v1"] == len(raw1)
         assert (p["bytes"], p["limit"], p["widgets"], p["widget_limit"]) == (
@@ -455,3 +455,15 @@ async def test_ref_errors_for_pages_are_all_collected(c):
     paths = [e["path"] for e in (await r.json())["errors"]]
     for want in (["pages", 0, "activity"], ["pages", 0, "widgets", 0, "nav"], ["pages", 1, "kind"], ["pages", 1, "widgets", 0, "nav"]):
         assert want in paths, paths
+
+
+async def test_page_cap_is_in_usage_and_over_it_is_an_error(c):
+    cfg = json.loads(json.dumps(CONFIG))
+    mk = lambda i: {"id": f"p{i}", "cols": 1, "rows": 1, "widgets": [{"type": "label", "x": 0, "y": 0, "label": "x"}]}
+    cfg["pages"] = [mk(i) for i in range(32)]
+    _, body = await preview(c, cfg)
+    assert body["ok"] and body["usage"]["pages"] == 32 and body["usage"]["page_limit"] == 32
+    cfg["pages"].append(mk(32))
+    _, body = await preview(c, cfg)
+    assert not body["ok"] and any("at most 32" in e["msg"] for e in body["errors"])
+    assert body["usage"] is None or body["usage"]["pages"] == 33

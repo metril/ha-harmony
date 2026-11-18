@@ -16,8 +16,18 @@ integration picks it up within moments.
 
 ## What it can and cannot reach
 
-- Sidebar editor: reachable only through Home Assistant ingress (admins only), from the
-  Supervisor ingress gateway. No port is published to the host.
+- Sidebar editor: reachable only through Home Assistant ingress, from the Supervisor ingress
+  gateway, and only with the logged-in user's id (`X-Remote-User-Id`, set by the Supervisor; a
+  request without it gets `401`). No port is published to the host. Apply, revert, import and IR
+  test-sends are logged with that user id (`audit user=... action=... hub=...`; never config
+  content or tokens).
+- Who may open it: the add-on asks for `panel_admin: true`, but the add-on cannot check admin
+  status itself: ingress forwards the user's id and names, and no header says whether the user is
+  an administrator. Admin-only access is enforced by the Supervisor, and only from Supervisor
+  2026.10.2 (Supervisor PR #7308); before that, a non-admin who knows the ingress URL could reach
+  the editor. Use Supervisor 2026.10.3 or newer (it also strips client-supplied identity headers
+  case-insensitively, PR #7377). This is a Supervisor version, which the add-on's `homeassistant:`
+  (Core version) field cannot express, so no minimum is declared.
 - Integration feed: `GET /api/v1/bundle` and `/api/v1/bundle/wait` (long-poll) serve the applied
   config, and `POST /api/v1/bundle/ack` lets the integration report whether it applied it. They need a bearer token (32 random bytes, generated at first start, stored `0600` in
   `/data`, never logged or shown in the UI) and a peer on the Supervisor network; they refuse

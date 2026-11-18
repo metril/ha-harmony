@@ -15,6 +15,8 @@ from .convert import Converted, convert_command
 MAX_COMMANDS = 256
 MAX_INPUTS = 64
 MAX_JSON = 131072
+MAX_NAME_CHARS = 200  # archive command names are short; anything longer is junk
+MAX_PRONTO_CHARS = 8192  # the hub takes at most 520 words (about 2.6 kB of text)
 
 DEVICE_TYPES = {
     1: "Television", 2: "VCR", 3: "CD Player", 4: "DVD Player", 5: "Laserdisc", 6: "Tape Deck",
@@ -92,6 +94,9 @@ def _label(raw: str, used: set[str]) -> str:
     return name
 
 
+_TEXT_FIELDS = ("pronto", "prontoRepeat", "keycode", "protocol")
+
+
 @dataclass
 class Built:
     device: dict[str, Any]
@@ -131,10 +136,17 @@ def build_device(
     by_raw: dict[str, Converted] = {}
     commands: dict[str, dict] = {}
     used: set[str] = set()
+    size = 2
     for cmd in codeset.get("commands", []):
         raw = cmd.get("name") if isinstance(cmd, dict) else None
         if not isinstance(raw, str) or not raw.strip():
             built.skipped.append((repr(raw), "command has no name"))
+            continue
+        if len(raw) > MAX_NAME_CHARS:
+            built.skipped.append((raw[:40] + "...", "command name is too long"))
+            continue
+        if any(isinstance(cmd.get(k), str) and len(cmd[k]) > MAX_PRONTO_CHARS for k in _TEXT_FIELDS):
+            built.skipped.append((raw, "IR data is too long"))
             continue
         res = convert_command(cmd)
         if not isinstance(res, Converted):
@@ -143,11 +155,14 @@ def build_device(
         if len(commands) >= MAX_COMMANDS:
             built.skipped.append((raw, f"over the hub's {MAX_COMMANDS} commands limit"))
             continue
-        trial = {**commands, "x" * 8: res.action}
-        if len(json.dumps(trial, separators=(",", ":"))) > MAX_JSON:
+        n = command_name(raw, used)
+        # running size of json.dumps(commands): braces + each `"name":action,`
+        add = len(json.dumps(n)) + len(json.dumps(res.action, separators=(",", ":"))) + 2
+        if size + add > MAX_JSON:
+            used.discard(n)
             built.skipped.append((raw, "over the hub's config size limit"))
             continue
-        n = command_name(raw, used)
+        size += add
         commands[n] = res.action
         built.forms[n] = res.form
         by_raw.setdefault(raw, res)

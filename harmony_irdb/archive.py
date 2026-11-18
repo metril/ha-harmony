@@ -29,6 +29,7 @@ BASES = (
 )
 DEFAULT_TTL = 7 * 86400
 DEFAULT_MAX_BYTES = 8 * 1024 * 1024  # the biggest real file (Sony's model index) is ~1 MB
+MAX_CODESET_COMMANDS = 2000  # real codesets have well under 500
 MANUFACTURERS_FILE = Path(__file__).with_name("manufacturers.json")
 
 _CODESET = re.compile(r"^codesets/[0-9A-Za-z_-]{1,16}/[0-9A-Za-z_-]{1,80}\.json$")
@@ -36,6 +37,12 @@ _CODESET = re.compile(r"^codesets/[0-9A-Za-z_-]{1,16}/[0-9A-Za-z_-]{1,80}\.json$
 
 class ArchiveError(Exception):
     """Archive data or a response was unusable."""
+
+
+class ArchiveLimitError(ArchiveError):
+    """A fetched entry exceeds a processing limit (it is dropped from the cache)."""
+
+    code = "archive_too_large"
 
 
 class OfflineError(ArchiveError):
@@ -164,6 +171,13 @@ class IrdbArchive:
         except OSError, ValueError, AttributeError:
             return None
 
+    def _drop(self, path: str) -> None:
+        """Forget a cache entry (a poisoned file must not be served again)."""
+        try:
+            self._file(path).unlink()
+        except OSError:
+            pass
+
     def _write(self, path: str, entry: dict) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
         f = self._file(path)
@@ -223,7 +237,7 @@ class IrdbArchive:
                 last = ArchiveError(f"HTTP {status} for {path}")
                 continue
             try:
-                data = json.loads(body)
+                data = await asyncio.to_thread(json.loads, body)
             except ValueError, RecursionError:
                 last = ArchiveError(f"{path}: not valid JSON")
                 continue
@@ -272,11 +286,18 @@ class IrdbArchive:
     async def device(self, slug: str, file: str) -> dict:
         data = await self.fetch_json(f"devices/{safe_segment(slug)}/{safe_segment(file)}")
         if not isinstance(data, dict):
+            await asyncio.to_thread(self._drop, f"devices/{slug}/{file}")
             raise ArchiveError("device file is not an object")
         return data
 
     async def codeset(self, path: str) -> dict:
         data = await self.fetch_json(safe_codeset_path(path))
         if not isinstance(data, dict) or not isinstance(data.get("commands"), list):
+            await asyncio.to_thread(self._drop, path)
             raise ArchiveError("codeset has no command list")
+        if len(data["commands"]) > MAX_CODESET_COMMANDS:
+            await asyncio.to_thread(self._drop, path)
+            raise ArchiveLimitError(
+                f"codeset has {len(data['commands'])} commands (limit {MAX_CODESET_COMMANDS})"
+            )
         return data

@@ -433,3 +433,11 @@ def page_tap_y(rows: int, row: int, *, titled: bool = False) -> int:
     n = rows - shift
     r = row - shift
     return 32 + (2 * r + 1) * 288 // (2 * n)
+
+
+def pytest_xdist_auto_num_workers(config):
+    """`-n auto` counts logical CPUs, not physical cores: the suite is half waiting (hub processes,
+    sockets, deadlines), so hyper-threads help."""
+    import os
+
+    return os.cpu_count() or 1

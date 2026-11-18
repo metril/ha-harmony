@@ -56,6 +56,7 @@ class CompileError(ValueError):
     def __init__(self, msg: str, path: list[Any] | None = None) -> None:
         super().__init__(msg)
         self.path = path or []
+        self.count: int | None = None  # wire pages needed, when the error is about the page cap
 
 
 @dataclass(frozen=True)
@@ -246,7 +247,9 @@ def build_pages(
     """
     units = _units(model, act_ids)
     if len(units) > MAX_PAGES:
-        raise CompileError(f"too many pages: {len(units)} (at most {MAX_PAGES})")
+        err = CompileError(f"too many pages: {len(units)} (at most {MAX_PAGES})")
+        err.count = len(units)
+        raise err
     first: dict[int, int] = {}
     for i, u in enumerate(units):
         first.setdefault(u.cfg_index, i)

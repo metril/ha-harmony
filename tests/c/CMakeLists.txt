@@ -79,6 +79,7 @@ if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
     add_test(NAME remote_fuzz_${i} COMMAND test_remote_fuzz ${i})
   endforeach()
   add_test(NAME remote_oom_precheck COMMAND test_remote_oom 1)
+  add_test(NAME remote_oom_precheck_v2 COMMAND test_remote_oom 4)
   add_test(NAME remote_oom_creation COMMAND test_remote_oom 2)
   foreach(t remote_render remote_rf)
     target_compile_definitions(test_${t} PRIVATE

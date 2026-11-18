@@ -23,6 +23,8 @@ from aiohttp import web
 # Supervisor's ingress gateway (documented in the HA app security/presentation guides).
 INGRESS_GATEWAY = "172.30.32.2"
 INGRESS_HEADER = "X-Ingress-Path"
+USER_HEADER = "X-Remote-User-Id"  # set by the Supervisor from the ingress session; unspoofable
+USER_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 HASSIO_NETWORK = "172.30.32.0/23"
 BUNDLE_PREFIX = "/api/v1/bundle"
 TOKEN_FILE = "bundle_token"
@@ -54,6 +56,12 @@ class IngressAuth:
             raise web.HTTPForbidden(reason="forbidden")
         if not _is_api(request) and not request.headers.get(INGRESS_HEADER):
             raise web.HTTPForbidden(reason="forbidden")
+        # The Supervisor adds the session's user id to every ingress request (and strips any the
+        # client sent). No id = not a logged-in ingress session: refuse rather than guess.
+        user = request.headers.get(USER_HEADER, "")
+        if not USER_ID.fullmatch(user):
+            raise web.HTTPUnauthorized(reason="unauthorized")
+        request["user_id"] = user
 
 
 class NoAuth:

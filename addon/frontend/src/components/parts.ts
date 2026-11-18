@@ -24,6 +24,7 @@ export function meters(store: Store): TemplateResult {
       ? meter('Config', `${(u.json_bytes / 1024).toFixed(1)} / ${(u.json_max / 1024).toFixed(0)} KiB`, u.json_bytes, u.json_max)
       : nothing}
     ${u ? meter('IR pool', `${Math.round((u.pool_words / u.pool_max) * 100)}%`, u.pool_words, u.pool_max) : nothing}
+    ${u ? meter('Pages', `${u.pages} / ${u.page_limit}`, u.pages, u.page_limit) : nothing}
     ${meter('Commands', `${cmds} / ${cmax}`, cmds, cmax)}
   `;
 }

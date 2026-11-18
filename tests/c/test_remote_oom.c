@@ -97,15 +97,16 @@ static hp_page_t worst_page_v2(int id) {
   return p;
 }
 
-static int part = 3; /* argv[1]: 1 = the precheck squeeze, 2 = creation failures; ctest runs them in parallel */
+static int part = 7; /* argv[1] bits: 1 = precheck squeeze with a v1 page, 4 = with a v2 page, 2 = creation failures; ctest runs them in parallel */
 
 static void test_out_of_memory_survives(void) {
-  if (part & 1) {
+  if (part & 5) {
   /* (a) the pool is nearly full: the free-memory precheck refuses the build and shows the error state */
   fresh_app();
   hp_page_t w = worst_page(40, 0), w2 = worst_page_v2(42);
   static void *hog[1024];
   for (int v = 0; v < 2; v++)
+  if (part & (v ? 4 : 1))
   for (size_t keep = 56000; keep > 0; keep -= 3500) {
     if (v) w = w2;
     ra_ui_show_boot(&app.ui);

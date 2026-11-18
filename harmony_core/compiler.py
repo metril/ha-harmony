@@ -11,7 +11,7 @@ from typing import Any
 from .config_model import Model
 from .harmony_proto import SOFT_KEY_BASE
 from .keys import KEY_NAMES, key_code
-from .page_build import MAX_SOFT_KEYS, CompileError, Tile, build_pages, encode_pages
+from .page_build import MAX_PAGES, MAX_SOFT_KEYS, CompileError, Tile, build_pages, encode_pages
 from .page_codec import MAX_BYTES, MAX_WIDGETS, Page, page_size
 
 # Must equal the HP_MAP_* defines in hub/engine/mapping.h (tests/py/test_compiler.py enforces it).
@@ -180,11 +180,13 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
     keys = _keymap(model["keys"], "keys", names, fail)
 
     act_ids = [a["id"] for a in model["activities"]]
+    wire_count = 0
     try:
         pages, cfg_ids, tiles = build_pages(model, act_ids, names, keys)
     except CompileError as exc:
         fail(str(exc), exc.path or ["pages"])
         pages, cfg_ids, tiles = [], [], []
+        wire_count = exc.count or 0
     if len(keys) > LIMITS["MAX_KEYS"]:
         fail(
             f"too many keys in the default map: {len(keys)} including page buttons"
@@ -256,7 +258,9 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
         "inputs_max": LIMITS["MAX_INPUTS"],
         "soft_keys": sum(1 for c in names if c >= SOFT_KEY_BASE),
         "soft_keys_max": MAX_SOFT_KEYS,
-        "pages": page_usage,
+        "pages": max(wire_count, len(models)),
+        "page_limit": MAX_PAGES,
+        "page_detail": page_usage,
     }
     return Compiled(
         hub_json=hub,
