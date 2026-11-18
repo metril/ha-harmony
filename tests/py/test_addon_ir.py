@@ -93,11 +93,7 @@ async def test_device_block(ir):
     assert st == 200
     d = body["device"]
     assert d["id"] == "sony_kv_32v42" and d["power"]["on"]["proto"] == "sirc12"
-    assert (
-        set(body["forms"].values()) <= {"proto", "pronto"}
-        and "vol_up" in body["forms"]
-        or body["forms"]
-    )
+    assert body["forms"] and set(body["forms"].values()) <= {"proto", "pronto"}
     assert body["source"]["kind"] == "harmony_archive" and body["source"]["mfr"] == "Sony"
     assert body["source"]["imported_at"] == "1970-01-01T00:00:00Z"
     assert body["device_type"] == {"id": 1, "name": "Television"}
