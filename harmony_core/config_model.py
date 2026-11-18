@@ -33,6 +33,11 @@ _Loader.add_implicit_resolver(
     "tag:yaml.org,2002:bool", re.compile(r"^(?:true|false|True|False|TRUE|FALSE)$"), list("tfTF")
 )
 
+def load_source(text: str) -> Any:
+    """Parse config YAML to plain data with the loader `parse_model` uses (no validation)."""
+    return yaml.load(text, Loader=_Loader)
+
+
 _SLUG = re.compile(r"^[a-z0-9_]{1,31}$")
 _ENTITY = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 _IR_FORMS = ("proto", "raw", "pronto", "flipper", "smartir")
