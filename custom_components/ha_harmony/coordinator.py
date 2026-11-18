@@ -870,7 +870,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
 
             async def one(
                 key: tuple[int, int, int], value: tuple[int, str], args: dict[str, Any], entity: str,
-                link: RemoteLink = link, rich: bool = rich,
+                link: RemoteLink = link, rich: bool = rich, window: asyncio.Semaphore = window,
             ) -> None:
                 nonlocal stop
                 async with window:
