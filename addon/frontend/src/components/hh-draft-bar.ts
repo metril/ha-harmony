@@ -24,7 +24,8 @@ export class HhDraftBar extends StoreElement {
       .usage { display: none; position: relative; }
       .usage .pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 9; background: var(--sf); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--lift); padding: 12px; display: grid; gap: 10px; width: 220px; }
       @media (max-width: 1100px) and (min-width: 721px) {
-        .db { padding: 6px 16px; flex-wrap: nowrap; }
+        .db { padding: 4px 16px; flex-wrap: nowrap; }
+        .db .btn { height: 30px; }
         .meters.long { display: none; }
         .usage { display: block; }
         .state .muted { display: none; }

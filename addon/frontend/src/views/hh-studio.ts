@@ -83,7 +83,7 @@ export class HhStudio extends StoreElement implements StudioHost {
       .pager { display: inline-flex; align-items: center; gap: 2px; }
       .sheetbtns { display: none; }
       .scrim { display: none; }
-      @media (max-width: 1100px) { :host { --pw: 224px; --iw: 236px; } .zoomg { display: none !important; } }
+      @media (max-width: 1100px) { :host { --pw: 224px; --iw: 236px; } .studio { height: max(560px, calc(100dvh - 104px)); } .zoomg { display: none !important; } }
       /* X-ray is a reading mode: on narrower screens it takes the whole width so the labels stay legible */
       @media (max-width: 1280px) and (min-width: 861px) {
         .studio.xr { grid-template-columns: minmax(0, 1fr); }

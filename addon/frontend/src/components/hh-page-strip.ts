@@ -22,7 +22,7 @@ export class HhPageStrip extends LitElement {
     shared,
     css`
       :host { display: block; background: var(--sf); border-top: 1px solid var(--line); }
-      .strip { display: flex; gap: 8px; align-items: stretch; padding: 6px 12px 6px; overflow-x: auto; }
+      .strip { display: flex; gap: 8px; align-items: stretch; padding: 6px 12px 6px; overflow-x: auto; scrollbar-width: thin; }
       .items { display: flex; gap: 8px; align-items: stretch; }
       .pg { position: relative; display: grid; gap: 3px; width: 84px; flex: none; justify-items: center; padding: 6px 4px 4px; border-radius: var(--r2); border: 1.5px solid transparent; background: transparent; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: pan-x; }
       .pg:hover { background: var(--sf2); }
@@ -55,8 +55,8 @@ export class HhPageStrip extends LitElement {
       :host { position: relative; }
       @media (max-width: 1100px), (max-height: 820px) {
         .strip { padding: 2px 10px; gap: 6px; }
-        .pg { width: 64px; padding: 4px 2px 2px; gap: 2px; }
-        .thumb { width: 38px; height: 50px; }
+        .pg { width: 64px; padding: 3px 2px 2px; gap: 1px; }
+        .thumb { width: 33px; height: 44px; }
         .name { font-size: 11px; max-width: 60px; }
         .sub { display: none; }
         .bar { width: 38px; height: 3px; }
