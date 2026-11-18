@@ -35,7 +35,7 @@ HUB_MISSING = {
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
     """A fake device root with the directories the hook expects."""
-    for d in ("etc", "cache", "data/ha-harmony"):
+    for d in ("etc", "cache", "data/ha-harmony", "var/volatile"):
         (tmp_path / d).mkdir(parents=True)
     (tmp_path / "etc" / "ha-harmony-enable").write_text("")
     return tmp_path
@@ -51,7 +51,9 @@ def install_conf(root: Path, text: str = "token=benchtok\nport=8099\nhub_id=ha-h
     (root / "data" / "ha-harmony" / "hub.conf").write_text(text)
 
 
-def source_hook(root: Path, *, healthy: int = 1, limit: int = 3, restrict_path: bool = False) -> tuple[str, str]:
+def source_hook(
+    root: Path, *, healthy: int = 1, limit: int = 3, restrict_path: bool = False, delay: int = 0
+) -> tuple[str, str]:
     """Source the hook the way rcS.local does and report DEMO_MODE afterwards.
 
     Returns (stdout, demo_mode) where demo_mode is "1" or "unset".
@@ -61,7 +63,13 @@ def source_hook(root: Path, *, healthy: int = 1, limit: int = 3, restrict_path: 
         "HAH_ROOT": str(root),
         "HAH_HEALTHY_SECS": str(healthy),
         "HAH_MAX_UNCLEAN": str(limit),
+        "HAH_START_DELAY": str(delay),
     }
+    # A logging killall stub always shadows the real one: never signal host processes.
+    stub = root / "_stub"
+    stub.mkdir(exist_ok=True)
+    (stub / "killall").write_text(f'#!/bin/sh\necho "$@" >>"{root}/killall.log"\n')
+    (stub / "killall").chmod(0o755)
     if restrict_path:
         # Only applets the hub actually has, so any use of a missing one fails loudly.
         bindir = root / "_bin"
@@ -72,9 +80,9 @@ def source_hook(root: Path, *, healthy: int = 1, limit: int = 3, restrict_path: 
                 target = bindir / applet
                 if not target.exists():
                     target.symlink_to(real)
-        env["PATH"] = str(bindir)
+        env["PATH"] = f"{stub}:{bindir}"
     else:
-        env["PATH"] = "/usr/bin:/bin"
+        env["PATH"] = f"{stub}:/usr/bin:/bin"
 
     p = subprocess.run(
         ["/bin/sh", "-c", script], capture_output=True, text=True, env=env, timeout=60, check=False
@@ -147,7 +155,7 @@ def test_clean_boot_starts_daemon_and_suppresses_hal(root: Path) -> None:
     _, demo = source_hook(root)
     assert demo == "1", "DEMO_MODE must be set so rcS:84 skips stock hal"
     assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
-    assert (root / "cache" / "ha-harmony.pid").exists()
+    _wait_for(root / "cache" / "ha-harmony.pid")
 
 
 def test_healthy_run_clears_the_strike_counter(root: Path) -> None:
@@ -232,6 +240,7 @@ def test_runs_inside_the_hub_applet_floor(root: Path) -> None:
     _, demo = source_hook(root, restrict_path=True)
     assert demo == "1"
     assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
+    _wait_for(root / "cache" / "ha-harmony.pid")
 
 
 def _wait_gone(p: Path, tries: int = 60) -> None:
@@ -241,3 +250,119 @@ def _wait_gone(p: Path, tries: int = 60) -> None:
         if not p.exists():
             return
         time.sleep(0.25)
+
+
+def _wait_for(p: Path, tries: int = 60) -> None:
+    import time
+
+    for _ in range(tries):
+        if p.exists() and p.stat().st_size:
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"{p} never appeared")
+
+
+# --- conf keys, argv, deferred launcher, log placement ---------------------------
+
+ARGV_DAEMON = 'echo "$@" > "$(dirname "$0")/argv.txt"; sleep 30'
+
+
+def _argv(root: Path) -> str:
+    f = root / "data" / "ha-harmony" / "argv.txt"
+    _wait_for(f)
+    return f.read_text()
+
+
+def test_rf_conf_keys_become_daemon_argv(root: Path) -> None:
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root, "token=t\nport=8099\nrf=spi\nrf_slot=2\n")
+    _, demo = source_hook(root)
+    assert demo == "1"
+    argv = _argv(root)
+    assert "--rf-spi --rf-slot 2" in argv
+    assert "--token t" in argv
+
+
+def test_no_rf_key_means_no_rf_flags(root: Path) -> None:
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root)
+    source_hook(root)
+    assert "--rf" not in _argv(root)
+
+
+@pytest.mark.parametrize(
+    "junk",
+    ["rf=bogus", "rf=", "rf_slot=", "rf_slot=2x", "rf_slot=-1", "rf_slot=$(id)", "stop_lua=maybe"],
+)
+def test_bad_conf_value_leaves_stock_alone_with_no_strike(root: Path, junk: str) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root, f"token=t\nrf=spi\n{junk}\n")
+    _, demo = source_hook(root)
+    assert demo == "unset"
+    assert not (root / "cache" / "ha-harmony-boot.n").exists(), "junk config must not spend a strike"
+    assert (root / "etc" / "ha-harmony-enable").exists()
+    assert not (root / "data" / "ha-harmony" / "argv.txt").exists()
+
+
+def test_daemon_output_never_goes_to_cache(root: Path) -> None:
+    install_daemon(root, "echo DAEMON-CHATTER; echo DAEMON-ERR >&2; sleep 30")
+    install_conf(root)
+    source_hook(root)
+    vlog = root / "var" / "volatile" / "ha-harmony.log"
+    for _ in range(60):
+        if vlog.exists() and "DAEMON-ERR" in vlog.read_text():
+            break
+        import time
+
+        time.sleep(0.1)
+    assert "DAEMON-CHATTER" in vlog.read_text()
+    for f in (root / "cache").iterdir():
+        assert "DAEMON" not in f.read_text(), f"daemon output leaked into {f}"
+    assert "starting" in (root / "cache" / "ha-harmony.log").read_text()
+
+
+def test_hook_log_is_truncated_per_boot(root: Path) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root)
+    (root / "cache" / "ha-harmony.log").write_text("OLD-BOOT-LINE\n")
+    source_hook(root)
+    assert "OLD-BOOT-LINE" not in (root / "cache" / "ha-harmony.log").read_text()
+
+
+def test_launch_is_deferred_not_synchronous(root: Path) -> None:
+    """With a long delay the hook still returns at once and has started nothing."""
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root)
+    import time
+
+    t0 = time.monotonic()
+    _, demo = source_hook(root, delay=30)
+    assert time.monotonic() - t0 < 10, "the synchronous path waited"
+    assert demo == "1"
+    assert not (root / "data" / "ha-harmony" / "argv.txt").exists()
+    assert not (root / "cache" / "ha-harmony.pid").exists()
+    # and statically: no sleep before the backgrounded subshell opens
+    code = re.sub(r"#.*", "", HOOK.read_text())
+    assert "sleep" not in code.split("\n\t\t\t(\n")[0]
+
+
+def test_stop_lua_is_one_switch_default_on(root: Path) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root)
+    source_hook(root)
+    _wait_for(root / "cache" / "ha-harmony.pid")
+    assert (root / "killall.log").read_text().split() == ["luaworks", "luadraws"]
+
+
+def test_stop_lua_off_leaves_lua_alone(root: Path) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root, "token=t\nstop_lua=0\n")
+    source_hook(root)
+    _wait_for(root / "cache" / "ha-harmony.pid")
+    assert not (root / "killall.log").exists()
+
+
+def test_launcher_uses_only_hub_tools_for_lua_stop() -> None:
+    code = re.sub(r"#.*", "", HOOK.read_text())
+    assert "killall" in code
+    assert not re.search(r"\b(pidof|pkill|killall -9|kill -9|kill -KILL)\b", code)

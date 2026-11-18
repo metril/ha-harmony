@@ -20,6 +20,12 @@
 # is what guarantees rcS reaches line 47 -- it is a load-bearing property, not a
 # style preference, and tests/py/test_boot_hook.py enforces it.
 #
+# DEFERRED LAUNCH. Even the daemon start is not synchronous: a background subshell waits
+# hah_delay seconds (dropbear and `ifup -a` come first), optionally stops luaworks/luadraws
+# (they retry a TCP connection to the now-absent hal forever), then starts the daemon and
+# watches it. Single-shot: no respawn. Daemon stdout/stderr go to tmpfs (/var/volatile),
+# never /cache, so a chatty daemon cannot wear or fill flash; only hook lines go to /cache.
+#
 # SELF-DISABLE. /cache/ha-harmony-boot.n counts boots that started our daemon but
 # were never confirmed healthy. Three strikes and we remove our own marker so the
 # next boot is pure stock. This is the shape stock itself uses for its memtester
@@ -34,12 +40,14 @@ hah_root="${HAH_ROOT:-}"
 hah_marker="$hah_root/etc/ha-harmony-enable"
 hah_counter="$hah_root/cache/ha-harmony-boot.n"
 hah_log="$hah_root/cache/ha-harmony.log"
+hah_dlog="$hah_root/var/volatile/ha-harmony.log"
 hah_pidfile="$hah_root/cache/ha-harmony.pid"
 hah_dir="$hah_root/data/ha-harmony"
 hah_daemon="$hah_dir/hub"
 hah_conf="$hah_dir/hub.conf"
 hah_limit="${HAH_MAX_UNCLEAN:-3}"
 hah_healthy="${HAH_HEALTHY_SECS:-120}"
+hah_delay="${HAH_START_DELAY:-20}"
 
 hah_say() {
 	echo "ha-harmony: $1" >>"$hah_log" 2>/dev/null
@@ -51,56 +59,99 @@ hah_say() {
 if [ ! -x "$hah_daemon" ] || [ ! -r "$hah_conf" ]; then
 	hah_say "daemon or config missing ($hah_daemon / $hah_conf) - leaving stock alone"
 else
-	# --- strike counter -------------------------------------------------------
-	hah_n=$(cat "$hah_counter" 2>/dev/null)
-	case "$hah_n" in
-	'' | *[!0-9]*) hah_n=0 ;; # absent or corrupt counts as clean
-	esac
-	hah_n=$((hah_n + 1))
-
-	if [ "$hah_n" -ge "$hah_limit" ]; then
-		# Three unclean boots. Disable ourselves and let stock have this boot:
-		# DEMO_MODE is deliberately NOT set below, so rcS:84 starts hal normally.
-		rm -f "$hah_marker"
-		rm -f "$hah_counter"
-		hah_say "DISABLED after $hah_n unclean boots - removed $hah_marker, booting stock"
-	else
-		echo "$hah_n" >"$hah_counter" 2>/dev/null
-
-		# Read config without sourcing it: a stray command in a config file would
-		# run in rcS's shell. Only these three keys are honoured.
-		hah_token=''
-		hah_port=''
-		hah_id=''
-		while IFS='=' read -r hah_k hah_v; do
-			case "$hah_k" in
-			token) hah_token="$hah_v" ;;
-			port) hah_port="$hah_v" ;;
-			hub_id) hah_id="$hah_v" ;;
+	# Read config without sourcing it: a stray command in a config file would run in
+	# rcS's shell. Only these keys are honoured; a bad value leaves stock alone and
+	# spends no strike (nothing was started).
+	hah_token=''
+	hah_port=''
+	hah_id=''
+	hah_rf=''
+	hah_slot=''
+	hah_stoplua=1
+	hah_bad=''
+	while IFS='=' read -r hah_k hah_v; do
+		case "$hah_k" in
+		token) hah_token="$hah_v" ;;
+		port) hah_port="$hah_v" ;;
+		hub_id) hah_id="$hah_v" ;;
+		rf)
+			case "$hah_v" in
+			spi) hah_rf=spi ;;
+			*) hah_bad="rf=$hah_v" ;;
 			esac
-		done <"$hah_conf"
+			;;
+		rf_slot)
+			case "$hah_v" in
+			'' | *[!0-9]*) hah_bad="rf_slot=$hah_v" ;;
+			*) hah_slot="$hah_v" ;;
+			esac
+			;;
+		stop_lua)
+			case "$hah_v" in
+			0 | 1) hah_stoplua="$hah_v" ;;
+			*) hah_bad="stop_lua=$hah_v" ;;
+			esac
+			;;
+		esac
+	done <"$hah_conf"
 
-		if [ -z "$hah_token" ]; then
-			hah_say "no token in $hah_conf - leaving stock alone"
+	if [ -n "$hah_bad" ]; then
+		hah_say "bad config value ($hah_bad) - leaving stock alone"
+	elif [ -z "$hah_token" ]; then
+		hah_say "no token in $hah_conf - leaving stock alone"
+	else
+		# --- strike counter ---------------------------------------------------
+		hah_n=$(cat "$hah_counter" 2>/dev/null)
+		case "$hah_n" in
+		'' | *[!0-9]*) hah_n=0 ;; # absent or corrupt counts as clean
+		esac
+		hah_n=$((hah_n + 1))
+
+		if [ "$hah_n" -ge "$hah_limit" ]; then
+			# Three unclean boots. Disable ourselves and let stock have this boot:
+			# DEMO_MODE is deliberately NOT set below, so rcS:84 starts hal normally.
+			rm -f "$hah_marker"
+			rm -f "$hah_counter"
+			hah_say "DISABLED after $hah_n unclean boots - removed $hah_marker, booting stock"
 		else
+			echo "$hah_n" >"$hah_counter" 2>/dev/null
+
+			# Digits-only slot and a fixed flag, so unquoted word splitting is safe.
+			hah_rfargs=''
+			if [ -n "$hah_rf" ]; then
+				hah_rfargs="--rf-spi"
+				[ -n "$hah_slot" ] && hah_rfargs="$hah_rfargs --rf-slot $hah_slot"
+			fi
+
 			# Past this point we own the radios: stock hal must not start.
 			DEMO_MODE=1
 			export DEMO_MODE
 
 			: >"$hah_log" 2>/dev/null
-			hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099})"
+			hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099}, rf=${hah_rf:-none}, launch in ${hah_delay}s)"
 
-			"$hah_daemon" --token "$hah_token" \
-				--port "${hah_port:-8099}" \
-				${hah_id:+--hub-id "$hah_id"} \
-				>>"$hah_log" 2>&1 </dev/null &
-			hah_pid=$!
-			echo "$hah_pid" >"$hah_pidfile" 2>/dev/null
-
-			# Health watcher: if the daemon is still alive after the settle window,
-			# this boot counts as clean and the strike counter is cleared. No
-			# `timeout` applet exists, hence a backgrounded sleep.
+			# Everything below runs in the background: the delay, the optional lua
+			# stop, the daemon and its watcher. Single-shot, no respawn.
 			(
+				sleep "$hah_delay"
+				if [ "$hah_stoplua" = 1 ]; then
+					killall luaworks luadraws >/dev/null 2>&1
+					echo "ha-harmony: stopped luaworks/luadraws" >>"$hah_log" 2>/dev/null
+				fi
+				: >"$hah_dlog" 2>/dev/null
+				# shellcheck disable=SC2086
+				"$hah_daemon" --token "$hah_token" \
+					--port "${hah_port:-8099}" \
+					${hah_id:+--hub-id "$hah_id"} \
+					$hah_rfargs \
+					>>"$hah_dlog" 2>&1 </dev/null &
+				hah_pid=$!
+				echo "$hah_pid" >"$hah_pidfile" 2>/dev/null
+				echo "ha-harmony: daemon started pid $hah_pid" >>"$hah_log" 2>/dev/null
+
+				# Health: still alive after the settle window means the port is bound
+				# and the radio held (the daemon exits non-zero otherwise), so this
+				# boot counts as clean. No `timeout` applet, hence the sleep.
 				sleep "$hah_healthy"
 				if kill -0 "$hah_pid" 2>/dev/null; then
 					rm -f "$hah_counter"
@@ -113,6 +164,7 @@ else
 	fi
 fi
 
-unset hah_root hah_marker hah_counter hah_log hah_pidfile hah_dir hah_daemon hah_conf
-unset hah_limit hah_healthy hah_n hah_token hah_port hah_id hah_pid hah_k hah_v
+unset hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
+unset hah_limit hah_healthy hah_delay hah_n hah_token hah_port hah_id hah_rf hah_slot
+unset hah_rfargs hah_stoplua hah_bad hah_k hah_v
 unset -f hah_say 2>/dev/null
