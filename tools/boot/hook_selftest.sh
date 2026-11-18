@@ -1,5 +1,5 @@
 # shellcheck shell=sh
-# shellcheck disable=SC2059,SC2317,SC1090,SC2046,SC2209
+# shellcheck disable=SC2059,SC2317,SC1090,SC2046,SC2209,SC2016
 # On-hub dry run of rcS.harmony under the hub's OWN BusyBox sh. Not sourced by anything on
 # the device; uploaded to /tmp/hah-selftest by `install_boot_hook.py selftest`.
 #
@@ -39,7 +39,9 @@ run_hook() {
 		reboot() { echo reboot >>"$T/reboot.log"; }
 		HAH_ROOT="$R" HAH_START_DELAY=0 HAH_HEALTHY_SECS=1 HAH_POLL_SECS=1
 		HAH_POLL_SLEEP="${HAH_SELFTEST_NAP:-}" HAH_HEALTHY_POLLS="${HAH_SELFTEST_POLLS:-}"
+		HAH_LOG_MAX_LINES="${SELFTEST_LOGMAX:-}"
 		export HAH_ROOT HAH_START_DELAY HAH_HEALTHY_SECS HAH_POLL_SECS HAH_POLL_SLEEP HAH_HEALTHY_POLLS
+		export HAH_LOG_MAX_LINES
 		. "$HOOK"
 		echo "DEMO=${DEMO_MODE:-unset}"
 	) >"$T/out" 2>&1 &
@@ -94,15 +96,20 @@ rm -rf "$R/cache"
 run_hook
 if [ "$DEMO" = unset ]; then pass "missing cache dir boots stock"; else fail "missing cache dir (DEMO=$DEMO)"; fi
 
-# 4. `ls -ln` size field used by the log cap
+# 4. line counting with `read` (the log cap; byte size from `ls` is not portable: on this
+#    hub `ls -ln` prints "-rw-r--r-- 1 0 0 0 0 50 name" and `ls -l` has no date columns)
 rm -f "$T/sz"
 i=0
 while [ "$i" -lt 5 ]; do
 	echo 123456789 >>"$T/sz"
 	i=$((i + 1))
 done
-set -- $(ls -ln "$T/sz")
-if [ "$5" = 50 ]; then pass "ls -ln size field"; else fail "ls -ln size field (got '$5')"; fi
+nl=0
+while IFS= read -r l; do
+	nl=$((nl + 1))
+	[ "$nl" -gt 3 ] && break
+done <"$T/sz" 2>/dev/null
+if [ "$nl" = 4 ]; then pass "read-based line count stops over the cap"; else fail "line count (got '$nl'; raw ls: $(ls -ln "$T/sz" 2>&1))"; fi
 
 # 5. optional argv pieces expand correctly (${var:+...})
 mkroot 'token=abc==\nhub_id=my-hub\nrf=spi\nrf_slot=2\nport=8100\n'
@@ -132,6 +139,20 @@ mkroot 'token=abc\n'
 rm -f "$R/etc/nowatchdog"
 run_hook
 if [ "$DEMO" = unset ]; then pass "stock watchdog enabled: stock"; else fail "watchdog guard (DEMO=$DEMO)"; fi
+
+# 9. the daemon log is capped in place while the daemon keeps writing (O_APPEND)
+mkroot 'token=abc\n'
+printf '#!/bin/sh\ni=0\nwhile [ $i -lt 30 ]; do echo line$i; i=$((i+1)); done\nsleep "%s"\necho AFTER\nsleep "%s"\n' "${HAH_SELFTEST_GAP:-4}" "${HAH_SELFTEST_GAP:-4}" >"$R/data/ha-harmony/hub"
+SELFTEST_LOGMAX=10
+export SELFTEST_LOGMAX
+run_hook
+sleep "${HAH_SELFTEST_GAP:-4}"
+nl=0
+while IFS= read -r l; do
+	nl=$((nl + 1))
+done <"$R/var/volatile/ha-harmony.log" 2>/dev/null
+if [ "$nl" -lt 30 ] && [ "$nl" -ge 1 ]; then pass "log capped in place ($nl lines left of 30+)"; else fail "log cap (lines=$nl)"; fi
+unset SELFTEST_LOGMAX
 
 sleep "${HAH_SELFTEST_FINAL:-3}" # let the 1 s watchers finish before the caller deletes the directory
 echo "selftest done: $fails failure(s)"

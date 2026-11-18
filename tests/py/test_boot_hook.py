@@ -605,7 +605,7 @@ def test_daemon_log_is_capped_without_corrupting_the_append_stream(root: Path) -
         " sleep 0.3; echo AFTER-TRUNCATE; sleep 30",
     )
     install_conf(root)
-    source_hook(root, healthy=1, extra_env={"HAH_LOG_MAX": "500"})
+    source_hook(root, healthy=1, extra_env={"HAH_LOG_MAX_LINES": "10"})
     vlog = root / "var" / "volatile" / "ha-harmony.log"
     _wait_text(vlog, "AFTER-TRUNCATE")
     data = vlog.read_bytes()
@@ -664,6 +664,7 @@ def test_onhub_selftest_script_passes_under_host_shells(tmp_path: Path) -> None:
         "HAH_SELFTEST_POLLS": "2",
         "HAH_SELFTEST_SETTLE": "0.15",
         "HAH_SELFTEST_TICK": "0.02",
+        "HAH_SELFTEST_GAP": "0.4",
         "HAH_SELFTEST_FINAL": "0.2",
     }
     pr = subprocess.Popen([*_CUR["shell"], str(script), str(HOOK)], stdout=subprocess.PIPE,
@@ -671,5 +672,5 @@ def test_onhub_selftest_script_passes_under_host_shells(tmp_path: Path) -> None:
     _PGIDS.append(pr.pid)
     out = pr.communicate(timeout=60)[0]
     assert pr.returncode == 0 and "0 failure(s)" in out, out
-    assert out.count("PASS") >= 11 and "FAIL" not in out
+    assert out.count("PASS") >= 12 and "FAIL" not in out
     assert not (Path("/etc/ha-harmony-enable")).exists()

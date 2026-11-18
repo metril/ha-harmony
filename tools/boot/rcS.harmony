@@ -66,7 +66,7 @@ hah_limit=$(hah_num "${HAH_MAX_UNCLEAN:-}" 3)
 hah_healthy=$(hah_num "${HAH_HEALTHY_SECS:-}" 120)
 hah_delay=$(hah_num "${HAH_START_DELAY:-}" 20)
 hah_step=$(hah_num "${HAH_POLL_SECS:-}" 5)
-hah_logmax=$(hah_num "${HAH_LOG_MAX:-}" 262144)
+hah_logmax=$(hah_num "${HAH_LOG_MAX_LINES:-}" 2000)
 [ "$hah_step" -ge 1 ] 2>/dev/null || hah_step=1
 # Poll interval: seconds on the hub; tests may pass a fraction (HAH_POLL_SLEEP) and a poll count.
 case "${HAH_POLL_SLEEP:-}" in
@@ -262,16 +262,21 @@ else
 					if [ "$hah_up" = 1 ]; then
 						rm -f "$hah_counter"
 						echo "ha-harmony: healthy after ${hah_healthy}s - strikes cleared" >>"$hah_log" 2>/dev/null
-						# Cap the tmpfs daemon log. The daemon holds it open O_APPEND (>>),
-						# so truncating in place is safe: its next write lands at the new
-						# end, no hole. No `wc`/`stat` on the hub: size comes from `ls -ln`
-						# (numeric ids: names may contain spaces).
+						# Cap the tmpfs daemon log by LINE count. The daemon holds it open
+						# O_APPEND (>>), so truncating in place is safe: its next write lands
+						# at the new end, no hole. Byte size cannot be read portably: BusyBox
+						# 1.13 `ls -l` has no date columns and `ls -ln` has extra ones, while
+						# host `ls -l` has dates; there is no wc/stat. Counting lines with
+						# `read` works everywhere (counting stops once over the cap).
 						while kill -0 "$hah_pid" 2>/dev/null; do
 							sleep "$hah_nap"
-							hah_sz=$(ls -ln "$hah_dlog" 2>/dev/null)
-							# shellcheck disable=SC2086
-							set -- $hah_sz
-							if [ "${5:-0}" -gt "$hah_logmax" ] 2>/dev/null; then
+							hah_nl=0
+							# shellcheck disable=SC2034
+							while IFS= read -r hah_l; do
+								hah_nl=$((hah_nl + 1))
+								[ "$hah_nl" -gt "$hah_logmax" ] && break
+							done <"$hah_dlog" 2>/dev/null
+							if [ "$hah_nl" -gt "$hah_logmax" ]; then
 								: >"$hah_dlog" 2>/dev/null
 							fi
 						done
