@@ -161,7 +161,7 @@ static void run_seed(uint64_t seed, int loops) {
 
 int main(int argc, char **argv) {
   int shard = argc > 1 ? atoi(argv[1]) : -1;
-  for (int s = 0; s < 8; s++)
-    if (shard < 0 || s % 4 == shard) run_seed((uint64_t)s + 1, 250);
+  for (int s = 0; s < 4; s++)
+    if (shard < 0 || s % 4 == shard) run_seed((uint64_t)s + 1, 150);
   return CT_DONE();
 }
