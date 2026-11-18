@@ -507,27 +507,20 @@ async def test_first_setup_with_a_slow_addon_returns_within_the_bound(
 
 
 # (d) an outgoing page is not base64-decoded just to be validated
-def test_encode_ws_does_not_decode_outgoing_pages():
+def test_encode_ws_does_not_decode_outgoing_pages(monkeypatch):
     import base64
-    import time
 
     from custom_components.ha_harmony.harmony_core import harmony_proto as hp
 
     payload = {"remote": 1, "page": 0, "data": base64.b64encode(bytes(range(251))).decode()}
-    n = 20000
-
-    def per_call(fn):
-        t0 = time.perf_counter()
-        for _ in range(n):
-            fn()
-        return (time.perf_counter() - t0) / n
-
-    enc = per_call(lambda: hp.encode_ws(hp.MsgType.PAGE_PUSH, payload, 7))
-    shallow = per_call(lambda: hp._validate("page_push", payload))
-    deep = per_call(lambda: hp._validate("page_push", payload, incoming=True))  # decodes base64
-    print(f"BENCH encode_ws {enc * 1e6:.2f} us; validate outgoing {shallow * 1e6:.2f} us, incoming {deep * 1e6:.2f} us")
-    assert enc < 50e-6  # generous: 2-4 microseconds in practice
-    assert shallow < deep * 0.8  # outgoing pages no longer pay for the base64 decode
+    calls = []
+    real = base64.b64decode
+    monkeypatch.setattr(hp.base64, "b64decode", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    hp.encode_ws(hp.MsgType.PAGE_PUSH, payload, 7)
+    hp._validate("page_push", payload)
+    assert calls == []  # outgoing pages are not base64-decoded just to be validated
+    hp._validate("page_push", payload, incoming=True)
+    assert len(calls) == 1  # untrusted input is decoded once to prove it
     bad = {**payload, "data": "not base64!!"}
     with pytest.raises(hp.ProtoError):  # untrusted input is still checked in full
         hp.decode_ws(hp.encode_ws(hp.MsgType.PAGE_PUSH, bad, 7))
