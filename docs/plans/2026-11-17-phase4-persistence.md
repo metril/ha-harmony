@@ -109,6 +109,7 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
 - [x] **Order inside the hook:** refuse unless daemon *and* config are present → bump the strike
       counter and apply the guard → parse the config → only then `export DEMO_MODE=1` and launch the
       daemon and its watcher in the background.
+      The daemon is launched with `--token-file <hub.conf>` (reads `token=` itself), so the token never appears in `ps`, env or logs.
 - [x] **Refuse to go inert.** If the daemon is missing, not executable, or its config has no token, the
       hook leaves `DEMO_MODE` unset so stock `hal` starts normally — and does *not* spend a strike. A
       half-installed hub must be a stock hub, never a dead one.

@@ -72,12 +72,46 @@ static int bad_num(const char *flag, const char *val) {
     return 2;
 }
 
+#define TOKEN_MAX 256
+static char g_tokbuf[TOKEN_MAX + 1];
+
+/* Read the WS token from PATH: a `token=VALUE` line (so hub.conf itself works), else a bare
+ * token as the only non-empty line. Never prints the value. Returns NULL if unusable. */
+static const char *read_token_file(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
+    char line[TOKEN_MAX + 16], first[TOKEN_MAX + 16] = "";
+    const char *val = NULL;
+    int nonempty = 0, ok = 1;
+    for (int n = 0; n < 64 && fgets(line, sizeof line, f); n++) {
+        size_t l = strlen(line);
+        if (l == sizeof line - 1 && line[l - 1] != '\n') { ok = 0; break; } /* over-long line */
+        while (l && (line[l - 1] == '\n' || line[l - 1] == '\r')) line[--l] = 0;
+        if (!l) continue;
+        if (!strncmp(line, "token=", 6)) { memcpy(first, line + 6, l - 6 + 1); val = first; nonempty = 1; break; }
+        if (!nonempty++) memcpy(first, line, l + 1);
+    }
+    fclose(f);
+    if (ok && !val && nonempty == 1) { /* a bare token may end in '=' padding, but `key=value` is some other conf line */
+        const char *eq = strchr(first, '=');
+        if (!eq || !eq[strspn(eq, "=")]) val = first;
+    }
+    if (!ok || !val || !*val || strlen(val) > TOKEN_MAX) {
+        memset(line, 0, sizeof line);
+        memset(first, 0, sizeof first);
+        return NULL;
+    }
+    strcpy(g_tokbuf, val);
+    memset(first, 0, sizeof first);
+    return g_tokbuf;
+}
+
 int main(int argc, char **argv) {
     bool sim = false, rf_spi = false;
     bool rf_debug = false;
     long rf_slot = 0; /* 0 = driver default; the Elite measured as HID++ device 2 on this hub */
     long port = 8099;
-    const char *token = NULL;
+    const char *token = NULL, *token_file = NULL;
     const char *cache = NULL;
     const char *state = NULL;
     const char *rf_path = NULL;
@@ -91,6 +125,7 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--sim")) sim = true;
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) { if (hp_parse_num(argv[++i], 0, 65535, &port)) return bad_num("--port", argv[i]); }
         else if (!strcmp(argv[i], "--token") && i + 1 < argc) token = argv[++i];
+        else if (!strcmp(argv[i], "--token-file") && i + 1 < argc) token_file = argv[++i];
         else if (!strcmp(argv[i], "--cache") && i + 1 < argc) cache = argv[++i];
         else if (!strcmp(argv[i], "--state") && i + 1 < argc) state = argv[++i];
         else if (!strcmp(argv[i], "--rf") && i + 1 < argc) rf_path = argv[++i];
@@ -116,7 +151,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--auth-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &auth_ms)) return bad_num("--auth-timeout-ms", argv[i]); }
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
-            fprintf(stderr, "usage: hub [--sim] [--port N] --token T [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
+            fprintf(stderr, "usage: hub [--sim] [--port N] (--token T | --token-file PATH) [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
                             "[--hub-id ID] [--fw-version V] [--ir-ports MASK] "
                             "[--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P]\n");
@@ -132,9 +167,13 @@ int main(int argc, char **argv) {
         fprintf(stderr, "hub: --rf-spi (the real radio) cannot be combined with --sim or --rf\n");
         return 2;
     }
+    if (token_file) {
+        if (token) { fprintf(stderr, "hub: --token and --token-file are mutually exclusive\n"); return 2; }
+        token = read_token_file(token_file);
+    }
     if (!token || !*token || port < 0 || port > 65535 || auth_ms <= 0 || idle_ms <= 0 ||
         auth_ms > INT32_MAX || idle_ms > INT32_MAX) {
-        fprintf(stderr, "hub: --token T required, port 0-65535, timeouts > 0\n");
+        fprintf(stderr, "hub: --token T or a readable --token-file (1-256 chars) required, port 0-65535, timeouts > 0\n");
         return 2;
     }
 

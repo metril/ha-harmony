@@ -71,7 +71,7 @@ echo "selftest in $T (hook $HOOK)"
 # 1. conf loop terminates, including a last line with no trailing newline
 mkroot 'port=8099\ntoken=lastline'
 run_hook
-if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "--token lastline --port 8099" ]; then
+if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "--token-file $R/data/ha-harmony/hub.conf --port 8099" ]; then
 	pass "conf without trailing newline"
 else
 	fail "conf without trailing newline (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
@@ -114,12 +114,15 @@ if [ "$nl" = 4 ]; then pass "read-based line count stops over the cap"; else fai
 # 5. optional argv pieces expand correctly (${var:+...})
 mkroot 'token=abc==\nhub_id=my-hub\nrf=spi\nrf_slot=2\nport=8100\n'
 run_hook
-want="--token abc== --port 8100 --hub-id my-hub --rf-spi --rf-slot 2"
+want="--token-file $R/data/ha-harmony/hub.conf --port 8100 --hub-id my-hub --rf-spi --rf-slot 2"
 if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ]; then
 	pass "argv quoting with rf, hub_id and '=' in token"
 else
 	fail "argv quoting (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
 fi
+
+# 5b. the token never appears in the daemon argv
+if ! grep -q 'abc==' "$T/argv" 2>/dev/null; then pass "token absent from daemon argv"; else fail "token leaked into argv"; fi
 
 # 6. junk config leaves stock alone, no strike
 mkroot 'token=abc\nrf_slot=2x\n'

@@ -347,7 +347,8 @@ def test_rf_conf_keys_become_daemon_argv(root: Path) -> None:
     assert demo == "1"
     argv = _argv(root)
     assert "--rf-spi --rf-slot 2" in argv
-    assert "--token t" in argv
+    assert f"--token-file {root}/data/ha-harmony/hub.conf" in argv
+    assert "--token " not in argv
 
 
 def test_no_rf_key_means_no_rf_flags(root: Path) -> None:
@@ -520,7 +521,11 @@ def test_token_containing_equals_survives_intact(root: Path) -> None:
     install_conf(root, "token=abc123==\nport=8099\n")
     _, demo = source_hook(root)
     assert demo == "1"
-    assert "--token abc123==" in _argv(root)
+    argv = _argv(root)
+    assert "--token-file" in argv
+    assert "abc123==" not in argv
+    for log in ("cache/ha-harmony.log", "var/volatile/ha-harmony.log"):
+        assert "abc123==" not in (root / log).read_text()
 
 
 @pytest.mark.parametrize(
@@ -553,7 +558,8 @@ def test_conf_without_trailing_newline_is_read(root: Path) -> None:
     install_conf(root, "port=8099\ntoken=lastline")
     _, demo = source_hook(root)
     assert demo == "1"
-    assert "--token lastline" in _argv(root)
+    assert "--token-file" in _argv(root)
+    assert "lastline" not in _argv(root)
 
 
 # --- early death: reboot switch ---------------------------------------------------

@@ -20,6 +20,9 @@
 # is what guarantees rcS reaches line 47 -- it is a load-bearing property, not a
 # style preference, and tests/py/test_boot_hook.py enforces it.
 #
+# TOKEN NEVER ON ARGV. The daemon gets `--token-file <hub.conf>` and reads the token itself, so
+# `ps` shows no secret. The token is still validated above (bad charset => stock, no strike).
+#
 # DEFERRED LAUNCH. Even the daemon start is not synchronous: a background subshell waits
 # hah_delay seconds (dropbear and `ifup -a` come first), optionally stops luaworks/luadraws
 # (they retry a TCP connection to the now-absent hal forever), then starts the daemon and
@@ -237,7 +240,7 @@ else
 					fi
 					: >"$hah_dlog" 2>/dev/null
 					# shellcheck disable=SC2086
-					"$hah_daemon" --token "$hah_token" \
+					"$hah_daemon" --token-file "$hah_conf" \
 						--port "${hah_port:-8099}" \
 						${hah_id:+--hub-id "$hah_id"} \
 						$hah_rfargs \
