@@ -218,6 +218,11 @@ def encode_page(page_id: int, cols: int, rows: int, widgets: list[Widget]) -> by
     return encode(Page(page_id, cols, rows, tuple(widgets)), 1)
 
 
+def widget_size(w: Widget, version: int = 2) -> int:
+    """Encoded length of one widget (label included)."""
+    return len(_widget_bytes(w, version == 2))
+
+
 def page_size(page: Page, version: int = 2) -> int:
     """Encoded length without the budget check (to compute an exact overage)."""
     if version == 1:

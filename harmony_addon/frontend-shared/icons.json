@@ -157,7 +157,6 @@
    "keywords": [
     "plus",
     "add",
-    "more",
     "increase"
    ],
    "svg": "<path d=\"M12 5v14M5 12h14\"/>"
@@ -297,8 +296,7 @@
    "name": "rewind",
    "keywords": [
     "rewind",
-    "back",
-    "seek"
+    "rw"
    ],
    "svg": "<path d=\"M11 6l-8 6 8 6zM21 6l-8 6 8 6z\"/>"
   },
@@ -309,7 +307,7 @@
     "fast",
     "forward",
     "ffwd",
-    "seek"
+    "ff"
    ],
    "svg": "<path d=\"M13 6l8 6-8 6zM3 6l8 6-8 6z\"/>"
   },
@@ -348,6 +346,7 @@
    "id": 34,
    "name": "vol_up",
    "keywords": [
+    "vol+",
     "volume",
     "up",
     "louder"
@@ -358,6 +357,7 @@
    "id": 35,
    "name": "vol_down",
    "keywords": [
+    "vol-",
     "volume",
     "down",
     "quieter"
@@ -378,7 +378,11 @@
    "name": "ch",
    "keywords": [
     "channel",
-    "channels"
+    "channels",
+    "ch+",
+    "ch-",
+    "up",
+    "down"
    ],
    "svg": "<path d=\"M8 9l4-4 4 4M8 15l4 4 4-4\"/>"
   },
@@ -463,8 +467,7 @@
    "keywords": [
     "signal",
     "rf",
-    "link",
-    "radio"
+    "link"
    ],
    "svg": "<path d=\"M4 20v-3M9 20v-7M14 20V9M19 20V4\"/>"
   },

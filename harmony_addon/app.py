@@ -26,7 +26,7 @@ from harmony_core.compiler import (
     compile_config,
 )
 from harmony_core.config_model import ConfigError, check_yaml_depth, load_source, parse_model
-from harmony_core.page_codec import decode_page
+from harmony_core.page_codec import decode_page, page_to_dict
 
 from . import __version__, schemas
 from .auth import Auth, IngressAuth
@@ -240,6 +240,7 @@ async def preview(request: web.Request) -> web.Response:
             "ok": True,
             "hash": compiled.config_hash,
             "pages": [dataclasses.asdict(decode_page(p)) for p in compiled.pages],
+            "pages_v2": [page_to_dict(m) for m in compiled.models],
             "usage": {
                 "json_bytes": len(compact_json(hub).encode()),
                 "json_max": LIMITS["MAX_JSON"],

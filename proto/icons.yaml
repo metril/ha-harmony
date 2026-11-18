@@ -14,7 +14,7 @@ icons:
   - {id: 12, name: down, keywords: [down, lower]}
   - {id: 13, name: home, keywords: [home, house]}
   - {id: 14, name: star, keywords: [favorite, favourite, star]}
-  - {id: 15, name: plus, keywords: [plus, add, more, increase]}
+  - {id: 15, name: plus, keywords: [plus, add, increase]}
   - {id: 16, name: minus, keywords: [minus, less, decrease, remove]}
   - {id: 17, name: check, keywords: [ok, done, confirm, yes, check]}
   - {id: 18, name: menu, keywords: [menu, hamburger]}
@@ -28,15 +28,15 @@ icons:
   - {id: 26, name: play, keywords: [play, start]}
   - {id: 27, name: pause, keywords: [pause]}
   - {id: 28, name: stop, keywords: [stop]}
-  - {id: 29, name: rewind, keywords: [rewind, back, seek]}
-  - {id: 30, name: ffwd, keywords: [fast, forward, ffwd, seek]}
+  - {id: 29, name: rewind, keywords: [rewind, rw]}
+  - {id: 30, name: ffwd, keywords: [fast, forward, ffwd, ff]}
   - {id: 31, name: skip_next, keywords: [skip, next, track]}
   - {id: 32, name: skip_prev, keywords: [skip, previous, prev, track]}
   - {id: 33, name: record, keywords: [record, rec, dvr]}
-  - {id: 34, name: vol_up, keywords: [volume, up, louder]}
-  - {id: 35, name: vol_down, keywords: [volume, down, quieter]}
+  - {id: 34, name: vol_up, keywords: [vol+, volume, up, louder]}
+  - {id: 35, name: vol_down, keywords: [vol-, volume, down, quieter]}
   - {id: 36, name: mute, keywords: [mute, silence]}
-  - {id: 37, name: ch, keywords: [channel, channels]}
+  - {id: 37, name: ch, keywords: [channel, channels, ch+, ch-, up, down]}
   - {id: 38, name: bulb, keywords: [light, lights, lamp, bulb]}
   - {id: 39, name: scene, keywords: [scene, scenes, mood, brightness]}
   - {id: 40, name: thermo, keywords: [temperature, thermostat, heating, climate]}
@@ -44,7 +44,7 @@ icons:
   - {id: 42, name: switch, keywords: [switch, plug, outlet, toggle]}
   - {id: 43, name: fan, keywords: [fan, ventilation]}
   - {id: 44, name: lock, keywords: [lock, door, secure]}
-  - {id: 45, name: rf, keywords: [signal, rf, link, radio]}
+  - {id: 45, name: rf, keywords: [signal, rf, link]}
   - {id: 46, name: rf_off, keywords: [no, signal, offline]}
   - {id: 47, name: sync, keywords: [sync, refresh, reload]}
   - {id: 48, name: warn, keywords: [warning, alert, error]}
