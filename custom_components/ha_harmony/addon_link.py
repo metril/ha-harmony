@@ -152,3 +152,24 @@ class AddonClient:
         """Long-poll: bytes of a newer bundle, or None when the add-on's wait ran out."""
         timeout = const.LINK_WAIT_TIMEOUT
         return await self._get("/wait", {"hub": hub_id, "rev": rev}, timeout)
+
+    async def ack(self, hub_id: str, rev: str, result: str, detail: str | None = None) -> None:
+        """Tell the add-on what became of a pulled bundle. Raises AddonError; callers ignore it."""
+        body: dict[str, str] = {"hub": hub_id, "rev": rev, "result": result}
+        if detail:
+            body["detail"] = detail[:200]
+        timeout = aiohttp.ClientTimeout(total=10, sock_connect=5)
+        try:
+            async with self._session.post(
+                self._base + "/ack",
+                json=body,
+                headers=self._headers,
+                timeout=timeout,
+                allow_redirects=False,
+            ) as resp:
+                if resp.status in (401, 403):
+                    raise AddonAuthError("the add-on refused the token")
+                if resp.status != 200:
+                    raise AddonUnreachable(f"the add-on answered HTTP {resp.status}")
+        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
+            raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None

@@ -530,3 +530,94 @@ async def test_429_is_backoff_not_an_auth_failure(hass, fake_hub, raw_addon, has
     with pytest.raises(AddonAuthError):
         await coord._link.fetch(HUB_ID)
     await hass.config_entries.async_unload(entry.entry_id)
+
+
+# ------------------------------------------------------------------ apply acknowledgements
+def ack_of(fake_addon):
+    return fake_addon.store.load(HUB_ID)["ack"]
+
+
+async def test_successful_push_is_acked_ok(hass, fake_hub, fake_addon):
+    hub = await fake_hub(hub_handler([]))
+    fake_addon.apply(SOURCE)
+    entry = await setup(hass, hub, fake_addon.link_data())
+    await hass.async_block_till_done()
+    ack = ack_of(fake_addon)
+    assert ack["result"] == "ok" and ack["rev"] == entry.runtime_data.rev
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_invalid_config_is_acked_as_error_with_a_short_reason(hass, fake_hub, fake_addon):
+    hub = await fake_hub(hub_handler([]))
+    fake_addon.apply({"devices": [{"id": "BAD ID"}]})
+    entry = await setup(hass, hub, fake_addon.link_data())
+    await hass.async_block_till_done()
+    ack = ack_of(fake_addon)
+    assert ack["result"] == "error" and ack["detail"].startswith("invalid config")
+    assert len(ack["detail"]) <= 200
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_hub_rejection_is_acked_as_error(hass, fake_hub, fake_addon):
+    async def reject(ws, env):
+        reply = {"v": 1, "id": env["id"]}
+        if env["t"] == "hello":
+            await ws.send_json(
+                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": []}}
+            )
+        elif env["t"] == "set_config":
+            await ws.send_json(
+                {**reply, "t": "config_ack", "d": {"ok": False, "message": "too big"}}
+            )
+
+    hub = await fake_hub(reject)
+    fake_addon.apply(SOURCE)
+    entry = await setup(hass, hub, fake_addon.link_data())
+    await hass.async_block_till_done()
+    ack = ack_of(fake_addon)
+    assert ack["result"] == "error" and "too big" in ack["detail"]
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_schema_mismatch_is_acked_as_error(hass, fake_hub, fake_addon, monkeypatch):
+    hub = await fake_hub(hub_handler([]))
+    fake_addon.apply(SOURCE)
+    monkeypatch.setattr("custom_components.ha_harmony.addon_link.BUNDLE_SCHEMA", BUNDLE_SCHEMA + 1)
+    entry = await setup(hass, hub, fake_addon.link_data())
+    await hass.async_block_till_done()
+    ack = ack_of(fake_addon)
+    assert ack["result"] == "error" and ack["detail"] == "schema not supported"
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_ack_failure_is_not_fatal(hass, fake_hub, raw_addon, hass_storage):
+    sets = []
+    hub = await fake_hub(hub_handler(sets))
+    preseed(hass_storage)
+    raw_addon["status"] = 404  # POST is not even routed in the raw add-on: the ack fails
+    entry = await setup(hass, hub, raw_addon["data"])
+    await hass.async_block_till_done()
+    assert len(sets) == 1 and entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data._acked is None  # will be retried on the next sync
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_ack_client_sends_only_bounded_fields(aiohttp_server):
+    seen = {}
+
+    async def handler(request):
+        seen["body"] = await request.json()
+        seen["auth"] = request.headers["Authorization"]
+        return web.json_response({"ok": True})
+
+    app = web.Application()
+    app.router.add_post("/api/v1/bundle/ack", handler)
+    srv = await aiohttp_server(app)
+    async with aiohttp.ClientSession() as s:
+        c = AddonClient(s, "127.0.0.1", srv.port, "tok")
+        await c.ack("h", "r1", "error", "x" * 500)
+    assert seen["auth"] == "Bearer tok"
+    assert (
+        set(seen["body"]) == {"hub", "rev", "result", "detail"}
+        and len(seen["body"]["detail"]) == 200
+    )

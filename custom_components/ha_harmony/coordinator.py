@@ -130,6 +130,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.rev: str | None = None
         self.applied_at: int | None = None
         self.link_state = "not_linked"
+        self._acked: tuple[str, str, str | None] | None = None
         self._link: AddonClient | None = None
         self._apply_lock = asyncio.Lock()
         self.last_error: str | None = None
@@ -275,8 +276,30 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         await self.async_sync_config()
         return bundle
 
+    def _ack_later(self, rev: str | None, result: str, detail: str | None = None) -> None:
+        """Report to the add-on what became of a bundle. Background, deduplicated, never fatal."""
+        if self._link is None or rev is None or self._acked == (rev, result, detail):
+            return
+        client = self._link
+
+        async def _send() -> None:
+            try:
+                await client.ack(self.hub_id, rev, result, detail)
+            except AddonError as exc:
+                _LOGGER.debug("Could not acknowledge config %s to the add-on: %s", rev, exc)
+            except Exception:
+                _LOGGER.debug("Unexpected error acknowledging config %s", rev, exc_info=True)
+            else:
+                self._acked = (rev, result, detail)
+
+        self.config_entry.async_create_background_task(
+            self.hass, _send(), f"{DOMAIN} add-on ack {self.hub_id}"
+        )
+
     def _reject(self, exc: BundleRejected) -> None:
         _LOGGER.error("Rejected the add-on config, keeping the previous one: %s", exc)
+        detail = "schema not supported" if exc.schema else f"invalid config: {exc}"
+        self._ack_later(exc.rev, "error", detail[:200])
         self.last_error = str(exc)
         self._set_issue(ISSUE_SCHEMA if exc.schema else ISSUE_INVALID, str(exc))
         self.async_set_link_state("rejected")
@@ -395,7 +418,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 return
             try:
                 if await self._push_config_locked():
+                    self._ack_later(self.rev, "ok")
                     await self._push_pages_locked()
+                else:
+                    self._ack_later(self.rev, "error", f"the hub rejected it: {self.last_error}"[:200])
             except (HarmonyConnectionError, HomeAssistantError) as exc:
                 _LOGGER.warning("Could not sync the config to the hub (will retry): %s", exc)
 
