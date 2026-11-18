@@ -1,6 +1,7 @@
 import { css, html, nothing } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { customElement, state } from 'lit/decorators.js';
 import { ApiError } from '../lib/api';
+import { diffConfig, type DiffRow } from '../lib/diff';
 import { shared } from '../lib/styles';
 import { StoreElement, confirmAction } from '../components/base';
 import { when } from '../components/parts';
@@ -14,9 +15,56 @@ export class HhHistory extends StoreElement {
       ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
       li { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); }
       .rev { font-weight: 650; min-width: 64px; }
+      .diffrow { flex-basis: 100%; display: grid; gap: 4px; }
+      .diffrow div { display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 8px; border-radius: var(--r1); background: var(--sf2); }
+      .k { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; min-width: 62px; }
+      .k.added { color: var(--ok); } .k.changed { color: var(--ir); } .k.removed { color: var(--bad); }
       .hash { font-family: var(--mono); font-size: 12px; color: var(--tx3); }
     `,
   ];
+
+  /** rev -> what changed from that version to the applied one (loaded on demand) */
+  @state() private open: Record<number, DiffRow[] | 'loading'> = {};
+
+  private close(rev: number) {
+    this.open = Object.fromEntries(Object.entries(this.open).filter(([k]) => Number(k) !== rev));
+  }
+
+  private async compare(rev: number) {
+    if (this.open[rev]) {
+      this.close(rev);
+      return;
+    }
+    this.open = { ...this.open, [rev]: 'loading' };
+    try {
+      const h = await this.store.api.historyEntry(this.store.hub, rev);
+      // "applied" is what the old version would become if restored: show old -> applied
+      this.open = { ...this.open, [rev]: diffConfig(h.config, this.store.appliedConfig) };
+    } catch (e) {
+      this.close(rev);
+      this.store.toast(e instanceof ApiError ? e.message : 'Could not load that version.', 'error');
+    }
+  }
+
+  private async restore(rev: number) {
+    const s = this.store;
+    if (s.hasDraft) {
+      const ok = await confirmAction(this, {
+        title: `Restore rev ${rev} as draft?`,
+        body: 'You have unapplied changes. Restoring replaces them with that version.',
+        ok: 'Replace draft',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    try {
+      await s.restoreAsDraft(rev);
+      s.toast(`Rev ${rev} restored as a draft. Review it, then apply.`);
+      location.hash = '#/overview';
+    } catch (e) {
+      s.toast(e instanceof ApiError ? e.message : 'Could not restore that version.', 'error');
+    }
+  }
 
   private async revert(rev: number) {
     const ok = await confirmAction(this, {
@@ -32,6 +80,17 @@ export class HhHistory extends StoreElement {
     } catch (e) {
       this.store.toast(e instanceof ApiError ? e.message : 'Could not revert.', 'error');
     }
+  }
+
+  private diffRows(rev: number) {
+    const d = this.open[rev];
+    if (d === undefined) return nothing;
+    if (d === 'loading') return html`<span class="muted diffrow">Loading…</span>`;
+    return html`<div class="diffrow" aria-label="Changes from rev ${rev} to the current version">
+      ${d.length
+        ? d.map((r) => html`<div><span class="k ${r.kind}">${r.kind}</span><span><strong>${r.area}</strong> ${r.label}</span>${r.detail ? html`<span class="muted">${r.detail}</span>` : nothing}</div>`)
+        : html`<span class="muted">Same as the current version.</span>`}
+    </div>`;
   }
 
   protected override render() {
@@ -50,12 +109,12 @@ export class HhHistory extends StoreElement {
             ${s.history.map(
               (h, i) => html`<li>
                 <span class="rev">Rev ${h.rev}</span><span>${when(h.at)}</span><span class="hash">${h.hash.slice(0, 12)}</span><span class="sp"></span>
-                ${h.config
-                  ? html`<button class="btn sm" @click=${() => void s.restoreAsDraft(h.config ?? {})}>Restore as draft</button>`
-                  : html`<button class="btn sm" aria-disabled="true" title="The add-on does not return old configs yet">Restore as draft</button>`}
+                <button class="btn sm" aria-expanded=${this.open[h.rev] !== undefined} @click=${() => void this.compare(h.rev)}>Compare</button>
+                <button class="btn sm" @click=${() => void this.restore(h.rev)}>Restore as draft</button>
                 ${i === 0
                   ? html`<button class="btn sm danger" @click=${() => void this.revert(h.rev)}>Revert to rev ${h.rev}</button>`
                   : html`<button class="btn sm" aria-disabled="true" title="Only the newest earlier version can be reverted to">Revert</button>`}
+                ${this.diffRows(h.rev)}
               </li>`,
             )}
           </ul>`}

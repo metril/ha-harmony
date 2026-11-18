@@ -8,7 +8,7 @@ export default defineConfig({
     cssCodeSplit: false,
     modulePreload: false,
     assetsInlineLimit: 0,
-    rollupOptions: { output: { inlineDynamicImports: true } },
+
   },
   test: {
     environment: 'happy-dom',

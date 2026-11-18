@@ -1,53 +1,97 @@
 // Typed client for the add-on API. All URLs are relative to document.baseURI (ingress prefix).
-import type { Config, ValidationError } from './model';
+import type { Config, IrAction, ValidationError } from './model';
 
 export interface Meta {
   applied: { rev: number; at: number; hash: string } | null;
-  /** `config` is not returned today; used for "Restore as draft" when the API adds it. */
-  history: { rev: number; at: number; hash: string; config?: Config }[];
+  history: { rev: number; at: number; hash: string }[];
   history_max: number;
+  /** integer draft revision (separate from applied.rev); sent back as If-Match */
+  rev: number;
 }
 export interface ConfigResponse extends Meta {
   hub: string;
-  draft: { config: Config; updated: number; rev?: number } | null;
-  applied: (Meta['applied'] & { config?: Config }) | null;
+  draft: { config: Config; updated: number } | null;
+  applied: (NonNullable<Meta['applied']> & { config?: Config }) | null;
 }
 export interface PutResponse extends Meta {
   hub: string;
   draft_updated: number;
-  draft_rev?: number;
-  rev?: number;
 }
 export interface Usage {
   json_bytes: number;
   json_max: number;
   pool_words: number;
   pool_max: number;
+  keys: number;
+  keys_max: number;
   devices: number;
   devices_max: number;
   activities: number;
   activities_max: number;
+  commands: number;
+  commands_max: number;
+  inputs: number;
+  inputs_max: number;
+  soft_keys: number;
+  soft_keys_max: number;
 }
+export interface PreviewPage {
+  index: number;
+  id: string;
+  ok: boolean;
+  error: string | null;
+  page: unknown;
+  bytes: number | null;
+  limit: number;
+  widgets: number | null;
+  widget_limit: number;
+}
+/** Always HTTP 200: `errors` lists what is wrong, `usage`/`hash` are null unless the whole config is valid. */
 export interface Preview {
-  ok: true;
-  hash: string;
-  usage: Usage;
-  pages: unknown[];
+  ok: boolean;
+  hash: string | null;
+  errors: ValidationError[];
+  missing_pages: { index: number; id: string }[];
+  pages: PreviewPage[];
+  usage: Usage | null;
 }
+/** config/status: the integration has applied the bundle once acked_rev === applied_rev. */
 export interface ApplyStatus {
+  hub: string;
+  applied_rev: string | null;
+  acked_rev: string | null;
+  result: 'ok' | 'error' | null;
+  detail: string | null;
+  acked_at: number | null;
+  linked: boolean;
+  last_seen: number | null;
+}
+export interface HubInfo {
+  id: string;
+  has_draft: boolean;
+  has_applied: boolean;
+  applied_rev: string | null;
+  applied_at: number | null;
+}
+export interface HistoryEntry {
+  hub: string;
   rev: number;
-  state: 'pending' | 'ok' | 'error';
-  detail?: string;
+  at: number;
+  hash: string;
+  config: Config;
 }
 export interface HaEntity {
   entity_id: string;
   name?: string;
+  domain?: string;
   state?: string;
+  device_class?: string;
 }
 export interface HaService {
   domain: string;
   service: string;
   name?: string;
+  fields?: string[];
 }
 
 export class ApiError extends Error {
@@ -57,15 +101,21 @@ export class ApiError extends Error {
     msg: string,
     public errors: ValidationError[] = [],
     public files: string[] = [],
+    /** the rest of the error object: `rev` on a 409 conflict, `retry_after_ms` on a 429 */
+    public extra: Record<string, unknown> = {},
   ) {
     super(msg);
     this.name = 'ApiError';
   }
   get isConflict(): boolean {
-    return this.status === 409 && ['conflict', 'rev_conflict', 'stale_draft', 'rev_mismatch'].includes(this.code);
+    return this.status === 409 && this.code === 'conflict';
   }
   get isNetwork(): boolean {
     return this.status === 0;
+  }
+  get retryAfterMs(): number | null {
+    const v = this.extra['retry_after_ms'];
+    return typeof v === 'number' ? v : null;
   }
 }
 
@@ -118,24 +168,21 @@ export class Api {
       }
     }
     if (!res.ok) {
-      const d = (data ?? {}) as { error?: { code?: string; msg?: string; errors?: ValidationError[]; files?: string[] }; errors?: ValidationError[] };
-      const err = d.error ?? {};
-      throw new ApiError(
-        res.status,
-        err.code ?? 'http_error',
-        err.msg ?? `Request failed (${res.status})`,
-        err.errors ?? d.errors ?? [],
-        err.files ?? [],
-      );
+      // {error:{code,msg,...extra}}; apply's 422 is the one flat shape: {ok:false, errors}
+      const d = (data ?? {}) as { error?: { code?: string; msg?: string; errors?: ValidationError[]; files?: string[] } & Record<string, unknown>; errors?: ValidationError[] };
+      const { code, msg, errors, files, ...extra } = d.error ?? {};
+      throw new ApiError(res.status, code ?? 'http_error', msg ?? `Request failed (${res.status})`, errors ?? d.errors ?? [], files ?? [], extra);
     }
     return data as T;
   }
 
   health = () => this.request<{ ok: boolean; addon_version: string }>('GET', 'api/v1/health');
-  /** Not in the API yet: callers treat 404/503 as "single hub". */
-  hubs = () => this.request<{ hubs: { id: string; name?: string }[] }>('GET', 'api/v1/hubs');
+  hubs = () => this.request<{ hubs: HubInfo[] }>('GET', 'api/v1/hubs');
   getConfig = (hub: string, full = false) =>
     this.request<ConfigResponse>('GET', 'api/v1/config', { query: { hub, full: full ? '1' : undefined } });
+  /** The source config of the applied version or one history row, by its integer rev. */
+  historyEntry = (hub: string, rev: number) =>
+    this.request<HistoryEntry>('GET', 'api/v1/config/history', { query: { hub, rev: String(rev) } });
   putDraft = (hub: string, config: Config, rev?: number | null) =>
     this.request<PutResponse>('PUT', 'api/v1/config/draft', {
       query: { hub },
@@ -147,22 +194,30 @@ export class Api {
       query: { hub },
       body: config ? { config } : {},
     });
-  /** 200 with usage, or ApiError 422 carrying `errors`. */
+  /** Always 200; look at `ok` and `errors`. Without `config` it checks the saved draft. */
   preview = (hub: string, config?: Config) =>
     this.request<Preview>('POST', 'api/v1/config/preview', { query: { hub }, body: config ? { config } : {} });
   apply = (hub: string) => this.request<Meta & { ok: true }>('POST', 'api/v1/config/apply', { query: { hub } });
   revert = (hub: string, target: 'applied' | 'previous') =>
     this.request<Meta & { ok: true }>('POST', 'api/v1/config/revert', { query: { hub }, body: { target } });
-  importYaml = (hub: string, yaml: string) =>
-    this.request<PutResponse & { ok: true }>('POST', 'api/v1/config/import_yaml', { query: { hub }, yaml });
+  importYaml = (hub: string, yaml: string, rev?: number | null) =>
+    this.request<PutResponse & { ok: true }>('POST', 'api/v1/config/import_yaml', {
+      query: { hub },
+      yaml,
+      headers: rev != null ? { 'If-Match': String(rev) } : {},
+    });
   exportUrl = (hub: string, source?: 'draft' | 'applied') => this.href('api/v1/config/export_yaml', { hub, source });
-  /** Planned: GET config/status. Callers treat 404 as "no status available". */
   applyStatus = (hub: string) => this.request<ApplyStatus>('GET', 'api/v1/config/status', { query: { hub } });
-  /** Amendment 9: 503 means Home Assistant is unreachable; callers fall back to typed ids. */
+  /** 503 ha_unavailable means Home Assistant cannot be read; callers fall back to typed ids. */
   haEntities = (domain?: string) =>
     this.request<{ entities: HaEntity[] }>('GET', 'api/v1/ha/entities', { query: { domain } });
   haServices = (domain?: string) =>
     this.request<{ services: HaService[] }>('GET', 'api/v1/ha/services', { query: { domain } });
+  /** Fire one inline code through Home Assistant. 429 carries retry_after_ms. */
+  irTest = (hub: string, ir: IrAction, portMask?: number) =>
+    this.request<{ ok: true; action: IrAction }>('POST', 'api/v1/ir/test', {
+      body: { hub, ir, ...(portMask !== undefined ? { port_mask: portMask } : {}) },
+    });
 }
 
 /** Entities, or null when Home Assistant cannot be read (503/404) so the UI offers free text. */
@@ -186,7 +241,7 @@ export async function haServicesOrNull(api: Api, domain?: string): Promise<HaSer
 /**
  * Single queue for draft PUTs. At most one request is in flight; edits that arrive meanwhile
  * collapse into one follow-up PUT carrying the newest config. The rev from each response is
- * sent as If-Match on the next one (when the API returns one).
+ * sent as If-Match on the next one.
  */
 export class DraftQueue {
   rev: number | null = null;
@@ -216,8 +271,7 @@ export class DraftQueue {
       this.pending = null;
       try {
         const res = await this.api.putDraft(this.hub, job.config, force ? null : this.rev);
-        const r = res.draft_rev ?? res.rev;
-        if (typeof r === 'number') this.rev = r;
+        this.rev = res.rev;
         job.waiters.forEach((w) => w.ok(res));
       } catch (e) {
         job.waiters.forEach((w) => w.fail(e));

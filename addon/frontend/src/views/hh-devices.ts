@@ -31,6 +31,7 @@ export class HhDevices extends StoreElement {
       td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; min-height: 40px; overflow-wrap: anywhere; }
       .scroll { overflow-x: auto; }
       dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+      .code { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 2px 0; }
       dt { color: var(--tx3); font-size: 12px; } dd { margin: 0; overflow-wrap: anywhere; }
     `,
   ];
@@ -75,7 +76,7 @@ export class HhDevices extends StoreElement {
         <table>
           <thead><tr><th>Name</th><th>Code</th><th>Ports</th><th></th></tr></thead>
           <tbody>
-            ${rows.map(([name, a]) => html`<tr><td>${name}</td><td class="mono">${summarize(a)}</td><td class="mono">${a.port_mask ?? 'all'}</td><td><hh-send-ir></hh-send-ir></td></tr>`)}
+            ${rows.map(([name, a]) => html`<tr><td>${name}</td><td class="mono">${summarize(a)}</td><td class="mono">${a.port_mask ?? 'all'}</td><td><hh-send-ir .code=${a}></hh-send-ir></td></tr>`)}
           </tbody>
         </table>
       </div>
@@ -84,14 +85,15 @@ export class HhDevices extends StoreElement {
 
   private details(d: Device) {
     const p = d.power;
-    const power = p?.toggle ? `Toggle · ${summarize(p.toggle)}` : p?.on || p?.off ? `On ${summarize(p.on)} · Off ${summarize(p.off)}` : 'None';
+    const pw = (['toggle', 'on', 'off'] as const).flatMap((k) => (p?.[k] ? [[k, p[k]] as const] : []));
+    const inputs = Object.entries(d.inputs ?? {});
     return html`<section class="card" aria-label="Device details">
       <h2>Details</h2>
       <dl>
         <dt>Id</dt><dd class="mono">${d.id}</dd>
-        <dt>Power</dt><dd>${power}</dd>
+        <dt>Power</dt><dd>${pw.length ? pw.map(([k, a]) => html`<div class="code"><span>${k} <span class="mono">${summarize(a)}</span></span><hh-send-ir .code=${a}></hh-send-ir></div>`) : 'None'}</dd>
         <dt>Settle</dt><dd>${d.settle_ms ?? 0} ms</dd>
-        <dt>Inputs</dt><dd>${Object.keys(d.inputs ?? {}).join(', ') || 'none'}</dd>
+        <dt>Inputs</dt><dd>${inputs.length ? inputs.map(([k, a]) => html`<div class="code"><span>${k} <span class="mono">${summarize(a)}</span></span><hh-send-ir .code=${a}></hh-send-ir></div>`) : 'none'}</dd>
         ${d.aliases?.length ? html`<dt>Aliases</dt><dd>${d.aliases.join(', ')}</dd>` : nothing}
         ${d.source ? html`<dt>Source</dt><dd>From IR archive · ${String(d.source.mfr ?? '')} ${String(d.source.model_file ?? '')}</dd>` : nothing}
       </dl>

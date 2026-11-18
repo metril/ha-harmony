@@ -5,7 +5,7 @@ import { icon } from '../lib/icons';
 import { counts } from '../lib/model';
 import { Router, hashFor } from '../lib/router';
 import { shared } from '../lib/styles';
-import { ApiError } from '../lib/api';
+import { ApiError, type HubInfo } from '../lib/api';
 import { StoreElement, type ConfirmRequest } from './base';
 import './hh-apply-dialog';
 import './hh-dialog';
@@ -75,7 +75,7 @@ export class HhApp extends StoreElement {
   @state() private applyOpen = false;
   @state() private importOpen = false;
   @state() private confirm: ConfirmRequest | null = null;
-  @state() private hubs: { id: string; name?: string }[] = [];
+  @state() private hubs: HubInfo[] = [];
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -151,7 +151,7 @@ export class HhApp extends StoreElement {
         <span class="brand">${icon('hub')} Harmony Editor</span>
         ${this.hubs.length > 1
           ? html`<select aria-label="Hub" @change=${(e: Event) => { const u = new URL(location.href); u.searchParams.set('hub', (e.target as HTMLSelectElement).value); location.href = u.toString(); }}>
-              ${this.hubs.map((h) => html`<option value=${h.id} ?selected=${h.id === s.hub}>${h.name ?? h.id}</option>`)}
+              ${this.hubs.map((h) => html`<option value=${h.id} ?selected=${h.id === s.hub}>${h.id}${h.has_applied ? '' : ' (no config yet)'}</option>`)}
             </select>`
           : nothing}
         <span class="sp"></span>

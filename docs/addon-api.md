@@ -27,6 +27,7 @@ the table below.
 | GET | `/assets` | ingress | Hashed UI assets under /assets/… (immutable cache; only present when the frontend is built) |
 | GET | `/api/v1/health` | ingress | Versions |
 | GET | `/api/v1/config` | ingress | Draft, applied metadata, history, draft `rev` |
+| GET | `/api/v1/config/history` | ingress | Source config of one applied or history version |
 | PUT | `/api/v1/config/draft` | ingress | Store the draft (honours `If-Match`) |
 | POST | `/api/v1/config/validate` | ingress | All validation errors |
 | POST | `/api/v1/config/preview` | ingress | Decoded pages, usage meters; error tolerant |
@@ -56,6 +57,8 @@ Query/body details follow. `hub` is a query parameter wherever a hub applies.
 - `GET config?hub=&full=0|1` -> `{hub, draft: {config, updated}|null, applied: {rev, at, hash}|null,
   history: [{rev, at, hash}], history_max, rev}`. `full=1` returns `applied` with its `config`.
   `rev` is the integer **draft revision**; it is separate from `applied.rev`.
+- `GET config/history?hub=&rev=<int>` -> `{hub, rev, at, hash, config}` for the applied version or one
+  history row (the integer `rev` those rows carry); `404 unknown_rev`. Used for "restore as draft" and diffs.
 - `PUT config/draft?hub=` body `{config}`; optional `If-Match: 3` (also `"3"`, `W/"3"`). Stale ->
   `409 conflict` with `error.rev` set to the current revision. No header = unconditional.
   -> `{hub, draft_updated, applied, history, history_max, rev}`. Import and revert also bump `rev`.
@@ -75,7 +78,7 @@ Query/body details follow. `hub` is a query parameter wherever a hub applies.
 
 ### Preview
 
-`POST config/preview?hub=` body `{config?}` always answers `200`, with every page that compiles even
+`POST config/preview?hub=` body `{config?}` (without `config` it uses the saved draft: `409 no_draft` when there is none, so send the applied config to preview that) always answers `200`, with every page that compiles even
 when the draft has errors elsewhere:
 
 ```

@@ -313,3 +313,25 @@ async def test_repeated_identical_acks_do_not_rewrite_the_store(feed, tmp_path):
     for _ in range(3):
         await feed.post("/api/v1/bundle/ack", json=b, headers=BEARER)
     assert f.stat().st_mtime_ns == m
+
+
+# ---------------------------------------------------------------- history rows
+async def test_history_entry_returns_the_source_config_by_rev(client):
+    NEWER = json.loads(json.dumps(CONFIG))
+    NEWER["devices"][0]["settle_ms"] = 250
+    await put_draft(client)
+    await client.post("/api/v1/config/apply", json={}, headers=H)
+    await client.put("/api/v1/config/draft", json={"config": NEWER}, headers=H)
+    await client.post("/api/v1/config/apply", json={}, headers=H)
+    meta = await (await client.get("/api/v1/config")).json()
+    old, cur = meta["history"][0], meta["applied"]
+    r = await client.get("/api/v1/config/history", params={"rev": str(old["rev"])})
+    body = await r.json()
+    assert r.status == 200 and body["rev"] == old["rev"] and body["config"] == CONFIG
+    assert set(body) == {"hub", "rev", "at", "hash", "config"}
+    r = await client.get("/api/v1/config/history", params={"rev": str(cur["rev"])})
+    assert (await r.json())["config"] == NEWER
+    r = await client.get("/api/v1/config/history", params={"rev": "99"})
+    assert r.status == 404 and (await r.json())["error"]["code"] == "unknown_rev"
+    for bad in ({}, {"rev": "x"}, {"rev": "-1"}):
+        assert (await client.get("/api/v1/config/history", params=bad)).status == 400

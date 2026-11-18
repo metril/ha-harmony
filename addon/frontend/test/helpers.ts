@@ -56,4 +56,13 @@ export function tvConfig(): Config {
   };
 }
 
-export const META = { applied: { rev: 3, at: 1_700_000_000, hash: 'abcdef0123456789' }, history: [{ rev: 2, at: 1_699_990_000, hash: '1111222233334444' }], history_max: 5 };
+export const META = { applied: { rev: 3, at: 1_700_000_000, hash: 'abcdef0123456789' }, history: [{ rev: 2, at: 1_699_990_000, hash: '1111222233334444' }], history_max: 5, rev: 7 };
+
+export const USAGE = {
+  json_bytes: 9000, json_max: 131072, pool_words: 900, pool_max: 1000, keys: 1, keys_max: 35,
+  devices: 2, devices_max: 16, activities: 1, activities_max: 16, commands: 62, commands_max: 256,
+  inputs: 5, inputs_max: 64, soft_keys: 0, soft_keys_max: 64,
+};
+export const previewOk = (over: object = {}) => ({ ok: true, hash: 'cafebabe', errors: [], missing_pages: [], pages: [], usage: USAGE, ...over });
+export const previewBad = (errors: unknown[]) => ({ ok: false, hash: null, errors, missing_pages: [], pages: [], usage: null });
+export const status = (over: object = {}) => ({ hub: 'h', applied_rev: 'aaaa1111', acked_rev: null, result: null, detail: null, acked_at: null, linked: true, last_seen: 1, ...over });

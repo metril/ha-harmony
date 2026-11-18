@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `GET /api/v1/config/history?rev=` returns the source config of an applied or history version, so the
+  editor can restore it as a draft and diff it.
+- Editor UI speaks the real API: nested errors, draft `rev` with `If-Match`, all-errors validation,
+  metered preview, hub picker, apply status with acknowledgement, Send IR.
 - Editor API: Home Assistant entity/service pickers (read-only Core API), IR database browsing and
   import, IR test-fire (calls only `ha_harmony.send_ir`), draft revisions (`If-Match`), all
   validation errors, hub list, apply acknowledgements and status.

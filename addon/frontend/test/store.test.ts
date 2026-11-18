@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../src/lib/store';
-import { META, fakeApi, tvConfig } from './helpers';
+import { META, USAGE, fakeApi, previewBad, previewOk, tvConfig } from './helpers';
 
 const draftResp = { hub: 'h', draft_updated: 1_700_000_100, ...META };
 function setup(over: Record<string, () => { status?: number; body?: unknown }> = {}, draft: unknown = null) {
@@ -11,7 +11,7 @@ function setup(over: Record<string, () => { status?: number; body?: unknown }> =
       puts.push(JSON.parse(c.body ?? '{}').config);
       return { body: draftResp };
     },
-    'POST api/v1/config/preview': () => ({ body: { ok: true, hash: 'h1', pages: [], usage: { json_bytes: 2048, json_max: 131072, pool_words: 100, pool_max: 1000, devices: 2, devices_max: 16, activities: 1, activities_max: 16 } } }),
+    'POST api/v1/config/preview': () => ({ body: previewOk({ usage: { ...USAGE, json_bytes: 2048 } }) }),
     ...over,
   });
   const store = new Store(f.api, 'h', 600);
@@ -54,7 +54,7 @@ describe('draft store', () => {
   it('enters the conflict state on 409 and keeps local edits; Overwrite resends', async () => {
     let conflict = true;
     const { store, calls } = setup({
-      'PUT api/v1/config/draft': () => (conflict ? { status: 409, body: { error: { code: 'conflict', msg: 'stale' } } } : { body: { ...draftResp, draft_rev: 9 } }),
+      'PUT api/v1/config/draft': () => (conflict ? { status: 409, body: { error: { code: 'conflict', msg: 'stale' } } } : { body: { ...draftResp, rev: 9 } }),
     });
     await store.load();
     store.edit((c) => (c.devices![0]!.name = 'Mine'));
@@ -67,14 +67,45 @@ describe('draft store', () => {
     expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2);
   });
 
-  it('keeps validation errors from a 422 preview and blocks nothing else', async () => {
-    const errors = [{ path: ['devices', 0, 'commands', 'x'], msg: 'bad' }];
-    const { store } = setup({ 'POST api/v1/config/preview': () => ({ status: 422, body: { ok: false, errors } }) });
+  it('keeps the errors a 200 preview reports, and drops the meters', async () => {
+    const errors = [{ path: ['devices', 0, 'commands', 'x'], msg: 'bad', line: null }];
+    const { store } = setup({ 'POST api/v1/config/preview': () => ({ body: previewBad(errors) }) });
     await store.load();
     store.edit((c) => (c.devices![0]!.name = 'Z'));
     await vi.advanceTimersByTimeAsync(700);
     expect(store.errors).toEqual(errors);
+    expect(store.usage).toBeNull();
     expect(store.errorSummary.bySection['devices']).toBe(1);
+  });
+
+  it('sends the rev from GET config as If-Match, then the rev each PUT returned', async () => {
+    let n = 7;
+    const { store, calls } = setup({ 'PUT api/v1/config/draft': () => ({ body: { ...draftResp, rev: ++n } }) });
+    await store.load();
+    store.edit((c) => (c.devices![0]!.name = 'A'));
+    await vi.advanceTimersByTimeAsync(700);
+    store.edit((c) => (c.devices![0]!.name = 'B'));
+    await vi.advanceTimersByTimeAsync(700);
+    const puts = calls.filter((c) => c.method === 'PUT').map((c) => c.headers['If-Match']);
+    expect(puts).toEqual(['7', '8']);
+  });
+
+  it('restores a history version as the draft from GET config/history', async () => {
+    const old = { ...tvConfig(), activities: [] };
+    const { store, puts, calls } = setup({ 'GET api/v1/config/history': () => ({ body: { hub: 'h', rev: 2, at: 1, hash: 'x', config: old } }) });
+    await store.load();
+    await store.restoreAsDraft(2);
+    expect(calls.find((c) => c.url.includes('config/history'))?.url).toContain('rev=2');
+    expect(puts.at(-1)).toEqual(old);
+    expect(store.hasDraft).toBe(true);
+  });
+
+  it('previews the applied config explicitly when there is no draft (the add-on would answer 409 no_draft)', async () => {
+    const { store, calls } = setup();
+    await store.load();
+    const body = JSON.parse(calls.find((c) => c.url.includes('config/preview'))!.body!);
+    expect(body.config.devices).toHaveLength(2);
+    expect(store.usage?.json_bytes).toBe(2048);
   });
 
   it('computes the diff against the applied config', async () => {
@@ -92,7 +123,7 @@ describe('draft store', () => {
   });
 
   it('is first-run when nothing is applied and there is no draft', async () => {
-    const { store } = setup({ 'GET api/v1/config': () => ({ body: { hub: 'h', draft: null, applied: null, history: [], history_max: 5 } }) });
+    const { store } = setup({ 'GET api/v1/config': () => ({ body: { hub: 'h', draft: null, applied: null, history: [], history_max: 5, rev: 0 } }) });
     await store.load();
     expect(store.isFirstRun).toBe(true);
   });

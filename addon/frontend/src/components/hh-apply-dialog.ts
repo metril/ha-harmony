@@ -34,7 +34,8 @@ export class HhApplyDialog extends StoreElement {
   @state() private phase: 'review' | 'applying' | 'done' | 'error' = 'review';
   @state() private rev = 0;
   @state() private message = '';
-  @state() private ack: 'unknown' | 'waiting' | 'ok' | 'error' | 'timeout' | 'unsupported' = 'unknown';
+  @state() private ack: 'unknown' | 'waiting' | 'ok' | 'error' | 'timeout' = 'unknown';
+  @state() private linked = true;
   private pollTimer?: ReturnType<typeof setTimeout>;
 
   override willUpdate(changed: Map<string, unknown>): void {
@@ -42,6 +43,7 @@ export class HhApplyDialog extends StoreElement {
       this.phase = 'review';
       this.message = '';
       this.ack = 'unknown';
+      this.linked = true;
     }
   }
   override disconnectedCallback(): void {
@@ -73,30 +75,29 @@ export class HhApplyDialog extends StoreElement {
     }
   }
 
-  /** Polls config/status (planned endpoint). A 404 means "not available": stay pending, never block. */
+  /**
+   * Polls config/status. The integration has taken the bundle when acked_rev equals applied_rev
+   * (both are bundle hashes); result says whether it worked. After waitMs we say Home Assistant has
+   * not picked it up yet but keep polling quietly: the ack can still arrive.
+   */
   private async poll(started: number): Promise<void> {
-    if (this.phase !== 'done') return;
+    if (this.phase !== 'done' || this.ack === 'ok' || this.ack === 'error') return;
     try {
       const s = await this.store.api.applyStatus(this.store.hub);
-      if (s.rev >= this.rev && s.state === 'ok') {
+      this.linked = s.linked;
+      if (s.applied_rev !== null && s.acked_rev === s.applied_rev && s.result === 'ok') {
         this.ack = 'ok';
         return;
       }
-      if (s.rev >= this.rev && s.state === 'error') {
+      if (s.applied_rev !== null && s.acked_rev === s.applied_rev && s.result === 'error') {
         this.ack = 'error';
         this.message = s.detail ?? 'The hub rejected the config.';
         return;
       }
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 404) {
-        this.ack = 'unsupported';
-        return;
-      }
+    } catch {
+      /* transient: try again */
     }
-    if (Date.now() - started >= this.waitMs) {
-      this.ack = 'timeout';
-      return;
-    }
+    if (this.ack !== 'timeout' && Date.now() - started >= this.waitMs) this.ack = 'timeout';
     this.pollTimer = setTimeout(() => void this.poll(started), this.pollMs);
   }
 
@@ -154,11 +155,11 @@ export class HhApplyDialog extends StoreElement {
         )}
       </ul>
       ${this.ack === 'waiting' ? html`<p class="muted">You can close this: the add-on has saved the config, and the rest happens in the background.</p>` : nothing}
-      ${this.ack === 'unsupported'
-        ? html`<p class="muted">Saved. Progress reporting from Home Assistant is not available yet, so the later steps cannot be confirmed here.</p>`
-        : nothing}
       ${this.ack === 'timeout'
-        ? html`<div class="banner ir" role="status">Saved as rev ${this.rev}. Home Assistant hasn't picked it up yet. Is the Harmony integration set up and linked to this add-on?</div>`
+        ? html`<div class="banner ir" role="status">Saved as rev ${this.rev}.
+            ${this.linked
+              ? 'Home Assistant has not picked it up yet. It will apply as soon as the integration is connected.'
+              : 'Home Assistant has not picked it up yet. Is the Harmony integration set up and linked to this add-on?'}</div>`
         : nothing}
       ${this.ack === 'error'
         ? html`<div class="banner bad" role="alert">${this.message} The hub keeps the old rev.</div>`
@@ -166,7 +167,7 @@ export class HhApplyDialog extends StoreElement {
       ${this.ack === 'error' && s.history.length
         ? html`<button slot="footer" class="btn danger" @click=${() => void this.revertPrevious()}>Revert to rev ${s.history[0]?.rev}</button>`
         : nothing}
-      <button slot="footer" class="btn pri" @click=${() => this.close()}>${this.ack === 'waiting' || this.ack === 'timeout' ? 'Keep waiting in background' : 'Done'}</button>
+      <button slot="footer" class="btn pri" @click=${() => this.close()}>${this.ack === 'ok' || this.ack === 'error' ? 'Done' : 'Keep waiting in background'}</button>
     </hh-dialog>`;
   }
 }

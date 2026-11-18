@@ -239,6 +239,18 @@ async def get_config(request: web.Request) -> web.Response:
     return jresp(out)
 
 
+async def get_history_entry(request: web.Request) -> web.Response:
+    """The source config of one applied version (the applied one or a history row), by its rev."""
+    q = query(request, schemas.HISTORY_QUERY)
+    state = _store_call(request.app[STORE_KEY].load, q["hub"])
+    rev = int(q["rev"])
+    rows = [state["applied"], *state["history"]]
+    row = next((r for r in rows if r is not None and r["rev"] == rev), None)
+    if row is None:
+        raise error(404, "unknown_rev", "no applied or history version has that rev")
+    return jresp({"hub": q["hub"], **{k: row[k] for k in ("rev", "at", "hash", "config")}})
+
+
 async def put_draft(request: web.Request) -> web.Response:
     q = query(request, schemas.QUERY)
     body = await read_body(request, schemas.PUT_DRAFT)
@@ -791,6 +803,7 @@ def create_app(
         app.router.add_get("/", index)
     app.router.add_get(f"{api}/health", health)
     app.router.add_get(f"{api}/config", get_config)
+    app.router.add_get(f"{api}/config/history", get_history_entry)
     app.router.add_put(f"{api}/config/draft", put_draft)
     app.router.add_post(f"{api}/config/validate", validate)
     app.router.add_post(f"{api}/config/preview", preview)

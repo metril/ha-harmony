@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Api, ApiError, DraftQueue, haEntitiesOrNull } from '../src/lib/api';
-import { META, fakeApi } from './helpers';
+import { META, fakeApi, previewBad } from './helpers';
 
 describe('api client', () => {
   it('builds relative URLs under the ingress base path', async () => {
@@ -42,12 +42,39 @@ describe('api client', () => {
     expect(err.files).toEqual(['flipper:a.ir']);
   });
 
-  it('reads validation errors from a 422 preview', async () => {
-    const errors = [{ path: ['devices', 0, 'id'], msg: 'bad id' }];
-    const { api } = fakeApi({ 'POST api/v1/config/preview': () => ({ status: 422, body: { ok: false, errors } }) });
-    const err = await api.preview('h').catch((e) => e);
+  it('preview is a 200 carrying errors, never an exception', async () => {
+    const errors = [{ path: ['devices', 0, 'id'], msg: 'bad id', line: null }];
+    const { api } = fakeApi({ 'POST api/v1/config/preview': () => ({ body: previewBad(errors) }) });
+    const p = await api.preview('h');
+    expect(p.ok).toBe(false);
+    expect(p.errors).toEqual(errors);
+    expect(p.usage).toBeNull();
+  });
+
+  it("apply's flat 422 {ok:false, errors} becomes ApiError.errors", async () => {
+    const errors = [{ path: ['keys', 'select'], msg: 'unknown', line: null }];
+    const { api } = fakeApi({ 'POST api/v1/config/apply': () => ({ status: 422, body: { ok: false, errors } }) });
+    const err = await api.apply('h').catch((e) => e);
     expect(err.status).toBe(422);
     expect(err.errors).toEqual(errors);
+  });
+
+  it('keeps conflict rev and the 429 cooldown from the nested error', async () => {
+    const { api } = fakeApi({
+      'PUT api/v1/config/draft': () => ({ status: 409, body: { error: { code: 'conflict', msg: 'stale', rev: 12 } } }),
+      'POST api/v1/ir/test': () => ({ status: 429, body: { error: { code: 'rate_limited', msg: 'slow', retry_after_ms: 1500 } } }),
+    });
+    const c = await api.putDraft('h', {}, 3).catch((e) => e);
+    expect(c.isConflict).toBe(true);
+    expect(c.extra.rev).toBe(12);
+    const r = await api.irTest('h', { proto: 'nec', addr: 1, cmd: 2 }, 3).catch((e) => e);
+    expect(r.retryAfterMs).toBe(1500);
+  });
+
+  it('ir/test sends {hub, ir, port_mask}; ha lists use the real wrappers', async () => {
+    const { api, calls } = fakeApi({ 'POST api/v1/ir/test': () => ({ body: { ok: true, action: {} } }) });
+    await api.irTest('h', { proto: 'nec', addr: 1, cmd: 2 }, 3);
+    expect(JSON.parse(calls[0]?.body ?? '')).toEqual({ hub: 'h', ir: { proto: 'nec', addr: 1, cmd: 2 }, port_mask: 3 });
   });
 
   it('turns a network failure into a status 0 error', async () => {
@@ -76,7 +103,7 @@ describe('draft queue', () => {
         bodies.push(JSON.parse(c.body ?? '{}').config);
         await new Promise((r) => setTimeout(r, 5));
         inflight--;
-        return { body: { hub: 'h', draft_updated: 1, draft_rev: bodies.length, ...META } };
+        return { body: { hub: 'h', draft_updated: 1, ...META, rev: bodies.length } };
       },
     });
     const q = new DraftQueue(api, 'h');
@@ -92,7 +119,7 @@ describe('draft queue', () => {
     const { api } = fakeApi({
       'PUT api/v1/config/draft': (c) => {
         seen.push(c.headers['If-Match']);
-        return { body: { hub: 'h', draft_updated: 1, draft_rev: 7, ...META } };
+        return { body: { hub: 'h', draft_updated: 1, ...META, rev: 7 } };
       },
     });
     const q = new DraftQueue(api, 'h');

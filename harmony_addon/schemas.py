@@ -72,6 +72,13 @@ GET_CONFIG_QUERY = vol.Schema(
     },
     extra=vol.PREVENT_EXTRA,
 )
+HISTORY_QUERY = vol.Schema(
+    {
+        vol.Optional("hub", default="default"): _hub,
+        vol.Required("rev"): vol.All(str, vol.Match(r"^[0-9]{1,12}$")),
+    },
+    extra=vol.PREVENT_EXTRA,
+)
 EXPORT_QUERY = vol.Schema(
     {
         vol.Optional("hub", default="default"): _hub,

@@ -14,7 +14,7 @@ export const hashFor = (...parts: (string | number)[]): string => '#/' + parts.m
 
 export function hubFromSearch(search: string): string {
   const h = new URLSearchParams(search).get('hub');
-  return h && /^[a-z0-9_]{1,31}$/.test(h) ? h : 'default';
+  return h && /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/.test(h) ? h : 'default';
 }
 
 export class Router extends EventTarget {

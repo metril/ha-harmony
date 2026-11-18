@@ -1,6 +1,6 @@
 // Draft store: working copy, ~600 ms debounced autosave through the single PUT queue,
 // optimistic edits with rollback, validation + usage via preview, conflict handling.
-import { Api, ApiError, DraftQueue, type Meta, type Usage } from './api';
+import { Api, ApiError, DraftQueue, type Meta, type Preview, type Usage } from './api';
 import { diffConfig, type DiffRow } from './diff';
 import { summarizeErrors } from './errors';
 import type { Config, ValidationError } from './model';
@@ -31,6 +31,9 @@ export class Store extends EventTarget {
   errors: ValidationError[] = [];
   usage: Usage | null = null;
   hash: string | null = null;
+  /** per-page preview results from the last check (error tolerant: good pages decode even when others fail) */
+  pages: Preview['pages'] = [];
+  missingPages: Preview['missing_pages'] = [];
   toasts: Toast[] = [];
   private queue: DraftQueue;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -86,14 +89,16 @@ export class Store extends EventTarget {
       this.config = clone(r.draft?.config ?? r.applied?.config ?? {});
       this.confirmed = clone(this.config);
       this.confirmedHasDraft = this.hasDraft;
-      this.queue.rev = typeof r.draft?.rev === 'number' ? r.draft.rev : null;
+      this.queue.rev = r.rev;
       this.savedAt = r.draft?.updated ?? null;
       this.saveState = 'clean';
       this.loaded = true;
       this.emit();
-      if (this.hasDraft) await this.check();
+      if (this.hasDraft || this.applied) await this.check();
       else {
         this.errors = [];
+        this.usage = null;
+        this.hash = null;
         this.emit();
       }
     } catch (e) {
@@ -107,6 +112,11 @@ export class Store extends EventTarget {
   edit(mutate: (c: Config) => void): void {
     const next = clone(this.config);
     mutate(next);
+    this.replace(next);
+  }
+
+  /** Swap in a whole config as an optimistic edit. */
+  replace(next: Config): void {
     this.config = next;
     this.hasDraft = true;
     if (this.saveState !== 'conflict') this.saveState = 'dirty';
@@ -154,21 +164,20 @@ export class Store extends EventTarget {
     }
   }
 
-  /** Validate the saved draft (preview gives errors on 422, usage on 200). */
+  /** Preview the saved draft (or the applied config): errors, per-page results and usage meters. */
   async check(): Promise<void> {
     const seq = ++this.seq;
     try {
-      const p = await this.api.preview(this.hub);
+      // no saved draft: the add-on has nothing to default to (409 no_draft), so send the applied config
+      const p = await this.api.preview(this.hub, this.hasDraft ? undefined : clone(this.config));
       if (seq !== this.seq) return;
-      this.errors = [];
+      this.errors = p.errors;
       this.usage = p.usage;
       this.hash = p.hash;
-    } catch (e) {
-      if (seq !== this.seq) return;
-      if (e instanceof ApiError && e.status === 422) {
-        this.errors = e.errors;
-        this.hash = null;
-      }
+      this.pages = p.pages;
+      this.missingPages = p.missing_pages;
+    } catch {
+      if (seq !== this.seq) return; // network trouble: keep what we showed before
     }
     this.emit();
   }
@@ -201,6 +210,7 @@ export class Store extends EventTarget {
       if (!m.applied) throw new ApiError(500, 'bad_response', 'The add-on did not confirm the apply.');
       this.applied = { ...m.applied, config: clone(this.config) };
       this.history = m.history;
+      this.queue.rev = m.rev;
       this.hasDraft = false;
       this.confirmed = clone(this.config);
       this.confirmedHasDraft = false;
@@ -223,15 +233,15 @@ export class Store extends EventTarget {
   }
 
   async importYaml(text: string): Promise<void> {
-    await this.api.importYaml(this.hub, text);
+    // the user already confirmed replacing the draft: only a live conflict check applies
+    await this.api.importYaml(this.hub, text, this.saveState === 'conflict' ? null : this.queue.rev);
     await this.load();
   }
 
-  /** Restore a history entry as the draft (history rows carry no config, so it needs `full` history). */
-  async restoreAsDraft(config: Config): Promise<void> {
-    this.edit((c) => {
-      Object.assign(c, { devices: [], activities: [], keys: {}, pages: [] }, clone(config));
-    });
+  /** Restore an applied version as the draft: fetch its source config, then replace the draft with it. */
+  async restoreAsDraft(rev: number): Promise<void> {
+    const h = await this.api.historyEntry(this.hub, rev);
+    this.replace(clone(h.config));
     await this.flush();
   }
 }
