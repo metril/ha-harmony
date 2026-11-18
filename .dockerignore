@@ -1,7 +1,10 @@
 *
 !addon/requirements.txt
 !addon/rootfs
+!addon/frontend
 !harmony_core
 !harmony_irdb
 !harmony_addon
 **/__pycache__
+addon/frontend/node_modules
+addon/frontend/dist

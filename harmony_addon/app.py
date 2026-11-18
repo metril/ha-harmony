@@ -100,6 +100,11 @@ def _harden(request: web.Request, resp: web.StreamResponse) -> None:
     resp.headers["Referrer-Policy"] = "no-referrer"
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
+    elif request.path.startswith("/assets/") and resp.status == 200:
+        # build output is content-hashed (vite), so it never changes under one name
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif request.path == "/" and resp.status == 200:
+        resp.headers["Cache-Control"] = "no-cache"
 
 
 def make_auth_mw(auth: Auth):
@@ -352,6 +357,14 @@ async def export_yaml(request: web.Request) -> web.Response:
     return web.Response(text=text, content_type="text/yaml", charset="utf-8")
 
 
+STATIC_KEY = web.AppKey("static_dir", Path)
+
+
+async def spa_index(request: web.Request) -> web.StreamResponse:
+    # Served as-is: every URL inside is relative, so it works under any ingress prefix.
+    return web.FileResponse(request.app[STATIC_KEY] / "index.html")
+
+
 async def index(request: web.Request) -> web.Response:
     o = request.app[OPTIONS_KEY]
     e = html.escape
@@ -373,6 +386,7 @@ def create_app(
     options: Options | None = None,
     clock: Callable[[], float] = time.time,
     auth: Auth | None = None,
+    static_dir: Path | str | None = None,
 ) -> web.Application:
     data_dir = Path(data_dir)
     app = web.Application(
@@ -385,7 +399,14 @@ def create_app(
     app[STORE_KEY] = Store(data_dir)
     app[CLOCK_KEY] = clock
     api = "/api/v1"
-    app.router.add_get("/", index)
+    if static_dir is not None and (Path(static_dir) / "index.html").is_file():
+        app[STATIC_KEY] = Path(static_dir)
+        app.router.add_get("/", spa_index)
+        assets = Path(static_dir) / "assets"
+        if assets.is_dir():
+            app.router.add_static("/assets", assets, follow_symlinks=False)
+    else:
+        app.router.add_get("/", index)
     app.router.add_get(f"{api}/health", health)
     app.router.add_get(f"{api}/config", get_config)
     app.router.add_put(f"{api}/config/draft", put_draft)

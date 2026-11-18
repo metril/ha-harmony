@@ -16,11 +16,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default="/data")
     ap.add_argument("--port", type=int, default=8099)
+    ap.add_argument("--static-dir", default="/opt/app/frontend")
     a = ap.parse_args()
     opts = load_options(Path(a.data_dir) / "options.json")
     logging.basicConfig(level=opts.log_level.upper(), format="%(levelname)s %(name)s: %(message)s")
     web.run_app(
-        create_app(a.data_dir, options=opts),
+        create_app(a.data_dir, options=opts, static_dir=a.static_dir),
         host="0.0.0.0",
         port=a.port,
         print=None,
