@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-18)
 
+- Reverting to the previous version keeps the config it replaces in the history, so a revert can be reverted.
 - Editor: Home Assistant service actions and the older HA event action are labelled apart in the key
   map ("HA light.toggle light.x" vs "HA event name"); the action picker offers "Home Assistant action".
 - `GET /api/v1/config/history?rev=` returns the source config of an applied or history version, so the

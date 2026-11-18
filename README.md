@@ -8,9 +8,11 @@
   <img src="custom_components/ha_harmony/brand/icon.png" alt="Harmony" width="96">
 </p>
 
-Custom firmware for the Logitech Harmony Hub, plus a Home Assistant integration that talks to it
-directly over your LAN. The goal is a Harmony setup that keeps working after Logitech's cloud is
-gone, with Home Assistant as the source of truth for devices, activities and remote layouts.
+Custom firmware for the Logitech Harmony Hub and Elite remote, a Home Assistant integration that
+talks to the hub directly over your LAN, and a **Harmony Editor** add-on to design the setup. The
+goal is a Harmony setup that keeps working after Logitech's cloud is gone, with Home Assistant as the
+source of truth: devices and IR codes, activities, Home Assistant actions on keys and touch pages, and
+remote layouts, all designed in the editor and run by the hub.
 
 > **Status: experimental.** The hub firmware has sent real IR that a real TV obeyed, and the
 > integration drives it end to end, but it is not yet a drop-in replacement for stock. Read
@@ -21,8 +23,9 @@ gone, with Home Assistant as the source of truth for devices, activities and rem
 | | |
 |---|---|
 | `hub/` | The hub daemon (C, static, soft-float MIPS for the AR9330). Drives IR through the stock `/dev/i2s` driver, speaks a small WebSocket protocol to Home Assistant. |
-| `custom_components/ha_harmony/` | The Home Assistant integration: config flow, activities, per-command buttons, events for remote key presses. |
-| `remote/` | Firmware for the Harmony Elite remote. **Not started on hardware.** |
+| `custom_components/ha_harmony/` | The Home Assistant integration: config flow, activities, per-command buttons, events for remote key presses, Home Assistant actions, remote pages. |
+| `addon/`, `harmony_addon/` | The Harmony Editor add-on: visual editor, IR database, config store. |
+| `remote/` | Firmware for the Harmony Elite remote (RF link to the hub, touch pages; page format v2). |
 | `tools/` | Backup, stock-config extraction and conversion, deployment, and the boot hook. |
 | `docs/` | Design, hardware notes (how IR is actually generated on this hub), plans and runbooks. |
 
@@ -45,7 +48,7 @@ gone, with Home Assistant as the source of truth for devices, activities and rem
   automation on the activity select.
 - **Boot persistence** is in progress. Today the daemon is started by hand and a reboot returns
   the hub to stock.
-- **The Elite remote.** Key names are the real Elite ones (`volume_up`, `select`, ...); the remote firmware itself is in progress.
+- **The Elite remote** firmware is under hardware bring-up: expect rough edges. Hub and remote firmware must be updated together.
 - **Zeroconf discovery** only works when Home Assistant listens on the same subnet as the hub;
   manual host/port entry always works. A hub already set up is never moved to a new address by an announcement
   alone: you confirm *Hub moved to ...?* first.
@@ -56,12 +59,25 @@ gone, with Home Assistant as the source of truth for devices, activities and rem
 2. Download *Harmony* and restart Home Assistant.
 3. *Settings → Devices & services → Add integration*, then enter the hub's host, port (default
    `8099`) and the token the daemon was started with.
-4. Install the **Harmony Editor** add-on (`addon/`); confirm its discovery card so the hub is linked,
-   then apply a config there. The format is in [`docs/ha-config.md`](docs/ha-config.md). The
-   integration pushes it to the hub only when it changes. (Upgrading from < 0.3.0: upload your old
-   YAML in the add-on, see the migration note there.)
+4. Install the **Harmony Editor** add-on (see [Editor add-on](#editor-add-on)); confirm its discovery
+   card so the hub is linked, then apply a config there. The integration pushes it to the hub only when it
+   changes. (Upgrading from < 0.3.0: the YAML file is no longer read; import it in the editor.)
 
 The integration does nothing useful against a stock hub: it needs this firmware's daemon running.
+
+## Editor add-on
+
+The **Harmony Editor** is a Home Assistant add-on with the visual editor (remote canvas, palette, pages),
+the IR database and the config store; it feeds the integration, which stays the hub's runtime client.
+
+- Install: add this repository's URL in *Settings -> Add-ons -> Add-on store -> Repositories*, install
+  *Harmony Editor*, start it and open it from the sidebar. It needs the integration >= 0.3.0 and Supervisor
+  2026.10.3 or newer.
+- **The add-on image is published only from an `addon-v*` tag, and may not exist yet.** Until the first such
+  tag is pushed the store cannot install it.
+- Read next: [`addon/DOCS.md`](addon/DOCS.md) (install, link, backups, troubleshooting),
+  [`docs/ha-config.md`](docs/ha-config.md) (the config format) and
+  [`docs/addon-api.md`](docs/addon-api.md) (the add-on's HTTP API).
 
 ## The hub side
 

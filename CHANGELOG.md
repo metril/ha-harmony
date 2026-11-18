@@ -1,7 +1,33 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-18)
 
+### BREAKING
+
+- **The config now comes from the Harmony Editor add-on.** The `<config>/ha_harmony/<hub_id>.yaml` file is no
+  longer read and there is no fallback: upload it in the editor (import YAML, review, apply). See
+  *Migrating from the YAML file* below.
+- **Hold-repeat key events are opt-in.** Hold repeats no longer fire `event` entities unless enabled in the
+  integration's options; Home Assistant actions with `repeat: true` are unaffected.
+- **The key event's `remote` attribute is gone** (the event entity is per remote): update automations that read it.
+- **Hub and remote firmware must be updated together** (page format v2, `remote_info` with `gen` and `pages`). A
+  mixed pair keeps working on v1 pages but loses the v2 features.
+- **A hub discovered at a new address needs confirmation** in Home Assistant before the integration retargets it.
+
+### Changes
+
+- Home Assistant actions, activity ids and HA-side steps follow the config the hub *accepted*: a config the hub
+  rejects no longer changes what a key press does (the *Add-on link* sensor shows `config_state`: accepted, pending
+  or rejected). Hub firmware: link loss is ordered with received frames and `remote_attached` is announced once per
+  link-up, before the remote's `remote_info`.
+- The config now comes from the Harmony Editor add-on (Supervisor discovery, long-poll, cached in
+  `.storage`). The integration re-validates and compiles it itself.
+- **Removed:** the `<config>/ha_harmony/<hub_id>.yaml` source and its loader. No fallback. A
+  leftover file raises one repair issue and is never read or deleted: upload it in the add-on
+  (import YAML, apply). See `docs/ha-config.md`.
+- `reload_config` now pulls from the add-on; `send_ir` no longer accepts IR file references.
+- New diagnostic sensor *Add-on link*; repair issues for rejected bundles and add-on/integration
+  schema mismatch.
 - **Home Assistant actions**: `{ha: {service, target, data, repeat}}` on keys, page buttons, tile taps and
   activity steps, run by the integration with the hub's current activity (allow-listed domains, no templates,
   validated in the add-on and again in the integration). `repeat: true` follows the remote's hold events.
@@ -27,17 +53,6 @@
   configured hub without confirmation; the add-on link confirm shows what is linked; per-domain on/off for HA
   devices (a closed cover is off); tiles follow an entity rename.
 - The add-on's `GET /api/v1/health` reports `capabilities: {ha_actions, page_format}`.
-
-## 0.3.0 (integration)
-
-- The config now comes from the Harmony Editor add-on (Supervisor discovery, long-poll, cached in
-  `.storage`). The integration re-validates and compiles it itself.
-- **Removed:** the `<config>/ha_harmony/<hub_id>.yaml` source and its loader. No fallback. A
-  leftover file raises one repair issue and is never read or deleted: upload it in the add-on
-  (import YAML, apply). See `docs/ha-config.md`.
-- `reload_config` now pulls from the add-on; `send_ir` no longer accepts IR file references.
-- New diagnostic sensor *Add-on link*; repair issues for rejected bundles and add-on/integration
-  schema mismatch.
 
 ### Migrating from the YAML file
 

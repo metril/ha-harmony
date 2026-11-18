@@ -1,18 +1,64 @@
 # Harmony Editor
 
-Hosts the visual editor, IR database, config store and preview for the Harmony hub. It **feeds**
-the Harmony custom integration, which stays the hub's runtime client, re-validates and compiles
-what it pulls, and keeps its own copy of the last applied config.
+## What it is
 
-## Status
+The Harmony Editor is where you design a Harmony hub's setup: devices and their IR codes, activities,
+key mappings, Home Assistant actions and the remote's touch pages. You edit a draft in your browser,
+review what changes, and apply it. The **Harmony integration** (`ha_harmony`) pulls the applied config,
+checks it again, and sends it to the hub; the editor never talks to the hub itself.
 
-Skeleton: the API and the integration feed work, the editor UI is a placeholder page.
+## Requirements
 
-## Moving from the integration's YAML file
+- Home Assistant OS or Supervised (add-ons need the Supervisor). Use **Supervisor 2026.10.3 or newer**:
+  admin-only access to the sidebar panel and the stripping of client-supplied identity headers were
+  fixed in the Supervisor from 2026.10.2 / 2026.10.3, and older versions let a non-admin who knows the
+  ingress URL reach the editor (details below).
+- The `ha_harmony` integration, **version 0.3.0 or newer**, installed (HACS) with your hub set up.
+- A rooted hub running the ha-harmony daemon (see the repository README). The editor is useless
+  without one.
 
-The integration (0.3.0) no longer reads `<config>/ha_harmony/<hub>.yaml`. Upload that file once
-with `POST /api/v1/config/import_yaml` (the editor's import button), then apply it; the
-integration picks it up within moments.
+## Install
+
+1. *Settings -> Add-ons -> Add-on store -> menu -> Repositories*: add `https://github.com/metril/ha-harmony`.
+2. Install **Harmony Editor**, start it, and open **Harmony** from the sidebar.
+
+The add-on image is built by the repository's `addon-publish` workflow from an `addon-v*` tag; if the
+store shows no installable version, that image has not been published yet.
+
+## Link it to the integration
+
+At start the add-on announces itself to Home Assistant. A discovery card for the Harmony integration
+appears (*Settings -> Devices & services*): confirm it. The integration then shows an **Add-on link**
+sensor:
+
+| State | Meaning |
+| --- | --- |
+| Not linked | Never confirmed; restart the add-on to announce again. |
+| Connecting | Reaching the add-on. |
+| Connected | Linked and following the add-on's applied config. |
+| Add-on unreachable | The add-on is stopped or restarting; the hub keeps its config and the integration its cached copy. |
+| Token refused | The add-on's token changed; restart the add-on and confirm the discovery again. |
+| Nothing applied yet | Linked, but no config has been applied in the editor. |
+| Config rejected | The integration found the applied config invalid or too new; see its repair issue. |
+
+The sensor's `config_state` attribute says whether the hub runs the newest config (`accepted`), has not
+taken it yet (`pending`) or refused it (`rejected`; Home Assistant keeps acting on the config the hub
+still runs).
+
+## Import an existing YAML
+
+Integration versions before 0.3.0 read `<config>/ha_harmony/<hub>.yaml`. That file is no longer read.
+In the editor choose **Import YAML**, pick the file, review the draft and apply. IR file references
+(`flipper:` / `smartir:`) cannot be resolved by the import: inline the codes first. The format is in
+`docs/ha-config.md`.
+
+## The studio in five lines
+
+1. The remote canvas shows the remote; click a key or a page widget to select it.
+2. The palette lists devices, activities, IR commands and Home Assistant actions.
+3. Assign by dragging from the palette onto a key or widget, or by clicking and choosing.
+4. Pages hold the touch layout (buttons, tiles); add, reorder and preview them with the size meters.
+5. **Apply** shows what changed, then publishes it; the integration pushes it to the hub.
 
 ## What it can and cannot reach
 
@@ -60,7 +106,26 @@ integration picks it up within moments.
 | --- | --- |
 | `log_level` | `debug`, `info`, `warning` or `error`. |
 
-## Installation note
+## Backups
+
+The draft, the applied config and the last five versions per hub live in the add-on's own `/data`,
+which is included in Home Assistant backups. The IR database cache (`/data/irdb`) is excluded and
+refetched when needed. The integration also keeps its last applied config in `.storage`. **Revert**
+returns to the previous version, and a revert can itself be reverted.
+
+## Troubleshooting
+
+- **Apply waits for Home Assistant.** The editor only publishes; the integration confirms once the
+  hub runs the config. If Home Assistant is down or the link sensor is not *Connected*, the apply stays
+  waiting and completes when the link returns.
+- **401 in the editor.** The Supervisor did not forward the logged-in user's id: it is older than
+  2026.10.3. Update the Supervisor.
+- **IR archive offline.** The database is fetched over HTTPS from a fixed list of hosts and cached; with
+  no network the editor works from the cache, and a device that was never cached cannot be browsed.
+- **Integration says the config is rejected.** Open its repair issue; the hub keeps running the previous
+  config until a valid one is applied and accepted.
+
+## Image and local builds
 
 The add-on is installed from the prebuilt image named by `image:` in `config.yaml`
 (`ghcr.io/metril/ha-harmony-editor-{arch}`, published by the `addon-publish` workflow on
