@@ -1,6 +1,7 @@
 """Push coordinator: hub state lives here, entities subscribe to changes.
 
-Also owns the YAML config lifecycle: load -> compile -> push `set_config` (only when the hub's
+Also owns the config lifecycle: the applied config comes from the Harmony Editor add-on (pulled,
+re-validated and compiled here, cached in `.storage`) -> push `set_config` (only when the hub's
 config hash differs) -> push pages -> keep tiles in sync with their bound entities.
 """
 
@@ -11,7 +12,6 @@ import base64
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -25,6 +25,16 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from . import const
+from .addon_link import (
+    AddonAuthError,
+    AddonClient,
+    AddonError,
+    Bundle,
+    BundleRejected,
+    NothingApplied,
+    compile_source,
+    parse_bundle,
+)
 from .api import (
     HarmonyAuthError,
     HarmonyCommandError,
@@ -47,8 +57,8 @@ from .const import (
     KEY_NAMES,
     UNKNOWN_KEY,
 )
-from .harmony_core.compiler import Compiled, CompileError, compile_config
-from .harmony_core.config_model import ConfigError, load_file, parse_model
+from .harmony_core.compiler import Compiled, compile_config
+from .harmony_core.config_model import parse_model
 from .harmony_core.harmony_proto import MsgType
 
 _LOGGER = logging.getLogger(__name__)
@@ -56,6 +66,19 @@ _LOGGER = logging.getLogger(__name__)
 KeyListener = Callable[[int, int, str], None]
 ISSUE_INVALID = "config_invalid"
 ISSUE_REJECTED = "config_rejected"
+ISSUE_SCHEMA = "bundle_schema"
+ISSUE_YAML = "yaml_unused"
+
+# add-on link states (the diagnostic sensor's values)
+LINK_STATES = (
+    "not_linked",
+    "connecting",
+    "ok",
+    "unreachable",
+    "auth_failed",
+    "nothing_applied",
+    "rejected",
+)
 
 
 @dataclass
@@ -99,11 +122,16 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._last_idx: int | None = None
         self.available = True
         self.compiled: Compiled = _empty_compiled()
-        self.managed = False  # a YAML file exists for this hub
-        # last good model, so a startup with a broken YAML still has a config to run
-        self._store: Store[dict[str, Any]] = Store(hass, 1, f"{DOMAIN}.config.{self.hub_id}")
-        self._saved_model: dict[str, Any] | None = None
-        self._loaded_once = False
+        self.managed = False  # an applied config (cached or fresh) exists for this hub
+        # the last applied add-on config: the remote stays configured while the add-on is down
+        self._store: Store[dict[str, Any]] = Store(
+            hass, const.STORE_VERSION, f"{DOMAIN}.bundle.{self.hub_id}"
+        )
+        self.rev: str | None = None
+        self.applied_at: int | None = None
+        self.link_state = "not_linked"
+        self._link: AddonClient | None = None
+        self._apply_lock = asyncio.Lock()
         self.last_error: str | None = None
         self.config_pushes = 0  # set_config requests sent (observable by tests)
         self.tile_updates = 0
@@ -131,10 +159,6 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         await self.client.async_close()
 
     # ------------------------------------------------------------ helpers
-    @property
-    def config_path(self) -> Path:
-        return Path(self.hass.config.path(const.CONFIG_SUBDIR, f"{self.hub_id}.yaml"))
-
     def _activity_name(self, idx: int | None) -> str | None:
         return self.activities[idx] if idx is not None and 0 <= idx < len(self.activities) else None
 
@@ -158,13 +182,15 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return lambda: self._key_listeners.remove(cb) if cb in self._key_listeners else None
 
     def async_add_config_listener(self, cb: Callable[[], None]) -> Callable[[], None]:
-        """Called after every successful (re)load of the YAML, so platforms can add entities."""
+        """Called after every applied config change, so platforms can add entities."""
         self._config_listeners.append(cb)
         return lambda: self._config_listeners.remove(cb) if cb in self._config_listeners else None
 
     def expected_unique_ids(self) -> set[str]:
         h = self.hub_id
         ids = {f"{h}_remote", f"{h}_activity"}
+        if self._link is not None:
+            ids.add(f"{h}_addon_link")
         for r in self.remotes:
             ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}"}
         for dev in self.compiled.devices.values():
@@ -173,7 +199,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return ids
 
     def device_commands(self, device: str) -> list[str]:
-        """Commands exposed as buttons: the YAML commands plus power_on/power_off."""
+        """Commands exposed as buttons: the configured commands plus power_on/power_off."""
         dev = self.compiled.devices[device]
         extra = ["power_on", "power_off"] if dev.power else []
         return [*dev.commands, *extra]
@@ -193,30 +219,164 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def _clear_issue(self, key: str) -> None:
         ir.async_delete_issue(self.hass, DOMAIN, f"{key}_{self.hub_id}")
 
-    async def async_load_config(self) -> bool:
-        """Read, validate and compile the YAML. On error the previous config stays; returns ok."""
-        path = self.config_path
+    # -- add-on feed
+    @property
+    def has_addon_link(self) -> bool:
+        return self._link is not None
+
+    def async_set_link_state(self, state: str) -> None:
+        if state != self.link_state:
+            self.link_state = state
+            self.async_update_listeners()
+
+    async def async_load_cached(self) -> bool:
+        """Use the last applied config from `.storage` (re-validated, like any bundle)."""
         try:
-            model = await self.hass.async_add_executor_job(load_file, path)
-            compiled = compile_config(model) if model is not None else _empty_compiled()
-        except ConfigError as exc:
-            return await self._load_failed(str(exc))
-        except CompileError as exc:
-            return await self._load_failed(f"{path}: {exc}")
-        self._clear_issue(ISSUE_INVALID)
-        self.last_error = None
-        self._loaded_once = True
-        self.managed = model is not None
-        if model is not None and model != self._saved_model:
-            self._saved_model = model
-            await self._store.async_save({"model": model})
-        if not self.managed:
-            _LOGGER.info(
-                "No config file at %s: using an empty config, the hub's own config is untouched",
-                path,
+            data = await self._store.async_load()
+        except (OSError, ValueError) as exc:
+            _LOGGER.warning("The cached add-on config is unreadable: %s", exc)
+            return False
+        if not isinstance(data, dict):
+            return False
+        try:
+            compiled = await self.hass.async_add_executor_job(
+                compile_source, data.get("config"), self.hub_id
             )
+        except BundleRejected as exc:
+            _LOGGER.warning("The cached add-on config is unusable and ignored: %s", exc)
+            return False
+        rev, at = data.get("rev"), data.get("applied_at")
+        self.rev = rev if isinstance(rev, str) else None
+        self.applied_at = at if type(at) is int else None
+        self.managed = True
         self._apply_compiled(compiled)
         return True
+
+    async def async_process_raw(self, raw: bytes) -> Bundle | None:
+        """Validate + compile a pulled bundle and, only if it is good, make it the config.
+        A bad bundle changes nothing (cache, entities, hub); raises BundleRejected."""
+        async with self._apply_lock:
+            try:
+                bundle = await self.hass.async_add_executor_job(parse_bundle, raw, self.hub_id)
+            except BundleRejected as exc:
+                self._reject(exc)
+                raise
+            self._clear_issue(ISSUE_INVALID)
+            self._clear_issue(ISSUE_SCHEMA)
+            self.last_error = None
+            changed = bundle.rev != self.rev or not self.managed
+            self.rev, self.applied_at, self.managed = bundle.rev, bundle.applied_at, True
+            if changed:
+                await self._store.async_save(
+                    {"rev": bundle.rev, "applied_at": bundle.applied_at, "config": bundle.source}
+                )
+            self._apply_compiled(bundle.compiled)
+            self.async_set_link_state("ok")
+        await self.async_sync_config()
+        return bundle
+
+    def _reject(self, exc: BundleRejected) -> None:
+        _LOGGER.error("Rejected the add-on config, keeping the previous one: %s", exc)
+        self.last_error = str(exc)
+        self._set_issue(ISSUE_SCHEMA if exc.schema else ISSUE_INVALID, str(exc))
+        self.async_set_link_state("rejected")
+
+    def async_start_link(self, client: AddonClient) -> None:
+        self._link = client
+        self.link_state = "connecting"
+        self.config_entry.async_create_background_task(
+            self.hass, self._link_loop(client), f"{DOMAIN} add-on link {self.hub_id}"
+        )
+
+    async def async_initial_fetch(self) -> None:
+        """First run with nothing cached: try once so entities exist at setup; never raises."""
+        if self._link is None or self.managed:
+            return
+        try:
+            await self.async_process_raw(await self._link.fetch(self.hub_id))
+        except AddonError as exc:
+            self._note_link_failure(exc)
+
+    async def async_refresh_from_addon(self) -> None:
+        """Service entry point: pull now, apply, push what changed; raises with the reason."""
+        if self._link is None:
+            raise HomeAssistantError("This hub is not linked to the Harmony Editor add-on")
+        try:
+            await self.async_process_raw(await self._link.fetch(self.hub_id))
+        except NothingApplied:
+            self.async_set_link_state("nothing_applied")
+            raise
+        except AddonError as exc:
+            if not isinstance(exc, BundleRejected):
+                self._note_link_failure(exc)
+            raise
+        if self.last_error:
+            raise HomeAssistantError(f"The hub rejected the config: {self.last_error}")
+
+    def _note_link_failure(self, exc: AddonError) -> bool:
+        """Record a failed pull; True when this changed the state (so it is logged once)."""
+        if isinstance(exc, AddonAuthError):
+            state = "auth_failed"
+        elif isinstance(exc, NothingApplied):
+            state = "nothing_applied"
+        elif isinstance(exc, BundleRejected):
+            state = "rejected"
+        else:
+            state = "unreachable"
+        first = state != self.link_state
+        self.async_set_link_state(state)
+        if first and state in ("unreachable", "auth_failed"):
+            _LOGGER.warning(
+                "Harmony Editor add-on: %s. Staying on the %s config",
+                exc,
+                "cached" if self.managed else "hub's own",
+            )
+        return first
+
+    async def _link_loop(self, client: AddonClient) -> None:
+        """Long-poll the add-on for newer applied configs; back off while it is unavailable."""
+        loop = asyncio.get_running_loop()
+        known: str | None = self.rev  # last rev handled (applied or rejected); "" = none applied
+        delay = const.LINK_BACKOFF_MIN
+        while True:
+            started = loop.time()
+            try:
+                if known is None:
+                    raw: bytes | None = await client.fetch(self.hub_id)
+                else:
+                    raw = await client.wait(self.hub_id, known)
+                if self.link_state in ("unreachable", "auth_failed"):
+                    _LOGGER.info("Harmony Editor add-on is reachable again")
+                if raw is not None:
+                    try:
+                        bundle = await self.async_process_raw(raw)
+                    except BundleRejected as exc:
+                        if exc.rev is None:
+                            raise
+                        known = exc.rev  # wait for the next apply rather than re-pulling this one
+                    else:
+                        known = bundle.rev if bundle else known
+                elif loop.time() - started < 0.5:
+                    await asyncio.sleep(1)  # an add-on answering instantly with nothing
+                if self.link_state in (
+                    "unreachable",
+                    "auth_failed",
+                    "connecting",
+                    "nothing_applied",
+                ):
+                    self.async_set_link_state("ok" if self.managed else "connecting")
+                delay = const.LINK_BACKOFF_MIN
+            except NothingApplied as exc:
+                self._note_link_failure(exc)
+                known = ""
+                await asyncio.sleep(delay)
+            except AddonError as exc:
+                self._note_link_failure(exc)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, const.LINK_BACKOFF_MAX)
+            except Exception:
+                _LOGGER.exception("Unexpected error in the add-on link; retrying")
+                await asyncio.sleep(const.LINK_BACKOFF_MAX)
 
     def _apply_compiled(self, compiled: Compiled) -> None:
         changed = compiled != self.compiled
@@ -227,37 +387,6 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             for cb in list(self._config_listeners):
                 cb()
             self.async_update_listeners()
-
-    async def _load_failed(self, message: str) -> bool:
-        _LOGGER.error("Invalid ha_harmony config, keeping the previous one: %s", message)
-        self.last_error = message
-        self._set_issue(ISSUE_INVALID, message)
-        if not self._loaded_once:  # nothing to keep yet (startup): use the last good config
-            await self._restore_last_good()
-        return False
-
-    async def _restore_last_good(self) -> None:
-        try:
-            data = await self._store.async_load()
-            if not data:
-                return
-            compiled = compile_config(data["model"])
-        except (CompileError, KeyError, TypeError, ValueError, OSError) as exc:
-            _LOGGER.warning("The saved last-good config is unusable: %s", exc)
-            return
-        _LOGGER.warning("Using the last good config until the YAML is fixed")
-        self._loaded_once = True
-        self._saved_model = data["model"]
-        self.managed = True
-        self._apply_compiled(compiled)
-
-    async def async_reload_config(self) -> None:
-        """Service entry point: re-read the YAML, push what changed; raises on a bad config."""
-        if not await self.async_load_config():
-            raise HomeAssistantError(f"Invalid config: {self.last_error}")
-        await self.async_sync_config()
-        if self.last_error:
-            raise HomeAssistantError(f"The hub rejected the config: {self.last_error}")
 
     async def async_sync_config(self) -> None:
         """Push set_config iff the hub's hash differs, then pages and tile texts. Never raises."""

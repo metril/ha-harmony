@@ -17,13 +17,23 @@ from homeassistant.exceptions import (
 )
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
+from .addon_link import AddonClient
 from .api import HarmonyAuthError, HarmonyConnectionError, HarmonyHubClient, HarmonyVersionError
 from .base_entity import hub_device_info
-from .const import CLIENT_KWARGS, CONF_TOKEN, CONFIG_SUBDIR, DOMAIN
-from .coordinator import HarmonyCoordinator
+from .const import (
+    CLIENT_KWARGS,
+    CONF_ADDON_HOST,
+    CONF_ADDON_PORT,
+    CONF_ADDON_TOKEN,
+    CONF_TOKEN,
+    CONFIG_SUBDIR,
+    DOMAIN,
+)
+from .coordinator import ISSUE_YAML, HarmonyCoordinator
 from .harmony_core.config_model import validate_ir
 
 PLATFORMS = [
@@ -74,13 +84,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def handle(call: ServiceCall) -> None:
         for coord in _coordinators(hass, call):
             if call.service == "reload_config":
-                await coord.async_reload_config()
+                await coord.async_refresh_from_addon()
             elif call.service == "push_pages":
                 await coord.async_push_pages()
             elif call.service == "send_ir":
-                base = Path(hass.config.path(CONFIG_SUBDIR))
-                try:
-                    action = await hass.async_add_executor_job(validate_ir, call.data["ir"], base)
+                try:  # no base dir: file references are refused (inline the codes)
+                    action = validate_ir(call.data["ir"])
                 except vol.Invalid as exc:
                     raise ServiceValidationError(f"Invalid IR action: {exc.error_message}") from exc
                 await coord.async_send_ir(action)
@@ -135,10 +144,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
     dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, **_device_kwargs(coordinator)
     )
-    await coordinator.async_load_config()  # a bad/missing file never blocks setup
+    await _flag_leftover_yaml(hass, coordinator)
+    await coordinator.async_load_cached()  # the remote keeps its config while the add-on is down
+    if entry.data.get(CONF_ADDON_HOST):
+        coordinator.async_start_link(
+            AddonClient(
+                async_get_clientsession(hass),
+                entry.data[CONF_ADDON_HOST],
+                entry.data[CONF_ADDON_PORT],
+                entry.data[CONF_ADDON_TOKEN],
+            )
+        )
+        await coordinator.async_initial_fetch()
     await coordinator.async_sync_config()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _flag_leftover_yaml(hass: HomeAssistant, coordinator: HarmonyCoordinator) -> None:
+    """0.3.0 dropped the YAML source. Only look for the file (never read or delete it) and point
+    the user at the add-on's import."""
+    path = Path(hass.config.path(CONFIG_SUBDIR, f"{coordinator.hub_id}.yaml"))
+    issue = f"{ISSUE_YAML}_{coordinator.hub_id}"
+    if await hass.async_add_executor_job(path.is_file):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_YAML,
+            translation_placeholders={"hub": coordinator.hub_id, "path": str(path)},
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, issue)
 
 
 def _device_kwargs(coordinator: HarmonyCoordinator) -> dict[str, Any]:

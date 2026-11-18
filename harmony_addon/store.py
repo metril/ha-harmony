@@ -15,7 +15,7 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 HISTORY_MAX = 5
-HUB_ID = re.compile(r"^[a-z0-9_]{1,31}$")
+HUB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")  # the hub's own ids, e.g. ha-harmony-abc
 
 
 class StoreError(Exception):

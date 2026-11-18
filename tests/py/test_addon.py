@@ -253,7 +253,7 @@ async def test_s3_unknown_keys_and_bad_bodies_are_400(client):
         "/api/v1/config/apply", data="{nope", headers={**H, "Content-Type": "application/json"}
     )
     assert r.status == 400
-    for q in ("?hub=../x", "?bogus=1", "?hub=A"):
+    for q in ("?hub=../x", "?bogus=1", "?hub=a%20b"):
         assert (await client.get("/api/v1/config" + q)).status == 400
 
 

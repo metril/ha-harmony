@@ -18,7 +18,17 @@ DOMAIN = "ha_harmony"
 DEFAULT_PORT = 8099
 CONF_TOKEN = "token"
 CLIENT_NAME = "home-assistant"
-CONFIG_SUBDIR = "ha_harmony"  # <HA config dir>/ha_harmony/<hub_id>.yaml
+CONFIG_SUBDIR = "ha_harmony"  # only to spot a leftover <config>/ha_harmony/<hub_id>.yaml
+CONF_ADDON_HOST = "addon_host"
+CONF_ADDON_PORT = "addon_port"
+CONF_ADDON_TOKEN = "addon_token"
+ADDON_SLUG = "ha_harmony_editor"
+BUNDLE_MAX_BYTES = 2 * 1024 * 1024  # a hub config is <= 128 KiB compiled; sources stay far below
+LINK_FETCH_TIMEOUT = 20.0  # seconds, whole request
+LINK_WAIT_TIMEOUT = 70.0  # the add-on holds a wait for 55 s
+LINK_BACKOFF_MIN = 5.0
+LINK_BACKOFF_MAX = 120.0
+STORE_VERSION = 1
 TILE_DEBOUNCE = 0.5  # seconds between a bound entity changing and its tile_update; tests shorten it
 TILE_TEXT_MAX = 31  # bytes, docs/proto/page-format.md
 
