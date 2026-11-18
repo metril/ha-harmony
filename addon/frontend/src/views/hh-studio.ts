@@ -68,6 +68,9 @@ export class HhStudio extends StoreElement implements StudioHost {
       .pop .x { width: 28px; height: 28px; border: 0; border-radius: 14px; background: transparent; cursor: pointer; color: var(--tx2); display: grid; place-items: center; padding: 0; }
       .pop .x:hover { background: var(--sf2); }
       .keyerr { margin: 0 12px 8px; }
+      .first { flex: none; max-width: 420px; margin: 0 auto 14px; padding: 14px 16px; background: var(--sf); border: 1px solid var(--line); border-radius: var(--r2); display: grid; gap: 6px; justify-items: start; box-shadow: var(--sh); }
+      .first h2 { margin: 0; font-size: 16px; }
+      .first p { margin: 0; color: var(--tx2); }
       .sheetbtns { display: none; }
       .scrim { display: none; }
       @media (max-width: 1100px) { :host { --pw: 244px; --iw: 264px; } }
@@ -503,6 +506,13 @@ export class HhStudio extends StoreElement implements StudioHost {
           <div class="canvas" @pointerdown=${(e: PointerEvent) => { if ((e.target as HTMLElement).closest('hh-remote') === null && this.pop) this.pop = null; }} @scroll=${() => (this.pop = null)}>
             ${picked
               ? html`<div class="banner2" role="status"><span>Click a key or the screen for ${describeSource(s.config, picked)}</span><span class="sp"></span><button @click=${() => this.assigner.cancel()}>Cancel</button></div>`
+              : nothing}
+            ${s.isFirstRun
+              ? html`<div class="first" role="status">
+                  <h2>Set up your first hub config</h2>
+                  <p>Nothing has been applied yet. Import a YAML file you already have, then drag its commands onto the remote.</p>
+                  <button class="btn pri" @click=${() => this.dispatchEvent(new Event('hh-import', { bubbles: true, composed: true }))}>Import YAML file</button>
+                </div>`
               : nothing}
             <hh-remote .host=${this} .assigner=${this.assigner}></hh-remote>
           </div>
