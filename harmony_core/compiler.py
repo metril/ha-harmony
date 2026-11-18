@@ -53,6 +53,18 @@ class HaDevice:
     settle_ms: int
     on: HaCall | None
     off: HaCall | None
+    inputs: dict[str, HaCall] = field(default_factory=dict)
+    commands: dict[str, HaCall] = field(default_factory=dict)
+
+    def lookup(self, command: str) -> HaCall | None:
+        """`power_on`, `power_off`, `input_<name>` or a configured command -> its call."""
+        if command == "power_on":
+            return self.on
+        if command == "power_off":
+            return self.off
+        if command.startswith("input_") and command[6:] in self.inputs:
+            return self.inputs[command[6:]]
+        return self.commands.get(command)
 
 
 @dataclass(frozen=True)
@@ -327,6 +339,8 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
             d.get("settle_ms", 0),
             call_of(d["power"]["on"]) if d.get("power") else None,
             call_of(d["power"]["off"]) if d.get("power") else None,
+            {n: call_of(x) for n, x in d["inputs"].items()},
+            {n: call_of(x) for n, x in d["commands"].items()},
         )
         for i, d in ha_devs.items()
     }

@@ -62,6 +62,7 @@ async def test_health_and_placeholder(client):
     r = await client.get("/api/v1/health")
     body = await r.json()
     assert r.status == 200 and body["ok"] and body["bundle_schema"] == 1
+    assert body["capabilities"] == {"ha_actions": True, "page_format": 2}
     page = await (await client.get("/")).text()
     assert "not built yet" in page and "<script" not in page
 

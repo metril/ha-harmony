@@ -231,6 +231,9 @@ async def health(request: web.Request) -> web.Response:
             "addon_version": __version__,
             "core_version": harmony_core.__version__,
             "bundle_schema": harmony_core.BUNDLE_SCHEMA,
+            # what the editor may offer: `ha:` actions / HA-backed devices / tile taps, and the
+            # newest page format the compiler can encode
+            "capabilities": {"ha_actions": True, "page_format": 2},
         }
     )
 

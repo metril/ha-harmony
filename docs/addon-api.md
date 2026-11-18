@@ -25,7 +25,7 @@ the table below.
 | --- | --- | --- | --- |
 | GET | `/` | ingress | The editor UI (`index.html`; placeholder page when the frontend is not built) |
 | GET | `/assets` | ingress | Hashed UI assets under /assets/… (immutable cache; only present when the frontend is built) |
-| GET | `/api/v1/health` | ingress | Versions |
+| GET | `/api/v1/health` | ingress | Versions and `capabilities` (`{ha_actions: true, page_format: 2}`) |
 | GET | `/api/v1/config` | ingress | Draft, applied metadata, history, draft `rev` |
 | GET | `/api/v1/config/history` | ingress | Source config of one applied or history version |
 | PUT | `/api/v1/config/draft` | ingress | Store the draft (honours `If-Match`) |
@@ -114,8 +114,9 @@ returned.
 with one row per hard key (35, ordered by code): `{key, code, source: "default"|"activity"|"none",
 action: null | {kind, label, ...}}`. Lookup is the hub's: activity keys, then the default layer, else
 none (`source:"none"`, `action:null`). Default-layer rows use `source:"default"`. `action.kind` is
-`device` (`device`, `command` or `input`), `activity` (`activity`), `ha` (`event`), `bt` (`usage`),
-`ir` (`form`) or `none`. Invalid config -> `422 {ok:false, errors}`.
+`device` (`device`, `command` or `input`), `activity` (`activity`), `ha` (`event` for an event action,
+or `service` + `entity` for a Home Assistant service action; `entity` is the first one, `"x +N"` for more), `bt` (`usage`),
+`ir` (`form`) or `none`. The `ha` action table is flattened with the same rule. Invalid config -> `422 {ok:false, errors}`.
 
 ### Status and hubs
 

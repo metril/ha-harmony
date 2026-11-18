@@ -335,3 +335,21 @@ async def test_history_entry_returns_the_source_config_by_rev(client):
     assert r.status == 404 and (await r.json())["error"]["code"] == "unknown_rev"
     for bad in ({}, {"rev": "x"}, {"rev": "-1"}):
         assert (await client.get("/api/v1/config/history", params=bad)).status == 400
+
+
+async def test_ha_actions_in_validate_and_keymap_and_hostile_ones_refused(client):
+    ok = {"keys": {"up": {"ha": {"service": "light.toggle", "target": {"entity_id": "light.a"}}}}}
+    r = await client.post("/api/v1/config/keymap", json={"config": ok}, headers=H)
+    rows = {x["key"]: x for x in (await r.json())["default"]}
+    assert rows["up"]["action"] == {
+        "kind": "ha",
+        "service": "light.toggle",
+        "entity": "light.a",
+        "label": "light.toggle light.a",
+    }
+    bad = {"keys": {"up": {"ha": {"service": "shell_command.x", "target": {"entity_id": "light.a"}}}}}
+    r = await client.post("/api/v1/config/validate", json={"config": bad}, headers=H)
+    body = await r.json()
+    assert any("not allowed" in e["msg"] for e in body["errors"])
+    r = await client.post("/api/v1/config/keymap", json={"config": bad}, headers=H)
+    assert r.status == 422
