@@ -237,10 +237,13 @@ typedef struct {
   app_link_event_t q[64];
   int nq, qh;
   int awake, nawake; /* last set_awake value and number of calls */
+  unsigned block_ms; /* each send_key blocks this long on the injected clock (a slow radio write) */
+  void *clk;         /* the fk_t whose clock it advances */
 } fk_link_t;
 
 static __attribute__((unused)) int fkl_send(void *c, uint8_t code, uint8_t action) {
   fk_link_t *l = c;
+  if (l->clk) ((fk_t *)l->clk)->now += l->block_ms;
   if (l->nsent < 512) {
     l->sent[l->nsent].code = code;
     l->sent[l->nsent++].action = action;

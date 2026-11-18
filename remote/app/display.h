@@ -12,7 +12,7 @@
 
 #define RA_SCREEN_W 240
 #define RA_SCREEN_H 320
-#define RA_DRAW_ROWS 32 /* draw buffer = the whole screen (150 KiB of cached RAM, ~0.3 % of the ~50 MB free):
+#define RA_DRAW_ROWS RA_SCREEN_H /* draw buffer = the whole screen (150 KiB of cached RAM, ~0.3 % of the ~50 MB free):
                                   * a full redraw renders once and flushes once, not in 10 strips over the visible page.
                                   * Not the fb's page 1: that mapping is uncached, and LVGL reads the buffer when blending. */
 

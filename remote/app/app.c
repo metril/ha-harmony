@@ -25,7 +25,18 @@ static uint32_t tick_cb(void) { return (uint32_t)g_tick_sys->ops.now_ms(g_tick_s
 
 static void sink_emit(void *ctx, uint8_t code, uint8_t action) {
   app_t *a = ctx;
+  if (a->ntx < sizeof a->tx / sizeof a->tx[0]) { /* the radio write can block: the pixels go out first (send_pending) */
+    a->tx[a->ntx].code = code;
+    a->tx[a->ntx++].action = action;
+    return;
+  }
   if (a->link.send_key(a->link.ctx, code, action) < 0) ra_logf(&a->sys, "send_key %u/%u failed", code, action);
+}
+static void send_pending(app_t *a) {
+  for (unsigned i = 0; i < a->ntx; i++)
+    if (a->link.send_key(a->link.ctx, a->tx[i].code, a->tx[i].action) < 0)
+      ra_logf(&a->sys, "send_key %u/%u failed", a->tx[i].code, a->tx[i].action);
+  a->ntx = 0;
 }
 static bool sink_gate(void *ctx, uint64_t now) {
   app_t *a = ctx;
@@ -154,6 +165,10 @@ void app_step(app_t *a, unsigned max_wait_ms) {
     for (int i = 0; i < 2; i++)
       if (ready[i]) ra_input_read(&a->input, i, now);
   ra_input_tick(&a->input, now);
+  if (w > 0 || a->ntx) {
+    lv_refr_now(a->display.disp); /* touch / key feedback: pixels now, not at the next refresh timer */
+    send_pending(a);              /* then the radio */
+  }
   ra_power_tick(&a->power, now);
   if (a->power.batt_polls != a->last_batt_polls) {
     a->last_batt_polls = a->power.batt_polls;
@@ -176,6 +191,7 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   a->last_awake = awake;
   app_link_event_t ev;
   for (int i = 0; i < LINK_EVENTS_PER_STEP && a->link.poll(a->link.ctx, now, &ev) > 0; i++) handle_link_event(a, &ev, now);
+  lv_timer_ready(lv_display_get_refr_timer(a->display.disp)); /* a page, tile or status change: draw it now, not at the next 33 ms tick */
   lv_timer_handler(); /* render what changed */
   if (a->lowbatt_pending && a->power.state != RA_PW_OFF) { /* the screen is on and its frame is drawn: show it now */
     char b[24];
