@@ -10,7 +10,13 @@ from typing import Any
 
 import aiohttp
 
-from .harmony_proto import PROTO_VERSION, MsgType, ProtoError, decode_ws_full, encode_ws
+from .harmony_core.harmony_proto import (
+    PROTO_VERSION,
+    MsgType,
+    ProtoError,
+    decode_ws_full,
+    encode_ws,
+)
 
 _LOGGER = logging.getLogger(__name__)
 

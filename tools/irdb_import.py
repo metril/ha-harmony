@@ -104,7 +104,7 @@ async def run(args: argparse.Namespace) -> int:
         )  # fmt: skip
     text = to_yaml([built.device])
     try:
-        from custom_components.ha_harmony.config_model import parse_model
+        from custom_components.ha_harmony.harmony_core.config_model import parse_model
 
         parse_model(text, "<import>")
     except ImportError:

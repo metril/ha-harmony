@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from custom_components.ha_harmony.compiler import (
+from custom_components.ha_harmony.const import KEY_CODES, SOFT_KEY_BASE
+from custom_components.ha_harmony.harmony_core.compiler import (
     LIMITS,
     CompileError,
     compact_json,
     compile_config,
     config_hash,
 )
-from custom_components.ha_harmony.config_model import ConfigError, parse_model
-from custom_components.ha_harmony.const import KEY_CODES, SOFT_KEY_BASE
-from custom_components.ha_harmony.page_codec import decode_page
+from custom_components.ha_harmony.harmony_core.config_model import ConfigError, parse_model
+from custom_components.ha_harmony.harmony_core.page_codec import decode_page
 
 ROOT = Path(__file__).resolve().parents[2]
 FIX = ROOT / "tests/py/fixtures/ir"

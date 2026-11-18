@@ -14,8 +14,9 @@ from typing import Any
 import voluptuous as vol
 import yaml
 
-from .const import KEY_CODES, SOFT_KEY_BASE, key_code
+from .harmony_proto import SOFT_KEY_BASE
 from .ir import IrCode, IrImportError, parse_flipper_file, parse_smartir_file
+from .keys import KEY_CODES, key_code
 
 Model = dict[str, Any]
 

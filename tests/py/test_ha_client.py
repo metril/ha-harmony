@@ -13,7 +13,7 @@ from custom_components.ha_harmony.api import (
     HarmonyHubClient,
     HarmonyVersionError,
 )
-from custom_components.ha_harmony.harmony_proto import MsgType
+from custom_components.ha_harmony.harmony_core.harmony_proto import MsgType
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 

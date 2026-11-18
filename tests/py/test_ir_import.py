@@ -5,15 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from custom_components.ha_harmony.ir.flipper import parse_flipper, parse_flipper_file
-from custom_components.ha_harmony.ir.model import (
+from custom_components.ha_harmony.harmony_core.ir.flipper import parse_flipper, parse_flipper_file
+from custom_components.ha_harmony.harmony_core.ir.model import (
     PROTOCOLS,
     IrCode,
     IrImportError,
     UnsupportedProtocolError,
 )
-from custom_components.ha_harmony.ir.pronto import normalise_pronto, pronto_to_raw
-from custom_components.ha_harmony.ir.smartir import decode_broadlink, parse_smartir_file
+from custom_components.ha_harmony.harmony_core.ir.pronto import normalise_pronto, pronto_to_raw
+from custom_components.ha_harmony.harmony_core.ir.smartir import (
+    decode_broadlink,
+    parse_smartir_file,
+)
 
 FIX = Path(__file__).parent / "fixtures" / "ir"
 

@@ -22,9 +22,9 @@ from homeassistant.helpers.typing import ConfigType
 
 from .api import HarmonyAuthError, HarmonyConnectionError, HarmonyHubClient, HarmonyVersionError
 from .base_entity import hub_device_info
-from .config_model import validate_ir
 from .const import CLIENT_KWARGS, CONF_TOKEN, CONFIG_SUBDIR, DOMAIN
 from .coordinator import HarmonyCoordinator
+from .harmony_core.config_model import validate_ir
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,

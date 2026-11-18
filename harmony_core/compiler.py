@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config_model import Model
-from .const import KEY_NAMES, SOFT_KEY_BASE, key_code
+from .harmony_proto import SOFT_KEY_BASE
+from .keys import KEY_NAMES, key_code
 from .page_codec import MAX_WIDGETS, Widget, encode_page
 
 # Must equal the HP_MAP_* defines in hub/engine/mapping.h (tests/py/test_compiler.py enforces it).

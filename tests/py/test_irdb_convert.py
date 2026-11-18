@@ -7,7 +7,7 @@ from pathlib import Path
 import ir_ref
 import pytest
 
-from custom_components.ha_harmony.ir.model import IrCode
+from custom_components.ha_harmony.harmony_core.ir.model import IrCode
 from harmony_irdb.convert import EXACT, Converted, Skipped, convert_command, exact_proto
 
 FIX = Path(__file__).parent / "fixtures" / "irdb"

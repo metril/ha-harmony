@@ -18,12 +18,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-MAX_US = 0xFFFF
+from harmony_core.ir.model import MAX_US, IrImportError
+from harmony_core.ir.pronto import normalise_pronto
+
 MAX_PRONTO_WORDS = 520  # compiler LIMITS["MAX_PRONTO"]
 MAX_DURATIONS = 512  # hub HP_IR_MAX_DUR (once + repeat)
 
 _KEYCODE = re.compile(r"^G:([^:()]{1,80}):\(([^()]*)\)\(([^()]*)\)\(([^()]*)\):\d+$")
-_WORD = re.compile(r"[0-9A-Fa-f]{4}")
 
 
 @dataclass(frozen=True)
@@ -95,13 +96,15 @@ def exact_proto(protocol: object, keycode: object) -> dict | None:
 
 # ---- pronto
 def _parse(text: object) -> list[int]:
-    words = text.split() if isinstance(text, str) else []
-    if len(words) < 6 or not all(_WORD.fullmatch(w) for w in words):
-        raise ValueError("malformed pronto")
-    v = [int(w, 16) for w in words]
-    if v[0] != 0 or v[1] == 0 or v[2] + v[3] == 0 or len(v) != 4 + 2 * (v[2] + v[3]):
-        raise ValueError("unsupported pronto structure")
-    return v
+    try:
+        return [int(w, 16) for w in normalise_pronto(text).split()]  # type: ignore[arg-type]
+    except IrImportError as exc:
+        kind = (
+            "malformed pronto"
+            if "too short" in str(exc) or "hex digits" in str(exc)
+            else "unsupported pronto structure"
+        )
+        raise ValueError(kind) from exc
 
 
 def _fmt(v: list[int]) -> str:

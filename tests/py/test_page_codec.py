@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from custom_components.ha_harmony.page_codec import (
+from custom_components.ha_harmony.harmony_core.page_codec import (
     MAX_LABEL,
     MAX_WIDGETS,
     Widget,

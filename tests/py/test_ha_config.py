@@ -19,7 +19,7 @@ from test_hub_engine import read_lines
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
 from custom_components.ha_harmony import const
 from custom_components.ha_harmony.coordinator import tile_text
-from custom_components.ha_harmony.harmony_proto import MsgType
+from custom_components.ha_harmony.harmony_core.harmony_proto import MsgType
 from proto import rf_codec
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")

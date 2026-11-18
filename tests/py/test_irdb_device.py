@@ -10,8 +10,8 @@ import pytest
 import yaml
 from irdb_fake import FakeSession
 
-from custom_components.ha_harmony import compiler
-from custom_components.ha_harmony.config_model import parse_model
+from custom_components.ha_harmony.harmony_core import compiler
+from custom_components.ha_harmony.harmony_core.config_model import parse_model
 from harmony_irdb import device as dev_mod
 from harmony_irdb.archive import ArchiveError, IrdbArchive, OfflineError
 from harmony_irdb.candidates import power_candidates
