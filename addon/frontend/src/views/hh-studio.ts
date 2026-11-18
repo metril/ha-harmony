@@ -59,7 +59,7 @@ export class HhStudio extends StoreElement implements StudioHost {
       .cw { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
       .tools { flex: none; display: flex; align-items: center; gap: 6px; }
       .tools .pager { background: var(--sf2); }
-      .canvas { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background-color: var(--cv); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 18px 18px; padding: 4px 16px; position: relative; scroll-behavior: auto; }
+      .canvas { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; background-color: var(--cv); background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 18px 18px; padding: 4px 16px; position: relative; scroll-behavior: auto; }
       hh-remote { flex: 1 1 auto; min-height: 0; }
       .banner2 { position: sticky; top: 0; z-index: 3; margin: -14px -16px 10px; flex: none; padding: 8px 14px; background: var(--acc); color: var(--onacc); font-weight: 600; display: flex; gap: 10px; align-items: center; }
       .banner2 .sp { flex: 1; }

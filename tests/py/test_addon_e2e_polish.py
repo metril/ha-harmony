@@ -229,3 +229,30 @@ async def test_tap_then_tap_works_with_touch_emulation_at_400px(browser, large):
     )
     # nothing scrolls the outer page during that
     assert await page.evaluate("window.scrollY") == 0
+
+
+async def test_long_press_drag_with_touch_emulation_does_not_scroll_the_page(browser, large):
+    """CDP touch events (Playwright's touchscreen can only tap): hold a chip 400 ms, drag it onto a key."""
+    page = await open_large(browser, large, 400, 800, has_touch=True, is_mobile=True)
+    await page.evaluate(f"() => {STORE}.edit(c => {{ delete c.keys['pause']; }})")
+    await page.wait_for_timeout(800)
+    await page.get_by_role("button", name="Palette").tap()
+    chip = page.locator("hh-palette .chip2", has_text="num_4").first
+    await chip.scroll_into_view_if_needed()
+    cb = await chip.bounding_box()
+    cdp = await page.context.new_cdp_session(page)
+    cx, cy = cb["x"] + cb["width"] / 2, cb["y"] + cb["height"] / 2
+    await cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": cx, "y": cy}]})
+    await page.wait_for_timeout(450)  # long press: the drag begins and the palette sheet closes
+    kb = await page.locator("hh-remote [data-key=pause]").bounding_box()
+    tx, ty = kb["x"] + kb["width"] / 2, kb["y"] + kb["height"] / 2
+    for i in range(1, 9):
+        await cdp.send(
+            "Input.dispatchTouchEvent",
+            {"type": "touchMove", "touchPoints": [{"x": cx + (tx - cx) * i / 8, "y": cy + (ty - cy) * i / 8}]},
+        )
+    await cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    await page.wait_for_function(
+        f"() => {STUDIO}.querySelector('hh-remote').shadowRoot.querySelector('[data-key=pause]').getAttribute('aria-label').includes('tv: num_4')"
+    )
+    assert await page.evaluate("window.scrollY") == 0
