@@ -12,6 +12,7 @@ import { deviceIdFor, nameProblem } from '../src/lib/device-edit';
 import { MAX_PAGES, MAX_PAGE_WIDGETS, pageCap, widgetCap } from '../src/lib/studio-model';
 import type { Config } from '../src/lib/model';
 import { refHref } from '../src/lib/refs';
+import { changedWidgetIndexes } from '../src/lib/diff';
 import { initial, likelyModels, type WState } from '../src/lib/wizard';
 
 const rows = table as { rule: string; path: (string | number)[]; msg: string }[];
@@ -92,5 +93,11 @@ describe('links and the wizard', () => {
   it('likely models carry their archive file when the add-on sends it', () => {
     const s = { ...initial(), confirmed: { kind: 'on', action: {}, form: 'proto', count: 2, models: ['A', 'B'], model_files: ['a.json'], codesets: 1 } } as unknown as WState;
     expect(likelyModels(s)).toEqual([{ name: 'A', file: 'a.json' }, { name: 'B' }]);
+  });
+  it('marks the widgets that differ between two versions of a page', () => {
+    const a = { widgets: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }] };
+    const b = { widgets: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B2' }, { id: 'd', label: 'D' }] };
+    expect(changedWidgetIndexes(a, b)).toEqual({ before: [1, 2], after: [1, 2] });
+    expect(changedWidgetIndexes(undefined, b).after).toEqual([0, 1, 2]);
   });
 });

@@ -5,6 +5,7 @@ import { icon } from '../lib/icons';
 import { shared } from '../lib/styles';
 import { StoreElement } from './base';
 import './hh-dialog';
+import './hh-page-diff';
 import { meters } from './parts';
 
 type Step = { label: string; state: 'done' | 'pending' | 'active' | 'todo' };
@@ -132,6 +133,7 @@ export class HhApplyDialog extends StoreElement {
               ${diff.map((r) => html`<li><span class="k ${r.kind}">${r.kind}</span><span><strong>${r.area}</strong> ${r.label}</span>${r.detail ? html`<span class="muted">${r.detail}</span>` : nothing}</li>`)}
             </ul>`
           : html`<p class="muted">The draft is identical to the applied config.</p>`}
+        <hh-page-diff scale="0.4"></hh-page-diff>
         <div class="meters">${meters(s)}</div>
         <p class="muted">Activities that are running keep going until they stop; the new config takes effect for the next one.</p>
         ${s.hash ? html`<div class="hash">Config hash ${s.hash}</div>` : nothing}

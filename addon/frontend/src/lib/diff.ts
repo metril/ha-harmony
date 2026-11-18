@@ -116,6 +116,18 @@ export interface PageChange {
   /** labels of the widgets that were added, changed or removed (by widget id) */
   widgets: string[];
 }
+/** Indexes (in each page's own widget list) of the widgets that were added, changed or removed, matched by widget id. */
+export function changedWidgetIndexes(a: Rec | undefined, b: Rec | undefined): { before: number[]; after: number[] } {
+  const wa = ((a?.['widgets'] as Rec[]) ?? []);
+  const wb = ((b?.['widgets'] as Rec[]) ?? []);
+  const key = (w: Rec, i: number) => String(w['id'] ?? `#${i}`);
+  const ma = new Map(wa.map((w, i) => [key(w, i), w]));
+  const mb = new Map(wb.map((w, i) => [key(w, i), w]));
+  return {
+    before: wa.flatMap((w, i) => (same(w, mb.get(key(w, i))) ? [] : [i])),
+    after: wb.flatMap((w, i) => (same(w, ma.get(key(w, i))) ? [] : [i])),
+  };
+}
 /** Pages that differ, with the widgets that changed on them. */
 export function changedPages(applied: Config | null, draft: Config | null): PageChange[] {
   const out: PageChange[] = [];
