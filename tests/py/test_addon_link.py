@@ -297,8 +297,7 @@ async def test_apply_in_addon_reaches_hub_promptly_and_is_cached_versioned(
     coord = entry.runtime_data
     assert coord.link_state == "ok" and len(sets) == 1
     fake_addon.apply(SOURCE2)  # no polling: the long-poll wakes
-    await until(lambda: len(sets) == 2)
-    assert coord.compiled.activities == ["Movie"]
+    await until(lambda: len(sets) == 2 and coord.compiled.activities == ["Movie"])  # after the ack
     saved = hass_storage[STORE_KEY]
     assert saved["version"] == const.STORE_VERSION and saved["data"]["config"] == SOURCE2
     assert saved["data"]["rev"] == coord.rev

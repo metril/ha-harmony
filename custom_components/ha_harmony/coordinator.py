@@ -197,7 +197,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.remotes: tuple[int, ...] = DEFAULT_REMOTE_IDS
         self.links: dict[int, RemoteLink] = {r: RemoteLink() for r in self.remotes}
         self._cfg_gen = 0  # bumped whenever the compiled config changes
-        self._accepted_gen: int | None = None  # the _cfg_gen the hub is known to run (hash equal)
+        self._accepted = False  # the hub is known to run `compiled` (it reported the matching hash)
+        self._rejected = False  # the hub refused `pending`; `compiled` stays the runtime table source
         self._known_rev: str | None = None  # last add-on rev handled (applied or rejected)
         self._sleep = lambda seconds: _sleep_hook(seconds)
         # tracked by hub index, never by name: a rename keeps the index, a reorder gets a new
@@ -205,7 +206,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._current_idx: int | None = None
         self._last_idx: int | None = None
         self.available = True
+        # `compiled` is the config the hub RUNS (last accepted): dispatch, activity ids, HA steps,
+        # tile bindings and the entities that describe the config all read it. `pending` is the
+        # newest config; it becomes `compiled` only when the hub reports its hash.
         self.compiled: Compiled = _empty_compiled()
+        self.pending: Compiled = self.compiled
         self.managed = False  # an applied config (cached or fresh) exists for this hub
         # the last applied add-on config: the remote stays configured while the add-on is down
         self._store: Store[dict[str, Any]] = Store(
@@ -544,8 +549,31 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 await asyncio.sleep(const.LINK_BACKOFF_MAX)
 
     def _apply_compiled(self, compiled: Compiled) -> None:
+        """Record the newest config; it becomes the runtime one at once only when the hub already
+        reports its hash (HA restart with the cached config), else when the hub accepts it."""
+        self.pending = compiled
+        self._rejected = False
+        if self.client.config_hash == compiled.config_hash:
+            self._promote()
+        else:
+            self._notify(TOPIC_LINK)
+
+    @property
+    def config_state(self) -> str:
+        """`accepted`: the hub runs the newest config. `pending`: waiting for the hub to take it.
+        `rejected`: the hub refused it and keeps running the previous one."""
+        if self._accepted and self.compiled is self.pending:
+            return "accepted"
+        return "rejected" if self._rejected else "pending"
+
+    def _promote(self) -> None:
+        """Atomically make `pending` the runtime config (the hub runs it)."""
+        compiled = self.pending
         changed = compiled != self.compiled
         self.compiled = compiled
+        self._accepted = True
+        self._rejected = False
+        self._notify(TOPIC_LINK)
         if changed:
             self._cfg_gen += 1
             self._warned.clear()  # one warning per (service, entity) per config revision
@@ -581,11 +609,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
 
     async def _push_config_locked(self) -> bool:
         """True when the hub runs the compiled config afterwards."""
-        compiled = self.compiled
+        compiled = self.pending
         want = compiled.config_hash
         if self.client.config_hash == want:
             _LOGGER.debug("Hub already runs config %s; not pushing", want)
-            self._accepted_gen = self._cfg_gen
+            self._promote()
             return True
         self.config_pushes += 1
         t0 = time.monotonic()
@@ -600,7 +628,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self.last_error = msg
             self._notify(TOPIC_LINK)
             self._set_issue(ISSUE_REJECTED, msg)
-            self._accepted_gen = None
+            self._rejected = True
+            self._notify(TOPIC_LINK)
             self._warn_unknown_index()  # no new list is coming: the reported index stays unknown
             return False
         if self.last_error is not None:
@@ -610,9 +639,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.client.config_hash = ack.get("config_hash")  # as the hub reports it
         reported = self.client.config_hash
         if reported is None or reported == want:
-            self._accepted_gen = self._cfg_gen
-        # activity_list is not echoed to the sender: apply it ourselves
-        self._set_activities(compiled.activities)
+            self._promote()
+            # activity_list is not echoed to the sender: apply it ourselves
+            self._set_activities(compiled.activities)
         return True
 
     def _set_activities(self, names: list[str]) -> None:
@@ -644,7 +673,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     @property
     def hub_accepted(self) -> bool:
         """The hub is known to run the compiled config: only then do pages of it make sense."""
-        return self._accepted_gen == self._cfg_gen
+        return self.config_state == "accepted"
 
     def _request_push(
         self, remote: int, *, wait: bool, force: bool = False
@@ -971,7 +1000,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # its remotes (remote_info) right after hello_ack. The next state_update is compared
             # with the activity known before the drop: a change while disconnected still runs its
             # Home Assistant steps (only the very first report after HA starts is a baseline).
-            self._accepted_gen = None  # the hub may have rebooted: the resync confirms its config
+            self._accepted = False  # the hub may have rebooted: the resync confirms its config
             for link in self.links.values():
                 link.epoch += 1
                 link.info, link.pushed = None, None
@@ -1011,6 +1040,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 cb(data["remote"], data["key"], action)
         elif mtype is MsgType.ACTIVITY_LIST:
             self.client.config_hash = data.get("config_hash")
+            if self.managed and self.client.config_hash == self.pending.config_hash:
+                self._promote()  # the hub runs the newest config (another sync, a replay)
             acts = data["activities"]
             self._set_activities([a for a in acts if isinstance(a, str)])
         elif mtype is MsgType.DEVICE_STATE:

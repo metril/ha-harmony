@@ -124,7 +124,12 @@ class HarmonyAddonLink(HarmonyEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, object]:
         c = self.coordinator
-        return {"rev": c.rev, "applied_at": c.applied_at, "last_error": c.last_error}
+        return {
+            "rev": c.rev,
+            "applied_at": c.applied_at,
+            "last_error": c.last_error,
+            "config_state": c.config_state,  # accepted | pending | rejected (by the hub)
+        }
 
 
 class HarmonyPageFormat(HarmonyEntity, SensorEntity):

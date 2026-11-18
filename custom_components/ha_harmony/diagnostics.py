@@ -58,6 +58,8 @@ async def async_get_config_entry_diagnostics(
             "config_hash": c.client.config_hash,
             "compiled_hash": comp.config_hash,
             "config_accepted": c.hub_accepted,
+            "config_state": c.config_state,
+            "pending_hash": c.pending.config_hash,
             "activities": list(c.activities),
             "current_activity": c.current_activity,
         },
