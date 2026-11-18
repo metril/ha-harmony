@@ -61,6 +61,9 @@ export class HhActivities extends StoreElement {
       .tools button:disabled { opacity: 0.3; cursor: default; }
       .tools .ic, .stepx .ic { width: 15px; height: 15px; }
       .wire { position: relative; flex: none; width: 96px; display: grid; align-content: center; justify-items: center; }
+      .first { position: relative; min-height: 26px; display: grid; justify-items: center; }
+      .first .pill { position: static; transform: none; }
+      .first .menu { top: 100%; }
       .wire svg { width: 100%; height: 22px; stroke: var(--acc); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
       .pill { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -135%); max-width: 100%; height: 24px; padding: 0 10px; border-radius: 12px; border: 1.5px solid var(--acc); background: var(--sf); color: var(--tx); font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .pill:hover { background: var(--accs); }
@@ -77,9 +80,10 @@ export class HhActivities extends StoreElement {
       .seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--sf2); border-radius: var(--r1); }
       .seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 5px; background: transparent; color: var(--tx2); font-weight: 600; font-size: 12px; cursor: pointer; }
       .seg button[aria-pressed="true"] { background: var(--sf); color: var(--tx); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); }
-      .tl { display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 8px 2px 12px; min-height: 64px; }
+      .tl { display: flex; align-items: center; gap: 8px 6px; flex-wrap: wrap; padding: 8px 2px 12px; min-height: 64px; }
       .step { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 40px; padding: 0 6px 0 12px; border-radius: 20px; font-size: 13px; font-weight: 600; max-width: 260px; }
       .step span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .step .tools { display: flex; }
       .step.auto { border: 1.5px dashed var(--line); background: var(--sf2); color: var(--tx2); padding-right: 12px; }
       .step.auto .sic { width: 14px; height: 14px; opacity: 0.7; }
       .step.user { border: 1.5px solid var(--acc); background: var(--sf); color: var(--tx); cursor: grab; touch-action: none; }
@@ -88,7 +92,7 @@ export class HhActivities extends StoreElement {
       .gap { flex: none; display: grid; justify-items: center; gap: 2px; font-size: 11px; color: var(--tx3); }
       .gap i { display: block; height: 0; border-top: 3px dotted var(--tx3); }
       .addstep { margin-top: 8px; display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf2); max-width: 420px; }
-      .who { display: grid; grid-template-columns: minmax(0, 1fr) 150px minmax(0, 1fr); gap: 14px; align-items: center; }
+      .who { display: grid; grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1fr); gap: 14px; align-items: center; }
       .zones { display: grid; gap: 14px; }
       .zone { display: grid; gap: 6px; padding: 12px; border: 1.5px dashed var(--line); border-radius: var(--r2); background: var(--sf); min-width: 0; cursor: pointer; }
       .zone.picked { border-color: var(--acc); background: var(--accs); }
@@ -96,7 +100,7 @@ export class HhActivities extends StoreElement {
       .zone select { height: 32px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 6px; min-width: 0; width: 100%; }
       .zone .rep { font-size: 12px; color: var(--tx2); }
       .zone .rep b { color: var(--ok); font-weight: 600; } .zone .rep em { color: var(--ir); font-style: normal; }
-      .remote { width: 150px; } .np { padding: 6px 10px; } .mt { margin-top: 12px; }
+      .remote { width: 120px; justify-self: center; } .np { padding: 6px 10px; } .mt { margin-top: 12px; }
       .offer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       .total { color: var(--tx2); font-size: 12.5px; margin-left: auto; }
       input.txt { height: 36px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; width: 100%; }
@@ -223,10 +227,10 @@ export class HhActivities extends StoreElement {
     const acts = this.cfg.activities ?? [];
     return html`
       <div class="head"><h1>Activities</h1><span class="chip">${acts.length} / 16</span><span class="muted">What the remote does when you press a start button.</span></div>
-      <div class="gallery" role="list">
-        ${acts.map((a) => html`<a class="acard" role="listitem" href=${hashFor('activities', a.id)}><h2>${stockIconSvg(stockIconByName('play')?.id ?? 26)} ${a.name ?? a.id}</h2><hh-chain-mini .cfg=${this.cfg} activity=${a.id}></hh-chain-mini>
+      <div class="gallery">
+        ${acts.map((a) => html`<a class="acard" href=${hashFor('activities', a.id)}><h2>${stockIconSvg(stockIconByName('play')?.id ?? 26)} ${a.name ?? a.id}</h2><hh-chain-mini .cfg=${this.cfg} activity=${a.id}></hh-chain-mini>
           <span class="muted">${(a.devices ?? []).length} devices · ${(a.steps ?? []).length + (a.off ?? []).length} own steps · ${Object.keys(a.keys ?? {}).length} keys</span></a>`)}
-        <button class="newcard" role="listitem" @click=${() => (this.newOpen = true)}><span class="plus">${icon('plus')}</span>New activity</button>
+        <button class="newcard" @click=${() => (this.newOpen = true)}><span class="plus">${icon('plus')}</span>New activity</button>
       </div>
       ${this.newDialog()}`;
   }
@@ -261,7 +265,7 @@ export class HhActivities extends StoreElement {
       <span aria-hidden="true" title="Drag to reorder" @pointerdown=${(e: PointerEvent) => this.chainDown(e, id, i)}>${art(d ? deviceKind(d) : 'other', 'art')}</span>
       <b title=${d?.name ?? dv}>${d?.name ?? dv}</b>
       <div class="chips">${ps ? html`<span class="chip ${ps.tone === 'ok' ? 'ok' : ps.tone === 'ir' ? 'ir' : ''}">${ps.text.replace('Power ', '')}</span>` : nothing}${d?.settle_ms ? html`<span class="chip">${d.settle_ms / 1000} s settle</span>` : nothing}</div>
-      ${i === 0 ? html`<div class="wire">${this.inputPill(id, dv)}</div>` : nothing}
+      ${i === 0 ? html`<div class="first">${this.inputPill(id, dv)}</div>` : nothing}
       <div class="tools" role="group" aria-label="${d?.name ?? dv}">
         <button aria-label="Move ${d?.name ?? dv} earlier" ?disabled=${i === 0} @click=${() => this.store.replace(moveChain(this.cfg, id, i, i - 1))}>◀</button>
         <button aria-label="Move ${d?.name ?? dv} later" ?disabled=${i === n - 1} @click=${() => this.store.replace(moveChain(this.cfg, id, i, i + 1))}>▶</button>

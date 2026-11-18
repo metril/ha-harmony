@@ -62,6 +62,7 @@ export class HhAddDevice extends StoreElement {
       .q { font-size: 20px; font-weight: 650; }
       .answers { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
       .answers .btn { height: 48px; padding: 0 22px; font-size: 15px; }
+      .btn.pri kbd { color: inherit; border-color: currentColor; opacity: 0.85; }
       kbd { font: inherit; font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; margin-left: 6px; color: var(--tx3); }
       .tried { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
       .tried .chip { min-width: 28px; justify-content: center; }

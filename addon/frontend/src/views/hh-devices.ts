@@ -45,7 +45,7 @@ export class HhDevices extends StoreElement {
       .add .ic { width: 24px; height: 24px; }
       .empty { text-align: center; padding: 40px 16px; display: grid; gap: 10px; justify-items: center; }
       /* device page */
-      .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .dbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
       .back { display: inline-flex; align-items: center; gap: 4px; color: var(--tx2); text-decoration: none; font-weight: 600; height: 36px; }
       .name { font-size: 20px; font-weight: 650; border: 1px solid transparent; border-radius: var(--r1); background: transparent; color: var(--tx); padding: 2px 8px; min-width: 0; flex: 1 1 200px; height: 40px; }
       .name:hover, .name:focus { border-color: var(--line); background: var(--sf); }
@@ -366,12 +366,12 @@ export class HhDevices extends StoreElement {
     const idx = this.devices.indexOf(d);
     const bytes = byteCounter(d.name ?? d.id);
     return html`
-      <div class="bar">
+      <div class="dbar">
         <a class="back" href=${hashFor('devices')}>← All devices</a><span class="sp"></span>
         ${ha ? nothing : html`<div class="seg" role="group" aria-label="View"><button aria-pressed=${this.view === 'keypad'} @click=${() => (this.view = 'keypad')}>Keypad</button><button aria-pressed=${this.view === 'list'} @click=${() => (this.view = 'list')}>List view</button></div>`}
         <button class="btn danger" @click=${() => void this.removeDev(d)}>Delete device</button>
       </div>
-      <div class="bar">
+      <div class="dbar">
         <span class="chip acc">${KIND_LABEL[deviceKind(d)]}</span>
         <input class="name" aria-label="Device name" .value=${d.name ?? d.id} @change=${(e: Event) => this.put(patchDevice(this.store.config, d.id, { name: (e.target as HTMLInputElement).value.trim().slice(0, 31) || undefined }), `name${d.id}`)} />
         <span class="muted">${bytes.used}/31 B · id <span class="mono">${d.id}</span> · ${sourceLabel(d)}${this.errorsOf(idx) ? ` · ${this.errorsOf(idx)} errors` : ''}</span>

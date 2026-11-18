@@ -32,12 +32,14 @@ export class HhOverview extends StoreElement {
       .top { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
       .rem { display: grid; gap: 10px; justify-items: center; text-align: center; }
       .rem hh-mini-remote { width: 150px; filter: drop-shadow(0 6px 14px rgba(16, 24, 32, 0.25)); }
-      .acts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+      .acts { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
       a.act { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf); color: var(--tx); text-decoration: none; }
       a.act:hover { border-color: var(--acc); }
       a.act b { display: flex; gap: 8px; align-items: center; font-size: 14px; }
       h2 .sub { font-weight: 400; color: var(--tx3); font-size: 12.5px; }
       .pages { display: grid; gap: 14px; }
+      .chg { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+      .kk h3 { margin-top: 0; }
       .pg { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 12px; align-items: center; }
       .pg figure { margin: 0; display: grid; gap: 4px; justify-items: center; font-size: 11px; color: var(--tx3); }
       .pg svg { border-radius: 8px; box-shadow: 0 0 0 1px var(--line); display: block; }
@@ -161,23 +163,24 @@ export class HhOverview extends StoreElement {
                 ? html`<div class="acts">${acts.map((a) => html`<a class="act" href=${hashFor('activities', a.id)}><b>${a.name ?? a.id}${changedActs.has(a.id) ? html`<span class="chip ir">Changed</span>` : nothing}</b><hh-chain-mini .cfg=${s.config} activity=${a.id}></hh-chain-mini><span class="muted">${(a.steps ?? []).length + (a.off ?? []).length} own steps · ${Object.keys(a.keys ?? {}).length} keys</span></a>`)}</div>`
                 : html`<p class="muted">No activities yet. <a href=${hashFor('activities')}>Create one</a>.</p>`}
             </section>
+      <section class="card" aria-labelledby="hc">
+              <h2 id="hc">${applied ? `Since rev ${s.applied?.rev}` : 'Changes in this draft'}</h2>
+              ${diff.length
+                ? html`
+                  <div class="chg">${pages.length ? html`<div class="pages">${pages.map((p) => {
+                    const ai = (applied?.pages ?? []).findIndex((x) => x.id === p.id);
+                    const bi = (s.config.pages ?? []).findIndex((x) => x.id === p.id);
+                    return html`<div class="pg"><b class="vh">${p.title}</b>${this.thumb('Before', ai >= 0 ? this.beforePages?.[ai] : null)}${this.thumb('After', bi >= 0 ? s.pages[bi] : null)}
+                      <div><b>${p.title}</b> <span class="chip ${p.kind === 'added' ? 'ok' : p.kind === 'removed' ? 'bad' : 'ir'}">${KIND_LABEL[p.kind]}</span>${p.widgets.length ? html`<div class="muted">Widgets: ${p.widgets.slice(0, 6).join(', ')}${p.widgets.length > 6 ? ` and ${p.widgets.length - 6} more` : ''}</div>` : nothing}</div></div>`;
+                  })}</div>` : nothing}
+                  ${keys.length ? html`<div class="kk"><h3>Keys</h3>${this.keyRemotes(keys)}</div>` : nothing}</div>
+            ${keys.length ? html`<ul>${keys.slice(0, 10).map((k) => html`<li class="row"><span class="k ${k.kind}">${KIND_LABEL[k.kind]}</span><span>${keyTitle(k.key)} <span class="muted">in ${k.layerName}</span></span></li>`)}</ul>` : nothing}
+                  <h3>Everything that changed</h3>
+                  <ul>${diff.map((r) => html`<li class="row"><span class="k ${r.kind}">${r.kind}</span><span><strong>${r.area}</strong> ${r.label}</span>${r.detail ? html`<span class="muted">${r.detail}</span>` : nothing}</li>`)}</ul>`
+                : html`<p class="muted">${s.hasDraft ? 'The draft matches the applied config.' : 'No draft. Edits you make appear here.'}</p>`}
+            </section>
           </div>
       </div>
-      <section class="card" aria-labelledby="hc">
-        <h2 id="hc">${applied ? `Since rev ${s.applied?.rev}` : 'Changes in this draft'}</h2>
-        ${diff.length
-          ? html`
-            ${pages.length ? html`<div class="pages">${pages.map((p) => {
-              const ai = (applied?.pages ?? []).findIndex((x) => x.id === p.id);
-              const bi = (s.config.pages ?? []).findIndex((x) => x.id === p.id);
-              return html`<div class="pg"><b class="vh">${p.title}</b>${this.thumb('Before', ai >= 0 ? this.beforePages?.[ai] : null)}${this.thumb('After', bi >= 0 ? s.pages[bi] : null)}
-                <div><b>${p.title}</b> <span class="chip ${p.kind === 'added' ? 'ok' : p.kind === 'removed' ? 'bad' : 'ir'}">${KIND_LABEL[p.kind]}</span>${p.widgets.length ? html`<div class="muted">Widgets: ${p.widgets.slice(0, 6).join(', ')}${p.widgets.length > 6 ? ` and ${p.widgets.length - 6} more` : ''}</div>` : nothing}</div></div>`;
-            })}</div>` : nothing}
-            ${keys.length ? html`<h3>Keys</h3>${this.keyRemotes(keys)}<ul>${keys.slice(0, 10).map((k) => html`<li class="row"><span class="k ${k.kind}">${KIND_LABEL[k.kind]}</span><span>${keyTitle(k.key)} <span class="muted">in ${k.layerName}</span></span></li>`)}</ul>` : nothing}
-            <h3>Everything that changed</h3>
-            <ul>${diff.map((r) => html`<li class="row"><span class="k ${r.kind}">${r.kind}</span><span><strong>${r.area}</strong> ${r.label}</span>${r.detail ? html`<span class="muted">${r.detail}</span>` : nothing}</li>`)}</ul>`
-          : html`<p class="muted">${s.hasDraft ? 'The draft matches the applied config.' : 'No draft. Edits you make appear here.'}</p>`}
-      </section>
       ${this.permissions()}
     `;
   }

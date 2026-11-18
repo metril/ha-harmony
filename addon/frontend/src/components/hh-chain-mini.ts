@@ -9,7 +9,7 @@ import type { Config } from '../lib/model';
 export class HhChainMini extends LitElement {
   static override styles = css`
     :host { display: block; }
-    .mini { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-height: 44px; }
+    .mini { display: flex; align-items: center; gap: 4px; min-height: 44px; overflow-x: auto; }
     .d { display: grid; justify-items: center; width: 56px; color: var(--acc); }
     .d .art { width: 44px; height: 33px; }
     .d small { font-size: 10.5px; color: var(--tx2); max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
