@@ -10,6 +10,9 @@ T="${1:?usage: remote_selftest.sh DIR ARGV}"
 WANT="${2:?usage: remote_selftest.sh DIR ARGV}"
 A="$T/app"
 fails=0
+# Waits: device defaults (whole seconds, BusyBox 1.13); the host tests shrink them via env.
+ST_TICK="${ST_TICK:-1}"
+ST_NAP="${ST_NAP:-3}"
 REAL_COUNT_FILE="${REAL_COUNT_FILE:-/data/app/bootcount}"
 
 pass() { echo "PASS  $1"; }
@@ -41,7 +44,7 @@ mkapp() {
 # one boot of start.sh, fully rooted at $A, with a short watcher tick
 boot() {
 	APP_DIR="$A" APP_BIN="$A/harmony_remote" APP_LOG="${BOOT_LOG:-$T/app.log}" \
-		START_TICK=1 START_LOG_MAX_LINES="${BOOT_LOGMAX:-}" sh "$A/start.sh" >/dev/null 2>&1
+		START_TICK="$ST_TICK" START_LOG_MAX_LINES="${BOOT_LOGMAX:-}" sh "$A/start.sh" >/dev/null 2>&1
 }
 
 launches() {
@@ -146,8 +149,7 @@ BOOT_LOG="$T/no/such/dir/app.log" boot
 if [ "$(launches)" = 1 ]; then pass "unwritable log: app still launched"; else fail "unwritable log (launches=$(launches))"; fi
 
 # 8. log capped in place while the app keeps writing
-# shellcheck disable=SC2016
-mkapp 'i=0; while [ $i -lt 40 ]; do echo line$i; i=$((i+1)); done; sleep 3; echo AFTER; sleep 1'
+mkapp "i=0; while [ \$i -lt 40 ]; do echo line\$i; i=\$((i+1)); done; sleep $ST_NAP; echo AFTER; sleep $ST_NAP"
 rm -f "$T/capped.log"
 BOOT_LOG="$T/capped.log" BOOT_LOGMAX=10 boot
 nl=0
@@ -157,7 +159,7 @@ if [ "$nl" -ge 1 ] && [ "$nl" -lt 40 ]; then pass "log capped in place ($nl of 4
 # 9. the hook line: armed launches the stub, DISABLE and non-executable do not
 mkapp
 line=$(cat "$T/hookline.sh")
-fire() { APP_DIR="$A" APP_BIN="$A/harmony_remote" APP_LOG="$T/app.log" START_TICK=1 sh -c "$line
+fire() { APP_DIR="$A" APP_BIN="$A/harmony_remote" APP_LOG="$T/app.log" START_TICK="$ST_TICK" sh -c "$line
 wait" >/dev/null 2>&1; }
 : >"$A/DISABLE"
 fire

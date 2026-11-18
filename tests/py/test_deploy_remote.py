@@ -463,7 +463,7 @@ def boot(tmp_path):
         **os.environ,
         "APP_DIR": str(app_dir),
         "APP_LOG": str(tmp_path / "app.log"),
-        "START_TICK": "1",
+        "START_TICK": "0.02",
     }
     env.pop("APP_BIN", None)
 
@@ -613,8 +613,8 @@ def test_start_sh_unwritable_log_still_launches(boot):
 def test_start_sh_caps_the_log_in_place(boot):
     app = boot.dir / "harmony_remote"
     app.write_text(
-        "#!/bin/sh\ni=0\nwhile [ $i -lt 60 ]; do echo line$i; i=$((i+1)); done\nsleep 2\n"
-        f"echo AFTER >> {boot.log}\nsleep 1\n"
+        "#!/bin/sh\ni=0\nwhile [ $i -lt 60 ]; do echo line$i; i=$((i+1)); done\nsleep 0.3\n"
+        f"echo AFTER >> {boot.log}\nsleep 0.2\n"
     )
     boot.env_["START_LOG_MAX_LINES"] = "10"
     boot.start()
@@ -628,6 +628,9 @@ def test_start_sh_has_no_arithmetic_on_file_content_and_no_missing_applets():
     assert not re.search(r"\b(head|tail|wc|dd|sync|basename|find|df|tar)\b", text)
 
 
+FAST = {"ST_TICK": "0.02", "ST_NAP": "0.3"}
+
+
 def test_selftest_script_passes_on_the_host(tmp_path):
     t = tmp_path / "st"
     t.mkdir()
@@ -637,7 +640,7 @@ def test_selftest_script_passes_on_the_host(tmp_path):
     p = subprocess.run(
         [*_CUR["shell"], str(dr.SELFTEST_SRC), str(t), "--slot 1 --powermode 0x30"],
         capture_output=True, text=True, timeout=120, check=False,
-        env={**os.environ, "REAL_COUNT_FILE": str(tmp_path / "real-bootcount")},
+        env={**os.environ, "REAL_COUNT_FILE": str(tmp_path / "real-bootcount"), **FAST},
     )  # fmt: skip
     assert p.returncode == 0, p.stdout + p.stderr
     assert "FAIL" not in p.stdout and p.stdout.count("PASS") >= 18, p.stdout
@@ -651,7 +654,7 @@ def test_selftest_script_catches_a_broken_start_sh(tmp_path):
     (t / "rcS.local.hooked").write_text(dr.insert_hook(RCS))
     (t / "hookline.sh").write_text(dr.hook_line(str(t / "app")) + "\n")
     p = subprocess.run([*_CUR["shell"], str(dr.SELFTEST_SRC), str(t), "--slot 1 --powermode 0x30"],
-                       capture_output=True, text=True, timeout=120, check=False)  # fmt: skip
+                       capture_output=True, text=True, timeout=120, check=False, env={**os.environ, **FAST})  # fmt: skip
     assert p.returncode != 0 and "FAIL" in p.stdout
 
 

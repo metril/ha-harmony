@@ -93,7 +93,8 @@ APP_LOG="${APP_LOG:-@LOG@}"
 LOG_MAX="${START_LOG_MAX_LINES:-@LOGMAX@}"
 TICK="${START_TICK:-30}"
 case "$LOG_MAX" in '' | *[!0-9]*) LOG_MAX=@LOGMAX@ ;; esac
-case "$TICK" in '' | *[!0-9]*) TICK=30 ;; esac
+# Whole seconds on the device (BusyBox 1.13 sleep); tests pass a fraction via START_TICK.
+case "$TICK" in '' | *[!0-9.]*) TICK=30 ;; esac
 COUNT_FILE="$APP_DIR/bootcount"
 [ -e "$APP_DIR/DISABLE" ] && exit 0
 n=''
