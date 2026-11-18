@@ -34,6 +34,11 @@ int hp_store_put(hp_store_t *s, const uint8_t *raw, size_t len) {
     return ret;
 }
 
+bool hp_store_same(const hp_store_t *s, const uint8_t *raw, size_t len) {
+    if (len < HP_PAGE_V2_HEADER || raw[0] != 2 || raw[1] >= HP_STORE_MAX) return false;
+    return s->have_gen && s->gen == raw[5] && s->meta[raw[1]].len == len && !memcmp(s->raw[raw[1]], raw, len);
+}
+
 bool hp_store_has(const hp_store_t *s, uint8_t id) { return id < HP_STORE_MAX && s->meta[id].len; }
 unsigned hp_store_count(const hp_store_t *s) { return s->count; }
 unsigned hp_store_need(const hp_store_t *s) { return s->total < HP_STORE_MAX ? s->total : HP_STORE_MAX; }

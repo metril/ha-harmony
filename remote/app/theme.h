@@ -38,6 +38,11 @@
 #define RA_LOWBATT_PCT 10
 #define RA_LOWBATT_REARM_PCT 13
 
+/* Icon fonts (tools/gen_remote_icon_font.sh): glyph U+E000 + icon id, see icons.h */
+LV_FONT_DECLARE(ra_icons_20);
+LV_FONT_DECLARE(ra_icons_24);
+LV_FONT_DECLARE(ra_icons_32);
+
 /* Fonts: Ubuntu, 4 bpp, Latin-1 (tools/gen_remote_fonts.sh) */
 LV_FONT_DECLARE(ra_font_b20); /* display: state screens, tiles */
 LV_FONT_DECLARE(ra_font_b18); /* top-bar title */

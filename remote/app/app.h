@@ -11,11 +11,13 @@
 #include "remote/app/power.h"
 #include "remote/app/sys.h"
 #include "remote/app/ui.h"
+#include "remote/page/store.h"
 
 typedef enum {
   APP_LINK_EV_NONE = 0,
   APP_LINK_EV_PAGE_PUSH,   /* page, data[0..len) */
   APP_LINK_EV_TILE_UPDATE, /* page, tile, text */
+  APP_LINK_EV_TILE_STATE,  /* page, tile, state, text (hp_tile_state_t) */
   APP_LINK_EV_STATE_UPDATE,/* activity, power */
   APP_LINK_EV_FAILED,      /* a send failed after all retries (fatal: the link cannot work at all) */
   APP_LINK_EV_ALIVE        /* any frame arrived from the hub */
@@ -23,7 +25,7 @@ typedef enum {
 
 typedef struct {
   app_link_event_kind_t kind;
-  uint8_t page, tile, activity;
+  uint8_t page, tile, activity, state;
   bool power, fatal; /* fatal: FAILED that shows the fallback at once */
   uint8_t data[HP_PAGE_MAX_BYTES];
   size_t len;
@@ -62,8 +64,15 @@ typedef struct {
   /* Fallback policy: >= APP_FAIL_COUNT consecutive FAILED events AND no hub frame for APP_FAIL_SILENCE_MS. */
   unsigned fail_run;
   uint64_t last_rx_ms;
-  hp_page_t saved; /* the last real page pushed, restored when the hub is heard again */
+  hp_page_t saved; /* version 1: the last real page pushed, restored when the hub is heard again */
   bool have_saved, awake_known, last_awake;
+  /* Version 2: the page store (raw wire bytes, ~9.4 KiB) and navigation. `v2` once a v2 page has been stored; `cur`
+   * is the page id on screen or being waited for (-1 none). */
+  hp_store_t store;
+  bool v2, state_known;
+  int cur;
+  uint8_t key_up, key_down, key_exit, key_home, key_fav; /* logical ids of the hard keys the app handles itself */
+  uint8_t swallowed;                                     /* bit 0..2: Up, Down, Exit were consumed at press: their holds / release too */
   unsigned last_batt_polls; /* power.batt_polls already shown in the status bar */
   bool lowbatt_disarmed;    /* the low-battery toast was queued for this dip (re-arms at >= 13 % or on a charger) */
   bool lowbatt_pending;     /* queued, waiting for the screen to be on */

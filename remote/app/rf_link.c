@@ -4,6 +4,7 @@
 
 #include "hub/hp_errors.h"
 #include "hub/rf/rf_payload.h"
+#include "remote/app/icons.h"
 
 static uint32_t t32(uint64_t now) { return (uint32_t)now; }
 
@@ -55,6 +56,22 @@ static void deliver(void *ctx, const hp_rf_msg_t *m) {
       ra_logf(&l->sys, "rf_link: bad tile_update dropped");
     }
     break;
+  case HP_MSG_TILE_STATE: {
+    hp_rf_val_t t[5];
+    if (hp_rf_unpack(m->type, m->payload, m->len, t, 5) == 0 && t[3].u <= HP_TILE_UNAVAILABLE && t[4].len <= HP_PAGE_MAX_TEXT) {
+      app_link_event_t *e = ring_push(l);
+      if (!e) return;
+      e->kind = APP_LINK_EV_TILE_STATE;
+      e->page = (uint8_t)t[1].u;
+      e->tile = (uint8_t)t[2].u;
+      e->state = (uint8_t)t[3].u;
+      memcpy(e->text, t[4].p, t[4].len);
+      e->text[t[4].len] = 0;
+    } else {
+      ra_logf(&l->sys, "rf_link: bad tile_state dropped");
+    }
+    break;
+  }
   case HP_MSG_STATE_UPDATE:
     if (hp_rf_unpack(m->type, m->payload, m->len, v, 2) == 0) {
       app_link_event_t *e = ring_push(l);
@@ -109,7 +126,18 @@ static int rf_send_key(void *ctx, uint8_t code, uint8_t action) {
   return rc;
 }
 
+static void send_info(rf_link_t *l, uint64_t now) {
+  hp_rf_val_t v[4] = {{.u = l->remote}, {.u = RF_LINK_PAGE_FMT}, {.u = RF_LINK_CAPS}, {.u = RA_ICON_MAX}};
+  if (send_msg(l, HP_MSG_REMOTE_INFO, v, 4, now) < 0) {
+    l->next_info_ms = now + RF_LINK_RETRY_MS;
+    return;
+  }
+  l->info_pending = false;
+  l->info_sent_ms = now;
+}
+
 static void heartbeat(rf_link_t *l, uint64_t now) {
+  if (!l->info_pending && now - l->info_sent_ms >= RF_LINK_BATTERY_MS) send_info(l, now); /* repeated: ahead of the battery */
   int pct = ra_battery_percent(&l->sys);
   if (pct < 0) pct = l->last_pct;
   if (pct < 0) { /* never had a reading: nothing honest to send */
@@ -136,6 +164,7 @@ static void service(rf_link_t *l, uint64_t now) {
   int rc = hp_rf_link_pump(&l->link, t32(now));
   if (l->link.rx_frames != l->seen_rx) { /* something came from the hub */
     l->seen_rx = l->link.rx_frames;
+    if (l->info_pending && l->next_info_ms == UINT64_MAX) l->next_info_ms = now;
     app_link_event_t *e = ring_push(l);
     if (e) e->kind = APP_LINK_EV_ALIVE;
   }
@@ -144,9 +173,12 @@ static void service(rf_link_t *l, uint64_t now) {
   if (att && l->lost) { /* re-attached after a loss: tell the hub we are here */
     l->lost = false;
     l->next_batt_ms = now;
+    l->info_pending = true;
+    l->next_info_ms = now;
   }
   if (!att && l->was_attached) l->lost = true;
   l->was_attached = att;
+  if (l->info_pending && now >= l->next_info_ms) send_info(l, now); /* first uplink after a link-up */
   if (now >= l->next_batt_ms) {
     heartbeat(l, now);
     hp_rf_link_pump(&l->link, t32(now));
@@ -154,6 +186,8 @@ static void service(rf_link_t *l, uint64_t now) {
   uint32_t f = hp_rf_link_status(&l->link).failures;
   if (f != l->seen_failures) {
     l->seen_failures = f;
+    l->info_pending = true; /* the hub went quiet: when it is heard again it may have forgotten us */
+    l->next_info_ms = UINT64_MAX; /* held until a frame arrives (below): no traffic towards a silent hub */
     raise_failed(l);
   }
 }
@@ -183,6 +217,10 @@ static uint32_t rf_next_ms(void *ctx, uint64_t now) {
   if (l->n || (!l->tp && !l->dead_reported)) return 0;
   if (!l->tp) return UINT32_MAX;
   uint64_t best = l->next_batt_ms > now ? l->next_batt_ms - now : 0;
+  if (l->info_pending) {
+    uint64_t d = l->next_info_ms > now ? l->next_info_ms - now : 0;
+    if (d < best) best = d;
+  }
   int r = hp_rf_link_next_timeout_ms(&l->link, t32(now)); /* the retry deadline always bounds the wait */
   if (r >= 0 && (uint64_t)r < best) best = (uint64_t)r;
   return best > UINT32_MAX ? UINT32_MAX : (uint32_t)best;
@@ -211,6 +249,8 @@ int rf_link_open(rf_link_t *l, const hp_rf_spi_cfg_t *cfg) {
   hp_rf_link_set_poll(&l->link, RF_LINK_POLL_MS, RF_LINK_IDLE_POLL_MS); /* active once the app reports awake */
   if (cfg->debug) hp_rf_link_set_log(&l->link, cfg->log ? cfg->log : hp_rf_log_stderr, cfg->log_ctx);
   l->next_batt_ms = 0; /* first heartbeat on the first poll */
+  l->info_pending = true;
+  l->next_info_ms = 0; /* remote_info goes out first */
   l->dead_reported = false;
   return 0;
 }

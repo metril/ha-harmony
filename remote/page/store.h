@@ -42,6 +42,8 @@ void hp_store_init(hp_store_t *);
  * version 2); -HP_E_TOOBIG (page id >= HP_STORE_MAX: it cannot be held). Storing a page drops its tile overlay. */
 int hp_store_put(hp_store_t *, const uint8_t *raw, size_t len);
 bool hp_store_has(const hp_store_t *, uint8_t id);
+/* The stored bytes of page `id` are exactly raw[0..len) (and the gen matches): a re-push that changes nothing. */
+bool hp_store_same(const hp_store_t *, const uint8_t *raw, size_t len);
 unsigned hp_store_count(const hp_store_t *);
 /* Pages the set needs before it is complete: min(total, HP_STORE_MAX); 0 until a page arrived. */
 unsigned hp_store_need(const hp_store_t *);

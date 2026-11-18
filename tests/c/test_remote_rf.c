@@ -13,6 +13,7 @@
 #include "hub/rf/link.h"
 #include "hub/rf/rf_payload.h"
 #include "remote/app/cli.h"
+#include "remote/app/icons.h"
 #include "remote/app/rf_link.h"
 #include "remote_fake.h"
 
@@ -156,7 +157,8 @@ static hp_rf_spi_ops_t fake_ops(fake_t *f) {
 /* ---- the world ---- */
 
 typedef struct { uint8_t remote, key, action; } hkey_t;
-typedef struct { uint8_t remote, pct; uint16_t mv; uint64_t at; } hbatt_t;
+typedef struct { uint8_t remote, pct; uint16_t mv; uint64_t at; int ord; } hbatt_t;
+typedef struct { uint8_t remote, fmt, caps, icons; uint64_t at; int ord; } hinfo_t;
 
 static fk_t fk;
 static app_t app;
@@ -167,7 +169,8 @@ static hp_rf_link_t hub_link;
 static hkey_t hkeys[256];
 static int nhkeys;
 static hbatt_t hbatt[32];
-static int nhbatt, nhother;
+static hinfo_t hinfo[32];
+static int nhbatt, nhinfo, nhother, hord; /* hord: arrival order of battery / remote_info objects */
 
 /* wait() recorder: what the loop select()s on and for how long */
 static int rec_n, rec_fd[3];
@@ -185,7 +188,11 @@ static void hub_deliver(void *ctx, const hp_rf_msg_t *m) {
   if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
     if (nhkeys < 256) hkeys[nhkeys++] = (hkey_t){(uint8_t)v[0].u, (uint8_t)v[1].u, (uint8_t)v[2].u};
   } else if (m->type == HP_MSG_BATTERY && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
-    if (nhbatt < 32) hbatt[nhbatt++] = (hbatt_t){(uint8_t)v[0].u, (uint8_t)v[1].u, (uint16_t)v[2].u, fk.now};
+    if (nhbatt < 32) hbatt[nhbatt++] = (hbatt_t){(uint8_t)v[0].u, (uint8_t)v[1].u, (uint16_t)v[2].u, fk.now, hord++};
+  } else if (m->type == HP_MSG_REMOTE_INFO) {
+    hp_rf_val_t r[4];
+    CT_EQ(hp_rf_unpack(m->type, m->payload, m->len, r, 4), 0);
+    if (nhinfo < 32) hinfo[nhinfo++] = (hinfo_t){(uint8_t)r[0].u, (uint8_t)r[1].u, (uint8_t)r[2].u, (uint8_t)r[3].u, fk.now, hord++};
   } else {
     nhother++;
   }
@@ -235,7 +242,7 @@ static int setup_ex(int hal, int soc_missing) {
   fh.peer = &fr;
   fr.peer = &fh;
   fr.hal = hal;
-  nhkeys = nhbatt = nhother = 0;
+  nhkeys = nhbatt = nhinfo = nhother = hord = 0;
   rec_n = 0;
   hp_rf_spi_ops_t ho = fake_ops(&fh);
   hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
@@ -381,22 +388,35 @@ static void test_keys_and_taps_reach_the_hub(void) {
 }
 
 /* Message types added after this firmware (tile_state, remote_info) are dropped without effect. */
-static void test_new_hub_types_are_dropped(void) {
+static void test_tile_state_applies_and_unknown_types_are_dropped(void) {
   setup();
   CT_EQ(hub_push_page(PAGE2, sizeof PAGE2), 0);
   WAIT_FOR(app.ui.page.page_id == 2);
   uint64_t before = fb_hash();
+  hp_rf_val_t r[4] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}};
+  CT_EQ(hub_send(HP_MSG_REMOTE_INFO, r, 4), 0); /* a type the remote does not act on: dropped, not an error */
   hp_rf_val_t t[5] = {{.u = 1}, {.u = 2}, {.u = 5}, {.u = 2}, {.p = (const uint8_t *)"On", .len = 2}};
   CT_EQ(hub_send(HP_MSG_TILE_STATE, t, 5), 0);
-  hp_rf_val_t r[4] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}};
-  CT_EQ(hub_send(HP_MSG_REMOTE_INFO, r, 4), 0);
   hp_rf_val_t s[2] = {{.u = 3}, {.u = 1}};
   CT_EQ(hub_send(HP_MSG_STATE_UPDATE, s, 2), 0); /* a later message still arrives, in order */
   WAIT_FOR(app.state_updates == 1);
   DRAIN();
-  CT_EQ(app.ui.page.widgets[0].text[0], 0);
-  CT_CHECK(fb_hash() == before);
+  CT_CHECK(!strcmp(app.ui.page.widgets[0].text, "On")); /* a version 1 page takes the text of a tile_state */
+  CT_CHECK(fb_hash() != before);
   CT_CHECK(!app.ui.fallback);
+  teardown();
+}
+
+/* remote_info is the first object after link-up, ahead of the battery message, and carries what the remote can do. */
+static void test_remote_info_is_first_uplink(void) {
+  setup();
+  WAIT_FOR(nhinfo >= 1 && nhbatt >= 1);
+  CT_EQ(hinfo[0].remote, RF_LINK_REMOTE_ID);
+  CT_EQ(hinfo[0].fmt, 2);
+  CT_EQ(hinfo[0].caps, 3);
+  CT_EQ(hinfo[0].icons, RA_ICON_MAX);
+  CT_CHECK(hinfo[0].ord < hbatt[0].ord);
+  CT_EQ(nhinfo, 1);
   teardown();
 }
 
@@ -495,6 +515,7 @@ static void test_idle_link_is_silent_and_heartbeats(void) {
   CT_EQ(app.ui.page.page_id, 2);
   CT_EQ(nhkeys, keys);
   CT_EQ(nhbatt, 3); /* open, +5 min, +10 min */
+  CT_EQ(nhinfo, 3); /* remote_info rides with each heartbeat: the hub only relays a change */
   CT_EQ(hbatt[1].pct, 42);
   CT_EQ(hbatt[1].at - t0, RF_LINK_BATTERY_MS);
   CT_EQ(hbatt[2].at - t0, 2 * RF_LINK_BATTERY_MS);
@@ -519,7 +540,7 @@ static void test_polls_only_while_awake(void) {
   int awake_polls = count_remote_writes(HP_RF_KIND_POLL) - p0;
   CT_CHECK(awake_polls >= 15 && awake_polls <= 22);
   CT_EQ(nhother, 0); /* the hub ignored every poll: no delivery, no ack */
-  CT_EQ(hp_rf_link_status(&hub_link).delivered, 1u);
+  CT_EQ(hp_rf_link_status(&hub_link).delivered, 2u); /* remote_info + battery */
   for (int i = 0; i < 40; i++) tick(1000); /* idle past the backlight-off time */
   CT_EQ(app.power.state, RA_PW_OFF);
   int p1 = count_remote_writes(HP_RF_KIND_POLL);
@@ -751,7 +772,8 @@ int main(void) {
   CT_RUN(test_page_push_renders_golden);
   CT_RUN(test_keys_and_taps_reach_the_hub);
   CT_RUN(test_tile_update_changes_render);
-  CT_RUN(test_new_hub_types_are_dropped);
+  CT_RUN(test_tile_state_applies_and_unknown_types_are_dropped);
+  CT_RUN(test_remote_info_is_first_uplink);
   CT_RUN(test_dropped_ack_delivers_once);
   CT_RUN(test_peer_that_never_acks_shows_fallback_only);
   CT_RUN(test_polls_only_while_awake);

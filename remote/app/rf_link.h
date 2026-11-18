@@ -10,6 +10,11 @@
  * retries, raises APP_LINK_EV_FAILED (the fallback page). An idle link is silent: acks follow
  * objects, so nothing is expected while nobody presses a key.
  *
+ * REMOTE_INFO. The first object after open, after every re-attach and after a send that failed all its retries (the
+ * hub may have restarted and forgotten it) is remote_info {remote, 2, caps 3, highest icon id}, ahead of the battery
+ * message; it is also repeated every RF_LINK_BATTERY_MS just ahead of the battery message (4 bytes; the hub only relays changes). A failed or refused send is
+ * retried in RF_LINK_RETRY_MS. Receives tile_state like tile_update.
+ *
  * HEARTBEAT. The hub treats the remote as absent until it speaks, so a `battery` message goes out
  * once right after open and then every RF_LINK_BATTERY_MS while the app runs, plus once when the
  * link re-attaches after a loss. percent = the STC3115 soc (ra_battery_percent, the guard's own
@@ -32,6 +37,10 @@
 #include "remote/app/app.h"
 
 #define RF_LINK_REMOTE_ID 1 /* key_event.remote, as remote_sim's default */
+/* remote_info (docs/plans/2026-11-18-page-format-v2.md): page format 2, caps bit 0 tile_state + bit 1 page store,
+ * icons = the highest stock icon id the font holds. */
+#define RF_LINK_PAGE_FMT 2
+#define RF_LINK_CAPS 3
 #define RF_LINK_BATTERY_MS (5 * 60 * 1000)
 #define RF_LINK_RETRY_MS 5000
 #define RF_LINK_POLL_MS HP_LINK_POLL_MS          /* poll gap while an object awaits its ack */
@@ -47,7 +56,8 @@ typedef struct {
   app_link_event_t ring[RF_LINK_RING];
   unsigned head, n;
   uint32_t seen_failures, seen_rx;
-  uint64_t next_batt_ms;
+  uint64_t next_batt_ms, next_info_ms, info_sent_ms;
+  bool info_pending;
   int last_pct;
   bool was_attached, lost, dead_reported;
 } rf_link_t;
