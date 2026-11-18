@@ -74,3 +74,13 @@ stock, confirm `hal` is back, then image.
 `/tmp/hah-selftest` (tmpfs) and runs the key cases under the hub's own BusyBox 1.13 `sh` with `killall` and
 `reboot` defined as shell functions. It writes only under `/tmp/hah-selftest` and removes it afterwards.
 Run it before the first real arm. (BusyBox 1.13 `ls -ln` has extra columns, so the hook caps its log by line count.)
+
+## Elite deploy tooling notes
+
+- Kill switch on the Elite: `tools/deploy_remote.py disable --yes` touches `/data/app/DISABLE`, `enable --yes` removes it;
+  both read the file back and print `DISABLE: PRESENT|absent`.
+- `tools/deploy_remote.py reboot --yes [--up-timeout SEC]` waits up to 600 s by default (a boot plus the USB link is
+  well over 120 s). After each reboot the Elite's USB gadget interface reappears renamed `enx<mac>` (no longer `usb0`)
+  and loses the host address: re-address it (`ip link`, then re-add the host address) or the wait will time out.
+- `tools/deploy_hub.py run --yes --detach -- <args>` starts the daemon without a tty, logs to `/tmp/ha-harmony-hub.log`,
+  confirms the pid is alive and prints it. Both tools need Python >=3.14 (they use 3.14-only syntax, so an older interpreter fails with a SyntaxError): run them with `uv run python tools/<tool>.py ...`.

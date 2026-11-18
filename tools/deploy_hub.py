@@ -283,9 +283,7 @@ class Deployer:
         rc, _, err = self.r.run_input(["sh", "-c", f"cat > {shlex.quote(dest)}"], data)
         if rc != 0:
             self.r.run(["rm", "-f", dest])
-            raise DeployError(
-                f"{dest}: upload failed (rc={rc}): {err.decode('utf-8', 'replace')}"
-            )
+            raise DeployError(f"{dest}: upload failed (rc={rc}): {err.decode('utf-8', 'replace')}")
         rc, out, err = self.r.run(["md5sum", dest])
         got = parse_hash(out, "md5") if rc == 0 else None
         if got != want:
@@ -302,7 +300,9 @@ class Deployer:
             rc, _, err = self.r.run(["mv", dest, remote])
             if rc != 0:
                 self.r.run(["rm", "-f", dest])
-                raise DeployError(f"{remote}: mv into place failed: {err.decode('utf-8', 'replace')}")
+                raise DeployError(
+                    f"{remote}: mv into place failed: {err.decode('utf-8', 'replace')}"
+                )
         self.out(f"  ok  {remote}  {len(data)} B  md5 {want}")
 
     def push(
@@ -541,7 +541,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     add("status", "[read-only] stock processes, device holders, /data free space, our files", False)
     p = add(
-        "push", "[WRITE] copy hub (+remote_sim, rf_probe, config, BusyBox) to /data/ha-harmony, md5-verified"
+        "push",
+        "[WRITE] copy hub (+remote_sim, rf_probe, config, BusyBox) to /data/ha-harmony, md5-verified",
     )
     p.add_argument("--hub", type=Path, required=True)
     p.add_argument("--remote-sim", type=Path)
@@ -553,10 +554,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("quiesce", "[WRITE] stop lua* then hal; verify devices unheld. BREAKS remote + HA")
     p.add_argument("--timeout", type=float, default=20.0)
     p = add("run", "[WRITE] run the hub in the foreground over ssh (args after --)")
-    p.add_argument("--detach", action="store_true", help="no TTY: background it, log to /tmp, print pid")
+    p.add_argument(
+        "--detach", action="store_true", help="no TTY: background it, log to /tmp, print pid"
+    )
     p.add_argument("hub_args", nargs=argparse.REMAINDER)
     p = add("prune", "[WRITE] delete only remote_sim and rf_probe from /data/ha-harmony")
-    p = add("press", "[WRITE] run remote_sim --rf SOCK --press KEY (key name like VolumeUp, or a numeric logical code 0..255)")
+    p = add(
+        "press",
+        "[WRITE] run remote_sim --rf SOCK --press KEY (key name like VolumeUp, or a numeric logical code 0..255)",
+    )
     p.add_argument("key")
     p.add_argument("--sock", default=RF_SOCKET)
     p = add("restore", "[WRITE] reboot the hub back to stock; wait; verify hal + lua")
@@ -576,7 +582,11 @@ def main(
         return 2
     if a.cmd == "press" and a.key.isdecimal() and not 0 <= int(a.key) <= 255:
         ap.error("numeric key must be 0..255")
-    if a.cmd == "press" and not a.key.isdecimal() and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", a.key):
+    if (
+        a.cmd == "press"
+        and not a.key.isdecimal()
+        and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", a.key)
+    ):
         ap.error("key must be a key name or a number")
     d = deployer or Deployer(
         runner
