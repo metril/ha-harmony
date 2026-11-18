@@ -16,6 +16,7 @@ import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows
 from custom_components.ha_harmony import const
 from custom_components.ha_harmony import coordinator as coord_mod
 from custom_components.ha_harmony.addon_link import BundleRejected
+from custom_components.ha_harmony.harmony_core.compiler import config_hash
 from custom_components.ha_harmony.harmony_core.ha_actions import HaCall
 from custom_components.ha_harmony.harmony_core.harmony_proto import MsgType
 from custom_components.ha_harmony.harmony_core.page_codec import decode_page
@@ -88,6 +89,7 @@ class ScriptHub:
         self.got: list[tuple[str, dict]] = []
         self.gate: asyncio.Event | None = None  # while cleared, page_push replies wait
         self.no_remote = False
+        self.reject_config = False  # answer set_config with ok=false
         self._late: list[asyncio.Task] = []
 
     async def handler(self, ws, env):
@@ -102,7 +104,11 @@ class ScriptHub:
             return
         self.got.append((t, d))
         if t == "set_config":
-            await ws.send_json({**reply, "t": "config_ack", "d": {"ok": True, "config_hash": "ab"}})
+            if self.reject_config:
+                ack = {"ok": False, "message": "too many keys"}
+            else:  # the real hub reports the CRC-32 of the config it runs
+                ack = {"ok": True, "config_hash": config_hash(d["config"])}
+            await ws.send_json({**reply, "t": "config_ack", "d": ack})
         elif t == "ping":
             await ws.send_json({**reply, "t": "pong", "d": {}})
         elif t in ("page_push", "command"):

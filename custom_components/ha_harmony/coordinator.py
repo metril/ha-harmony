@@ -156,6 +156,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.remotes: tuple[int, ...] = DEFAULT_REMOTE_IDS
         self.links: dict[int, RemoteLink] = {r: RemoteLink() for r in self.remotes}
         self._cfg_gen = 0  # bumped whenever the compiled config changes
+        self._accepted_gen: int | None = None  # the _cfg_gen the hub is known to run (hash equal)
+        self._known_rev: str | None = None  # last add-on rev handled (applied or rejected)
         self._sleep = lambda seconds: _sleep_hook(seconds)
         # tracked by hub index, never by name: a rename keeps the index, a reorder gets a new
         # state_update from the hub
@@ -318,6 +320,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self.last_error = None
             changed = bundle.rev != self.rev or not self.managed
             self.rev, self.applied_at, self.managed = bundle.rev, bundle.applied_at, True
+            self._known_rev = bundle.rev
             if changed:
                 await self._store.async_save(
                     {"rev": bundle.rev, "applied_at": bundle.applied_at, "config": bundle.source}
@@ -410,15 +413,15 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     async def _link_loop(self, client: AddonClient) -> None:
         """Long-poll the add-on for newer applied configs; back off while it is unavailable."""
         loop = asyncio.get_running_loop()
-        known: str | None = self.rev  # last rev handled (applied or rejected); "" = none applied
+        self._known_rev = self.rev  # last rev handled (applied or rejected); "" = none applied
         delay = const.LINK_BACKOFF_MIN
         while True:
             started = loop.time()
             try:
-                if known is None:
+                if self._known_rev is None:
                     raw: bytes | None = await client.fetch(self.hub_id)
                 else:
-                    raw = await client.wait(self.hub_id, known)
+                    raw = await client.wait(self.hub_id, self._known_rev)
                 if self.link_state in ("unreachable", "auth_failed"):
                     _LOGGER.info("Harmony Editor add-on is reachable again")
                 if raw is not None:
@@ -427,9 +430,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     except BundleRejected as exc:
                         if exc.rev is None:
                             raise
-                        known = exc.rev  # wait for the next apply rather than re-pulling this one
+                        self._known_rev = exc.rev  # wait for the next apply, not re-pulling this one
                     else:
-                        known = bundle.rev if bundle else known
+                        if bundle:
+                            self._known_rev = bundle.rev
                 elif loop.time() - started < 0.5:
                     await asyncio.sleep(1)  # an add-on answering instantly with nothing
                 if self.link_state in (
@@ -442,7 +446,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 delay = const.LINK_BACKOFF_MIN
             except NothingApplied as exc:
                 self._note_link_failure(exc)
-                known = ""
+                self._known_rev = ""
                 await asyncio.sleep(delay)
             except AddonError as exc:
                 self._note_link_failure(exc)
@@ -488,6 +492,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         want = compiled.config_hash
         if self.client.config_hash == want:
             _LOGGER.debug("Hub already runs config %s; not pushing", want)
+            self._accepted_gen = self._cfg_gen
             return True
         self.config_pushes += 1
         try:
@@ -499,11 +504,15 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             _LOGGER.error("The hub rejected the config: %s", msg)
             self.last_error = msg
             self._set_issue(ISSUE_REJECTED, msg)
+            self._accepted_gen = None
             self._warn_unknown_index()  # no new list is coming: the reported index stays unknown
             return False
         self.last_error = None
         self._clear_issue(ISSUE_REJECTED)
         self.client.config_hash = ack.get("config_hash")  # as the hub reports it
+        reported = self.client.config_hash
+        if reported is None or reported == want:
+            self._accepted_gen = self._cfg_gen
         # activity_list is not echoed to the sender: apply it ourselves
         self._set_activities(compiled.activities)
         return True
@@ -525,7 +534,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     async def async_push_pages(self) -> None:
         """The `push_pages` service: resend the whole set to every remote and wait for it."""
         tasks = [self._request_push(r, wait=True, force=True) for r in self.remotes]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*(t for t in tasks if t), return_exceptions=True)
 
     # ------------------------------------------------------------ pages per remote
     def remote_format(self, remote: int) -> int:
@@ -534,12 +543,31 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def _rlink(self, remote: int) -> RemoteLink:
         return self.links.setdefault(remote, RemoteLink())
 
-    def _request_push(self, remote: int, *, wait: bool, force: bool = False) -> asyncio.Task[None]:
-        """(Re)start the page push of one remote; an older push of it is cancelled first and has
-        finished before the new one sends anything, so two sets never interleave."""
+    @property
+    def hub_accepted(self) -> bool:
+        """The hub is known to run the compiled config: only then do pages of it make sense."""
+        return self._accepted_gen == self._cfg_gen
+
+    def _request_push(
+        self, remote: int, *, wait: bool, force: bool = False
+    ) -> asyncio.Task[None] | None:
+        """(Re)start the page push of one remote. A no-op when the wanted (config gen, format,
+        link epoch) is what is already pushed or in flight, or while the hub has not accepted the
+        config. Otherwise an older push of the remote is cancelled first and has finished before
+        the new one sends anything, so two sets never interleave."""
         link = self._rlink(remote)
         old = link.task
-        if old is not None and not old.done():
+        running = old is not None and not old.done()
+        if not force:
+            if not self.hub_accepted:
+                link.pending = True  # the sync that gets the config accepted requests the push
+                return old if running else None
+            if running and link.waiting:
+                return old  # it reads the format and generation when remote_info arrives
+            want = (self._cfg_gen, link.page_fmt, link.epoch)
+            if want in (link.pushed, link.inflight):
+                return old if running else None
+        if running:
             old.cancel()
         link.task = self.config_entry.async_create_background_task(
             self.hass, self._push_remote(remote, wait, force, old), name=f"{DOMAIN} pages {remote}"
@@ -558,6 +586,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 await self._wait_info(link)
             finally:
                 link.waiting = False
+        if not self.hub_accepted:
+            link.pending = True
+            return
         want = (self._cfg_gen, link.page_fmt, link.epoch)
         if not force and link.pushed == want:
             return
@@ -626,10 +657,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         changed = link.info != new
         link.info, link.attached = new, True
         link.info_event.set()
-        want = (self._cfg_gen, link.page_fmt, link.epoch)
         # One push per link-up: a task still waiting for this message carries on by itself, and a
         # set already sent (or being sent) in this format and epoch is not repeated.
-        if remote in self.remotes and not link.waiting and want not in (link.pushed, link.inflight):
+        if remote in self.remotes:
             self._request_push(remote, wait=False)
         if changed:
             self.async_update_listeners()
@@ -767,6 +797,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # its remotes (remote_info) right after hello_ack, and the next state_update is a
             # baseline for the Home Assistant activity steps, not a transition.
             self._act_known = False
+            self._accepted_gen = None  # the hub may have rebooted: the resync confirms its config
             for link in self.links.values():
                 link.epoch += 1
                 link.info, link.pushed = None, None
