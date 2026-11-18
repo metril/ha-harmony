@@ -65,6 +65,42 @@ static hp_page_t worst_page(int id, int titled) {
   return p;
 }
 
+/* Worst case for a version 2 page: 32 widgets, every one with an icon and a maximum-length label; tiles with a caption
+ * and the longest value; paged + BACK (the bar's extra labels). Mixed shapes. */
+static hp_page_t worst_page_v2(int id, int stale_tiles) {
+  hp_page_t p;
+  memset(&p, 0, sizeof p);
+  p.version = 2;
+  p.page_id = (uint8_t)id;
+  p.total = 50;
+  p.gen = 3;
+  p.cols = 8;
+  p.rows = 4;
+  p.back = 1;
+  p.seq_idx = 2;
+  p.seq_cnt = 3;
+  memset(p.title, 'T', HP_PAGE_MAX_TITLE);
+  for (unsigned i = 0; i < HP_PAGE_MAX_WIDGETS; i++) {
+    hp_widget_t *w = &p.widgets[i];
+    w->id = (uint8_t)i;
+    w->x = (uint8_t)(i % 8);
+    w->y = (uint8_t)(i / 8);
+    w->w = w->h = 1;
+    w->kind = (uint8_t)(i % 3 == 2 ? HP_WIDGET_TILE : HP_WIDGET_BUTTON);
+    w->icon = (uint8_t)(1 + i % RA_ICON_MAX);
+    w->role = (uint8_t)(i % 5);
+    w->shape = (uint8_t)(i % 4);
+    w->has_bind = i % 2;
+    w->bind = (uint8_t)(i % 7);
+    memset(w->label, 'W', HP_PAGE_MAX_LABEL);
+    memset(w->text, 'M', HP_PAGE_MAX_TEXT);
+    w->tstate = (uint8_t)(i % 4);
+  }
+  p.count = HP_PAGE_MAX_WIDGETS;
+  (void)stale_tiles;
+  return p;
+}
+
 static size_t pool_free(void) {
   lv_mem_monitor_t m;
   lv_mem_monitor(&m);
@@ -98,7 +134,42 @@ static void test_pool_peak_and_no_leak(void) {
   app_destroy(&app);
 }
 
-int main(void) {
-  CT_RUN(test_pool_peak_and_no_leak);
+/* 32 widgets with icons (an extra label each), captions on the tiles, a toast over it, the stale state and activity
+ * changes: peak <= 60 % of the pool, nothing leaks cycle to cycle, no out-of-memory state. */
+static void test_v2_pool_peak_and_no_leak(void) {
+  fresh_app();
+  hp_page_t w1 = worst_page_v2(10, 0), w2 = worst_page_v2(11, 1);
+  size_t baseline = 0;
+  for (int i = 0; i < 8; i++) {
+    ra_ui_show_page(&app.ui, i % 2 ? &w2 : &w1);
+    ra_ui_toast(&app.ui, "Battery 8%", "Place on the charger");
+    ra_ui_set_battery(&app.ui, 8, 0);
+    ra_ui_set_link(&app.ui, 1); /* "stale" captions */
+    ra_ui_set_activity(&app.ui, (uint8_t)(i % 7), 1);
+    ra_ui_press_at(&app.ui, 120, 100);
+    ra_ui_tile_state(&app.ui, (uint8_t)(10 + i % 2), 2, HP_TILE_ON, "On", 2);
+    refresh();
+    ra_ui_set_link(&app.ui, 0);
+    ra_ui_show_receiving_n(&app.ui, 5, 40);
+    ra_ui_show_receiving_n(&app.ui, 6, 40);
+    ra_ui_toast_dismiss(&app.ui);
+    ra_ui_show_boot(&app.ui);
+    CT_EQ(app.ui.oom, 0);
+    if (i == 0) baseline = pool_free();
+    else CT_EQ(pool_free(), baseline);
+  }
+  lv_mem_monitor_t m;
+  lv_mem_monitor(&m);
+  unsigned pct = (unsigned)(m.max_used * 100 / LV_MEM_SIZE);
+  fprintf(stderr, "v2 pool peak: %zu of %u bytes (%u%%)\n", m.max_used, (unsigned)LV_MEM_SIZE, pct);
+  CT_CHECK(pct <= 60);
+  app_destroy(&app);
+}
+
+/* argv[1]: "v1" or "v2" runs one half (ctest runs them in parallel); no argument runs both. */
+int main(int argc, char **argv) {
+  int v1 = argc < 2 || !strcmp(argv[1], "v1"), v2 = argc < 2 || !strcmp(argv[1], "v2");
+  if (v1) CT_RUN(test_pool_peak_and_no_leak);
+  if (v2) CT_RUN(test_v2_pool_peak_and_no_leak);
   return CT_DONE();
 }

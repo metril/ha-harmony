@@ -63,8 +63,13 @@ if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
   foreach(t remote_input remote_power remote_render remote_mem remote_oom remote_app remote_rf remote_latency)
     add_executable(test_${t} test_${t}.c)
     target_link_libraries(test_${t} PRIVATE hp_remote_app hp_hub)
-    add_test(NAME ${t} COMMAND test_${t})
+    if(NOT t STREQUAL "remote_mem")
+      add_test(NAME ${t} COMMAND test_${t})
+    endif()
   endforeach()
+  # the pool tests are the slowest: one ctest entry per half so they run in parallel
+  add_test(NAME remote_mem_v1 COMMAND test_remote_mem v1)
+  add_test(NAME remote_mem_v2 COMMAND test_remote_mem v2)
   foreach(t remote_render remote_rf)
     target_compile_definitions(test_${t} PRIVATE
       HP_PAGES_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json"

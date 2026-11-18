@@ -167,6 +167,8 @@ static void sc_home_charging_linkdown(void) {
   ra_ui_set_battery(&app.ui, 100, 1);
   ra_ui_set_link(&app.ui, 1);
 }
+#include "v2_screens.h"
+
 static const screen_t SCREENS[] = {
     {"boot", sc_boot},
     {"receiving", sc_receiving},
@@ -175,6 +177,15 @@ static const screen_t SCREENS[] = {
     {"home_pressed", sc_home_pressed},
     {"home_lowbatt_toast", sc_home_lowbatt},
     {"home_charging_linkdown", sc_home_charging_linkdown},
+    {"v2_home_active", sc2_home_active},
+    {"v2_home_off", sc2_home_off},
+    {"v2_home_pressed", sc2_pressed},
+    {"v2_activity", sc2_activity},
+    {"v2_tiles", sc2_tiles},
+    {"v2_tiles_stale", sc2_tiles_stale},
+    {"v2_paged_2_of_3", sc2_paged},
+    {"v2_back_page", sc2_back},
+    {"v2_receiving_12_of_40", sc2_receiving},
 };
 #define NSCREENS ((int)(sizeof SCREENS / sizeof SCREENS[0]))
 
@@ -202,8 +213,10 @@ static void test_goldens(void) {
     fprintf(out, "{\n \"hash\": \"fnv1a-64 over the 240x320 RGB565 framebuffer (153600 bytes, little-endian)\",\n \"pages\": {\n");
   }
   const cJSON *v;
-  int first = 1;
-  cJSON_ArrayForEach(v, cJSON_GetObjectItem(pages, "valid")) {
+  int first = 1, npages = 0;
+  for (int set = 0; set < 2; set++)
+  cJSON_ArrayForEach(v, cJSON_GetObjectItem(pages, set ? "valid_v2" : "valid")) {
+    npages++;
     const char *name = cJSON_GetObjectItem(v, "name")->valuestring;
     uint8_t raw[300];
     size_t n = unhex(cJSON_GetObjectItem(v, "hex")->valuestring, raw, sizeof raw);
@@ -253,7 +266,7 @@ static void test_goldens(void) {
     fclose(out);
     fprintf(stderr, "regenerated %s\n", HP_RENDER_JSON);
   } else if (gpages) {
-    CT_EQ(cJSON_GetArraySize(gpages), cJSON_GetArraySize(cJSON_GetObjectItem(pages, "valid")));
+    CT_EQ(cJSON_GetArraySize(gpages), npages);
     CT_EQ(cJSON_GetArraySize(gscreens), NSCREENS);
   }
   cJSON_Delete(pages);

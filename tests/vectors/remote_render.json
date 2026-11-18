@@ -7,7 +7,14 @@
   "max_widgets": "49a51117375fdeae",
   "max_label": "bca8b7e8676d28ce",
   "corner_16x16": "bb502de8d7059abe",
-  "max_size_15x15": "db1666f2e84f6836"
+  "max_size_15x15": "db1666f2e84f6836",
+  "v2_minimal": "53b70c6bff8a18cc",
+  "v2_title": "2612c69b19d48541",
+  "v2_all_options": "7a958c65f5fd5889",
+  "v2_home": "d8808cdfc8fb638d",
+  "v2_title_24_bytes": "06a7762b7a4ca307",
+  "v2_32_widgets_251_bytes": "c6ba56d570a4fb4e",
+  "v2_page_group_end": "b90da457947281dd"
  },
  "screens": {
   "boot": "3715224771477ef6",
@@ -16,6 +23,15 @@
   "home": "95266e6deb23721c",
   "home_pressed": "da5469b58ce406c2",
   "home_lowbatt_toast": "14b9324565ffd2af",
-  "home_charging_linkdown": "66e53bbeca3d1391"
+  "home_charging_linkdown": "66e53bbeca3d1391",
+  "v2_home_active": "c701b9be7153651d",
+  "v2_home_off": "66e543acd94c259d",
+  "v2_home_pressed": "6a80fb22bb7a35ec",
+  "v2_activity": "936eb29b1b25fd2c",
+  "v2_tiles": "94ea19c415b9617c",
+  "v2_tiles_stale": "7ec50ae9ecc1d521",
+  "v2_paged_2_of_3": "674bde79657eba05",
+  "v2_back_page": "99a558ea8f88c303",
+  "v2_receiving_12_of_40": "ba05fa86d145d45e"
  }
 }

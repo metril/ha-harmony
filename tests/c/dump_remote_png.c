@@ -129,6 +129,8 @@ static hp_page_t tiles_page(void) {
 }
 static hp_page_t empty_page(void) { return page(5, 4, 6); }
 
+#include "v2_screens.h"
+
 static void fresh(void) {
   fk_init(&fk);
   ra_ops_t ops = fk_ops(&fk);
@@ -178,5 +180,19 @@ int main(int argc, char **argv) {
   ra_ui_set_link(&app.ui, 0); ra_ui_show_boot(&app.ui); shot(d, "connecting");
   ra_ui_show_receiving(&app.ui); shot(d, "receiving");
   app_destroy(&app);
+  /* version 2 screens go to <outdir>/v2/ */
+  char d2[512];
+  snprintf(d2, sizeof d2, "%s/v2", argv[1]);
+  mkdir(d2, 0777);
+  static const struct { const char *name; void (*fn)(void); } v2s[] = {
+      {"home", sc2_home_active}, {"home_off", sc2_home_off}, {"home_pressed", sc2_pressed}, {"activity", sc2_activity},
+      {"tiles", sc2_tiles}, {"tiles_stale", sc2_tiles_stale}, {"paged", sc2_paged}, {"back", sc2_back},
+      {"receiving", sc2_receiving}};
+  for (unsigned i = 0; i < sizeof v2s / sizeof v2s[0]; i++) {
+    fresh();
+    v2s[i].fn();
+    shot(d2, v2s[i].name);
+    app_destroy(&app);
+  }
   return 0;
 }

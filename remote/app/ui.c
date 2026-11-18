@@ -12,6 +12,8 @@
 static void paint(ra_ui_t *ui, unsigned i);
 static const char *tile_caption(const ra_ui_t *ui, const hp_widget_t *w);
 
+static void stale_caption(ra_ui_t *ui, unsigned i);
+
 static int edge(int i, int n, int total) { return (i * total + n - 1) / n; }
 
 void ra_ui_widget_box(const hp_page_t *p, const hp_widget_t *w, int *x1, int *y1, int *x2, int *y2) {
@@ -189,6 +191,7 @@ void ra_ui_set_link(ra_ui_t *ui, int lost) {
   if (ui->page.version != 2) return;
   for (unsigned i = 0; i < ui->page.count; i++) { /* v2 tiles say "stale" while the link is lost */
     if (ui->page.widgets[i].kind != HP_WIDGET_TILE || !ui->obj[i]) continue;
+    if (!ui->wcap[i] && lost) stale_caption(ui, i); /* a tile without a name gets its caption now (optional: skipped when memory is tight) */
     if (ui->wcap[i]) lv_label_set_text(ui->wcap[i], tile_caption(ui, &ui->page.widgets[i]));
     paint(ui, i);
   }
@@ -224,10 +227,11 @@ static void fail(ra_ui_t *ui) {
   if (ui->err) lv_obj_remove_flag(ui->err, LV_OBJ_FLAG_HIDDEN);
 }
 
-/* Free memory needed before building `objs` page objects (a widget is 2 to 4: surface, text, icon, caption; measured
- * ~0.4 KiB each, 0.55 KiB budgeted), plus the bar and the renderer's working set. Refusing early is what keeps
- * LVGL's own allocations (which do not check for failure) safe. */
-#define BUILD_NEED(objs) (560u * (objs) + 8192u)
+/* Free memory needed before building a page: ~0.9 KiB per widget measured (surface + text; 1.1 KiB budgeted), ~0.25 KiB
+ * per extra object (a v2 icon glyph or tile caption; 0.3 KiB budgeted), plus the bar and the renderer's working set.
+ * The worst v2 page (32 widgets, all with icons, tile captions, toast) peaks at 56 % of the pool and is budgeted 56 KiB of
+ * the ~60 KiB free. Refusing early is what keeps LVGL's own allocations (which do not check for failure) safe. */
+#define BUILD_NEED(widgets, extra) (1100u * (widgets) + 300u * (extra) + 8192u)
 
 static int enough_memory(unsigned need) {
   if (ra_ui_test_skip_precheck) return 1;
@@ -236,7 +240,7 @@ static int enough_memory(unsigned need) {
   return mon.free_size >= need;
 }
 
-static int screen_reset(ra_ui_t *ui, const char *title, unsigned objs, const bar_ctx_t *bc) {
+static int screen_reset(ra_ui_t *ui, const char *title, unsigned widgets, unsigned extra, const bar_ctx_t *bc) {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_clean(scr);
   lv_obj_remove_style_all(scr);
@@ -252,7 +256,7 @@ static int screen_reset(ra_ui_t *ui, const char *title, unsigned objs, const bar
   ui->recv_total = 0;
   ui->title_idx = -1;
   ui->pressed = -1;
-  if (!enough_memory(BUILD_NEED(objs)) || bar_build(ui, scr, title, bc) < 0) {
+  if (!enough_memory(BUILD_NEED(widgets, extra)) || bar_build(ui, scr, title, bc) < 0) {
     fail(ui);
     return -1;
   }
@@ -370,9 +374,12 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
     if (!l) return -1;
     lv_obj_align(l, LV_ALIGN_CENTER, 0, cap_h ? 6 : 0);
     if (cap_h) {
-      lv_obj_t *c = make_label(o, tile_caption(ui, w), &ra_st_txt_cap, NULL, bw - (ic ? 44 : 8));
+      lv_obj_t *c = make_label(o, tile_caption(ui, w), &ra_st_txt_cap, NULL, bw - (ic ? 38 : 8));
       if (!c) return -1;
-      if (ic) lv_obj_set_pos(c, 36, 8);
+      if (ic) {
+        lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_set_pos(c, 32, 8);
+      }
       else lv_obj_align(c, LV_ALIGN_TOP_MID, 0, 6);
       ui->wcap[i] = c;
     }
@@ -390,7 +397,7 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
     if (k == 1) mono[0] = (char)toupper((unsigned char)mono[0]);
     txt = mono;
   }
-  int row = w->shape == HP_SHAPE_ROW || w->shape == HP_SHAPE_PILL || bh < 44;
+  int row = w->shape == HP_SHAPE_ROW || w->shape == HP_SHAPE_PILL || (bh < 44 && bw >= 100); /* wide and short: a row */
   int big = w->shape == HP_SHAPE_CARD && !row && bw >= 100 && bh >= 80;
   int mono_px = bw < bh ? bw : bh;
   int px = w->shape == HP_SHAPE_MONOGRAM ? (mono_px >= 72 ? 32 : mono_px >= 44 ? 24 : 20)
@@ -426,9 +433,9 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
       lv_obj_align(l, LV_ALIGN_BOTTOM_LEFT, 12, -12);
     }
   } else if (ic && l) { /* dense: icon over label, both centred */
-    int ih = lv_font_get_line_height(icon_font(px)), lh = lv_obj_get_height(l);
+    int ih = lv_font_get_line_height(icon_font(px)), lh = lv_font_get_line_height(lv_obj_get_style_text_font(l, 0));
     int gap = (bh - ih - lh) / 3;
-    if (gap < 1) gap = 1;
+    if (gap < 0) gap = 0;
     lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, gap + 1);
     lv_obj_align(l, LV_ALIGN_BOTTOM_MID, 0, -gap);
   } else if (l) {
@@ -450,13 +457,13 @@ static void build(ra_ui_t *ui) {
   } else if (title_idx >= 0 && p->widgets[title_idx].label[0]) {
     title = p->widgets[title_idx].label;
   }
-  unsigned objs = 0;
-  for (unsigned i = 0; i < p->count; i++) {
+  unsigned extra = 0; /* icon glyph labels and tile captions */
+  for (unsigned i = 0; v2 && i < p->count; i++) {
     const hp_widget_t *w = &p->widgets[i];
-    objs += 2 + (v2 && w->icon && w->icon <= RA_ICON_MAX) + (v2 && w->kind == HP_WIDGET_TILE && (w->label[0] || ui->link_lost));
+    extra += (w->icon && w->icon <= RA_ICON_MAX) + (w->kind == HP_WIDGET_TILE && (w->label[0] || ui->link_lost));
   }
   bar_ctx_t bc = {.back = v2 && p->back, .seq_idx = v2 ? p->seq_idx : 0, .seq_cnt = v2 ? p->seq_cnt : 0};
-  if (screen_reset(ui, title, objs, &bc) < 0) return;
+  if (screen_reset(ui, title, p->count, extra, &bc) < 0) return;
   ui->title_idx = title_idx;
   int interactive_or_text = 0;
   for (unsigned i = 0; i < p->count; i++) {
@@ -513,7 +520,7 @@ static void show_builtin(ra_ui_t *ui, uint8_t id, const char *head, const char *
   memset(&ui->page, 0, sizeof ui->page);
   ui->page.page_id = id;
   ui->page.cols = ui->page.rows = 1;
-  if (screen_reset(ui, "Harmony", 0, NULL) < 0) return;
+  if (screen_reset(ui, "Harmony", 0, 0, NULL) < 0) return;
   if (message(ui, head, sub, head_hex) < 0) fail(ui);
 }
 
@@ -584,6 +591,24 @@ void ra_ui_show_receiving_n(ra_ui_t *ui, unsigned k, unsigned n) {
 void ra_ui_show_fallback(ra_ui_t *ui) {
   show_builtin(ui, RA_UI_PAGE_FALLBACK, "Hub unreachable", "Reconnecting automatically", RA_HEX_BAD);
   ui->fallback = 1;
+}
+
+static void stale_caption(ra_ui_t *ui, unsigned i) {
+  const hp_widget_t *w = &ui->page.widgets[i];
+  int x1, y1, x2, y2;
+  ra_ui_widget_rect(&ui->page, w, &x1, &y1, &x2, &y2);
+  int bw = x2 - x1 + 1, bh = y2 - y1 + 1;
+  if (bh < 44 || !enough_memory(4096)) return;
+  lv_obj_t *c = make_label(ui->obj[i], "stale", &ra_st_txt_cap, NULL, bw - (ui->ico[i] ? 38 : 8));
+  if (!c) return;
+  if (ui->ico[i]) {
+    lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_pos(c, 32, 8);
+  } else {
+    lv_obj_align(c, LV_ALIGN_TOP_MID, 0, 6);
+  }
+  ui->wcap[i] = c;
+  lv_obj_align(ui->lbl[i], LV_ALIGN_CENTER, 0, 6);
 }
 
 /* Live text / state of a tile on screen: the label text and colours only. */
