@@ -580,8 +580,12 @@ def dump_config(config: dict[str, Any], fmt: str, header: str) -> str:
 def validate_config(text: str, fmt: str) -> tuple[int, int]:
     """Run the real config_model + compiler. Returns (config bytes, pool words)."""
     sys.path.insert(0, str(ROOT))
-    from custom_components.ha_harmony.compiler import _pool_words, compact_json, compile_config
-    from custom_components.ha_harmony.config_model import parse_model
+    from custom_components.ha_harmony.harmony_core.compiler import (
+        _pool_words,
+        compact_json,
+        compile_config,
+    )
+    from custom_components.ha_harmony.harmony_core.config_model import parse_model
 
     model = parse_model(text, "<generated>")  # JSON is valid YAML
     compiled = compile_config(model)

@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from custom_components.ha_harmony.compiler import compile_config
-from custom_components.ha_harmony.config_model import parse_model
+from custom_components.ha_harmony.harmony_core.compiler import compile_config
+from custom_components.ha_harmony.harmony_core.config_model import parse_model
 
 ROOT = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location(

@@ -14,8 +14,9 @@ from typing import Any
 import voluptuous as vol
 import yaml
 
-from .const import KEY_CODES, SOFT_KEY_BASE, key_code
+from .harmony_proto import SOFT_KEY_BASE
 from .ir import IrCode, IrImportError, parse_flipper_file, parse_smartir_file
+from .keys import KEY_CODES, key_code
 
 Model = dict[str, Any]
 
@@ -31,6 +32,32 @@ _Loader.yaml_implicit_resolvers = {
 _Loader.add_implicit_resolver(
     "tag:yaml.org,2002:bool", re.compile(r"^(?:true|false|True|False|TRUE|FALSE)$"), list("tfTF")
 )
+
+MAX_FLOW_DEPTH = 64  # a real config nests ~10 deep; PyYAML's scanner is quadratic in flow depth
+
+
+def check_yaml_depth(text: str, file: str = "<config>") -> None:
+    """Refuse absurd `[`/`{` nesting with one linear scan (an over-approximation: quotes count)."""
+    depth = 0
+    for ch in text:
+        if ch in "[{":
+            depth += 1
+            if depth > MAX_FLOW_DEPTH:
+                raise ConfigError(file, [], "invalid YAML: nested too deeply")
+        elif ch in "]}" and depth:
+            depth -= 1
+
+
+def load_source(text: str) -> Any:
+    """Parse config YAML to plain data with the loader `parse_model` uses (no validation)."""
+    check_yaml_depth(text)
+    try:
+        return yaml.load(text, Loader=_Loader)
+    except yaml.YAMLError as exc:
+        raise ConfigError("<config>", [], f"invalid YAML: {getattr(exc, 'problem', exc)}") from None
+    except RecursionError:
+        raise ConfigError("<config>", [], "invalid YAML: nested too deeply") from None
+
 
 _SLUG = re.compile(r"^[a-z0-9_]{1,31}$")
 _ENTITY = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
@@ -238,6 +265,8 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("power"): power,
         vol.Optional("inputs", default=dict): {_name: ir},
         vol.Optional("settle_ms"): _int(0, 60000),
+        # Provenance of an imported device (tools/irdb_import.py); never compiled or sent.
+        vol.Optional("source"): {str: vol.Any(str, int, float, bool, None)},
         vol.Optional("commands", default=dict): {_cmd_name: ir},
     }
     activity = {
@@ -377,9 +406,12 @@ class _RefError(Exception):
 # ---------------------------------------------------------------- entry points
 def parse_model(text: str, file: str = "<config>", base_dir: Path | None = None) -> Model:
     """Validate YAML `text`. `file` is only used in messages; `base_dir` anchors IR file refs."""
+    check_yaml_depth(text, file)
     try:
         root = yaml.compose(text, Loader=_Loader)
         data = yaml.load(text, Loader=_Loader)
+    except RecursionError:
+        raise ConfigError(file, [], "invalid YAML: nested too deeply") from None
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         raise ConfigError(

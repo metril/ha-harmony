@@ -60,7 +60,7 @@ def _leaf(enc: str, value: Any) -> IrCode:
             raise IrImportError("expected base64 string")
         try:
             packet = base64.b64decode(value, validate=True)
-        except (binascii.Error, ValueError):
+        except binascii.Error, ValueError:
             raise IrImportError("invalid base64") from None
         return IrCode(hz=_DEFAULT_HZ, us=normalise_raw(decode_broadlink(packet)))
     if enc == "pronto":

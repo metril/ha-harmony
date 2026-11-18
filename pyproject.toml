@@ -22,10 +22,11 @@ package = false
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests/py"]
+# worksteal: the real-time sh selftests in test_deploy_remote (20+ s each) must not queue on one worker
 addopts = "--dist=worksteal"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["proto/gen", "custom_components/ha_harmony/harmony_proto.py"]
+extend-exclude = ["proto/gen", "harmony_core/harmony_proto.py"]

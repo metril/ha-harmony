@@ -10,7 +10,7 @@ import pytest
 from conftest import RemoteDump
 from test_hub_engine import call, hello, recv
 
-from custom_components.ha_harmony.page_codec import Widget, encode_page
+from custom_components.ha_harmony.harmony_core.page_codec import Widget, encode_page
 from proto import rf_codec
 
 PAGE_PUSH, TILE_UPDATE = 12, 15

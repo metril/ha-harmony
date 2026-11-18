@@ -79,6 +79,9 @@ pages:
   `input_` are reserved for the built-ins and rejected. Home Assistant's device buttons and
   `remote.send_command` use the hub's `device_command` verb, so a toggle device is never toggled the
   wrong way.
+- **Device `source`** (optional mapping of scalars): where an imported device came from, written by
+  `tools/irdb_import.py` (`kind: harmony_archive, mfr, model_file, codeset, imported_at`). Never compiled
+  or sent to the hub.
 - **Device `aliases`** (optional list of names, max 31 bytes each): other names the device answers to
   in `remote.send_command` and `ha_harmony.set_device_state`. Resolved in Home Assistant and never
   sent to the hub. Meant for migration: `tools/stock_to_ha_config.py --device-list` sets each

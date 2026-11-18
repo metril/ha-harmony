@@ -516,7 +516,7 @@ def _emit_c(s: Schema) -> str:
     return "\n".join(out)
 
 
-HA_DIR = HERE.parent / "custom_components" / "ha_harmony"
+HA_DIR = HERE.parent / "harmony_core"
 
 
 def generate(schema: Path, out_dir: Path, ha_dir: Path | None = None) -> None:

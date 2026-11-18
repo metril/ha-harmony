@@ -33,8 +33,6 @@ from .api import (
     HarmonyHubClient,
     HarmonyVersionError,
 )
-from .compiler import Compiled, CompileError, compile_config
-from .config_model import ConfigError, load_file, parse_model
 from .const import (
     CMD_DEVICE_COMMAND,
     CMD_IR_SEND,
@@ -49,7 +47,9 @@ from .const import (
     KEY_NAMES,
     UNKNOWN_KEY,
 )
-from .harmony_proto import MsgType
+from .harmony_core.compiler import Compiled, CompileError, compile_config
+from .harmony_core.config_model import ConfigError, load_file, parse_model
+from .harmony_core.harmony_proto import MsgType
 
 _LOGGER = logging.getLogger(__name__)
 

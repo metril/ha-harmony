@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from custom_components.ha_harmony.compiler import (
+from custom_components.ha_harmony.const import KEY_CODES, SOFT_KEY_BASE
+from custom_components.ha_harmony.harmony_core.compiler import (
     LIMITS,
     CompileError,
     compact_json,
     compile_config,
     config_hash,
 )
-from custom_components.ha_harmony.config_model import ConfigError, parse_model
-from custom_components.ha_harmony.const import KEY_CODES, SOFT_KEY_BASE
-from custom_components.ha_harmony.page_codec import decode_page
+from custom_components.ha_harmony.harmony_core.config_model import ConfigError, parse_model
+from custom_components.ha_harmony.harmony_core.page_codec import decode_page
 
 ROOT = Path(__file__).resolve().parents[2]
 FIX = ROOT / "tests/py/fixtures/ir"
@@ -365,3 +365,13 @@ def test_alias_equal_to_own_id_is_harmless():
 
 def test_alias_obeys_name_rules():
     bad(f"devices: [{{id: tv, aliases: ['{'x' * 32}'], commands: {{x: {NEC}}}}}]", "31 bytes")
+
+
+def test_deeply_nested_yaml_is_a_config_error_not_a_crash():
+    from custom_components.ha_harmony.harmony_core.config_model import load_source
+
+    deep = "x: " + "[" * 400_000 + "]" * 400_000
+    with pytest.raises(ConfigError, match="nested too deeply"):
+        model(deep)
+    with pytest.raises(ConfigError):
+        load_source(deep)

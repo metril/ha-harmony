@@ -1,0 +1,7 @@
+*
+!addon/requirements.txt
+!addon/rootfs
+!harmony_core
+!harmony_irdb
+!harmony_addon
+**/__pycache__

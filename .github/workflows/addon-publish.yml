@@ -1,0 +1,57 @@
+name: addon-publish
+
+# Publishes ghcr.io/metril/ha-harmony-editor-{amd64,aarch64}:<version> (what addon/config.yaml's
+# `image:` points the Supervisor at). Only on addon-v* tags or by hand, never on push.
+on:
+  push:
+    tags: ["addon-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the add-on version and refuse a tag mismatch
+        id: v
+        run: |
+          version=$(sed -n 's/^version: "\(.*\)"$/\1/p' addon/config.yaml)
+          [ -n "$version" ] || { echo "no version in addon/config.yaml"; exit 1; }
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "addon-v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match addon/config.yaml version ${version}"
+            exit 1
+          fi
+          base=$(sed -n 's/^  ${{ matrix.arch }}: //p' addon/build.yaml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build from the repo root and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: addon/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: BUILD_FROM=${{ steps.v.outputs.base }}
+          push: true
+          tags: ghcr.io/metril/ha-harmony-editor-${{ matrix.arch }}:${{ steps.v.outputs.version }}

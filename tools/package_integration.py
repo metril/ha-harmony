@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import zipfile
 from pathlib import Path
@@ -29,13 +30,15 @@ EPOCH = (2026, 1, 1, 0, 0, 0)
 
 
 def package_files(src: Path) -> list[Path]:
+    """Real files under src, following symlinked directories (harmony_core is one in the repo)."""
     files = []
-    for p in sorted(src.rglob("*")):
-        rel = p.relative_to(src)
-        if p.is_dir() or EXCLUDE_DIRS & set(rel.parts) or p.suffix in EXCLUDE_SUFFIXES:
-            continue
-        files.append(p)
-    return files
+    for dirpath, dirnames, filenames in os.walk(src, followlinks=True):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
+        for f in filenames:
+            p = Path(dirpath) / f
+            if p.suffix not in EXCLUDE_SUFFIXES:
+                files.append(p)
+    return sorted(files, key=lambda p: p.relative_to(src).as_posix())
 
 
 def build(src: Path, out: Path, version: str) -> list[str]:
