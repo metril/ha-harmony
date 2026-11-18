@@ -8,7 +8,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
-from .coordinator import HarmonyCoordinator
+from .coordinator import HarmonyCoordinator, topic_device
 from .entity_sync import setup_dynamic
 
 
@@ -27,7 +27,9 @@ class HarmonyDevicePower(HarmonyEntity, BinarySensorEntity):
     _attr_name = "Power"
 
     def __init__(self, coordinator: HarmonyCoordinator, device: str) -> None:
-        super().__init__(coordinator, f"dev_{device}_power", device=device)
+        super().__init__(
+            coordinator, f"dev_{device}_power", device=device, topics=(topic_device(device),)
+        )
         self._device = device
 
     @property

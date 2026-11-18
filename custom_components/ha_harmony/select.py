@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
 from .const import OFF_OPTION
-from .coordinator import HarmonyCoordinator
+from .coordinator import TOPIC_ACTIVITY, HarmonyCoordinator
 
 
 async def async_setup_entry(
@@ -25,7 +25,7 @@ class HarmonyActivitySelect(HarmonyEntity, SelectEntity):
     _attr_name = "Activity"
 
     def __init__(self, coordinator: HarmonyCoordinator) -> None:
-        super().__init__(coordinator, "activity")
+        super().__init__(coordinator, "activity", topics=(TOPIC_ACTIVITY,))
 
     @property
     def _off_label(self) -> str:

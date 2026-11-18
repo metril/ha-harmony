@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -67,6 +67,24 @@ from .tile_format import tile_state, tile_text
 _LOGGER = logging.getLogger(__name__)
 
 __all__ = ["HarmonyCoordinator", "tile_text"]
+
+TOPIC_AVAILABLE = "available"  # the hub connection went up or down
+TOPIC_ACTIVITY = "activity"  # the running activity or the activity list
+TOPIC_CONFIG = "config"  # a new applied config (devices, key names)
+TOPIC_LINK = "link"  # the add-on link state, revision or last error
+
+
+def topic_device(device: str) -> str:
+    return f"device:{device}"
+
+
+def topic_battery(remote: int) -> str:
+    return f"battery:{remote}"
+
+
+def topic_remote(remote: int) -> str:
+    return f"remote:{remote}"  # what the remote announced (page format, caps)
+
 
 KeyListener = Callable[[int, int, str], None]
 ISSUE_INVALID = "config_invalid"
@@ -180,6 +198,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.last_error: str | None = None
         self.config_pushes = 0  # set_config requests sent (observable by tests)
         self.tile_updates = 0
+        self._topic_subs: dict[str, list[Callable[[], None]]] = {}
         self._key_listeners: list[KeyListener] = []
         self._config_listeners: list[Callable[[], None]] = []
         self._sync_lock = asyncio.Lock()
@@ -236,6 +255,31 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def event_types(self) -> list[str]:
         return sorted({*KEY_NAMES.values(), *self.compiled.key_names.values(), UNKNOWN_KEY})
 
+    def async_subscribe_topics(
+        self, topics: Iterable[str], cb: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Entities listen to what they show (TOPIC_* below), never to "anything changed"."""
+        topics = tuple(topics)
+        for t in topics:
+            self._topic_subs.setdefault(t, []).append(cb)
+
+        def unsub() -> None:
+            for t in topics:
+                subs = self._topic_subs.get(t)
+                if subs and cb in subs:
+                    subs.remove(cb)
+
+        return unsub
+
+    @callback
+    def _notify(self, *topics: str) -> None:
+        seen: set[Callable[[], None]] = set()
+        for t in topics:
+            for cb in list(self._topic_subs.get(t, ())):
+                if cb not in seen:  # an entity on two of the topics is written once
+                    seen.add(cb)
+                    cb()
+
     def async_add_key_listener(self, cb: KeyListener) -> Callable[[], None]:
         self._key_listeners.append(cb)
         return lambda: self._key_listeners.remove(cb) if cb in self._key_listeners else None
@@ -287,7 +331,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def async_set_link_state(self, state: str) -> None:
         if state != self.link_state:
             self.link_state = state
-            self.async_update_listeners()
+            self._notify(TOPIC_LINK)
 
     async def async_load_cached(self) -> bool:
         """Use the last applied config from `.storage` (re-validated, like any bundle)."""
@@ -327,6 +371,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             changed = bundle.rev != self.rev or not self.managed
             self.rev, self.applied_at, self.managed = bundle.rev, bundle.applied_at, True
             self._known_rev = bundle.rev
+            self._notify(TOPIC_LINK)
             if changed:
                 await self._store.async_save(
                     {"rev": bundle.rev, "applied_at": bundle.applied_at, "config": bundle.source}
@@ -361,6 +406,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         detail = "schema not supported" if exc.schema else f"invalid config: {exc}"
         self._ack_later(exc.rev, "error", detail[:200])
         self.last_error = str(exc)
+        self._notify(TOPIC_LINK)
         self._set_issue(ISSUE_SCHEMA if exc.schema else ISSUE_INVALID, str(exc))
         self.async_set_link_state("rejected")
 
@@ -473,7 +519,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._prune_registry()
             for cb in list(self._config_listeners):
                 cb()
-            self.async_update_listeners()
+            self._notify(TOPIC_CONFIG)
 
     async def async_sync_config(self) -> None:
         """Push set_config iff the hub's hash differs, then pages and tile texts. Never raises."""
@@ -509,11 +555,14 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             msg = str(ack.get("message") or "rejected without a reason")
             _LOGGER.error("The hub rejected the config: %s", msg)
             self.last_error = msg
+            self._notify(TOPIC_LINK)
             self._set_issue(ISSUE_REJECTED, msg)
             self._accepted_gen = None
             self._warn_unknown_index()  # no new list is coming: the reported index stays unknown
             return False
-        self.last_error = None
+        if self.last_error is not None:
+            self.last_error = None
+            self._notify(TOPIC_LINK)
         self._clear_issue(ISSUE_REJECTED)
         self.client.config_hash = ack.get("config_hash")  # as the hub reports it
         reported = self.client.config_hash
@@ -535,7 +584,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 len(self.activities),
                 self.activities,
             )
-        self.async_update_listeners()
+        self._notify(TOPIC_ACTIVITY)
 
     async def async_push_pages(self) -> None:
         """The `push_pages` service: resend the whole set to every remote and wait for it."""
@@ -605,7 +654,6 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 await self._send_all_tiles(remote)
         finally:
             link.inflight = None
-            self.async_update_listeners()
 
     async def _wait_info(self, link: RemoteLink) -> None:
         """Up to INFO_WAIT seconds for the remote's `remote_info`; never blocks the loop."""
@@ -654,7 +702,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             link.info, link.pushed, link.attached = None, None, True
             link.info_event.clear()
             self._request_push(remote, wait=True)
-        self.async_update_listeners()
+            self._notify(topic_remote(remote))
 
     def _on_remote_info(self, data: dict[str, Any]) -> None:
         remote = data["remote"]
@@ -668,7 +716,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if remote in self.remotes:
             self._request_push(remote, wait=False)
         if changed:
-            self.async_update_listeners()
+            self._notify(topic_remote(remote))
 
     def _prune_registry(self) -> None:
         """Remove entities/devices of this entry that the current config no longer defines."""
@@ -721,9 +769,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
 
             @callback
             def on_dev(event: Event[EventStateChangedData]) -> None:
+                # a playing media_player changes attributes every few seconds: only a change of
+                # the derived power/input reaches the entities of that device
+                new = _ha_device_state(event.data["new_state"])
                 for dev_id in dev_of.get(event.data["entity_id"], ()):
-                    self.device_states[dev_id] = _ha_device_state(event.data["new_state"])
-                self.async_update_listeners()
+                    if self.device_states.get(dev_id) != new:
+                        self.device_states[dev_id] = new
+                        self._notify(topic_device(dev_id))
 
             self._ha_dev_unsub = async_track_state_change_event(self.hass, list(dev_of), on_dev)
 
@@ -818,13 +870,14 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             _LOGGER.error("Hub protocol version mismatch, not reconnecting: %s", err)
             # Reload so setup surfaces the explicit ConfigEntryError (SETUP_ERROR, no retry loop).
             self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
-        self.async_update_listeners()
+        self._notify(TOPIC_AVAILABLE)
 
     @callback
     def _on_push(self, mtype: MsgType, data: dict[str, Any]) -> None:
         if mtype is MsgType.STATE_UPDATE:
             idx = data["activity"]
             before = self.current_activity_id
+            idx_before = (self._current_idx, self._last_idx)
             if not data["power"]:
                 self._current_idx = None
             else:
@@ -832,7 +885,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 # activity the hub's re-report can precede the new list (_activity_name range-checks).
                 self._last_idx = self._current_idx = idx
             self._note_activity(before, self.current_activity_id)
-            self.async_update_listeners()
+            if idx_before != (self._current_idx, self._last_idx):
+                self._notify(TOPIC_ACTIVITY)
         elif mtype is MsgType.KEY_EVENT:
             self._remote_seen()
             action = KEY_ACTIONS.get(data["action"], "press")
@@ -845,16 +899,20 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._set_activities([a for a in acts if isinstance(a, str)])
         elif mtype is MsgType.DEVICE_STATE:
             if data["device"] not in self.compiled.ha_devices:  # those follow their entity
-                self.device_states[data["device"]] = DeviceState(data["power"], data.get("input"))
-            self.async_update_listeners()
+                new = DeviceState(data["power"], data.get("input"))
+                if self.device_states.get(data["device"]) != new:
+                    self.device_states[data["device"]] = new
+                    self._notify(topic_device(data["device"]))
         elif mtype is MsgType.REMOTE_ATTACHED:
             self._on_remote_attached()
         elif mtype is MsgType.REMOTE_INFO:
             self._on_remote_info(data)
         elif mtype is MsgType.BATTERY:
             self._remote_seen()
-            self.battery[data["remote"]] = (data["percent"], data["millivolts"])
-            self.async_update_listeners()
+            new_b = (data["percent"], data["millivolts"])
+            if self.battery.get(data["remote"]) != new_b:
+                self.battery[data["remote"]] = new_b
+                self._notify(topic_battery(data["remote"]))
 
     # ------------------------------------------------------------ Home Assistant actions
     @property

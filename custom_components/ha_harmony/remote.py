@@ -21,7 +21,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
 from .const import HOLD_REPEAT, HUB_DEVICE
-from .coordinator import HarmonyCoordinator
+from .coordinator import TOPIC_ACTIVITY, HarmonyCoordinator
 from .errors import ha_error
 
 
@@ -38,7 +38,7 @@ class HarmonyRemote(HarmonyEntity, RemoteEntity):
     _attr_supported_features = RemoteEntityFeature.ACTIVITY
 
     def __init__(self, coordinator: HarmonyCoordinator) -> None:
-        super().__init__(coordinator, "remote")
+        super().__init__(coordinator, "remote", topics=(TOPIC_ACTIVITY,))
 
     @property
     def is_on(self) -> bool:

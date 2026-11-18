@@ -324,3 +324,55 @@ async def test_stable_connection_resets_the_backoff(fake_hub):
         await c.async_close()
         await session.close()
     assert waits[:4] == [1.0, 2.0, 1.0, 2.0]  # rand 0.5 = the middle of the jitter range
+
+
+# 8: entities are written only for what they show
+@pytest.fixture
+def writes(monkeypatch):
+    from homeassistant.helpers.entity import Entity
+
+    seen: list[str] = []
+    real = Entity.async_write_ha_state
+
+    def counting(self):
+        seen.append(self.entity_id)
+        return real(self)
+
+    monkeypatch.setattr(Entity, "async_write_ha_state", counting)
+    return seen
+
+
+async def test_attribute_churn_of_a_tracked_device_writes_no_entity(hass, rig, clock, writes):
+    hass.states.async_set("media_player.shield", "playing", {"volume_level": 0.1})
+    _hub, _c = await rig()
+    await settle(hass)
+    writes.clear()
+    for i in range(30):  # a playing media_player: new position/volume attributes all the time
+        hass.states.async_set("media_player.shield", "playing", {"volume_level": i / 100})
+    await settle(hass)
+    assert writes == []
+    hass.states.async_set("media_player.shield", "off")  # a real change: that device only
+    await settle(hass)
+    assert sorted(writes) == ["binary_sensor.shield_power", "sensor.shield_input"]
+
+
+async def test_battery_update_writes_only_the_battery_entities(hass, rig, clock, writes):
+    hub, _c = await rig()
+    await settle(hass)
+    writes.clear()
+    await hub.push("battery", {"remote": 1, "percent": 80, "millivolts": 3100})
+    await settle(hass, lambda: writes)
+    assert sorted(writes) == ["sensor.remote_1_battery", "sensor.remote_1_voltage"]
+    writes.clear()
+    await hub.push("battery", {"remote": 1, "percent": 80, "millivolts": 3100})  # nothing changed
+    await settle(hass)
+    assert writes == []
+
+
+async def test_activity_change_writes_the_activity_entities_only(hass, rig, clock, writes):
+    hub, _c = await rig()
+    await settle(hass)
+    writes.clear()
+    await hub.push("state_update", {"activity": 1, "power": True})
+    await settle(hass, lambda: writes)
+    assert sorted(writes) == ["remote.harmony_hub_sim_hub", "select.harmony_hub_sim_hub_activity"]

@@ -8,7 +8,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HarmonyConfigEntry
 from .base_entity import HarmonyEntity
-from .coordinator import HarmonyCoordinator
+from .coordinator import TOPIC_CONFIG, HarmonyCoordinator
 
 
 async def async_setup_entry(
@@ -22,7 +22,7 @@ async def async_setup_entry(
 
 class HarmonyKeyEvent(HarmonyEntity, EventEntity):
     def __init__(self, coordinator: HarmonyCoordinator, remote: int) -> None:
-        super().__init__(coordinator, f"key_{remote}")
+        super().__init__(coordinator, f"key_{remote}", topics=(TOPIC_CONFIG,))
         self._remote = remote
         self._attr_name = f"Remote {remote} keys"
 

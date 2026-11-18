@@ -13,7 +13,15 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HarmonyConfigEntry, const
 from .base_entity import HarmonyEntity
-from .coordinator import LINK_STATES, HarmonyCoordinator
+from .coordinator import (
+    LINK_STATES,
+    TOPIC_CONFIG,
+    TOPIC_LINK,
+    HarmonyCoordinator,
+    topic_battery,
+    topic_device,
+    topic_remote,
+)
 from .entity_sync import setup_dynamic
 
 
@@ -38,7 +46,12 @@ class HarmonyDeviceInput(HarmonyEntity, SensorEntity):
     _attr_name = "Input"
 
     def __init__(self, coordinator: HarmonyCoordinator, device: str) -> None:
-        super().__init__(coordinator, f"dev_{device}_input", device=device)
+        super().__init__(
+            coordinator,
+            f"dev_{device}_input",
+            device=device,
+            topics=(topic_device(device), TOPIC_CONFIG),
+        )
         self._device = device
 
     @property
@@ -58,7 +71,9 @@ class HarmonyRemoteBattery(HarmonyEntity, SensorEntity):
     _attr_native_unit_of_measurement = PERCENTAGE
 
     def __init__(self, coordinator: HarmonyCoordinator, remote: int) -> None:
-        super().__init__(coordinator, f"battery_{remote}", remote=remote)
+        super().__init__(
+            coordinator, f"battery_{remote}", remote=remote, topics=(topic_battery(remote),)
+        )
         self._remote = remote
 
     @property
@@ -74,7 +89,9 @@ class HarmonyRemoteVoltage(HarmonyEntity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfElectricPotential.MILLIVOLT
 
     def __init__(self, coordinator: HarmonyCoordinator, remote: int) -> None:
-        super().__init__(coordinator, f"voltage_{remote}", remote=remote)
+        super().__init__(
+            coordinator, f"voltage_{remote}", remote=remote, topics=(topic_battery(remote),)
+        )
         self._remote = remote
 
     @property
@@ -91,7 +108,7 @@ class HarmonyAddonLink(HarmonyEntity, SensorEntity):
     _attr_translation_key = "addon_link"
 
     def __init__(self, coordinator: HarmonyCoordinator) -> None:
-        super().__init__(coordinator, "addon_link")
+        super().__init__(coordinator, "addon_link", topics=(TOPIC_LINK,), track_available=False)
         self._attr_options = list(LINK_STATES)
 
     @property
@@ -116,7 +133,9 @@ class HarmonyPageFormat(HarmonyEntity, SensorEntity):
     _attr_name = "Page format"
 
     def __init__(self, coordinator: HarmonyCoordinator, remote: int) -> None:
-        super().__init__(coordinator, f"pagefmt_{remote}", remote=remote)
+        super().__init__(
+            coordinator, f"pagefmt_{remote}", remote=remote, topics=(topic_remote(remote),)
+        )
         self._attr_options = ["unknown", "v1", "v2"]
         self._remote = remote
 
