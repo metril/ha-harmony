@@ -858,8 +858,10 @@ def test_run_detach_command_shape():
     assert rc == 0
     assert hub.fg == [], "detach must not use the TTY foreground path"
     assert hub.detached == [
-        f"p=$({dh.REMOTE_HUB} --port 8099 --rf-spi </dev/null >{dh.DETACH_LOG} 2>&1 & echo $!); "
-        "sleep 3; kill -0 $p && echo $p"
+        (
+            f"p=$({dh.REMOTE_HUB} --port 8099 --rf-spi </dev/null >{dh.DETACH_LOG} 2>&1 & echo $!); "
+            "sleep 3; kill -0 $p && echo $p"
+        )
     ]
     assert "pidof" not in hub.detached[0], "must report the pid we started, not any hub"
     assert any("pid 4242" in ln for ln in lines)
