@@ -7,6 +7,7 @@ Errors are `ConfigError`s that name the file, line and YAML location. No Home As
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -302,8 +303,75 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             vol.Optional("activities", default=list): [activity],
             vol.Optional("keys", default=dict): keys,
             vol.Optional("pages", default=list): [page],
+            # Opaque editor metadata: bounded, never compiled, never sent to the hub.
+            vol.Optional("editor"): _editor,
         }
     )
+
+
+EDITOR_MAX_BYTES = 65536
+EDITOR_MAX_NODES = 5000
+EDITOR_MAX_DEPTH = 8
+
+
+def _editor(v: Any) -> dict[str, Any]:
+    """`editor:` is a JSON-shaped mapping with capped size, node count and depth."""
+    if not isinstance(v, dict):
+        raise vol.Invalid("editor must be a mapping")
+    nodes = 0
+    stack: list[tuple[Any, int]] = [(v, 1)]
+    while stack:
+        cur, depth = stack.pop()
+        nodes += 1
+        if nodes > EDITOR_MAX_NODES:
+            raise vol.Invalid("editor metadata is too large")
+        if depth > EDITOR_MAX_DEPTH:
+            raise vol.Invalid(f"editor metadata is nested deeper than {EDITOR_MAX_DEPTH}")
+        if isinstance(cur, dict):
+            for k, x in cur.items():
+                if not isinstance(k, str) or len(k) > 100:
+                    raise vol.Invalid("editor keys must be short text")
+                stack.append((x, depth + 1))
+        elif isinstance(cur, list):
+            stack.extend((x, depth + 1) for x in cur)
+        elif isinstance(cur, str):
+            if len(cur) > 2000:
+                raise vol.Invalid("editor text is too long")
+        elif cur is not None and not isinstance(cur, (bool, int, float)):
+            raise vol.Invalid("editor metadata must be plain JSON data")
+    try:
+        size = len(json.dumps(v, allow_nan=False))
+    except TypeError, ValueError:
+        raise vol.Invalid("editor metadata must be plain JSON data") from None
+    if size > EDITOR_MAX_BYTES:
+        raise vol.Invalid(f"editor metadata is over {EDITOR_MAX_BYTES} bytes")
+    return v
+
+
+def validate_pages(config: dict[str, Any]) -> list[tuple[dict[str, Any] | None, list[ConfigError]]]:
+    """Per page: (its validated model, []) or (None, [errors]). Shape only: references to
+    devices and activities are NOT checked, so this is for rendering previews, never for apply."""
+    pages = config.get("pages")
+    if not isinstance(pages, list):
+        return []
+    schema = _build_schema(_Resolver(None))
+    out: list[tuple[dict[str, Any] | None, list[ConfigError]]] = []
+    for i, page in enumerate(pages):
+        try:
+            model = schema({"pages": [page]})
+            out.append((model["pages"][0], []))
+        except vol.Invalid as exc:
+            errs = exc.errors if isinstance(exc, vol.MultipleInvalid) else [exc]
+            out.append(
+                (
+                    None,
+                    [
+                        ConfigError("<config>", ["pages", i, *list(e.path)[2:]], e.error_message)
+                        for e in errs
+                    ],
+                )
+            )
+    return out
 
 
 def _check_power(p: dict[str, Any]) -> dict[str, Any]:
@@ -454,6 +522,34 @@ def _parse(
         data = {}
     if not isinstance(data, dict):
         raise ConfigError(file, [], "the top level must be a mapping", 1)
+    return _parse_data(data, root, file, base_dir, errors)
+
+
+def parse_data(data: dict[str, Any], base_dir: Path | None = None) -> Model:
+    """Like parse_model for an already-loaded JSON-shaped dict (no YAML pass: much faster).
+    Messages carry no line numbers. Fail-fast."""
+    model = _parse_data(data, None, "<config>", base_dir, None)
+    assert model is not None
+    return model
+
+
+def validate_data(data: dict[str, Any], base_dir: Path | None = None) -> list[ConfigError]:
+    """`validate_all` for an already-loaded dict."""
+    errors: list[ConfigError] = []
+    try:
+        _parse_data(data, None, "<config>", base_dir, errors)
+    except ConfigError as exc:
+        errors.append(exc)
+    return errors
+
+
+def _parse_data(
+    data: dict[str, Any],
+    root: yaml.Node | None,
+    file: str,
+    base_dir: Path | None,
+    errors: list[ConfigError] | None,
+) -> Model | None:
     try:
         model = _build_schema(_Resolver(base_dir))(data)
         refs: list[_RefError] | None = None if errors is None else []

@@ -63,6 +63,11 @@ def _validate(page: Page) -> None:
         seen.append(w)
 
 
+def encoded_size(widgets: list[Widget]) -> int:
+    """Bytes the page would occupy (header + widgets), whether or not it fits."""
+    return 5 + sum(5 + len(w.label.encode()) for w in widgets)
+
+
 def encode_page(page_id: int, cols: int, rows: int, widgets: list[Widget]) -> bytes:
     """Encode a page; raises ValueError for anything the remote would reject."""
     _validate(Page(page_id, cols, rows, tuple(widgets)))

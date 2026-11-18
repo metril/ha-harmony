@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import zlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from .config_model import Model
 from .harmony_proto import SOFT_KEY_BASE
 from .keys import KEY_NAMES, key_code
-from .page_codec import MAX_WIDGETS, Widget, encode_page
+from .page_codec import MAX_BYTES, MAX_WIDGETS, Widget, encode_page, encoded_size
 
 # Must equal the HP_MAP_* defines in hub/engine/mapping.h (tests/py/test_compiler.py enforces it).
 LIMITS: dict[str, int] = {
@@ -59,6 +60,9 @@ class Compiled:
     tiles: list[Tile]
     activities: list[str] = field(default_factory=list)  # hub activity names, index order
     devices: dict[str, CompiledDevice] = field(default_factory=dict)
+    # Measured sizes against the hub's and remote's limits (the editor's meters). Not part of
+    # equality: two compiles of the same config are the same config.
+    usage: dict[str, Any] = field(default_factory=dict, compare=False)
 
     @property
     def config_hash(self) -> str:
@@ -75,9 +79,12 @@ def config_hash(hub_json: dict[str, Any]) -> str:
     return f"{zlib.crc32(compact_json(hub_json).encode()):08x}"
 
 
-def _limit(what: str, n: int, key: str) -> None:
+Problem = tuple[list[Any], str]  # (path in the config, message)
+
+
+def _limit(what: str, n: int, key: str, fail: Callable[..., None]) -> None:
     if n > LIMITS[key]:
-        raise CompileError(f"too many {what}: {n} (the hub allows at most {LIMITS[key]})")
+        fail(f"too many {what}: {n} (the hub allows at most {LIMITS[key]})")
 
 
 def _pool_words(obj: Any) -> int:
@@ -101,20 +108,31 @@ def _pool_words(obj: Any) -> int:
     return total
 
 
-def _keymap(keys: dict[str, Any], where: str, names: dict[int, str]) -> dict[str, Any]:
+def _keymap(
+    keys: dict[str, Any], where: str, names: dict[int, str], fail: Callable[..., None]
+) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for name, action in keys.items():
         code = key_code(name)
         assert code is not None  # schema-validated
         if str(code) in out:
-            raise CompileError(f"{where}: key {name!r} (code {code}) is mapped twice")
+            fail(f"{where}: key {name!r} (code {code}) is mapped twice")
         out[str(code)] = action
         names[code] = KEY_NAMES.get(code, f"key_{code}")
     return out
 
 
-def compile_config(model: Model) -> Compiled:
-    """Model -> Compiled. Raises CompileError when the hub or the remote cannot take it."""
+def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Compiled:
+    """Model -> Compiled. Raises CompileError when the hub or the remote cannot take it.
+
+    With `collect` (previews only) nothing is raised: every problem is appended as (path, msg),
+    pages that do not fit come back as b"", and the result is not fit to send to a hub."""
+
+    def fail(msg: str, path: list[Any] | None = None) -> None:
+        if collect is None:
+            raise CompileError(msg)
+        collect.append((path or [], msg))
+
     names: dict[int, str] = {}
     devices: list[dict[str, Any]] = []
     for d in model["devices"]:
@@ -128,12 +146,13 @@ def compile_config(model: Model) -> Compiled:
         if d["commands"]:
             dev["commands"] = d["commands"]
         devices.append(dev)
-    _limit("devices", len(devices), "MAX_DEVICES")
-    _limit("commands", sum(len(d["commands"]) for d in model["devices"]), "MAX_COMMANDS")
-    _limit("inputs", sum(len(d["inputs"]) for d in model["devices"]), "MAX_INPUTS")
+    _limit("devices", len(devices), "MAX_DEVICES", fail)
+    _limit("commands", sum(len(d["commands"]) for d in model["devices"]), "MAX_COMMANDS", fail)
+    _limit("inputs", sum(len(d["inputs"]) for d in model["devices"]), "MAX_INPUTS", fail)
 
     activities: list[dict[str, Any]] = []
-    for a in model["activities"]:
+    for ai, a in enumerate(model["activities"]):
+        where = ["activities", ai]
         out: dict[str, Any] = {"id": a["id"], "name": a.get("name", a["id"])}
         if a["devices"]:
             out["devices"] = a["devices"]
@@ -141,37 +160,45 @@ def compile_config(model: Model) -> Compiled:
             if a[sect]:
                 out[sect] = a[sect]
                 if len(a[sect]) > LIMITS["MAX_STEPS"]:
-                    raise CompileError(
+                    fail(
                         f"activity {a['id']!r}: too many `{sect}`: {len(a[sect])}"
-                        f" (the hub allows at most {LIMITS['MAX_STEPS']})"
+                        f" (the hub allows at most {LIMITS['MAX_STEPS']})",
+                        [*where, sect],
                     )
         if len(a["devices"]) > LIMITS["MAX_ACT_DEVS"]:
-            raise CompileError(
+            fail(
                 f"activity {a['id']!r}: {len(a['devices'])} devices"
-                f" (the hub allows at most {LIMITS['MAX_ACT_DEVS']})"
+                f" (the hub allows at most {LIMITS['MAX_ACT_DEVS']})",
+                [*where, "devices"],
             )
-        keys = _keymap(a["keys"], f"activity {a['id']!r}", names)
+        keys = _keymap(a["keys"], f"activity {a['id']!r}", names, fail)
         if len(keys) > LIMITS["MAX_KEYS"]:
-            raise CompileError(f"activity {a['id']!r}: too many keys: {len(keys)}")
+            fail(f"activity {a['id']!r}: too many keys: {len(keys)}", [*where, "keys"])
         if keys:
             out["keys"] = keys
         activities.append(out)
-    _limit("activities", len(activities), "MAX_ACTIVITIES")
+    _limit("activities", len(activities), "MAX_ACTIVITIES", fail)
     if len({a["name"] for a in activities}) != len(activities):
-        raise CompileError("activity names must be unique")
+        fail("activity names must be unique", ["activities"])
 
-    keys = _keymap(model["keys"], "keys", names)
+    keys = _keymap(model["keys"], "keys", names, fail)
 
     pages: list[bytes] = []
+    page_usage: list[dict[str, int]] = []
     tiles: list[Tile] = []
     wire = 0
+    overflow = False
     for pi, p in enumerate(model["pages"]):
         widgets: list[Widget] = []
         for w in p["widgets"]:
             if wire >= MAX_SOFT_KEYS:
-                raise CompileError(
-                    f"too many widgets across all pages: more than {MAX_SOFT_KEYS} soft keys"
-                )
+                if not overflow:
+                    fail(
+                        f"too many widgets across all pages: more than {MAX_SOFT_KEYS} soft keys",
+                        ["pages", pi],
+                    )
+                overflow = True
+                break
             widgets.append(Widget(w["type"], wire, w["x"], w["y"], w["w"], w["h"], w["label"]))
             code = SOFT_KEY_BASE + wire
             if w["type"] != "label":
@@ -181,30 +208,45 @@ def compile_config(model: Model) -> Compiled:
             elif w["type"] == "tile":
                 tiles.append(Tile(pi, wire, w["entity"], w["label"]))
             wire += 1
+        page_usage.append(
+            {
+                "bytes": encoded_size(widgets),
+                "limit": MAX_BYTES,
+                "widgets": len(p["widgets"]),
+                "widget_limit": MAX_WIDGETS,
+            }
+        )
         if len(widgets) > MAX_WIDGETS:
-            raise CompileError(
-                f"page {p['id']!r}: too many widgets: {len(widgets)} (max {MAX_WIDGETS})"
+            fail(
+                f"page {p['id']!r}: too many widgets: {len(widgets)} (max {MAX_WIDGETS})",
+                ["pages", pi],
             )
         try:
             pages.append(encode_page(pi, p["cols"], p["rows"], widgets))
         except ValueError as exc:
-            raise CompileError(f"page {p['id']!r}: {exc}") from None
+            fail(f"page {p['id']!r}: {exc}", ["pages", pi])
+            pages.append(b"")
     if len(keys) > LIMITS["MAX_KEYS"]:
-        raise CompileError(
+        fail(
             f"too many keys in the default map: {len(keys)} including page buttons"
-            f" (the hub allows at most {LIMITS['MAX_KEYS']})"
+            f" (the hub allows at most {LIMITS['MAX_KEYS']})",
+            ["keys"],
         )
 
     hub: dict[str, Any] = {"format": 2, "devices": devices, "activities": activities, "keys": keys}
-    words = _pool_words(hub)
+    try:
+        words = _pool_words(hub)
+    except CompileError as exc:
+        fail(str(exc))
+        words = 0
     if words > LIMITS["POOL_WORDS"]:
-        raise CompileError(
+        fail(
             f"IR data is {words} words in total (the hub's pool holds {LIMITS['POOL_WORDS']});"
             " use protocol codes or fewer raw/pronto codes"
         )
     size = len(compact_json(hub).encode())
     if size > LIMITS["MAX_JSON"]:
-        raise CompileError(f"compiled config is {size} bytes (the hub allows {LIMITS['MAX_JSON']})")
+        fail(f"compiled config is {size} bytes (the hub allows {LIMITS['MAX_JSON']})")
 
     cdevs = {
         d["id"]: CompiledDevice(
@@ -217,6 +259,25 @@ def compile_config(model: Model) -> Compiled:
         )
         for d in model["devices"]
     }
+    usage = {
+        "json_bytes": size,
+        "json_max": LIMITS["MAX_JSON"],
+        "pool_words": words,
+        "pool_max": LIMITS["POOL_WORDS"],
+        "keys": len(keys),
+        "keys_max": LIMITS["MAX_KEYS"],
+        "devices": len(devices),
+        "devices_max": LIMITS["MAX_DEVICES"],
+        "activities": len(activities),
+        "activities_max": LIMITS["MAX_ACTIVITIES"],
+        "commands": sum(len(d["commands"]) for d in model["devices"]),
+        "commands_max": LIMITS["MAX_COMMANDS"],
+        "inputs": sum(len(d["inputs"]) for d in model["devices"]),
+        "inputs_max": LIMITS["MAX_INPUTS"],
+        "soft_keys": wire,
+        "soft_keys_max": MAX_SOFT_KEYS,
+        "pages": page_usage,
+    }
     return Compiled(
         hub_json=hub,
         pages=pages,
@@ -224,4 +285,5 @@ def compile_config(model: Model) -> Compiled:
         tiles=tiles,
         activities=[a["name"] for a in activities],
         devices=cdevs,
+        usage=usage,
     )

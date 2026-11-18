@@ -22,20 +22,19 @@ from aiohttp import web
 
 import harmony_core
 from harmony_core.compiler import (
-    LIMITS,
     CompileError,
-    _pool_words,
-    compact_json,
     compile_config,
 )
 from harmony_core.config_model import (
     ConfigError,
     check_yaml_depth,
     load_source,
-    parse_model,
-    validate_all,
+    parse_data,
+    validate_data,
     validate_ir,
+    validate_pages,
 )
+from harmony_core.keymap import resolve_keymaps
 from harmony_core.page_codec import decode_page
 from harmony_irdb.archive import IrdbArchive
 
@@ -75,6 +74,7 @@ WAIT_KEY = web.AppKey("wait_s", float)
 CATALOG_KEY = web.AppKey("catalog", Catalog)
 SEEN_KEY = web.AppKey("bundle_seen", dict)
 ACKS_KEY = web.AppKey("acks", dict)
+MEMO_KEY = web.AppKey("preview_memo", dict)
 SENDER_KEY = web.AppKey("ir_sender", object)
 LIMITER_KEY = web.AppKey("ir_limiter", SendLimiter)
 WAIT_SECONDS = 55.0
@@ -155,17 +155,16 @@ MAX_ERRORS = 100
 
 def _check(config: dict[str, Any], *, all_errors: bool = True) -> tuple[Any, list[dict[str, Any]]]:
     """(model, []) or (None, [{path, msg, line}]). `all_errors=False` keeps the integration's
-    fail-fast behaviour (one error)."""
-    text = json.dumps(config)
+    fail-fast behaviour (one error). Works on the loaded dict: no YAML pass (about 100x faster)."""
     if not all_errors:
         try:
-            return parse_model(text, "config"), []
+            return parse_data(config), []
         except ConfigError as exc:
             return None, [_err(exc)]
-    errors = validate_all(text, "config")
+    errors = validate_data(config)
     if errors:
         return None, [_err(e) for e in errors[:MAX_ERRORS]]
-    return parse_model(text, "config"), []
+    return parse_data(config), []
 
 
 def _err(exc: ConfigError) -> dict[str, Any]:
@@ -262,31 +261,110 @@ def _compile(config: dict[str, Any]):
         return None, None, [{"path": [], "msg": str(exc)[:300], "line": None}]
 
 
+PREVIEW_MEMO_MAX = 8
+
+
+def _page_error(errors: list[dict[str, Any]], i: int) -> str | None:
+    for e in errors:
+        if e["path"][:2] == ["pages", i]:
+            return e["msg"]
+    return None
+
+
+def _preview(config: dict[str, Any]) -> dict[str, Any]:
+    """Blocking (CPU). Always answers: pages that compile are returned even when the draft has
+    errors elsewhere; apply stays strict because it uses `_compile`, not this."""
+    raw_pages = config.get("pages") if isinstance(config.get("pages"), list) else []
+    _, errors = _check(config)
+    problems: list[tuple[list[Any], str]] = []
+    if not errors:
+        model = parse_data(config)
+        compiled = compile_config(model, collect=problems)
+        errors = [{"path": p, "msg": m[:300], "line": None} for p, m in problems]
+        total_ok = not problems
+    else:  # compile what can be compiled: valid pages only, by shape (references unchecked)
+        shaped = validate_pages(config)
+        for i, (_, errs) in enumerate(shaped):
+            have = any(e["path"][:2] == ["pages", i] for e in errors)
+            if errs and not have:  # the whole-config pass stopped before reaching this page
+                errors.extend(_err(e) for e in errs[: MAX_ERRORS - len(errors)])
+        blank = {"id": "x", "cols": 1, "rows": 1, "widgets": []}
+        partial = {
+            "devices": [],
+            "activities": [],
+            "keys": {},
+            "pages": [m if m is not None else blank for m, _ in shaped],
+        }
+        compiled = compile_config(partial, collect=problems)
+        for path, msg in problems:
+            if path[:1] == ["pages"]:
+                errors.append({"path": path, "msg": msg[:300], "line": None})
+        model, total_ok = None, False
+    pages = []
+    for i, data in enumerate(compiled.pages):
+        raw = raw_pages[i] if i < len(raw_pages) and isinstance(raw_pages[i], dict) else {}
+        pu = compiled.usage["pages"][i]
+        err = _page_error(errors, i)
+        ok = bool(data) and err is None
+        pid = raw.get("id") if isinstance(raw.get("id"), str) else None
+        pages.append(
+            {
+                "index": i,
+                "id": pid,
+                "ok": ok,
+                "error": None if ok else (err or "page does not compile"),
+                "page": dataclasses.asdict(decode_page(data)) if ok else None,
+                "bytes": pu["bytes"] if (model is not None or ok) else None,
+                "limit": pu["limit"],
+                "widgets": len(raw["widgets"]) if isinstance(raw.get("widgets"), list) else None,
+                "widget_limit": pu["widget_limit"],
+            }
+        )
+    usage = {k: v for k, v in compiled.usage.items() if k != "pages"} if model is not None else None
+    return {
+        "ok": not errors,
+        "hash": compiled.config_hash if total_ok else None,
+        "errors": errors,
+        "missing_pages": [{"index": p["index"], "id": p["id"]} for p in pages if not p["ok"]],
+        "pages": pages,
+        "usage": usage,
+    }
+
+
 async def preview(request: web.Request) -> web.Response:
     q = query(request, schemas.QUERY)
     body = await read_body(request, schemas.OPT_CONFIG)
     state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    _, compiled, errors = _compile(_pick_config(state, body.get("config")))
+    config = _pick_config(state, body.get("config"))
+    # editor metadata cannot change a preview: leave it out of the memo key
+    key = hashlib.sha256(
+        json.dumps(_public(config), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    memo: dict[str, dict[str, Any]] = request.app[MEMO_KEY]
+    out = memo.pop(key, None)
+    if out is None:
+        out = await asyncio.get_running_loop().run_in_executor(None, _preview, _public(config))
+    memo[key] = out  # most recently used last
+    while len(memo) > PREVIEW_MEMO_MAX:
+        memo.pop(next(iter(memo)))
+    return jresp(out)
+
+
+def _keymap_sync(config: dict[str, Any]):
+    model, errors = _check(config)
+    return None if errors else resolve_keymaps(model), errors
+
+
+async def keymap(request: web.Request) -> web.Response:
+    """Per layer, every hard key's effective action, from the one lookup rule in harmony_core."""
+    q = query(request, schemas.QUERY)
+    body = await read_body(request, schemas.OPT_CONFIG)
+    state = _store_call(request.app[STORE_KEY].load, q["hub"])
+    config = _pick_config(state, body.get("config"))
+    maps, errors = await asyncio.get_running_loop().run_in_executor(None, _keymap_sync, config)
     if errors:
         return jresp({"ok": False, "errors": errors}, 422)
-    hub = compiled.hub_json
-    return jresp(
-        {
-            "ok": True,
-            "hash": compiled.config_hash,
-            "pages": [dataclasses.asdict(decode_page(p)) for p in compiled.pages],
-            "usage": {
-                "json_bytes": len(compact_json(hub).encode()),
-                "json_max": LIMITS["MAX_JSON"],
-                "pool_words": _pool_words(hub),
-                "pool_max": LIMITS["POOL_WORDS"],
-                "devices": len(compiled.devices),
-                "devices_max": LIMITS["MAX_DEVICES"],
-                "activities": len(compiled.activities),
-                "activities_max": LIMITS["MAX_ACTIVITIES"],
-            },
-        }
-    )
+    return jresp({"ok": True, **maps})
 
 
 async def apply(request: web.Request) -> web.Response:
@@ -537,7 +615,14 @@ class ApplyNotifier:
             ev.set()
 
 
+def _public(config: dict[str, Any]) -> dict[str, Any]:
+    """What the integration may see: editor-only metadata never leaves the add-on, so editing
+    it can neither change the bundle rev nor trigger a hub push (nor break an older integration)."""
+    return {k: v for k, v in config.items() if k != "editor"}
+
+
 def _rev(config: dict[str, Any]) -> str:
+    config = _public(config)
     canon = json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canon.encode()).hexdigest()[:16]
 
@@ -552,7 +637,7 @@ def _bundle(hub: str, state: dict[str, Any]) -> dict[str, Any] | None:
         "hub_id": hub,
         "applied_at": a["at"],
         "rev": _rev(a["config"]),
-        "config": a["config"],
+        "config": _public(a["config"]),
     }
 
 
@@ -650,6 +735,7 @@ def create_app(
     app[WAIT_KEY] = wait_seconds
     app[CATALOG_KEY] = Catalog(ha_api, clock)
     app[SEEN_KEY] = {}
+    app[MEMO_KEY] = {}
     app[SENDER_KEY] = ir_sender
     app[LIMITER_KEY] = SendLimiter(send_clock)
     if irdb is not None:
@@ -686,6 +772,7 @@ def create_app(
     app.router.add_put(f"{api}/config/draft", put_draft)
     app.router.add_post(f"{api}/config/validate", validate)
     app.router.add_post(f"{api}/config/preview", preview)
+    app.router.add_post(f"{api}/config/keymap", keymap)
     app.router.add_post(f"{api}/config/apply", apply)
     app.router.add_post(f"{api}/config/revert", revert)
     app.router.add_post(f"{api}/config/import_yaml", import_yaml)
