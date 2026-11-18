@@ -51,7 +51,7 @@ export interface V2Widget {
   bind: number | null;
 }
 export interface V2Page {
-  version: 2;
+  version: 1 | 2;
   id: number;
   cols: number;
   rows: number;

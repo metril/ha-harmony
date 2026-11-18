@@ -30,8 +30,8 @@ export interface Activity {
 export interface Widget {
   type: string;
   id?: string;
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
   w?: number;
   h?: number;
   label?: string;

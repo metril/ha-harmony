@@ -10,6 +10,7 @@ export default tseslint.config(
   {
     files: ['src/**'],
     rules: {
+      '@typescript-eslint/no-dynamic-delete': 'off',
       'no-restricted-syntax': [
         'error',
         {
