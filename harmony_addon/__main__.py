@@ -13,7 +13,6 @@ from .auth import load_or_create_token
 from .options import load_options
 from .supervisor import Discovery, default_supervisor
 
-
 SHUTDOWN_TIMEOUT = 3.0  # waiters are woken at shutdown; never sit out a ~55 s long poll
 
 
