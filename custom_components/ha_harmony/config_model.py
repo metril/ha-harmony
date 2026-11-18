@@ -238,6 +238,8 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("power"): power,
         vol.Optional("inputs", default=dict): {_name: ir},
         vol.Optional("settle_ms"): _int(0, 60000),
+        # Provenance of an imported device (tools/irdb_import.py); never compiled or sent.
+        vol.Optional("source"): {str: vol.Any(str, int, float, bool, None)},
         vol.Optional("commands", default=dict): {_cmd_name: ir},
     }
     activity = {
