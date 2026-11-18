@@ -1,6 +1,7 @@
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../components/hh-action-picker';
+import '../components/hh-chain-mini';
 import '../components/hh-dialog';
 import '../components/hh-mini-remote';
 import { StoreElement, confirmAction } from '../components/base';
@@ -37,13 +38,6 @@ export class HhActivities extends StoreElement {
       .acard { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--r3); background: var(--sf); color: var(--tx); text-decoration: none; }
       .acard:hover { box-shadow: var(--sh); border-color: var(--acc); }
       .acard h2 { margin: 0; font-size: 16px; font-weight: 650; display: flex; gap: 8px; align-items: center; }
-      .mini { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-height: 44px; }
-      .mini .d { display: grid; justify-items: center; width: 56px; color: var(--acc); }
-      .mini .d .art { width: 44px; height: 33px; }
-      .mini .d small { font-size: 10.5px; color: var(--tx2); max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .mini .w { display: grid; justify-items: center; font-size: 10px; color: var(--tx3); max-width: 64px; }
-      .mini .w span { background: var(--sf2); border-radius: 8px; padding: 0 6px; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .mini .w i { display: block; width: 28px; border-top: 2px dashed var(--line); }
       .newcard { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 160px; border: 2px dashed var(--line); border-radius: var(--r3); background: transparent; color: var(--tx2); font-weight: 600; cursor: pointer; }
       .newcard:hover { border-color: var(--acc); color: var(--tx); background: var(--sf2); }
       .newcard .plus { width: 44px; height: 44px; border-radius: 50%; background: var(--accs); color: var(--acc); display: grid; place-items: center; }
@@ -225,21 +219,12 @@ export class HhActivities extends StoreElement {
   }
 
   // ------------------------------------------------------------ gallery
-  private mini(id: string) {
-    const order = chainOrder(this.cfg, id);
-    const a = this.cfg.activities?.find((x) => x.id === id);
-    return html`<div class="mini" aria-label="Devices in order">${order.map((dv, i) => {
-      const d = this.dev(dv);
-      const input = a?.devices?.find((x) => x.device === dv)?.input;
-      return html`${i > 0 ? html`<span class="w"><span>${input ?? ''}</span><i></i></span>` : nothing}<span class="d">${art(d ? deviceKind(d) : 'other')}<small>${d?.name ?? dv}</small></span>`;
-    })}${order.length === 0 ? html`<span class="muted">No devices yet</span>` : nothing}</div>`;
-  }
   private gallery() {
     const acts = this.cfg.activities ?? [];
     return html`
       <div class="head"><h1>Activities</h1><span class="chip">${acts.length} / 16</span><span class="muted">What the remote does when you press a start button.</span></div>
       <div class="gallery" role="list">
-        ${acts.map((a) => html`<a class="acard" role="listitem" href=${hashFor('activities', a.id)}><h2>${stockIconSvg(stockIconByName('play')?.id ?? 26)} ${a.name ?? a.id}</h2>${this.mini(a.id)}
+        ${acts.map((a) => html`<a class="acard" role="listitem" href=${hashFor('activities', a.id)}><h2>${stockIconSvg(stockIconByName('play')?.id ?? 26)} ${a.name ?? a.id}</h2><hh-chain-mini .cfg=${this.cfg} activity=${a.id}></hh-chain-mini>
           <span class="muted">${(a.devices ?? []).length} devices · ${(a.steps ?? []).length + (a.off ?? []).length} own steps · ${Object.keys(a.keys ?? {}).length} keys</span></a>`)}
         <button class="newcard" role="listitem" @click=${() => (this.newOpen = true)}><span class="plus">${icon('plus')}</span>New activity</button>
       </div>

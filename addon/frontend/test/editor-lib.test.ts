@@ -5,6 +5,7 @@ import { deviceIdFor, duplicateCommand, nameProblem, powerStatus, setPowerMode, 
 import { proposeFromEntity } from '../src/lib/ha-propose';
 import type { Config } from '../src/lib/model';
 import { permissions, tileDefaultTap } from '../src/lib/permissions';
+import { changedKeys, changedPages } from '../src/lib/diff';
 import { deleteDevice, deleteItem, describeRef, findRefs, renameItem } from '../src/lib/refs';
 import { candidateLabel, draftDevice, initial, isOffline, reduce, stepsFor, type WAction, type WState } from '../src/lib/wizard';
 import { tvConfig } from './helpers';
@@ -189,6 +190,22 @@ describe('auto-create', () => {
     const c = addControlPage(full(), 'watch_tv');
     expect(c.pages?.at(-1)).toMatchObject({ activity: 'watch_tv', back: true, title: 'Living room TV' });
     expect(addStartButton({ ...full(), pages: [] }, 'watch_tv')).toHaveProperty('refused');
+  });
+});
+
+describe('what changed since the last apply', () => {
+  it('lists changed keys per layer and changed pages with their widgets', () => {
+    const a = full();
+    const b = JSON.parse(JSON.stringify(a)) as Config;
+    b.keys = { ...b.keys, menu: { device: 'tv', command: 'ok' } };
+    delete (b.keys as Record<string, unknown>)['volume_up'];
+    b.activities![0]!.keys = { select: { device: 'tv', command: 'vol_up' } };
+    b.pages![0]!.widgets[0]!.label = 'Louder';
+    b.pages![0]!.widgets.push({ type: 'label', label: 'New' });
+    expect(changedKeys(a, b).map((k) => `${k.layer}:${k.key}:${k.kind}`).sort()).toEqual(['default:menu:added', 'default:volume_up:removed', 'watch_tv:select:changed']);
+    expect(changedPages(a, b)).toEqual([{ id: 'main', title: 'main', kind: 'changed', widgets: ['Louder', 'New'] }]);
+    expect(changedKeys(a, a)).toEqual([]);
+    expect(changedPages(a, { ...a, pages: [] })).toEqual([{ id: 'main', title: 'main', kind: 'removed', widgets: [] }]);
   });
 });
 

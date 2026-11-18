@@ -82,3 +82,61 @@ export function diffConfig(applied: Config | null, draft: Config | null): DiffRo
   for (const n of other) if (!same(A[n], B[n])) rows.push({ kind: 'changed', area: 'Setting', label: n });
   return rows;
 }
+
+export interface KeyChange {
+  /** `default` or an activity id */
+  layer: string;
+  layerName: string;
+  key: string;
+  kind: 'added' | 'changed' | 'removed';
+}
+/** Hard keys that differ between two configs, per layer (Default and each activity). */
+export function changedKeys(applied: Config | null, draft: Config | null): KeyChange[] {
+  const out: KeyChange[] = [];
+  const layers = (c: Config | null): Map<string, { name: string; keys: Rec }> => {
+    const m = new Map<string, { name: string; keys: Rec }>([['default', { name: 'Default', keys: (c?.keys ?? {}) as Rec }]]);
+    for (const a of c?.activities ?? []) m.set(a.id, { name: a.name ?? a.id, keys: (a.keys ?? {}) as Rec });
+    return m;
+  };
+  const A = layers(applied);
+  const B = layers(draft);
+  for (const [id, b] of B) {
+    const d = keyDiff(A.get(id)?.keys, b.keys);
+    for (const key of d.added) out.push({ layer: id, layerName: b.name, key, kind: 'added' });
+    for (const key of d.changed) out.push({ layer: id, layerName: b.name, key, kind: 'changed' });
+    for (const key of d.removed) out.push({ layer: id, layerName: b.name, key, kind: 'removed' });
+  }
+  return out;
+}
+
+export interface PageChange {
+  id: string;
+  title: string;
+  kind: 'added' | 'changed' | 'removed';
+  /** labels of the widgets that were added, changed or removed (by widget id) */
+  widgets: string[];
+}
+/** Pages that differ, with the widgets that changed on them. */
+export function changedPages(applied: Config | null, draft: Config | null): PageChange[] {
+  const out: PageChange[] = [];
+  const pa = byId(applied?.pages);
+  const pb = byId(draft?.pages);
+  for (const [id, b] of pb) {
+    const a = pa.get(id);
+    const title = String(b['title'] ?? id);
+    if (!a) out.push({ id, title, kind: 'added', widgets: [] });
+    else if (!same(a, b)) {
+      const wa = new Map(((a['widgets'] as Rec[]) ?? []).map((w, i) => [String(w['id'] ?? `#${i}`), w]));
+      const labels: string[] = [];
+      ((b['widgets'] as Rec[]) ?? []).forEach((w, i) => {
+        const k = String(w['id'] ?? `#${i}`);
+        if (!same(wa.get(k), w)) labels.push(String(w['label'] ?? k));
+        wa.delete(k);
+      });
+      for (const w of wa.values()) labels.push(String(w['label'] ?? w['id']));
+      out.push({ id, title, kind: 'changed', widgets: labels });
+    }
+  }
+  for (const [id, a] of pa) if (!pb.has(id)) out.push({ id, title: String(a['title'] ?? id), kind: 'removed', widgets: [] });
+  return out;
+}

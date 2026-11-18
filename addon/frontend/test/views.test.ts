@@ -71,12 +71,12 @@ describe('screens render with a realistic config', () => {
     expect(text(bar)).toContain('Valid');
   });
 
-  it('first-run shows the empty state with Import and a disabled Add device', async () => {
+  it('first-run shows the empty state with Import and Add your first device', async () => {
     const { app } = await boot({ applied: false });
     const ov = app.shadowRoot!.querySelector('hh-overview')!;
     await settle(ov as HTMLElement);
     expect(text(ov)).toContain('Import YAML file');
-    expect(ov.shadowRoot!.querySelector('button[aria-disabled="true"]')?.textContent).toContain('Add first device');
+    expect(ov.shadowRoot!.querySelector('a.btn.pri')?.getAttribute('href')).toBe('#/devices/new');
   });
 
   it('devices: keypad of 60+ commands, each with its own Send IR; the list view has every row', async () => {
@@ -143,7 +143,7 @@ describe('screens render with a realistic config', () => {
     await settle(av as HTMLElement);
     expect(av.shadowRoot!.querySelectorAll('.acard').length).toBe(1);
     expect(text(av)).toContain('Watch TV');
-    expect(text(av)).toContain('port1');
+    expect(av.shadowRoot!.querySelector('hh-chain-mini')!.shadowRoot!.textContent).toContain('port1');
     expect(text(av)).toContain('New activity');
     location.hash = '#/activities/watch_tv';
     await vi.waitFor(() => expect(text(av)).toContain('Signal chain'));

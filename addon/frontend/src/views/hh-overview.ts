@@ -1,19 +1,50 @@
 import { css, html, nothing } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { customElement, state } from 'lit/decorators.js';
+import '../components/hh-chain-mini';
+import '../components/hh-mini-remote';
 import { StoreElement } from '../components/base';
+import type { PreviewPage } from '../lib/api';
+import { changedKeys, changedPages, type KeyChange } from '../lib/diff';
 import { LIMITS, counts } from '../lib/model';
+import { pageSvg } from '../lib/page-renderer';
+import { permissions } from '../lib/permissions';
+import { keyTitle } from '../lib/remote-layout';
+import { hashFor } from '../lib/router';
+import { StudioState } from '../lib/studio-state';
+import { pageIndexForLayer } from '../lib/studio-model';
 import { shared } from '../lib/styles';
 
+const KIND_LABEL = { added: 'Added', changed: 'Changed', removed: 'Removed' } as const;
+
+/** Overview: the remote as it will look, the activities, what changed since the last apply, and what Home Assistant is asked for. */
 @customElement('hh-overview')
 export class HhOverview extends StoreElement {
   static override styles = [
     shared,
     css`
       :host { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+      .stack { display: grid; gap: 16px; min-width: 0; }
+      h3 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tx3); }
+      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+      .stat { padding: 12px 14px; }
       .stat .v { font-size: 22px; font-weight: 650; }
       .stat .l { font-size: 12px; color: var(--tx3); }
-      .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+      .top { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
+      .rem { display: grid; gap: 10px; justify-items: center; text-align: center; }
+      .rem hh-mini-remote { width: 150px; filter: drop-shadow(0 6px 14px rgba(16, 24, 32, 0.25)); }
+      .acts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+      a.act { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf); color: var(--tx); text-decoration: none; }
+      a.act:hover { border-color: var(--acc); }
+      a.act b { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+      h2 .sub { font-weight: 400; color: var(--tx3); font-size: 12.5px; }
+      .pages { display: grid; gap: 14px; }
+      .pg { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 12px; align-items: center; }
+      .pg figure { margin: 0; display: grid; gap: 4px; justify-items: center; font-size: 11px; color: var(--tx3); }
+      .pg svg { border-radius: 8px; box-shadow: 0 0 0 1px var(--line); display: block; }
+      .arrow { color: var(--tx3); font-size: 18px; }
+      .xr { display: flex; gap: 18px; flex-wrap: wrap; }
+      .xr figure { margin: 0; display: grid; gap: 4px; justify-items: center; font-size: 12px; font-weight: 600; width: 96px; }
+      .xr figure hh-mini-remote { width: 96px; }
       ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
       li.row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
       .k { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; min-width: 62px; }
@@ -22,15 +53,64 @@ export class HhOverview extends StoreElement {
       .empty h1 { font-size: 24px; }
       .empty p { max-width: 46ch; color: var(--tx2); margin: 0; }
       .empty .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+      .perm { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+      .perm li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+      .perm .why { color: var(--tx3); font-size: 12px; }
+      .st { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--sf3); color: var(--tx2); }
+      .st.on { background: var(--irs); color: var(--ir); }
       a.fix { color: var(--bad); font-weight: 600; }
+      @media (max-width: 760px) { .top { grid-template-columns: minmax(0, 1fr); } .pg { grid-template-columns: auto auto; } .pg > :last-child { grid-column: 1 / -1; } }
     `,
   ];
+  @state() private beforePages: PreviewPage[] | null = null;
+  private beforeFor = '';
+  private ha = new StudioState(this.store);
 
-  private permissions(): string[] {
-    const ents = new Set<string>();
-    for (const p of this.store.config.pages ?? [])
-      for (const w of p.widgets ?? []) if (typeof w.entity === 'string') ents.add(w.entity);
-    return [...ents].sort();
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this.ha.addEventListener('change', this.onHa);
+    void this.ha.loadHa();
+  }
+  override disconnectedCallback(): void {
+    this.ha.removeEventListener('change', this.onHa);
+    super.disconnectedCallback();
+  }
+  private onHa = () => this.requestUpdate();
+
+  /** the applied config's pages, decoded once per applied version, for the "before" thumbnails */
+  protected override willUpdate(): void {
+    const s = this.store;
+    const key = s.applied?.hash ?? '';
+    if (!s.hasDraft || !s.appliedConfig || key === this.beforeFor) return;
+    this.beforeFor = key;
+    void s.api.preview(s.hub, s.appliedConfig).then((p) => (this.beforePages = p.pages)).catch(() => (this.beforePages = null));
+  }
+
+  private thumb(label: string, p: PreviewPage | undefined | null) {
+    return html`<figure>${p?.page ? pageSvg(p.page, {}, 0.5, `${label} page`) : html`<span class="muted">none</span>`}<figcaption>${label}</figcaption></figure>`;
+  }
+  private keyRemotes(changes: KeyChange[]) {
+    const layers = [...new Set(changes.map((c) => c.layer))];
+    return html`<div class="xr">${layers.slice(0, 4).map((l) => {
+      const mine = changes.filter((c) => c.layer === l);
+      const marks = Object.fromEntries(mine.map((c) => [c.key, 'chg']));
+      return html`<figure><hh-mini-remote .marks=${marks} label="Keys changed in ${mine[0]?.layerName}"></hh-mini-remote>${mine[0]?.layerName}</figure>`;
+    })}</div>`;
+  }
+
+  private permissions() {
+    const p = permissions(this.store.config);
+    const live = new Map((this.ha.entities ?? []).map((e) => [e.entity_id, e]));
+    return html`<section class="card" aria-labelledby="hp">
+      <h2 id="hp">Permissions <span class="sub">Home Assistant entities and services this draft uses</span></h2>
+      ${p.entities.length || p.services.length
+        ? html`<div class="perm">
+            <div><b>Entities (${p.entities.length})</b><ul>${p.entities.map((e) => html`<li><span class="mono">${e.id}</span>${live.get(e.id)?.state ? html`<span class="st ${live.get(e.id)?.state === 'on' ? 'on' : ''}">${live.get(e.id)?.state}</span>` : nothing}<span class="why">${e.uses.slice(0, 2).join(', ')}</span></li>`)}</ul></div>
+            <div><b>Services (${p.services.length})</b>${p.services.length ? html`<ul>${p.services.map((s) => html`<li><span class="mono">${s.service}</span><span class="why">${s.uses} use${s.uses === 1 ? '' : 's'}</span></li>`)}</ul>` : html`<p class="muted">No service calls.</p>`}</div>
+          </div>`
+        : html`<p class="muted">The draft does not ask Home Assistant for anything.</p>`}
+      <p class="muted">Informational. Nothing is granted here; Home Assistant decides what the integration may do.</p>
+    </section>`;
   }
 
   protected override render() {
@@ -40,16 +120,21 @@ export class HhOverview extends StoreElement {
         <h1>Set up your first hub config</h1>
         <p>Nothing has been applied yet. Import a YAML file you already have, or start by adding a device.</p>
         <div class="row">
-          <button class="btn pri" @click=${() => this.dispatchEvent(new Event('hh-import', { bubbles: true, composed: true }))}>Import YAML file</button>
-          <button class="btn" aria-disabled="true" title="The device editor is being rebuilt and is not available yet">Add first device <span class="chip">Coming</span></button>
+          <button class="btn" @click=${() => this.dispatchEvent(new Event('hh-import', { bubbles: true, composed: true }))}>Import YAML file</button>
+          <a class="btn pri" href=${hashFor('devices', 'new')}>Add your first device</a>
         </div>
       </div>`;
     }
     const c = counts(s.config);
     const acts = s.config.activities ?? [];
+    const applied = s.appliedConfig;
     const diff = s.diff;
-    const perms = this.permissions();
     const errs = s.errorSummary;
+    const home = pageIndexForLayer(s.config, 'default');
+    const homePage = s.pages[home]?.page ?? null;
+    const pages = s.hasDraft ? changedPages(applied, s.config) : [];
+    const keys = s.hasDraft ? changedKeys(applied, s.config) : [];
+    const changedActs = new Set(acts.filter((a) => s.hasDraft && JSON.stringify(a) !== JSON.stringify(applied?.activities?.find((x) => x.id === a.id))).map((a) => a.id));
     return html`
       <h1>Overview</h1>
       ${errs.total
@@ -59,31 +144,41 @@ export class HhOverview extends StoreElement {
             ${errs.first ? html`<a class="btn sm" href=${'#/' + errs.first.route}>Go to field</a>` : nothing}
           </div>`
         : nothing}
-      <div class="stats">
-        ${this.stat('Devices', c.devices, LIMITS.devices)} ${this.stat('Activities', c.activities, 16)}
-        ${this.stat('Page widgets', c.widgets, LIMITS.widgets)} ${this.stat('Inputs', c.inputs, LIMITS.inputs)}
-      </div>
-      <div class="two">
-        <section class="card" aria-labelledby="ha">
-          <h2 id="ha">Activities</h2>
-          ${acts.length
-            ? html`<ul>${acts.map((a) => html`<li>${a.name ?? a.id} <span class="muted">${(a.devices ?? []).length} devices</span></li>`)}</ul>`
-            : html`<p class="muted">No activities yet.</p>`}
+      <div class="top">
+        <section class="card rem" aria-label="Your remote">
+          <h2>Your remote</h2>
+          <hh-mini-remote .page=${homePage} label="Your remote showing the ${s.config.pages?.[home]?.title ?? 'home'} page"></hh-mini-remote>
+          <a class="btn sm" href=${hashFor('remote')}>Open in the studio</a>
         </section>
-        <section class="card" aria-labelledby="hc">
-          <h2 id="hc">Changes in this draft</h2>
-          ${diff.length
-            ? html`<ul>${diff.map((r) => html`<li class="row"><span class="k ${r.kind}">${r.kind}</span><span><strong>${r.area}</strong> ${r.label}</span>${r.detail ? html`<span class="muted">${r.detail}</span>` : nothing}</li>`)}</ul>`
-            : html`<p class="muted">${s.hasDraft ? 'The draft matches the applied config.' : 'No draft. Edits you make appear here.'}</p>`}
-        </section>
+          <div class="stack">
+            <div class="stats">
+              ${this.stat('Devices', c.devices, LIMITS.devices)} ${this.stat('Activities', c.activities, 16)}
+              ${this.stat('Page widgets', c.widgets, LIMITS.widgets)} ${this.stat('Inputs', c.inputs, LIMITS.inputs)}
+            </div>
+            <section class="card" aria-labelledby="ha">
+              <h2 id="ha">Activities</h2>
+              ${acts.length
+                ? html`<div class="acts">${acts.map((a) => html`<a class="act" href=${hashFor('activities', a.id)}><b>${a.name ?? a.id}${changedActs.has(a.id) ? html`<span class="chip ir">Changed</span>` : nothing}</b><hh-chain-mini .cfg=${s.config} activity=${a.id}></hh-chain-mini><span class="muted">${(a.steps ?? []).length + (a.off ?? []).length} own steps · ${Object.keys(a.keys ?? {}).length} keys</span></a>`)}</div>`
+                : html`<p class="muted">No activities yet. <a href=${hashFor('activities')}>Create one</a>.</p>`}
+            </section>
+          </div>
       </div>
-      <section class="card" aria-labelledby="hp">
-        <h2 id="hp">Permissions</h2>
-        ${perms.length
-          ? html`<p class="muted">The draft will ask Home Assistant to read these entities.</p><ul>${perms.map((e) => html`<li class="mono">${e}</li>`)}</ul>`
-          : html`<p class="muted">The draft does not ask Home Assistant for anything.</p>`}
-        <p class="muted">After Apply, Home Assistant asks you to approve changes to this list.</p>
+      <section class="card" aria-labelledby="hc">
+        <h2 id="hc">${applied ? `Since rev ${s.applied?.rev}` : 'Changes in this draft'}</h2>
+        ${diff.length
+          ? html`
+            ${pages.length ? html`<div class="pages">${pages.map((p) => {
+              const ai = (applied?.pages ?? []).findIndex((x) => x.id === p.id);
+              const bi = (s.config.pages ?? []).findIndex((x) => x.id === p.id);
+              return html`<div class="pg"><b class="vh">${p.title}</b>${this.thumb('Before', ai >= 0 ? this.beforePages?.[ai] : null)}${this.thumb('After', bi >= 0 ? s.pages[bi] : null)}
+                <div><b>${p.title}</b> <span class="chip ${p.kind === 'added' ? 'ok' : p.kind === 'removed' ? 'bad' : 'ir'}">${KIND_LABEL[p.kind]}</span>${p.widgets.length ? html`<div class="muted">Widgets: ${p.widgets.slice(0, 6).join(', ')}${p.widgets.length > 6 ? ` and ${p.widgets.length - 6} more` : ''}</div>` : nothing}</div></div>`;
+            })}</div>` : nothing}
+            ${keys.length ? html`<h3>Keys</h3>${this.keyRemotes(keys)}<ul>${keys.slice(0, 10).map((k) => html`<li class="row"><span class="k ${k.kind}">${KIND_LABEL[k.kind]}</span><span>${keyTitle(k.key)} <span class="muted">in ${k.layerName}</span></span></li>`)}</ul>` : nothing}
+            <h3>Everything that changed</h3>
+            <ul>${diff.map((r) => html`<li class="row"><span class="k ${r.kind}">${r.kind}</span><span><strong>${r.area}</strong> ${r.label}</span>${r.detail ? html`<span class="muted">${r.detail}</span>` : nothing}</li>`)}</ul>`
+          : html`<p class="muted">${s.hasDraft ? 'The draft matches the applied config.' : 'No draft. Edits you make appear here.'}</p>`}
       </section>
+      ${this.permissions()}
     `;
   }
 
