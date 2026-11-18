@@ -118,6 +118,7 @@ typedef struct {
     uint8_t npending_dev;
     hub_pend_t pend[HUB_PEND_MAX]; /* oldest first */
     uint8_t npend;
+    uint32_t pend_dropped; /* held messages lost to a full queue (a tile that found only pages, or the oldest page) */
     hub_info_t info[HUB_INFO_MAX]; /* remote_info per remote; dropped when the RF link is lost */
 } hub_ctx_t;
 

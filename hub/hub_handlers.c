@@ -130,6 +130,22 @@ static void pend_drop_old_gen(hub_ctx_t *h, uint8_t remote, uint8_t gen) {
     }
 }
 
+/* The held queue is full: tile messages are evicted first, oldest first, so a burst of tile updates never costs a page
+ * (an incomplete page set leaves the remote on "Receiving"). With only pages held, a new tile is refused (false) and a new
+ * page drops the oldest page. (A page of an older gen, and the page with the same id, are already gone: pend_drop_old_gen,
+ * pend_supersede.) Each loss is counted; the first is logged. */
+static bool pend_make_room(hub_ctx_t *h, hp_msg_type_t incoming) {
+    for (uint8_t i = 0; i < h->npend; i++)
+        if (is_tile_msg(h->pend[i].type)) {
+            pend_remove(h, i);
+            return true;
+        }
+    if (!h->pend_dropped++) fprintf(stderr, "hub: held queue full of pages; dropping (counted in pend_dropped)\n");
+    if (is_tile_msg((uint8_t)incoming)) return false;
+    pend_remove(h, 0);
+    return true;
+}
+
 static bool rf_up(const hub_ctx_t *h) { return !h->sinks.rf->attached || h->sinks.rf->attached(h->sinks.rf->self); }
 
 /* Packs and queues one RF message on the link (stop-and-wait, driven by hub_pump_rf). While the remote
@@ -152,7 +168,7 @@ static int rf_send_keyed(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, si
         rc = hp_rf_link_send(&h->link, t, payload, plen, hp_sched_now(&h->sched));
         if (rc != -HP_E_NOENT) return rc;
     }
-    if (h->npend == HUB_PEND_MAX) pend_remove(h, 0); /* the oldest loses */
+    if (h->npend == HUB_PEND_MAX && !pend_make_room(h, t)) return 0; /* a tile that found only pages: dropped */
     hub_pend_t *p = &h->pend[h->npend++];
     p->type = (uint8_t)t;
     p->remote = remote;

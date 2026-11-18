@@ -236,6 +236,53 @@ static void test_forty_held_pages_fill_the_store_in_order(void) {
     CT_CHECK(R.max_depth <= 1);
 }
 
+/* A burst of tile updates while the remote is away must never push a page out of the held queue. */
+static void test_tile_burst_never_evicts_pages(void) {
+    remote_hook = store_hook;
+    world_reset_hook = store_reset;
+    world_init(true, MODEL_S3);
+    run(400);
+    hp_rf_link_set_awake(&RL, false, R.now);
+    run(900);
+    CT_CHECK(!R.up);
+    uint8_t raw[40];
+    for (uint8_t id = 0; id < 10; id++) CT_CHECK(push_raw(id, raw, mkpage(raw, id, 10, 0x66, id == 2 ? 1 : 0, 0)));
+    for (int t = 0; t < 100; t++) CT_CHECK(tile_cmd((uint8_t)(t / 10), (uint8_t)(t % 10), "v", -1));
+    CT_EQ(count_pend(HP_MSG_PAGE_PUSH), 10);
+    CT_EQ(H.npend, HUB_PEND_MAX);
+    /* the newest tiles are the ones kept */
+    CT_CHECK(H.pend[H.npend - 1].type == HP_MSG_TILE_UPDATE && H.pend[H.npend - 1].page == 9 && H.pend[H.npend - 1].tile == 9);
+    hp_rf_link_set_awake(&RL, true, R.now);
+    run(20000);
+    CT_EQ(norder, 10);
+    for (int i = 0; i < norder; i++) CT_EQ(order[i], i);
+    CT_CHECK(hp_store_complete(&ST));
+}
+
+/* Only pages held and the queue full: a new tile is refused, a new page drops the oldest page (counted). */
+static void test_full_queue_of_pages_refuses_tiles_and_drops_oldest_page(void) {
+    world();
+    hp_rf_link_set_awake(&RL, false, R.now);
+    run(900);
+    CT_CHECK(!R.up);
+    uint8_t raw[40];
+    const uint8_t v1[] = {1, 9, 1, 1, 0}; /* v1 pages: no gen, so no older-gen purge */
+    for (uint8_t id = 0; id < HUB_PEND_MAX; id++) {
+        uint8_t b[sizeof v1];
+        memcpy(b, v1, sizeof v1);
+        b[1] = id;
+        CT_CHECK(push_raw(id, b, sizeof b));
+    }
+    CT_EQ(H.npend, HUB_PEND_MAX);
+    CT_CHECK(tile_cmd(1, 1, "x", -1)); /* dropped: still ok to the caller, no page lost */
+    CT_EQ(count_pend(HP_MSG_PAGE_PUSH), HUB_PEND_MAX);
+    CT_EQ(H.pend_dropped, 1u);
+    CT_CHECK(push_raw(50, raw, mkpage(raw, 0, 1, 0x70, 0, 0)));
+    CT_EQ(H.npend, HUB_PEND_MAX);
+    CT_EQ(H.pend[0].page, 1); /* page 0 was the oldest */
+    CT_EQ(H.pend_dropped, 2u);
+}
+
 int main(void) {
     test_remote_info_cached_and_cleared_on_link_loss();
     test_unknown_and_unexpected_types_are_dropped();
@@ -243,5 +290,7 @@ int main(void) {
     test_tile_update_and_state_share_one_held_key();
     test_newer_gen_drops_held_pages_of_older_gen();
     test_forty_held_pages_fill_the_store_in_order();
+    test_tile_burst_never_evicts_pages();
+    test_full_queue_of_pages_refuses_tiles_and_drops_oldest_page();
     return CT_DONE();
 }
