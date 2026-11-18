@@ -1027,12 +1027,3 @@ def test_internal_write_guard_rejects_outside_paths():
             dr._need_write(p)
     for p in (dr.RCS_LOCAL, dr.RCS_TMP, "/data/app/x", "/var/volatile/x"):
         assert dr._need_write(p) == p
-
-
-def test_deploy_tools_parse_on_python_3_13():
-    """`except A, B:` (PEP 758) is 3.14-only; the tools must stay runnable on 3.13."""
-    import ast
-
-    tools = Path(__file__).resolve().parents[2] / "tools"
-    for name in ("deploy_hub.py", "deploy_remote.py", "device_backup.py"):
-        ast.parse((tools / name).read_text(), feature_version=(3, 13))

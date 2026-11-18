@@ -83,4 +83,4 @@ Run it before the first real arm. (BusyBox 1.13 `ls -ln` has extra columns, so t
   well over 120 s). After each reboot the Elite's USB gadget interface reappears renamed `enx<mac>` (no longer `usb0`)
   and loses the host address: re-address it (`ip link`, then re-add the host address) or the wait will time out.
 - `tools/deploy_hub.py run --yes --detach -- <args>` starts the daemon without a tty, logs to `/tmp/ha-harmony-hub.log`,
-  confirms the pid is alive and prints it. Both tools run on Python 3.13 or newer (the repo pins 3.14).
+  confirms the pid is alive and prints it. Both tools need Python >=3.14 (they use 3.14-only syntax, so an older interpreter fails with a SyntaxError): run them with `uv run python tools/<tool>.py ...`.

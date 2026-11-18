@@ -523,10 +523,14 @@ class RemoteDeployer:
         path = _need_write(DISABLE)
         rc, _, err = self.r.run(["touch", path] if disabled else ["rm", "-f", path])
         if rc != 0:
-            raise DeployError(f"could not {'create' if disabled else 'remove'} {path}: {_dec(err)[-200:]}")
+            raise DeployError(
+                f"could not {'create' if disabled else 'remove'} {path}: {_dec(err)[-200:]}"
+            )
         present = self.exists(DISABLE)
         if present != disabled:
-            raise DeployError(f"{path} is still {'present' if present else 'absent'} after the write")
+            raise DeployError(
+                f"{path} is still {'present' if present else 'absent'} after the write"
+            )
         self.out(f"DISABLE: {'PRESENT (hook will not launch the app)' if present else 'absent'}")
         return 0
 
@@ -552,7 +556,9 @@ class RemoteDeployer:
                 "host address: find it with `ip link`, re-add the host address on it, then "
                 "retry. Also check the USB cable; if it never returns, Menu+Off factory-resets it."
             )
-        self.out("ssh is back after reboot (if the interface was renamed, you already re-addressed it)")
+        self.out(
+            "ssh is back after reboot (if the interface was renamed, you already re-addressed it)"
+        )
         return self.status()
 
 
