@@ -120,6 +120,18 @@ ends in `exit 0`, so `rcS` stops there: no `hal`, no stock UI, no watchdog daemo
 processes: init, syslogd, klogd, dropbear. `/etc` and `/data` write through the unionfs to ubifs and
 persist; `/var/volatile` is tmpfs. The boot hook is `tools/deploy_remote.py install-hook`.
 
+**rcS.local probe (RO, 2026-11-18) [MEASURED]:** `/` is `none on / type unionfs (dirs=/mnt/data=rw:/mnt/root=ro)`
+(rw branch `ubi0:data` ubifs, ro branch squashfs `mtdblock6`); the branch mounts are not visible
+in the running namespace, so whether `rcS.local` sits in the rw layer is not directly observable
+(it is root-edited, 117 B, mode 755). `rcS` runs `if [ -x /etc/init.d/rcS.local ]; then source ...`:
+**sourced and `-x`-guarded**, so a syntax error aborts `rcS` itself (selftest INFO line: the caller
+printed nothing afterwards) and a non-executable file skips it, taking our dropbear start with it
+(`rcS` has a later `-r /etc/tdeenable` fallback to `/usr/sbin/dropbear`, which exists; untested as a
+recovery). **Rename atomicity on this unionfs-over-ubifs is UNKNOWN**; `deploy_remote.py` says so
+before every rcS.local write and gates it with an on-device `sh -n`, md5 read-back and restore.
+BusyBox 1.13.4 here has no `head tail wc dd df find tar sync basename od`; it does have `sh -n`
+(verified to reject a broken file), `md5sum`, `pidof`, `kill`, `cp`, `mv`, `chmod`, `awk`, `cut`.
+
 The kernel watchdog driver is loaded but **not armed** (nothing opens `/dev/watchdog`; the device
 has run for hours unfed). `/etc/nowatchdog` also stops `rcS` starting the stock watchdog daemon.
 

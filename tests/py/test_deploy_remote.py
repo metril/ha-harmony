@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,19 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import deploy_hub as dh
 import deploy_remote as dr
+
+_BB = shutil.which("busybox")
+SHELLS = ["/bin/sh"] + ([f"{_BB}:sh"] if _BB else [])
+_CUR = {"shell": ["/bin/sh"]}
+
+
+@pytest.fixture(autouse=True, params=SHELLS, ids=lambda x: "busybox" if ":" in x else "sh")
+def _shell(request):
+    """Every start.sh / selftest run below goes through /bin/sh and, when present, host busybox."""
+    sh = request.param
+    _CUR["shell"] = sh.split(":") if ":" in sh else [sh]
+    yield
+
 
 RCS = (
     "#!/bin/sh\n"
@@ -36,7 +50,10 @@ BASE_FILES = {
 class FakeRemote:
     """Interprets exactly the commands deploy_remote may emit; anything else fails the test."""
 
-    def __init__(self, rcs=RCS, corrupt=(), upload_rc=0, up_after=3, reboot_fires=True):
+    def __init__(
+        self, rcs=RCS, corrupt=(), upload_rc=0, up_after=3, reboot_fires=True, mangle_mv=None
+    ):
+        self.mangle_mv = {k: list(v) for k, v in (mangle_mv or {}).items()}  # dest -> [bytes|None]
         self.files: dict[str, bytes] = dict(BASE_FILES)
         self.files[dr.RCS_LOCAL] = rcs.encode()
         self.corrupt, self.upload_rc = set(corrupt), upload_rc
@@ -68,8 +85,10 @@ class FakeRemote:
             hits = [p for p in self.files if p.startswith(a[2] + "/")]
             out = "".join(f"-rwxr-xr-x 1 root root {len(self.files[p])} {p}\n" for p in hits)
             return (0, out.encode(), b"") if hits else (1, b"", b"No such file")
-        if a == ["mkdir", "-p", dr.APP_DIR]:
+        if a[:2] == ["mkdir", "-p"] and (a[2] == dr.APP_DIR or a[2] == dr.SELFTEST_DIR):
             return 0, b"", b""
+        if a[:2] == ["sh", f"{dr.SELFTEST_DIR}/remote_selftest.sh"]:
+            return self.selftest(a)
         if a[0] == "md5sum":
             data = self.files.get(a[1])
             if data is None:
@@ -80,12 +99,27 @@ class FakeRemote:
         if a[0] == "chmod":
             self.modes[a[2]] = a[1]
             return 0, b"", b""
+        if a[:2] == ["sh", "-n"]:
+            data = self.files.get(a[2])
+            if data is None:
+                return 2, b"", b"No such file"
+            p = subprocess.run(["sh", "-n"], input=data, capture_output=True, check=False)
+            return p.returncode, b"", p.stderr
         if a[0] == "mv":
             self.files[a[2]] = self.files.pop(a[1])
             self.modes[a[2]] = self.modes.pop(a[1], "644")
+            if self.mangle_mv.get(a[2]):
+                bad = self.mangle_mv[a[2]].pop(0)
+                if bad is not None:
+                    self.files[a[2]] = bad
             return 0, b"", b""
         if a[:2] == ["rm", "-f"]:
             self.files.pop(a[2], None)
+            return 0, b"", b""
+        if a[:2] == ["rm", "-rf"] and a[2] == dr.SELFTEST_DIR:
+            pre = a[2] + "/"
+            self.files = {p: d for p, d in self.files.items() if not p.startswith(pre)}
+            self.selftest_removed = True
             return 0, b"", b""
         if a[:2] == ["rm", "-rf"]:
             pre = a[2] + "/"
@@ -96,6 +130,17 @@ class FakeRemote:
                 self.down = self.up_after
             return 255, b"", b""
         raise AssertionError(f"unexpected command: {a}")
+
+    selftest_rc = 0
+    selftest_removed = False
+
+    def selftest(self, a):
+        """Stand-in for the on-device script: assert what was uploaded, report a result."""
+        t = a[2]
+        assert a[3] == "--slot 1 --powermode 0x30"
+        assert f"{t}/start.sh" in self.files and f"{t}/hookline.sh" in self.files
+        self.files[f"{t}/app/ran"] = b"x"  # a file the run created: cleanup must remove it
+        return self.selftest_rc, b"PASS  fake\nremote selftest done: 0 failure(s)\n", b""
 
     def run_input(self, argv, data):
         self.log.append(argv)
@@ -216,7 +261,7 @@ def test_push_happy_path_atomic_and_chmod(art):
     assert any("push complete: 2" in ln for ln in lines)
     # staged to a temp, verified, then moved
     i = dev.log.index(["md5sum", f"{dr.APP_DIR}/rf_probe.new"])
-    assert dev.log[i + 2] == ["mv", f"{dr.APP_DIR}/rf_probe.new", f"{dr.APP_DIR}/rf_probe"]
+    assert dev.log[i + 3] == ["mv", f"{dr.APP_DIR}/rf_probe.new", f"{dr.APP_DIR}/rf_probe"]
 
 
 def test_push_md5_mismatch_leaves_nothing(art):
@@ -257,10 +302,11 @@ def test_run_foreground_and_missing_app(art):
 
 
 def test_install_hook_happy_path_order_and_atomicity():
-    d, dev, _ = make()
+    d, dev, lines = make()
     assert d.install_hook() == 0
     assert dev.files[dr.RCS_BACKUP] == RCS.encode()
     assert dev.files[dr.START_SH] == dr.start_script().encode()
+    assert "--slot 1 --powermode 0x30" in dev.files[dr.START_SH].decode()
     text = hooked(dev)
     assert text == dr.insert_hook(RCS) and text.count(dr.HOOK_MARKER) == 1
     assert dev.modes[dr.START_SH] == "755" and dev.modes[dr.RCS_LOCAL] == "755"
@@ -268,8 +314,14 @@ def test_install_hook_happy_path_order_and_atomicity():
     uploads = [c[2] for c in dev.log if c[:2] == ["sh", "-c"]]
     assert f"cat > {dr.RCS_TMP}" in uploads and f"cat > {dr.RCS_LOCAL}" not in uploads
     i = dev.log.index(["md5sum", dr.RCS_TMP])
-    assert dev.log[i + 2] == ["mv", dr.RCS_TMP, dr.RCS_LOCAL]
+    mv = dev.log.index(["mv", dr.RCS_TMP, dr.RCS_LOCAL])
+    # vetted on the device BEFORE the mv, and again after it
+    assert ["sh", "-n", dr.RCS_TMP] in dev.log[i:mv] and ["cat", dr.RCS_TMP] in dev.log[i:mv]
+    assert dev.log[mv + 1 :][:2] == [["md5sum", dr.RCS_LOCAL], ["sh", "-n", dr.RCS_LOCAL]]
     assert dr.RCS_TMP not in dev.files
+    assert any("UNKNOWN" in ln for ln in lines) and lines.index(
+        next(ln for ln in lines if "UNKNOWN" in ln)
+    ) < lines.index(next(ln for ln in lines if "hook installed in" in ln))
 
 
 def test_install_hook_is_idempotent():
@@ -301,12 +353,13 @@ def test_install_hook_refuses_duplicate_hook_lines():
 
 
 def test_backup_never_overwritten():
-    d, dev, lines = make()
+    d, dev, _ = make()
     dev.files[dr.RCS_BACKUP] = b"PRECIOUS ORIGINAL\n"
-    d.install_hook()
+    with pytest.raises(dh.DeployError, match="refresh-backup"):
+        d.install_hook()
     assert dev.files[dr.RCS_BACKUP] == b"PRECIOUS ORIGINAL\n"
     assert dr.RCS_BACKUP not in dev.written and dr.RCS_BACKUP + ".new" not in dev.written
-    assert any("already exists" in ln for ln in lines)
+    assert dev.files[dr.RCS_LOCAL] == RCS.encode()
 
 
 def test_hook_present_without_backup_refuses():
@@ -343,8 +396,9 @@ def test_uninstall_restores_and_keeps_files():
     assert dr.RCS_TMP not in dev.files
     assert any("left /data/app" in ln for ln in lines)
     i = dev.log.index(["md5sum", dr.RCS_TMP])
-    assert dev.log[i + 2] == ["mv", dr.RCS_TMP, dr.RCS_LOCAL]
-    assert dev.log[-1] == ["md5sum", dr.RCS_LOCAL]  # verified after the move
+    mv = dev.log.index(["mv", dr.RCS_TMP, dr.RCS_LOCAL])
+    assert ["sh", "-n", dr.RCS_TMP] in dev.log[i:mv]
+    assert dev.log[-2:] == [["md5sum", dr.RCS_LOCAL], ["sh", "-n", dr.RCS_LOCAL]]
 
 
 def test_uninstall_purge_removes_app_dir():
@@ -400,7 +454,7 @@ def boot(tmp_path):
     app_dir.mkdir()
     ran = tmp_path / "ran"
     app = app_dir / "harmony_remote"
-    app.write_text(f"#!/bin/sh\necho started >> {ran}\n")
+    app.write_text(f'#!/bin/sh\necho started >> {ran}\necho "$@" > {tmp_path}/argv\n')
     app.chmod(0o755)
     script = app_dir / "start.sh"
     script.write_text(dr.start_script())
@@ -409,15 +463,17 @@ def boot(tmp_path):
         **os.environ,
         "APP_DIR": str(app_dir),
         "APP_LOG": str(tmp_path / "app.log"),
+        "START_TICK": "1",
     }
     env.pop("APP_BIN", None)
 
     class Boot:
         dir, runs, disable, count = app_dir, ran, app_dir / "DISABLE", app_dir / "bootcount"
+        argv, log, env_ = tmp_path / "argv", tmp_path / "app.log", env
 
         @staticmethod
         def start() -> None:
-            subprocess.run(["sh", str(script)], env=env, check=True, timeout=10)
+            subprocess.run([*_CUR["shell"], str(script)], env=env, check=True, timeout=10)
 
         @staticmethod
         def launches() -> int:
@@ -464,8 +520,8 @@ def test_hook_line_guards_on_executable_and_disable(boot):
     line = dr.hook_line(str(boot.dir))
 
     def fire() -> None:
-        subprocess.run(["sh", "-c", f"{line}\nwait"], check=True, timeout=10,
-                       env={**os.environ, "APP_DIR": str(boot.dir), "APP_LOG": str(boot.dir / "log")})  # fmt: skip
+        subprocess.run([*_CUR["shell"], "-c", f"{line}\nwait"], check=True, timeout=10,
+                       env={**os.environ, "APP_DIR": str(boot.dir), "APP_LOG": str(boot.dir / "log"), "START_TICK": "1"})  # fmt: skip
 
     boot.disable.write_text("")
     fire()
@@ -480,8 +536,265 @@ def test_hook_line_guards_on_executable_and_disable(boot):
 
 def test_hooked_rcs_local_is_valid_shell_and_exits_zero():
     hooked_text = dr.insert_hook(RCS)
-    p = subprocess.run(["sh", "-n", "-c", hooked_text], capture_output=True, check=False)
+    p = subprocess.run([*_CUR["shell"], "-n", "-c", hooked_text], capture_output=True, check=False)
     assert p.returncode == 0, p.stderr
+
+
+# --- review fixes: argv, backup hygiene, rcS vetting, hardened start.sh, selftest -----------
+
+
+def test_start_sh_runs_app_with_exact_slot_and_powermode(boot):
+    boot.start()
+    assert boot.argv.read_text().strip() == "--slot 1 --powermode 0x30"
+
+
+@pytest.mark.parametrize(("slot", "pm"), [(7, "0xAB"), (15, "0x00")])
+def test_start_script_argv_is_configurable(slot, pm):
+    text = dr.start_script(slot=slot, powermode=pm)
+    assert f'"$APP_BIN" --slot {slot} --powermode 0x{pm[2:].lower()} >>' in text
+
+
+@pytest.mark.parametrize("slot", ["0", "16", "x", "-1", "1 ; reboot", ""])
+def test_slot_validation(slot):
+    with pytest.raises(Exception, match="slot"):
+        dr.parse_slot(slot)
+    with pytest.raises(SystemExit):
+        dr.main(["install-hook", "--yes", "--slot", slot])
+
+
+@pytest.mark.parametrize("pm", ["30", "0x3", "0x300", "0xZZ", "0x30; reboot", ""])
+def test_powermode_validation(pm):
+    with pytest.raises(Exception, match="powermode"):
+        dr.parse_powermode(pm)
+
+
+def test_install_hook_builds_slot_powermode_into_start_sh_and_status_shows_them():
+    d, dev, lines = make()
+    d.install_hook(slot=5, powermode="0x2A")
+    assert dev.files[dr.START_SH] == dr.start_script(slot=5, powermode="0x2a").encode()
+    lines.clear()
+    d.status()
+    assert "start.sh app argv: --slot 5 --powermode 0x2a" in "\n".join(lines)
+
+
+def test_cli_install_hook_defaults_and_flags():
+    d, dev, _ = make()
+    assert dr.main(["install-hook", "--yes"], deployer=d) == 0
+    assert b"--slot 1 --powermode 0x30" in dev.files[dr.START_SH]
+    d2, dev2, _ = make()
+    assert (
+        dr.main(["install-hook", "--yes", "--slot", "9", "--powermode", "0x31"], deployer=d2) == 0
+    )
+    assert b"--slot 9 --powermode 0x31" in dev2.files[dr.START_SH]
+
+
+def test_start_sh_counter_classes_never_error_and_count_clean(boot):
+    for junk in ("", "08", "09", "banana", "1 2", "0003", "99999999999999999999", "-1", "4"):
+        boot.count.write_text(junk + "\n")
+        boot.disable.unlink(missing_ok=True)
+        boot.start()
+        assert boot.count.read_text().strip() == "1", junk
+        assert not boot.disable.exists(), junk
+
+
+def test_start_sh_unwritable_counter_does_not_launch(boot):
+    boot.count.mkdir()
+    before = boot.launches()
+    boot.start()  # exits 0 (check=True) without starting the app
+    assert boot.launches() == before == 0
+
+
+def test_start_sh_unwritable_log_still_launches(boot):
+    boot.env_["APP_LOG"] = str(boot.dir / "no" / "such" / "log")
+    boot.start()
+    assert boot.launches() == 1
+
+
+def test_start_sh_caps_the_log_in_place(boot):
+    app = boot.dir / "harmony_remote"
+    app.write_text(
+        "#!/bin/sh\ni=0\nwhile [ $i -lt 60 ]; do echo line$i; i=$((i+1)); done\nsleep 2\n"
+        f"echo AFTER >> {boot.log}\nsleep 1\n"
+    )
+    boot.env_["START_LOG_MAX_LINES"] = "10"
+    boot.start()
+    n = len(boot.log.read_text().splitlines())
+    assert 1 <= n < 60
+
+
+def test_start_sh_has_no_arithmetic_on_file_content_and_no_missing_applets():
+    text = dr.start_script()
+    assert "$((n + 1))" in text and 'case "$n" in 0 | 1 | 2 | 3)' in text
+    assert not re.search(r"\b(head|tail|wc|dd|sync|basename|find|df|tar)\b", text)
+
+
+def test_selftest_script_passes_on_the_host(tmp_path):
+    t = tmp_path / "st"
+    t.mkdir()
+    (t / "start.sh").write_text(dr.start_script())
+    (t / "rcS.local.hooked").write_text(dr.insert_hook(RCS))
+    (t / "hookline.sh").write_text(dr.hook_line(str(t / "app")) + "\n")
+    p = subprocess.run(
+        [*_CUR["shell"], str(dr.SELFTEST_SRC), str(t), "--slot 1 --powermode 0x30"],
+        capture_output=True, text=True, timeout=120, check=False,
+        env={**os.environ, "REAL_COUNT_FILE": str(tmp_path / "real-bootcount")},
+    )  # fmt: skip
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "FAIL" not in p.stdout and p.stdout.count("PASS") >= 18, p.stdout
+    assert not (tmp_path / "real-bootcount").exists()
+
+
+def test_selftest_script_catches_a_broken_start_sh(tmp_path):
+    t = tmp_path / "st"
+    t.mkdir()
+    (t / "start.sh").write_text(dr.start_script().replace("n=$((n + 1))", "n=$((n + 2))"))
+    (t / "rcS.local.hooked").write_text(dr.insert_hook(RCS))
+    (t / "hookline.sh").write_text(dr.hook_line(str(t / "app")) + "\n")
+    p = subprocess.run([*_CUR["shell"], str(dr.SELFTEST_SRC), str(t), "--slot 1 --powermode 0x30"],
+                       capture_output=True, text=True, timeout=120, check=False)  # fmt: skip
+    assert p.returncode != 0 and "FAIL" in p.stdout
+
+
+def test_selftest_cleans_up_and_touches_only_its_dir():
+    d, dev, lines = make()
+    assert d.selftest() == 0
+    assert dev.selftest_removed and not [p for p in dev.files if p.startswith(dr.SELFTEST_DIR)]
+    assert dev.files[dr.RCS_LOCAL] == RCS.encode()  # the real rcS.local is never written
+    assert dr.RCS_LOCAL not in dev.written and dr.RCS_TMP not in dev.written
+    for c in dev.log:
+        if c in (["uname", "-a"], ["cat", dr.RCS_LOCAL]):
+            continue
+        assert dr.SELFTEST_DIR in " ".join(c), c
+    hooked_copy = dev.written[f"{dr.SELFTEST_DIR}/rcS.local.hooked.new"].decode()
+    assert hooked_copy == dr.insert_hook(RCS) or dr.HOOK_MARKER in hooked_copy
+    assert any("1 failure" not in ln and "done: 0 failure" in ln for ln in lines)
+    assert any("removed" in ln for ln in lines)
+
+
+def test_selftest_failure_still_cleans_up_and_exits_nonzero():
+    dev = FakeRemote()
+    dev.selftest_rc = 1
+    d, dev, _ = make(dev)
+    assert d.selftest() == 1 and dev.selftest_removed
+
+
+def test_selftest_upload_failure_still_cleans_up():
+    d, dev, _ = make(FakeRemote(corrupt={f"{dr.SELFTEST_DIR}/start.sh.new"}))
+    with pytest.raises(dh.DeployError, match="MISMATCH"):
+        d.selftest()
+    assert dev.selftest_removed
+
+
+def test_selftest_real_hook_line_is_rooted_in_the_selftest_dir():
+    line = dr.hook_line(dr.SELFTEST_DIR + "/app")
+    assert "/data/app" not in line and line.count(dr.SELFTEST_DIR) == 3
+
+
+# backup hygiene
+
+
+def test_stale_backup_refuses_install_without_refresh():
+    d, dev, _ = make()
+    dev.files[dr.RCS_BACKUP] = b"#!/bin/sh\n/data/dropbearmulti dropbear\nexit 0\n"
+    with pytest.raises(dh.DeployError, match="differs.*--refresh-backup|--refresh-backup"):
+        d.install_hook()
+    assert dev.written == {} and dev.files[dr.RCS_LOCAL] == RCS.encode()
+
+
+def test_refresh_backup_replaces_stale_backup_then_installs():
+    d, dev, _ = make()
+    dev.files[dr.RCS_BACKUP] = b"stale\n"
+    d.install_hook(refresh_backup=True)
+    assert dev.files[dr.RCS_BACKUP] == RCS.encode() and dr.HOOK_MARKER in hooked(dev)
+
+
+def test_matching_backup_is_kept_untouched():
+    d, dev, lines = make()
+    dev.files[dr.RCS_BACKUP] = RCS.encode()
+    d.install_hook()
+    assert dr.RCS_BACKUP not in dev.written and dr.RCS_BACKUP + ".new" not in dev.written
+    assert any("already matches" in ln for ln in lines)
+
+
+def test_uninstall_refuses_backup_without_dropbear_or_exit():
+    for bad in ("#!/bin/sh\nexit 0\n", "#!/bin/sh\n/data/dropbearmulti dropbear\n", "",
+                dr.insert_hook(RCS)):  # fmt: skip
+        d, dev, _ = make()
+        d.install_hook()
+        dev.files[dr.RCS_BACKUP] = bad.encode()
+        before = dev.files[dr.RCS_LOCAL]
+        with pytest.raises(dh.DeployError, match="refusing to restore"):
+            d.uninstall()
+        assert dev.files[dr.RCS_LOCAL] == before
+
+
+# rcS.local vetting on the device
+
+
+def test_syntax_error_candidate_aborts_before_mv_original_untouched():
+    class BadSyntax(FakeRemote):
+        def run(self, argv):
+            if argv[:2] == ["sh", "-n"] and argv[2] == dr.RCS_TMP:
+                self.log.append(argv)
+                return 2, b"", b"syntax error: unexpected end of file"
+            return super().run(argv)
+
+    d, dev, _ = make(BadSyntax())
+    with pytest.raises(dh.DeployError, match=r"sh -n.*rejects"):
+        d.install_hook()
+    assert dev.files[dr.RCS_LOCAL] == RCS.encode() and dr.RCS_TMP not in dev.files
+    assert not [c for c in dev.log if c[0] == "mv" and c[2] == dr.RCS_LOCAL]
+
+
+def test_candidate_missing_dropbear_is_caught_by_shape_check():
+    assert dr.rcs_shape_problem("#!/bin/sh\nexit 0\n", False)
+    assert dr.rcs_shape_problem(RCS, True)  # hook expected, absent
+    assert dr.rcs_shape_problem(dr.insert_hook(RCS), True) is None
+    assert dr.rcs_shape_problem(dr.insert_hook(RCS), False)
+    twice = dr.insert_hook(RCS).replace("exit 0\n", dr.hook_line() + "\nexit 0\n")
+    assert dr.rcs_shape_problem(twice, True)
+    before = RCS.replace("/data/dropbearmulti dropbear -R -p 0.0.0.0:22\n", "")
+    assert dr.rcs_shape_problem(before.replace("exit 0", dr.hook_line() + "\nexit 0"), True)
+
+
+def test_post_mv_corruption_is_restored_from_the_previous_content():
+    d, dev, lines = make(FakeRemote(mangle_mv={dr.RCS_LOCAL: [b"#!/bin/sh\nif\n"]}))
+    with pytest.raises(dh.DeployError, match="previous content restored and verified"):
+        d.install_hook()
+    assert dev.files[dr.RCS_LOCAL] == RCS.encode()
+    assert any("POST-WRITE CHECK FAILED" in ln for ln in lines)
+    assert dev.log.count(["sh", "-n", dr.RCS_LOCAL]) == 1  # the restore (first swap failed on md5)
+
+
+def test_post_mv_md5_mismatch_is_restored():
+    d, dev, _ = make(FakeRemote(mangle_mv={dr.RCS_LOCAL: [RCS.encode() + b"#x\n"]}))
+    with pytest.raises(dh.DeployError, match="restored and verified"):
+        d.install_hook()
+    assert dev.files[dr.RCS_LOCAL] == RCS.encode()
+
+
+def test_failed_restore_is_loud():
+    d, _dev, _ = make(FakeRemote(mangle_mv={dr.RCS_LOCAL: [b"if\n", b"if\n"]}))
+    with pytest.raises(dh.DeployError, match="restore failed.*do NOT reboot"):
+        d.install_hook()
+
+
+def test_uninstall_post_mv_failure_restores_the_hooked_file():
+    d, dev, _ = make()
+    d.install_hook()
+    hooked_before = dev.files[dr.RCS_LOCAL]
+    dev.mangle_mv = {dr.RCS_LOCAL: [b"if\n"]}
+    with pytest.raises(dh.DeployError, match="restored and verified"):
+        d.uninstall()
+    assert dev.files[dr.RCS_LOCAL] == hooked_before
+
+
+def test_uninstall_verifies_with_sh_n_and_md5():
+    d, dev, _ = make()
+    d.install_hook()
+    dev.log.clear()
+    d.uninstall()
+    assert ["sh", "-n", dr.RCS_LOCAL] in dev.log and ["md5sum", dr.RCS_LOCAL] in dev.log
 
 
 # --- cli ------------------------------------------------------------------------------------
@@ -516,7 +829,9 @@ DENY = re.compile(
     r"/sys/power/state|\bdd\b|nandwrite|flash_erase|flashcp|ubiformat|nohup|setsid|\bsed -i"
 )
 READ_ONLY_SYSFS = (dr.POWERSOURCE, dr.SOC)
-ALLOWED_READS = (dr.RCS_LOCAL, dr.RCS_BACKUP, dr.BOOTCOUNT, *READ_ONLY_SYSFS)
+ALLOWED_READS = (
+    dr.RCS_LOCAL, dr.RCS_TMP, dr.RCS_BACKUP, dr.BOOTCOUNT, dr.START_SH, *READ_ONLY_SYSFS,
+)  # fmt: skip
 
 
 def violations(remote: str) -> list[str]:
@@ -538,7 +853,12 @@ def violations(remote: str) -> list[str]:
         return [] if dr.under_write_root(rest[1]) else bad
     if prog == "ls" and rest == ["-l", dr.APP_DIR]:
         return []
-    if a == ["mkdir", "-p", dr.APP_DIR] or a == ["rm", "-rf", dr.APP_DIR]:
+    if a in (["mkdir", "-p", dr.APP_DIR], ["rm", "-rf", dr.APP_DIR],
+             ["mkdir", "-p", dr.SELFTEST_DIR], ["rm", "-rf", dr.SELFTEST_DIR]):  # fmt: skip
+        return []
+    if prog == "sh" and len(rest) == 2 and rest[0] == "-n":
+        return [] if dr.under_write_root(rest[1]) or rest[1] == dr.RCS_LOCAL else bad
+    if prog == "sh" and rest[:1] == [f"{dr.SELFTEST_DIR}/remote_selftest.sh"]:
         return []
     if prog == "md5sum" and len(rest) == 1:
         return [] if dr.under_write_root(rest[0]) else bad
@@ -622,6 +942,10 @@ def test_every_emitted_command_is_brick_safe(art):
     go(h, lambda d: d.reboot())
     go(h, lambda d: d.uninstall())
     go(h, lambda d: d.uninstall(purge=True))
+    go(FakeRemote(), lambda d: d.selftest())
+    go(FakeRemote(corrupt={f"{dr.SELFTEST_DIR}/start.sh.new"}), lambda d: d.selftest())
+    go(FakeRemote(mangle_mv={dr.RCS_LOCAL: [b"if\n"]}), lambda d: d.install_hook())
+    go(FakeRemote(mangle_mv={dr.RCS_LOCAL: [b"if\n", b"if\n"]}), lambda d: d.install_hook())
     go(FakeRemote(rcs="#!/bin/sh\nexit 0\n"), lambda d: d.install_hook())
     go(FakeRemote(corrupt={dr.RCS_TMP}), lambda d: d.install_hook())
     go(FakeRemote(corrupt={f"{dr.APP_DIR}/harmony_remote.new"}), lambda d: d.push(art))
