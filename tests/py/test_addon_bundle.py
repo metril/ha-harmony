@@ -179,10 +179,12 @@ async def test_failed_attempts_are_rate_limited(aiohttp_client, tmp_path):
     c = await aiohttp_client(app2)
     codes = [(await c.get("/api/v1/bundle")).status for _ in range(BundleAuth.MAX_FAILS)]
     assert set(codes) == {401}
-    r = await c.get("/api/v1/bundle", headers=BEARER)  # even the right token waits now
+    r = await c.get("/api/v1/bundle")  # a wrong token is now throttled...
     assert r.status == 429 and r.headers.get("Retry-After") == "60"
-    t[0] += BundleAuth.WINDOW + 1
+    # ...but the right one never is (Core and every add-on share one source IP)
     assert (await c.get("/api/v1/bundle", headers=BEARER)).status == 404
+    t[0] += BundleAuth.WINDOW + 1
+    assert (await c.get("/api/v1/bundle")).status == 401
 
 
 # ---------------------------------------------------------------- token handling

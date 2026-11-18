@@ -122,7 +122,9 @@ class AddonClient:
             ) as resp:
                 if resp.status in (204, 304):
                     return None
-                if resp.status in (401, 403, 429):
+                if resp.status == 429:  # throttled by the add-on: back off, the token may be fine
+                    raise AddonUnreachable("the add-on is rate limiting requests")
+                if resp.status in (401, 403):
                     raise AddonAuthError("the add-on refused the token")
                 if resp.status == 404:
                     raise NothingApplied("no config has been applied in the add-on yet")

@@ -515,3 +515,18 @@ async def test_ignored_hub_entry_never_gets_the_token(hass, fake_addon):
     cfg = {"host": "127.0.0.1", "port": fake_addon.port, "token": ADDON_TOKEN}
     res = await hassio_flow(hass, **cfg)
     assert res["type"] is FlowResultType.ABORT and res["reason"] == "no_hub"
+
+
+async def test_429_is_backoff_not_an_auth_failure(hass, fake_hub, raw_addon, hass_storage):
+    hub = await fake_hub(hub_handler([]))
+    preseed(hass_storage)
+    raw_addon["status"] = 429
+    entry = await setup(hass, hub, raw_addon["data"])
+    coord = entry.runtime_data
+    with pytest.raises(AddonUnreachable):
+        await coord.async_refresh_from_addon()
+    assert coord.link_state == "unreachable"
+    raw_addon["status"] = 401
+    with pytest.raises(AddonAuthError):
+        await coord._link.fetch(HUB_ID)
+    await hass.config_entries.async_unload(entry.entry_id)

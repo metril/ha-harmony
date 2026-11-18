@@ -85,7 +85,8 @@ def load_or_create_token(data_dir: Path | str) -> str:
 
 class BundleAuth:
     """Bearer token + hassio-network peer, and never via ingress. One opaque 401 for every miss;
-    repeated misses from one peer are answered 429 for a while."""
+    repeated misses from one peer are answered 429 for a while. Only failures count: the token is
+    checked first, so a valid caller is never throttled."""
 
     MAX_FAILS = 10
     WINDOW = 60.0
@@ -124,15 +125,16 @@ class BundleAuth:
 
     def check(self, request: web.Request) -> None:
         ip = _peer_ip(request) or "?"
-        if self._limited(ip):
-            raise web.HTTPTooManyRequests(reason="rate limited", headers={"Retry-After": "60"})
         scheme, _, given = request.headers.get("Authorization", "").partition(" ")
         ok = scheme == "Bearer" and hmac.compare_digest(
             hashlib.sha256(given.encode()).digest(), self._digest
         )
-        if not (ok and self._in_network(ip) and INGRESS_HEADER not in request.headers):
-            self._fails.setdefault(ip, deque()).append(self._clock())
-            raise web.HTTPUnauthorized(reason="unauthorized")
+        if ok and self._in_network(ip) and INGRESS_HEADER not in request.headers:
+            return  # a valid token is never throttled (Core and add-ons share one source IP)
+        if self._limited(ip):
+            raise web.HTTPTooManyRequests(reason="rate limited", headers={"Retry-After": "60"})
+        self._fails.setdefault(ip, deque()).append(self._clock())
+        raise web.HTTPUnauthorized(reason="unauthorized")
 
 
 class RouteAuth:
