@@ -7,7 +7,8 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
 
 1. Build and push (atomic; the old binary survives any failure):
    `tools/deploy_hub.py push --yes --hub <build>/hub --busybox <static-mips-busybox>`
-   then `tools/deploy_hub.py prune --yes` to drop `remote_sim` and `rf_probe` if space is tight.
+   `push` stages the BusyBox in /tmp and runs its own /data space check (refuses below a 512 KB margin), so `prune` is only needed
+   when that check refuses: `tools/deploy_hub.py prune --yes` drops `remote_sim` and `rf_probe`.
 2. Token in a file (mode 600) or `HAH_TOKEN`; never on argv.
 3. `md5sum <build>/hub`, then:
    `tools/install_boot_hook.py install --yes --token-file F --rf-slot 2 --expect-md5 <md5>`
@@ -17,7 +18,11 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
    `--no-reboot-on-early-death` writes 0). `install` clears the strike counter before arming. If the rcS.local
    replace is not a provable atomic rename it only warns (rcS sources rcS.local under `[ -x ]`, so a missing file
    is a stock boot with SSH up).
-4. Marker `/etc/ha-harmony-enable` is created last. Reboot to take effect.
+4. Marker `/etc/ha-harmony-enable` is created last. Reboot to take effect: `ssh harmony-hub reboot` (the hub has no `sync`;
+   the ssh call can hang until the link drops, so run it with `timeout`, backgrounded). Wait with a bounded poll
+   (`ssh -o ConnectTimeout=3` every 5 s, give up after about 180 s); never an unbounded loop. Bench: SSH is up about 25-35 s
+   after the reboot command, the daemon listens about 45 s in, the health mark lands at about 150 s uptime.
+   The daemon is started with `--token-file hub.conf`, so the token is not on its argv. The `rf_spi: link up` line may appear late.
 
 ## Status / disarm
 
@@ -63,9 +68,9 @@ it retries and logs; whether that is benign long-term was not determined, hence 
 No `device_backup.py` / flash imaging while armed: the daemon holds the shared SPI bus. Disarm, reboot to
 stock, confirm `hal` is back, then image.
 
-## On-hub dry run (not yet run)
+## On-hub dry run (run 2026-11-18: 15/15 pass)
 
 `tools/install_boot_hook.py selftest --yes` copies the hook and `tools/boot/hook_selftest.sh` into
 `/tmp/hah-selftest` (tmpfs) and runs the key cases under the hub's own BusyBox 1.13 `sh` with `killall` and
 `reboot` defined as shell functions. It writes only under `/tmp/hah-selftest` and removes it afterwards.
-Run it before the first real arm.
+Run it before the first real arm. (BusyBox 1.13 `ls -ln` has extra columns, so the hook caps its log by line count.)

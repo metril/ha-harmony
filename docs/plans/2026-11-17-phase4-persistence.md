@@ -312,3 +312,47 @@ The UART adapter, deferred through Phases 1–3 as "not a prerequisite", **becom
   exact feed protocol (not disassembled) and whether the kernel driver can arm itself. Conclusion: a reboot loop
   after the health mark is only possible if `/etc/nowatchdog` is removed. Guard implemented: the hook leaves stock
   alone (no strike) and the installer refuses unless `/etc/nowatchdog` exists.
+
+## Bench: hardware gate G1–G5 (2026-11-18, 03:03–05:10 UTC)
+
+Hub 192.0.2.11, remote app (slot 1) started by hand once and never restarted. About 12 hub reboots in total. All of G1–G5 passed.
+
+**Selftest (on the hub's own sh):** first run 11/12 at 02:58 (`ls -ln` on BusyBox 1.13 has two extra columns, so the size-based
+log cap read 0) -> cap changed to a line count; then 13/13 (03:03), then 15/15 (03:18, adds "token absent from daemon argv" and the 257-char token).
+**Deploy:** `push` ran its own space check and passed, so `prune` was not run. /data (the 5 MB "/" overlay) 3064 KB free after
+the first push, 2620 KB after the second (the running old inode is still held). /cache 4860 KB free. Builds: 2a76a395... (850708 B, token on
+argv) for boot 1, then 4dc6b91c... (874980 B, `--token-file`) from B2 on; device md5 equals local both times. Moved to `--token-file`
+after boot 1 at the user's request: `ps`, `/proc/pid/cmdline` and both logs contain no token (checked locally against the token file).
+Daemon argv now `--token-file /data/ha-harmony/hub.conf --port 8099 --rf-spi --rf-slot 2`.
+
+**G1 (3 armed boots):** boot 1 (old build) SSH up 24 s uptime at first contact; hook log `boot strike 1 of 3 ... launch in 20s`,
+`stopped lua/luaworks/luadraws`, `daemon started pid 176`, `healthy after 120s - strikes cleared` (seen by uptime 166 s); /dev/rfspi held, RSS 968 kB,
+no hal/lua, HA connected on :8099. Boot 2: same on the new build, RSS 976 kB. Boot 3: SSH up 32 s after the reboot command, daemon
+listening +43 s, healthy at 155 s, RSS 976 kB. User confirmed key -> TV IR after boots 1 and 3, and again before G3.
+**G2 (stub `hub` = `exit 1`):** manual reboot 03:37:33 -> boot A `boot strike 1`, SSH +33 s; self-reboot -> boot B `boot strike 2`;
+logged `died within 120s - strike 2 stands`, `rebooting (reboot_on_early_death)`, `watcher done`, then boot C
+`DISABLED after 3 unclean boots - removed /etc/ha-harmony-enable, booting stock`. Stock up (hal at uptime 37 s) within 2 min 14 s of the first reboot;
+hal holds /dev/rfspi and /dev/i2s, marker absent, SSH answered on every boot. HA stock `remote.harmony` "off" (up), ha_harmony entities unavailable.
+Restored: binary renamed back (md5 4dc6b91c...), `install` re-run, healthy at 157 s.
+**G4:** `disarm` + reboot: stock in 33 s to SSH, hal+lua up, no hub, hook log not rewritten (hook not sourced). `install` + reboot: healthy armed boot.
+**G3a (one pull, ~10 s off):** SSH 32 s, `boot strike 1 of 3`, healthy at 163 s, counter gone, HA reconnected, hub md5 4dc6b91c..., conf
+validates, rcS.local block + `sh -n` ok, cache.json 35018 B and state.json 68 B present, dmesg has 0 jffs2 lines.
+**G3b (pull again ~10 s into the next boot):** armed boot came up, SSH 24 s, `boot strike 2 of 3` (the interrupted boot persisted exactly one strike),
+`healthy after 120s - strikes cleared` at 157 s, counter gone. Same integrity checks pass; no `*.hah-tmp`, `hub.new` or zero-length files in
+/data/ha-harmony, /etc/init.d, /cache; no jffs2/oops/panic in dmesg.
+**G5 (1 h idle armed, sample / 10 min):** pid 183 throughout, 9 fds, VmRSS 972 kB in all 7 samples, MemFree 39084 / 39124 / 39100 / 39100 / 39088 /
+39076 / 39052 kB, SUnreclaim 3396 / 3372 / 3376 / 3376 / 3384 / 3380 / 3388 kB, uptime 166 -> 3789 s (no reboot), daemon log 4-5 lines,
+hook log 4 lines, 0 oops/jffs2. Log cap never fired.
+**Remote app (pid 2687):** survived every hub reboot and pull without a restart; 0 "Hub unreachable"; its own link lost/up counts went 6/6 -> 10/10.
+
+### Open items
+1. Hub daemon's `rf_spi: link up (slot 2...)` line is late or missing (seen at 155-260 s uptime on some boots, absent on others) while the remote
+   receives frames: logging bug or genuinely late link status. Needs timestamps in the daemon log.
+2. `usb 1-1 ... error -71` flood in hub dmesg (khubd in D state) and host-side enumeration failures on usb 1-10 (bursts that pre-date arming).
+   No stock-boot dmesg to compare. Test with the cable unplugged and on a stock boot.
+3. Time to SSH not measured on boots 1-2 (the wait script hung on `ssh reboot`).
+4. /dev/i2s is opened on first use (not held at idle), so the "holds /dev/i2s" check does not apply while idle.
+5. `remote_sim` and `rf_probe` are still on /data (prune not run; 2620 KB free).
+6. Hook and daemon still differ on CR in conf values (hook stricter: safe direction).
+7. Factory-reset/Pair button is probably unavailable while armed (unverified).
+8. T7 remote boot hook not yet installed.
