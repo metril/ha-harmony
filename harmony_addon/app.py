@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import aiohttp
 import voluptuous as vol
 import yaml
 from aiohttp import web
@@ -35,8 +36,9 @@ from harmony_core.config_model import (
     validate_all,
 )
 from harmony_core.page_codec import decode_page
+from harmony_irdb.archive import IrdbArchive
 
-from . import __version__, schemas
+from . import __version__, ir_routes, schemas
 from .auth import (
     BUNDLE_PREFIX,
     HASSIO_NETWORK,
@@ -50,7 +52,7 @@ from .ha_client import Catalog, HaApi, HaUnavailable
 from .options import Options, load_options
 from .store import HISTORY_MAX, RevConflict, Store, StoreError
 from .supervisor import Discovery
-from .web_util import error, jresp, query, read_body
+from .web_util import CLOCK_KEY, error, jresp, query, read_body
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +68,6 @@ CSRF_HEADER = "X-HH-CSRF"
 
 OPTIONS_KEY = web.AppKey("options", Options)
 STORE_KEY = web.AppKey("store", Store)
-CLOCK_KEY = web.AppKey("clock", Callable)
 NOTIFIER_KEY = web.AppKey("notifier", object)
 WAIT_KEY = web.AppKey("wait_s", float)
 CATALOG_KEY = web.AppKey("catalog", Catalog)
@@ -583,6 +584,8 @@ def create_app(
     discovery: Discovery | None = None,
     wait_seconds: float = WAIT_SECONDS,
     ha_api: HaApi | None = None,
+    irdb: IrdbArchive | None = None,
+    irdb_dir: Path | str | None = None,
 ) -> web.Application:
     """`auth` guards the ingress routes; the bundle routes always need `bundle_token` (default:
     the 0600 token file under data_dir) from a peer in `bundle_networks` (None: any, for tests)."""
@@ -604,6 +607,17 @@ def create_app(
     app[WAIT_KEY] = wait_seconds
     app[CATALOG_KEY] = Catalog(ha_api, clock)
     app[SEEN_KEY] = {}
+    if irdb is not None:
+        app[ir_routes.IRDB_KEY] = irdb
+    else:  # one archive for the process: its own aiohttp session, cache under /data/irdb
+
+        async def _irdb_ctx(app: web.Application):
+            session = aiohttp.ClientSession(raise_for_status=False)
+            app[ir_routes.IRDB_KEY] = IrdbArchive(session, irdb_dir or data_dir / "irdb")
+            yield
+            await session.close()
+
+        app.cleanup_ctx.append(_irdb_ctx)
     app[ACKS_KEY] = {}
 
     async def _wake_waiters(_: web.Application) -> None:
@@ -633,6 +647,7 @@ def create_app(
     app.router.add_get(f"{api}/config/export_yaml", export_yaml)
     app.router.add_get(f"{api}/ha/entities", ha_entities)
     app.router.add_get(f"{api}/ha/services", ha_services)
+    ir_routes.add_routes(app, api)
     app.router.add_get(f"{api}/hubs", list_hubs)
     app.router.add_get(f"{api}/config/status", config_status)
     app.router.add_post(f"{api}/bundle/ack", post_ack)

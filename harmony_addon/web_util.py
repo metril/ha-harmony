@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 import voluptuous as vol
 from aiohttp import web
+
+CLOCK_KEY = web.AppKey("clock", Callable)
 
 
 def jresp(data: Any, status: int = 200) -> web.Response:
