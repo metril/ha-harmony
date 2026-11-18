@@ -209,7 +209,7 @@ async def test_screenshots(browser, site):
     await page.get_by_text("Device").first.wait_for()
     await shots(page, "history")
     await page.goto(f"{site}{PREFIX}/#/devices/tv")
-    await page.get_by_text("Send IR").first.wait_for()
+    await page.locator("hh-send-ir").first.wait_for()
     await shots(page, "devices")
 
 
@@ -431,6 +431,54 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
     assert [p for p in problems if "Failed to load resource" not in p] == []
 
 
+async def test_draft_survives_a_page_reload(browser, site):
+    from harmony_core.config_model import load_source
+
+    status, _ = await api(
+        site, "PUT", "/api/v1/config/draft", json={"config": load_source(YAML)}, headers=H
+    )
+    assert status == 200
+    page = await open_editor(browser, site)
+    await page.goto(f"{site}{PREFIX}/#/devices/tv")
+    name = page.get_by_label("Device name")
+    await name.fill("Den TV")
+    await name.dispatch_event("change")
+    await page.wait_for_function(
+        "() => document.querySelector('hh-app').store.saveState === 'saved'", timeout=8000
+    )
+    await page.reload()
+    await page.get_by_label("Device name").wait_for()
+    assert await page.get_by_label("Device name").input_value() == "Den TV"
+    assert await page.evaluate("() => document.querySelector('hh-app').store.hasDraft") is True
+    _, got = await api(site, "GET", "/api/v1/config")
+    assert got["draft"]["config"]["devices"][0]["name"] == "Den TV"
+
+
+async def test_wizard_likely_model_goes_candidates_to_model_files(
+    browser, site_ir
+):
+    page = await open_editor(browser, site_ir)
+    seen: list[str] = []
+    page.on("request", lambda r: seen.append(r.url.split("/api/v1/")[-1]))
+    await page.goto(f"{site_ir}{PREFIX}/#/devices/new")
+    await page.get_by_role("button", name="IR archive").click()
+    await page.locator(".brand", has_text="Sony").first.click()
+    await page.get_by_role("button", name="TV", exact=False).first.click()
+    await page.get_by_text("Code 1 of 2").wait_for()
+    await page.get_by_role("button", name="No, next code").click()
+    await page.get_by_role("button", name="Yes").click()
+    await page.get_by_text("Likely matches").wait_for()
+    cand = next(u for u in seen if u.startswith("ir/candidates"))
+    assert "brand=" in cand and "type=" in cand
+    # the candidate answer carried model_files: choosing a likely model asks for that file directly
+    await page.locator(".model", has_text="KDL-46V2501").first.click()
+    await page.get_by_text("Review Sony KDL-46V2501").wait_for()
+    dev = [u for u in seen if u.startswith("ir/device")]
+    assert len(dev) == 1 and "model=" in dev[0], (dev, seen)
+    assert dev[0].endswith("model=KDL-46V2501.json"), dev  # the archive file from model_files
+    assert seen.index(cand) < seen.index(dev[0])
+
+
 HA_STATES = [
     {"entity_id": "light.kitchen", "state": "on", "attributes": {"friendly_name": "Kitchen"}},
     {"entity_id": "light.attic", "state": "off", "attributes": {"friendly_name": "Attic lamp"}},
@@ -494,7 +542,7 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
     await insp.get_by_placeholder("Search entities").fill("light.kitchen")
     await insp.get_by_role("button", name="Set action").click()
     await page.get_by_role("button", name="X-ray").click()
-    await page.locator("hh-remote text.xl", has_text="light.toggle").wait_for()
+    await page.locator("hh-remote text.xl", has_text="Kitchen · toggle").wait_for()
     await page.get_by_role("button", name="X-ray").click()
 
     # drag a light from the palette's Home tab onto the screen: a tile with the automatic tap

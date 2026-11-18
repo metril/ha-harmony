@@ -38,6 +38,7 @@ export class HhPalette extends LitElement {
       .chip2 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chip2.used { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
       .chip2[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
+      .hab { flex: none; font-style: normal; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; border: 1px solid var(--line); color: var(--tx2); background: var(--sf); }
       .chip2 .sic { width: 15px; height: 15px; flex: none; }
       .ent { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 4px 8px; border-radius: var(--r1); border: 1px solid transparent; background: transparent; color: var(--tx); text-align: left; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
       /* a few hundred Home Assistant entities: rows outside the viewport are not laid out or painted */
@@ -137,11 +138,11 @@ export class HhPalette extends LitElement {
         const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
           ? html`<h2>${pretty(grp)}</h2><div class="chips" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
-              ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), stockIconSvg(commandIconId(c.name, c.group))))}
+              ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(commandIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
             </div>`
           : nothing;
       });
-      return html`<details open><summary>${stockIconSvg(1)}<span>${d.name ?? d.id}</span><small>${Object.keys(d.commands ?? {}).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
+      return html`<details open><summary>${stockIconSvg(1)}<span>${d.name ?? d.id}</span>${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant device">HA</i>` : nothing}<small>${Object.keys(d.commands ?? {}).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
     });
   }
   private activities() {

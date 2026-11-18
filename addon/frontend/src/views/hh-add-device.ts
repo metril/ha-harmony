@@ -5,10 +5,10 @@ import { StoreElement } from '../components/base';
 import type { HhSendIr } from '../components/hh-send-ir';
 import { ApiError, type IrBrand, type IrDeviceResult, type IrModels, type IrParsed } from '../lib/api';
 import { KIND_LABEL, KIND_TYPE, OTHER_TYPES, art, commandIconId, type Kind } from '../lib/device-art';
-import { deviceIdFor, nameProblem } from '../lib/device-edit';
+import { capProblem, deviceIdFor, nameProblem } from '../lib/device-edit';
 import { proposeFromEntity, PROPOSAL_DOMAINS } from '../lib/ha-propose';
 import { stockIconSvg } from '../lib/icon-shapes';
-import { LIMITS, type Device, type IrAction } from '../lib/model';
+import type { Device, IrAction } from '../lib/model';
 import { hashFor } from '../lib/router';
 import { summarize, trimBytes } from '../lib/codes';
 import { shared } from '../lib/styles';
@@ -269,11 +269,17 @@ export class HhAddDevice extends StoreElement {
     }
     return out;
   }
+  /** Why the device cannot be added (hub limits), or null. */
+  private capReason(ha: boolean, inputs?: Record<string, IrAction>): string | null {
+    const cfg = this.store.config;
+    return capProblem(cfg, 'device') ?? (ha ? null : (capProblem(cfg, 'command', this.w.selected.length) ?? capProblem(cfg, 'input', Object.keys(inputs ?? {}).length)));
+  }
   private add() {
     const d = this.w.result?.device;
     if (!d) return;
-    if ((this.store.config.devices ?? []).length >= LIMITS.devices) {
-      this.store.toast(`The hub holds at most ${LIMITS.devices} devices.`, 'error');
+    const dev0 = this.capReason(d.kind === 'ha', d.inputs);
+    if (dev0) {
+      this.store.toast(dev0, 'error');
       return;
     }
     const commands: Record<string, IrAction> = {};
@@ -407,7 +413,8 @@ export class HhAddDevice extends StoreElement {
           <span class="muted">${w.selected.length} of ${cmds.length} commands${ha ? '' : ' · settle ' + (d.settle_ms ?? 0) + ' ms'}</span>
           ${this.notes.length || (ha && (r.notes?.length ?? 0)) ? html`<ul class="plain">${(ha ? r.notes : this.notes).map((n) => html`<li>${n}</li>`)}</ul>` : nothing}
           ${r.skipped.length ? html`<div><b>Left out (${r.skipped_total || r.skipped.length})</b><ul class="plain">${r.skipped.slice(0, 8).map((s) => html`<li>${s.name}: ${s.reason}</li>`)}</ul></div>` : nothing}
-          <button class="btn pri" ?disabled=${bad || !this.devName.trim()} @click=${() => this.add()}>Add device</button>
+          <button class="btn pri" ?disabled=${bad || !this.devName.trim() || !!this.capReason(ha, d.inputs)} @click=${() => this.add()}>Add device</button>
+          ${this.capReason(ha, d.inputs) ? html`<span class="why" role="alert">${this.capReason(ha, d.inputs)}</span>` : nothing}
           <span class="why">Adds to the draft only. Review and apply it from the bar at the top.</span>
         </aside>
       </div>`;

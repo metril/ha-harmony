@@ -5,7 +5,7 @@ import type { Assigner, Spot } from '../lib/assigner';
 import { cellAt, pageGroup, widgetRect } from '../lib/page-renderer';
 import { BODY, GLASS, KEYS, SCREEN, VIEW, keyPath, keyTitle, type KeyGeom } from '../lib/remote-layout';
 import type { StudioHost } from '../lib/studio-state';
-import { DEFAULT_LAYER, activityIndex, boxOf, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
+import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
 import type { Page } from '../lib/model';
 
@@ -299,7 +299,7 @@ export class HhRemote extends LitElement {
   }
   private keyLabel(g: KeyGeom, row: KeymapRow | undefined): string {
     const layer = this.st.layerName(this.st.layer);
-    const what = !row || row.source === 'none' ? 'does nothing' : row.action?.kind === 'none' ? 'switched off' : row.action?.label;
+    const what = !row || row.source === 'none' ? 'does nothing' : row.action?.kind === 'none' ? 'switched off' : row.action ? this.st.actionLabel(row.action) : undefined;
     const how = !row ? '' : this.st.layer === DEFAULT_LAYER ? (row.source === 'none' ? '' : ', assigned') : row.source === 'activity' ? ', override' : row.source === 'default' ? ', from Default' : '';
     return `${keyTitle(g.name)}, ${layer} layer: ${what}${how}`;
   }
@@ -400,12 +400,12 @@ export class HhRemote extends LitElement {
   }
 
   private xray(rows: KeymapRow[]): TemplateResult {
-    const labels = xrayLabels(rows.map((r) => ({ key: r.key, text: r.action && r.action.kind !== 'none' ? String(r.action.label) : r.action ? 'Does nothing' : '' })));
+    const labels = xrayLabels(rows.map((r) => ({ key: r.key, text: r.action && r.action.kind !== 'none' ? this.st.actionLabel(r.action) : r.action ? 'Does nothing' : '' })));
     const inherit = new Map(rows.map((r) => [r.key, r.source === 'default' && this.st.layer !== DEFAULT_LAYER]));
     return svg`<g aria-hidden="true">${labels.map((l) => {
       const left = l.side === 'left';
       return svg`<line class="xline" x1=${l.x1} y1=${l.y1} x2=${left ? l.x + 6 : l.x - 6} y2=${l.y}></line>
-        <text class=${inherit.get(l.key) ? 'xl inh' : 'xl'} x=${l.x} y=${l.y + 6} text-anchor=${left ? 'end' : 'start'}>${l.text}</text>`;
+        <text class=${inherit.get(l.key) ? 'xl inh' : 'xl'} x=${l.x} y=${l.y + 6} text-anchor=${left ? 'end' : 'start'}>${clip(l.text) === l.text ? nothing : svg`<title>${l.text}</title>`}${clip(l.text)}</text>`;
     })}</g>`;
   }
 

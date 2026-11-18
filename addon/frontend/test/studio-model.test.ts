@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Assigner, moveCursor, type Spot } from '../src/lib/assigner';
-import type { Config, Page } from '../src/lib/model';
+import type { Config, Device, Page } from '../src/lib/model';
 import {
   assign, deviceChips, duplicatePage, errorTarget, firstFree, fits, groupCommand, isRefusal, labelRoom, movePage, moveBox, pageBytes, pageIndexForLayer,
   placeWidget, resizeBox, setKey, templatePage, trimToBytes, defaultService, type Source, type Target,
@@ -29,7 +29,13 @@ describe('command grouping heuristic', () => {
     ['up', 'navigation'], ['ok', 'navigation'], ['menu', 'navigation'], ['channel_up', 'navigation'], ['prev_channel', 'navigation'],
     ['play', 'transport'], ['pause', 'transport'], ['fast_forward', 'transport'], ['skip_next', 'transport'], ['rew', 'transport'],
     ['5', 'numbers'], ['num_7', 'numbers'], ['digit0', 'numbers'], ['input_hdmi1', 'inputs'], ['hdmi2', 'inputs'], ['source', 'inputs'], ['subtitle', 'other'], ['aspect', 'other'],
+    ['source_toggle', 'other'], ['input_toggle', 'other'], ['toggle_source', 'other'], ['input_next', 'other'], ['source_cycle', 'other'], ['power_toggle', 'power'], ['vol_up', 'volume'], ['volume_mute', 'volume'], ['mute', 'volume'], ['ch_up', 'navigation'], ['ch_down', 'navigation'], ['prev_channel', 'navigation'],
   ])('%s -> %s', (name, group) => expect(groupCommand(name)).toBe(group));
+  it('only declared inputs land under Inputs', () => {
+    const g = deviceChips({ id: 'x', commands: { source_toggle: { proto: 'nec', addr: 1, cmd: 1 }, subtitle: { proto: 'nec', addr: 1, cmd: 2 } }, inputs: { tv: { proto: 'nec', addr: 1, cmd: 3 } } } as Device);
+    expect(g.other.map((c) => c.name)).toEqual(['source_toggle', 'subtitle']);
+    expect(g.inputs.map((c) => c.name)).toEqual(['tv']);
+  });
   it('builds grouped chips with built-in power and inputs', () => {
     const g = deviceChips(cfg().devices![0]!);
     expect(g.power.map((c) => c.name)).toEqual(['power_on', 'power_off']);

@@ -128,13 +128,22 @@ export class StudioState extends EventTarget {
     for (const act of km.activities) patch(act.keys, (cfg.activities ?? []).find((x) => x.id === act.id)?.keys, 'activity');
     return changed;
   }
+  /** friendly names of the Home Assistant entities read so far */
+  entityNames(): Map<string, string> {
+    return new Map((this.entities ?? []).filter((e) => e.name).map((e) => [e.entity_id, String(e.name)]));
+  }
+  /** Readable label of a key map action: "Lamp · toggle", "Shield · DPAD_UP". */
+  actionLabel(a: NonNullable<KeymapRow['action']>): string {
+    return keyActionLabel(a, this.store.config, this.entityNames());
+  }
   async loadKeymap(): Promise<void> {
     const seq = ++this.kmSeq;
     try {
       const km = await this.store.api.keymap(this.store.hub, structuredClone(this.store.config));
       if (seq !== this.kmSeq) return;
-      const fix = (rows: typeof km.default) => rows.map((r) => (r.action ? { ...r, action: { ...r.action, label: keyActionLabel(r.action) } } : r));
-      this.keymap = { ...km, default: fix(km.default), activities: km.activities.map((a) => ({ ...a, keys: fix(a.keys) })) };
+      this.keymap = km;
+      // friendly names for the labels of Home Assistant actions
+      if (!this.haLoaded && [...km.default, ...km.activities.flatMap((a) => a.keys)].some((r) => r.action?.kind === 'ha' && 'service' in r.action)) void this.loadHa();
       this.keymapError = null;
     } catch (e) {
       if (seq !== this.kmSeq) return;

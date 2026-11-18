@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { IrCandidate, IrDeviceResult } from '../src/lib/api';
 import { addActivity, addActivityDevice, addControlPage, addStartButton, addStep, applyHandler, chainOrder, deleteActivity, handlerOf, matchZone, moveChain, moveStep, normName, removeStep, timeline } from '../src/lib/activity-edit';
 import { deviceIdFor, duplicateCommand, nameProblem, powerStatus, setPowerMode, sourceLabel, withPorts, withRepeats } from '../src/lib/device-edit';
-import { keyActionLabel } from '../src/lib/studio-model';
+import { clip, describeAction, haLabel, isHaAction, keyActionLabel } from '../src/lib/studio-model';
+import { boundEditor, editorBytes } from '../src/lib/activity-edit';
+import { capProblem } from '../src/lib/device-edit';
+import { byDomain } from '../src/lib/permissions';
 import { proposeFromEntity } from '../src/lib/ha-propose';
 import type { Config } from '../src/lib/model';
 import { permissions, tileDefaultTap } from '../src/lib/permissions';
@@ -120,7 +123,7 @@ describe('activity timeline', () => {
   it('accepts Home Assistant steps', () => {
     const ha = { ha: { service: 'light.turn_off', target: { entity_id: 'light.lamp' } } };
     const c = addStep(full(), 'watch_tv', 'start', ha) as Config;
-    expect(timeline(c, 'watch_tv', 'start').items.at(-1)).toMatchObject({ kind: 'user', label: 'HA light.turn_off light.lamp' });
+    expect(timeline(c, 'watch_tv', 'start').items.at(-1)).toMatchObject({ kind: 'user', label: 'light.lamp \u00B7 turn_off' });
   });
   it('chain order is visual only and survives device removal', () => {
     const c = moveChain(full(), 'watch_tv', 0, 1);
@@ -317,9 +320,81 @@ describe('add-device wizard state machine', () => {
 });
 
 describe('key map labels', () => {
-  it('tells a Home Assistant service action from the older event action (both kind "ha")', () => {
-    expect(keyActionLabel({ kind: 'ha', service: 'light.toggle', entity: 'light.k', label: 'light.toggle light.k' })).toBe('HA light.toggle light.k');
-    expect(keyActionLabel({ kind: 'ha', event: 'tv', label: 'HA event tv' })).toBe('HA event tv');
-    expect(keyActionLabel({ kind: 'device', label: 'avr: mute' })).toBe('avr: mute');
+  const names = new Map([['light.lamp', 'Lamp']]);
+  const ha = tvConfig();
+  ha.devices?.push({ id: 'shield', name: 'Shield', kind: 'ha', entity: 'media_player.shield', commands: { DPAD_UP: { ha: { service: 'remote.send_command', target: { entity_id: 'remote.shield' } } } } });
+  it('Home Assistant actions read "<friendly name> · <service>", with a repeat marker', () => {
+    expect(keyActionLabel({ kind: 'ha', service: 'light.toggle', entity: 'light.lamp', label: 'light.toggle light.lamp' }, ha, names)).toBe('Lamp \u00B7 toggle');
+    expect(keyActionLabel({ kind: 'ha', service: 'light.toggle', entity: 'light.k', label: 'light.toggle light.k (repeats)' }, ha, names)).toBe('light.k \u00B7 toggle \u21BB');
+    expect(keyActionLabel({ kind: 'ha', service: 'scene.turn_on', entity: 'scene.a +1', label: 'x' }, ha, names)).toBe('scene.a +1 \u00B7 turn_on');
+    expect(keyActionLabel({ kind: 'device', device: 'shield', command: 'DPAD_UP', label: 'shield: DPAD_UP' }, ha)).toBe('Shield \u00B7 DPAD_UP');
+  });
+  it('leaves events, IR devices and the rest alone', () => {
+    expect(keyActionLabel({ kind: 'ha', event: 'tv', label: 'HA event tv' }, ha)).toBe('HA event tv');
+    expect(keyActionLabel({ kind: 'device', device: 'tv', command: 'mute', label: 'tv: mute' }, ha)).toBe('tv: mute');
+  });
+  it('describeAction (key popover) uses the same form; long labels clip with an ellipsis', () => {
+    expect(describeAction(ha, { ha: { service: 'light.toggle', target: { entity_id: 'light.lamp' }, repeat: true } }, names)).toBe('Lamp \u00B7 toggle \u21BB');
+    expect(describeAction(ha, { device: 'shield', command: 'DPAD_UP' })).toBe('Shield \u00B7 DPAD_UP');
+    expect(haLabel('light.x', 0, 'light.toggle', false)).toBe('light.x \u00B7 toggle');
+    const long = 'Living room ceiling spotlights \u00B7 turn_on';
+    expect(clip(long)).toHaveLength(26);
+    expect(clip(long).endsWith('\u2026')).toBe(true);
+    expect(clip('Lamp \u00B7 toggle')).toBe('Lamp \u00B7 toggle');
+  });
+  it('knows which actions run through Home Assistant (no IR test-fire)', () => {
+    expect(isHaAction(ha, { ha: { service: 'light.toggle', target: { entity_id: 'light.lamp' } } })).toBe(true);
+    expect(isHaAction(ha, { device: 'shield', command: 'DPAD_UP' })).toBe(true);
+    expect(isHaAction(ha, { device: 'tv', command: 'power_on' })).toBe(false);
+    expect(isHaAction(ha, null)).toBe(false);
+  });
+});
+
+describe('permissions grouped by domain', () => {
+  it('lists the services used per entity, domains in order', () => {
+    const c: Config = { devices: [], keys: {}, pages: [] };
+    for (let i = 0; i < 20; i++) c.keys![`k${i}`] = { ha: { service: i % 2 ? 'light.toggle' : 'switch.turn_on', target: { entity_id: `${i % 2 ? 'light' : 'switch'}.e${i}` } } };
+    c.keys!['x'] = { ha: { service: 'light.turn_off', target: { entity_id: 'light.e1' } } };
+    const g = byDomain(permissions(c));
+    expect(g.map((x) => [x.domain, x.entities.length])).toEqual([['light', 10], ['switch', 10]]);
+    expect(g[0]!.entities.find((e) => e.id === 'light.e1')!.services).toEqual(['light.toggle', 'light.turn_off']);
+  });
+});
+
+describe('hub limits are refused before apply', () => {
+  const many = (n: number, kind: 'commands' | 'inputs'): Config => ({ devices: [{ id: 'd', [kind]: Object.fromEntries(Array.from({ length: n }, (_, i) => [`c${i}`, { proto: 'nec', addr: 1, cmd: i % 256 }])) }] });
+  it('commands past 256, inputs past 64, devices past 16', () => {
+    expect(capProblem(many(255, 'commands'), 'command')).toBeNull();
+    expect(capProblem(many(256, 'commands'), 'command')).toContain('at most 256 commands');
+    expect(capProblem(many(250, 'commands'), 'command', 7)).toContain('256');
+    expect(capProblem(many(64, 'inputs'), 'input')).toContain('at most 64 inputs');
+    expect(capProblem({ devices: Array.from({ length: 16 }, (_, i) => ({ id: `d${i}` })) }, 'device')).toContain('at most 16 devices');
+  });
+  it('Home Assistant devices are not compiled, so they do not count', () => {
+    const c = many(256, 'commands');
+    c.devices!.push({ id: 'h', kind: 'ha', commands: { a: { ha: { service: 'light.toggle', target: { entity_id: 'light.a' } } } } });
+    expect(capProblem(c, 'command', 1, true)).toBeNull();
+  });
+});
+
+describe('editor metadata is bounded by construction', () => {
+  it('drops entries of deleted activities, foreign chain ids and oversized strings; same object when clean', () => {
+    const c: Config = {
+      devices: [{ id: 'tv' }],
+      activities: [{ id: 'a', devices: [{ device: 'tv' }] }],
+      editor: { activities: { a: { chain: ['tv', 'gone'], handlers: { volume: 'x'.repeat(500) } }, dead: { chain: ['tv'] } } },
+    };
+    const b = boundEditor(c);
+    expect(Object.keys(b.editor!['activities'] as object)).toEqual(['a']);
+    expect((b.editor!['activities'] as Record<string, { chain: string[]; handlers: Record<string, string> }>)['a']!.chain).toEqual(['tv']);
+    expect((b.editor!['activities'] as Record<string, { handlers: Record<string, string> }>)['a']!.handlers['volume']).toHaveLength(100);
+    expect(boundEditor(b)).toBe(b);
+    expect(boundEditor({ devices: [] })).toEqual({ devices: [] });
+  });
+  it('stays under the soft cap however many keys the user fills', () => {
+    const filled = Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`k${i}`, { device: 'tv', command: 'x'.repeat(200) }]));
+    const c: Config = { devices: [{ id: 'tv' }], activities: [{ id: 'a', devices: [{ device: 'tv' }] }], editor: { activities: { a: { filled } } } };
+    const b = boundEditor(c);
+    expect(editorBytes(b)).toBeLessThan(32 * 1024);
   });
 });

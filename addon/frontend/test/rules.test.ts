@@ -37,7 +37,7 @@ describe('rule table', () => {
   });
   it('summary', () => {
     const n = (h: string) => Object.values(RULES).filter((r) => r.how === h).length;
-    expect({ total: Object.keys(RULES).length, prevented: n('prevented'), inline: n('inline'), gap: n('gap') }).toEqual({ total: 60, prevented: 53, inline: 5, gap: 2 });
+    expect({ total: Object.keys(RULES).length, prevented: n('prevented'), inline: n('inline'), gap: n('gap') }).toEqual({ total: 60, prevented: 55, inline: 5, gap: 0 });
   });
 });
 

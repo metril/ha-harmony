@@ -11,7 +11,6 @@ export interface RuleUi {
 }
 const P = (by: string): RuleUi => ({ how: 'prevented', by });
 const I = (by: string): RuleUi => ({ how: 'inline', by });
-const G = (by: string): RuleUi => ({ how: 'gap', by });
 
 export const RULES: Record<string, RuleUi> = {
   'device id pattern': P('ids are generated (deviceIdFor, 24 chars + suffix)'),
@@ -27,7 +26,7 @@ export const RULES: Record<string, RuleUi> = {
   'alias is another device id': I('Problems list on the device page (aliases only come from imports)'),
   'duplicate device id': P('ids are unique-suffixed'),
   'max 16 devices': P('Add device refuses at 16'),
-  'max 256 commands': G('banner with the server message + red Commands meter + Apply disabled; adding commands is not blocked'),
+  'max 256 commands': P('Add command, Duplicate and the wizard refuse past 256 (capProblem) and say why; same for 64 inputs'),
   'HA device takes only ha actions': P('HA device commands use the Home Assistant action picker'),
   'HA device power needs on and off': I('Problems list on the device page'),
   'HA device entity pattern': I('Problems list on the device page'),
@@ -73,7 +72,7 @@ export const RULES: Record<string, RuleUi> = {
   'one home page': P('Kind control refuses a second Home page'),
   'list page has no x/y': P('list pages never get x/y'),
   'list rows 1..16': P('number input clamped'),
-  'editor size': G('no control grows editor metadata past the cap in practice; only the banner would show it'),
+  'editor size': P('the store prunes editor metadata to ids the editor can show (boundEditor), far under the cap'),
 };
 
 export type Surface = 'key' | 'widget' | 'page' | 'device' | 'activity' | 'banner';

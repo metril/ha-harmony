@@ -1,6 +1,7 @@
 // Draft store: working copy, ~600 ms debounced autosave through the single PUT queue,
 // optimistic edits with rollback, validation + usage via preview, conflict handling.
 import { Api, ApiError, DraftQueue, type Meta, type Preview, type Usage } from './api';
+import { boundEditor } from './activity-edit';
 import { diffConfig, type DiffRow } from './diff';
 import { summarizeErrors } from './errors';
 import type { Config, ValidationError } from './model';
@@ -153,6 +154,7 @@ export class Store extends EventTarget {
 
   /** Swap in a whole config as an optimistic edit. Edits sharing a `coalesce` key within 1.2 s are one undo step. */
   replace(next: Config, coalesce?: string): void {
+    next = boundEditor(next);
     const now = Date.now();
     if (!(coalesce && this.lastEditKey?.key === coalesce && now - this.lastEditKey.at < 1200)) {
       this.past.push(this.config);

@@ -217,6 +217,19 @@ describe('remote studio', () => {
     expect((([...picker.shadowRoot.querySelectorAll('button')].find((x) => x.textContent === 'Set action')) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('a key on a Home Assistant action shows an HA badge, not Send IR, and reads "Lamp · toggle"', async () => {
+    const { insp, store } = await inspectorFor({ kind: 'key', name: 'red' });
+    store.edit((c) => void (c.keys = { ...c.keys, red: { ha: { service: 'light.toggle', target: { entity_id: 'light.lamp' }, repeat: true } } }));
+    const picker = insp.shadowRoot.querySelector('hh-action-picker') as El;
+    await tick(picker);
+    await tick(picker);
+    const send = picker.shadowRoot.querySelector('hh-send-ir') as El;
+    await send.updateComplete;
+    expect(send.shadowRoot.querySelector('button')).toBeNull();
+    expect(send.shadowRoot.querySelector('.ha')!.textContent).toBe('HA');
+    expect(picker.shadowRoot.querySelector('.cur b')!.textContent).toMatch(/^.+ \u00B7 toggle \u21BB$/);
+  });
+
   it('the key panel offers Send IR for the code the key sends, and palette chips carry a function icon', async () => {
     const { insp, palette } = await inspectorFor({ kind: 'key', name: 'volume_up' });
     const picker = insp.shadowRoot.querySelector('hh-action-picker') as El;

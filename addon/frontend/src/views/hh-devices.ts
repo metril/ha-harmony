@@ -7,7 +7,7 @@ import { StoreElement, confirmAction } from '../components/base';
 import type { CodeEdit, CodeSave } from '../components/hh-code-dialog';
 import { summarize, trimBytes } from '../lib/codes';
 import { KIND_LABEL, art, commandIconId, deviceKind, groupIconId } from '../lib/device-art';
-import { commandCount, duplicateCommand, isHaDevice, mapCodes, nameProblem, patchDevice, powerMode, powerStatus, setCommand, setInput, setPowerCode, setPowerMode, sourceLabel, withPorts, withRepeats, type PowerMode } from '../lib/device-edit';
+import { capProblem, commandCount, duplicateCommand, isHaDevice, mapCodes, nameProblem, patchDevice, powerMode, powerStatus, setCommand, setInput, setPowerCode, setPowerMode, sourceLabel, withPorts, withRepeats, type PowerMode } from '../lib/device-edit';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { icon } from '../lib/icons';
 import { LIMITS, type Device, type IrAction } from '../lib/model';
@@ -175,6 +175,12 @@ export class HhDevices extends StoreElement {
     if (s.where === 'power') cfg = setPowerCode(cfg, d.id, s.name as 'on' | 'off' | 'toggle', s.code);
     else {
       const kind = s.where === 'commands' ? 'command' : 'input';
+      const existing = s.name ? (s.where === 'commands' ? d.commands : d.inputs)?.[s.name] : undefined;
+      const full = existing ? null : capProblem(cfg, kind, 1, isHaDevice(d));
+      if (full) {
+        this.store.toast(full, 'error');
+        return;
+      }
       if (s.name && s.name !== s.newName) cfg = renameItem(cfg, d.id, kind, s.name, s.newName);
       cfg = (s.where === 'commands' ? setCommand : setInput)(cfg, d.id, s.newName, s.code);
     }
@@ -182,6 +188,11 @@ export class HhDevices extends StoreElement {
     this.edit = null;
   }
   private dup(d: Device, name: string) {
+    const full = capProblem(this.store.config, 'command', 1, isHaDevice(d));
+    if (full) {
+      this.store.toast(full, 'error');
+      return;
+    }
     const r = duplicateCommand(this.store.config, d.id, name);
     this.put(r.config, undefined, `Duplicated as ${r.name}`);
     this.edit = { where: 'commands', name: r.name, code: JSON.parse(JSON.stringify(r.config.devices?.find((x) => x.id === d.id)?.commands?.[r.name] ?? {})) as IrAction };
@@ -214,7 +225,7 @@ export class HhDevices extends StoreElement {
       <div class="head"><h1>Devices</h1><span class="chip">${all.length} / ${LIMITS.devices}</span><span class="muted">What the hub can control. Open one to see its keypad.</span></div>
       <div class="gallery" role="list" aria-label="Devices">
         ${all.map((d, i) => html`<div role="listitem" class="cont">${this.card(d, i)}</div>`)}
-        <div role="listitem" class="addw"><a class="add" href=${hashFor('devices', 'new')}><span class="plus">${icon('plus')}</span>Add device<span class="muted">From the IR archive, pasted codes or Home Assistant</span></a></div>
+        <div role="listitem" class="addw">${all.length >= LIMITS.devices ? html`<span class="add" aria-disabled="true" title=${capProblem(this.store.config, 'device') ?? ''}><span class="plus">${icon('plus')}</span>Add device<span class="muted">The hub holds at most ${LIMITS.devices} devices.</span></span>` : html`<a class="add" href=${hashFor('devices', 'new')}><span class="plus">${icon('plus')}</span>Add device<span class="muted">From the IR archive, pasted codes or Home Assistant</span></a>`}</div>
       </div>
       ${all.length === 0 ? html`<p class="muted">No devices yet. Add your first one to get started.</p>` : nothing}`;
   }
@@ -227,10 +238,12 @@ export class HhDevices extends StoreElement {
       <button class="k" aria-label="Edit ${name}" @click=${() => (this.edit = { where, name, code: JSON.parse(JSON.stringify(code)) as IrAction })}>
         <b>${stockIconSvg(commandIconId(name, g))}<span>${name}</span></b><small>${summarize(code)}${code.port_mask ? ` · ports ${code.port_mask}` : ''}${code.repeats && code.repeats > 1 ? ` · ×${code.repeats}` : ''}</small>
       </button>
-      <hh-send-ir variant="round" .code=${code} name=${name}></hh-send-ir>
+      <hh-send-ir variant="round" ?ha=${d.kind === 'ha'} .code=${code} name=${name}></hh-send-ir>
     </div>`;
   }
-  private placeholder(where: 'commands' | 'inputs', label: string) {
+  private placeholder(d: Device, where: 'commands' | 'inputs', label: string) {
+    const full = capProblem(this.store.config, where === 'commands' ? 'command' : 'input', 1, isHaDevice(d));
+    if (full) return html`<div class="key ph"><button class="k" disabled aria-disabled="true" title=${full}>+ ${label}</button><span class="why" role="note">${full}</span></div>`;
     return html`<div class="key ph"><button class="k" @click=${() => (this.edit = { where, name: null, code: { proto: 'nec', addr: 0, cmd: 0 } })}>+ ${label}</button></div>`;
   }
   private powerKeys(d: Device) {
@@ -238,7 +251,7 @@ export class HhDevices extends StoreElement {
     return (['on', 'off', 'toggle'] as const).filter((k) => p[k]).map(
       (k) => html`<div class="key"><button class="k" aria-label="Edit power ${k}" @click=${() => (this.edit = { where: 'power', name: k, code: JSON.parse(JSON.stringify(p[k])) as IrAction })}>
         <b>${stockIconSvg(commandIconId('power'))}<span>Power ${k}</span></b><small>${summarize(p[k])}</small></button>
-        <hh-send-ir variant="round" .code=${p[k]} name="power ${k}"></hh-send-ir></div>`,
+        <hh-send-ir variant="round" ?ha=${d.kind === 'ha'} .code=${p[k]} name="power ${k}"></hh-send-ir></div>`,
     );
   }
   private groupBlock(d: Device, g: Group, items: [string, IrAction][], where: 'commands' | 'inputs') {
@@ -259,7 +272,7 @@ export class HhDevices extends StoreElement {
     return html`<section class="grp" aria-label="${pretty(g)} keys">
       <h2>${stockIconSvg(groupIconId(g))} ${pretty(g)}<span class="muted">${items.length}</span></h2>
       ${nav && Object.keys(dpadNames).length ? html`<div class="dpad">${dp.map((s) => (s && dpadNames[s] ? this.key(d, where, dpadNames[s] as string, map.get(dpadNames[s] as string) as IrAction) : html`<span></span>`))}</div>` : nothing}
-      <div class=${g === 'numbers' && numbered.length >= 8 ? 'numpad' : 'keys'}>${(nav ? rest : numbered).map(([n, c]) => this.key(d, where, n, c))}${g === 'inputs' ? this.placeholder('inputs', 'input') : nothing}</div>
+      <div class=${g === 'numbers' && numbered.length >= 8 ? 'numpad' : 'keys'}>${(nav ? rest : numbered).map(([n, c]) => this.key(d, where, n, c))}${g === 'inputs' ? this.placeholder(d, 'inputs', 'input') : nothing}</div>
     </section>`;
   }
   private keypad(d: Device) {
@@ -270,7 +283,7 @@ export class HhDevices extends StoreElement {
       <section class="grp" aria-label="Power keys"><h2>${stockIconSvg(groupIconId('power'))} Power</h2><div class="keys">${this.powerKeys(d)}${(by.get('power') ?? []).map(([n, c]) => this.key(d, 'commands', n, c))}${!d.power ? html`<span class="muted">No power control (see Power on the right)</span>` : nothing}</div></section>
       ${GROUPS.filter((g) => g !== 'power' && g !== 'inputs' && (by.get(g)?.length ?? 0) > 0).map((g) => this.groupBlock(d, g, by.get(g) ?? [], 'commands'))}
       ${this.groupBlock(d, 'inputs', Object.entries(d.inputs ?? {}), 'inputs')}
-      <div class="keys">${this.placeholder('commands', 'command')}</div>`;
+      <div class="keys">${this.placeholder(d, 'commands', 'command')}</div>`;
   }
 
   // ------------------------------------------------------------ list view
@@ -295,7 +308,7 @@ export class HhDevices extends StoreElement {
             <td><input type="checkbox" aria-label="Select ${n}" .checked=${this.sel.includes(n)} @change=${(e: Event) => (this.sel = (e.target as HTMLInputElement).checked ? [...this.sel, n] : this.sel.filter((x) => x !== n))} /></td>
             <td><input type="text" aria-label="Name of ${n}" .value=${n} @input=${(e: Event) => (this.rowName = [n, (e.target as HTMLInputElement).value])} @change=${(e: Event) => this.renameRow(d, n, (e.target as HTMLInputElement).value)} />${prob ? html`<span class="hint" role="alert">${prob}</span>` : nothing}<span class="hint">${byteCounter(this.rowName?.[0] === n ? this.rowName[1] : n).used}/31 B</span></td>
             <td class="mono">${summarize(c)}</td><td class="mono">${c.port_mask ?? 'all'}</td>${ha ? html`<td class="mono">${c.repeats ?? 1}</td>` : nothing}
-            <td><button class="btn sm" @click=${() => (this.edit = { where: 'commands', name: n, code: JSON.parse(JSON.stringify(c)) as IrAction })}>Edit</button> <hh-send-ir .code=${c} name=${n}></hh-send-ir></td></tr>`;
+            <td><button class="btn sm" @click=${() => (this.edit = { where: 'commands', name: n, code: JSON.parse(JSON.stringify(c)) as IrAction })}>Edit</button> <hh-send-ir ?ha=${d.kind === 'ha'} .code=${c} name=${n}></hh-send-ir></td></tr>`;
         })}</tbody></table></div>`;
   }
   private rowName: [string, string] | null = null;
@@ -326,7 +339,7 @@ export class HhDevices extends StoreElement {
       <h2>Power</h2>
       <div class="seg" role="group" aria-label="Power control">${modes.map(([m, label]) => html`<button aria-pressed=${mode === m} @click=${() => this.put(setPowerMode(this.store.config, d.id, m))}>${label}</button>`)}</div>
       <p class="why mt">${mode === 'both' ? 'Separate on and off codes: the hub always knows what it sends.' : mode === 'toggle' ? 'One code switches it on and off. It can get out of step if you use the original remote.' : 'The hub will not switch this device on or off.'}</p>
-      ${(['on', 'off', 'toggle'] as const).filter((k) => d.power?.[k]).map((k) => html`<div class="row"><span class="l"><b>${k === 'toggle' ? 'Toggle' : `Power ${k}`}</b><small>${summarize(d.power?.[k])}</small></span><span><button class="btn sm" @click=${() => (this.edit = { where: 'power', name: k, code: JSON.parse(JSON.stringify(d.power?.[k])) as IrAction })}>Edit</button> <hh-send-ir variant="round" .code=${d.power?.[k]} name="power ${k}"></hh-send-ir></span></div>`)}
+      ${(['on', 'off', 'toggle'] as const).filter((k) => d.power?.[k]).map((k) => html`<div class="row"><span class="l"><b>${k === 'toggle' ? 'Toggle' : `Power ${k}`}</b><small>${summarize(d.power?.[k])}</small></span><span><button class="btn sm" @click=${() => (this.edit = { where: 'power', name: k, code: JSON.parse(JSON.stringify(d.power?.[k])) as IrAction })}>Edit</button> <hh-send-ir variant="round" ?ha=${d.kind === 'ha'} .code=${d.power?.[k]} name="power ${k}"></hh-send-ir></span></div>`)}
     </section>`;
   }
   private settingsPanel(d: Device) {

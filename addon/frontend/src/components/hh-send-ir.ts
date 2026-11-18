@@ -13,6 +13,7 @@ export class HhSendIr extends LitElement {
     shared,
     css`
       button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; border: 1.5px solid var(--ir); color: var(--ir); background: var(--irs); font-weight: 600; font-size: 12px; white-space: nowrap; cursor: pointer; }
+      .ha { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 10px; border: 1px solid var(--line); background: var(--sf2); color: var(--tx2); font-size: 11px; font-weight: 700; letter-spacing: 0.3px; cursor: default; }
       button[aria-disabled="true"] { opacity: 0.6; cursor: not-allowed; }
       :host([variant="round"]) button { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 50%; }
       :host([variant="round"]) button .t { display: none; }
@@ -28,6 +29,8 @@ export class HhSendIr extends LitElement {
   @property({ reflect: true }) variant: 'pill' | 'round' | 'big' = 'pill';
   /** what is being sent, for the accessible name: "Send IR for vol_up" */
   @property() name = '';
+  /** the code belongs to a Home Assistant device: nothing to test-fire */
+  @property({ type: Boolean }) ha = false;
   @state() private busy = false;
   @state() private sent = false;
   @state() private wait = 0;
@@ -83,6 +86,7 @@ export class HhSendIr extends LitElement {
   }
 
   protected override render() {
+    if (this.ha || this.code?.ha) return html`<span class="ha" title="Home Assistant action: runs through Home Assistant, so there is no IR code to test-fire" aria-label="Home Assistant action, no IR test">HA</span>`;
     const why = this.blocked();
     const label = this.busy ? 'Sending…' : this.sent ? 'Sent' : this.wait > 0 ? `Wait ${Math.ceil(this.wait / 1000)} s` : 'Send IR';
     const what = this.name ? `Send IR for ${this.name}` : 'Send IR';

@@ -6,7 +6,7 @@ import { StoreElement } from '../components/base';
 import '../components/hh-page-diff';
 import { changedKeys, changedPages, type KeyChange } from '../lib/diff';
 import { LIMITS, counts } from '../lib/model';
-import { permissions } from '../lib/permissions';
+import { byDomain, permissions } from '../lib/permissions';
 import { keyTitle } from '../lib/remote-layout';
 import { hashFor } from '../lib/router';
 import { StudioState } from '../lib/studio-state';
@@ -55,8 +55,12 @@ export class HhOverview extends StoreElement {
       .empty p { max-width: 46ch; color: var(--tx2); margin: 0; }
       .empty .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
       .perm { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+      .scrollbox { max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r1); padding: 4px 10px; }
+      .perm h3 { margin: 8px 0 2px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--tx3); }
+      .perm ul { margin: 0; padding: 0; list-style: none; }
       .perm li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
       .perm .why { color: var(--tx3); font-size: 12px; }
+      .svc { font-size: 11px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--line); color: var(--tx2); }
       .st { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--sf3); color: var(--tx2); }
       .st.on { background: var(--irs); color: var(--ir); }
       a.fix { color: var(--bad); font-weight: 600; }
@@ -92,8 +96,8 @@ export class HhOverview extends StoreElement {
       <h2 id="hp">Permissions <span class="sub">Home Assistant entities and services this draft uses</span></h2>
       ${p.entities.length || p.services.length
         ? html`<div class="perm">
-            <div><b>Entities (${p.entities.length})</b><ul>${p.entities.map((e) => html`<li><span class="mono">${e.id}</span>${live.get(e.id)?.state ? html`<span class="st ${live.get(e.id)?.state === 'on' ? 'on' : ''}">${live.get(e.id)?.state}</span>` : nothing}<span class="why">${e.uses.slice(0, 2).join(', ')}</span></li>`)}</ul></div>
-            <div><b>Services (${p.services.length})</b>${p.services.length ? html`<ul>${p.services.map((s) => html`<li><span class="mono">${s.service}</span><span class="why">${s.uses} use${s.uses === 1 ? '' : 's'}</span></li>`)}</ul>` : html`<p class="muted">No service calls.</p>`}</div>
+            <div><b>Entities (${p.entities.length})</b><div class="scrollbox" tabindex="0" role="region" aria-label="Entities by domain">${byDomain(p).map((g) => html`<h3>${g.domain} (${g.entities.length})</h3><ul>${g.entities.map((e) => html`<li><span class="mono">${e.id}</span>${live.get(e.id)?.state ? html`<span class="st ${live.get(e.id)?.state === 'on' ? 'on' : ''}">${live.get(e.id)?.state}</span>` : nothing}${e.services.length ? html`<span class="svc">${e.services.map((x) => x.split('.').pop()).join(', ')}</span>` : nothing}<span class="why" title=${e.uses.join(', ')}>${e.uses.slice(0, 2).join(', ')}</span></li>`)}</ul>`)}</div></div>
+            <div><b>Services (${p.services.length})</b>${p.services.length ? html`<div class="scrollbox"><ul>${p.services.map((s) => html`<li><span class="mono">${s.service}</span><span class="why">${s.uses} use${s.uses === 1 ? '' : 's'}</span></li>`)}</ul></div>` : html`<p class="muted">No service calls.</p>`}</div>
           </div>`
         : html`<p class="muted">The draft does not ask Home Assistant for anything.</p>`}
       <p class="muted">Informational. Nothing is granted here; Home Assistant decides what the integration may do.</p>

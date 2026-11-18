@@ -19,6 +19,8 @@ const RE = {
   volume: /vol|mute|loud|bass|treble/,
   channel: /chan|^ch(?:_|$|\d)|^prev_ch|last/,
   transport: /play|pause|stop|rew|(?:^|_)ff(?:_|$)|forward|record|(?:^|_)rec(?:_|$)|skip|eject|(?:^|_)(?:next|prev|previous)(?:_|$)|backward/,
+  // a command that cycles / toggles the source is not an input of its own (only the device's `inputs` are)
+  cycles: /(?:source|input|src|inp)s?[_-]?(?:toggle|cycle|next|prev|previous|switch|select)|(?:toggle|cycle|next|prev|previous|switch)[_-]?(?:source|input|src|inp)/,
   inputs: /^input|hdmi|source|(?:^|_)(?:av|aux|tuner|optical|coax|usb|bluetooth|arc)\d?(?:_|$)|tv_audio/,
   navigation: /^(?:up|down|left|right|ok|enter|select|back|exit|menu|home|guide|info|return|nav|dpad|cursor|options|settings|tools|top_menu|popup)/,
 };
@@ -27,6 +29,7 @@ export function groupCommand(name: string): Group {
   const n = name.toLowerCase();
   if (RE.numbers.test(n)) return 'numbers';
   if (RE.power.test(n)) return 'power';
+  if (RE.cycles.test(n)) return 'other';
   if (RE.volume.test(n)) return 'volume';
   if (RE.channel.test(n)) return 'navigation';
   if (RE.transport.test(n)) return 'transport';
@@ -58,7 +61,7 @@ export const isNone = (a: unknown): boolean => !!a && typeof a === 'object' && '
 export const pretty = (s: string): string => s.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 /** One-line summary of a config action. */
-export function describeAction(cfg: Config, a: unknown): string {
+export function describeAction(cfg: Config, a: unknown, names?: ReadonlyMap<string, string>): string {
   if (!a || typeof a !== 'object') return 'Nothing';
   const x = a as Action;
   if ('device' in x) {
@@ -72,8 +75,10 @@ export function describeAction(cfg: Config, a: unknown): string {
     return `Start ${a2?.name ?? x['activity']}`;
   }
   if ('ha' in x) {
-    const h = x['ha'] as { service?: string; target?: { entity_id?: string } };
-    return `HA ${h.service ?? '?'} ${h.target?.entity_id ?? ''}`.trim();
+    const h = x['ha'] as { service?: string; target?: { entity_id?: string | string[] }; repeat?: boolean };
+    const ids = h.target?.entity_id;
+    const list = Array.isArray(ids) ? ids : ids ? [ids] : [];
+    return haLabel(list[0] ?? '', Math.max(0, list.length - 1), h.service ?? '?', !!h.repeat, names);
   }
   if ('event' in x) return `HA event ${x['event']}`;
   if ('none' in x) return 'Does nothing';
@@ -81,9 +86,35 @@ export function describeAction(cfg: Config, a: unknown): string {
   return 'IR code';
 }
 
-/** Key map label: a Home Assistant service action (has `service`) reads "HA light.toggle light.x"; the older event action keeps "HA event name". Both have kind "ha". */
-export function keyActionLabel(a: { kind: string; label: string } & Record<string, unknown>): string {
-  return a.kind === 'ha' && typeof a['service'] === 'string' && !a.label.startsWith('HA ') ? `HA ${a.label}` : a.label;
+export const REPEAT_MARK = '\u21BB';
+export const LABEL_CLIP = 26;
+/** "Lamp · toggle": the entity's friendly name (or id) and the short form of the service; ↻ when it repeats while held. */
+export function haLabel(first: string, more: number, service: string, repeat: boolean, names?: ReadonlyMap<string, string>): string {
+  const who = (names?.get(first) || first || 'Home Assistant') + (more > 0 ? ` +${more}` : '');
+  return `${who} \u00B7 ${service.split('.').pop() || service}${repeat ? ` ${REPEAT_MARK}` : ''}`;
+}
+/** True when the action runs through Home Assistant (an `ha:` action, or a command / input of a `kind: ha` device): no IR to test-fire. */
+export function isHaAction(cfg: Config, a: unknown): boolean {
+  if (!a || typeof a !== 'object') return false;
+  const x = a as Action;
+  if ('ha' in x) return true;
+  return 'device' in x && (cfg.devices ?? []).find((v) => v.id === x['device'])?.kind === 'ha';
+}
+/** `s` cut to `max` characters with an ellipsis (callers keep the full text in a title). */
+export const clip = (s: string, max = LABEL_CLIP): string => (Array.from(s).length > max ? `${Array.from(s).slice(0, max - 1).join('')}\u2026` : s);
+
+/** Key map label for X-ray and the key's name: HA actions read "Lamp · toggle", HA-device commands "Shield · DPAD_UP". */
+export function keyActionLabel(a: { kind: string; label: string } & Record<string, unknown>, cfg?: Config, names?: ReadonlyMap<string, string>): string {
+  if (a.kind === 'ha' && typeof a['service'] === 'string') {
+    const ent = typeof a['entity'] === 'string' ? a['entity'] : '';
+    const [first = '', more] = ent.split(' +');
+    return haLabel(first, Number(more) || 0, a['service'], a.label.endsWith('(repeats)'), names);
+  }
+  if (a.kind === 'device' && cfg) {
+    const d = (cfg.devices ?? []).find((v) => v.id === a['device']);
+    if (d?.kind === 'ha') return `${d.name ?? d.id} \u00B7 ${typeof a['command'] === 'string' ? a['command'] : `input ${String(a['input'])}`}`;
+  }
+  return a.label;
 }
 
 // ---------------------------------------------------------------- sources and targets

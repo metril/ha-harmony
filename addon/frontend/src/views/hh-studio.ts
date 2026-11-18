@@ -32,6 +32,7 @@ interface Press {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
+const LAYER_PILLS = 5;
 /** The remote studio: palette | remote canvas with layers, X-ray and screen editing | inspector. */
 @customElement('hh-studio')
 export class HhStudio extends StoreElement implements StudioHost {
@@ -46,8 +47,10 @@ export class HhStudio extends StoreElement implements StudioHost {
       .pal > *, .insp > * { flex: 1; min-height: 0; }
       .mid { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--cv); }
       .tb { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 12px; padding: 4px 12px; background: var(--sf); border-bottom: 1px solid var(--line); z-index: 2; }
-      .layers { display: flex; gap: 4px; overflow-x: auto; flex: 1 1 0; min-width: 0; padding: 2px; scrollbar-width: thin; }
-      .layers button { flex: none; height: 28px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
+      .lw { display: flex; align-items: center; gap: 4px; flex: 1 1 0; min-width: 0; }
+      .layers { display: flex; gap: 4px; overflow: hidden; flex: 0 1 auto; min-width: 0; padding: 2px; }
+      .lw select { flex: none; height: 28px; max-width: 120px; border-radius: 16px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 600; font-size: 12px; padding: 0 6px; }
+      .layers button { flex: 0 1 auto; min-width: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; height: 28px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
       .layers button:hover { background: var(--sf2); }
       .layers button[aria-selected="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
       .grp { display: inline-flex; gap: 2px; padding: 2px; background: var(--sf2); border-radius: var(--r1); }
@@ -55,7 +58,9 @@ export class HhStudio extends StoreElement implements StudioHost {
       .grp button[aria-pressed="true"], .grp button[aria-selected="true"] { background: var(--sf); color: var(--tx); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); }
       .grp button:disabled { opacity: 0.4; cursor: default; }
       .grp .ic { width: 16px; height: 16px; }
-      @media (min-width: 1101px) { .tb { flex-wrap: wrap; } .layers { flex: 1 1 100%; } }
+      @media (min-width: 1101px) { .tb { flex-wrap: wrap; } .lw { flex: 1 1 100%; } }
+      @media (max-width: 720px) { .layers { overflow-x: auto; } .layers button { flex: none; } }
+      @media (max-width: 1100px) { .layers button { padding: 0 9px; font-size: 12px; max-width: 96px; } }
       .cw { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
       .tools { flex: none; display: flex; align-items: center; gap: 6px; }
       .tools .pager { background: var(--sf2); }
@@ -490,9 +495,20 @@ export class HhStudio extends StoreElement implements StudioHost {
   private layers() {
     const acts = this.store.config.activities ?? [];
     const items: [string, string][] = [[DEFAULT_LAYER, 'Default'], ...acts.map((a) => [a.id, a.name ?? a.id] as [string, string])];
-    return html`<div class="layers" role="tablist" aria-label="Layer" @keydown=${(e: KeyboardEvent) => this.layerKey(e, items)}>
-      ${items.map(([id, name]) => html`<button role="tab" id=${`layer-${id}`} tabindex=${this.st.layer === id ? 0 : -1} aria-selected=${this.st.layer === id} @click=${() => this.st.setLayer(id)}>${name}</button>`)}
-    </div>`;
+    // up to LAYER_PILLS pills; beyond that the rest sit in a menu (the selected layer always shows as a pill)
+    let shown = items;
+    let rest: [string, string][] = [];
+    if (items.length > LAYER_PILLS) {
+      const head = items.slice(0, LAYER_PILLS - 1);
+      const cur = items.find(([id]) => id === this.st.layer);
+      shown = cur && !head.includes(cur) ? [...items.slice(0, LAYER_PILLS - 2), cur] : head;
+      rest = items.filter((it) => !shown.includes(it));
+    }
+    return html`<div class="lw"><div class="layers" role="tablist" aria-label="Layer" @keydown=${(e: KeyboardEvent) => this.layerKey(e, items)}>
+      ${shown.map(([id, name]) => html`<button role="tab" id=${`layer-${id}`} title=${name} tabindex=${this.st.layer === id ? 0 : -1} aria-selected=${this.st.layer === id} @click=${() => this.st.setLayer(id)}>${name}</button>`)}
+    </div>${rest.length ? html`<select aria-label="More layers" @change=${(e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) this.st.setLayer(v); (e.target as HTMLSelectElement).value = ''; }}>
+      <option value="">More (${rest.length})</option>${rest.map(([id, name]) => html`<option value=${id}>${name}</option>`)}
+    </select>` : nothing}</div>`;
   }
   private layerKey(e: KeyboardEvent, items: [string, string][]) {
     const i = items.findIndex(([id]) => id === this.st.layer);
@@ -611,7 +627,7 @@ export class HhStudio extends StoreElement implements StudioHost {
       const layer = this.st.layer;
       value = (layer === DEFAULT_LAYER ? cfg.keys : (cfg.activities ?? []).find((a) => a.id === layer)?.keys)?.[sel.name] ?? null;
       const row = this.st.rows().find((r) => r.key === (sel as { name: string }).name);
-      current = row?.action ? `${row.action.label}${row.source === 'default' && layer !== DEFAULT_LAYER ? ' (from Default)' : ''}` : '';
+      current = row?.action ? `${this.st.actionLabel(row.action)}${row.source === 'default' && layer !== DEFAULT_LAYER ? ' (from Default)' : ''}` : '';
     } else {
       const w = cfg.pages?.[sel.page]?.widgets[sel.index];
       title = `${w?.type ?? 'widget'} ${w?.label ?? ''}`.trim();

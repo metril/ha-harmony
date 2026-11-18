@@ -1,6 +1,6 @@
 // Pure edits of one device: commands, power, inputs, ports, repeats, naming rules. No DOM.
 import { utf8Bytes, NAME_MAX } from './codes';
-import type { Config, Device, IrAction } from './model';
+import { LIMITS, type Config, type Device, type IrAction } from './model';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 export const isHaDevice = (d: Device): boolean => d.kind === 'ha';
@@ -133,4 +133,18 @@ export function sourceLabel(d: Device): string {
 
 export function commandCount(d: Device): number {
   return Object.keys(d.commands ?? {}).length;
+}
+
+/** Total commands / inputs of the IR devices (Home Assistant devices are not compiled, so they do not count). */
+export function irTotals(cfg: Config): { commands: number; inputs: number } {
+  const ir = (cfg.devices ?? []).filter((d) => !isHaDevice(d));
+  return { commands: ir.reduce((n, d) => n + Object.keys(d.commands ?? {}).length, 0), inputs: ir.reduce((n, d) => n + Object.keys(d.inputs ?? {}).length, 0) };
+}
+/** Why adding `n` more of this kind would pass the hub's limit (compiler MAX_*), or null. `ha`: the target is a Home Assistant device. */
+export function capProblem(cfg: Config, kind: 'command' | 'input' | 'device', n = 1, ha = false): string | null {
+  if (kind === 'device') return (cfg.devices ?? []).length + n > LIMITS.devices ? `The hub holds at most ${LIMITS.devices} devices.` : null;
+  if (ha) return null;
+  const t = irTotals(cfg);
+  if (kind === 'command') return t.commands + n > LIMITS.commands ? `The hub holds at most ${LIMITS.commands} commands across all devices (${t.commands} used). Delete some first.` : null;
+  return t.inputs + n > LIMITS.inputs ? `The hub holds at most ${LIMITS.inputs} inputs across all devices (${t.inputs} used). Delete some first.` : null;
 }

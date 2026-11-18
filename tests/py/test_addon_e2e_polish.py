@@ -218,20 +218,34 @@ async def test_five_late_failures_are_prevented_or_shown_before_apply(browser, l
     await insp.get_by_label("Field brightness_pct").fill("{{ 5 }}")
     await insp.get_by_text("must not contain a template").wait_for()
     assert await insp.get_by_role("button", name="Set action").is_disabled()
-    # 4. the 33rd widget on a page is refused
-    await page.evaluate(
-        f"() => {STORE}.edit(c => {{ const p = c.pages[4]; p.cols = 16; p.rows = 16; "
-        "p.widgets = Array.from({length: 32}, (_, i) => ({type: 'label', x: i % 16, y: Math.floor(i / 16), label: 'L'})); })"
+    # 4. the 33rd widget on a page is refused in the UI (N on the screen = "add a widget")
+    await page.goto(f"{large}{PREFIX}/#/remote")
+    pi = await page.evaluate(
+        f"() => {{ const s = {STORE}; const i = s.config.pages.findIndex(p => !p.list); "
+        "s.edit(c => { const p = c.pages[i]; p.cols = 16; p.rows = 16; "
+        "p.widgets = Array.from({length: 32}, (_, k) => ({type: 'label', id: 'f' + k, x: k % 16, y: Math.floor(k / 16), label: 'L'})); }); return i; }"
     )
-    from_state = await page.evaluate(f"() => {STORE}.config.pages[4].widgets.length")
-    assert from_state == 32
-    # 5. 'Next page' is not offered on the last page
     await page.evaluate(
-        f"() => {STORE}.edit(c => {{ const p = c.pages[c.pages.length - 1]; p.widgets.push({{type: 'button', id: 'lastnav', x: 3, y: 3, label: 'N', nav: 'home'}}); }})"
+        f"() => document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').state0.set({{mode: 'screen', page: {pi}}})"
     )
-    await page.wait_for_timeout(400)
-    r = await page.evaluate(f"() => {{ const s = {STORE}; return s.config.pages.length; }}")
-    assert r == 14
+    screen = page.locator("hh-remote [role=application]")
+    await screen.dispatch_event("keydown", {"key": "n"})
+    await page.get_by_text("A page holds at most 32 widgets.").first.wait_for()
+    assert await page.evaluate(f"() => {STORE}.config.pages[{pi}].widgets.length") == 32
+    # 5. "Next page" is disabled in the picker of a button on the last page
+    last = await page.evaluate(
+        f"() => {{ const s = {STORE}; const i = s.config.pages.length - 1; "
+        "s.edit(c => { c.pages[i].widgets.push({type: 'button', id: 'lastnav', x: 0, y: 0, label: 'N', action: {none: true}}); }); "
+        "return [i, s.config.pages[i].widgets.length - 1]; }"
+    )
+    await page.evaluate(
+        f"() => document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').state0.set("
+        f"{{mode: 'screen', page: {last[0]}, sel: {{kind: 'widget', page: {last[0]}, index: {last[1]}}}}})"
+    )
+    nxt = page.locator("hh-inspector option[value=next]")
+    await nxt.wait_for(state="attached")
+    assert await nxt.is_disabled()
+    assert "last page" in (await nxt.text_content())
 
 
 async def test_keyboard_only_assign_a_command_to_a_key_then_apply(browser, large):
@@ -300,3 +314,107 @@ async def test_long_press_drag_with_touch_emulation_does_not_scroll_the_page(bro
         f"() => {STUDIO}.querySelector('hh-remote').shadowRoot.querySelector('[data-key=pause]').getAttribute('aria-label').includes('tv: num_4')"
     )
     assert await page.evaluate("window.scrollY") == 0
+
+
+def _studio(js):
+    return f"() => document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').state0.{js}"
+
+
+async def test_ha_actions_have_no_test_fire_and_read_as_name_dot_command(browser, large):
+    page = await open_large(browser, large)
+    # a Home Assistant action on a key (friendly name from the entity, repeat marker) and a long device name
+    await page.evaluate(
+        f"() => {STORE}.edit(c => {{ c.activities[1].keys.left = {{ha: {{service: 'light.toggle', target: {{entity_id: 'light.room_0_light'}}, repeat: true}}}}; "
+        "c.devices[4].name = 'Living room ceiling shield'; })"
+    )
+    await page.evaluate(_studio("setLayer('stream')"))
+    await page.get_by_role("button", name="X-ray").click()
+    remote = page.locator("hh-remote")
+    await page.wait_for_timeout(2000)
+    texts = await remote.locator("text.xl").evaluate_all(
+        "els => els.map(e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(''))"
+    )
+    assert any(t.startswith("Room 0 light") and t.endswith("toggle ↻") for t in texts), [t for t in texts if "toggle" in t or "light" in t]
+    long = [t for t in texts if t.startswith("Living room ceiling")]
+    assert long and long[0].endswith("…") and len(long[0]) <= 26, texts
+    titles = await remote.locator("text.xl title").all_text_contents()
+    assert any(t == "Living room ceiling shield · play_pause" for t in titles), titles
+    if SHOTS:
+        Path(SHOTS).mkdir(parents=True, exist_ok=True)
+        await page.screenshot(path=f"{SHOTS}/xray-ha.png")
+    # the key popover / inspector: an HA badge, never a Send IR button
+    await remote.locator("[data-key=play]").click()
+    insp = page.locator("hh-inspector")
+    await insp.locator("hh-send-ir .ha").first.wait_for()
+    assert await insp.locator("hh-send-ir button").count() == 0
+    # the palette: HA device chips carry the badge
+    await page.get_by_role("tab", name="Devices").click()
+    assert await page.locator("hh-palette .chip2 .hab").count() >= 10
+    # an IR command still has its Send IR button
+    await page.get_by_role("button", name="Close").first.click()
+    await remote.locator("[data-key=volume_up]").click()
+    await insp.locator("hh-send-ir button").first.wait_for()
+
+
+async def test_permissions_panel_groups_20_entities_and_scrolls_inside_its_card(browser, large):
+    page = await open_large(browser, large)
+    await page.evaluate(
+        f"() => {STORE}.edit(c => {{ c.pages[0].widgets = Array.from({{length: 20}}, (_, i) => ({{type: 'tile', id: 't' + i, x: i % 4, y: Math.floor(i / 4), "
+        "entity: (i % 2 ? 'light.perm_' : 'switch.perm_') + i, tap: {ha: {service: (i % 2 ? 'light.toggle' : 'switch.turn_on'), target: {entity_id: (i % 2 ? 'light.perm_' : 'switch.perm_') + i}}}})); })"
+    )
+    await page.goto(f"{large}{PREFIX}/#/overview")
+    box = page.locator("hh-overview .scrollbox[aria-label='Entities by domain']")
+    await box.wait_for()
+    heads = await box.locator("h3").all_text_contents()
+    assert "light (19)" in heads and "switch (10)" in heads, heads
+    assert [h.split(" ")[0] for h in heads] == sorted(h.split(" ")[0] for h in heads), heads
+    m = await box.evaluate("e => ({sh: e.scrollHeight, ch: e.clientHeight})")
+    assert m["sh"] > m["ch"] and m["ch"] <= 300, m
+    assert await box.locator(".svc", has_text="toggle").count() >= 10
+    card = await page.locator("hh-overview section[aria-labelledby=hp]").bounding_box()
+    assert card["height"] < 700, card
+    if SHOTS:
+        await page.locator("hh-overview section[aria-labelledby=hp]").screenshot(path=f"{SHOTS}/permissions.png")
+
+
+async def test_layer_pills_fit_at_1024_and_overflow_into_a_menu_past_five(browser, large):
+    page = await open_large(browser, large, 1024, 768)
+    fits = (
+        "() => { const r = " + STUDIO + ".querySelector('.layers'); return [r.scrollWidth <= r.clientWidth + 1, r.querySelectorAll('button').length, "
+        + STUDIO
+        + ".querySelectorAll('.lw select').length]; }"
+    )
+    assert await page.evaluate(fits) == [True, 4, 0]  # Default + 3 activities
+    await page.evaluate(
+        f"() => {STORE}.edit(c => {{ c.activities.push({{id: 'a4', name: 'Music', devices: [{{device: 'avr'}}]}}); }})"
+    )
+    assert await page.evaluate(fits) == [True, 5, 0]  # five layers: all pills, no scroll
+    await page.evaluate(
+        f"() => {STORE}.edit(c => {{ for (const n of ['a5', 'a6', 'a7']) c.activities.push({{id: n, name: 'Extra ' + n, devices: [{{device: 'avr'}}]}}); }})"
+    )
+    assert await page.evaluate(fits) == [True, 4, 1]  # eight layers: four pills and a "More" menu
+    more = page.locator("hh-studio").locator("select[aria-label='More layers']")
+    await more.select_option("a7")
+    await page.locator("hh-studio .layers button[aria-selected=true]", has_text="Extra a7").wait_for()
+    assert await page.evaluate(fits) == [True, 4, 1]
+
+
+async def test_hub_limits_are_refused_in_the_ui_with_the_reason(browser, large):
+    page = await open_large(browser, large)
+    # 256 commands in total: the keypad's "+ command" is disabled and says why
+    await page.evaluate(
+        f"() => {STORE}.edit(c => {{ const t = c.devices[0]; "
+        "for (let i = 0; Object.keys(t.commands).length + 25 + 21 + 8 < 256; i++) t.commands['pad' + i] = {proto: 'nec', addr: 1, cmd: i % 256}; })"
+    )
+    await page.goto(f"{large}{PREFIX}/#/devices/tv")
+    add = page.locator("hh-devices button.k", has_text="+ command")
+    await add.wait_for()
+    assert await add.is_disabled()
+    assert "at most 256 commands" in (await add.get_attribute("title"))
+    # 16 devices: the gallery's "Add device" is not a link any more
+    await page.evaluate(
+        f"() => {STORE}.edit(c => {{ for (let i = 0; c.devices.length < 16; i++) c.devices.push({{id: 'x' + i, name: 'X' + i, commands: {{a: {{proto: 'nec', addr: 1, cmd: 1}}}}}}); }})"
+    )
+    await page.goto(f"{large}{PREFIX}/#/devices")
+    await page.locator("hh-devices .add[aria-disabled=true]").wait_for()
+    assert await page.locator("hh-devices a.add").count() == 0

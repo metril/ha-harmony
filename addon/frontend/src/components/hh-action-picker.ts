@@ -5,7 +5,7 @@ import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { HA_DOMAINS } from '../lib/studio-state';
 import { ACTION_DOMAINS, haProblem } from '../lib/ha-rules';
-import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, entityDomain, fieldData, groupCommand, pretty, resolveIr, type Source } from '../lib/studio-model';
+import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, entityDomain, isHaAction, fieldData, groupCommand, pretty, resolveIr, type Source } from '../lib/studio-model';
 import './hh-send-ir';
 
 type Kind = 'command' | 'input' | 'activity' | 'alloff' | 'ha';
@@ -20,6 +20,7 @@ export class HhActionPicker extends LitElement {
       :host { display: grid; gap: 10px; min-width: 0; font-size: 13px; }
       .cur { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--r1); background: var(--sf2); }
       .cur b { font-weight: 600; }
+      .cur b.nm { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .sp { flex: 1; }
       .seg { display: flex; flex-wrap: wrap; gap: 4px; }
       .seg button { height: 30px; padding: 0 10px; border-radius: 15px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); cursor: pointer; font-size: 12px; font-weight: 600; }
@@ -167,10 +168,11 @@ export class HhActionPicker extends LitElement {
   protected override render() {
     if (!this.host) return nothing;
     const sug = this.suggestions();
-    const cur = this.value ? describeAction(this.cfg, this.value) : this.current || 'Nothing';
+    const cur = this.value ? describeAction(this.cfg, this.value, this.host.state.entityNames()) : this.current || 'Nothing';
     const ir = resolveIr(this.cfg, this.value);
+    const ha = !ir && this.value && isHaAction(this.cfg, this.value);
     return html`
-      <div class="cur"><span class="muted">Now</span> <b>${cur}</b>${ir ? html`<span class="sp"></span><hh-send-ir .code=${ir} name=${cur}></hh-send-ir>` : nothing}</div>
+      <div class="cur"><span class="muted">Now</span> <b class="nm" title=${cur}>${cur}</b>${ir ? html`<span class="sp"></span><hh-send-ir .code=${ir} name=${cur}></hh-send-ir>` : ha ? html`<span class="sp"></span><hh-send-ir ha></hh-send-ir>` : nothing}</div>
       <label>Search
         <input type="search" placeholder="vol_up, Watch TV, light…" .value=${this.q} @input=${(e: Event) => (this.q = (e.target as HTMLInputElement).value)} />
       </label>

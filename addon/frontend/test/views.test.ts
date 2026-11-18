@@ -79,6 +79,17 @@ describe('screens render with a realistic config', () => {
     expect(ov.shadowRoot!.querySelector('a.btn.pri')?.getAttribute('href')).toBe('#/devices/new');
   });
 
+  it('hh-send-ir shows an HA badge, no button, for a Home Assistant action or device', async () => {
+    await boot();
+    for (const props of [{ code: { ha: { service: 'light.toggle', target: { entity_id: 'light.a' } } } }, { ha: true, code: { proto: 'nec', addr: 1, cmd: 1 } }]) {
+      const el = Object.assign(document.createElement('hh-send-ir'), props) as unknown as HTMLElement & { updateComplete: Promise<unknown> };
+      document.body.append(el);
+      await el.updateComplete;
+      expect(el.shadowRoot!.querySelector('button')).toBeNull();
+      expect(el.shadowRoot!.querySelector('.ha')!.textContent).toBe('HA');
+    }
+  });
+
   it('devices: keypad of 60+ commands, each with its own Send IR; the list view has every row', async () => {
     const { app, calls } = await boot({ hash: '#/devices/tv' });
     const dv = app.shadowRoot!.querySelector('hh-devices')!;

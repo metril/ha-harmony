@@ -133,9 +133,9 @@ export class HhInspector extends LitElement {
     const state = layer === DEFAULT_LAYER ? (row?.action ? 'Assigned' : 'Does nothing') : row?.source === 'activity' ? 'Overrides Default' : row?.source === 'default' ? 'Inherited from Default' : 'Does nothing';
     return html`<div class="pad">
       <h2>${keyTitle(name)} <span class="chip">${this.st.layerName(layer)}</span></h2>
-      <div class="muted">${state}${row?.action ? ` · ${row.action.label}` : ''}</div>
+      <div class="muted">${state}${row?.action ? ` · ${this.host.state.actionLabel(row.action)}` : ''}</div>
       ${this.errorsFor((t) => t.kind === 'key' && t.key === name)}
-      <hh-action-picker .host=${this.host} .value=${raw} .current=${row?.action ? `${row.action.label}${row.source === 'default' && layer !== DEFAULT_LAYER ? ' (from Default)' : ''}` : ''} mode="key" ?inherits=${layer !== DEFAULT_LAYER} @pick=${(e: CustomEvent<Source>) => this.fireSource({ ...e.detail })}></hh-action-picker>
+      <hh-action-picker .host=${this.host} .value=${raw} .current=${row?.action ? `${this.host.state.actionLabel(row.action)}${row.source === 'default' && layer !== DEFAULT_LAYER ? ' (from Default)' : ''}` : ''} mode="key" ?inherits=${layer !== DEFAULT_LAYER} @pick=${(e: CustomEvent<Source>) => this.fireSource({ ...e.detail })}></hh-action-picker>
     </div>`;
   }
 

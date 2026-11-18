@@ -2,7 +2,7 @@
 import type { Config } from './model';
 
 export interface Permissions {
-  entities: { id: string; uses: string[] }[];
+  entities: { id: string; uses: string[]; services: string[] }[];
   services: { service: string; uses: number }[];
 }
 type Rec = Record<string, unknown>;
@@ -18,11 +18,15 @@ export function permissions(cfg: Config): Permissions {
   const ents = new Map<string, Set<string>>();
   const svcs = new Map<string, number>();
   const ent = (id: string, use: string) => ents.set(id, (ents.get(id) ?? new Set()).add(use));
+  const used = new Map<string, Set<string>>();
   const act = (a: unknown, use: string) => {
     const h = haOf(a);
     if (!h) return;
     svcs.set(h.service, (svcs.get(h.service) ?? 0) + 1);
-    h.ids.forEach((i) => ent(i, use));
+    h.ids.forEach((i) => {
+      ent(i, use);
+      used.set(i, (used.get(i) ?? new Set()).add(h.service));
+    });
   };
   for (const d of cfg.devices ?? []) {
     const dn = d.name ?? d.id;
@@ -45,7 +49,7 @@ export function permissions(cfg: Config): Permissions {
       act(w['tap'], use);
     }
   return {
-    entities: [...ents].map(([id, u]) => ({ id, uses: [...u] })).sort((a, b) => a.id.localeCompare(b.id)),
+    entities: [...ents].map(([id, u]) => ({ id, uses: [...u], services: [...(used.get(id) ?? [])].sort() })).sort((a, b) => a.id.localeCompare(b.id)),
     services: [...svcs].map(([service, uses]) => ({ service, uses })).sort((a, b) => a.service.localeCompare(b.service)),
   };
 }
@@ -57,4 +61,14 @@ export function tileDefaultTap(entityId: string): string | null {
   if (['scene', 'script'].includes(d)) return `${d}.turn_on`;
   if (['button', 'input_button'].includes(d)) return `${d}.press`;
   return null;
+}
+
+/** Entities grouped by domain (light, switch, ...), domains and entities in alphabetical order. */
+export function byDomain(p: Permissions): { domain: string; entities: Permissions['entities'] }[] {
+  const g = new Map<string, Permissions['entities']>();
+  for (const e of p.entities) {
+    const d = e.id.split('.')[0] ?? '';
+    g.set(d, [...(g.get(d) ?? []), e]);
+  }
+  return [...g].map(([domain, entities]) => ({ domain, entities })).sort((a, b) => a.domain.localeCompare(b.domain));
 }

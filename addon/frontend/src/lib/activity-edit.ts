@@ -82,6 +82,30 @@ function metaOf(cfg: Config, id: string): ActMeta {
   const acts = (cfg.editor['activities'] = (cfg.editor['activities'] as Record<string, ActMeta> | undefined) ?? {}) as Record<string, ActMeta>;
   return (acts[id] = acts[id] ?? {});
 }
+/** Editor metadata stays far below the server's caps (65536 bytes, 5000 nodes): the editor writes only ids it can show. */
+export const EDITOR_SOFT_MAX = 32 * 1024;
+export const editorBytes = (cfg: Config): number => (cfg.editor ? JSON.stringify(cfg.editor).length : 0);
+/** The config with `editor.activities` reduced to what the editor can use: entries of existing activities only, chains of
+ *  that activity's devices, short strings, at most 128 filled keys; `filled` (a convenience) goes first if still over the soft cap.
+ *  Returns the same object when nothing needs to change. */
+export function boundEditor(cfg: Config): Config {
+  const acts = cfg.editor?.['activities'] as Record<string, ActMeta> | undefined;
+  if (!acts) return cfg;
+  const keep: Record<string, ActMeta> = {};
+  for (const a of cfg.activities ?? []) {
+    const m = acts[a.id];
+    if (!m || typeof m !== 'object') continue;
+    const devs = new Set((a.devices ?? []).map((d) => d.device));
+    const out: ActMeta = {};
+    if (Array.isArray(m.chain)) out.chain = m.chain.filter((d) => devs.has(d)).slice(0, 16);
+    if (m.handlers) out.handlers = Object.fromEntries(Object.entries(m.handlers).filter(([k, v]) => typeof v === 'string' && k.length <= 100).map(([k, v]) => [k, v.slice(0, 100)]).slice(0, 32));
+    if (m.filled) out.filled = Object.fromEntries(Object.entries(m.filled).slice(0, 128));
+    keep[a.id] = out;
+  }
+  const next = { ...cfg, editor: { ...cfg.editor, activities: keep } } as Config;
+  if (editorBytes(next) > EDITOR_SOFT_MAX) for (const m of Object.values(keep)) delete m.filled;
+  return JSON.stringify(next.editor) === JSON.stringify(cfg.editor) ? cfg : next;
+}
 export const readMeta = (cfg: Config, id: string): ActMeta => ((cfg.editor?.['activities'] as Record<string, ActMeta> | undefined)?.[id] ?? {}) as ActMeta;
 
 /** Visual order of the device cards: the saved chain, then any device not in it. */
