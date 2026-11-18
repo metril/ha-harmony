@@ -26,25 +26,18 @@ static uint32_t tick_cb(void) { return (uint32_t)g_tick_sys->ops.now_ms(g_tick_s
 
 /* ---- version 2: page store, navigation, local keys ---- */
 
-/* Renders the page `cur` from the store, or the "Receiving page k of N" screen while the set is incomplete or the page
- * has not arrived yet (it resolves when it does: see PAGE_PUSH). */
+/* Renders the page `cur` from the store when it is there and the set is complete (or shown partially: see
+ * partial_check); else the "Receiving page k of N" screen. */
 static void show_cur(app_t *a) {
   unsigned have = hp_store_count(&a->store), need = hp_store_need(&a->store);
   ra_display_note(&a->display, RA_WHY_PAGE, 0);
   hp_page_t p;
-  if (hp_store_complete(&a->store) && a->cur >= 0 && hp_store_get(&a->store, (uint8_t)a->cur, &p) == 0) {
+  if ((hp_store_complete(&a->store) || a->partial) && a->cur >= 0 && hp_store_get(&a->store, (uint8_t)a->cur, &p) == 0) {
     ra_ui_show_page(&a->ui, &p);
     return;
   }
-  if (a->cur >= 0 && (unsigned)a->cur >= need) need = (unsigned)a->cur + 1; /* a page past the set: still on its way */
   if (have >= need) need = have + 1;
   ra_ui_show_receiving_n(&a->ui, have, need);
-}
-
-static void goto_page(app_t *a, int id) {
-  if (id < 0 || id == a->cur) return;
-  a->cur = id;
-  show_cur(a);
 }
 
 /* A stored page is on screen. */
@@ -52,7 +45,37 @@ static bool on_stored_page(const app_t *a) {
   return a->v2 && a->cur >= 0 && a->ui.page.version == 2 && a->ui.page.page_id == a->cur;
 }
 
-static void go_home(app_t *a) { goto_page(a, hp_store_start(&a->store)); }
+/* Shows stored page `id`. A target outside the set is ignored; one that has not arrived toasts and stays. */
+static void goto_page(app_t *a, int id) {
+  if (id < 0 || (unsigned)id >= hp_store_need(&a->store)) return;
+  if (!hp_store_has(&a->store, (uint8_t)id)) {
+    ra_ui_toast(&a->ui, "Page not received yet", NULL);
+    return;
+  }
+  if (id == a->cur && on_stored_page(a)) return;
+  a->cur = id;
+  show_cur(a);
+}
+
+/* To the start page (home, else page 0, else the lowest stored) from any state: also the receiving and error screens. */
+static void go_home(app_t *a) {
+  int id = hp_store_start(&a->store);
+  if (id < 0) return;
+  if (!hp_store_complete(&a->store)) a->partial = true; /* the user asked for a page: show what there is */
+  if (id == a->cur && on_stored_page(a)) return;
+  a->cur = id;
+  show_cur(a);
+}
+
+/* Incomplete set, nothing new for APP_PARTIAL_MS: show the best stored page and keep filling in the background. */
+static uint32_t partial_wait_ms(const app_t *a, uint64_t now) {
+  if (!a->v2 || a->partial || !hp_store_count(&a->store) || hp_store_complete(&a->store)) return UINT32_MAX;
+  uint64_t due = a->last_page_ms + APP_PARTIAL_MS;
+  return now >= due ? 0 : (uint32_t)(due - now);
+}
+static void partial_check(app_t *a, uint64_t now) {
+  if (partial_wait_ms(a, now) == 0) go_home(a);
+}
 
 static void page_step(app_t *a, int dir) {
   const hp_page_t *p = &a->ui.page;
@@ -70,24 +93,24 @@ static bool local_key(app_t *a, uint8_t code, uint8_t action) {
     if (action == HP_KEY_ACTION_RELEASE) a->swallowed &= (uint8_t)~(1u << bit);
     return sw;
   }
-  if (!a->v2 || !on_stored_page(a)) return false;
+  if (!a->v2 || !hp_store_count(&a->store)) return false;
+  bool stored = on_stored_page(a);
   const hp_page_t *p = &a->ui.page;
   if (bit == 0 || bit == 1) {
-    if (p->seq_cnt < 2) return false;
+    if (!stored || p->seq_cnt < 2) return false;
     a->swallowed |= (uint8_t)(1u << bit);
     page_step(a, bit == 1 ? 1 : -1);
     return true;
   }
   if (bit == 2) {
-    if (!p->back) return false;
+    if (stored && !p->back) return false; /* a plain page: Exit goes to the hub; the receiving / error screens go Home */
     a->swallowed |= 4;
     go_home(a);
     return true;
   }
-  if (code == a->key_home || code == a->key_fav) {
-    if (action == HP_KEY_ACTION_PRESS)
-      goto_page(a, hp_store_find_kind(&a->store, code == a->key_home ? HP_PAGE_KIND_HOME : HP_PAGE_KIND_FAVORITES));
-  }
+  if (action != HP_KEY_ACTION_PRESS) return false;
+  if (code == a->key_home) go_home(a);
+  else if (code == a->key_fav) goto_page(a, hp_store_find_kind(&a->store, HP_PAGE_KIND_FAVORITES));
   return false;
 }
 
@@ -101,7 +124,8 @@ static bool sink_widget(void *ctx, const hp_widget_t *w) {
 static void sink_bar(void *ctx, int x, int y) {
   app_t *a = ctx;
   (void)y;
-  if (on_stored_page(a) && a->ui.page.back && x < 40) go_home(a); /* the back chevron */
+  if (x >= 40 || !a->v2) return;
+  if (!on_stored_page(a) || a->ui.page.back) go_home(a); /* the back chevron; on the receiving / error screens the same corner */
 }
 
 static void sink_emit(void *ctx, uint8_t code, uint8_t action) {
@@ -131,6 +155,8 @@ static void sink_touch(void *ctx, int x, int y, bool down) {
   ra_display_note(&a->display, down ? RA_WHY_PRESS : RA_WHY_RELEASE, a->input_ms);
   if (down) ra_ui_press_at(&a->ui, x, y);
   else ra_ui_release(&a->ui);
+  if (!down && a->v2 && a->ui.page.page_id == RA_UI_PAGE_ERROR)
+    a->home_req = true; /* the error screen has nothing to tap: any tap retries (after this touch is done: it would hit the new page) */
 }
 static void sink_activity(void *ctx, uint64_t now) {
   app_t *a = ctx;
@@ -181,12 +207,13 @@ static void heard(app_t *a, uint64_t now) {
   ra_ui_set_link(&a->ui, 0);
 }
 
-/* A version 2 page: into the store (a new gen clears it). While the set is incomplete the screen is "Receiving page k of
- * N"; when it completes the home page (else page 0, or the running activity's page) is shown; afterwards a page is
- * re-rendered only when the one on screen was replaced, or the one being waited for arrived. An identical re-push changes
- * nothing at all. */
-static void push_v2(app_t *a, const uint8_t *raw, size_t len) {
-  if (hp_store_same(&a->store, raw, len)) return;
+/* A version 2 page: into the store (a new gen or total clears it). While the set is incomplete the screen is "Receiving
+ * page k of N" (APP_PARTIAL_MS after the last page: the best stored page, see partial_check); when it completes the home
+ * page (else page 0, or the running activity's page) is shown; afterwards a page is re-rendered only when the one on
+ * screen was replaced. An identical re-push of a stored page changes nothing, but only in v2 mode: the first v2 page after
+ * v1 pages always switches the remote to v2. */
+static void push_v2(app_t *a, const uint8_t *raw, size_t len, uint64_t now) {
+  if (a->v2 && hp_store_same(&a->store, raw, len)) return;
   int r = hp_store_put(&a->store, raw, len);
   if (r < 0) {
     ra_logf(&a->sys, "page_push rejected (%d)", r);
@@ -196,10 +223,15 @@ static void push_v2(app_t *a, const uint8_t *raw, size_t len) {
     a->v2 = true;
     a->have_saved = false;
     a->cur = -1;
+    a->partial = false;
   }
-  if (r == HP_STORE_CLEARED) a->cur = -1;
+  a->last_page_ms = now;
+  if (r == HP_STORE_CLEARED) {
+    a->cur = -1;
+    a->partial = false;
+  }
   bool complete = hp_store_complete(&a->store);
-  if (!complete) {
+  if (!complete && !a->partial) {
     if (a->ui.page.version != 2 || a->ui.page.page_id != a->cur || a->cur < 0) show_cur(a); /* progress */
     return;
   }
@@ -210,8 +242,8 @@ static void push_v2(app_t *a, const uint8_t *raw, size_t len) {
       if (pg >= 0) a->cur = pg;
     }
     show_cur(a);
-  } else if (raw[1] == a->cur || !on_stored_page(a)) { /* the visible page was replaced, or the awaited page arrived */
-    show_cur(a);
+  } else if (raw[1] == a->cur || !on_stored_page(a)) { /* the visible page was replaced, or the screen is not a stored page */
+    if (hp_store_has(&a->store, (uint8_t)a->cur)) show_cur(a);
   }
 }
 
@@ -221,7 +253,7 @@ static void state_v2(app_t *a, uint8_t activity, bool power) {
   bool changed = !a->state_known || a->last_activity != activity || a->last_power != power;
   a->state_known = true;
   ra_ui_set_activity(&a->ui, activity, power);
-  if (!a->v2 || !changed || !hp_store_complete(&a->store)) return;
+  if (!a->v2 || !changed || !(hp_store_complete(&a->store) || a->partial)) return;
   if (power) {
     int pg = hp_store_find_act(&a->store, (uint8_t)(activity + 1));
     if (pg >= 0) goto_page(a, pg);
@@ -235,7 +267,7 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
   case APP_LINK_EV_PAGE_PUSH: {
     heard(a, now);
     if (ev->len >= 1 && ev->data[0] == 2) {
-      push_v2(a, ev->data, ev->len);
+      push_v2(a, ev->data, ev->len, now);
       break;
     }
     hp_page_t p;
@@ -243,7 +275,14 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
     if (r < 0) {
       ra_logf(&a->sys, "page_push rejected (%d)", r);
     } else {
-      a->v2 = false; /* a version 1 page: the old single-page behaviour */
+      /* A version 1 page: the old single-page behaviour. It replaces the display and leaves v2 mode (what a v1-only Home
+       * Assistant needs); the v2 set is dropped, and the next v2 page starts a fresh one. */
+      if (a->v2) {
+        a->v2 = false;
+        a->partial = false;
+        a->cur = -1;
+        hp_store_init(&a->store);
+      }
       a->saved = p;
       a->have_saved = true;
       ra_display_note(&a->display, RA_WHY_PAGE, 0);
@@ -307,9 +346,9 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   if (lfd >= 0) fds[nfd++] = lfd;
   uint32_t cap = lfd >= 0 ? APP_LINK_IDLE_WAIT_MS : LINK_POLL_MS;
   uint32_t t = max_wait_ms < cap ? max_wait_ms : cap;
-  uint32_t d[4] = {lv_ms, ra_power_next_ms(&a->power, now), ra_input_next_ms(&a->input, now),
-                   a->link.next_ms ? a->link.next_ms(a->link.ctx, now) : UINT32_MAX};
-  for (int i = 0; i < 4; i++)
+  uint32_t d[5] = {lv_ms, ra_power_next_ms(&a->power, now), ra_input_next_ms(&a->input, now),
+                   a->link.next_ms ? a->link.next_ms(a->link.ctx, now) : UINT32_MAX, partial_wait_ms(a, now)};
+  for (int i = 0; i < 5; i++)
     if (d[i] < t) t = d[i];
   int ready[3] = {0, 0, 0};
   int w = a->sys.ops.wait(a->sys.ops.ctx, fds, nfd, t, ready);
@@ -345,6 +384,11 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   a->last_awake = awake;
   app_link_event_t ev;
   for (int i = 0; i < LINK_EVENTS_PER_STEP && a->link.poll(a->link.ctx, now, &ev) > 0; i++) handle_link_event(a, &ev, now);
+  if (a->home_req) {
+    a->home_req = false;
+    go_home(a);
+  }
+  partial_check(a, now);
   lv_timer_ready(lv_display_get_refr_timer(a->display.disp)); /* a page, tile or status change: draw it now, not at the next 33 ms tick */
   lv_timer_handler(); /* render what changed */
   if (a->lowbatt_pending && a->power.state != RA_PW_OFF) { /* the screen is on and its frame is drawn: show it now */

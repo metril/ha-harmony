@@ -73,7 +73,9 @@ int hp_store_find_act(const hp_store_t *s, uint8_t act) {
 int hp_store_start(const hp_store_t *s) {
     int h = hp_store_find_kind(s, HP_PAGE_KIND_HOME);
     if (h >= 0) return h;
-    return hp_store_need(s) && hp_store_has(s, 0) ? 0 : -1;
+    for (unsigned i = 0; i < hp_store_need(s); i++) /* page 0, else the lowest stored: an incomplete set still has a start */
+        if (s->meta[i].len) return (int)i;
+    return -1;
 }
 
 int hp_store_tile(hp_store_t *s, uint8_t page, uint8_t tile, uint8_t state, const char *text, size_t len) {

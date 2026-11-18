@@ -70,6 +70,9 @@ typedef struct {
    * is the page id on screen or being waited for (-1 none). */
   hp_store_t store;
   bool v2, state_known;
+  bool home_req;          /* a tap on the error screen: go to the start page after the input is handled */
+  bool partial;           /* the set is incomplete and the best stored page is shown (timeout, or the user pressed Home) */
+  uint64_t last_page_ms;  /* when the last new v2 page arrived */
   int cur;
   uint8_t key_up, key_down, key_exit, key_home, key_fav; /* logical ids of the hard keys the app handles itself */
   uint8_t swallowed;                                     /* bit 0..2: Up, Down, Exit were consumed at press: their holds / release too */
@@ -88,6 +91,8 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
  * input, holds, power, link events and LVGL timers. */
 void app_step(app_t *a, unsigned max_wait_ms);
 
+/* An incomplete page set shows the best stored page this long after its last page arrived. */
+#define APP_PARTIAL_MS 10000
 #define APP_FAIL_COUNT 3
 #define APP_FAIL_SILENCE_MS 5000
 

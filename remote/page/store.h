@@ -53,7 +53,7 @@ int hp_store_get(const hp_store_t *, uint8_t id, hp_page_t *out);
 /* Lowest id of a page of that kind / that `act` value (activity index + 1), or -1. */
 int hp_store_find_kind(const hp_store_t *, uint8_t kind);
 int hp_store_find_act(const hp_store_t *, uint8_t act);
-/* The page shown first: the home page, else page 0; -1 if that page is not held. */
+/* The page shown first: the home page, else page 0, else the lowest stored id (an incomplete set); -1 if none. */
 int hp_store_start(const hp_store_t *);
 /* Records live state for a tile (state: hp_tile_state_t). 0; -HP_E_INVAL bad UTF-8. */
 int hp_store_tile(hp_store_t *, uint8_t page, uint8_t tile, uint8_t state, const char *text, size_t len);

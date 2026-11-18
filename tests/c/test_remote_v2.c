@@ -385,8 +385,8 @@ static void test_exit_on_back_page_goes_home_and_chevron(void) {
   app_destroy(&app);
 }
 
-/* A page referenced but not yet received: the receiving screen, resolved when the page arrives. */
-static void test_missing_page_shows_receiving_then_resolves(void) {
+/* A nav target that has not arrived (after the receiving screen gave way to the best page): a brief toast, the screen stays. */
+static void test_missing_nav_target_toasts_and_stays(void) {
   start();
   push_set(3, 0);
   settle();
@@ -397,11 +397,141 @@ static void test_missing_page_shows_receiving_then_resolves(void) {
   memset(&app.store.meta[3], 0, sizeof app.store.meta[3]); /* page 3 never arrived (a lost page) */
   app.store.count--;
   tap_widget(2); /* nav to 3 */
-  CT_EQ(app.ui.page.page_id, RA_UI_PAGE_RECEIVING);
-  CT_CHECK(!strcmp(cap_text(), "4 of 5"));
+  CT_EQ(shown(), 1); /* stays put, not the receiving screen */
+  CT_CHECK(app.ui.toast != NULL);
+  CT_CHECK(!strcmp(lv_label_get_text(lv_obj_get_child(app.ui.toast, 0)), "Page not received yet"));
   fkl_push_page(&lk, keep, klen);
   settle();
-  CT_EQ(shown(), 3); /* resolved: the awaited page, not Home */
+  CT_EQ(shown(), 1);
+  tap_widget(2);
+  CT_EQ(shown(), 3); /* now it is there */
+  app_destroy(&app);
+}
+
+/* ---- review fixes: receiving timeout, dead touch, v1 <-> v2 ---- */
+
+static const ws_t A1 = {HP_WIDGET_BUTTON, 1, 0, 0, 2, 1, 0, 0, 0, 0, -1, "A"};
+
+static void test_incomplete_set_shows_best_page_after_10s(void) {
+  start();
+  ws_t a[] = {A1};
+  push(2, 4, 5, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "Two", a, 1);
+  push(3, 4, 5, HP_PAGE_KIND_HOME, 0, 0, 0, 0, "Home", a, 1);
+  settle();
+  CT_EQ(app.ui.page.page_id, RA_UI_PAGE_RECEIVING);
+  fk.now += 9000;
+  step();
+  CT_EQ(app.ui.page.page_id, RA_UI_PAGE_RECEIVING); /* not yet */
+  fk.now += 1500;
+  step();
+  CT_EQ(shown(), 3); /* the home page, though the set is incomplete */
+  tap_widget(1);
+  /* a missing target toasts and stays; the set keeps filling in the background */
+  push(1, 4, 5, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "One", a, 1);
+  settle();
+  CT_EQ(shown(), 3);
+  CT_EQ(hp_store_count(&app.store), 3u);
+  push(0, 4, 5, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "Zero", a, 1);
+  settle();
+  CT_EQ(shown(), 3); /* complete: the user is not moved */
+  CT_CHECK(hp_store_complete(&app.store));
+  app_destroy(&app);
+  /* no home page: the lowest stored id */
+  start();
+  push(2, 4, 5, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "Two", a, 1);
+  push(1, 4, 5, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "One", a, 1);
+  settle();
+  fk.now += 11000;
+  step();
+  CT_EQ(shown(), 1);
+  app_destroy(&app);
+}
+
+static void test_partial_set_nav_to_missing_page_toasts(void) {
+  start();
+  ws_t h[] = {one(1, HP_ROLE_NAV, RA_ICON_CHEV_RIGHT, 3, "Go")};
+  push(0, 4, 5, HP_PAGE_KIND_HOME, 0, 0, 0, 0, "Home", h, 1);
+  settle();
+  fk.now += 11000;
+  step();
+  CT_EQ(shown(), 0);
+  press_key(1, KEY_FAV_); /* wakes the screen if it dimmed */
+  tap_widget(1); /* page 3 has not arrived */
+  CT_EQ(shown(), 0);
+  CT_CHECK(app.ui.toast != NULL);
+  app_destroy(&app);
+}
+
+static void test_home_exit_chevron_work_from_receiving_and_error(void) {
+  start();
+  ws_t a[] = {A1};
+  push(1, 4, 5, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "One", a, 1);
+  settle();
+  CT_EQ(app.ui.page.page_id, RA_UI_PAGE_RECEIVING);
+  int sent = lk.nsent;
+  press_key(1, KEY_HOME_); /* Home on the receiving screen: the best page now */
+  CT_EQ(shown(), 1);
+  CT_EQ(lk.nsent, sent + 2); /* and still forwarded */
+  app_destroy(&app);
+
+  start();
+  push_set(3, 0);
+  settle();
+  CT_EQ(shown(), 1);
+  const int keys[3][2] = {{1, KEY_HOME_}, {0, KEY_EXIT_}, {-1, 0}};
+  for (int k = 0; k < 3; k++) {
+    ra_ui_test_fail_at = 3; /* the next page build runs out of memory */
+    tap_widget(2);          /* home -> scenes */
+    ra_ui_test_fail_at = -1;
+    CT_EQ(app.ui.page.page_id, RA_UI_PAGE_ERROR);
+    sent = lk.nsent;
+    if (keys[k][0] >= 0) press_key(keys[k][0], keys[k][1]);
+    else { /* a tap on the error screen */
+      fk.now += 40; fk_touch(&fk, 120, 160, 1); app_step(&app, 0);
+      fk.now += 40; fk_touch(&fk, 120, 160, 0); app_step(&app, 0);
+    }
+    CT_EQ(shown(), 1); /* the start page again */
+  }
+  /* the receiving screen of a new gen: the bar's left corner goes to the best page too */
+  ws_t a2[] = {A1};
+  push(0, 3, 9, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "N0", a2, 1);
+  settle();
+  CT_EQ(app.ui.page.page_id, RA_UI_PAGE_RECEIVING);
+  fk.now += 40; fk_touch(&fk, 12, 12, 1); app_step(&app, 0);
+  fk.now += 40; fk_touch(&fk, 12, 12, 0); app_step(&app, 0);
+  CT_EQ(shown(), 0);
+  app_destroy(&app);
+}
+
+/* v1 pages, remote_info, then the v2 set with the SAME gen as one stored before: the v2 home must show, with paging. */
+static void test_v1_then_identical_v2_set_switches_to_v2(void) {
+  static const uint8_t V1[] = {0x01, 0x01, 0x04, 0x06, 0x01, 0x00, 0x01, 0x00, 0x11, 0x04, 'V', 'o', 'l', '+'};
+  start();
+  push_set(3, 0);
+  settle();
+  CT_EQ(shown(), 1);
+  CT_CHECK(app.v2);
+  fkl_push_page(&lk, V1, sizeof V1); /* an old-format Home Assistant pushes v1 pages */
+  settle();
+  CT_CHECK(!app.v2);
+  CT_EQ(app.ui.page.page_id, 1);
+  CT_EQ(app.ui.page.version, 1);
+  push_set(3, 0); /* identical to what was stored before */
+  settle();
+  CT_CHECK(app.v2);
+  CT_EQ(shown(), 1); /* the v2 home */
+  tap_widget(2);
+  CT_EQ(shown(), 3);
+  CT_CHECK(app.ui.seq && !strcmp(lv_label_get_text(app.ui.seq), "1/2"));
+  press_key(0, KEY_DOWN_);
+  CT_EQ(shown(), 4); /* paging works */
+  /* the reverse: a v1 page while a v2 set is stored replaces the display and leaves v2 mode (a v1-only HA needs that) */
+  fkl_push_page(&lk, V1, sizeof V1);
+  settle();
+  CT_CHECK(!app.v2);
+  CT_EQ(app.ui.page.version, 1);
+  CT_EQ(hp_store_count(&app.store), 0u);
+  /* ...and tile updates for it work the v1 way */
   app_destroy(&app);
 }
 
@@ -452,7 +582,11 @@ int main(void) {
   CT_RUN(test_paged_up_down_are_local);
   CT_RUN(test_home_and_favorites_navigate_and_forward);
   CT_RUN(test_exit_on_back_page_goes_home_and_chevron);
-  CT_RUN(test_missing_page_shows_receiving_then_resolves);
+  CT_RUN(test_missing_nav_target_toasts_and_stays);
+  CT_RUN(test_incomplete_set_shows_best_page_after_10s);
+  CT_RUN(test_partial_set_nav_to_missing_page_toasts);
+  CT_RUN(test_home_exit_chevron_work_from_receiving_and_error);
+  CT_RUN(test_v1_then_identical_v2_set_switches_to_v2);
   CT_RUN(test_tile_state_is_kept_for_pages_off_screen);
   CT_RUN(test_v1_page_still_works_and_is_not_stored);
   return CT_DONE();
