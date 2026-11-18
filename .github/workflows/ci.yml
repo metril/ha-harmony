@@ -107,7 +107,7 @@ jobs:
           rm tc.tar
       - name: Configure
         run: >-
-          cmake -S . -B build-cross -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build-cross -DCMAKE_BUILD_TYPE=Release -DHP_ALLOW_DEV_OTA_KEY=ON
           -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/${{ matrix.tc_file }}.cmake
       - name: Build
         run: cmake --build build-cross -j
@@ -145,7 +145,7 @@ jobs:
           qemu=$(command -v qemu-mips-static || command -v qemu-mips)
           cmake -S . -B build-cross-test -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/hub-mips.cmake \
-            -DHP_BUILD_TESTS=ON -DCMAKE_CROSSCOMPILING_EMULATOR="$qemu"
+            -DHP_ALLOW_DEV_OTA_KEY=ON -DHP_BUILD_TESTS=ON -DCMAKE_CROSSCOMPILING_EMULATOR="$qemu"
           cmake --build build-cross-test -j
           ctest --test-dir build-cross-test --output-on-failure -j
 

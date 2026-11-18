@@ -94,3 +94,6 @@ if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
   add_executable(dump_remote_png dump_remote_png.c)
   target_link_libraries(dump_remote_png PRIVATE hp_remote_app hp_hub)
 endif()
+
+# Signed OTA images: SHA-512/Ed25519 vectors, verify rejections, hub staged apply (host fs only).
+add_hp_test(ota)

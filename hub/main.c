@@ -11,6 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "common/ota/ota_image.h"
 #include "hub/hp_errors.h"
 #include "hub/hub_handlers.h"
 #include "hub/io/hw_sinks.h"
@@ -292,6 +293,7 @@ int main(int argc, char **argv) {
     }
     g_tbl.hub_id = hub_id ? hub_id : sim ? "sim-hub" : real_id;
     g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : "ha-harmony-hub";
+    if (ota_pubkey_is_dev()) fprintf(stderr, "hub: dev OTA key built in (never ship this build)\n");
     hp_ws_cb_t cb = {on_text, on_close};
     hp_ws_server_t *srv = hp_ws_listen((uint16_t)port, token, &cb, NULL);
     if (!srv) {

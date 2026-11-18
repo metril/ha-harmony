@@ -18,7 +18,7 @@
 #
 # Then build the hub with:
 #   HP_TOOLCHAIN_ROOT=vendor/toolchains/mips_24kc cmake -S . -B build-cross \
-#       -DCMAKE_BUILD_TYPE=Release \
+#       -DCMAKE_BUILD_TYPE=Release -DHP_ALLOW_DEV_OTA_KEY=ON \
 #       -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/hub-mips.cmake
 #   cmake --build build-cross -j
 set -eu

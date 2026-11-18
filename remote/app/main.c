@@ -2,6 +2,7 @@
 /* harmony_remote: the Harmony Elite remote app. Renders pages with LVGL on /dev/fb0, reads the hard
  * keys and touch from evdev, drives backlight/LEDs, guards the battery and speaks to the hub over
  * the RF link (--rf spi, remote/app/rf_link.h). */
+#include "common/ota/ota_image.h"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,7 @@ int main(int argc, char **argv) {
     ra_cli_usage(stderr, argv[0]);
     return 2;
   }
+  if (ota_pubkey_is_dev()) fprintf(stderr, "harmony_remote: dev OTA key built in (never ship this build)\n");
   fprintf(stderr, "harmony_remote: rf=%s powermode=0x%02X%s slot=%u\n", cli.rf_spi ? "spi" : "none", cli.powermode,
           cli.powermode ? "" : " (default, unvalidated)", cli.slot);
 
