@@ -87,7 +87,8 @@ async def test_restart_with_a_different_hub_hash_waits_for_the_push(hass, rig, c
     hub.got.clear()
     await hass.config_entries.async_reload(entry.entry_id)
     await settle(hass, lambda: any(t == "set_config" for t, _ in hub.got))
-    await settle(hass)
+    c2 = entry.runtime_data
+    await settle(hass, lambda: entry.runtime_data.config_state == "accepted")  # the ack arrives over the socket
     c2 = entry.runtime_data
     assert c2.config_state == "accepted" and c2.compiled.devices  # promoted by the acked push
     assert er.async_get(hass)  # registry intact
