@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.14 (2026-11-19)
+
 - Editor: Bluetooth fixes. A pairing run only accepts a result that differs from the one held when its window opened, with a newer `gen`, and (when ok) an address the hub lists, so an earlier pairing is never reported for a timed-out run; the hub now clears the last pairing result when a window opens. Status polling keeps one timer and drops overtaken responses; a retry id is bound to its action; leaving the key learner or the pairing wizard mid-request turns listening off and closes the window; a learned press on a page the hub cannot map is explained instead of assigned; Bluetooth commands (default set included) count against the command limit like the backend counts them; the palette shows a default-set device's commands; the countdown is no longer read out every second; remote renames refuse duplicates; the phone key map takes two lines per key. The bundle budget for all JS is 200 KiB (lazy chunks), the entry stays at 90 KiB.
 
 
