@@ -25,7 +25,7 @@ send, LE supported). Values come from the link, never constants. Absent: no `bt_
 
 ## bt_state
 
-`{state, discoverable, discoverable_secs?, le?, pairing?, hosts, remotes?}`
+`{state, discoverable, discoverable_secs?, le?, gen?, pairing?, hosts, remotes?}`
 
 - `state`: `off` | `starting` | `ready` | `no_adapter` | `disabled`.
 - `discoverable_secs`: seconds left while discoverable.
@@ -53,3 +53,15 @@ not depend on it.
 Slots are one byte, so `bt_state` can list up to 255 hosts and 32 remotes. The hub keeps it inside one 64 KiB frame:
 every entry's fixed part is always sent, but the optional `name` is dropped from the entries that would push the message
 past a 40,000-byte budget (worst-case escaped names included). Clients must treat `name` as optional.
+
+## Semantics
+
+- The hub sends `bt_state` (id 0) right after `hello_ack` on builds with Bluetooth; that is the read-only way to get it.
+- The reply to `bt_pair` / `bt_forget` is a snapshot taken when the request was accepted, not its outcome. The outcome
+  arrives as a later `bt_state` push. `bt_key` is best effort: an asynchronous failure is not reported.
+- `gen` is bumped by the hub's Bluetooth link on every change. The `discoverable_secs` countdown does not push anything:
+  count down locally from the last value.
+- Bursts of changes are coalesced into one push per event-loop pass.
+- If the helper dies, `state` leaves `ready`, `hosts` / `remotes` / `pairing` are cleared and a push follows.
+- Values from nearby devices are untrusted: an entry whose `addr` is not `AA:BB:CC:DD:EE:FF` is omitted, and a `name`
+  that is not valid UTF-8 is omitted.

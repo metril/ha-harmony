@@ -291,6 +291,7 @@ messages:
       - {name: discoverable, type: bool}
       - {name: discoverable_secs, type: u16, optional: true}
       - {name: le, type: bool, optional: true}  # the adapter can do Bluetooth LE
+      - {name: gen, type: u32, optional: true}  # bumped by the link on every change (not by the discoverable_secs countdown)
       - {name: pairing, type: json, optional: true}
       - {name: hosts, type: json}
       - {name: remotes, type: json, optional: true}  # bonded LE remotes (input): [{slot, addr, name?, connected, battery?}]

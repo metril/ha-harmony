@@ -37,6 +37,11 @@ static void setup(void) {
     seen_n = 0;
 }
 
+static void notify(void) {
+    bt_fake_notify();
+    hub_flush_pending(&H); /* one broadcast per event-loop pass */
+}
+
 static void send_msg(const char *json) {
     size_t n = 0;
     reply[0] = 0;
@@ -184,7 +189,7 @@ static void test_state_json_and_broadcast(void) {
     snprintf(g_bt_fake.state.pairing_name, BT_LINK_NAME_MAX, "Phone");
     g_bt_fake.state.pairing_transport = BT_TRANSPORT_LE;
     add_host(2, "AA:BB:CC:DD:EE:03", "Phone", BT_TRANSPORT_LE, true);
-    bt_fake_notify(); /* a change on the link reaches the broadcast path */
+    notify(); /* a change on the link reaches the broadcast path */
     CT_EQ(seen_n, 1);
     CT_CHECK(!strcmp(seen_type, "bt_state"));
     CT_CHECK(strstr(seen_json, "\"pairing\":{\"result\":\"ok\",\"addr\":\"AA:BB:CC:DD:EE:03\",\"name\":\"Phone\",\"kind\":\"host\",\"transport\":\"le\"}"));
@@ -193,13 +198,13 @@ static void test_state_json_and_broadcast(void) {
     g_bt_fake.state.pairing_name[0] = 0;
     g_bt_fake.state.pairing_transport = BT_TRANSPORT_ANY;
     g_bt_fake.state.status = BT_NO_ADAPTER;
-    bt_fake_notify();
+    notify();
     CT_CHECK(strstr(seen_json, "\"state\":\"no_adapter\"") && strstr(seen_json, "\"result\":\"refused\"") &&
              !strstr(seen_json, "\"name\":\"\"") && !strstr(seen_json, "\"transport\":\"le\"}"));
     static const char *const names[] = {"off", "starting", "ready", "no_adapter", "disabled"};
     for (int i = 0; i < 5; i++) {
         g_bt_fake.state.status = (enum bt_link_status)i;
-        bt_fake_notify();
+        notify();
         char want[40];
         snprintf(want, sizeof want, "\"state\":\"%s\"", names[i]);
         CT_CHECK(strstr(seen_json, want));
@@ -250,7 +255,7 @@ static void test_remotes(void) {
     g_bt_fake.state.pairing = BT_PAIR_OK;
     g_bt_fake.state.pairing_kind = BT_KIND_REMOTE;
     snprintf(g_bt_fake.state.pairing_addr, BT_LINK_ADDR_MAX, "11:22:33:44:55:66");
-    bt_fake_notify();
+    notify();
     CT_CHECK(strstr(seen_json, "\"kind\":\"remote\""));
     CT_CHECK(strstr(seen_json, "\"remotes\":[{\"slot\":1,\"addr\":\"11:22:33:44:55:66\",\"name\":\"Clicker\",\"connected\":true,\"battery\":80},"
                                "{\"slot\":3,\"addr\":\"11:22:33:44:55:77\",\"connected\":false}]"));
@@ -316,8 +321,71 @@ static void test_max_hosts_fit_one_frame(void) {
     CT_CHECK(has("no_slot"));
     send_msg("{\"v\":1,\"id\":5,\"t\":\"bt_forget\",\"d\":{\"slot\":31,\"kind\":\"remote\"}}");
     CT_CHECK(has("\"t\":\"bt_state\""));
-    bt_fake_notify(); /* the broadcast path takes the same size */
+    notify(); /* the broadcast path takes the same size */
     CT_CHECK(seen_n == 1 && strlen(seen_json) > 0);
+}
+
+static void test_untrusted_link_data(void) {
+    setup();
+    hello();
+    struct bt_link_state *st = &g_bt_fake.state;
+    memset(st->hosts[0].name, 'x', BT_LINK_NAME_MAX); /* not NUL terminated */
+    snprintf(st->hosts[0].addr, sizeof st->hosts[0].addr, "AA:BB:CC:DD:EE:01");
+    st->hosts[1].slot = 1;
+    snprintf(st->hosts[1].addr, sizeof st->hosts[1].addr, "AA:BB:CC:DD:EE:02");
+    snprintf(st->hosts[1].name, sizeof st->hosts[1].name, "bad\xff\xfe");
+    st->hosts[2].slot = 2;
+    snprintf(st->hosts[2].addr, sizeof st->hosts[2].addr, "not an address!!!");
+    st->hosts[3].slot = 3;
+    snprintf(st->hosts[3].addr, sizeof st->hosts[3].addr, "AA:BB:CC:DD:EE:0\"");
+    st->hosts[4].slot = 4;
+    snprintf(st->hosts[4].addr, sizeof st->hosts[4].addr, "aa:bb:cc:dd:ee:05");
+    st->n_hosts = 5;
+    st->remotes[0].slot = 0;
+    snprintf(st->remotes[0].addr, sizeof st->remotes[0].addr, "AABBCCDDEE0000000");
+    st->n_remotes = 1;
+    st->status = (enum bt_link_status)200;
+    st->pairing = (enum bt_link_pair_result)77;
+    snprintf(st->pairing_addr, sizeof st->pairing_addr, "AA:BB:CC:DD:EE:09");
+    st->hosts[0].transport = (enum bt_link_transport)9;
+    send_msg("{\"v\":1,\"id\":2,\"t\":\"bt_pair\",\"d\":{\"on\":false}}");
+    CT_CHECK(has("\"state\":\"off\"") && !has("\"pairing\""));
+    CT_CHECK(has("\"slot\":0") && has("\"slot\":1") && has("\"slot\":4") && !has("\"slot\":2") && !has("\"slot\":3"));
+    CT_CHECK(!has("\\u00") && !has("\xff") && !has("bad")); /* bad UTF-8 name omitted */
+    CT_CHECK(has("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"") && !has("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
+    CT_CHECK(has("\"remotes\":[]"));
+    st->status = BT_READY;
+    st->pairing = BT_PAIR_OK;
+    st->pairing_transport = (enum bt_link_transport)9;
+    send_msg("{\"v\":1,\"id\":3,\"t\":\"bt_pair\",\"d\":{\"on\":false}}");
+    CT_CHECK(has("\"result\":\"ok\"") && !has("\"transport\":\"le\"}"));
+}
+
+static void test_gen_and_coalescing_and_hello_state(void) {
+    setup();
+    hello();
+    g_bt_fake.state.gen = 41;
+    send_msg("{\"v\":1,\"id\":2,\"t\":\"bt_pair\",\"d\":{\"on\":false}}");
+    CT_CHECK(has("\"gen\":41"));
+    /* a burst of changes: one broadcast per pass; no change: none */
+    g_bt_fake.state.gen = 44;
+    bt_fake_notify();
+    bt_fake_notify();
+    bt_fake_notify();
+    CT_EQ(seen_n, 0);
+    hub_flush_pending(&H);
+    CT_EQ(seen_n, 1);
+    CT_CHECK(strstr(seen_json, "\"gen\":44"));
+    hub_flush_pending(&H);
+    CT_EQ(seen_n, 1);
+    /* the state frame sent right after hello */
+    char frame[65536];
+    size_t n = 0;
+    CT_EQ(hub_bt_state_frame(frame, sizeof frame, &n), 0);
+    frame[n] = 0;
+    CT_CHECK(strstr(frame, "\"t\":\"bt_state\"") && strstr(frame, "\"id\":0") && strstr(frame, "\"gen\":44"));
+    g_bt_fake.available = false;
+    CT_CHECK(hub_bt_state_frame(frame, sizeof frame, &n) != 0);
 }
 
 static void test_unavailable(void) {
@@ -343,6 +411,8 @@ int main(void) {
     CT_RUN(test_remotes);
     CT_RUN(test_remote_key_push);
     CT_RUN(test_max_hosts_fit_one_frame);
+    CT_RUN(test_untrusted_link_data);
+    CT_RUN(test_gen_and_coalescing_and_hello_state);
     CT_RUN(test_unavailable);
     return CT_DONE();
 }

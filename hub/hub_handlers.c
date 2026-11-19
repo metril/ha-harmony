@@ -322,6 +322,14 @@ static cJSON *info_json(const hub_info_t *i) {
     return d;
 }
 
+static cJSON *bt_state_json(void);
+
+int hub_bt_state_frame(char *buf, size_t cap, size_t *len) {
+    if (!bt_link_available()) return -HP_E_NOENT;
+    cJSON *o = bt_state_json();
+    return o ? hp_make_reply(0, "bt_state", o, buf, cap, len) : -HP_E_INVAL;
+}
+
 void hub_send_state(hub_ctx_t *h, hp_ws_conn_t *c) {
     for (unsigned i = 0; i < HUB_INFO_MAX; i++) { /* what the remote announced, before the state it refers to */
         if (!h->info[i].valid) continue;
@@ -342,6 +350,11 @@ void hub_send_state(hub_ctx_t *h, hp_ws_conn_t *c) {
         cJSON *o = device_json(h, i);
         if (o && hp_make_reply(0, "device_state", o, buf, sizeof buf, &n) == 0) (void)hp_ws_send(c, buf, n);
     }
+    { /* a read-only way to learn the Bluetooth state: it follows every hello (only on builds with Bluetooth) */
+        static char bb[HP_WS_MAX_FRAME];
+        size_t bn = 0;
+        if (hub_bt_state_frame(bb, sizeof bb, &bn) == 0) (void)hp_ws_send(c, bb, bn);
+    }
     uint32_t rb = 0;
     char why[96];
     if (hp_ota_rollback_info(&h->ota, &rb, why, sizeof why)) {
@@ -359,6 +372,11 @@ void hub_send_state(hub_ctx_t *h, hp_ws_conn_t *c) {
 }
 
 void hub_flush_pending(hub_ctx_t *h) {
+    if (h->bt_dirty) { /* one bt_state per event-loop pass, however many changes the link reported */
+        h->bt_dirty = false;
+        cJSON *d = bt_state_json();
+        if (d) hub_broadcast(h, "bt_state", d);
+    }
     if (h->pending_list) {
         h->pending_list = false;
         cJSON *d = cJSON_CreateObject();
@@ -813,6 +831,23 @@ static int on_set_hub_id(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
 static const char *const bt_status_name[] = {"off", "starting", "ready", "no_adapter", "disabled"};
 static const char *const bt_result_name[] = {NULL, "ok", "failed", "refused"};
 static const char *const bt_transport_name[] = {NULL, "classic", "le"};
+#define BT_NELEM(a) (sizeof(a) / sizeof((a)[0]))
+
+/* Everything the helper reports is untrusted: strictly AA:BB:CC:DD:EE:FF (hex digits, any case). */
+static bool bt_addr_ok(const char *a) {
+    if (strnlen(a, BT_LINK_ADDR_MAX) != 17) return false;
+    for (int i = 0; i < 17; i++) {
+        if (i % 3 == 2) {
+            if (a[i] != ':') return false;
+        } else if (!((a[i] >= '0' && a[i] <= '9') || (a[i] >= 'a' && a[i] <= 'f') || (a[i] >= 'A' && a[i] <= 'F'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* A name from a nearby device: forced NUL-terminated by the caller, kept only when it is valid UTF-8. */
+static bool bt_name_ok(const char *n) { return n[0] && hp_utf8_valid((const uint8_t *)n, strlen(n)); }
 
 /* Bytes a string takes inside JSON quotes (cJSON escapes quote, backslash and control bytes). */
 static size_t json_len(const char *s) {
@@ -822,12 +857,22 @@ static size_t json_len(const char *s) {
 }
 
 #define BT_STATE_BUDGET 40000 /* of the 64 KiB frame: hosts + remotes beyond it lose their (optional) names */
-#define BT_ENTRY_FIXED 112    /* slot, addr, transport, connected and punctuation of one entry, upper bound */
+#define BT_ENTRY_FIXED 112    /* (addr is validated to 17 chars, so this is a true bound) */ /* slot, addr, transport, connected and punctuation of one entry, upper bound */
 
 static cJSON *bt_state_json(void) {
     static struct bt_link_state st; /* ~20 KB: event-loop thread only, not on the stack */
     size_t used = 0;
     bt_link_state(&st);
+    for (unsigned i = 0; i < BT_LINK_HOSTS_CAP; i++) {
+        st.hosts[i].addr[BT_LINK_ADDR_MAX - 1] = 0;
+        st.hosts[i].name[BT_LINK_NAME_MAX - 1] = 0;
+    }
+    for (unsigned i = 0; i < BT_LINK_REMOTES_CAP; i++) {
+        st.remotes[i].addr[BT_LINK_ADDR_MAX - 1] = 0;
+        st.remotes[i].name[BT_LINK_NAME_MAX - 1] = 0;
+    }
+    st.pairing_addr[BT_LINK_ADDR_MAX - 1] = 0;
+    st.pairing_name[BT_LINK_NAME_MAX - 1] = 0;
     cJSON *o = cJSON_CreateObject();
     cJSON *hosts = cJSON_CreateArray();
     if (!o || !hosts) {
@@ -835,28 +880,30 @@ static cJSON *bt_state_json(void) {
         cJSON_Delete(hosts);
         return NULL;
     }
-    cJSON_AddStringToObject(o, "state", bt_status_name[st.status]);
+    cJSON_AddStringToObject(o, "state", (unsigned)st.status < BT_NELEM(bt_status_name) ? bt_status_name[st.status] : "off");
+    cJSON_AddNumberToObject(o, "gen", st.gen);
     cJSON_AddBoolToObject(o, "discoverable", st.discoverable);
     if (st.discoverable) cJSON_AddNumberToObject(o, "discoverable_secs", st.discoverable_secs);
     cJSON_AddBoolToObject(o, "le", st.le);
-    if (st.pairing != BT_PAIR_NONE) {
+    if ((unsigned)st.pairing > BT_PAIR_NONE && (unsigned)st.pairing < BT_NELEM(bt_result_name) && bt_addr_ok(st.pairing_addr)) {
         cJSON *p = cJSON_AddObjectToObject(o, "pairing");
         if (p) {
             cJSON_AddStringToObject(p, "result", bt_result_name[st.pairing]);
             cJSON_AddStringToObject(p, "addr", st.pairing_addr);
-            if (st.pairing_name[0]) cJSON_AddStringToObject(p, "name", st.pairing_name);
+            if (bt_name_ok(st.pairing_name)) cJSON_AddStringToObject(p, "name", st.pairing_name);
             cJSON_AddStringToObject(p, "kind", st.pairing_kind == BT_KIND_REMOTE ? "remote" : "host");
-            if (st.pairing_transport != BT_TRANSPORT_ANY)
+            if ((unsigned)st.pairing_transport > BT_TRANSPORT_ANY && (unsigned)st.pairing_transport < BT_NELEM(bt_transport_name))
                 cJSON_AddStringToObject(p, "transport", bt_transport_name[st.pairing_transport]);
         }
     }
     for (unsigned i = 0; i < st.n_hosts && i < BT_LINK_HOSTS_CAP; i++) {
+        if (!bt_addr_ok(st.hosts[i].addr)) continue;
         cJSON *e = cJSON_CreateObject();
         if (!e) break;
         cJSON_AddNumberToObject(e, "slot", st.hosts[i].slot);
         cJSON_AddStringToObject(e, "addr", st.hosts[i].addr);
         used += BT_ENTRY_FIXED;
-        if (st.hosts[i].name[0] && used + json_len(st.hosts[i].name) + 10 <= BT_STATE_BUDGET) {
+        if (bt_name_ok(st.hosts[i].name) && used + json_len(st.hosts[i].name) + 10 <= BT_STATE_BUDGET) {
             cJSON_AddStringToObject(e, "name", st.hosts[i].name);
             used += json_len(st.hosts[i].name) + 10;
         }
@@ -868,12 +915,13 @@ static cJSON *bt_state_json(void) {
     cJSON_AddItemToObject(o, "hosts", hosts);
     cJSON *remotes = cJSON_AddArrayToObject(o, "remotes");
     for (unsigned i = 0; remotes && i < st.n_remotes && i < BT_LINK_REMOTES_CAP; i++) {
+        if (!bt_addr_ok(st.remotes[i].addr)) continue;
         cJSON *e = cJSON_CreateObject();
         if (!e) break;
         cJSON_AddNumberToObject(e, "slot", st.remotes[i].slot);
         cJSON_AddStringToObject(e, "addr", st.remotes[i].addr);
         used += BT_ENTRY_FIXED;
-        if (st.remotes[i].name[0] && used + json_len(st.remotes[i].name) + 10 <= BT_STATE_BUDGET) {
+        if (bt_name_ok(st.remotes[i].name) && used + json_len(st.remotes[i].name) + 10 <= BT_STATE_BUDGET) {
             cJSON_AddStringToObject(e, "name", st.remotes[i].name);
             used += json_len(st.remotes[i].name) + 10;
         }
@@ -885,10 +933,7 @@ static cJSON *bt_state_json(void) {
 }
 
 /* The link's listener: any state change goes to every authenticated client. */
-static void on_bt_changed(void *vctx) {
-    cJSON *d = bt_state_json();
-    if (d) hub_broadcast(vctx, "bt_state", d);
-}
+static void on_bt_changed(void *vctx) { ((hub_ctx_t *)vctx)->bt_dirty = true; } /* coalesced: see hub_flush_pending */
 
 /* A key from a bonded LE remote: only to sockets that opted in with bt_listen. */
 static void on_bt_remote_key(void *vctx, unsigned slot, unsigned page, unsigned usage, bool down) {

@@ -10,7 +10,7 @@
     {"env": {"v": 1, "id": 5, "t": "bt_key", "d": {"slot": 0, "page": 12, "usage": 233, "action": "press"}}},
     {"env": {"v": 1, "id": 6, "t": "bt_key", "d": {"slot": 3, "page": 7, "usage": 65535, "action": "down"}}},
     {"env": {"v": 1, "id": 0, "t": "bt_state", "d": {"state": "off", "discoverable": false, "hosts": []}}},
-    {"env": {"v": 1, "id": 7, "t": "bt_state", "d": {"state": "ready", "discoverable": true, "discoverable_secs": 118, "le": true,
+    {"env": {"v": 1, "id": 7, "t": "bt_state", "d": {"state": "ready", "discoverable": true, "discoverable_secs": 118, "le": true, "gen": 7,
       "pairing": {"result": "ok", "addr": "AA:BB:CC:DD:EE:03", "name": "Phone", "kind": "host", "transport": "le"},
       "hosts": [{"slot": 0, "addr": "AA:BB:CC:DD:EE:01", "name": "TV", "transport": "classic", "connected": true},
                 {"slot": 2, "addr": "AA:BB:CC:DD:EE:03", "transport": "le", "connected": false}],

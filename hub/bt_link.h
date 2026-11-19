@@ -52,6 +52,7 @@ struct bt_link_remote {
 };
 
 struct bt_link_state {
+    uint32_t gen; /* bumped by the link on every change (never by the discoverable_secs countdown) */
     enum bt_link_status status;
     bool discoverable;
     uint16_t discoverable_secs;       /* seconds left while discoverable, else 0 */
@@ -67,6 +68,18 @@ struct bt_link_state {
     struct bt_link_remote remotes[BT_LINK_REMOTES_CAP];
 };
 
+/* Contract details (the implementation, not the hub, owns these):
+ *  - bt_link_state() serves a cached snapshot; nothing here queries the helper synchronously.
+ *  - If the helper dies, status leaves BT_READY (BT_OFF/BT_NO_ADAPTER), the cached hosts/remotes/pairing are cleared,
+ *    `gen` is bumped and the listener fires.
+ *  - BT_LINK_E_NO_SLOT / BT_LINK_E_NOT_CONNECTED are answered from the cache. A forget or key that the helper
+ *    later fails is NOT reported back (bt_link_key is best effort).
+ *  - A bt_link_pair/forget return of BT_LINK_OK means "queued": the hub replies with a snapshot taken at that
+ *    moment, not the outcome. The outcome arrives as a later bt_state push.
+ *  - The listener fires once per real change (it only sets a flag in the hub; one bt_state per event-loop pass).
+ *    It must NOT fire for the discoverable_secs countdown: clients count down locally from the last value.
+ *  - A caller wakes the event loop itself when it changes state from another thread (the hub only polls its flag
+ *    in hub_flush_pending). */
 /* true when this build has Bluetooth (hello_ack carries `bt`, the bt_* requests are served). */
 bool bt_link_available(void);
 /* Open (on) or close the pairing window; secs is 1..300 and transport is one of the enum (already validated).

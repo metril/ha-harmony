@@ -92,7 +92,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'ota_commit': (33, 'rf', ()),
     'ota_result': (34, 'rf', (('code', 'u8', False), ('build', 'u32', False), )),
     'bt_pair': (35, 'ws', (('on', 'bool', False), ('secs', 'u16', True), ('transport', 'str', True), ('mode', 'str', True), )),
-    'bt_state': (36, 'ws', (('state', 'str', False), ('discoverable', 'bool', False), ('discoverable_secs', 'u16', True), ('le', 'bool', True), ('pairing', 'json', True), ('hosts', 'json', False), ('remotes', 'json', True), )),
+    'bt_state': (36, 'ws', (('state', 'str', False), ('discoverable', 'bool', False), ('discoverable_secs', 'u16', True), ('le', 'bool', True), ('gen', 'u32', True), ('pairing', 'json', True), ('hosts', 'json', False), ('remotes', 'json', True), )),
     'bt_forget': (37, 'ws', (('slot', 'u8', False), ('kind', 'str', True), )),
     'bt_key': (38, 'ws', (('slot', 'u8', False), ('page', 'u8', False), ('usage', 'u16', False), ('action', 'str', False), )),
     'bt_remote_key': (39, 'ws', (('slot', 'u8', False), ('page', 'u8', False), ('usage', 'u16', False), ('down', 'bool', False), )),
