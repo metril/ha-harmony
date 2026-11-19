@@ -8,7 +8,7 @@ import { capProblem } from '../src/lib/device-edit';
 import { byDomain } from '../src/lib/permissions';
 import { proposeFromEntity } from '../src/lib/ha-propose';
 import { LEGACY_LIMITS, LIMITS, applyUsageLimits, type Config } from '../src/lib/model';
-import { meters } from '../src/components/parts';
+import { configSizeFigures, meters } from '../src/components/parts';
 import { render } from 'lit';
 import { USAGE } from './helpers';
 import { permissions, tileDefaultTap } from '../src/lib/permissions';
@@ -414,6 +414,35 @@ describe('the editor shows the connected hub\'s caps', () => {
     render(meters({ usage: USAGE, config: many(10) } as never), host);
     expect(host.textContent).toContain('IR pool');
     expect(host.textContent).toContain('62 / 256');
+  });
+});
+
+describe('config size meter: label and bar come from one function', () => {
+  const OH = 1536 * 1024;
+  const BUDGET = 8 * 1024 * 1024;
+  const cur = { ...USAGE, json_max: null, pool_max: null, commands_max: null, inputs_max: null, config_budget: BUDGET, config_overhead: OH };
+  function shown(bytes: number) {
+    const host = document.createElement('div');
+    render(meters({ usage: { ...cur, config_bytes: bytes }, config: {} } as never), host);
+    const bar = host.querySelector('.bar i') as HTMLElement;
+    return { text: host.querySelector('.meter span')!.textContent!, width: parseFloat(bar.style.width), min: bar.style.minWidth };
+  }
+  it('an empty config is a sliver, 150 commands about 0.3 %, and the label is the same net figures', () => {
+    const empty = shown(OH);
+    expect(empty.width).toBe(0);
+    const small = shown(OH + 150 * 120);
+    const f = configSizeFigures(OH + 150 * 120, BUDGET, OH);
+    expect(small.text).toContain(f.text);
+    expect(small.width).toBeCloseTo((f.used / f.max) * 100, 3);
+    expect(small.width).toBeLessThan(1);
+    expect(small.min).toBe('2px');
+  });
+  it('half and over', () => {
+    const half = shown(OH + (BUDGET - OH) / 2);
+    expect(half.width).toBeCloseTo(50, 3);
+    const over = shown(BUDGET + 1);
+    expect(over.width).toBe(100);
+    expect(over.text).toContain('remove commands');
   });
 });
 

@@ -12,7 +12,7 @@ export function meter(label: string, text: string, value: number, max: number, h
   const over = level === 'full' && hint ? ` ${hint}` : '';
   return html`<div class="meter" role="group" aria-label="${label}: ${text}${over}" title=${tip ?? ''}>
     <span><b>${label}</b> ${text}${over ? html` <em class="over">${hint}</em>` : nothing}</span>
-    <div class="bar"><i class=${classMap({ warn: level === 'warn', full: level === 'full' })} style=${setStyle({ width: `${pct}%` })}></i></div>
+    <div class="bar"><i class=${classMap({ warn: level === 'warn', full: level === 'full' })} style=${setStyle({ width: `${pct}%`, 'min-width': pct > 0 ? '2px' : '0' })}></i></div>
   </div>`;
 }
 
@@ -25,6 +25,18 @@ export function sizeText(bytes: number, round: 'up' | 'down'): string {
   return `${kib < 10 ? r(kib * 10) / 10 : r(kib)} KiB`;
 }
 
+/** The one place label and bar of the "Config size" meter come from: both are the net figures (the hub's fixed load
+ * overhead left out), so an empty config reads and draws as about 0. Net used > net available exactly when used > budget. */
+export function configSizeFigures(bytes: number, budget: number, overhead?: number | null) {
+  const used = net(bytes, overhead);
+  const max = net(budget, overhead);
+  return { used, max, text: `${sizeText(used, 'up')} of ${sizeText(max, 'down')} on this hub` };
+}
+export function configSizeMeter(bytes: number, budget: number, overhead?: number | null): TemplateResult {
+  const f = configSizeFigures(bytes, budget, overhead);
+  return meter('Config size', f.text, f.used, f.max, 'over, remove commands', 'The hub keeps a fixed part of its budget to load any config; it is left out here, so an empty config reads about 0 and the right side is what you can fill.');
+}
+
 /** The draft meters, fed by the preview's `usage`. A current hub has one: "Config size X of Y KiB on this hub" (its memory
  * budget); old firmware has fixed limits: config KiB, IR pool %, commands. Pages are the remote's. */
 export function meters(store: Store): TemplateResult {
@@ -33,7 +45,7 @@ export function meters(store: Store): TemplateResult {
   const cmax = u?.commands_max ?? LIMITS.commands;
   if (u && u.config_budget != null && u.config_bytes != null)
     return html`
-      ${meter('Config size', `${sizeText(net(u.config_bytes, u.config_overhead), 'up')} of ${sizeText(net(u.config_budget, u.config_overhead), 'down')} on this hub`, u.config_bytes, u.config_budget, 'over, remove commands', 'The hub keeps a fixed part of its budget to load any config; it is left out here, so an empty config reads about 0 and the right side is what you can fill.')}
+      ${configSizeMeter(u.config_bytes, u.config_budget, u.config_overhead)}
       ${meter('Pages', `${u.pages} / ${u.page_limit}`, u.pages, u.page_limit)}
     `;
   return html`

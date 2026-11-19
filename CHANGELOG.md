@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Editor: the "Config size" meter's bar now uses the same net figures as its label (the hub's fixed load overhead left out), so 18 KiB of 6.5 MiB no longer draws about 19% full.
+
 ## 0.3.9 (2026-11-18)
 
 - Hub items below are in the repo and need a firmware update on the hub; the integration and editor fall back to the old fixed limits for older firmware.
