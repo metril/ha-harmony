@@ -51,7 +51,8 @@ int main(int argc, char **argv) {
   if (cli.rf_spi) {
     /* After the panel checks, so a refused start never touches the radio. A failed open (stock hal
      * alive, no device) leaves the link dead: the fallback page shows and the app keeps running. */
-    hp_rf_spi_cfg_t cfg = {.slot = cli.slot, .powermode = cli.powermode, .role = HP_RF_SPI_ROLE_REMOTE, .debug = cli.rf_debug};
+    hp_rf_spi_cfg_t cfg = {.slot = cli.slot, .powermode = cli.powermode, .role = HP_RF_SPI_ROLE_REMOTE, .debug = cli.rf_debug,
+                           .slot_file = cli.slot ? NULL : "/data/app/rf_slot"}; /* learned slot, provisional after a restart */
     int rc = rf_link_open(&rf, &cfg);
     if (rc < 0) fprintf(stderr, "harmony_remote: cannot open the radio (%d); running without a link\n", rc);
   }

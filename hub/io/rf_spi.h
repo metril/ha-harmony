@@ -26,7 +26,11 @@
  *
  * SLOT. `cfg.slot` != 0 fixes the slot (only that slot's reports are used, as before). With 0 the slot is
  * learned from the link-up report `10 NN 41 04 <status> <wpid>` (status 0x87 / wpid 0x4021 on the hub,
- * 0x07 / 0x880B on the remote): taken only while detached, so a re-link on another slot is picked up.
+ * 0x07 / 0x880B on the remote) or, because a restart on an already-up link gets no such report, from the
+ * first data frame (hub `0x12 NN`, remote `0x20 <pipe> 0x12`, pipe & 0x0F; a TX status only while unknown).
+ * Taken only while detached, so a re-link on another slot is picked up. `cfg.slot_file` persists the learned
+ * slot; it is read back at open as a provisional slot that a report or frame on another slot corrects.
+ * The radio has no link-status query (nor does the reference implementation).
  * Until it is known data and TX statuses are dropped (debug line) and send() is -HP_E_NOENT with no write.
  *
  * SAFETY. Opens only /dev/rfspi (and /proc, for the preflight): never /dev/rffw, the chip-flash
@@ -95,6 +99,7 @@ typedef struct {
     bool debug;                  /* log every write and read (ms since open, TX/RX, rc/len, hex) */
     void (*log)(void *ctx, const char *line); /* sink for debug and link-transition lines; NULL = stderr */
     void *log_ctx;
+    const char *slot_file;       /* learning only: the learned slot is saved here and read back as a provisional start slot */
 } hp_rf_spi_cfg_t;
 
 /* The real syscalls (hal preflight walks /proc). Tests copy it and override fields. */

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Hub and remote learn their RF slot from the radio's link-up report (`10 NN 41 04 ...`); `--rf-slot` / `--slot` are optional overrides. Nothing is sent to a guessed slot before it is known, and a re-link on another slot is picked up. The boot hook and `deploy_remote.py install-hook` no longer pass a slot by default; `install_boot_hook.py install --rf` enables the radio without one.
+- Hub and remote can learn their RF slot from the radio (link-up report, or the first data frame when the link was already up; the learned slot is saved in `rf_slot` next to the hub state file / in `/data/app` and used as a provisional start slot). Opt-in until the bench gate passes: `install_boot_hook.py install --learn-slot`, `deploy_remote.py install-hook --learn-slot`; `--rf-slot` / `--slot` still pass a fixed slot by default and override learning. Nothing is sent to a guessed slot before it is known. The remote's `--slot 0` is now rejected (omit the flag to learn).
 - Hub boot hook: bounded daemon respawn (`respawn_max`, default 3, 0 = off) with a heartbeat wedge cover, an `rf_debug` conf key and uptime-stamped logs; the boot-strike counter is never touched by a respawn.
 - Remote: opt-in suspend to RAM after idle (`HARMONY_SUSPEND=battery|always`) with an hourly timed wake (msp430 `wakeup`, 3600 s) so the battery guard still runs, resume re-link and sleep-gap accounting. Touch does not wake it; buttons and motion do. See `docs/runbooks/remote-suspend-soak.md`.
 - OTA: signed image container with Ed25519 verification (`ota_sign` tool, staged apply helper on the hub). Builds that bake in the public dev key need `-DHP_ALLOW_DEV_OTA_KEY=ON`.

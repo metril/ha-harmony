@@ -237,7 +237,14 @@ int main(int argc, char **argv) {
         hp_sim_init(&g_sim, stdout);
         g_hub.sinks = hp_sim_sinks(&g_sim);
     } else {
-        hp_rf_spi_cfg_t rc_cfg = {NULL, (uint8_t)rf_slot, NULL, HP_RF_SPI_ROLE_HUB, 0, rf_debug, NULL, NULL};
+        /* a learned slot is kept next to the state file (provisional start value after a restart) */
+        char slot_file[256] = "";
+        if (rf_slot == 0 && state) {
+            const char *sl = strrchr(state, '/');
+            int dl = sl ? (int)(sl - state) + 1 : 0;
+            if (dl < 200) snprintf(slot_file, sizeof slot_file, "%.*srf_slot", dl, state);
+        }
+        hp_rf_spi_cfg_t rc_cfg = {NULL, (uint8_t)rf_slot, NULL, HP_RF_SPI_ROLE_HUB, 0, rf_debug, NULL, NULL, slot_file};
         hp_hw_cfg_t hc = {NULL, (uint8_t)ir_ports, NULL, rf_spi ? &rc_cfg : NULL};
         int hr = hp_hw_sinks_open(&hc, &g_hw);
         if (hr == -HP_E_HALBUSY) {

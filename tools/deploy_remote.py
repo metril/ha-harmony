@@ -35,10 +35,10 @@ BOOTCOUNT = f"{APP_DIR}/bootcount"
 DISABLE = f"{APP_DIR}/DISABLE"
 DEFAULT_APP = "harmony_remote"
 MAX_BOOTS = 3
-# Bench-proven RF setting (bench session 1): without it the app defaults to powermode 0x00 and
-# would boot "healthy" with the radio dead. The slot is learned from the link-up report; --slot
-# is only an override, so by default start.sh passes none.
-DEFAULT_SLOT: int | None = None
+# Bench-proven RF settings (bench session 1): without them the app would boot "healthy" with the
+# radio dead. The app can learn the slot from the radio (omit --slot); that is opt-in via
+# --learn-slot until the bench gate in docs/runbooks/phase4-persistence.md passes.
+DEFAULT_SLOT: int | None = 1
 DEFAULT_POWERMODE = "0x30"
 SELFTEST_SRC = Path(__file__).resolve().parent / "boot" / "remote_selftest.sh"
 SELFTEST_DIR = "/var/volatile/hah-selftest"  # tmpfs; the ONLY place selftest writes
@@ -598,14 +598,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("app_args", nargs=argparse.REMAINDER)
     p = add("install-hook", "[WRITE] back up rcS.local, add the guarded boot line, write start.sh")
     p.add_argument(
-        "--slot", type=parse_slot, default=DEFAULT_SLOT, help="override the RF slot 1..15 (default: learned from the link-up report)"
+        "--slot", type=parse_slot, default=DEFAULT_SLOT, help="RF slot 1..15 (default %(default)s)"
     )
+    p.add_argument("--learn-slot", action="store_true",
+                   help="pass no slot: the app learns it from the radio (opt-in, needs the bench gate)")  # fmt: skip
     p.add_argument("--powermode", type=parse_powermode, default=DEFAULT_POWERMODE,
                    help="RF powermode 0xNN (default %(default)s)")  # fmt: skip
     p.add_argument("--refresh-backup", action="store_true",
                    help="replace a stale rcS.local.orig with the current rcS.local")  # fmt: skip
     p = add("selftest", "[WRITE /var/volatile only] run start.sh + hook line against a stub app")
     p.add_argument("--slot", type=parse_slot, default=DEFAULT_SLOT)
+    p.add_argument("--learn-slot", action="store_true")
     p.add_argument("--powermode", type=parse_powermode, default=DEFAULT_POWERMODE)
     add("mark-good", "[WRITE] reset the boot counter to 0")
     p = add("uninstall", "[WRITE] restore rcS.local from the backup (md5-verified)")
@@ -649,9 +652,9 @@ def main(
                 args = a.app_args[1:] if a.app_args[:1] == ["--"] else a.app_args
                 return d.run_app(a.app, args)
             case "install-hook":
-                return d.install_hook(a.app, a.slot, a.powermode, a.refresh_backup)
+                return d.install_hook(a.app, None if a.learn_slot else a.slot, a.powermode, a.refresh_backup)
             case "selftest":
-                return d.selftest(a.slot, a.powermode)
+                return d.selftest(None if a.learn_slot else a.slot, a.powermode)
             case "mark-good":
                 return d.mark_good()
             case "uninstall":

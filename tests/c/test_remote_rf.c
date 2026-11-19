@@ -256,7 +256,7 @@ static int setup_ex(int hal, int soc_missing) {
   nhkeys = nhbatt = nhinfo = nhother = hord = 0;
   rec_n = 0;
   hp_rf_spi_ops_t ho = fake_ops(&fh);
-  hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
+  hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL, NULL};
   radios_link_up();
   CT_EQ(hp_rf_spi_open(&hc, &hub_tp), 0);
   CT_EQ(hub_tp->claim(hub_tp->self), 0);
@@ -269,7 +269,7 @@ static int setup_ex(int hal, int soc_missing) {
   CT_EQ(app_init(&app, &ops, &link, NULL), 0);
   rf_link_set_store(&rf, &app.store); /* as main.c does */
   hp_rf_spi_ops_t ro = fake_ops(&fr);
-  hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL};
+  hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL, NULL};
   int orc = rf_link_open(&rf, &rc);
   if (orc == 0) { /* both radios have learned their slot from the link-up reports before anything is driven */
     for (int i = 0; i < 3000 && (hp_rf_spi_slot(rf.tp) != 1 || hp_rf_spi_slot(hub_tp) != 2); i++) ms_sleep(1);
@@ -478,7 +478,7 @@ static void test_remote_info_reports_a_store_it_already_holds(void) {
   fr.peer = &fh;
   nhkeys = nhbatt = nhinfo = nhother = hord = 0;
   hp_rf_spi_ops_t ho = fake_ops(&fh);
-  hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
+  hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL, NULL};
   radios_link_up();
   CT_EQ(hp_rf_spi_open(&hc, &hub_tp), 0);
   CT_EQ(hub_tp->claim(hub_tp->self), 0);
@@ -493,7 +493,7 @@ static void test_remote_info_reports_a_store_it_already_holds(void) {
   size_t n = v2raw(raw, 0, 1, 0x3C);
   CT_EQ(hp_store_put(&app.store, raw, n), HP_STORE_OK); /* a set kept across the link, as after a hub restart */
   hp_rf_spi_ops_t ro = fake_ops(&fr);
-  hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL};
+  hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL, NULL};
   CT_EQ(rf_link_open(&rf, &rc), 0);
   WAIT_FOR(hp_rf_spi_slot(rf.tp) == 1 && hp_rf_spi_slot(hub_tp) == 2);
   WAIT_FOR(nhinfo >= 1);
@@ -709,7 +709,7 @@ static void test_cli(void) {
   const char *bad[][3] = {
       {"--rf", "usb", NULL},        {"--rf", "", NULL},         {"--rf", NULL, NULL},       {"--powermode", "0x05", NULL},
       {"--powermode", "0x100", NULL}, {"--powermode", "-16", NULL}, {"--powermode", "zz", NULL}, {"--powermode", "0x3g", NULL},
-      {"--slot", "16", NULL},       {"--slot", "-1", NULL},     {"--slot", "", NULL},       {"--slot", "1x", NULL},
+      {"--slot", "16", NULL}, {"--slot", "0", NULL}, {"--slot=0", NULL, NULL},       {"--slot", "-1", NULL},     {"--slot", "", NULL},       {"--slot", "1x", NULL},
       {"--slot", NULL, NULL},       {"--bogus", "1", NULL},     {"rf", "spi", NULL},
   };
   for (unsigned i = 0; i < sizeof bad / sizeof bad[0]; i++) {

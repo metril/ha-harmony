@@ -412,14 +412,16 @@ def test_rf_slot_lands_in_conf(hub: FakeHub) -> None:
         install(FakeHub(), rf_slot=16)
 
 
-def test_rf_flag_enables_radio_without_a_slot(hub: FakeHub) -> None:
-    install(hub, rf=True)
+def test_learn_slot_is_opt_in_and_exclusive(hub: FakeHub) -> None:
+    hub0 = FakeHub()
+    install(hub0)
+    assert "rf=" not in hub0.files[ibh.CONF].decode()  # default: radio off, as before
+    install(hub, learn_slot=True)
     conf = hub.files[ibh.CONF].decode()
     assert "rf=spi\n" in conf
     assert "rf_slot" not in conf
-    hub2 = FakeHub()
-    install(hub2)
-    assert "rf=" not in hub2.files[ibh.CONF].decode()
+    with pytest.raises(ibh.InstallError, match="exclusive"):
+        install(FakeHub(), rf_slot=2, learn_slot=True)
 
 
 def test_keep_lua_writes_the_switch(hub: FakeHub) -> None:

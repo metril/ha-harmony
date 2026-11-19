@@ -191,7 +191,7 @@ run.
   (`10 02 41 04 87 21 40` = link up, wpid 0x4021), and the hub is device **1** on the remote
   (`10 01 41 04 07 0b 88`, wpid 0x880B). The pipe table had been read off by one (pipe `0x20` is
   device 1). Addressing the wrong index gives `10 01 8f 40 0d 09 00` (error 0x09) per frame.
-  Both sides now learn the slot from the link-up report; `--rf-slot` (hub) and `--slot` (remote) are optional overrides.
+  Both sides can learn the slot from the radio (opt-in `--learn-slot`); `--rf-slot` (hub) and `--slot` (remote) override.
 - `deploy_hub.py run` forces a TTY (`ssh -tt`) and fails from a non-interactive session; the
   daemon was started detached on the device instead. Needs a `--detach` mode.
 - A `ps | grep` stop-check matched its own ssh command line and reported the app as still running;

@@ -6,8 +6,8 @@
  *                     bench display tests (default on a host build)
  *   --powermode 0xN0  upper nibble OR'd into byte 1 of every frame. Default 0x00. UNVALIDATED: stock's
  *                     value was not recovered. The low nibble must be 0.
- *   --slot N          override the hub's slot on the remote, 0..15 (default 0 = learned from the radio's
- *                     link-up report, measured slot 1)
+ *   --slot N          override the hub's slot on the remote, 1..15 (omit it to learn it from the radio's
+ *                     link-up report or first frame, measured slot 1; 0 is rejected)
  *   --rf-debug        log every radio write/read frame and every link event to stderr (a flag, no value)
  *   --ui-debug        one stderr line per screen refresh (flush count, pixels, render/flush time, reason, and for
  *                     touches the input-event-to-flush latency) (a flag, no value)
