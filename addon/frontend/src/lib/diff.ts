@@ -73,12 +73,18 @@ export function diffConfig(applied: Config | null, draft: Config | null): DiffRo
     }
     for (const [id, x] of a) if (!b.has(id)) rows.push({ kind: 'removed', area, label: String(x.name ?? id) });
   }
+  if (!same(A['theme'] ?? 'default', B['theme'] ?? 'default')) rows.push({ kind: 'changed', area: 'Theme', label: String(B['theme'] ?? 'default'), detail: `was ${String(A['theme'] ?? 'default')}` });
+  const ta = (A['themes'] ?? {}) as Rec;
+  const tb = (B['themes'] ?? {}) as Rec;
+  for (const n of Object.keys(tb)) if (!(n in ta)) rows.push({ kind: 'added', area: 'Theme', label: n });
+  for (const n of Object.keys(tb)) if (n in ta && !same(ta[n], tb[n])) rows.push({ kind: 'changed', area: 'Theme', label: n, detail: 'colours changed' });
+  for (const n of Object.keys(ta)) if (!(n in tb)) rows.push({ kind: 'removed', area: 'Theme', label: n });
   const k = keyDiff(A.keys as Rec | undefined, B.keys as Rec | undefined);
   for (const n of k.added) rows.push({ kind: 'added', area: 'Hard key', label: n });
   for (const n of k.changed) rows.push({ kind: 'changed', area: 'Hard key', label: n });
   for (const n of k.removed) rows.push({ kind: 'removed', area: 'Hard key', label: n });
   const other = new Set([...Object.keys(A), ...Object.keys(B)]);
-  for (const n of ['devices', 'activities', 'pages', 'keys']) other.delete(n);
+  for (const n of ['devices', 'activities', 'pages', 'keys', 'theme', 'themes']) other.delete(n);
   for (const n of other) if (!same(A[n], B[n])) rows.push({ kind: 'changed', area: 'Setting', label: n });
   return rows;
 }

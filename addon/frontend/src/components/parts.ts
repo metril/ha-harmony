@@ -5,6 +5,7 @@ import type { Store } from '../lib/store';
 import { LIMITS, counts } from '../lib/model';
 import type { Problem } from '../lib/problems';
 import { icon } from '../lib/icons';
+import { degradeText } from '../lib/theme-model';
 
 export function meter(label: string, text: string, value: number, max: number, hint?: string, tip?: string): TemplateResult {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
@@ -86,4 +87,12 @@ export function problemList(list: Problem[], onOpen?: (p: Problem) => void): Tem
 export type ChipTone = 'ok' | 'bad' | 'ir' | '';
 export function statusChip(tone: ChipTone, label: string, o: { check?: boolean; title?: string; id?: string } = {}): TemplateResult {
   return html`<span class="chip ${tone}" id=${o.id ?? nothing} title=${o.title ?? nothing}>${o.check ? icon('check') : nothing}${label}</span>`;
+}
+
+/** The one non-blocking notice for a remote whose firmware lacks colours or custom themes (Themes view and apply dialog). */
+export function themeNotice(msgs: readonly string[] | undefined): TemplateResult | typeof nothing {
+  const text = degradeText(msgs);
+  if (!text) return nothing;
+  return html`<div class="banner ir" role="status" id="theme-notice"><span>${icon('alert')} ${text}</span>
+    <details><summary>What changes</summary><ul>${(msgs ?? []).map((m) => html`<li>${m}</li>`)}</ul></details></div>`;
 }

@@ -222,13 +222,14 @@ export class HhApp extends StoreElement {
       { id: 'overview', label: 'Overview', icon: 'overview' },
       { id: 'devices', label: 'Devices', icon: 'devices', count: c.devices },
       { id: 'activities', label: 'Activities', icon: 'activities', count: c.activities },
+      { id: 'themes', label: 'Themes', icon: 'palette' },
       { id: '-', label: '', icon: '' },
       { id: 'history', label: 'History', icon: 'history', count: hist },
     ];
   }
 
   private sectionTitle(): string {
-    const names: Record<string, string> = { remote: 'Remote studio', overview: 'Overview', devices: 'Devices', ir: 'Add a device', activities: 'Activities', history: 'History' };
+    const names: Record<string, string> = { remote: 'Remote studio', overview: 'Overview', devices: 'Devices', ir: 'Add a device', activities: 'Activities', themes: 'Themes', history: 'History' };
     return names[this.router.route.section] ?? 'Harmony Editor';
   }
 
@@ -252,6 +253,8 @@ export class HhApp extends StoreElement {
         return this.lazy('add-device', () => import('../views/hh-add-device'), html`<hh-add-device></hh-add-device>`);
       case 'activities':
         return this.lazy('activities', () => import('../views/hh-activities'), html`<hh-activities .selected=${parts[0] ?? ''}></hh-activities>`);
+      case 'themes':
+        return this.lazy('themes', () => import('../views/hh-themes'), html`<hh-themes .selected=${parts[0] ?? ''} .notices=${this.link?.theme_notices ?? []}></hh-themes>`);
       case 'history':
         return this.lazy('history', () => import('../views/hh-history'), html`<hh-history></hh-history>`);
       default:
@@ -322,7 +325,7 @@ export class HhApp extends StoreElement {
           </main>
         </div>
       </div>
-      <hh-apply-dialog .open=${this.applyOpen}></hh-apply-dialog>
+      <hh-apply-dialog .open=${this.applyOpen} .themeMsgs=${this.link?.theme_notices ?? []}></hh-apply-dialog>
       <hh-import-dialog .open=${this.importOpen}></hh-import-dialog>
       <hh-dialog .open=${this.confirm !== null} heading=${this.confirm?.title ?? ''} @close=${() => this.answer(false)}>
         <p>${this.confirm?.body}</p>

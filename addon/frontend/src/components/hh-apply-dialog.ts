@@ -7,7 +7,7 @@ import { shared } from '../lib/styles';
 import { StoreElement } from './base';
 import './hh-dialog';
 import './hh-page-diff';
-import { meters } from './parts';
+import { meters, themeNotice } from './parts';
 
 type Step = { label: string; state: 'done' | 'pending' | 'active' | 'todo' };
 
@@ -39,6 +39,8 @@ export class HhApplyDialog extends StoreElement {
   @state() private ack: 'unknown' | 'waiting' | 'ok' | 'error' | 'timeout' = 'unknown';
   @state() private linked = true;
   @state() private lastStatus: ApplyStatus | null = null;
+  /** what the linked remote's firmware cannot show of the draft's colours (non-blocking; from the app's link status) */
+  @property({ attribute: false }) themeMsgs: string[] = [];
   private pollTimer?: ReturnType<typeof setTimeout>;
 
   override willUpdate(changed: Map<string, unknown>): void {
@@ -135,6 +137,7 @@ export class HhApplyDialog extends StoreElement {
             </ul>`
           : html`<p class="muted">The draft is identical to the applied config.</p>`}
         <hh-page-diff scale="0.4"></hh-page-diff>
+        ${themeNotice(this.themeMsgs)}
         <div class="meters">${meters(s)}</div>
         <p class="muted">Activities that are running keep going until they stop; the new config takes effect for the next one.</p>
         ${s.hash ? html`<div class="hash">Config hash ${s.hash}</div>` : nothing}

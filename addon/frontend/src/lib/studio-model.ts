@@ -3,6 +3,7 @@
 // key / cell / widget does). No DOM here, so it is all unit-tested.
 import type { Config, Device, IrAction, Page, Widget } from './model';
 import { tileDefaultTap } from './permissions';
+import { colourBytes } from './theme-model';
 
 export type Action = Record<string, unknown>;
 export type Layer = string; // 'default' or an activity id
@@ -332,7 +333,7 @@ export function pageBytes(p: Page): number {
   p.widgets.forEach((w, i) => {
     if (i === promoted) return;
     const styled = (w.role && w.role !== 'default' && !w.nav) || (w.shape && w.shape !== 'card') || w.icon_only;
-    n += 5 + (styled || w.nav ? 1 : 0) + (w.icon && w.icon !== 'none' ? 1 : 0) + (w.nav || (w['bind'] as unknown) ? 1 : 0) + utf8(w.label ?? '');
+    n += 5 + (styled || w.nav ? 1 : 0) + (w.icon && w.icon !== 'none' ? 1 : 0) + (w.nav || (w['bind'] as unknown) ? 1 : 0) + utf8(w.label ?? '') + colourBytes(w);
   });
   return n;
 }

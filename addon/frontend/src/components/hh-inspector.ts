@@ -7,6 +7,11 @@ import { STOCK_ICONS } from '../lib/stock-icons';
 import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { meter } from './parts';
+import { confirmAction } from './base';
+import './hh-colour-field';
+import type { AddPaletteDetail } from './hh-colour-field';
+import { PALETTE_NAMES } from '../lib/themes';
+import { PRESETS, activeName, activeTheme, colourBytes, createTheme, selectTheme, setPaletteFill, uniqueThemeName, widgetColors } from '../lib/theme-model';
 import {
   DEFAULT_LAYER, LABEL_MAX, PAGE_BUDGET, describeAction, errorTarget, gridOf, isList, labelBytes, labelRoom, pageBytes, setPage, setWidget, trimToBytes,
   sourceAction, type Source,
@@ -178,6 +183,7 @@ export class HhInspector extends LitElement {
         ? html`<div class="sec"><h3>Look</h3>
             <div class="sw" role="group" aria-label="Role">${ROLES.map((r) => html`<button class="r-${r}" aria-pressed=${(w.role ?? 'default') === r} ?disabled=${!!navVal} @click=${() => this.widgetPatch(pi, wi, { role: r === 'default' ? undefined : r })}><i></i>${r}</button>`)}</div>
             <div class="sw" role="group" aria-label="Shape">${SHAPES.map((s) => html`<button class="s-${s}" aria-pressed=${(w.shape ?? 'card') === s} @click=${() => this.widgetPatch(pi, wi, { shape: s === 'card' ? undefined : s })}><i></i>${s}</button>`)}</div>
+            ${this.colourRows(pi, wi, w)}
             <label>Icon <input type="search" placeholder="Search icons" .value=${this.iconQ} @input=${(e: Event) => (this.iconQ = (e.target as HTMLInputElement).value)} /></label>
             <div class="icons" role="group" aria-label="Icon">
               <button aria-pressed=${!w.icon || w.icon === 'none'} aria-label="No icon" title="No icon" @click=${() => this.widgetPatch(pi, wi, { icon: undefined })}>none</button>
@@ -186,6 +192,8 @@ export class HhInspector extends LitElement {
             <label class="chk"><input type="checkbox" .checked=${!!w.icon_only} @change=${(e: Event) => this.widgetPatch(pi, wi, { icon_only: (e.target as HTMLInputElement).checked || undefined })} /> Icon only (the label is kept but not drawn)</label>
           </div>`
         : nothing}
+      ${w.type === 'label' ? html`<div class="sec"><h3>Look</h3>${this.colourRows(pi, wi, w)}</div>` : nothing}
+      ${this.colourCost(pi, page, w, pp)}
       ${isBtn
         ? html`<label>Tap goes to page
             <select .value=${navVal} @change=${(e: Event) => this.setNav(pi, wi, (e.target as HTMLSelectElement).value)}>
@@ -204,6 +212,59 @@ export class HhInspector extends LitElement {
       </details>
       <div class="seg"><button @click=${() => this.host.removeWidget(pi, wi)}>Delete widget</button></div>
     </div>`;
+  }
+
+  private colourRows(pi: number, wi: number, w: Widget) {
+    const theme = activeTheme(this.cfg).theme;
+    const kind = w.type === 'tile' ? 'tile' : w.type === 'label' ? 'label' : 'button';
+    const look = (o: { state?: 'on' | 'value' }) => widgetColors({ kind, role: w.role ?? 'default' }, o, theme);
+    const dflt = look({ state: 'value' });
+    const on = look({ state: 'on' });
+    const set = (key: 'color' | 'on_color') => (e: CustomEvent<{ value: string | undefined; coalesce: boolean }>) =>
+      this.widgetPatch(pi, wi, { [key]: e.detail.value }, e.detail.coalesce ? `col-${key}` : undefined);
+    const add = (key: 'color' | 'on_color') => (e: CustomEvent<AddPaletteDetail>) => void this.addToPalette(pi, wi, key, e.detail);
+    return html`<hh-colour-field .theme=${theme} .value=${w.color} heading=${w.type === 'label' ? 'Text colour' : w.type === 'tile' ? 'Colour' : 'Colour'}
+        defaultLabel=${w.type === 'label' ? 'Default' : 'Default (role)'} .defaultLook=${w.type === 'label' ? [theme.tokens.bg, theme.tokens.tx2] : [dflt.fill, dflt.ink]}
+        @colour=${set('color')} @add-palette=${add('color')}></hh-colour-field>
+      ${w.type === 'tile'
+        ? html`<hh-colour-field .theme=${theme} .value=${w.on_color} heading="When on" defaultLabel="Default (warm)" .defaultLook=${[on.fill, on.ink]}
+            @colour=${set('on_color')} @add-palette=${add('on_color')}></hh-colour-field>`
+        : nothing}`;
+  }
+  /** Adds a colour to the active user theme's palette (making one of the user's own first when a preset is active) and points the widget at it. */
+  private async addToPalette(pi: number, wi: number, key: 'color' | 'on_color', d: AddPaletteDetail) {
+    const cfg = this.cfg;
+    const name = activeName(cfg);
+    const slot = PALETTE_NAMES[d.slot] as string;
+    let next;
+    if (name in PRESETS) {
+      const mine = uniqueThemeName(cfg, `my_${name}`);
+      const ok = await confirmAction(this, {
+        title: 'Make a theme of your own?',
+        body: `"${PRESETS[name]?.name}" is built in and cannot be changed. This creates your theme "${mine}" on top of it, with ${slot} set to ${d.hex}, and switches the remote to it.`,
+        ok: 'Create theme and add',
+      });
+      if (!ok) return;
+      next = selectTheme(createTheme(cfg, mine, name, { palette: { [String(d.slot + 1)]: { fill: d.hex } } }), mine);
+    } else {
+      const ok = await confirmAction(this, {
+        title: `Replace ${slot} in "${name}"?`,
+        body: `Every widget that uses ${slot} will change to ${d.hex}.`,
+        ok: `Replace ${slot}`,
+      });
+      if (!ok) return;
+      next = setPaletteFill(cfg, name, d.slot, d.hex);
+    }
+    this.st.store.replace(setWidget(next, pi, wi, { [key]: slot }));
+  }
+  /** The colour bytes of this widget and the compiler's over-budget message for its page. */
+  private colourCost(_pi: number, page: Page, w: Widget, pp: ReturnType<StudioHost['state']['previewOf']>) {
+    const cb = colourBytes(w);
+    const err = pp?.error && /colour/i.test(pp.error) ? pp.error : null;
+    const total = page.widgets.reduce((n, x) => n + colourBytes(x), 0);
+    if (!cb && !err) return nothing;
+    return html`${cb ? html`<p class="why" id="colour-cost">Colour uses ${cb} B here (${total} B on this page). A palette name costs 1 B, a custom colour 2 B more.</p>` : nothing}
+      ${err ? html`<div class="errs" role="alert"><div class="err">${err}</div></div>` : nothing}`;
   }
 
   /** "When tapped" for a tile: automatic (toggle / turn on / press by domain), toggle, an action, or nothing. */
@@ -243,7 +304,7 @@ export class HhInspector extends LitElement {
     if (!w || w.type === type) return;
     if (type === 'label') this.widgetPatch(pi, wi, { type, action: undefined, entity: undefined, nav: undefined, id: undefined, icon: undefined, role: undefined, shape: undefined, icon_only: undefined });
     else if (type === 'tile') this.widgetPatch(pi, wi, { type, action: undefined, nav: undefined, entity: 'sensor.choose_entity', id: w.id ?? `tile_${wi + 1}` });
-    else this.widgetPatch(pi, wi, { type, entity: undefined, action: { none: true }, id: w.id ?? `btn_${wi + 1}` });
+    else this.widgetPatch(pi, wi, { type, entity: undefined, on_color: undefined, action: { none: true }, id: w.id ?? `btn_${wi + 1}` });
   }
 
   private pageView(pi: number) {

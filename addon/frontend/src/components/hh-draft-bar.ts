@@ -110,6 +110,7 @@ export class HhDraftBar extends StoreElement {
       ${errs
         ? html`<button class="chip bad chipbtn" @click=${() => this.showFirst()} aria-label="${errs} errors. Show the first one">${icon('alert')} ${errs} error${errs === 1 ? '' : 's'} · Show</button>`
         : statusChip('ok', 'Valid', { check: true })}
+      ${s.warnings.length ? statusChip('ir', `${s.warnings.length} warning${s.warnings.length === 1 ? '' : 's'}`, { id: 'warn-chip', title: s.warnings.map((w) => w.msg).join('\n') }) : nothing}
       <div class="meters long">${meters(s)}</div>
       <div class="usage">
         <button class="btn sm" aria-expanded=${this.usageOpen} aria-controls="usage-pop" @click=${() => (this.usageOpen = !this.usageOpen)}>Usage</button>

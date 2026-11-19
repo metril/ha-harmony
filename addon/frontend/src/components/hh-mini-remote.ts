@@ -2,6 +2,7 @@ import { LitElement, css, nothing, svg } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import type { V2Page } from '../lib/api';
 import { pageGroup } from '../lib/page-renderer';
+import type { RenderTheme } from '../lib/theme-model';
 import { GLASS, JOINED, PLATED, PLATES, KEYS, MINI_VIEW, SCREEN, bodyPath, gripPath, keyPath, tintPath } from '../lib/remote-layout';
 
 /** A small, read-only Elite drawing: optional screen page, and keys marked on / changed / missing / dim. */
@@ -29,6 +30,8 @@ export class HhMiniRemote extends LitElement {
   @property({ attribute: false }) page: V2Page | null = null;
   /** key name -> mark: on | chg | miss | dim | pulse */
   @property({ attribute: false }) marks: Record<string, string> = {};
+  /** the theme to draw the page in (default: the preset the page names) */
+  @property({ attribute: false }) theme?: RenderTheme;
   @property() label = 'Harmony Elite remote';
 
   protected override render() {
@@ -36,7 +39,7 @@ export class HhMiniRemote extends LitElement {
       <path class="body" d=${bodyPath()}></path>
       <rect class="glass" x=${GLASS.x} y=${GLASS.y} width=${GLASS.w} height=${GLASS.h} rx=${GLASS.r}></rect>
       <svg x=${SCREEN.x} y=${SCREEN.y} width=${SCREEN.w} height=${SCREEN.h} viewBox="0 0 240 320">
-        ${this.page ? pageGroup(this.page, {}) : svg`<rect width="240" height="320" fill="#101820"></rect>`}
+        ${this.page ? pageGroup(this.page, this.theme ? { theme: this.theme } : {}) : svg`<rect width="240" height="320" fill="#101820"></rect>`}
       </svg>
       <path class="grip" d=${gripPath()}></path>
       ${PLATES.map((d) => svg`<path class="plate" d=${d}></path>`)}
