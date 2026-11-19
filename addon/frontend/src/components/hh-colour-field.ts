@@ -34,9 +34,9 @@ export class HhColourField extends LitElement {
       .pop { margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf2); display: grid; gap: 10px; }
       .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       input[type="text"], select { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; }
-      input[type="text"] { width: 9ch; font-family: var(--mono); }
+      input[type="text"] { width: 10.5ch; font-family: var(--mono); }
       input[type="color"] { width: 44px; height: 34px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); cursor: pointer; }
-      .rec { display: flex; gap: 4px; flex-wrap: wrap; }
+      .rec { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; min-height: 28px; }
       .rec button { width: 28px; height: 28px; border-radius: 14px; border: 2px solid var(--line); cursor: pointer; padding: 0; }
       .rec button[aria-pressed="true"] { border-color: var(--tx); }
       .lbl { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tx3); }
@@ -98,8 +98,8 @@ export class HhColourField extends LitElement {
     const free = isFree(this.value);
     const [df, di] = this.defaultLook;
     return html`<div class="grid" role="group" aria-label=${this.heading}>
-      <button class="sw def" aria-pressed=${!this.value} title=${this.defaultLabel} @click=${() => { this.open = false; this.emit(undefined); }}>
-        <i style=${setStyle({ background: hex6(df), color: hex6(di), border: '1px solid var(--line)' })}>Aa</i><span>${this.defaultLabel}</span></button>
+      <button class="sw def" aria-pressed=${!this.value} title=${this.defaultLabel} aria-label=${this.defaultLabel} @click=${() => { this.open = false; this.emit(undefined); }}>
+        <i style=${setStyle({ background: hex6(df), color: hex6(di), border: '1px solid var(--line)' })}>Aa</i><span>Default</span></button>
       ${th.swatches.map((s) => html`<button class="sw" aria-pressed=${this.value === s.name} title=${s.name} aria-label=${s.name} @click=${() => { this.open = false; this.emit(s.name); }}>
         <i class=${needsOutline(s.fill, th.tokens.bg) ? 'ol' : ''} style=${setStyle({ background: hex6(s.fill), color: hex6(s.ink) })}>Aa</i><span>${s.name}</span></button>`)}
       <button class="sw cus" aria-pressed=${free} aria-expanded=${this.open} title="Any colour" @click=${() => (this.open = !this.open)}>
@@ -119,11 +119,11 @@ export class HhColourField extends LitElement {
           aria-invalid=${this.draft && !h ? 'true' : 'false'} @input=${(e: Event) => this.onHex(e)} @change=${() => this.commit()} />
         <input type="color" aria-label="Pick a colour" .value=${(h ?? (isFree(this.value) ? this.value : hexOf(th.tokens.acc))).toLowerCase()} @input=${(e: Event) => this.onNative(e)} @change=${(e: Event) => this.onNative(e)} />
       </div>
-      ${this.recent.length
-        ? html`<div><div class="lbl">Recent</div><div class="rec" role="group" aria-label="Recent colours">
-            ${this.recent.map((r) => html`<button style=${setStyle({ background: r })} aria-label=${r} title=${r} aria-pressed=${cur === r} @click=${() => { this.draft = r; this.repl = nearestSlot(r, th); this.emit(r); this.remember(r); }}></button>`)}
-          </div></div>`
-        : nothing}
+      <div><div class="lbl">Recent</div><div class="rec" role="group" aria-label="Recent colours">
+        ${this.recent.length
+          ? this.recent.map((r) => html`<button style=${setStyle({ background: r })} aria-label=${r} title=${r} aria-pressed=${cur === r} @click=${() => { this.draft = r; this.repl = nearestSlot(r, th); this.emit(r); this.remember(r); }}></button>`)
+          : html`<span class="why">Colours you use appear here.</span>`}
+      </div></div>
       ${info
         ? html`<div class="read" role="status">
             <span class="chip ${info.ok ? 'ok' : 'ir'}">${info.ok ? '' : 'Low contrast: '}label contrast ${ratioText(info.ratio_x100)}:1</span>

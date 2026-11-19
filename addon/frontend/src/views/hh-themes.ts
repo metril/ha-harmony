@@ -64,15 +64,16 @@ export class HhThemes extends StoreElement {
       .side .th { display: flex; gap: 6px; }
       .side .th svg { width: 76px; height: auto; border-radius: 6px; box-shadow: 0 0 0 1px var(--line); display: block; }
       .grp { display: grid; gap: 6px; margin-bottom: 14px; }
-      .grp h4, .pal h4 { margin: 0; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; }
-      .tk { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
+      .grp h3, .pal h3 { margin: 0; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; }
+      .tk { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
       .tk .nm { display: grid; min-width: 0; }
       .tk .nm b { font-size: 13px; font-weight: 600; }
       .tk .nm span { font-size: 11px; color: var(--tx3); }
-      @media (max-width: 520px) { .tk { grid-template-columns: 40px minmax(0, 1fr) auto; } .tk .nm span { display: none; } .tk button.rs { grid-column: 3; } .tk input.hx { grid-column: 3; } }
+      @media (max-width: 520px) { .tk .nm span { display: none; } }
+      .tk .nm button.rs { justify-self: start; margin-top: 2px; }
       input[type="color"] { width: 40px; height: 34px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); cursor: pointer; }
       input.hx, input.nm2 { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; }
-      input.hx { width: 9ch; font-family: var(--mono); }
+      input.hx { width: 10.5ch; font-family: var(--mono); }
       input.nm2 { width: 100%; max-width: 280px; }
       input[aria-invalid="true"] { border-color: var(--bad); }
       .pal .row { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 6px; }
@@ -84,7 +85,7 @@ export class HhThemes extends StoreElement {
       .prob { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--line); }
       .prob span { flex: 1 1 200px; min-width: 0; }
       .prob i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; border: 1px solid var(--line); }
-      button.rs { height: 28px; padding: 0 10px; font-size: 12px; }
+      button.rs { height: 28px; padding: 0 10px; font-size: 12px; min-height: 28px; }
       .back { display: inline-flex; gap: 6px; align-items: center; color: var(--tx2); text-decoration: none; font-weight: 500; min-height: 32px; }
       .nmrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
       .blk { display: block; margin-bottom: 12px; }
@@ -180,9 +181,9 @@ export class HhThemes extends StoreElement {
     const set = (h: string, key = `th-${name}-${t}`) => this.edit(setToken(this.cfg, name, t, h), key);
     return html`<div class="tk" role="group" aria-label=${lab.name}>
       <input type="color" aria-label="${lab.name} colour" .value=${v.toLowerCase()} @input=${(e: Event) => { const h = (e.target as HTMLInputElement).value; this.later(() => set(h.toUpperCase())); }} />
-      <div class="nm"><b>${lab.name} <span class="muted">${t.toUpperCase()}</span></b><span>${lab.where}</span></div>
+      <div class="nm"><b>${lab.name} <span class="muted">${t.toUpperCase()}</span></b><span>${lab.where}</span>
+        <button class="btn rs" ?hidden=${!own} aria-label="Reset ${lab.name}" title="Back to the value of ${this.cfg.themes?.[name]?.extends ?? 'default'}" @click=${() => this.edit(resetToken(this.cfg, name, t))}>Reset</button></div>
       <input class="hx" type="text" maxlength="7" spellcheck="false" aria-label="${lab.name} hex" .value=${v} @change=${(e: Event) => { const el = e.target as HTMLInputElement; const h = parseHex(el.value); if (h) set(h); else el.value = v; }} />
-      <button class="btn rs" ?hidden=${!own} aria-label="Reset ${lab.name}" @click=${() => this.edit(resetToken(this.cfg, name, t))}>Reset</button>
     </div>`;
   }
   private paletteCell(name: string, th: RenderTheme, slot: number) {
@@ -255,8 +256,8 @@ export class HhThemes extends StoreElement {
                   <button class="btn sm" aria-label="Fix ${p.title}" @click=${() => this.edit(applyFix(this.cfg, name, p))}>Fix</button></div>`)}
               </section>`
             : html`<p>${statusChip('ok', 'Text is readable everywhere', { check: true })}</p>`}
-          ${TOKEN_GROUPS.map((g) => html`<div class="grp"><h4>${g.title}</h4>${g.tokens.map((t) => this.tokenRow(name, th, t))}</div>`)}
-          <div class="pal"><h4>Palette</h4><p class="muted">The 12 colours widgets can use. Text on each is chosen automatically.</p>
+          ${TOKEN_GROUPS.map((g) => html`<div class="grp"><h3>${g.title}</h3>${g.tokens.map((t) => this.tokenRow(name, th, t))}</div>`)}
+          <div class="pal"><h3>Palette</h3><p class="muted">The 12 colours widgets can use. Text on each is chosen automatically.</p>
             <div class="row">${PALETTE_NAMES.map((_n, i) => this.paletteCell(name, th, i))}</div></div>
           <div class="acts end">
             <button class="btn" @click=${() => this.edit(selectTheme(this.cfg, name))} ?hidden=${used}>Use this theme</button>

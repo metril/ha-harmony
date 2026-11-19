@@ -193,7 +193,7 @@ export class HhInspector extends LitElement {
           </div>`
         : nothing}
       ${w.type === 'label' ? html`<div class="sec"><h3>Look</h3>${this.colourRows(pi, wi, w)}</div>` : nothing}
-      ${this.colourCost(pi, page, w, pp)}
+      ${this.colourCost(pi, page, w)}
       ${isBtn
         ? html`<label>Tap goes to page
             <select .value=${navVal} @change=${(e: Event) => this.setNav(pi, wi, (e.target as HTMLSelectElement).value)}>
@@ -258,9 +258,10 @@ export class HhInspector extends LitElement {
     this.st.store.replace(setWidget(next, pi, wi, { [key]: slot }));
   }
   /** The colour bytes of this widget and the compiler's over-budget message for its page. */
-  private colourCost(_pi: number, page: Page, w: Widget, pp: ReturnType<StudioHost['state']['previewOf']>) {
+  private colourCost(pi: number, page: Page, w: Widget) {
     const cb = colourBytes(w);
-    const err = pp?.error && /colour/i.test(pp.error) ? pp.error : null;
+    const pe = this.st.store.pages[pi]?.error;
+    const err = pe && /colour/i.test(pe) ? pe : null;
     const total = page.widgets.reduce((n, x) => n + colourBytes(x), 0);
     if (!cb && !err) return nothing;
     return html`${cb ? html`<p class="why" id="colour-cost">Colour uses ${cb} B here (${total} B on this page). A palette name costs 1 B, a custom colour 2 B more.</p>` : nothing}
