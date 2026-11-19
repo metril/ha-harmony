@@ -1,9 +1,9 @@
 """Headless-browser end-to-end: the real aiohttp app + the real built bundle, under an ingress prefix.
 
 Skipped unless playwright is importable, a Chromium can be launched (HH_CHROMIUM=/path/to/chrome
-overrides the lookup) and addon/frontend/dist exists (`npm run build`). CI does not install
-playwright, so this runs on developer machines:
-    HH_CHROMIUM=/usr/bin/google-chrome uv run --with playwright python -m pytest tests/py/test_addon_e2e.py -n0
+overrides the lookup) and addon/frontend/dist exists (`npm run build`). With HH_REQUIRE_E2E=1 (set
+in CI) any of those missing is a failure, never a silent skip:
+    HH_CHROMIUM=/usr/bin/google-chrome uv run pytest tests/py/test_addon_e2e.py -n0
 Set HH_SHOTS=<dir> to also write light/dark screenshots at 1280 and 400 px.
 """
 
@@ -19,9 +19,15 @@ from harmony_addon.app import create_app
 from harmony_addon.auth import NoAuth
 from harmony_addon.options import Options
 
-pw = pytest.importorskip("playwright.async_api")
+REQUIRED = bool(os.environ.get("HH_REQUIRE_E2E"))
 DIST = Path(__file__).resolve().parents[2] / "addon" / "frontend" / "dist"
-pytestmark = pytest.mark.skipif(not (DIST / "index.html").is_file(), reason="frontend not built")
+if REQUIRED:
+    import playwright.async_api as pw  # ImportError fails collection
+
+    assert (DIST / "index.html").is_file(), "HH_REQUIRE_E2E set but the frontend is not built"
+else:
+    pw = pytest.importorskip("playwright.async_api")
+    pytestmark = pytest.mark.skipif(not (DIST / "index.html").is_file(), reason="frontend not built")
 
 PREFIX = "/api/hassio_ingress/e2eTok_en-1"
 TOKEN = "ab" * 32
@@ -59,6 +65,8 @@ async def browser():
         try:
             b = await p.chromium.launch(executable_path=os.environ.get("HH_CHROMIUM"))
         except pw.Error as exc:  # no browser binary on this machine
+            if REQUIRED:
+                raise
             pytest.skip(f"cannot launch chromium: {exc}")
         yield b
         await b.close()
@@ -87,7 +95,7 @@ async def api(origin, method, path, **kw):
     if "/bundle" not in path:  # bearer routes are not ingress routes
         kw["headers"] = {**INGRESS_HEADERS, **kw.get("headers", {})}
     async with aiohttp.ClientSession() as s, s.request(method, origin + path, **kw) as r:
-        return r.status, await r.json()
+        return r.status, (await r.json() if r.status != 204 else None)
 
 
 async def ack(origin, result="ok", detail=None):
@@ -167,6 +175,9 @@ async def test_a_second_tab_editing_the_draft_shows_the_conflict_banner(browser,
 
 async def test_waiting_message_after_30s_is_reachable_and_late_ack_still_completes(browser, site):
     await seed(site, SMALL)
+    # the integration is linked (it polls for this hub): with no poller at all the dialog says
+    # "No Home Assistant integration is linked" instead
+    await api(site, "GET", "/api/v1/bundle?hub=default", headers={"Authorization": f"Bearer {TOKEN}"})
     page = await open_editor(browser, site)
     await page.get_by_text("No changes since rev 1").wait_for()
     # an edit through the store, then apply it from the UI with a shortened wait
