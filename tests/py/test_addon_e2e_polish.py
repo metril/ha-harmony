@@ -472,8 +472,8 @@ async def test_palette_chips_form_an_aligned_grid(browser, large, size):
             f"""() => {{
           const body = {PALETTE}.querySelector('.body'), bb = body.getBoundingClientRect(), out = [];
           if (body.scrollWidth > body.clientWidth) out.push('horizontal overflow');
-          for (const grp of {PALETTE}.querySelectorAll('.chips')) {{
-            const cs = [...grp.querySelectorAll('.chip2')].map(c => c.getBoundingClientRect());
+          for (const grp of {PALETTE}.querySelectorAll('.cells')) {{
+            const cs = [...grp.children].map(c => c.getBoundingClientRect());
             if (!cs.length) continue;
             const lefts = new Set(cs.map(r => Math.round(r.left))), hs = new Set(cs.map(r => Math.round(r.height)));
             if (lefts.size > 3) out.push('ragged left edges ' + [...lefts]);
@@ -508,7 +508,7 @@ async def test_selection_can_be_cleared(browser, large, how):
     assert await page.evaluate(pressed) == "true"
     if how in ("reclick", "body"):  # the popover may sit over the key: dismiss it first, the key stays selected
         await page.keyboard.press("Escape")
-        await page.wait_for_timeout(150)
+        await page.wait_for_function(f"() => !{STUDIO}.querySelector('.pop')", timeout=3000)
         assert '"key"' in await _sel(page)
     if how == "reclick":
         await page.mouse.click(x, y)
@@ -528,8 +528,7 @@ async def test_selection_can_be_cleared(browser, large, how):
         await page.keyboard.press("Escape")
     else:
         await page.evaluate(f"() => {STUDIO_EL}.st.setLayer('watch_tv')")
-    await page.wait_for_timeout(250)
-    assert await _sel(page) == "null"
+    await page.wait_for_function(f"() => JSON.stringify({STUDIO_EL}.st.sel) === 'null'", timeout=3000)
     assert await page.evaluate(pressed) == "false"
     assert await page.evaluate(f"() => !{STUDIO}.querySelector('.pop')")
     await page.context.close()
@@ -615,10 +614,14 @@ async def test_every_key_label_and_glyph_is_readable_when_selected(browser, larg
     names = await page.evaluate(f"() => [...{REMOTE}.querySelectorAll('[data-key]')].map((e) => e.dataset.key)")
     assert len(names) >= 35
     bad = []
-    for state in ("idle", "hover", "selected", "selected+hover"):
+    for state in ("idle", "hover", "selected", "selected+hover", "drop-target"):
         for name in names:
-            sel = "null" if state in ("idle", "hover") else f"{{kind: 'key', name: '{name}'}}"
+            sel = "null" if state in ("idle", "hover", "drop-target") else f"{{kind: 'key', name: '{name}'}}"
             await page.evaluate(f"() => {STUDIO_EL}.st.set({{sel: {sel}}})")
+            if state == "drop-target":  # a picked-up source with the keyboard cursor on this key
+                await page.evaluate(
+                    f"() => {{ const a = {STUDIO_EL}.assigner; a.cancel(); a.pick({{kind: 'alloff'}}); a.setCursor({{kind: 'key', name: '{name}'}}); }}"
+                )
             hover = state.endswith("hover")
             await page.mouse.move(*(await _key_centre(page, name))) if hover else await page.mouse.move(0, 0)
             await page.wait_for_timeout(150)
@@ -626,4 +629,26 @@ async def test_every_key_label_and_glyph_is_readable_when_selected(browser, larg
                 if ratio < (4.5 if is_text else 3.0):
                     bad.append(f"{state} {name}: {key} {col} on {bg} = {ratio:.2f}")
     assert bad == [], "\n".join(bad)
+    await page.context.close()
+
+
+@pytest.mark.parametrize("size", [(1440, 900), (1280, 720)])
+async def test_inspector_free_keys_form_an_aligned_grid(browser, large, size):
+    page = await open_large(browser, large, *size)
+    await page.evaluate(f"() => {STUDIO_EL}.st.set({{sel: null}})")
+    await page.wait_for_timeout(250)
+    bad = await page.evaluate(
+        f"""() => {{
+      const root = {STUDIO}.querySelector('hh-inspector').shadowRoot, out = [];
+      const ir = root.host.getBoundingClientRect();
+      for (const grp of root.querySelectorAll('.cells')) {{
+        const cs = [...grp.children].map(c => c.getBoundingClientRect());
+        if (new Set(cs.map(r => Math.round(r.height))).size > 1) out.push('unequal heights');
+        if (new Set(cs.map(r => Math.round(r.left))).size > 3) out.push('ragged left edges');
+        if (cs.some(r => r.right > ir.right + 0.5)) out.push('overflow');
+      }}
+      return [out, root.querySelectorAll('.cells').length];
+    }}"""
+    )
+    assert bad[1] >= 1 and bad[0] == [], bad
     await page.context.close()
