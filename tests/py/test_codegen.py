@@ -400,3 +400,46 @@ def test_v036_decoder_accepts_main_hello_ack(tmp_path):
     assert ns["decode_ws"](env)[1] == {"hub_id": "h", "fw_version": "0.3.7"}
     with pytest.raises(ns["ProtoError"]):
         ns["decode_ws"]({**env, "d": {"fw_build": 366}})  # required field still enforced
+
+
+def _v038_schema(tmp_path):
+    """The real schema as 0.3.8 had it: no hello_ack.limits, no config_chunk."""
+    import re as _re
+
+    text = REAL_SCHEMA.read_text()
+    text = _re.sub(r"^ *- \{name: limits,.*\n", "", text, flags=_re.MULTILINE)
+    text = _re.sub(r"^  - name: config_chunk\n(?:    .*\n|      .*\n)+", "", text, flags=_re.MULTILINE)
+    p = tmp_path / "v038.yaml"
+    p.write_text(text)
+    return p
+
+
+LIMITS_HELLO = {
+    "hub_id": "h", "fw_version": "0.3.9", "fw_build": 400, "ota_key": "release",
+    "limits": {"budget": 8192, "flash_free": 4096, "chunk": 49152},
+}
+
+
+def test_v038_integration_decodes_hello_ack_with_limits(tmp_path):
+    """A 0.3.8 integration (no limits, no config_chunk in its schema) against this hub."""
+    out = tmp_path / "out"
+    generate(_v038_schema(tmp_path), out)
+    ns = load_gen_py(out)
+    assert "CONFIG_CHUNK" not in ns["MsgType"].__members__
+    got = ns["decode_ws"]({"v": 1, "id": 1, "t": "hello_ack", "d": LIMITS_HELLO})[1]
+    assert got["hub_id"] == "h" and "limits" not in got and got["fw_build"] == 400
+
+
+def test_this_integration_decodes_v038_hello_ack_and_falls_back():
+    """This integration against a 0.3.8 hub: hello_ack without limits -> the fixed legacy limits."""
+    from harmony_core.hub_limits import CURRENT, LEGACY, HubLimits
+
+    ns = _real_py()
+    env = {"v": 1, "id": 1, "t": "hello_ack",
+           "d": {"hub_id": "h", "fw_version": "0.3.8", "fw_build": 366, "ota_key": "dev"}}
+    data = ns["decode_ws"](env)[1]
+    assert "limits" not in data
+    lim = HubLimits.from_hello(data.get("limits"))
+    assert lim == LEGACY and lim.legacy
+    wire = {k: v for k, v in CURRENT.to_wire().items() if k != "flash_free"}  # flash_free optional
+    assert HubLimits.from_hello(wire) == CURRENT

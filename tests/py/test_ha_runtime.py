@@ -188,7 +188,7 @@ def _fast_tiles(monkeypatch):
     monkeypatch.setattr(const, "TILE_DEBOUNCE", 0.05)
 
 
-async def settle(hass, predicate=None, timeout=3.0):
+async def settle(hass, predicate=None, timeout=15.0):  # an upper bound only: returns when true
     async with asyncio.timeout(timeout):
         while True:
             await hass.async_block_till_done()
@@ -318,8 +318,10 @@ async def test_newer_config_cancels_a_running_push_and_sets_never_interleave(
     fake_addon.apply_yaml(THREE_PAGES.replace("label: Lamp", "label: Lamp two"))
     await c.async_refresh_from_addon()
     hub.gate.set()
-    await settle(hass)
-    await asyncio.sleep(0.1)
+    new_gen = c.compiled.models[0].gen
+    n_new = len(c.compiled.pages_v2)
+    # the full new set arrived (a signal, not a sleep), then everything in flight drained
+    await settle(hass, lambda: [p.gen for p in hub.pages()[before:]].count(new_gen) >= n_new)
     await settle(hass)
     gens = [p.gen for p in hub.pages()[before:]]
     assert old_gen != c.compiled.models[0].gen

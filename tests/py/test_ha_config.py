@@ -425,15 +425,26 @@ async def test_page_tap_runs_button_action(hass, hub_rf, write_yaml, built_binar
 
 async def test_tile_update_follows_bound_entity(hass, hub_rf, write_yaml, built_binaries):
     write_yaml(BASE)
-    r = start_remote(built_binaries, hub_rf.rf, "--dump-layout", "--settle-ms", "800")
+    # settle = quiet time after the last frame; generous so a stalled loop cannot end the dump early
+    r = start_remote(built_binaries, hub_rf.rf, "--dump-layout", "--settle-ms", "2500",
+                     "--timeout-ms", "20000")
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
-    base = coord.tile_updates
+    sent: list[str] = []  # the tile texts actually sent, in order (the attach push sends "--" first)
+    real = coord.client.async_send
+
+    async def spy(msg_type, data, *a, **kw):
+        if data.get("command") == const.CMD_TILE_UPDATE:
+            sent.append(data["args"]["text"])
+        return await real(msg_type, data, *a, **kw)
+
+    coord.client.async_send = spy
     hass.states.async_set("sensor.temp", "21.5", {"unit_of_measurement": "°C"})
-    await until(hass, lambda: coord.tile_updates > base)
+    await until(hass, lambda: "21.5 °C" in sent, timeout=15)
     hass.states.async_set("sensor.temp", "22.0", {"unit_of_measurement": "°C"})
     hass.states.async_set("sensor.temp", "22.5", {"unit_of_measurement": "°C"})  # debounced
-    await until(hass, lambda: coord.tile_updates == base + 2)
+    await until(hass, lambda: "22.5 °C" in sent, timeout=15)
+    assert "22.0 °C" not in sent, sent  # the burst coalesced into its latest value
     code, out = await asyncio.to_thread(r.result)
     tile = json.loads(out)["widgets"][2]
     assert code == 0 and tile["kind"] == "tile" and tile["text"] == "22.5 °C"
