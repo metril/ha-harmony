@@ -14,6 +14,15 @@ else()
 endif()
 option(HP_SANITIZE "Build with ASan+UBSan" ${_hp_san})
 
+# The hub's /data is ~2.4 MB and an OTA needs twice the image plus HP_OTA_SLACK free: hub cross builds are size-first
+# (-Os, per-function sections, linker gc, stripped output; tools/check_hub_size.py enforces the budget).
+if(CMAKE_CROSSCOMPILING AND HP_TARGET STREQUAL "hub")
+  if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE MinSizeRel CACHE STRING "Build type" FORCE)
+  endif()
+  add_compile_options(-ffunction-sections -fdata-sections)
+endif()
+
 add_compile_options(-Wall -Wextra -Werror)
 if(HP_SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -211,7 +220,16 @@ if(HH_BT)
   include(hub/bt/bt.cmake)  # include(), not add_subdirectory: a hub/ build dir would collide with the hub executable
   target_link_libraries(hub PRIVATE hp_bt)
   target_compile_definitions(hub PRIVATE HH_BT=1)
-  target_link_options(hub PRIVATE -Wl,--gc-sections)  # BTstack and the helper are built with -ffunction-sections
+endif()
+if(NOT HP_SANITIZE)
+  target_link_options(hub PRIVATE -Wl,--gc-sections)  # drop unreferenced functions/data (all hub objects are built with -ffunction-sections)
+endif()
+if(CMAKE_CROSSCOMPILING AND HP_TARGET STREQUAL "hub" AND CMAKE_STRIP)
+  # What deploy_hub.py pushes and ota_sign signs is the stripped build/hub; hub.debug keeps the symbols next to it.
+  add_custom_command(TARGET hub POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:hub> $<TARGET_FILE:hub>.debug
+    COMMAND ${CMAKE_STRIP} --strip-all $<TARGET_FILE:hub>
+    COMMENT "Stripping hub (unstripped copy: hub.debug)")
 endif()
 
 # Bench-only IR emitter experiment (not shipped in the hub binary).

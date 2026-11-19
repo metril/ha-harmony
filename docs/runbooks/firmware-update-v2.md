@@ -22,7 +22,10 @@ hub strike counter / `install_boot_hook.py disarm`; remote `/data/app/DISABLE`.
 1. Hub: `HP_TOOLCHAIN_ROOT=$PWD/vendor/toolchains/mips_24kc cmake --build build-cross -j8 --target hub`
 2. Remote: `HP_TOOLCHAIN_ROOT=$PWD/vendor/toolchains/armv5-eabi cmake --build build-remote -j8 --target harmony_remote`
 3. `cmake --build build-host -j8 && ctest --test-dir build-host -j8`; `uv run pytest tests/py -n auto -q`.
-4. `md5sum build-cross/hub build-remote/harmony_remote` and note them.
+4. `python3 tools/check_hub_size.py build-cross/hub` (the cross build defaults to MinSizeRel: -Os, gc-sections, a stripped `hub`, with the
+   symbols in `hub.debug`; it fails over 600 KiB, and prints the OTA need of 2x image + slack against the ~2.4 MB /data). Push and sign
+   only the stripped `hub`; `deploy_hub.py push` refuses an unstripped one.
+5. `md5sum build-cross/hub build-remote/harmony_remote` and note them.
 
 ## 3. Push (files only; running processes unchanged)
 

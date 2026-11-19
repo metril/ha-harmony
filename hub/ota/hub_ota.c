@@ -20,7 +20,11 @@
 /* tools/ota_sign reads the build id from here when -b is omitted, so image and binary cannot disagree */
 const char hp_build_tag[] = "HPBUILDID=" HP_STR(HP_BUILD_ID) ";";
 uint32_t (*hp_build_id_hook)(void); /* tests only: replaces the compiled-in id */
-uint32_t hp_build_id(void) { return hp_build_id_hook ? hp_build_id_hook() : (uint32_t)HP_BUILD_ID; }
+uint32_t hp_build_id(void) {
+    if (hp_build_id_hook) return hp_build_id_hook();
+    /* the volatile read references hp_build_tag, so --gc-sections keeps the string ota_sign looks for */
+    return *(const volatile char *)hp_build_tag == 'H' ? (uint32_t)HP_BUILD_ID : 0;
+}
 
 static uint64_t default_avail(const char *dir) {
     struct statvfs v;

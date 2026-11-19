@@ -221,9 +221,9 @@ int main(int argc, char **argv) {
             if (r < 0 && errno != EINTR && errno != EAGAIN) return 0;
             if (r > 0) have += (size_t)r;
             for (;;) {
-                uint8_t type;
+                uint8_t type = 0;
                 const uint8_t *p;
-                size_t len;
+                size_t len = 0;
                 size_t used = bt_ipc_parse(buf, have, &type, &p, &len);
                 if (used == 0 || used == (size_t)-1) break;
                 on_frame(type, p, len);

@@ -359,6 +359,10 @@ int main(int argc, char **argv) {
     }
     hp_actsm_reloaded(&g_hub.act); /* device tracking for the cached config */
     hub_bt_config_sync(&g_hub);    /* the helper starts when the cached config has Bluetooth hosts or remotes */
+#ifndef HH_BT
+    (void)bt_helper;
+    (void)bt_dir;
+#endif
 #ifdef HH_BT
     bool bt_run = !sim || bt_helper; /* --sim never launches the real helper */
     {
