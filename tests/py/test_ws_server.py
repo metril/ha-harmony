@@ -4,6 +4,7 @@ import signal
 import socket
 import struct
 import subprocess
+from pathlib import Path
 
 import aiohttp
 import pytest
@@ -203,7 +204,7 @@ def test_heartbeat_file_tracks_monotonic_uptime(start_hub, tmp_path):
     while time.monotonic() < deadline and int(hb.read_text() or first) <= first:
         time.sleep(0.1)
     assert int(hb.read_text()) > first, "heartbeat was not refreshed"
-    up = float(open("/proc/uptime").read().split()[0])
+    up = float(Path("/proc/uptime").read_text().split()[0])
     assert abs(up - int(hb.read_text())) < 3600 * 24  # same scale (seconds), not epoch
     assert int(hb.read_text()) < 10**8  # not a wall-clock epoch
 

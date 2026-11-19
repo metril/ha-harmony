@@ -25,7 +25,7 @@ def tool(tmp_path_factory):
 
 def run(tool, *args, home=None, ok=True):
     env = dict(os.environ, HOME=str(home)) if home else os.environ
-    r = subprocess.run([str(tool), *map(str, args)], capture_output=True, text=True, env=env)
+    r = subprocess.run([str(tool), *map(str, args)], capture_output=True, text=True, env=env, check=False)
     assert (r.returncode == 0) == ok, r.stderr + r.stdout
     return r
 
@@ -83,7 +83,7 @@ def test_pubheader_dev_matches_committed_and_generated_is_not_dev(tool, tmp_path
     committed = (ROOT / "common/ota/ota_pubkey_dev.h").read_text()
     pub = run(tool, "pubkey", "--dev").stdout.strip()
     assert "OTA_PUBKEY_IS_DEV 1" in dev and "OTA_PUBKEY_IS_DEV 1" in committed
-    flat = lambda s: "".join(s.split())  # noqa: E731
+    flat = lambda s: "".join(s.split())
     assert flat(dev.split("OTA_PUBKEY_INIT")[1].split("#endif")[0].replace("\\", "")) == flat(
         committed.split("OTA_PUBKEY_INIT")[1].split("#endif")[0].replace("\\", "")
     )
@@ -96,16 +96,16 @@ def test_pubheader_dev_matches_committed_and_generated_is_not_dev(tool, tmp_path
 @pytest.mark.skipif(not shutil.which("cmake"), reason="cmake missing")
 def test_release_build_refuses_dev_key(tmp_path, tool):
     base = ["cmake", "-S", str(ROOT), "-B", str(tmp_path / "b")]
-    r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=Release", "-DHP_BUILD_TESTS=OFF"], capture_output=True, text=True)
+    r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=Release", "-DHP_BUILD_TESTS=OFF"], capture_output=True, text=True, check=False)
     assert r.returncode != 0 and "DEV/TEST public key" in r.stderr
     allow = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DHP_BUILD_TESTS=OFF", "-DHP_ALLOW_DEV_OTA_KEY=ON"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, check=False)
     assert allow.returncode == 0 and "DEV/TEST OTA PUBLIC KEY" in allow.stderr
     r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DHP_BUILD_TESTS=OFF", "-DHP_ALLOW_DEV_OTA_KEY=OFF"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, check=False)
     assert r.returncode != 0
     gen = tmp_path / "gen.h"
     gen.write_text(run(tool, "pubheader", "--dev").stdout.replace("IS_DEV 1", "IS_DEV 0"))
     r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=Release", "-DHP_BUILD_TESTS=OFF", f"-DHP_OTA_PUBKEY_HEADER={gen}"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr

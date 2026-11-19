@@ -916,7 +916,7 @@ def test_log_lines_carry_uptime_stamps(root: Path) -> None:
     source_hook(root)
     vlog = root / "var" / "volatile" / "ha-harmony.log"
     _wait_text(vlog, "DAEMON-LINE")
-    assert re.search(r"^\[up \d+s\] DAEMON-LINE$", vlog.read_text(), re.M)
+    assert re.search(r"^\[up \d+s\] DAEMON-LINE$", vlog.read_text(), re.MULTILINE)
     _wait_text(root / "cache" / "ha-harmony.log", "healthy")
     lines = _clog(root).splitlines()
     assert lines and all(re.match(r"\[up \d+s( \d{4}-\d\d-\d\d [\d:]+)?\] ha-harmony: ", ln) for ln in lines)
