@@ -22,6 +22,7 @@
 
 
 typedef struct {
+  uint8_t page_theme; /* theme id the last v2 page asked for */
   hp_page_t page; /* what is on screen (boot / fallback / pushed); built-in pages have count 0 */
   lv_obj_t *obj[HP_PAGE_MAX_WIDGETS];
   lv_obj_t *lbl[HP_PAGE_MAX_WIDGETS];
@@ -51,7 +52,10 @@ typedef struct {
 } ra_ui_t;
 
 void ra_ui_init(ra_ui_t *ui); /* needs an LVGL display; shows the boot page */
-void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p);
+void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p); /* a v2 page also applies its theme preset */
+/* The custom theme (99-byte wire form) for pages with theme id 7; until one is set such pages use the default preset.
+ * 0 ok, -1 invalid (the previous one is kept). */
+int ra_ui_set_custom_theme(const uint8_t *bytes, size_t n);
 void ra_ui_show_boot(ra_ui_t *ui);      /* "Connecting" */
 void ra_ui_show_receiving(ra_ui_t *ui); /* hub heard, no page yet */
 /* "Receiving page k of N" with a progress bar; called again it only updates the texts and the bar. */

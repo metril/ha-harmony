@@ -68,7 +68,7 @@ add_test(NAME remote_probe COMMAND test_remote_probe)
 
 # Remote app (LVGL render, evdev input, power): host-only through the injected syscall seam.
 if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
-  foreach(t remote_input remote_power remote_suspend remote_render remote_mem remote_oom remote_app remote_rf remote_latency remote_v2 remote_fuzz remote_themes)
+  foreach(t remote_input remote_power remote_suspend remote_render remote_mem remote_oom remote_app remote_rf remote_latency remote_v2 remote_fuzz remote_themes remote_colors)
     add_executable(test_${t} test_${t}.c)
     target_link_libraries(test_${t} PRIVATE hp_remote_app hp_hub)
     if(NOT t STREQUAL "remote_mem" AND NOT t STREQUAL "remote_oom" AND NOT t STREQUAL "remote_fuzz")
@@ -84,11 +84,12 @@ if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME remote_oom_precheck COMMAND test_remote_oom 1)
   add_test(NAME remote_oom_precheck_v2 COMMAND test_remote_oom 4)
   add_test(NAME remote_oom_creation COMMAND test_remote_oom 2)
-  foreach(t remote_render remote_rf remote_themes)
+  foreach(t remote_render remote_rf remote_themes remote_colors)
     target_compile_definitions(test_${t} PRIVATE
       HP_PAGES_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json"
       HP_RENDER_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/remote_render.json"
-      HP_THEME_RENDER_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/remote_render_themes.json")
+      HP_THEME_RENDER_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/remote_render_themes.json"
+      HP_COLORS_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/remote_render_colors.json")
   endforeach()
 endif()
 
