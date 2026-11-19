@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { KeymapRow, V2Page } from '../lib/api';
 import type { Assigner, Spot } from '../lib/assigner';
 import { cellAt, pageGroup, widgetRect } from '../lib/page-renderer';
-import { BODY, DPAD, GLASS, KEYS, PRINTED, SCREEN, VIEW, keyPath, keyTitle, type KeyGeom } from '../lib/remote-layout';
+import { BODY, DPAD, GLASS, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, keyPath, keyTitle, type KeyGeom } from '../lib/remote-layout';
 import type { StudioHost } from '../lib/studio-state';
 import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
@@ -319,7 +319,11 @@ export class HhRemote extends LitElement {
       case 'down': return tri(`M${cx} ${cy + 6}l7 -9h-14z`);
       case 'left': return tri(`M${cx - 6} ${cy}l9 -7v14z`);
       case 'right': return tri(`M${cx + 6} ${cy}l-9 -7v14z`);
-      case 'prev_channel': return svg`<path class="gs" d="M${cx + 9} ${cy + 5}h-12a6 6 0 0 0 0 -12h8M${cx - 1} ${cy - 11}l-4 4l4 4" stroke-linecap="round" stroke-linejoin="round"></path>`;
+      case 'prev_channel': return svg`<path class="gs" d="M${cx - 9} ${cy - 3}l5 -5m-5 5l5 5m-5 -5h12a6 6 0 0 1 0 12h-6" stroke-linecap="round" stroke-linejoin="round"></path>`;
+      case PHYSICAL_KEYS.lightUpper:
+      case PHYSICAL_KEYS.lightLower: return svg`<path class="gs" d="M${cx - 4.5} ${cy + 2.5}a6 6 0 1 1 9 0c-1 1 -1.5 2 -1.5 3.5h-6c0 -1.5 -.5 -2.500 -1.500 -3.500zM${cx - 2.500} ${cy + 8.500}h5" stroke-linecap="round" stroke-linejoin="round"></path>`;
+      case PHYSICAL_KEYS.socketUpper:
+      case PHYSICAL_KEYS.socketLower: return svg`<rect class="gs" x=${cx - 7} y=${cy - 7} width="14" height="14" rx="4"></rect><path class="gs" d="M${cx - 2.500} ${cy - 2.500}v2.500M${cx + 2.500} ${cy - 2.500}v2.500M${cx - 2} ${cy + 3}h4" stroke-linecap="round"></path>`;
       case 'play': return svg`<path class="gl" d="M${cx - 4} ${cy - 6}l11 6l-11 6z"></path>`;
       case 'pause': return svg`<path class="gl" d="M${cx - 5} ${cy - 6}h3.5v12h-3.5zM${cx + 1.5} ${cy - 6}h3.5v12h-3.5z"></path>`;
       case 'stop': return svg`<rect class="gl" x=${cx - 5} y=${cy - 5} width="10" height="10" rx="1.5"></rect>`;
