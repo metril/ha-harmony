@@ -24,6 +24,7 @@ const PATHS: Record<string, string> = {
   clock: 'M12 7v5l3 2M12 3a9 9 0 100 18 9 9 0 000-18z',
   palette: 'M12 3a9 9 0 100 18c1.4 0 2-.9 2-1.8 0-1.2-1-1.4-1-2.4 0-.9.8-1.6 1.8-1.6H17a4 4 0 004-4c0-4.4-4-8.2-9-8.2zM7.5 11.5v.01M9.5 7.5v.01M14.5 7.5v.01',
   plus: 'M12 5v14M5 12h14',
+  bluetooth: 'M7 7l10 10-5 4V3l5 4L7 17',
 };
 
 export function icon(name: string, cls = 'ic'): TemplateResult {

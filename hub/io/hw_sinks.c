@@ -8,6 +8,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "hub/bt_link.h"
 #include "hub/hp_errors.h"
 
 /* --- real syscalls ------------------------------------------------------------------------ */
@@ -153,9 +154,13 @@ fail:
     return rc;
 }
 
-static int bt_key(void *self, uint16_t usage, bool down) {
-    (void)self; (void)usage; (void)down;
-    return -HP_E_NOSYS;
+/* A key for a Bluetooth host goes to the link (hub/bt_link.h). Best effort by contract: a helper that is down, a host
+ * that is not bonded or a full socket loses the key silently, so an activity's IR steps are never aborted by Bluetooth. */
+static int bt_key(void *self, uint8_t host, uint8_t page, uint16_t usage, bool down) {
+    (void)self;
+    if (!bt_link_available()) return -HP_E_NOSYS;
+    (void)bt_link_key(host, page, usage, down ? BT_KEY_DOWN : BT_KEY_UP);
+    return 0;
 }
 static int rf_send(void *self, const uint8_t *f, size_t n) { (void)self; (void)f; (void)n; return -HP_E_NOSYS; }
 static int rf_recv(void *self, uint8_t *f, size_t cap, int t) { (void)self; (void)f; (void)cap; (void)t; return -HP_E_NOSYS; }

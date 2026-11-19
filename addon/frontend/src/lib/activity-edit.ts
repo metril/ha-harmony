@@ -1,5 +1,6 @@
 // Pure edits and models for activities: devices and inputs, the start/stop timeline, "who handles it".
 import type { Activity, Config, Device } from './model';
+import { commandNames } from './bt';
 import { trimBytes } from './codes';
 import { activityOf } from './refs';
 import { addPage, describeAction, firstFree, pageDims, templatePage, trimToBytes, uniqueWidgetId, LABEL_MAX, type Action } from './studio-model';
@@ -241,7 +242,7 @@ export interface Match {
 /** Which command of `d` answers each key of the zone: the first accepted spelling wins; exact match only. */
 export function matchZone(d: Device, zone: Zone): Match {
   const by = new Map<string, string>();
-  for (const n of Object.keys(d.commands ?? {})) if (!by.has(normName(n))) by.set(normName(n), n);
+  for (const n of commandNames(d)) if (!by.has(normName(n))) by.set(normName(n), n);
   const matched: Record<string, string> = {};
   const missing: string[] = [];
   for (const key of ZONE_KEYS[zone]) {

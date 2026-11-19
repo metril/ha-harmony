@@ -22,8 +22,9 @@ typedef struct hp_ir_sink {
 
 typedef struct hp_bt_sink {
     void *self;
-    /* HID consumer-page usage key event. */
-    int (*key)(void *self, uint16_t usage, bool down);
+    /* HID key event for Bluetooth host slot `host` (0..HH_BT_MAX_HOSTS-1): `page` 7 (keyboard) or 12
+     * (consumer), `usage` the HID usage id, down = press, !down = release. */
+    int (*key)(void *self, uint8_t host, uint8_t page, uint16_t usage, bool down);
 } hp_bt_sink;
 
 typedef struct hp_rf_transport {

@@ -2,6 +2,7 @@
 // optimistic edits with rollback, validation + usage via preview, conflict handling.
 import { Api, ApiError, DraftQueue, type Meta, type Preview, type Usage } from './api';
 import { boundEditor } from './activity-edit';
+import { primeBtDefaults } from './bt';
 import { diffConfig, type DiffRow } from './diff';
 import { summarizeErrors } from './errors';
 import { applyUsageLimits, type Config, type ValidationError } from './model';
@@ -173,6 +174,7 @@ export class Store extends EventTarget {
       this.readStash(r.rev);
       this.loaded = true;
       this.emit();
+      void primeBtDefaults(this.api, this.config, () => this.emit());
       if (this.hasDraft || this.applied) await this.check();
       else {
         this.errors = [];
@@ -235,6 +237,7 @@ export class Store extends EventTarget {
     this.hasDraft = true;
     if (this.saveState !== 'conflict') this.saveState = 'dirty';
     this.emit();
+    void primeBtDefaults(this.api, next, () => this.emit()); // a pasted or restored config may bring a Bluetooth device on the default set
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.save(), this.debounceMs);
     if (this.retryTimer) clearTimeout(this.retryTimer);

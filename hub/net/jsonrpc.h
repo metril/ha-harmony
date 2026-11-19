@@ -15,8 +15,11 @@
 #include "proto/gen/harmony_proto.h"
 #include "vendor/cjson/cJSON.h"
 
+_Static_assert(HP_MSG_MAX_CODE < 128, "handler tables are indexed by message code: codes must stay small");
+
 typedef struct {
     bool authed; /* set by a successful hello */
+    bool bt_listen; /* bt_listen on: wants bt_remote_key pushes; reset by hello */
 } hp_session_t;
 
 /* Called for a validated, authenticated message. `d` is the (possibly empty)
@@ -45,7 +48,7 @@ typedef struct {
     /* Indexed by hp_msg_type_t. hello is handled internally; ping has a
      * built-in pong when handler[HP_MSG_PING] is NULL. NULL otherwise =>
      * error/unknown_type. */
-    hp_handler_fn handler[HP_MSG_COUNT + 1];
+    hp_handler_fn handler[HP_MSG_MAX_CODE + 1]; /* a small table indexed by code: keep codes dense */
 } hp_handler_tbl_t;
 
 #define HP_DISPATCH_OK 0

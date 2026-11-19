@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
+import { commandNames } from '../lib/bt';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { commandIconId } from '../lib/device-art';
 import { shared } from '../lib/styles';
@@ -128,7 +129,7 @@ export class HhPalette extends LitElement {
 
   private devices() {
     const used = this.usedKeys();
-    const devs = (this.cfg().devices ?? []).filter((d) => this.match(d.name ?? '', d.id, ...Object.keys(d.commands ?? {}), ...Object.keys(d.inputs ?? {})));
+    const devs = (this.cfg().devices ?? []).filter((d) => this.match(d.name ?? '', d.id, ...commandNames(d), ...Object.keys(d.inputs ?? {})));
     if (!devs.length) return html`<p class="empty">${this.st.query ? 'Nothing matches.' : 'No devices yet. Import YAML or add a device first.'}</p>`;
     return devs.map((d) => {
       const g = deviceChips(d);
@@ -141,7 +142,7 @@ export class HhPalette extends LitElement {
             </div>`
           : nothing;
       });
-      return html`<details open><summary>${stockIconSvg(1)}<span>${d.name ?? d.id}</span>${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant device">HA</i>` : nothing}<small>${Object.keys(d.commands ?? {}).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
+      return html`<details open><summary>${stockIconSvg(1)}<span>${d.name ?? d.id}</span>${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant device">HA</i>` : nothing}<small>${commandNames(d).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
     });
   }
   private activities() {

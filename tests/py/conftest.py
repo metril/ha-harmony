@@ -62,6 +62,7 @@ def built_binaries() -> Path:
                     "hub",
                     "remote_sim",
                     "ota_sign",
+                    "bt_fake_helper",  # tests/c: a stand-in for `hub bt-helper` (test_bt_link_e2e.py)
                 ]
             )
         finally:

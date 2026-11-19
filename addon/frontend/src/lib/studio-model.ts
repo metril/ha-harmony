@@ -1,6 +1,7 @@
 // Pure logic of the remote studio: command grouping, action descriptions, config edits for keys and
 // page widgets (grid maths, overlap, byte counter), and the assignment rules (what a drop on a
 // key / cell / widget does). No DOM here, so it is all unit-tested.
+import { commandNames } from './bt';
 import type { Config, Device, IrAction, Page, Widget } from './model';
 import { tileDefaultTap } from './permissions';
 import { colourBytes } from './theme-model';
@@ -49,7 +50,7 @@ export interface Chip {
 export function deviceChips(d: Device): Record<Group, Chip[]> {
   const out = Object.fromEntries(GROUPS.map((g) => [g, [] as Chip[]])) as Record<Group, Chip[]>;
   if (d.power) for (const n of ['power_on', 'power_off']) out.power.push({ kind: 'command', device: d.id, name: n, group: 'power' });
-  for (const n of Object.keys(d.commands ?? {})) {
+  for (const n of commandNames(d)) {
     const g = groupCommand(n);
     out[g].push({ kind: 'command', device: d.id, name: n, group: g });
   }
@@ -241,7 +242,7 @@ export function resolveIr(cfg: Config, a: unknown): IrAction | null {
   const x = a as Action;
   if ('device' in x) {
     const d = (cfg.devices ?? []).find((v) => v.id === x['device']);
-    if (!d || d.kind === 'ha') return null;
+    if (!d || d.kind === 'ha' || d.kind === 'bt') return null;
     if ('input' in x) return d.inputs?.[String(x['input'])] ?? null;
     const c = String(x['command']);
     if (c === 'power_on') return d.power?.on ?? d.power?.toggle ?? null;
@@ -573,7 +574,7 @@ export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { en
     }
     case 'activity': {
       const d = devices.find((x) => x.id === ctx.device) ?? devices[0];
-      const names = new Set(Object.keys(d?.commands ?? {}));
+      const names = new Set(d ? commandNames(d) : []);
       const pick = (...c: string[]) => c.find((n) => names.has(n));
       const slots: [string, string | undefined][] = [['Vol +', pick('vol_up', 'volume_up')], ['Vol -', pick('vol_down', 'volume_down')], ['Mute', pick('mute')], ['Play', pick('play', 'play_pause')], ['Pause', pick('pause')], ['Stop', pick('stop')]];
       const widgets: Widget[] = [];
@@ -583,11 +584,11 @@ export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { en
       return { id: pid, cols: 4, rows: 6, title: d?.name ?? 'Control', ...(ctx.activity ? { activity: ctx.activity } : {}), back: true, widgets };
     }
     case 'numbers': {
-      const d = devices.find((dv) => Object.keys(dv.commands ?? {}).some((n) => groupCommand(n) === 'numbers')) ?? devices[0];
+      const d = devices.find((dv) => commandNames(dv).some((n) => groupCommand(n) === 'numbers')) ?? devices[0];
       const widgets: Widget[] = [];
       for (let n = 1; n <= 10 && d; n++) {
         const c = n % 10;
-        const cmd = Object.keys(d.commands ?? {}).find((k) => RE.numbers.test(k.toLowerCase()) && k.endsWith(String(c)));
+        const cmd = commandNames(d).find((k) => RE.numbers.test(k.toLowerCase()) && k.endsWith(String(c)));
         if (cmd) widgets.push(btn(c === 0 ? 1 : (n - 1) % 3, c === 0 ? 3 : Math.floor((n - 1) / 3), String(c), { device: d.id, command: cmd }, { shape: 'pill' }, 1));
       }
       return { id: pid, cols: 3, rows: 4, title: 'Numbers', back: true, widgets };
@@ -599,7 +600,7 @@ export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { en
     }
     case 'devices': {
       const widgets: Widget[] = [];
-      devices.forEach((d) => Object.keys(d.commands ?? {}).slice(0, 12).forEach((c) => widgets.length < 30 && widgets.push({ type: 'button', id: mk('btn'), label: trimToBytes(`${d.name ?? d.id} ${c}`, LABEL_MAX), action: { device: d.id, command: c } })));
+      devices.forEach((d) => commandNames(d).slice(0, 12).forEach((c) => widgets.length < 30 && widgets.push({ type: 'button', id: mk('btn'), label: trimToBytes(`${d.name ?? d.id} ${c}`, LABEL_MAX), action: { device: d.id, command: c } })));
       return { id: pid, cols: 1, list: { rows: 6 }, title: 'Devices', back: true, widgets };
     }
     default:

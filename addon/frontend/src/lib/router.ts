@@ -3,7 +3,7 @@ export interface Route {
   section: string;
   parts: string[];
 }
-export const SECTIONS = ['remote', 'overview', 'devices', 'activities', 'themes', 'ir', 'history'] as const;
+export const SECTIONS = ['remote', 'overview', 'devices', 'activities', 'themes', 'ir', 'bluetooth', 'history'] as const;
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);

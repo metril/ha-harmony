@@ -77,3 +77,10 @@ CLIENT_KWARGS: dict[str, Any] = {
     "pong_timeout": 10.0,
     "request_timeout": 10.0,
 }
+
+# Bluetooth (bluetooth.py)
+EVENT_BT_REMOTE_KEY = "ha_harmony_bt_remote_key"
+BT_RELAY_MAX_BYTES = 64 * 1024  # the add-on's answer to a relay exchange
+BT_POLL_FAST = 1.0  # seconds between relay exchanges while a pairing window or a key listen is active
+BT_POLL_IDLE = 5.0
+BT_LISTEN_DEFAULT = 60  # `ha_harmony.bt_listen` lease, seconds (max 300)

@@ -82,7 +82,7 @@ pages:
   older than this field ignores it and sends one frame.
 - **Action** in `keys`, `steps`, `off` and page buttons: an IR action; `{device, command}` (a command,
   `power_on`/`power_off`); `{device, input}`; `{activity: <id>|"off"}` (not in `steps`/`off`);
-  `{event: name}` (HA only); `{bt: usage}`; `{none: true}`.
+  `{event: name}` (HA only); `{bt: usage}` (a consumer usage; see [Bluetooth devices](#bluetooth-devices-and-remotes)); `{none: true}`.
   `{ha: {service, target, data, repeat}}` (Home Assistant only): see [Home Assistant actions](#home-assistant-actions).
 - **Device command names** are free text (max 31 bytes) but `power_on`, `power_off` and names starting with
   `input_` are reserved for the built-ins and rejected. Home Assistant's device buttons and
@@ -232,6 +232,55 @@ devices that are not already on (the entity is the truth), (4) selects their inp
 start of Home Assistant is only a baseline (no steps run when it restarts); a change that happened while Home
 Assistant and the hub were disconnected is compared with the activity known before the drop and its steps run. A newer transition cancels the
 steps still waiting. HA steps and IR steps of one list are not interleaved: IR steps run first.
+
+### Bluetooth devices and remotes
+
+The hub can act as a Bluetooth HID keyboard/consumer-control device towards up to **255** hosts (TVs, boxes), and
+accept keys from up to **32** physical Bluetooth remotes. Both are configuration only here; the Bluetooth link is
+made by the hub.
+
+```yaml
+devices:
+  - id: shield
+    kind: bt
+    name: Shield
+    address: aa:bb:cc:dd:ee:ff     # optional until paired; normalised to upper case (quote it if it is all digits)
+    transport: auto                # auto (default) | classic | le
+    commands:                      # optional: omitted = every built-in name (not letters, F-keys, punctuation)
+      Home: Home                   # <command name>: <built-in name> | HID:<page hex>:<usage hex>
+      Search: "HID:0C:0221"
+      Ok: OK
+
+bt_remotes:
+  - name: Homatics
+    address: "11:22:33:44:55:66"   # optional
+    keys:                          # optional; <built-in name | HID:pp:uuuu>: <key name>, added to the defaults
+      Red: red
+      "HID:0C:0223": favorites
+```
+
+- A `kind: bt` device is used like an IR device: `{device: shield, command: Home}` in `keys`, `steps`, `off`, page
+  buttons and tiles; it gets the same command buttons (disabled by default, none above 200 commands) and
+  `remote.send_command`. It has no `power` or `inputs`. In a `steps`/`off` list a Bluetooth command is a tap (key
+  down, key up); on a physical key it is key down at the press and key up at the release. The device's slot
+  (`host`, 0..254) is its index among the `kind: bt` devices in file order; the compiled config carries a top-level
+  `bt_hosts: [{slot, addr|null, name, transport}]`.
+- **Codes**: only the keyboard page (`07`, usages `0001`..`00FF`) and the consumer page (`0C`, `0001`..`03FF`)
+  exist. A command value is a built-in name (`DirectionUp`, `Select`/`OK`, `Back`, `Home`, `Menu`, `Info`, `Play`,
+  `Pause`, `PlayPause`, `Stop`, `SkipForward`, `SkipBack`, `FastForward`, `Rewind`, `VolumeUp`, `VolumeDown`, `Mute`,
+  `PowerToggle`, `ChannelUp`, `ChannelDown`, `Red`..`Blue`, `Number0`..`Number9`, `F1`..`F12`, `a`..`z`, and more;
+  case does not matter, a few short aliases such as `up`, `ok`, `vol_up` work), `0x0221` (a consumer usage), or
+  `HID:<page>:<usage>` such as `HID:0C:0223`.
+- **`bt_remotes`**: each entry's `keys` map a usage to a key name from the same set as the Elite's hard keys (`up`,
+  `volume_up`, `key_<n>`, ...), so the activity key maps apply to a Bluetooth remote unchanged. Without `keys` (and
+  under your entries) a default map applies: arrows, Select/Enter, Back/Escape (`exit`), Home, Menu, Info,
+  Play/PlayPause (`play`), Pause, Stop, FastForward, Rewind, volume, Mute, channels, PowerToggle
+  (`power_off_activity`), the colour keys and digits 0..9 (`key_100`..`key_109`). Compiled as
+  `bt_remotes: [{slot, addr|null, name, keys: [[page, usage, key_id], ...]}]`; the keys are counted as key-map
+  entries, and every host and remote as a device, in the hub's memory budget. `Usage: null` removes a default
+  (that button then does nothing); older configs without it are unchanged. A usage that is not mapped is ignored.
+- Errors are located: an address that is not `AA:BB:CC:DD:EE:FF`, a page other than 07/0C, an unknown name or key,
+  more than 255 devices or 32 remotes. The hub's own table sizes will be compared at push time (not yet).
 
 ### Which pages a remote gets
 

@@ -14,6 +14,15 @@ else()
 endif()
 option(HP_SANITIZE "Build with ASan+UBSan" ${_hp_san})
 
+# The hub's /data is ~2.4 MB and an OTA needs twice the image plus HP_OTA_SLACK free: hub cross builds are size-first
+# (-Os, per-function sections, linker gc, stripped output; tools/check_hub_size.py enforces the budget).
+if(CMAKE_CROSSCOMPILING AND HP_TARGET STREQUAL "hub")
+  if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE MinSizeRel CACHE STRING "Build type" FORCE)
+  endif()
+  add_compile_options(-ffunction-sections -fdata-sections)
+endif()
+
 add_compile_options(-Wall -Wextra -Werror)
 if(HP_SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -147,6 +156,16 @@ if(CMAKE_CROSSCOMPILING AND HP_TARGET STREQUAL "remote")
   return()
 endif()
 
+# Bluetooth HID helper (`hub bt-helper`): BTstack Classic HID device and, with HH_BT_LE, LE HID peripheral + LE remotes.
+option(HH_BT "Build the Bluetooth HID helper into the hub binary" ON)
+option(HH_BT_LE "Bluetooth helper: LE peripheral (HID over GATT) and LE remotes (HOGP host), besides Classic" ON)
+# The supervisor (bt_link.c) when the helper is built in, else the "no Bluetooth" stub.
+if(HH_BT)
+  set(_hp_bt_link hub/bt_link.c)
+else()
+  set(_hp_bt_link hub/bt_link_stub.c)
+endif()
+
 # Hub code library; later tasks append sources here.
 add_library(hp_hub STATIC
   hub/net/ws.c
@@ -163,6 +182,7 @@ add_library(hp_hub STATIC
   hub/io/hw_sinks.c
   hub/io/rf_pair.c
   hub/ir/encode.c
+  ${_hp_bt_link}
   hub/hub_handlers.c
   hub/ota/hub_ota.c
 )
@@ -193,6 +213,24 @@ set_source_files_properties(hub/ota/hub_ota.c PROPERTIES COMPILE_DEFINITIONS HP_
 
 add_executable(hub hub/main.c)
 target_link_libraries(hub PRIVATE hp_hub)
+if(HH_BT AND HH_BT_LE)
+  target_compile_definitions(hp_hub PRIVATE HH_BT_LE=1)  # bt_link.c reports LE in its default limits
+endif()
+if(HH_BT)
+  include(hub/bt/bt.cmake)  # include(), not add_subdirectory: a hub/ build dir would collide with the hub executable
+  target_link_libraries(hub PRIVATE hp_bt)
+  target_compile_definitions(hub PRIVATE HH_BT=1)
+endif()
+if(NOT HP_SANITIZE)
+  target_link_options(hub PRIVATE -Wl,--gc-sections)  # drop unreferenced functions/data (all hub objects are built with -ffunction-sections)
+endif()
+if(CMAKE_CROSSCOMPILING AND HP_TARGET STREQUAL "hub" AND CMAKE_STRIP)
+  # What deploy_hub.py pushes and ota_sign signs is the stripped build/hub; hub.debug keeps the symbols next to it.
+  add_custom_command(TARGET hub POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:hub> $<TARGET_FILE:hub>.debug
+    COMMAND ${CMAKE_STRIP} --strip-all $<TARGET_FILE:hub>
+    COMMENT "Stripping hub (unstripped copy: hub.debug)")
+endif()
 
 # Bench-only IR emitter experiment (not shipped in the hub binary).
 add_executable(ir_bench tools/ir_bench.c)

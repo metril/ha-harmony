@@ -18,9 +18,10 @@
 #
 # Then build the hub with:
 #   HP_TOOLCHAIN_ROOT=vendor/toolchains/mips_24kc cmake -S . -B build-cross \
-#       -DCMAKE_BUILD_TYPE=Release -DHP_ALLOW_DEV_OTA_KEY=ON \
+#       -DCMAKE_BUILD_TYPE=MinSizeRel -DHP_ALLOW_DEV_OTA_KEY=ON \
 #       -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/hub-mips.cmake
-#   cmake --build build-cross -j
+#   cmake --build build-cross -j     # build-cross/hub is stripped (-Os, gc-sections); build-cross/hub.debug keeps the symbols
+#   python3 tools/check_hub_size.py build-cross/hub     # size budget before any push or OTA signing
 set -eu
 
 REPO=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)

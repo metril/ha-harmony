@@ -16,7 +16,8 @@ All commands run from the repo root. Device steps are `[WRITE]` (they replace `/
 ## Build and sign
 
 ```
-cmake -S . -B build-hub -DHP_TARGET=hub -DHP_ALLOW_DEV_OTA_KEY=ON ...   # cross build; see the phase 4 plan for the toolchain env
+cmake -S . -B build-hub -DHP_TARGET=hub -DCMAKE_BUILD_TYPE=MinSizeRel -DHP_ALLOW_DEV_OTA_KEY=ON ...   # cross build (size-first: -Os, gc-sections, stripped output; hub.debug keeps symbols)
+python3 tools/check_hub_size.py build-hub/hub                         # stripped <= 600 KiB and 2x image + slack fits the ~2.4 MB /data; sign only the stripped hub
 build/ota_sign sign --dev -t hub build-hub/hub hub-<BUILD>.img      # dev key (bench only); the build id is read from the binary
 build/ota_sign sign -t hub build-hub/hub hub-<BUILD>.img            # release key (~/.config/ha-harmony/ota_ed25519)
 build/ota_sign verify -t hub --dev hub-<BUILD>.img                             # sanity check before shipping

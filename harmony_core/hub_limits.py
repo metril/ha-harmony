@@ -122,6 +122,22 @@ CURRENT = HubLimits(
 )
 
 
+def bt_fit_error(hub_json: dict[str, Any], bt: Any) -> str | None:
+    """Why a hub that reported `bt` (hello_ack.bt, None = no Bluetooth support) cannot take the
+    config's Bluetooth devices / remotes, or None."""
+    hosts, remotes = len(hub_json.get("bt_hosts", ())), len(hub_json.get("bt_remotes", ()))
+    if not hosts and not remotes:
+        return None
+    if not isinstance(bt, dict):
+        return "this config has Bluetooth devices or remotes, but the hub has no Bluetooth support (update its firmware)"
+    hmax, rmax = bt.get("hosts_max"), bt.get("remotes_max")
+    if isinstance(hmax, int) and hosts > hmax:
+        return f"too many Bluetooth devices: {hosts} (the hub allows at most {hmax})"
+    if isinstance(rmax, int) and remotes > rmax:
+        return f"too many Bluetooth remotes: {remotes} (the hub allows at most {rmax})"
+    return None
+
+
 def estimate_bytes(
     lim: HubLimits,
     *,
@@ -130,12 +146,14 @@ def estimate_bytes(
     inputs: int,
     keys: int,
     words: int,
+    bt_hosts: int = 0,
+    bt_remotes: int = 0,
     **_ignored: int,
 ) -> int:
     """What the hub needs to load a config (hub/engine/mapping.c est_full); a budget compares to this."""
     return (
         lim.slack_b
-        + devices * lim.dev_b
+        + (devices + bt_hosts + bt_remotes) * lim.dev_b  # a bt table entry is budgeted as a device
         + (commands + inputs) * lim.cmd_b
         + keys * lim.key_b
         + words * lim.word_b

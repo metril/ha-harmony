@@ -39,7 +39,7 @@ from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, page_to_dict
 from harmony_core.theme_build import theme_warnings
 from harmony_irdb.archive import IrdbArchive
 
-from . import __version__, ir_routes, schemas
+from . import __version__, bt_routes, ir_routes, schemas
 from .auth import (
     BUNDLE_PREFIX,
     HASSIO_NETWORK,
@@ -1083,6 +1083,7 @@ def create_app(
     app.router.add_get(f"{api}/ha/entities", ha_entities)
     app.router.add_get(f"{api}/ha/services", ha_services)
     ir_routes.add_routes(app, api)
+    bt_routes.add_routes(app, api)
     app.router.add_post(f"{api}/ir/test", ir_test)
     app.router.add_get(f"{api}/hubs", list_hubs)
     app.router.add_post(f"{api}/hubs/adopt", adopt_hub)

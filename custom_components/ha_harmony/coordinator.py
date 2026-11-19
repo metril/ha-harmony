@@ -45,6 +45,7 @@ from .api import (
     HarmonyHubClient,
     HarmonyVersionError,
 )
+from .bluetooth import TOPIC_BT, BtManager  # noqa: F401  (TOPIC_BT is used by the platforms)
 from .const import (
     CMD_DEVICE_COMMAND,
     CMD_IR_SEND,
@@ -73,6 +74,7 @@ from .harmony_core.compiler import (
 from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
+from .harmony_core.hub_limits import bt_fit_error
 from .ota import CHUNK, TARGET_HUB, UPLOAD_ATTEMPTS, Image, encode_chunk
 from .tile_format import tile_state, tile_text
 
@@ -294,6 +296,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._unsubs.append(
             hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, self._on_registry_update)
         )
+        self.btm = BtManager(self)  # the hub's Bluetooth feature (bluetooth.py)
         self.async_set_updated_data(None)
 
     async def _async_update_data(self) -> None:  # push only
@@ -304,6 +307,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             unsub()
         self._unsubs = []
         self._untrack_tiles()
+        self.btm.shutdown()
         for t in [self._ha_task, self._flush_task, *(lk.task for lk in self.links.values()),
                   *(lk.retry_task for lk in self.links.values())]:
             if t is not None and not t.done():
@@ -373,6 +377,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if self.has_addon_link:
             ids.add(f"{h}_addon_link")
         ids.add(f"{h}_firmware")
+        ids |= self.btm.expected_unique_ids()
         for r in self.remotes:
             ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}", f"{h}_pagefmt_{r}"}
         for dev in self.compiled.devices.values():
@@ -513,6 +518,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         client.remotes_provider = self._remotes_report
         client.identity = self._link_identity()
         self.link_state = "connecting"
+        self.btm.start_relay(client)
         self.config_entry.async_create_background_task(
             self.hass, self._link_loop(client), f"{DOMAIN} add-on link {self.hub_id}"
         )
@@ -716,6 +722,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             too_big = await self.hass.async_add_executor_job(
                 lambda: fit_error(config_stats(compiled.hub_json, self.client.limits.max_pronto), self.client.limits)
             )
+        too_big = too_big or bt_fit_error(compiled.hub_json, self.client.bt)
         try:
             if too_big:
                 hint = " (this hub runs older firmware; updating it raises the limit)" if self.client.limits.legacy else ""
@@ -1296,6 +1303,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # with the activity known before the drop: a change while disconnected still runs its
             # Home Assistant steps (only the very first report after HA starts is a baseline).
             self._accepted = False  # the hub may have rebooted: the resync confirms its config
+            self.btm.on_connect()
             self._set_hub_theme(True)  # and may run other firmware: theme_push is tried again
             for link in self.links.values():
                 link.epoch += 1
@@ -1347,6 +1355,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 if self.device_states.get(data["device"]) != new:
                     self.device_states[data["device"]] = new
                     self._notify(topic_device(data["device"]))
+        elif mtype is MsgType.BT_STATE:
+            self.btm.on_state(data)
+        elif mtype is MsgType.BT_REMOTE_KEY:
+            self.btm.on_key(data)
         elif mtype is MsgType.OTA_STATUS:
             self._on_ota_status(data)
         elif mtype is MsgType.REMOTE_ATTACHED:
@@ -1658,6 +1670,31 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             raise ha_error("hub_unreachable", error=exc) from exc
         if not res.get("ok"):
             raise ha_error("hub_failed", error=res.get("message", "unknown error"))
+
+    # ------------------------------------------------------------ Bluetooth (bluetooth.py)
+    @property
+    def bt_state(self) -> dict[str, Any] | None:
+        """The latest `bt_state` of the hub (cleaned); None before the first one or on a hub without Bluetooth."""
+        return self.btm.state
+
+    async def async_bt_pair(
+        self,
+        on: bool,
+        secs: int | None = None,
+        mode: str = "host",
+        transport: str = "any",
+        addr: str | None = None,
+    ) -> None:
+        await self.btm.pair(on, secs, mode, transport, addr)
+
+    async def async_bt_forget(self, kind: str, slot: int) -> None:
+        await self.btm.forget(kind, slot)
+
+    async def async_bt_key(self, slot: int, page: int, usage: int, action: str) -> None:
+        await self.btm.key(slot, page, usage, action)
+
+    async def async_bt_listen(self, on: bool, secs: int = const.BT_LISTEN_DEFAULT) -> None:
+        await self.btm.async_listen(on, secs)
 
     async def async_start_activity(self, name: str) -> None:
         await self.async_command(HUB_DEVICE, CMD_START_ACTIVITY, {"name": name})

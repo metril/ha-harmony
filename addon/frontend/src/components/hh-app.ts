@@ -229,13 +229,14 @@ export class HhApp extends StoreElement {
       { id: 'devices', label: 'Devices', icon: 'devices', count: c.devices },
       { id: 'activities', label: 'Activities', icon: 'activities', count: c.activities },
       { id: 'themes', label: 'Themes', icon: 'palette' },
+      { id: 'bluetooth', label: 'Bluetooth', icon: 'bluetooth' },
       { id: '-', label: '', icon: '' },
       { id: 'history', label: 'History', icon: 'history', count: hist },
     ];
   }
 
   private sectionTitle(): string {
-    const names: Record<string, string> = { remote: 'Remote studio', overview: 'Overview', devices: 'Devices', ir: 'Add a device', activities: 'Activities', themes: 'Themes', history: 'History' };
+    const names: Record<string, string> = { remote: 'Remote studio', overview: 'Overview', devices: 'Devices', ir: 'Add a device', activities: 'Activities', themes: 'Themes', bluetooth: 'Bluetooth', history: 'History' };
     return names[this.router.route.section] ?? 'Harmony Editor';
   }
 
@@ -261,6 +262,8 @@ export class HhApp extends StoreElement {
         return this.lazy('activities', () => import('../views/hh-activities'), html`<hh-activities .selected=${parts[0] ?? ''}></hh-activities>`);
       case 'themes':
         return this.lazy('themes', () => import('../views/hh-themes'), html`<hh-themes .selected=${parts[0] ?? ''} .notices=${this.link?.theme_notices ?? []}></hh-themes>`);
+      case 'bluetooth':
+        return this.lazy('bluetooth', () => import('../views/hh-bluetooth'), html`<hh-bluetooth .parts=${parts}></hh-bluetooth>`);
       case 'history':
         return this.lazy('history', () => import('../views/hh-history'), html`<hh-history></hh-history>`);
       default:

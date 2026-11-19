@@ -52,6 +52,23 @@ In the editor choose **Import YAML**, pick the file, review the draft and apply.
 (`flipper:` / `smartir:`) cannot be resolved by the import: inline the codes first. The format is in
 `docs/ha-config.md`.
 
+## Bluetooth devices and remotes
+
+Needs hub firmware with Bluetooth and the Harmony integration connected. Open **Bluetooth** in the editor's menu.
+
+- **A TV box or phone the hub should control.** Choose **Add Bluetooth device** (or **Add a device**, then
+  *Bluetooth device*) and **Start pairing**. A countdown starts; on the device open Bluetooth settings and pair with
+  the entry whose name starts with *Harmony*. When it appears, name it, keep or change its commands and
+  **Add device**. Use the test button on the Bluetooth page to send a key once. Devices the hub already knows but
+  your config does not show *Not in your config* with **Add to config**.
+- **A Bluetooth remote.** Put the remote in pairing mode, choose **Add Bluetooth remote**, **Scan for remotes** and
+  **Pair** next to yours (stronger signal bars are closer). Then choose what each button does; defaults are
+  filled in. **Learn a button** shows which button you press and lets you assign a key to it.
+- Nothing reaches the hub until you apply the draft. **Forget** removes the hub's pairing only; its config entry stays.
+- If pairing is refused or times out the page says what to try next. If it says the hub has no Bluetooth, is
+  offline or has not reported yet, nothing is wrong with your config: update the hub firmware, check the hub and Home
+  Assistant, or update the integration.
+
 ## The studio in five lines
 
 1. The remote canvas shows the remote; click a key or a page widget to select it.

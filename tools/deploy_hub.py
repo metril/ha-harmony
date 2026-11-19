@@ -325,6 +325,11 @@ class Deployer:
         for local, _, _ in items + ([(busybox, "", None)] if busybox else []):
             if not local.is_file():
                 raise DeployError(f"local file not found: {local}")
+        if b".symtab" in hub.read_bytes():
+            raise DeployError(
+                f"{hub} is not stripped ({hub.stat().st_size} B): push the stripped cross build output "
+                "(build-cross/hub, not hub.debug); /data is ~2.4 MB and an OTA needs twice the image"
+            )
         # The old files still exist while the new ones upload (hub lands as hub.new), so the
         # full new size must fit in what is free now.
         need = sum(local.stat().st_size for local, _, _ in items)

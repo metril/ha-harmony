@@ -7,6 +7,7 @@ import { ApiError, type IrBrand, type IrDeviceResult, type IrModels, type IrPars
 import { KIND_LABEL, KIND_TYPE, OTHER_TYPES, art, commandIconId, type Kind } from '../lib/device-art';
 import { capProblem, deviceIdFor, nameProblem } from '../lib/device-edit';
 import { proposeFromEntity, PROPOSAL_DOMAINS } from '../lib/ha-propose';
+import { icon } from '../lib/icons';
 import { stockIconSvg } from '../lib/icon-shapes';
 import type { Device, IrAction } from '../lib/model';
 import { hashFor } from '../lib/router';
@@ -311,6 +312,8 @@ export class HhAddDevice extends StoreElement {
         <button class="tile" @click=${() => this.pickSource('archive')}>${art('tv', 'art')}IR archive<small>Search thousands of remotes by brand and model</small></button>
         <button class="tile" @click=${() => this.pickSource('paste')}>${art('other', 'art')}Paste or upload codes<small>Pronto hex, a Flipper .ir file or a SmartIR file</small></button>
         <button class="tile" ?disabled=${!ok} title=${ok ? '' : 'This add-on version cannot store Home Assistant actions yet'} @click=${() => this.pickSource('ha')}>${art('streamer', 'art')}Home Assistant entity<small>${ok ? 'A media player or remote you already have' : 'Needs a newer add-on (ha_actions is off)'}</small></button>
+        <a class="tile" id="add-bt-device" href=${hashFor('bluetooth', 'host')}>${icon('bluetooth', 'big')}Bluetooth device<small>Pair a TV box or phone; the hub types to it</small></a>
+        <a class="tile" id="add-bt-remote" href=${hashFor('bluetooth', 'remote')}>${icon('bluetooth', 'big')}Bluetooth remote<small>Use a Bluetooth remote with your activities</small></a>
       </div>`;
   }
   private brand() {

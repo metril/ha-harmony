@@ -26,6 +26,7 @@ from .addon_link import AddonClient
 from .api import HarmonyAuthError, HarmonyConnectionError, HarmonyHubClient, HarmonyVersionError
 from .base_entity import hub_device_info
 from .const import (
+    BT_LISTEN_DEFAULT,
     CLIENT_KWARGS,
     CONF_ADDON_HOST,
     CONF_ADDON_PORT,
@@ -74,6 +75,26 @@ SERVICE_SCHEMAS: dict[str, vol.Schema] = {
     "install_firmware": vol.Schema(
         {**_TARGET, vol.Required("path"): cv.string, vol.Optional("allow_dev_key", default=False): cv.boolean}
     ),
+    "bt_pair": vol.Schema(
+        {
+            **_TARGET,
+            vol.Optional("mode", default="host"): vol.In(["host", "remote"]),
+            vol.Optional("transport", default="any"): vol.In(["any", "classic", "le"]),
+            vol.Optional("seconds", default=120): vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
+            vol.Optional("address"): cv.string,
+        }
+    ),
+    "bt_stop_pairing": vol.Schema(_TARGET),
+    "bt_forget": vol.Schema({**_TARGET, vol.Required("address"): cv.string}),
+    "bt_listen": vol.Schema(
+        {
+            **_TARGET,
+            vol.Optional("on", default=True): cv.boolean,
+            vol.Optional("seconds", default=BT_LISTEN_DEFAULT): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=300)
+            ),
+        }
+    ),
     "set_device_state": vol.Schema(
         {
             **_TARGET,
@@ -93,7 +114,15 @@ def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[HarmonyCoordin
         entries = [e for e in entries if wanted in (e.entry_id, e.unique_id)]
         if not entries:
             raise invalid("no_matching_hub", hub=wanted)
-    elif len(entries) > 1 and call.service in ("send_ir", "set_device_state", "install_firmware"):
+    elif len(entries) > 1 and call.service in (
+        "send_ir",
+        "set_device_state",
+        "install_firmware",
+        "bt_pair",
+        "bt_stop_pairing",
+        "bt_forget",
+        "bt_listen",
+    ):
         raise invalid("several_hubs")
     if not entries:
         raise invalid("no_loaded_hub")
@@ -123,6 +152,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 await coord.async_push_pages()
             elif call.service == "install_firmware":
                 await _install_firmware(hass, coord, call.data["path"], call.data["allow_dev_key"])
+            elif call.service == "bt_pair":
+                await coord.async_bt_pair(
+                    True,
+                    call.data["seconds"],
+                    call.data["mode"],
+                    call.data["transport"],
+                    call.data.get("address"),
+                )
+            elif call.service == "bt_stop_pairing":
+                await coord.async_bt_pair(False)
+            elif call.service == "bt_forget":
+                await coord.btm.forget_address(call.data["address"])
+            elif call.service == "bt_listen":
+                await coord.async_bt_listen(call.data["on"], call.data["seconds"])
             elif call.service == "send_ir":
                 try:  # no base dir: file references are refused (inline the codes)
                     action = validate_ir(call.data["ir"])

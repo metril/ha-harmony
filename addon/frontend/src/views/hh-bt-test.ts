@@ -1,0 +1,63 @@
+import { LitElement, css, html, nothing } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import type { Api, BtCodes } from '../lib/api';
+import { CmdId, btError, resolveId } from '../lib/bt-model';
+import { shared } from '../lib/styles';
+
+/** Test-fire: pick a command and press it once on a paired host. `commands` maps a command name to its built-in name or HID code. */
+@customElement('hh-bt-test')
+export class HhBtTest extends LitElement {
+  static override styles = [
+    shared,
+    css`
+      :host { display: grid; gap: 4px; min-width: 0; }
+      .r { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+      select { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; max-width: 190px; }
+      .lab { font-size: 12px; font-weight: 650; color: var(--tx3); text-transform: uppercase; letter-spacing: 0.04em; }
+      .m { font-size: 12.5px; color: var(--tx2); } .m.bad { color: var(--bad); }
+    `,
+  ];
+  @property({ attribute: false }) api!: Api;
+  @property() hub = 'default';
+  @property({ type: Number }) peer: number | null = null;
+  @property({ attribute: false }) codes: BtCodes | null = null;
+  @property({ attribute: false }) commands: Record<string, string> = {};
+  @property() label = 'device';
+  @property({ type: Boolean }) disabled = false;
+  /** shown instead of the result while the control is disabled */
+  @property() reason = '';
+  private cid = new CmdId();
+  @state() private pick = '';
+  @state() private busy = false;
+  @state() private msg: { ok: boolean; text: string } | null = null;
+
+  private async send() {
+    const name = this.pick || Object.keys(this.commands)[0];
+    const code = name && this.codes ? resolveId(this.codes, this.commands[name] as string) : null;
+    if (!name || !code || this.peer === null) return;
+    this.busy = true;
+    this.msg = null;
+    try {
+      await this.api.btKey(this.hub, this.peer, code.page, code.usage, 'press', this.cid.id('key', { peer: this.peer, page: code.page, usage: code.usage }));
+      this.cid.settle();
+      this.msg = { ok: true, text: `Sent ${name}.` };
+    } catch (e) {
+      this.cid.settle(e);
+      this.msg = { ok: false, text: btError(e) };
+    } finally {
+      this.busy = false;
+    }
+  }
+  protected override render() {
+    const names = Object.keys(this.commands);
+    const off = this.disabled || this.peer === null || !names.length || !this.codes;
+    const cur = this.pick && names.includes(this.pick) ? this.pick : (names[0] ?? '');
+    const why = this.reason && off ? this.reason : '';
+    return html`<div class="r" role="group" aria-label="Test ${this.label}">
+        <span class="lab">Test</span>
+        <select aria-label="Command to send to ${this.label}" .value=${cur} ?disabled=${off} @change=${(e: Event) => (this.pick = (e.target as HTMLSelectElement).value)}>${names.map((n) => html`<option value=${n} ?selected=${n === cur}>${n}</option>`)}</select>
+        <button class="btn sm" ?disabled=${off || this.busy} @click=${() => void this.send()}>${this.busy ? 'Sending…' : 'Send'}</button>
+      </div>
+      <span class="m ${this.msg && !this.msg.ok ? 'bad' : ''}" role="status" aria-live="polite">${why || (this.msg?.text ?? nothing)}</span>`;
+  }
+}

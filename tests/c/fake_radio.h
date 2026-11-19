@@ -210,7 +210,7 @@ static __attribute__((unused)) void run(uint32_t ms) {
 
 /* page_push through the real handler; 1 = replied command_result ok:true */
 static __attribute__((unused)) int push_page(uint8_t page, const char *b64) {
-    char js[160];
+    char js[480];
     snprintf(js, sizeof js, "{\"remote\":1,\"page\":%u,\"data\":\"%s\"}", (unsigned)page, b64);
     cJSON *d = cJSON_Parse(js);
     char reply[512];

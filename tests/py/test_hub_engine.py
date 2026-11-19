@@ -89,8 +89,8 @@ async def test_config_activity_and_sink_order(hub_process):
         assert st["t"] == "state_update" and st["d"] == {"activity": 0, "power": True}
         assert read_lines(hub_process, 4) == [
             "ir port=1 hz=38029 n=2 us=263,526",
-            "bt usage=00e9 down=1",
-            "bt usage=00e9 down=0",
+            "bt host=0 page=0c usage=00e9 down=1",
+            "bt host=0 page=0c usage=00e9 down=0",
             "ir port=4 hz=38029 n=2 us=789,1052",
         ]
         r = await call(ws, "command", {"device": "hub", "command": "power_off"}, id=4)

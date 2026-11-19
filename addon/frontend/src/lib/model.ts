@@ -1,4 +1,5 @@
 // Config shapes (docs/ha-config.md). Loose on purpose: the server validates.
+import { commandNames } from './bt';
 export interface IrAction {
   proto?: string;
   addr?: number;
@@ -20,8 +21,12 @@ export interface HaCall {
   repeat?: boolean;
 }
 export interface Device {
-  /** `ha`: no IR, power / inputs / commands are Home Assistant actions */
-  kind?: 'ir' | 'ha';
+  /** `ha`: no IR, power / inputs / commands are Home Assistant actions. `bt`: a Bluetooth host, `commands` are
+   *  built-in names or `HID:pp:uuuu` strings, no power / inputs */
+  kind?: 'ir' | 'ha' | 'bt';
+  /** `bt` only: the host's address (`AA:BB:CC:DD:EE:FF`) and link type */
+  address?: string;
+  transport?: 'auto' | 'classic' | 'le';
   /** where an HA-backed device's state comes from */
   entity?: string;
   id: string;
@@ -113,7 +118,7 @@ export function counts(c: Config | null) {
   return {
     devices: devices.length,
     activities: (c?.activities ?? []).length,
-    commands: devices.reduce((n, d) => n + Object.keys(d.commands ?? {}).length, 0),
+    commands: devices.reduce((n, d) => n + commandNames(d).length, 0), // a Bluetooth device on the default set counts it
     inputs: devices.reduce((n, d) => n + Object.keys(d.inputs ?? {}).length, 0),
     widgets: (c?.pages ?? []).reduce((n, p) => n + (p.widgets ?? []).length, 0),
     pages: (c?.pages ?? []).length,

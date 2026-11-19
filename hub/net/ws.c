@@ -292,7 +292,7 @@ struct hp_ws_server {
     hp_ws_cb_t cb;
     void *user;
     int auth_ms, idle_ms;
-    int (*extra_fds)(void *arg, int out[4]);
+    int (*extra_fds)(void *arg, int out[8]);
     void *extra_arg;
     hp_ws_conn_t conns[HP_WS_MAX_CONNS];
 };
@@ -597,7 +597,7 @@ static void accept_one(hp_ws_server_t *s) {
     c->deadline = now_ms() + HP_WS_HANDSHAKE_MS;
 }
 
-void hp_ws_set_extra_fds(hp_ws_server_t *s, int (*fn)(void *arg, int out[4]), void *arg) {
+void hp_ws_set_extra_fds(hp_ws_server_t *s, int (*fn)(void *arg, int out[8]), void *arg) {
     if (!s) return;
     s->extra_fds = fn;
     s->extra_arg = arg;
@@ -605,8 +605,8 @@ void hp_ws_set_extra_fds(hp_ws_server_t *s, int (*fn)(void *arg, int out[4]), vo
 
 int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
     if (!s) return -HP_E_INVAL;
-    struct pollfd fds[5 + HP_WS_MAX_CONNS];
-    int map[3 + HP_WS_MAX_CONNS];
+    struct pollfd fds[9 + HP_WS_MAX_CONNS];
+    int map[9 + HP_WS_MAX_CONNS];
     int nf = 0;
     int64_t now = now_ms();
     int64_t wait = timeout_ms < 0 ? INT32_MAX : timeout_ms;
@@ -634,9 +634,9 @@ int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
         }
     }
     if (s->extra_fds) { /* wake-only: the owner services these fds itself */
-        int ef[4] = {-1, -1, -1, -1};
+        int ef[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
         int ne = s->extra_fds(s->extra_arg, ef);
-        for (int k = 0; k < ne && k < 4; k++) {
+        for (int k = 0; k < ne && k < 8; k++) {
             fds[nf].fd = ef[k]; fds[nf].events = POLLIN; fds[nf].revents = 0; map[nf++] = -2;
         }
     }

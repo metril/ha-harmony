@@ -29,6 +29,7 @@ static const hp_field_desc_t hp_fields_hello_ack[] = {
     {"hw_id", HP_T_STR, true, NULL},
     {"rename", HP_T_BOOL, true, NULL},
     {"id_pinned", HP_T_BOOL, true, NULL},
+    {"bt", HP_T_JSON, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_error[] = {
@@ -177,9 +178,53 @@ static const hp_field_desc_t hp_fields_ota_result[] = {
     {"build", HP_T_U32, false, NULL},
 };
 
+static const hp_field_desc_t hp_fields_bt_pair[] = {
+    {"on", HP_T_BOOL, false, NULL},
+    {"secs", HP_T_U16, true, NULL},
+    {"transport", HP_T_STR, true, NULL},
+    {"mode", HP_T_STR, true, NULL},
+    {"addr", HP_T_STR, true, NULL},
+};
+
+static const hp_field_desc_t hp_fields_bt_state[] = {
+    {"state", HP_T_STR, false, NULL},
+    {"discoverable", HP_T_BOOL, false, NULL},
+    {"discoverable_secs", HP_T_U16, true, NULL},
+    {"le", HP_T_BOOL, true, NULL},
+    {"gen", HP_T_U32, true, NULL},
+    {"pairing", HP_T_JSON, true, NULL},
+    {"hosts", HP_T_JSON, false, NULL},
+    {"remotes", HP_T_JSON, true, NULL},
+    {"candidates", HP_T_JSON, true, NULL},
+    {"window", HP_T_STR, true, NULL},
+};
+
+static const hp_field_desc_t hp_fields_bt_forget[] = {
+    {"slot", HP_T_U8, false, NULL},
+    {"kind", HP_T_STR, true, NULL},
+};
+
+static const hp_field_desc_t hp_fields_bt_key[] = {
+    {"slot", HP_T_U8, false, NULL},
+    {"page", HP_T_U8, false, NULL},
+    {"usage", HP_T_U16, false, NULL},
+    {"action", HP_T_STR, false, NULL},
+};
+
+static const hp_field_desc_t hp_fields_bt_remote_key[] = {
+    {"slot", HP_T_U8, false, NULL},
+    {"page", HP_T_U8, false, NULL},
+    {"usage", HP_T_U16, false, NULL},
+    {"down", HP_T_BOOL, false, NULL},
+};
+
+static const hp_field_desc_t hp_fields_bt_listen[] = {
+    {"on", HP_T_BOOL, false, NULL},
+};
+
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
-    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 11, hp_fields_hello_ack},
+    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 12, hp_fields_hello_ack},
     {"error", HP_MSG_ERROR, HP_TRANSPORT_WS, 3, hp_fields_error},
     {"ping", HP_MSG_PING, HP_TRANSPORT_WS, 0, NULL},
     {"pong", HP_MSG_PONG, HP_TRANSPORT_WS, 0, NULL},
@@ -211,6 +256,12 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"ota_frag_ack", HP_MSG_OTA_FRAG_ACK, HP_TRANSPORT_RF, 1, hp_fields_ota_frag_ack},
     {"ota_commit", HP_MSG_OTA_COMMIT, HP_TRANSPORT_RF, 0, NULL},
     {"ota_result", HP_MSG_OTA_RESULT, HP_TRANSPORT_RF, 2, hp_fields_ota_result},
+    {"bt_pair", HP_MSG_BT_PAIR, HP_TRANSPORT_WS, 5, hp_fields_bt_pair},
+    {"bt_state", HP_MSG_BT_STATE, HP_TRANSPORT_WS, 10, hp_fields_bt_state},
+    {"bt_forget", HP_MSG_BT_FORGET, HP_TRANSPORT_WS, 2, hp_fields_bt_forget},
+    {"bt_key", HP_MSG_BT_KEY, HP_TRANSPORT_WS, 4, hp_fields_bt_key},
+    {"bt_remote_key", HP_MSG_BT_REMOTE_KEY, HP_TRANSPORT_WS, 4, hp_fields_bt_remote_key},
+    {"bt_listen", HP_MSG_BT_LISTEN, HP_TRANSPORT_WS, 1, hp_fields_bt_listen},
 };
 
 const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT] = {

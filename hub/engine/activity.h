@@ -45,7 +45,7 @@
 #define HP_ACT_STATE_VER 1
 #define HP_ACT_PLAN_MAX (HP_MAP_MAX_DEVICES + 2 * HP_MAP_MAX_ACT_DEVS + 2 * HP_MAP_MAX_STEPS + 8)
 
-typedef enum { HP_ACTSM_EVT_DEVICE = 1, HP_ACTSM_EVT_ACTIVITY = 2 } hp_actsm_evt_t;
+typedef enum { HP_ACTSM_EVT_DEVICE = 1, HP_ACTSM_EVT_ACTIVITY = 2, HP_ACTSM_EVT_START = 3 /* idx = the activity being started */ } hp_actsm_evt_t;
 /* DEVICE: idx = device index; ACTIVITY: idx = reported activity (-1 none). */
 typedef void (*hp_actsm_notify_fn)(void *ctx, hp_actsm_evt_t evt, int idx);
 
