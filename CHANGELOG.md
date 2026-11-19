@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Editor: the Elite drawing's proportions now follow the photo (taller body, Off lower and inset, screen centred, keys and the D-pad ring placed from one table of body fractions, empty rounded grip at the bottom).
 - Hub boot hook: bounded daemon respawn (`respawn_max`, default 3, 0 = off) with a heartbeat wedge cover, an `rf_debug` conf key and uptime-stamped logs; the boot-strike counter is never touched by a respawn.
 - Remote: opt-in suspend to RAM after idle (`HARMONY_SUSPEND=battery|always`) with an hourly timed wake (msp430 `wakeup`, 3600 s) so the battery guard still runs, resume re-link and sleep-gap accounting. Touch does not wake it; buttons and motion do. See `docs/runbooks/remote-suspend-soak.md`.
 - OTA: signed image container with Ed25519 verification (`ota_sign` tool, staged apply helper on the hub). Builds that bake in the public dev key need `-DHP_ALLOW_DEV_OTA_KEY=ON`.
