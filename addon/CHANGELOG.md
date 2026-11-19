@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.7 (2026-11-18)
+
+- Fix: the integration's protocol decoder ignores unknown fields from a newer hub (0.3.6 could not connect to the current hub firmware).
+- Studio layer pills fit narrow widths; opt-in RF slot learning; hub signed OTA firmware updates.
+
 ## 0.3.6 (2026-11-18)
 
 - Editor: the Elite drawing follows the photo proportions.
