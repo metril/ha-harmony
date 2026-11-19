@@ -169,10 +169,12 @@ export const searchBuiltins = (list: BtCodes['builtins'], q: string): BtCodes['b
 export const pageName = (page: number): string => (page === 7 ? 'Keyboard' : page === 12 ? 'Consumer' : `Page ${page}`);
 
 // ------------------------------------------------------------------ config edits
+/** usage -> key name; null removes a default (that button does nothing) */
+export type KeyMap = Record<string, string | null>;
 export interface BtRemoteCfg {
   name: string;
   address?: string;
-  keys?: Record<string, string>;
+  keys?: KeyMap;
 }
 export const remotesOf = (cfg: Config): BtRemoteCfg[] => ((cfg['bt_remotes'] as BtRemoteCfg[] | undefined) ?? []).filter((r) => r && typeof r === 'object');
 export const btDevices = (cfg: Config): Device[] => (cfg.devices ?? []).filter((d) => d.kind === 'bt');
@@ -215,15 +217,15 @@ export interface KeyRow {
   id: string;
   page: number;
   usage: number;
-  /** key the hub maps it to now */
-  key: string;
+  /** key the hub maps it to now; null: does nothing */
+  key: string | null;
   /** default key of a built-in default row (undefined for rows of your own) */
   was?: string;
   mine: boolean;
 }
 /** Defaults first (with your override applied), then your own rows that are not a default's usage. */
-export function keyRows(codes: BtCodes, keys: Record<string, string> | undefined): KeyRow[] {
-  const mine = new Map<string, [string, string]>(); // "page:usage" -> [id, key]
+export function keyRows(codes: BtCodes, keys: KeyMap | undefined): KeyRow[] {
+  const mine = new Map<string, [string, string | null]>(); // "page:usage" -> [id, key]
   for (const [id, key] of Object.entries(keys ?? {})) {
     const c = resolveId(codes, id);
     mine.set(c ? `${c.page}:${c.usage}` : `?${id}`, [id, key]);
@@ -235,23 +237,24 @@ export function keyRows(codes: BtCodes, keys: Record<string, string> | undefined
     if (seen.has(k)) continue;
     seen.add(k);
     const o = mine.get(k);
-    rows.push({ id: o?.[0] ?? d.name, page: d.page, usage: d.usage, key: o?.[1] ?? d.key, was: d.key, mine: !!o && o[1] !== d.key });
+    rows.push({ id: o?.[0] ?? d.name, page: d.page, usage: d.usage, key: o ? o[1] : d.key, was: d.key, mine: !!o && o[1] !== d.key });
   }
   for (const [k, [id, key]] of mine) {
     if (seen.has(k)) continue;
+    if (key === null) continue;
     const c = resolveId(codes, id);
     rows.push({ id, page: c?.page ?? 0, usage: c?.usage ?? 0, key, mine: true });
   }
   return rows;
 }
 /** Set (or, when it equals the default, clear) the key of one row; returns the new `keys` map. */
-export function setRowKey(keys: Record<string, string> | undefined, row: Pick<KeyRow, 'id' | 'was'>, key: string): Record<string, string> {
+export function setRowKey(keys: KeyMap | undefined, row: Pick<KeyRow, 'id' | 'was'>, key: string | null): KeyMap {
   const out = { ...(keys ?? {}) };
-  if (row.was !== undefined && key === row.was) delete out[row.id];
+  if (row.was === undefined ? key === null : key === row.was) delete out[row.id];
   else out[row.id] = key;
   return out;
 }
-export const dropRowKey = (keys: Record<string, string> | undefined, id: string): Record<string, string> => {
+export const dropRowKey = (keys: KeyMap | undefined, id: string): KeyMap => {
   const out = { ...(keys ?? {}) };
   delete out[id];
   return out;
@@ -267,5 +270,35 @@ export function keyProblem(codes: BtCodes, key: string): string | null {
 }
 /** Is the code already mapped (default or yours)? */
 export function isMapped(rows: readonly KeyRow[], page: number, usage: number): boolean {
-  return rows.some((r) => r.page === page && r.usage === usage);
+  return rows.some((r) => r.page === page && r.usage === usage && r.key !== null);
 }
+
+// ------------------------------------------------------------------ key names for people
+export const KEY_GROUPS = ['Navigation', 'Transport', 'Volume and channel', 'Colour', 'Digits', 'Other'] as const;
+export type KeyGroup = (typeof KEY_GROUPS)[number];
+const DIGIT = /^key_10([0-9])$/;
+/** "Digit 0", "Volume up", "Key 5"; the id stays available as a tooltip. */
+export function keyLabel(k: string): string {
+  const d = DIGIT.exec(k);
+  if (d) return `Digit ${d[1]}`;
+  const n = /^key_(\d+)$/.exec(k);
+  if (n) return `Key ${n[1]}`;
+  const t = k.replace(/_/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+export function keyGroup(k: string): KeyGroup {
+  if (DIGIT.test(k)) return 'Digits';
+  if (/^(volume|channel)_|^(mute)$/.test(k)) return 'Volume and channel';
+  if (/^(red|green|yellow|blue)$/.test(k)) return 'Colour';
+  if (/^(play|pause|stop|record|rewind|fast_forward|skip_|next|prev)/.test(k)) return 'Transport';
+  if (/^(up|down|left|right|select|ok|exit|back|home|menu|guide|info|favorites|options)$/.test(k)) return 'Navigation';
+  return 'Other';
+}
+/** The valid key names grouped for a picker; `extra` (a name already in use that is not listed) is kept so it shows. */
+export function keyOptions(codes: BtCodes, extra?: string | null): { group: KeyGroup; keys: { id: string; label: string }[] }[] {
+  const all = new Set(codes.keys);
+  if (extra) all.add(extra);
+  return KEY_GROUPS.map((g) => ({ group: g, keys: [...all].filter((k) => keyGroup(k) === g).map((id) => ({ id, label: keyLabel(id) })) })).filter((g) => g.keys.length);
+}
+/** "Up" for `up`, "Does nothing" for null. */
+export const keyText = (k: string | null): string => (k === null ? 'Does nothing' : keyLabel(k));

@@ -13,6 +13,7 @@ export class HhBtTest extends LitElement {
       :host { display: grid; gap: 4px; min-width: 0; }
       .r { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
       select { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; max-width: 190px; }
+      .lab { font-size: 12px; font-weight: 650; color: var(--tx3); text-transform: uppercase; letter-spacing: 0.04em; }
       .m { font-size: 12.5px; color: var(--tx2); } .m.bad { color: var(--bad); }
     `,
   ];
@@ -23,6 +24,8 @@ export class HhBtTest extends LitElement {
   @property({ attribute: false }) commands: Record<string, string> = {};
   @property() label = 'device';
   @property({ type: Boolean }) disabled = false;
+  /** shown instead of the result while the control is disabled */
+  @property() reason = '';
   private cid = new CmdId();
   @state() private pick = '';
   @state() private busy = false;
@@ -49,10 +52,12 @@ export class HhBtTest extends LitElement {
     const names = Object.keys(this.commands);
     const off = this.disabled || this.peer === null || !names.length || !this.codes;
     const cur = this.pick && names.includes(this.pick) ? this.pick : (names[0] ?? '');
-    return html`<div class="r">
+    const why = this.reason && off ? this.reason : '';
+    return html`<div class="r" role="group" aria-label="Test ${this.label}">
+        <span class="lab">Test</span>
         <select aria-label="Command to send to ${this.label}" .value=${cur} ?disabled=${off} @change=${(e: Event) => (this.pick = (e.target as HTMLSelectElement).value)}>${names.map((n) => html`<option value=${n} ?selected=${n === cur}>${n}</option>`)}</select>
         <button class="btn sm" ?disabled=${off || this.busy} @click=${() => void this.send()}>${this.busy ? 'Sending…' : 'Send'}</button>
       </div>
-      <span class="m ${this.msg && !this.msg.ok ? 'bad' : ''}" role="status" aria-live="polite">${this.msg?.text ?? nothing}</span>`;
+      <span class="m ${this.msg && !this.msg.ok ? 'bad' : ''}" role="status" aria-live="polite">${why || (this.msg?.text ?? nothing)}</span>`;
   }
 }

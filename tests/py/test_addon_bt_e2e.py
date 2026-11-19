@@ -265,7 +265,7 @@ async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
     bt.press(12, 0x223)
     await page.get_by_text("You pressed").wait_for()
     await page.get_by_text("→ acts as").wait_for()  # Home is a default usage
-    await page.get_by_label("Key for Home", exact=True).last.fill("menu")
+    await page.get_by_label("Key for Home", exact=True).last.select_option(label="Menu")
     bt.press(12, 0x9999 % 0x400)  # a usage nobody mapped
     await page.get_by_text("Not mapped").first.wait_for()
     await shot(page, "09-remote-learn")
@@ -277,7 +277,7 @@ async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
     assert any(c["op"] == "pick" and c["addr"] == REMOTE for c in bt.ran)
     # the panel offers the key editor of a configured remote
     await page.get_by_role("link", name="Edit buttons").first.click()
-    await page.get_by_role("table", name="Remote buttons and their keys").wait_for()
+    await page.get_by_role("list", name="Remote buttons and their keys").wait_for()
     await shot(page, "10-remote-keys")
     assert clean(problems) == []
 
@@ -386,3 +386,83 @@ activities:
     await page.get_by_role("heading", name="Commands").wait_for()
     await page.get_by_text("Not paired yet").first.wait_for()
     assert clean(problems) == []
+
+
+ACTIVE = """(() => { let e = document.activeElement; while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement;
+  return e ? ((e.getAttribute('aria-label') || e.innerText || e.id || e.tagName) + '').trim() : ''; })()"""
+
+
+async def tab_to(page, text, limit=250):
+    """Press Tab until the focused control's name contains `text`."""
+    for _ in range(limit):
+        await page.keyboard.press("Tab")
+        if text in await page.evaluate(ACTIVE):
+            return
+    raise AssertionError(f"never reached {text!r} by keyboard; at {await page.evaluate(ACTIVE)!r}")
+
+
+async def test_the_host_wizard_works_from_the_keyboard_alone(browser, bt, site):
+    page, _ = await open_bt(browser, site)
+    await page.get_by_text("Ready", exact=True).first.wait_for()
+    await tab_to(page, "Add Bluetooth device")
+    await page.keyboard.press("Enter")
+    await page.get_by_role("button", name="Start pairing").wait_for()
+    await tab_to(page, "Start pairing")
+    await page.keyboard.press("Enter")
+    await page.get_by_role("timer").wait_for()
+    bt.add_host()
+    await page.get_by_role("heading", name="Name it and choose its commands").wait_for()
+    assert await page.evaluate(ACTIVE) == "Name it and choose its commands"  # focus moved to the new step
+    await tab_to(page, "Add device")
+    await page.keyboard.press("Enter")
+    cfg = await draft_has(site, lambda c: bool(c.get("devices")))
+    assert cfg["devices"][0]["address"] == BOX
+
+
+async def test_the_remote_wizard_works_from_the_keyboard_alone(browser, bt, site):
+    bt.candidates({"addr": REMOTE, "name": "Homatics Remote", "rssi": -48})
+    page, _ = await open_bt(browser, site)
+    await page.get_by_text("Ready", exact=True).first.wait_for()
+    await tab_to(page, "Add Bluetooth remote")
+    await page.keyboard.press("Enter")
+    await page.get_by_role("button", name="Scan for remotes").wait_for()
+    await tab_to(page, "Scan for remotes")
+    await page.keyboard.press("Enter")
+    await page.get_by_role("list", name="Remotes found").wait_for()
+    await tab_to(page, "Pair with Homatics Remote")
+    await page.keyboard.press("Enter")
+    await page.get_by_role("heading", name="Choose what its buttons do").wait_for()
+    await tab_to(page, "Key for Back")
+    await page.keyboard.press("ArrowDown")  # a select: change it from the keyboard
+    await tab_to(page, "Add remote")
+    await page.keyboard.press("Enter")
+    cfg = await draft_has(site, lambda c: bool(c.get("bt_remotes")))
+    assert cfg["bt_remotes"][0]["address"] == REMOTE and "Back" in cfg["bt_remotes"][0].get("keys", {})
+
+
+async def test_a_default_can_be_set_to_does_nothing_and_the_picker_has_human_names(browser, bt, site):
+    await seed(site, "bt_remotes: [{name: R}]\n")
+    bt.add_remote(configured=True)
+    page, _ = await open_bt(browser, site, "bluetooth/keys/0")
+    sel = page.get_by_label("Key for Back", exact=True)
+    await sel.wait_for()
+    opts = await sel.locator("option").all_inner_texts()
+    assert "Does nothing" in opts and "Digit 0" in opts and "Volume up" in opts and "up" not in opts
+    assert await sel.locator("optgroup").evaluate_all("g => g.map(x => x.label)") == ["Navigation", "Transport", "Volume and channel", "Colour", "Digits", "Other"]
+    await sel.select_option(label="Does nothing")
+    cfg = await draft_has(site, lambda c: (c.get("bt_remotes") or [{}])[0].get("keys", {}).get("Back", 1) is None)
+    assert cfg["bt_remotes"][0]["keys"] == {"Back": None}
+    await page.get_by_role("button", name="Reset Back to Exit").click()
+    await draft_has(site, lambda c: "keys" not in c["bt_remotes"][0] or not c["bt_remotes"][0]["keys"])
+
+
+async def test_nothing_overflows_at_390(browser, bt, site):
+    bt.add_host(configured=False, result=False)
+    bt.add_remote(configured=False)
+    for route in ("bluetooth", "bluetooth/host", "bluetooth/remote", f"bluetooth/remote/{REMOTE}", f"bluetooth/host/{BOX}"):
+        page = await open_editor(browser, site, [], viewport={"width": 390, "height": 844})
+        await page.evaluate(f"location.hash = '#/{route}'")
+        await page.wait_for_timeout(1200)
+        over = await page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
+        assert over <= 0, f"{route} overflows by {over}px"
+        await page.close()

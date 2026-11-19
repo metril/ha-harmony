@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, type BtCodes, type BtState } from '../src/lib/api';
 import { commandNames, setBtDefaults } from '../src/lib/bt';
-import { CmdId, addHostDevice, addRemote, bars, btError, clock, dropRowKey, hidCode, keyProblem, keyRows, nextCountdown, outcome, parseHid, patchRemote, removeRemote, secsLeft, setRowKey } from '../src/lib/bt-model';
+import { CmdId, addHostDevice, addRemote, bars, btError, clock, dropRowKey, hidCode, keyLabel, keyOptions, keyProblem, keyRows, nextCountdown, outcome, parseHid, patchRemote, removeRemote, secsLeft, setRowKey } from '../src/lib/bt-model';
 import { announce, derive, observe, startRun } from '../src/lib/bt-wizard';
 import { deviceChips } from '../src/lib/studio-model';
 import { irTotals } from '../src/lib/device-edit';
@@ -161,6 +161,19 @@ describe('key table', () => {
     expect(setRowKey({}, row, 'menu')).toEqual({ Home: 'menu' });
     expect(setRowKey({}, { id: 'HID:0C:00CD' }, 'play')).toEqual({ 'HID:0C:00CD': 'play' });
     expect(dropRowKey({ a: 'b', c: 'd' }, 'a')).toEqual({ c: 'd' });
+  });
+  it('a default can be set to does-nothing (null) and reset', () => {
+    const row = { id: 'Home', was: 'home' };
+    const keys = setRowKey({}, row, null);
+    expect(keys).toEqual({ Home: null });
+    expect(keyRows(codes, keys)[1]).toMatchObject({ key: null, mine: true });
+    expect(setRowKey(keys, row, 'home')).toEqual({});
+    expect(setRowKey({ 'HID:0C:00CD': 'play' }, { id: 'HID:0C:00CD' }, null)).toEqual({});
+  });
+  it('key names get human labels and groups', () => {
+    expect([keyLabel('key_100'), keyLabel('volume_up'), keyLabel('power_off_activity'), keyLabel('key_5')]).toEqual(['Digit 0', 'Volume up', 'Power off activity', 'Key 5']);
+    const g = keyOptions({ ...codes, keys: ['up', 'play', 'volume_up', 'red', 'key_103', 'favorites', 'zzz'] }).map((x) => [x.group, x.keys.map((k) => k.id)]);
+    expect(g).toEqual([['Navigation', ['up', 'favorites']], ['Transport', ['play']], ['Volume and channel', ['volume_up']], ['Colour', ['red']], ['Digits', ['key_103']], ['Other', ['zzz']]]);
   });
   it('validates key names', () => {
     expect(keyProblem(codes, 'menu')).toBeNull();

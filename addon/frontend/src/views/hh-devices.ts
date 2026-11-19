@@ -213,9 +213,7 @@ export class HhDevices extends StoreElement {
           <span class="chip ${ps.tone === 'ok' ? 'ok' : ps.tone === 'ir' ? 'ir' : ''}">${ps.text}</span>
           <span class="chip">${commandCount(d)} command${commandCount(d) === 1 ? '' : 's'}</span>
           ${inputs ? html`<span class="chip">${inputs} input${inputs === 1 ? '' : 's'}</span>` : nothing}
-          ${ha ? html`<span class="chip acc">Home Assistant</span>` : nothing}
-          ${d.kind === 'bt' ? html`<span class="chip acc">Bluetooth</span>` : nothing}
-          ${errs ? html`<span class="chip bad">${errs} error${errs === 1 ? '' : 's'}</span>` : nothing}
+          ${ha ? html`<span class="chip acc">Home Assistant</span>` : nothing}          ${errs ? html`<span class="chip bad">${errs} error${errs === 1 ? '' : 's'}</span>` : nothing}
         </div>
       </div>
     </a>`;

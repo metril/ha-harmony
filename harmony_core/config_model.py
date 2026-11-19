@@ -309,7 +309,10 @@ def _bt_remote_keys(v: Any) -> list[list[Any]]:
         if pu in seen:
             raise vol.Invalid(f"{spec!r} is the same usage as {seen[pu]!r}")
         seen[pu] = spec
-        out[pu] = _keyname(key)
+        if key is None:  # `Usage: null` (a default removed): that button does nothing
+            out.pop(pu, None)
+        else:
+            out[pu] = _keyname(key)
     if len(out) > REMOTE_MAX_KEYS:
         raise vol.Invalid(
             f"too many keys: {len(out)} (at most {REMOTE_MAX_KEYS}, defaults included)"

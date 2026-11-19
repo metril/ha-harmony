@@ -1,46 +1,57 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { ApiError, type Api, type BtCodes } from '../lib/api';
-import { btError, dropRowKey, hidCode, isMapped, keyProblem, keyRows, nameOfUsage, pageName, setRowKey, type KeyRow } from '../lib/bt-model';
+import { btError, dropRowKey, hidCode, isMapped, keyOptions, keyRows, keyText, nameOfUsage, pageName, setRowKey, type KeyMap, type KeyRow } from '../lib/bt-model';
 import { shared } from '../lib/styles';
 
 interface Pressed {
   page: number;
   usage: number;
 }
+const NONE = '__none__';
 
-/** The key map of one Bluetooth remote: every usage it can send and the Elite key it acts as (defaults filled in), plus a
- *  learn mode that listens for a press on the real remote. `value` is the config's `keys` (only your changes); `change`
- *  fires with the new map. */
+/** The key map of one Bluetooth remote: every usage it can send and the Elite key it acts as (defaults filled in, any default
+ *  can be set to "Does nothing"), plus a learn mode that listens for a press on the real remote. `value` is the config's `keys`
+ *  (only your changes); `change` fires with the new map. */
 @customElement('hh-bt-keys')
 export class HhBtKeys extends LitElement {
   static override styles = [
     shared,
     css`
-      :host { display: grid; gap: 14px; min-width: 0; }
-      .learn { display: grid; gap: 10px; padding: 14px 16px; }
+      :host { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+      .learn { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px 16px; min-width: 0; }
       .learn h3, .tbl h3 { margin: 0; font-size: 15px; }
       .learn p { margin: 0; color: var(--tx2); font-size: 13.5px; }
-      .got { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 10px 12px; border-radius: var(--r2); background: var(--accs); }
+      .got { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 10px 12px; border-radius: var(--r2); background: var(--accs); min-width: 0; }
       .got b { font-size: 16px; }
       .pulse { width: 12px; height: 12px; border-radius: 50%; background: var(--acc); display: inline-block; animation: hh-pulse 1.4s ease-in-out infinite; }
       @keyframes hh-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
       @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
       .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
       .unm { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-      input[type="text"] { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; width: 150px; max-width: 100%; }
-      input[aria-invalid="true"] { border-color: var(--bad); }
-      .scroll { overflow-x: auto; }
-      table { width: 100%; border-collapse: collapse; font-size: 13px; }
-      th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tx3); text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-      td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-      tr.hit td { background: var(--accs); }
-      .err { color: var(--bad); font-size: 12.5px; }
+      select { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; width: 100%; max-width: 230px; }
+      .got select { width: 200px; }
+      .head, .kr { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.7fr) minmax(0, 1.5fr) 84px; gap: 8px; align-items: center; padding: 4px 8px; }
+      .head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tx3); border-bottom: 1px solid var(--line); padding-block: 6px; }
+      .kr { border-bottom: 1px solid var(--line); min-height: 46px; }
+      .kr.hit { background: var(--accs); }
+      .kr b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .kr .end { justify-self: end; }
       .hint { color: var(--tx3); font-size: 12.5px; margin: 0; }
+      .err { color: var(--bad); font-size: 12.5px; }
+      @media (max-width: 640px) {
+        .head { display: none; }
+        .kr { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; padding-block: 8px; }
+        .kr .use { order: 2; justify-self: end; }
+        .kr .pick { grid-column: 1 / -1; order: 3; }
+        .kr .end { order: 2; }
+        select { max-width: none; }
+        .got select { width: 100%; }
+      }
     `,
   ];
   @property({ attribute: false }) codes: BtCodes | null = null;
-  @property({ attribute: false }) value: Record<string, string> = {};
+  @property({ attribute: false }) value: KeyMap = {};
   /** the remote's slot in the hub, to ignore keys of other remotes while learning (null: accept any) */
   @property({ type: Number }) peer: number | null = null;
   @property({ attribute: false }) api!: Api;
@@ -50,7 +61,6 @@ export class HhBtKeys extends LitElement {
   @state() private seen: Pressed[] = [];
   @state() private assign = '';
   @state() private err = '';
-  @state() private edits: Record<string, string> = {};
   private seq = 0;
   private timer?: ReturnType<typeof setTimeout>;
 
@@ -58,8 +68,8 @@ export class HhBtKeys extends LitElement {
     void this.stopLearn();
     super.disconnectedCallback();
   }
-  private emit(v: Record<string, string>) {
-    this.dispatchEvent(new CustomEvent<Record<string, string>>('change', { detail: v }));
+  private emit(v: KeyMap) {
+    this.dispatchEvent(new CustomEvent<KeyMap>('change', { detail: v }));
   }
 
   // ------------------------------------------------------------ learn mode
@@ -105,31 +115,33 @@ export class HhBtKeys extends LitElement {
   }
 
   // ------------------------------------------------------------ edits
-  private rowKey(r: KeyRow, key: string) {
-    const c = this.codes;
-    if (!c) return;
-    const bad = keyProblem(c, key);
-    this.edits = { ...this.edits, [r.id]: key };
-    if (bad) return;
-    const e = { ...this.edits };
-    delete e[r.id];
-    this.edits = e;
-    this.emit(setRowKey(this.value, r, key.trim()));
+  private setRow(r: Pick<KeyRow, 'id' | 'was'>, v: string) {
+    this.emit(setRowKey(this.value, r, v === NONE ? null : v));
   }
-  private assignPressed(p: Pressed, key: string) {
+  private assignPressed(p: Pressed, v: string) {
     const c = this.codes;
-    if (!c) return;
-    const bad = keyProblem(c, key);
-    if (bad) return void (this.err = bad);
+    if (!c || !v) return void (this.err = 'Choose which key it presses.');
     this.err = '';
     const id = nameOfUsage(c, p.page, p.usage);
     const row = keyRows(c, this.value).find((r) => r.page === p.page && r.usage === p.usage);
-    this.emit(row ? setRowKey(this.value, { id: row.id, ...(row.was !== undefined ? { was: row.was } : {}) }, key.trim()) : { ...this.value, [id]: key.trim() });
+    const key = v === NONE ? null : v;
+    this.emit(row ? setRowKey(this.value, { id: row.id, ...(row.was !== undefined ? { was: row.was } : {}) }, key) : key === null ? this.value : { ...this.value, [id]: key });
     this.assign = '';
   }
   private rowLabel(p: Pressed): string {
     const n = nameOfUsage(this.codes, p.page, p.usage);
     return n.startsWith('HID:') ? `${pageName(p.page)} ${n.slice(4)}` : n;
+  }
+  /** A grouped key picker. `current` null = "Does nothing"; `blank` adds a "Choose a key…" first option (learn mode). */
+  private picker(label: string, current: string | null, on: (v: string) => void, blank = false) {
+    const c = this.codes;
+    if (!c) return nothing;
+    const val = current === null ? NONE : current;
+    return html`<select aria-label=${label} @change=${(e: Event) => on((e.target as HTMLSelectElement).value)}>
+      ${blank ? html`<option value="" ?selected=${current === ''}>Choose a key…</option>` : nothing}
+      <option value=${NONE} ?selected=${val === NONE}>Does nothing</option>
+      ${keyOptions(c, current || null).map((g) => html`<optgroup label=${g.group}>${g.keys.map((k) => html`<option value=${k.id} title=${k.id} ?selected=${val === k.id}>${k.label}</option>`)}</optgroup>`)}
+    </select>`;
   }
 
   protected override render() {
@@ -140,7 +152,6 @@ export class HhBtKeys extends LitElement {
     const cur = p ? rows.find((r) => r.page === p.page && r.usage === p.usage) : undefined;
     const unmapped = this.seen.filter((s) => !isMapped(rows, s.page, s.usage));
     return html`
-      <datalist id="hh-bt-keys">${c.keys.map((k) => html`<option value=${k}></option>`)}</datalist>
       <section class="card learn" aria-label="Learn a button">
         <h3>Press a button on the remote</h3>
         <p>${this.learning ? 'Listening. Press any button on the remote; it appears here.' : 'Not sure which usage a button sends? Start listening, press it, then choose its key.'}</p>
@@ -150,9 +161,9 @@ export class HhBtKeys extends LitElement {
         <div role="status" aria-live="polite">
           ${p
             ? html`<div class="got"><span>You pressed</span><b>${this.rowLabel(p)}</b><span class="muted mono">${hidCode(p.page, p.usage).slice(4)}</span>
-                ${cur ? html`<span>→ acts as <b>${cur.key}</b></span>` : html`<span class="chip ir">Not mapped</span>`}
-                <input type="text" list="hh-bt-keys" aria-label="Key for ${this.rowLabel(p)}" placeholder="key, e.g. menu" .value=${this.assign} @input=${(e: Event) => (this.assign = (e.target as HTMLInputElement).value)} @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && this.assignPressed(p, this.assign)} />
-                <button class="btn sm pri" @click=${() => this.assignPressed(p, this.assign)}>${cur ? 'Change' : 'Assign'}</button></div>`
+                ${cur?.key ? html`<span>→ acts as <b>${keyText(cur.key)}</b></span>` : html`<span class="chip ir">${cur ? 'Does nothing' : 'Not mapped'}</span>`}
+                ${this.picker(`Key for ${this.rowLabel(p)}`, this.assign, (v) => (this.assign = v), true)}
+                <button class="btn sm pri" @click=${() => this.assignPressed(p, this.assign)}>${cur?.key ? 'Change' : 'Assign'}</button></div>`
             : nothing}
         </div>
         ${this.err ? html`<span class="err" role="alert">${this.err}</span>` : nothing}
@@ -160,18 +171,17 @@ export class HhBtKeys extends LitElement {
       </section>
       <section class="tbl" aria-label="Button map">
         <h3>What each button does</h3>
-        <p class="hint">Defaults are filled in. Change a key to override it; a button that is not listed does nothing.</p>
-        <div class="scroll"><table aria-label="Remote buttons and their keys">
-          <thead><tr><th>Button</th><th>Usage</th><th>Acts as key</th><th></th></tr></thead>
-          <tbody>${rows.map((r) => {
-            const val = this.edits[r.id] ?? r.key;
-            const bad = r.id in this.edits ? keyProblem(c, val) : null;
-            return html`<tr class=${p && r.page === p.page && r.usage === p.usage ? 'hit' : ''}>
-              <td><b>${r.id.startsWith('HID:') ? 'Your own code' : r.id}</b></td>
-              <td class="mono">${r.page ? hidCode(r.page, r.usage).slice(4) : r.id}</td>
-              <td><input type="text" list="hh-bt-keys" aria-label="Key for ${r.id}" aria-invalid=${bad ? 'true' : 'false'} .value=${val} @input=${(e: Event) => this.rowKey(r, (e.target as HTMLInputElement).value)} />${bad ? html`<div class="err" role="alert">${bad}</div>` : nothing}</td>
-              <td>${r.was === undefined ? html`<button class="btn sm" aria-label="Remove ${r.id}" @click=${() => this.emit(dropRowKey(this.value, r.id))}>Remove</button>` : r.mine ? html`<button class="btn sm" aria-label="Reset ${r.id} to ${r.was}" @click=${() => { const e = { ...this.edits }; delete e[r.id]; this.edits = e; this.emit(dropRowKey(this.value, r.id)); }}>Reset</button>` : html`<span class="chip">Default</span>`}</td></tr>`;
-          })}</tbody></table></div>
+        <p class="hint">Defaults are filled in. Change a key to override it, or choose "Does nothing" to turn a button off.</p>
+        <div role="list" aria-label="Remote buttons and their keys">
+          <div class="head" aria-hidden="true"><span>Button</span><span>Usage</span><span>Acts as key</span><span></span></div>
+          ${rows.map(
+            (r) => html`<div class="kr ${p && r.page === p.page && r.usage === p.usage ? 'hit' : ''}" role="listitem">
+              <b title=${r.id}>${r.id.startsWith('HID:') ? 'Your own code' : r.id}</b>
+              <span class="mono muted use">${r.page ? hidCode(r.page, r.usage).slice(4) : r.id}</span>
+              <span class="pick">${this.picker(`Key for ${r.id}`, r.key, (v) => this.setRow(r, v))}</span>
+              <span class="end">${r.was === undefined ? html`<button class="btn sm" aria-label="Remove ${r.id}" @click=${() => this.emit(dropRowKey(this.value, r.id))}>Remove</button>` : r.mine ? html`<button class="btn sm" aria-label="Reset ${r.id} to ${keyText(r.was)}" @click=${() => this.emit(dropRowKey(this.value, r.id))}>Reset</button>` : html`<span class="chip">Default</span>`}</span></div>`,
+          )}
+        </div>
       </section>`;
   }
 }

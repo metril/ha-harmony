@@ -277,7 +277,8 @@ bt_remotes:
   Play/PlayPause (`play`), Pause, Stop, FastForward, Rewind, volume, Mute, channels, PowerToggle
   (`power_off_activity`), the colour keys and digits 0..9 (`key_100`..`key_109`). Compiled as
   `bt_remotes: [{slot, addr|null, name, keys: [[page, usage, key_id], ...]}]`; the keys are counted as key-map
-  entries, and every host and remote as a device, in the hub's memory budget. A usage that is not mapped is ignored.
+  entries, and every host and remote as a device, in the hub's memory budget. `Usage: null` removes a default
+  (that button then does nothing); older configs without it are unchanged. A usage that is not mapped is ignored.
 - Errors are located: an address that is not `AA:BB:CC:DD:EE:FF`, a page other than 07/0C, an unknown name or key,
   more than 255 devices or 32 remotes. The hub's own table sizes will be compared at push time (not yet).
 

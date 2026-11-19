@@ -58,14 +58,14 @@ export const btCss = css`
   .sig i { width: 4px; background: var(--sf3); border-radius: 1px; }
   .sig i:nth-child(1) { height: 5px; } .sig i:nth-child(2) { height: 8px; } .sig i:nth-child(3) { height: 12px; } .sig i:nth-child(4) { height: 16px; }
   .sig i.on { background: var(--acc); }
-  .form { display: grid; gap: 14px; width: 100%; }
+  .form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; width: 100%; min-width: 0; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .pad { padding: 14px 16px; }
   .narrow { max-width: 520px; }
   label.f.narrow { max-width: 320px; }
   .big { font-size: 18px; color: var(--tx); }
   .bare { border: 0; padding: 0; margin: 0; }
-  .side { display: grid; gap: 12px; align-content: start; }
+  .side { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; min-width: 0; }
   .twocol { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
   @media (max-width: 860px) { .twocol { grid-template-columns: minmax(0, 1fr); } h1 { font-size: 22px; } .peer { grid-template-columns: minmax(0, 1fr); } .acts { justify-content: flex-start; } .cand { grid-template-columns: minmax(0, 1fr) auto; } .cand .btn { grid-column: 1 / -1; } .timer { font-size: 38px; } }
 `;

@@ -3,7 +3,7 @@ import { customElement, property } from 'lit/decorators.js';
 import { BtElement, btCss } from './bt-base';
 import './hh-bt-keys';
 import { confirmAction } from '../components/base';
-import { patchRemote, remotesOf, removeRemote, sameAddr } from '../lib/bt-model';
+import { patchRemote, remotesOf, removeRemote, sameAddr, type KeyMap } from '../lib/bt-model';
 import { byteCounter, trimBytes } from '../lib/codes';
 import { hashFor } from '../lib/router';
 import { shared } from '../lib/styles';
@@ -30,9 +30,9 @@ export class HhBtRemote extends BtElement {
       <div class="head"><h1>${r.name}</h1>${live ? html`<span class="chip ${live.connected ? 'ok' : ''}">${live.connected ? 'Connected' : 'Not connected'}</span>` : html`<span class="chip ir">Not paired</span>`}<span class="mono muted">${r.address ?? 'no address yet'}</span></div>
       ${this.downBanner()}
       <label class="f narrow">Name<input type="text" aria-label="Remote name" .value=${r.name} @change=${(e: Event) => { const v = trimBytes((e.target as HTMLInputElement).value.trim()); if (v) this.store.replace(patchRemote(this.store.config, this.index, { name: v })); }} /></label>
-      <span class="hint">${bytes.used}/31 B</span>
+      <span class="hint">${bytes.used} of ${bytes.max} bytes (the remote shows at most ${bytes.max})</span>
       <hh-bt-keys .codes=${this.codes} .value=${r.keys ?? {}} .peer=${live?.slot ?? null} .api=${this.store.api} hub=${this.hub}
-        @change=${(e: CustomEvent<Record<string, string>>) => this.store.replace(patchRemote(this.store.config, this.index, { keys: e.detail }))}></hh-bt-keys>
+        @change=${(e: CustomEvent<KeyMap>) => this.store.replace(patchRemote(this.store.config, this.index, { keys: e.detail }))}></hh-bt-keys>
       ${this.codesErr ? html`<div class="banner bad" role="alert"><span>${this.codesErr}</span><span class="sp"></span><button class="btn sm" @click=${() => void this.loadCodes()}>Retry</button></div>` : nothing}`;
   }
 }

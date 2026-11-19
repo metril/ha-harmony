@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { signal, BtElement, btCss } from './bt-base';
 import './hh-bt-commands';
 import './hh-bt-keys';
-import { CmdId, LINK_CHIP, addHostDevice, addRemote, clock, outcome, remotesOf, secsLeft, nextCountdown, sameAddr, type Countdown } from '../lib/bt-model';
+import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, clock, outcome, remotesOf, secsLeft, nextCountdown, sameAddr, type Countdown } from '../lib/bt-model';
 import { announce, derive, observe, startRun, type Phase, type Run } from '../lib/bt-wizard';
 import { byteCounter, trimBytes } from '../lib/codes';
 import { capProblem } from '../lib/device-edit';
@@ -29,7 +29,7 @@ export class HhBtPair extends BtElement {
   @state() private paired: { addr: string; name?: string; transport?: 'classic' | 'le' } | null = null;
   @state() private name = '';
   @state() private commands: Record<string, string> = {};
-  @state() private keys: Record<string, string> = {};
+  @state() private keys: KeyMap = {};
   @state() private picking = '';
   private cStart = new CmdId();
   private cStop = new CmdId();
@@ -224,12 +224,12 @@ export class HhBtPair extends BtElement {
         <div class="form">
           ${host
             ? html`<hh-bt-commands .codes=${this.codes} .value=${this.commands} @change=${(e: CustomEvent<Record<string, string>>) => (this.commands = e.detail)}></hh-bt-commands>`
-            : html`<hh-bt-keys .codes=${this.codes} .value=${this.keys} .peer=${slot} .api=${this.store.api} hub=${this.hub} @change=${(e: CustomEvent<Record<string, string>>) => (this.keys = e.detail)}></hh-bt-keys>`}
+            : html`<hh-bt-keys .codes=${this.codes} .value=${this.keys} .peer=${slot} .api=${this.store.api} hub=${this.hub} @change=${(e: CustomEvent<KeyMap>) => (this.keys = e.detail)}></hh-bt-keys>`}
           ${this.codesErr ? html`<div class="banner bad" role="alert"><span>${this.codesErr}</span><span class="sp"></span><button class="btn sm" @click=${() => void this.loadCodes()}>Retry</button></div>` : nothing}
         </div>
         <aside class="side card pad" aria-label="Summary">
           <label class="f">${host ? 'Device name' : 'Remote name'}<input type="text" aria-label="Name" aria-invalid=${prob ? 'true' : 'false'} .value=${this.name} @input=${(e: Event) => (this.name = trimBytes((e.target as HTMLInputElement).value))} /></label>
-          <span class="hint">${bytes.used}/31 B</span>
+          <span class="hint">${bytes.used} of ${bytes.max} bytes (the hub stores at most ${bytes.max})</span>
           ${prob ? html`<span class="err" role="alert">${prob}</span>` : nothing}
           <button class="btn pri" ?disabled=${!!prob || !this.codes} @click=${() => this.save()}>${host ? 'Add device' : 'Add remote'}</button>
           <span class="hint">Adds to the draft only. Review and apply it from the bar at the top.</span>

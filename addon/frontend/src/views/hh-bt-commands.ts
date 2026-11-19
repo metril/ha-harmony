@@ -12,7 +12,7 @@ export class HhBtCommands extends LitElement {
   static override styles = [
     shared,
     css`
-      :host { display: grid; gap: 12px; min-width: 0; }
+      :host { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
       .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
       input[type="search"], input[type="text"] { height: 36px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; min-width: 0; }
       .tools input[type="search"] { flex: 1; min-width: 160px; }
