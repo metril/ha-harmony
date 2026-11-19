@@ -118,7 +118,7 @@ REMOTES_HEADER_MAX = 4000
 
 def encode_remotes(remotes: list[dict[str, Any]]) -> str:
     """The header value: compact ASCII JSON, notices dropped from the end until it fits."""
-    rows = [{**r, "notices": [str(m)[:200] for m in r.get("notices", [])][:8]} for r in remotes]
+    rows = [{**r, "notices": [str(m)[:200] for m in r.get("notices", [])][:8]} for r in remotes[:8]]
     while True:
         out = json.dumps(rows, separators=(",", ":"))
         if len(out) <= REMOTES_HEADER_MAX:
@@ -156,7 +156,7 @@ class AddonClient:
         if lim is not None:
             headers[LIMITS_HEADER] = json.dumps(lim.to_wire(), separators=(",", ":"))
         rem = self.remotes_provider() if self.remotes_provider else None
-        if rem:
+        if rem is not None:  # an empty list too: it clears what the add-on kept
             headers[REMOTES_HEADER] = encode_remotes(rem)
         return headers
 

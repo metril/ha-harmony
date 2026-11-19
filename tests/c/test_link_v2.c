@@ -523,6 +523,31 @@ static void test_busy_link_holds_theme_and_page(void) {
     CT_CHECK(th >= 0 && pg > th);
     CT_CHECK(hp_store_complete(&ST) && hp_store_theme_ok(&ST));
     CT_EQ(H.npend, 0);
+    CT_EQ(H.theme_out, 0); /* every send was counted once and resolved once */
+    CT_EQ(H.page_out[0], 0);
+}
+
+/* a link drop keeps the strict link's queue: the theme still queued is still counted, so its pages do not overtake it */
+static void test_link_drop_keeps_counting_what_the_link_still_holds(void) {
+    th_world();
+    uint8_t raw[40];
+    R.drop_dl = 1000; /* nothing gets through: the theme stays queued on the link */
+    CT_CHECK(push_theme(5, 1));
+    CT_CHECK(push_raw(0, raw, themed(raw, 0, 1, 5)));
+    CT_EQ(H.theme_out, 1);
+    CT_CHECK(hp_rf_link_status(&H.link).queued > 0);
+    away();
+    CT_CHECK(hp_rf_link_status(&H.link).queued == 0 || H.theme_out == 1); /* zeroed only when the queue is empty */
+    hp_rf_link_set_awake(&RL, true, R.now);
+    R.drop_dl = 0;
+    run(15000);
+    int th = -1, pg = -1;
+    for (int i = 0; i < nseen; i++) {
+        if (seen[i].type == HP_MSG_THEME_PUSH && th < 0) th = i;
+        if (seen[i].type == HP_MSG_PAGE_PUSH && pg < 0) pg = i;
+    }
+    CT_CHECK(th >= 0 && pg > th);
+    CT_EQ(H.theme_out, 0);
 }
 
 /* live tile values during a themed push reach the remote after their page, once per tile, latest value */
@@ -564,6 +589,7 @@ static void test_tiles_do_not_overtake_a_resent_page(void) {
 }
 
 int main(void) {
+    test_link_drop_keeps_counting_what_the_link_still_holds();
     test_busy_link_holds_theme_and_page();
     test_tiles_follow_the_theme_and_their_page();
     test_tiles_do_not_overtake_a_resent_page();

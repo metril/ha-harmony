@@ -262,9 +262,10 @@ static int rf_send_keyed(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, si
     bool set_msg = t == HP_MSG_PAGE_PUSH || theme;
     if (rf_up(h) && !(t == HP_MSG_PAGE_PUSH && theme_pending(h, remote, has_gen)) && /* a page waits for its theme */
         !(is_tile_msg((uint8_t)t) && tile_blocked(h, remote, page))) { /* a tile waits for its page */
+        uint8_t *out = t == HP_MSG_PAGE_PUSH ? &h->page_out[page] : theme ? &h->theme_out : NULL;
+        if (out) (*out)++; /* counted before the send: the link may resolve it (report) before the call returns */
         rc = hp_rf_link_send(&h->link, t, payload, plen, hp_sched_now(&h->sched));
-        if (rc == 0 && t == HP_MSG_PAGE_PUSH) h->page_out[page]++;
-        if (rc == 0 && theme) h->theme_out++;
+        if (out && rc != 0 && *out) (*out)--; /* not queued: refused, busy or nobody there */
         if (rc != -HP_E_NOENT && !(rc == -HP_E_BUSY && set_msg)) return rc; /* a full link queue holds a page or theme */
     }
     hub_pend_t n = {.type = (uint8_t)t, .remote = remote, .page = page, .tile = tile, .has_gen = has_gen, .gen = gen,
@@ -291,10 +292,11 @@ static void pend_flush(hub_ctx_t *h) {
             i++;
             continue;
         }
+        uint8_t *out = p->type == HP_MSG_PAGE_PUSH ? &h->page_out[p->page] : p->type == HP_MSG_THEME_PUSH ? &h->theme_out : NULL;
+        if (out) (*out)++;
         int rc = hp_rf_link_send(&h->link, (hp_msg_type_t)p->type, p->payload, p->len, hp_sched_now(&h->sched));
+        if (out && rc != 0 && *out) (*out)--;
         if (rc == -HP_E_BUSY || rc == -HP_E_NOENT) return; /* later */
-        if (rc == 0 && p->type == HP_MSG_PAGE_PUSH) h->page_out[p->page]++;
-        if (rc == 0 && p->type == HP_MSG_THEME_PUSH) h->theme_out++;
         pend_remove(h, i); /* sent, or unsendable */
     }
 }
@@ -917,8 +919,10 @@ static void rf_link_up(hub_ctx_t *h) {
     if (h->rf_attached) return;
     h->rf_attached = true;
     h->info_fresh = true;
-    h->theme_out = 0; /* nothing is in flight on a new link, whatever a lost result left counted */
-    memset(h->page_out, 0, sizeof h->page_out);
+    if (!hp_rf_link_status(&h->link).queued) { /* nothing is in flight: whatever a lost result left counted is void */
+        h->theme_out = 0; /* (a strict link keeps its queue across a drop: those objects still report) */
+        memset(h->page_out, 0, sizeof h->page_out);
+    }
     cJSON *d = cJSON_CreateObject();
     if (d) hub_broadcast(h, "remote_attached", d);
     for (unsigned i = 0; i < HUB_INFO_MAX; i++) {
@@ -935,8 +939,10 @@ static void rf_link_up(hub_ctx_t *h) {
 static void rf_link_lost(hub_ctx_t *h) {
     h->rf_attached = false;
     h->info_fresh = true;
-    h->theme_out = 0;
-    memset(h->page_out, 0, sizeof h->page_out); /* the link dropped what was in flight without a result */
+    if (!hp_rf_link_status(&h->link).queued) { /* the link dropped what was in flight without a result */
+        h->theme_out = 0;
+        memset(h->page_out, 0, sizeof h->page_out);
+    }
     memset(h->info, 0, sizeof h->info); /* the remote may come back as another firmware: ask again */
 }
 

@@ -244,7 +244,10 @@ async def test_a_palette_only_remote_shows_its_notice_in_the_themes_view(browser
             "remote": 1,
             "caps": 7,
             "tier": "palette",
-            "notices": ["theme 'dusk' replaced by its base preset 'midnight': the remote firmware has no custom colour support"],
+            "notices": [
+                "theme 'dusk' replaced by its base preset 'midnight': the remote firmware has no custom colour support",
+                "<b id='injected'>x</b><img src=x onerror='window.__pwn=1'>",
+            ],
         }
     ]
     headers = {"Authorization": f"Bearer {TOKEN}", "X-Hub-Remotes": json.dumps(report)}
@@ -258,5 +261,9 @@ async def test_a_palette_only_remote_shows_its_notice_in_the_themes_view(browser
     notice = page.locator("#theme-notice")
     await notice.wait_for()
     assert "palette colours only" in await notice.inner_text()
+    await notice.locator("summary").click()
+    assert "<b id='injected'>" in await notice.inner_text()  # shown as text, never as markup
+    assert await page.locator("#injected").count() == 0
+    assert await page.evaluate("() => window.__pwn === undefined")
     await shot(page, "theme-notice-palette-remote")
     await page.context.close()

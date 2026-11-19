@@ -139,7 +139,7 @@ class LinkedHubs:
             if not isinstance(r, dict):
                 continue
             rem, caps, tier, notes = r.get("remote"), r.get("caps"), r.get("tier"), r.get("notices")
-            if type(rem) is not int or type(caps) is not int or tier not in ("none", "palette", "custom"):
+            if type(rem) is not int or type(caps) is not int or not 0 <= rem <= 255 or not 0 <= caps <= 255 or tier not in ("none", "palette", "custom"):
                 continue
             msgs = [m[:200] for m in notes if isinstance(m, str)][:8] if isinstance(notes, list) else []
             rows.append({"remote": rem, "caps": caps, "tier": tier, "notices": msgs})

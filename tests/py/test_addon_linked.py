@@ -196,6 +196,15 @@ async def test_poll_reports_the_remotes_and_status_exposes_their_notices(c):
         await c.get("/api/v1/bundle?hub=hub-a", headers={**BEARER, "X-Hub-Remotes": bad})
     st = await (await c.get("/api/v1/config/status?hub=hub-a")).json()
     assert st["remotes"] == report and len(st["theme_notices"]) == 1
+    for bad_row in ({"remote": 256, "caps": 7}, {"remote": 1, "caps": -1}, {"remote": -1, "caps": 7}, {"remote": 1, "caps": 300}):
+        row = {"tier": "palette", "notices": [], **bad_row}
+        await c.get("/api/v1/bundle?hub=hub-a", headers={**BEARER, "X-Hub-Remotes": json.dumps([row])})
+    st = await (await c.get("/api/v1/config/status?hub=hub-a")).json()
+    assert st["remotes"] == report  # out-of-range ids and caps are refused
+    await c.get("/api/v1/bundle?hub=hub-a", headers={**BEARER, "X-Hub-Remotes": "[]"})
+    st = await (await c.get("/api/v1/config/status?hub=hub-a")).json()
+    assert st["remotes"] == [] and st["theme_notices"] == []  # an empty report clears it
+    await c.get("/api/v1/bundle?hub=hub-a", headers={**BEARER, "X-Hub-Remotes": json.dumps(report)})
     # a later poll with nothing wrong replaces it (the remote was updated: no notices left)
     hdr = {**BEARER, "X-Hub-Remotes": json.dumps([{"remote": 1, "caps": 15, "tier": "custom", "notices": []}])}
     await c.get("/api/v1/bundle?hub=hub-a", headers=hdr)

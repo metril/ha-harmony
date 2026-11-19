@@ -730,6 +730,12 @@ async def test_poll_carries_the_remotes_tier_and_notices_and_they_are_bounded(ai
         c = AddonClient(s, "127.0.0.1", srv.port, "tok")
         await c.wait("h", "r1")
         assert seen["h"] is None  # nothing known: no header
+        c.remotes_provider = list
+        await c.wait("h", "r1")
+        assert seen["h"] == "[]"  # no remote known: still sent, so the add-on drops what it kept
+        c.remotes_provider = lambda: rows * 12
+        await c.wait("h", "r1")
+        assert len(json.loads(seen["h"])) == 8  # at most 8 rows
         c.remotes_provider = lambda: rows
         await c.wait("h", "r1")
     got = json.loads(seen["h"])
