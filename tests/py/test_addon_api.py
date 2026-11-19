@@ -162,7 +162,7 @@ async def apply(c, hub, config=CONFIG):
 
 
 async def test_hubs_lists_what_the_store_knows(feed):
-    assert (await (await feed.get("/api/v1/hubs")).json()) == {"hubs": []}
+    assert (await (await feed.get("/api/v1/hubs")).json())["hubs"] == []
     await put_draft_hub(feed, "b-hub")
     rev = await apply(feed, "a-hub")
     hubs = (await (await feed.get("/api/v1/hubs")).json())["hubs"]
@@ -205,6 +205,9 @@ async def test_ack_roundtrip_and_status(feed, tmp_path):
         "acked_at": None,
         "linked": False,
         "last_seen": None,
+        "hub_last_seen": None,
+        "linked_hubs": [],
+        "now": st["now"],
     }
     rev = await apply(feed, "h1")
     st = await (await feed.get("/api/v1/config/status?hub=h1")).json()

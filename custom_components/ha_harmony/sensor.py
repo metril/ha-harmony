@@ -125,6 +125,7 @@ class HarmonyAddonLink(HarmonyEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, object]:
         c = self.coordinator
         return {
+            "hub_id": c.hub_id,
             "rev": c.rev,
             "applied_at": c.applied_at,
             "last_error": c.last_error,

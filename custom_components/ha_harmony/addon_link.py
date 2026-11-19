@@ -127,7 +127,7 @@ class AddonClient:
                 if resp.status in (401, 403):
                     raise AddonAuthError("the add-on refused the token")
                 if resp.status == 404:
-                    raise NothingApplied("no config has been applied in the add-on yet")
+                    raise NothingApplied(f"no config has been applied for hub {params.get('hub', '?')} in the add-on")
                 if resp.status != 200:
                     raise AddonUnreachable(f"the add-on answered HTTP {resp.status}")
                 if (resp.content_length or 0) > const.BUNDLE_MAX_BYTES:

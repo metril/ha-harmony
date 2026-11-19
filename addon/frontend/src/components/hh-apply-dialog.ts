@@ -1,6 +1,7 @@
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { ApiError } from '../lib/api';
+import { ApiError, type ApplyStatus } from '../lib/api';
+import { linkInfo, linkProblem } from '../lib/hubs';
 import { icon } from '../lib/icons';
 import { shared } from '../lib/styles';
 import { StoreElement } from './base';
@@ -37,6 +38,7 @@ export class HhApplyDialog extends StoreElement {
   @state() private message = '';
   @state() private ack: 'unknown' | 'waiting' | 'ok' | 'error' | 'timeout' = 'unknown';
   @state() private linked = true;
+  @state() private lastStatus: ApplyStatus | null = null;
   private pollTimer?: ReturnType<typeof setTimeout>;
 
   override willUpdate(changed: Map<string, unknown>): void {
@@ -86,6 +88,7 @@ export class HhApplyDialog extends StoreElement {
     try {
       const s = await this.store.api.applyStatus(this.store.hub);
       this.linked = s.linked;
+      this.lastStatus = s;
       if (s.applied_rev !== null && s.acked_rev === s.applied_rev && s.result === 'ok') {
         this.ack = 'ok';
         return;
@@ -159,9 +162,10 @@ export class HhApplyDialog extends StoreElement {
       ${this.ack === 'waiting' ? html`<p class="muted">You can close this: the add-on has saved the config, and the rest happens in the background.</p>` : nothing}
       ${this.ack === 'timeout'
         ? html`<div class="banner ir" role="status">Saved as rev ${this.rev}.
-            ${this.linked
+            ${linkProblem(linkInfo(this.lastStatus, s.hub), s.hub) ??
+            (this.linked
               ? 'Home Assistant has not picked it up yet. It will apply as soon as the integration is connected.'
-              : 'Home Assistant has not picked it up yet. Is the Harmony integration set up and linked to this add-on?'}</div>`
+              : 'Home Assistant has not picked it up yet. Is the Harmony integration set up and linked to this add-on?')}</div>`
         : nothing}
       ${this.ack === 'error'
         ? html`<div class="banner bad" role="alert">${this.message} The hub keeps the old rev.</div>`

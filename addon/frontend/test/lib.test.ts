@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { byteCounter, summarize, utf8Bytes, validateCode } from '../src/lib/codes';
 import { locate, summarizeErrors } from '../src/lib/errors';
 import { hashFor, hubFromSearch, parseHash } from '../src/lib/router';
+import { linkInfo, linkProblem, pickHub } from '../src/lib/hubs';
+import type { HubsResponse } from '../src/lib/api';
 import { tvConfig } from './helpers';
 
 describe('byte counter', () => {
@@ -104,5 +106,42 @@ describe('router', () => {
     expect(hubFromSearch('?hub=sim_hub')).toBe('sim_hub');
     expect(hubFromSearch('?hub=../x')).toBe('default');
     expect(hubFromSearch('')).toBe('default');
+  });
+});
+
+describe('hub selection', () => {
+  const stored = (...ids: string[]) => ids.map((id) => ({ id, has_draft: false, has_applied: true, applied_rev: 'a', applied_at: 1 }));
+  const resp = (linked: string[], hubs: string[] = []): HubsResponse => ({ hubs: stored(...hubs), linked: linked.map((id, i) => ({ id, last_seen: 100 - i })), adopt: null });
+  it('an explicit ?hub= wins', () => {
+    expect(pickHub('?hub=mine', resp(['x'])).hub).toBe('mine');
+    expect(pickHub('?hub=mine', resp(['x'])).reason).toBe('explicit');
+  });
+  it('the one linked hub is used, never default', () => {
+    const c = pickHub('', resp(['living-room-hub'], ['default']));
+    expect([c.hub, c.reason]).toEqual(['living-room-hub', 'linked']);
+  });
+  it('several linked hubs: the newest, with every id in the switcher', () => {
+    const c = pickHub('', resp(['b', 'a'], ['default']));
+    expect([c.hub, c.reason, c.choices]).toEqual(['b', 'newest-linked', ['b', 'a', 'default']]);
+  });
+  it('several linked hubs: the remembered one wins when still linked', () => {
+    expect(pickHub('', resp(['b', 'a']), 'a').hub).toBe('a');
+    expect(pickHub('', resp(['b', 'a']), 'gone').hub).toBe('b');
+  });
+  it('nothing linked: a stored hub, else default, and anyLinked is false', () => {
+    expect(pickHub('', resp([], ['sim'])).hub).toBe('sim');
+    const c = pickHub('', resp([], ['default']));
+    expect([c.hub, c.anyLinked]).toEqual(['default', false]);
+    expect(pickHub('?hub=../x', null).hub).toBe('default');
+  });
+  it('link info: none, other, stale, polling', () => {
+    const s = (linked_hubs: { id: string; last_seen: number }[]) => ({ linked_hubs, now: 1000 }) as never;
+    expect(linkInfo(s([]), 'h').kind).toBe('none');
+    expect(linkInfo(s([{ id: 'x', last_seen: 999 }]), 'h').kind).toBe('other');
+    expect(linkInfo(s([{ id: 'h', last_seen: 500 }]), 'h').kind).toBe('stale');
+    expect(linkInfo(s([{ id: 'h', last_seen: 990 }]), 'h').kind).toBe('polling');
+    expect(linkInfo({} as never, 'h').kind).toBe('unknown');
+    expect(linkProblem(linkInfo(s([{ id: 'x', last_seen: 999 }]), 'h'), 'h')).toContain('not polling for this hub (h)');
+    expect(linkProblem({ kind: 'polling', ids: [] }, 'h')).toBeNull();
   });
 });

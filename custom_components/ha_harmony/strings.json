@@ -143,7 +143,7 @@
           "ok": "Connected",
           "unreachable": "Add-on unreachable",
           "auth_failed": "Token refused",
-          "nothing_applied": "Nothing applied yet",
+          "nothing_applied": "No config applied for this hub in the add-on",
           "rejected": "Config rejected"
         }
       },

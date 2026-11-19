@@ -513,6 +513,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     raw: bytes | None = await client.fetch(self.hub_id)
                 else:
                     raw = await client.wait(self.hub_id, self._known_rev)
+                    if raw is None and not self._known_rev:
+                        # the add-on holds the wait open when nothing is applied for this hub id, so
+                        # a quiet poll says nothing: ask once per cycle (404 -> "nothing_applied")
+                        raw = await client.fetch(self.hub_id)
                 if self.link_state in ("unreachable", "auth_failed"):
                     _LOGGER.info("Harmony Editor add-on is reachable again")
                 if raw is not None:

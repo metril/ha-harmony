@@ -122,3 +122,8 @@ TEST_IR = vol.Schema(
     },
     extra=vol.PREVENT_EXTRA,
 )
+
+ADOPT = vol.Schema(
+    {vol.Optional("from", default="default"): _hub, vol.Required("to"): _hub},
+    extra=vol.PREVENT_EXTRA,
+)

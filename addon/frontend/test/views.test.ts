@@ -307,6 +307,51 @@ describe('apply dialog', () => {
     await vi.waitFor(() => expect(text(dlg)).toContain('Is the Harmony integration set up and linked'));
   });
 
+  it('names the hub id when Home Assistant polls for another one, instead of waiting forever', async () => {
+    const st = status({ linked_hubs: [{ id: 'living-room-hub', last_seen: 995 }], now: 1000, hub_last_seen: null });
+    const { app, store } = await boot({ draft: true, statuses: [st] });
+    store.edit((c) => (c.devices![0]!.name = 'Renamed TV'));
+    await store.flush();
+    const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean; pollMs: number; waitMs: number };
+    dlg.pollMs = 10;
+    dlg.waitMs = 30;
+    dlg.open = true;
+    await settle(dlg);
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(text(dlg)).toContain('Home Assistant is not polling for this hub (h)'));
+    expect(text(dlg)).toContain('living-room-hub');
+  });
+
+  it('the app shows applied vs acked after navigation, and the link problem', async () => {
+    const st = status({ linked_hubs: [{ id: 'h', last_seen: 990 }], now: 1000 });
+    const { app } = await boot({ statuses: [st] });
+    await vi.waitFor(() => expect(app.shadowRoot!.querySelector('#link-pending')?.textContent).toContain('aaaa1111'));
+    expect(app.shadowRoot!.querySelector('#link-problem')).toBeNull();
+    document.body.replaceChildren();
+    const stale = await boot({ statuses: [status({ linked_hubs: [{ id: 'h', last_seen: 100 }], now: 1000 })] });
+    await vi.waitFor(() => expect(stale.app.shadowRoot!.querySelector('#link-problem')?.textContent).toContain('not polling for this hub (h)'));
+    document.body.replaceChildren();
+    const none = await boot({ statuses: [status({ linked_hubs: [], now: 1000 })] });
+    await vi.waitFor(() => expect(none.app.shadowRoot!.querySelector('#link-problem')?.textContent).toContain('No Home Assistant integration is linked'));
+  });
+
+  it('offers to move a default store to a linked hub', async () => {
+    const adopted: string[] = [];
+    const { app } = await boot({
+      routes: {
+        'GET api/v1/hubs': () => ({ body: { hubs: [{ id: 'default', has_draft: false, has_applied: true, applied_rev: 'a', applied_at: 1 }], linked: [{ id: 'hub-a', last_seen: 1 }, { id: 'hub-b', last_seen: 1 }], adopt: { from: 'default', to: ['hub-a', 'hub-b'] } } }),
+        'POST api/v1/hubs/adopt': (c) => {
+          adopted.push(String(c.body));
+          return { body: { ok: true, hub: 'hub-b' } };
+        },
+      },
+    });
+    await vi.waitFor(() => expect(app.shadowRoot!.textContent).toContain('Move it to'));
+    expect([...app.shadowRoot!.querySelectorAll('.banner button')].map((b) => b.textContent?.trim())).toEqual(['hub-a', 'hub-b']);
+    expect([...app.shadowRoot!.querySelectorAll('select[aria-label="Hub"] option')].map((o) => o.getAttribute('value'))).toEqual(['h', 'hub-a', 'hub-b', 'default']);
+    expect(adopted).toEqual([]);
+  });
+
   it('a 422 on apply closes the dialog and records the errors', async () => {
     const { store } = await boot({ draft: true });
     store.api.apply = () => Promise.reject(new ApiError(422, 'x', 'bad', [{ path: ['devices', 0, 'id'], msg: 'bad id' }]));
