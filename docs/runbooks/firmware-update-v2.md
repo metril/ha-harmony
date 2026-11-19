@@ -65,3 +65,7 @@ hub strike counter / `install_boot_hook.py disarm`; remote `/data/app/DISABLE`.
   Three unclean boots self-disarm.
 - Remote: `ssh ... touch /data/app/DISABLE` stops our app; or `deploy_remote.py push --yes <saved harmony_remote>`; last resort Menu+Off.
 - Never flash partitions. HA is untouched by this procedure.
+
+## 4c. Restarting the remote app without a reboot (2026-11-19)
+
+`kill` the `start.sh` and `harmony_remote` pids, then `ssh root@... '(/data/app/start.sh </dev/null >/dev/null 2>&1 &)'`. A plain `nohup ... &` dies with the ssh session. The new start.sh prefixes log lines with `[up Ns]`. A freshly started app announces `gen 0 pages 0` until Home Assistant pushes pages again.

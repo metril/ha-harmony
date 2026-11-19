@@ -71,3 +71,8 @@ the health mark is rolled back at the next boot).
   (`tools/deploy_hub.py prune`) and retry; partial files are removed by the hub.
 - `ota_busy`: another upload is connected. Wait for it, or reconnect and send `ota_abort` from the owner; if the owner is gone the next
   `ota_begin` takes over.
+
+## Hub filesystem facts (measured 2026-11-19, no OTA run)
+
+- `/data` is a unionfs overlay: `ln` (hard link) works and shares the inode; `mv -f` over an existing file is an atomic rename; `ln` onto an existing name fails (`File exists`), as ota_apply_staged expects. Symlinks work too.
+- statvfs works (BusyBox `df`/`stat -f` need the pushed `/tmp/busybox`): 5 MB total, about 2.4 MB free with the 1 MB hub, `remote_sim` and `rf_probe` present. A 2 MB write succeeded. An update needs about 2 MB peak (hub + staged), `hub.prev` is a hard link: tight but fits; run `deploy_hub.py prune` first if it refuses.

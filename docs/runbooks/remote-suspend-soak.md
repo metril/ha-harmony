@@ -51,3 +51,7 @@ Run on a bench remote with a serial/log tap, never the only unit. Another agent 
 - No touch wake (the kernel masks the touch panel during suspend), by design.
 - Whether the LIS3DH wakes a suspended remote is read from the kernel survey, not yet measured on this build: check it in step 1
   (shake a suspended unit) and record it.
+
+## Bench note (2026-11-19)
+
+The wake alarm is fixed at 3600 s: there is no test override, so a suspend cycle on the bench needs a hard-key press (or a 1 h wait). `1-0034/wakeup` (rw, reads 3600) and `wakeup_event` (ro, reads `none`) exist. The gate was not run unattended.

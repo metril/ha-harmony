@@ -111,3 +111,13 @@ Learning is opt-in: `install_boot_hook.py install --yes --learn-slot ...` (hub) 
 6. Delete both `rf_slot` files and repeat 4 and 5: the slot is learned from the first data frame instead.
 7. Power-cycle the Elite: the slot is re-learned, nothing was sent while unknown.
 Only after all pass should the defaults change.
+
+## Bench result: respawn gate (2026-11-19, build 366, passed)
+
+- Kill after health mark: `daemon died after health mark - respawn 1 of 3 in 5s (no reboot)`, daemon back in ~6 s, strike file untouched, no reboot.
+- `kill -STOP`: `heartbeat stale for over 60s` logged 65 s after the stop, then the NEXT backoff applies on top (30 s for the 2nd respawn): back after ~100 s total, not 65.
+- Backoffs seen: 5 s, 30 s, 120 s; 4th death: `respawn budget exhausted (3 of 3), leaving the hub inert (no reboot)` then `watcher done`; reboot returned to normal (healthy at 153 s).
+- The heartbeat file holds the daemon's uptime seconds. Pid is in `/var/volatile/ha-harmony.pid`; `ps` shows no token on argv.
+- BusyBox-ash surprises: no `tail`, `head`, `wc`, `stat`, `sleep`-less loops are fine, `grep -E` missing; use `sed -n 'N,$p'` and `cut`. `ps` output is truncated to 40 columns without the pushed /tmp/busybox.
+- The hub daemon does not log client hellos; check `/proc/net/tcp` (port 8099 = `:1FA3`, state 01 = established) or a read-only WS client.
+- After a hub reboot the RF `link up` line can take 150-200 s; Elite re-announces itself (`remote_info`) once the link is back.
