@@ -50,7 +50,8 @@ async def test_caps_change_repushes_with_degraded_colours(hass, rig, clock, monk
     assert lamp.color == "red" and lamp.on_color in PALETTE and mid[0].theme == 1
     assert len(hub.pages()) == sent + len(mid)
     assert any("custom colours snapped" in n["msg"] for n in c.theme_notices(1))
-    # bit 3 without a theme transport counts as bit 2 only: the same set, nothing re-sent
+    # an integration without the theme transport counts bit 3 as bit 2 only: the same set, nothing re-sent
+    monkeypatch.setattr(const, "THEME_TRANSPORT", False)
     await hub.push("remote_info", {**V2_INFO, "caps": 15})
     await settle(hass)
     assert len(hub.pages()) == sent + len(mid)

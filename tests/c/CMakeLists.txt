@@ -90,7 +90,8 @@ if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
       HP_PAGES_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/pages.json"
       HP_RENDER_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/remote_render.json"
       HP_THEME_RENDER_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/remote_render_themes.json"
-      HP_COLORS_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/remote_render_colors.json")
+      HP_COLORS_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/remote_render_colors.json"
+      HP_THEME_CHAIN_JSON="${CMAKE_SOURCE_DIR}/tests/vectors/theme_chain.json")
   endforeach()
 endif()
 

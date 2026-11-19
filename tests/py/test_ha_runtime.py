@@ -90,6 +90,7 @@ class ScriptHub:
         self.got: list[tuple[str, dict]] = []
         self.gate: asyncio.Event | None = None  # while cleared, page_push replies wait
         self.no_remote = False
+        self.old_hub = False  # firmware before theme_push: that message is answered unknown_type
         self.reject_config = False  # answer set_config with ok=false
         self.tile_delay = 0.0  # seconds a tile_update reply is held
         self.tiles_inflight = self.tiles_peak = 0
@@ -124,8 +125,11 @@ class ScriptHub:
             self.tiles_inflight += 1
             self.tiles_peak = max(self.tiles_peak, self.tiles_inflight)
             self._late.append(asyncio.create_task(self._tile_reply_later(ws, reply)))
-        elif t in ("page_push", "command"):
-            if t == "page_push" and self.gate is not None and not self.gate.is_set():
+        elif t == "theme_push" and self.old_hub:
+            err = {"code": "unknown_type", "message": "unknown message type"}
+            await ws.send_json({**reply, "t": "error", "d": err})
+        elif t in ("page_push", "command", "theme_push"):
+            if t != "command" and self.gate is not None and not self.gate.is_set():
                 self._late.append(asyncio.create_task(self._reply_when_open(ws, reply)))
                 return
             if self.no_remote:
@@ -148,6 +152,9 @@ class ScriptHub:
 
     def pages(self):
         return [decode_page(base64.b64decode(d["data"])) for t, d in self.got if t == "page_push"]
+
+    def themes(self):
+        return [(d["gen"], base64.b64decode(d["data"])) for t, d in self.got if t == "theme_push"]
 
     def tiles(self):
         return [d["args"] for t, d in self.got if t == "command" and d["command"] == "tile_update"]
