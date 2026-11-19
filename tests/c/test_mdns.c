@@ -408,7 +408,7 @@ static void test_backoff_fn(void) {
 static void test_retry_state_machine(void) {
     hp_sched_t sc; g_now = 0xFFFFF000u; /* start near wraparound */
     hp_sched_init(&sc, fake_clock, NULL);
-    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", fake_detect};
+    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", fake_detect, NULL};
     hp_mdns_srv_t m;
     g_detect_ok = 0; g_mask = 0xFF000000u; g_ip = 0x7F000001u;
     /* no address yet: start succeeds soft, no socket, retries with backoff */

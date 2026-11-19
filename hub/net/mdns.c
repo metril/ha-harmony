@@ -242,6 +242,12 @@ static void emit(wr_t *w, const hp_mdns_svc_t *s, unsigned rec, unsigned flags) 
         n = snprintf(kv, sizeof kv, "v=%u", s->proto_v);
         put8(w, (unsigned)n);
         put(w, kv, (size_t)n);
+        if (s->hw[0]) {
+            n = snprintf(kv, sizeof kv, "hw=%s", s->hw);
+            if (n < 0 || (size_t)n >= sizeof kv) { w->err = 1; return; }
+            put8(w, (unsigned)n);
+            put(w, kv, (size_t)n);
+        }
         rr_end(w, at);
         break;
     }

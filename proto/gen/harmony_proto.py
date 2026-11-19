@@ -40,6 +40,8 @@ class MsgType(IntEnum):
     OTA_END = 22
     OTA_ABORT = 23
     OTA_STATUS = 24
+    SET_HUB_ID = 26
+    HUB_ID_ACK = 27
     OTA_OFFER = 30
     OTA_FRAG = 31
     OTA_FRAG_ACK = 32
@@ -52,7 +54,7 @@ ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'ho
 # name -> (code, transport, ((field, wire type, optional), ...))
 MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'hello': (1, 'ws', (('token', 'str', False), ('client', 'str', True), )),
-    'hello_ack': (2, 'ws', (('hub_id', 'str', False), ('fw_version', 'str', True), ('activities', 'json', True), ('config_hash', 'str', True), ('limits', 'json', True), ('fw_build', 'u32', True), ('ota_key', 'str', True), )),
+    'hello_ack': (2, 'ws', (('hub_id', 'str', False), ('fw_version', 'str', True), ('activities', 'json', True), ('config_hash', 'str', True), ('limits', 'json', True), ('fw_build', 'u32', True), ('ota_key', 'str', True), ('name', 'str', True), ('hw_id', 'str', True), ('rename', 'bool', True), ('id_pinned', 'bool', True), )),
     'error': (3, 'ws', (('code', 'str', False), ('message', 'str', False), ('ref_id', 'u32', True), )),
     'ping': (4, 'ws', ()),
     'pong': (5, 'ws', ()),
@@ -76,6 +78,8 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'ota_end': (22, 'ws', ()),
     'ota_abort': (23, 'ws', ()),
     'ota_status': (24, 'ws', (('state', 'str', False), ('offset', 'u32', False), ('size', 'u32', False), ('build', 'u32', True), ('reason', 'str', True), )),
+    'set_hub_id': (26, 'ws', (('id', 'str', False), ('name', 'str', True), )),
+    'hub_id_ack': (27, 'ws', (('hub_id', 'str', False), ('name', 'str', True), )),
     'ota_offer': (30, 'rf', (('size', 'u32', False), ('build', 'u32', False), )),
     'ota_frag': (31, 'rf', (('offset', 'u32', False), ('data', 'bytes', False), )),
     'ota_frag_ack': (32, 'rf', (('offset', 'u32', False), )),

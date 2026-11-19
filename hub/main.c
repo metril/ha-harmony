@@ -20,6 +20,7 @@
 #include "hub/io/rf_spi.h"
 #include "hub/io/sim_sinks.h"
 #include "hub/parse_num.h"
+#include "hub/net/ident.h"
 #include "hub/net/jsonrpc.h"
 #include "hub/net/mdns_srv.h"
 #include "hub/net/ws.h"
@@ -55,6 +56,18 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
 }
 
 static hp_mdns_srv_t g_mdns; /* fd < 0 until started */
+
+/* set_hub_id changed the id: the mDNS record moves to the new name (goodbye for the old one first). */
+static void on_ident_changed(void *ctx, const hp_ident_t *id) {
+    (void)ctx;
+    char lab[HP_ID_MAX + 1];
+    hp_ident_mdns_label(id->id, lab);
+    if (g_mdns.sched) {
+        if (hp_mdns_srv_rename(&g_mdns, lab) < 0) fprintf(stderr, "hub: mdns keeps the old name (%s is not a DNS label)\n", id->id);
+        else snprintf(g_mdns.svc.hub_id, sizeof g_mdns.svc.hub_id, "%s", id->id); /* TXT hub_id= is the real id */
+    }
+    fprintf(stderr, "hub: id is now %s\n", id->id);
+}
 
 /* The ws poll's (max 4) extra wake-only fds: RF pair socket(s) + mDNS. */
 static int rf_fds(void *arg, int out[4]) {
@@ -185,7 +198,7 @@ int main(int argc, char **argv) {
     const char *cache = NULL;
     const char *state = NULL;
     const char *rf_path = NULL;
-    const char *hub_id = NULL, *fw_version = NULL;
+    const char *hub_id = NULL, *fw_version = NULL, *ident_dir = NULL, *hw_id = NULL;
     const char *hb_path = NULL;
     const char *ota_dir = NULL, *ota_target = NULL, *health_file = NULL;
     bool ota_allow_dev = false;
@@ -194,7 +207,7 @@ int main(int argc, char **argv) {
     long ir_ports = HP_HW_DEFAULT_IR_PORTS;
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
     int mdns = -1; /* -1 = default: on for the real daemon, off under --sim */
-    hp_mdns_opts_t mo = {HP_MDNS_PORT, NULL, NULL, NULL};
+    hp_mdns_opts_t mo = {HP_MDNS_PORT, NULL, NULL, NULL, NULL};
     g_mdns.fd = -1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--sim")) sim = true;
@@ -223,6 +236,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--health-file") && i + 1 < argc) health_file = argv[++i];
         else if (!strcmp(argv[i], "--ota-target") && i + 1 < argc) ota_target = argv[++i];
         else if (!strcmp(argv[i], "--hub-id") && i + 1 < argc) hub_id = argv[++i];
+        else if (!strcmp(argv[i], "--ident-dir") && i + 1 < argc) ident_dir = argv[++i];
+        else if (!strcmp(argv[i], "--hw-id") && i + 1 < argc) hw_id = argv[++i];
         else if (!strcmp(argv[i], "--fw-version") && i + 1 < argc) fw_version = argv[++i];
         else if (!strcmp(argv[i], "--ir-ports") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 255, &ir_ports)) return bad_num("--ir-ports", argv[i]); }
         else if (!strcmp(argv[i], "--mdns")) mdns = 1;
@@ -234,7 +249,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
             fprintf(stderr, "usage: hub [--sim] [--port N] (--token T | --token-file PATH) [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
-                            "[--ota-dir DIR [--ota-target FILE] [--ota-allow-dev] [--health-file FILE]] [--hub-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] "
+                            "[--ota-dir DIR [--ota-target FILE] [--ota-allow-dev] [--health-file FILE]] [--hub-id ID] [--ident-dir DIR] [--hw-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] "
                             "[--config-budget KiB] [--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P]\n");
             return 2;
@@ -341,11 +356,27 @@ int main(int argc, char **argv) {
     g_tbl.token = token;
     static char host[64];
     static char real_id[80];
-    if (!hub_id && !sim) {
+    if (!sim) {
         if (gethostname(host, sizeof host - 1) != 0 || !host[0]) strcpy(host, "hub");
         snprintf(real_id, sizeof real_id, "ha-harmony-%s", host);
     }
-    g_tbl.hub_id = hub_id ? hub_id : sim ? "sim-hub" : real_id;
+    static char state_dir[256], hw_buf[HP_HW_MAX + 1];
+    if (!ident_dir && state) { /* the daemon's own state dir (next to state.json); hub.conf is never written */
+        const char *sl = strrchr(state, '/');
+        int dl = sl ? (int)(sl - state) : 0;
+        if (sl && dl > 0 && dl < (int)sizeof state_dir) {
+            snprintf(state_dir, sizeof state_dir, "%.*s", dl, state);
+            ident_dir = state_dir;
+        }
+    }
+    if (!hw_id && !sim) {
+        hp_ident_hw_read(NULL, hw_buf);
+        hw_id = hw_buf;
+    }
+    (void)hp_ident_init(&g_hub.ident, ident_dir, hub_id, sim ? "sim-hub" : real_id, hw_id); /* never fails */
+    if (g_hub.ident.warn[0]) fprintf(stderr, "hub: %s\n", g_hub.ident.warn);
+    g_hub.ident_changed = on_ident_changed;
+    g_tbl.hub_id = g_hub.ident.id;
     g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : "ha-harmony-hub";
     fprintf(stderr, "hub: build %u\n", (unsigned)hp_build_id());
     if (ota_pubkey_is_dev()) fprintf(stderr, "hub: dev OTA key built in (never ship this build)\n");
@@ -358,8 +389,12 @@ int main(int argc, char **argv) {
     g_hub.srv = srv;
     if (mdns < 0) mdns = !sim;
     if (mdns) {
-        if (hp_mdns_srv_start(&g_mdns, &g_hub.sched, &mo, g_tbl.hub_id, hp_ws_port(srv), HP_PROTO_VERSION) < 0)
+        mo.hw = g_hub.ident.hw[0] ? g_hub.ident.hw : NULL;
+        char lab[HP_ID_MAX + 1];
+        hp_ident_mdns_label(g_tbl.hub_id, lab);
+        if (hp_mdns_srv_start(&g_mdns, &g_hub.sched, &mo, lab, hp_ws_port(srv), HP_PROTO_VERSION) < 0)
             fprintf(stderr, "hub: mdns disabled (%s)\n", g_mdns.err);
+        else snprintf(g_mdns.svc.hub_id, sizeof g_mdns.svc.hub_id, "%s", g_tbl.hub_id); /* TXT hub_id= is the real id */
     }
     hp_ws_set_extra_fds(srv, rf_fds, rf);
     hp_ws_set_timeouts(srv, (int)auth_ms, (int)idle_ms);

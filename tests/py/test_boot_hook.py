@@ -774,7 +774,7 @@ def test_onhub_selftest_script_passes_under_host_shells(tmp_path: Path) -> None:
     failed = [ln for ln in out.splitlines() if ln.startswith("FAIL")]
     assert not failed, f"failing selftest cases: {failed}\n{out}"
     assert pr.returncode == 0 and "0 failure(s)" in out, out
-    assert out.count("PASS") >= 19
+    assert out.count("PASS") >= 22
     assert not (Path("/etc/ha-harmony-enable")).exists()
 
 

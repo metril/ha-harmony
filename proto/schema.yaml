@@ -28,6 +28,14 @@ messages:
       - {name: limits, type: json, optional: true}
       - {name: fw_build, type: u32, optional: true}   # installed firmware build id (OTA floor)
       - {name: ota_key, type: str, optional: true}    # "dev" (public test key built in) | "release"; absent = no OTA
+      # Hub identity (docs/proto/hub-identity.md), all absent on older firmware: the display name (UTF-8, <= 48
+      # bytes, omitted when none is set), the stable hardware id (the same hub across renames; omitted when the hub
+      # cannot read one), rename = the hub understands set_hub_id, id_pinned = hub.conf pins the id (set_hub_id
+      # is refused until the pin is removed on the device).
+      - {name: name, type: str, optional: true}
+      - {name: hw_id, type: str, optional: true}
+      - {name: rename, type: bool, optional: true}
+      - {name: id_pinned, type: bool, optional: true}
 
   - name: error
     code: 3
@@ -210,7 +218,24 @@ messages:
       - {name: build, type: u32, optional: true}
       - {name: reason, type: str, optional: true}
 
-  # 25..29 spare. 30..34 are RESERVED for the remote's RF transport (not implemented): the hub
+  # Change the hub's id and display name (docs/proto/hub-identity.md). `id` is required (the current id keeps it);
+  # `name` is optional (absent keeps the stored one, "" clears it). Answered with hub_id_ack, or an `error`
+  # {bad_id | bad_name | id_pinned | io}. Takes effect at once: hello_ack and the mDNS announcements use it.
+  - name: set_hub_id
+    code: 26
+    transport: ws
+    fields:
+      - {name: id, type: str}
+      - {name: name, type: str, optional: true}
+
+  - name: hub_id_ack
+    code: 27
+    transport: ws
+    fields:
+      - {name: hub_id, type: str}
+      - {name: name, type: str, optional: true}
+
+  # 28..29 spare. 30..34 are RESERVED for the remote's RF transport (not implemented): the hub
   # relays a verified remote image as fragments and the remote answers per window.
   - name: ota_offer
     code: 30

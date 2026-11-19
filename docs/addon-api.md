@@ -14,7 +14,7 @@ the table below.
   `Origin`/`Sec-Fetch-Site`; otherwise `403 csrf`. Bearer POSTs need only the JSON content type.
 - Bodies and query strings are schema-validated, unknown keys and repeated query params are
   `400 bad_request`. Request bodies are at most 1 MiB. `hub` defaults to `default` and must match
-  `[A-Za-z0-9][A-Za-z0-9._-]{0,62}`.
+  `[A-Za-z0-9][A-Za-z0-9._-]{0,62}` (the dot is accepted for ids already in use; new ids have none).
 - Errors always look like `{"error": {"code": "...", "msg": "...", ...extra}}`. Responses to `/api/`
   carry `Cache-Control: no-store`.
 - Validation entries are `{path: [..], msg: str, line: null}`; at most 100 are returned.
@@ -146,7 +146,7 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
 - Linked hub ids: every authenticated `GET bundle` or `bundle/wait` with a valid `hub` records the id
   and the time (404s included), in memory and in `/data/linked_hubs.json` (at most 32 ids).
 - `GET hubs` -> `{hubs: [{id, has_draft, has_applied, applied_rev, applied_at}], linked: [{id,
-  last_seen}], now, adopt: {from: "default", to: [id]}|null}`. `adopt` is set when a store exists
+  last_seen, name?}], now, adopt: {from: "default", to: [id]}|null}`. `adopt` is set when a store exists
   under `default` and some linked hub id has no store of its own (the editor offers the move).
 - **Adoption.** When exactly one hub id other than `default` is linked and has no store, and `default`
   has one, the add-on moves the `default` store file to that id automatically (one atomic rename,
@@ -202,6 +202,18 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
   55 s (or at once on shutdown).
 - `POST bundle/ack` body `{hub, rev, result: "ok"|"error", detail?: str (<= 200)}` -> `{ok:true}`;
   `404 nothing_applied`; `409 stale_rev` (with the current `rev`) when `rev` is not the applied one.
+- **Renamed hubs.** A poll (`GET bundle`, `GET bundle/wait`) may say which hub it is with three optional headers
+  (an add-on that does not know them ignores them): `X-Hub-Hw` (the hub's stable hardware id, `[A-Za-z0-9._:-]`, 1 to
+  64), `X-Hub-Prev` (the id the hub had before a rename, a valid hub id other than `default`) and `X-Hub-Name` (the
+  display name, percent-encoded UTF-8, at most 48 bytes, no control characters; empty clears it). The add-on records
+  the hardware id and name per linked hub (`linked_hubs.json`, `hw` and `names`). When the polled `hub` has no store of
+  its own and a store exists under `X-Hub-Prev`, or under a linked id with the same hardware id, that store (draft,
+  applied revisions, history, ack) is moved to `hub` in one atomic rename (the generalisation of the `default`
+  adoption; the old id is dropped from the linked list). A `prev` whose recorded hardware id differs is another hub and
+  is skipped. It never overwrites: if `hub` already has a store nothing moves. The response carries
+  `X-HH-Adopt: moved | exists | none` whenever one of the headers was sent (`exists`: refused because `hub` already has
+  a store; `none`: nothing to move, which is also the answer to a repeat). Moving back is the same call the other way
+  round (`hub=<old>`, `X-Hub-Prev: <new>`), which the integration uses to undo a rename.
 - Failed bearer attempts are rate limited (`429`); a valid token never is. `401 unauthorized` for
   every other miss.
 

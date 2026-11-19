@@ -373,6 +373,16 @@ describe('apply dialog', () => {
     await vi.waitFor(() => expect(none.app.shadowRoot!.querySelector('#link-problem')?.textContent).toContain('No Home Assistant integration is linked'));
   });
 
+  it('the header shows the hub name with the id as secondary text, and the switcher uses names', async () => {
+    const hubs = (linked: object[]) => ({ body: { hubs: [], linked, adopt: null } });
+    const { app } = await boot({ routes: { 'GET api/v1/hubs': () => hubs([{ id: 'h', last_seen: 1, name: 'Living room' }]) } });
+    await vi.waitFor(() => expect(app.shadowRoot!.querySelector('.hub .hn')?.textContent).toBe('Living room'));
+    expect(app.shadowRoot!.querySelector('.hub .hid2')?.textContent).toBe('h');
+    document.body.replaceChildren();
+    const two = await boot({ routes: { 'GET api/v1/hubs': () => hubs([{ id: 'h', last_seen: 2, name: 'Living room' }, { id: 'other', last_seen: 1 }]) } });
+    await vi.waitFor(() => expect([...two.app.shadowRoot!.querySelectorAll('select[aria-label="Hub"] option')].map((o) => o.textContent?.trim())).toEqual(['Living room (h) (no config yet)', 'other (no config yet)']));
+  });
+
   it('offers to move a default store to a linked hub', async () => {
     const adopted: string[] = [];
     const { app } = await boot({

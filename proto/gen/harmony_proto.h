@@ -34,6 +34,8 @@ typedef enum {
     HP_MSG_OTA_END = 22,
     HP_MSG_OTA_ABORT = 23,
     HP_MSG_OTA_STATUS = 24,
+    HP_MSG_SET_HUB_ID = 26,
+    HP_MSG_HUB_ID_ACK = 27,
     HP_MSG_OTA_OFFER = 30,
     HP_MSG_OTA_FRAG = 31,
     HP_MSG_OTA_FRAG_ACK = 32,
@@ -41,7 +43,7 @@ typedef enum {
     HP_MSG_OTA_RESULT = 34
 } hp_msg_type_t;
 
-#define HP_MSG_COUNT 30
+#define HP_MSG_COUNT 32
 
 typedef enum {
     HP_KEY_ACTION_PRESS = 0,

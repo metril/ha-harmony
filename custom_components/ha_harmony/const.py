@@ -26,6 +26,12 @@ CONF_ADDON_TOKEN = "addon_token"
 CONF_HOLD_EVENTS = "hold_events"  # option: also write an event for each hold repeat
 CONF_ALL_COMMAND_BUTTONS = "all_command_buttons"  # option: command buttons even for devices over the limit
 COMMAND_BUTTON_LIMIT = 200  # a device with more commands gets no (new) command buttons unless the option is set
+CONF_HW_ID = "hw_id"  # the hub's stable hardware id (hello_ack.hw_id): the same hub across renames
+CONF_HUB_NAME = "name"  # the hub's display name ("" / absent = none)
+CONF_CAN_RENAME = "can_rename"  # the firmware understands set_hub_id (stored so the reconfigure form can say so)
+CONF_ID_PINNED = "id_pinned"  # hub.conf pins the id on the device
+CONF_PREV_ID = "prev_hub_id"  # the id before a rename, sent on add-on polls until the add-on has seen it
+HUB_NAME_MAX = 48  # bytes
 CONF_ADDON_SLUG = "addon_slug"
 CONF_ADDON_UUID = "addon_uuid"
 ADDON_SLUG = "ha_harmony_editor"

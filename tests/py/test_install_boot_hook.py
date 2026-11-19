@@ -497,7 +497,7 @@ def test_bad_token_charset_refused_before_any_write(hub: FakeHub, tok: str) -> N
     assert hub.log == []
 
 
-@pytest.mark.parametrize("hid", ["a b", "a\nb", "x;touch y", "a=b", "", "$(x)"])
+@pytest.mark.parametrize("hid", ["a b", "a\nb", "x;touch y", "a=b", "", "$(x)", "a.b", "default"])
 def test_bad_hub_id_refused(hub: FakeHub, hid: str) -> None:
     with pytest.raises(ibh.InstallError, match="hub id"):
         install(hub, hub_id=hid)

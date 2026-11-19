@@ -32,6 +32,7 @@ typedef struct {
     const char *dest;  /* "a.b.c.d:port": where announcements/multicast replies go
                         * (default: the group on 5353; none for unicast-only mode). */
     hp_mdns_detect_fn detect; /* NULL = real interface detection (multicast mode only) */
+    const char *hw;    /* optional stable hardware id for TXT hw= (NULL = none) */
 } hp_mdns_opts_t;
 
 /* Per-record-set multicast holdoff (RFC 6762 s6: one multicast of a record
@@ -81,6 +82,9 @@ int hp_mdns_srv_fd(const hp_mdns_srv_t *); /* may change over time; -1 when down
 uint16_t hp_mdns_srv_port(const hp_mdns_srv_t *);
 /* Drains readable datagrams (bounded per call) and answers matching queries. */
 void hp_mdns_srv_service(hp_mdns_srv_t *);
+/* The hub's id changed: goodbye (TTL 0) for the old name, then announce under `hub_id` (the same port and
+ * address). 0, or -HP_E_INVAL for an id that is not a DNS label (nothing changes). Safe when not running. */
+int hp_mdns_srv_rename(hp_mdns_srv_t *, const char *hub_id);
 /* Sends the goodbye (TTL 0) records, cancels timers, closes the socket. Safe if not running. */
 void hp_mdns_srv_stop(hp_mdns_srv_t *);
 

@@ -300,6 +300,36 @@ pages:
 integration); the keys and buttons are forwarded to Home Assistant by the hub, so they need Home Assistant
 to be up.
 
+## Naming your hub
+
+The hub id (`ha-harmony-<hostname>` by default) keys the config entry, every entity and device identifier, the cached
+config and the add-on's store. The **display name** is free text (up to 48 bytes) shown as the device name, entry
+title and editor header (the id stays as secondary text).
+
+**Rename:** *Settings > Devices & services > Harmony > ⋮ > Reconfigure*, fields **Hub ID** (letters, digits, `_` `-`,
+1 to 63 characters, starting with a letter or digit, not `default`) and **Name**; needs hub firmware with
+`set_hub_id`, and an up-to-date add-on if you use one (an old add-on cannot move its store: the rename is refused).
+Home Assistant sends the id to the hub (stored on the hub, announced by mDNS at once), moves everything keyed by the old
+id (entry, devices, entity *unique* ids, cache, add-on store) and reloads. Entity ids do not change, so history,
+dashboards and automations keep working (entity ids derived from the old id keep their names).
+
+**All or nothing.** If a step fails (hub refuses, id taken, add-on already holds a config under the new id, ...) it is
+all undone, the hub goes back to its old id and the form says why. If even that undo cannot reach the hub, Home
+Assistant follows the hub's new id by its hardware id at the next start.
+
+**Same hub, new id.** mDNS carries `hw=<hardware id>` (MAC derived), so discovery and setup recognise a renamed hub and
+the entry follows an id changed on the device (a different hardware id on the same address is refused). If the add-on
+then holds configs under both ids, both are kept and a repair issue says what to do. A hub with no readable MAC has no
+hardware id: it cannot be renamed from Home Assistant.
+
+**Pinning (advanced).** `hub_id=<id>` in `/data/ha-harmony/hub.conf` (or `tools/install_boot_hook.py --hub-id`) pins the
+id; Home Assistant then refuses to rename it (`id_pinned`), the name still works. An unusable pin (`default`, over 63
+characters) is logged and ignored (not pinned); the daemon never exits over an id. The default is saved on first boot. Precedence: pin, then the id saved by Home
+Assistant (`/data/ha-harmony/hub_id`), then the hostname default. Delete `hub_id` and `hub_name` there to reset. Older
+dotted ids keep working (announced on mDNS with `-` for the dot); new ids cannot contain a dot.
+
+Old firmware (no `set_hub_id`): the form shows id and name read-only. More: `docs/proto/hub-identity.md`.
+
 ## Operation
 The config is pushed on connect only if the hub's `config_hash` differs from the compiled one. Services:
 `ha_harmony.reload_config` (pull from the add-on now, recompile, push if changed; fails when the hub is
@@ -317,7 +347,7 @@ resent every 0.4 s until that time has passed).
 on the integration, off by default: one recorder row per 0.4 s of holding). Home Assistant key actions with
 `repeat: true` are not affected. Event attributes are `key` and `action`.
 
-**Connection changes.** *Reconfigure* changes host, port and token. The hub's mDNS announcement never retargets a
+**Connection changes.** *Reconfigure* changes host, port and token, and the hub's id and name (see *Naming your hub*). The hub's mDNS announcement never retargets a
 configured hub by itself: if a hub id is announced at another address Home Assistant offers *Hub moved to
 `<host>`?* and sends the token only after you confirm (anyone on the LAN can answer mDNS).
 

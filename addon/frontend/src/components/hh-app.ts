@@ -6,7 +6,7 @@ import { counts } from '../lib/model';
 import { Router, hashFor } from '../lib/router';
 import { shared } from '../lib/styles';
 import { ApiError, type ApplyStatus, type HubsResponse } from '../lib/api';
-import { linkInfo, linkProblem, pickHub, rememberHub } from '../lib/hubs';
+import { hubLabel, hubName, linkInfo, linkProblem, pickHub, rememberHub } from '../lib/hubs';
 import { StoreElement, type ConfirmRequest } from './base';
 import './hh-dialog';
 import './hh-draft-bar';
@@ -35,6 +35,8 @@ export class HhApp extends StoreElement {
       .hub { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 12px; border-left: 1px solid var(--line); height: 28px; }
       .hub .hl { color: var(--tx3); font-size: 12px; }
       .hub .hid { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16ch; font-family: var(--mono); font-size: 12px; }
+      .hub .hn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 18ch; font-weight: 600; }
+      .hub .hid2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16ch; font-family: var(--mono); font-size: 11px; color: var(--tx3); }
       .hub select { max-width: 22ch; }
       select { height: 32px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 8px; }
       .layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: calc(100vh - 48px); }
@@ -77,6 +79,8 @@ export class HhApp extends StoreElement {
         .brand { display: none; }
         .hub { border-left: 0; padding-left: 4px; }
         .hub .hid { max-width: 10ch; }
+        .hub .hn { max-width: 10ch; }
+        .hub .hid2 { display: none; }
         .hub select { max-width: 12ch; }
         .hub .chip { padding: 0 6px; font-size: 11px; }
         .hdr-btn span { display: none; }
@@ -191,9 +195,11 @@ export class HhApp extends StoreElement {
       <span class="hl">Hub:</span>
       ${choices.length > 1
         ? html`<select aria-label="Hub" @change=${(e: Event) => this.goHub((e.target as HTMLSelectElement).value)}>
-            ${choices.map((id) => html`<option value=${id} ?selected=${id === s.hub}>${id}${this.hubs?.hubs.find((h) => h.id === id)?.has_applied ? '' : ' (no config yet)'}</option>`)}
+            ${choices.map((id) => html`<option value=${id} ?selected=${id === s.hub}>${hubLabel(this.hubs, id)}${this.hubs?.hubs.find((h) => h.id === id)?.has_applied ? '' : ' (no config yet)'}</option>`)}
           </select>`
-        : html`<strong class="hid" title=${s.hub}>${s.hub}</strong>`}
+        : hubName(this.hubs, s.hub)
+          ? html`<strong class="hn" title=${hubName(this.hubs, s.hub)}>${hubName(this.hubs, s.hub)}</strong><span class="hid2" title=${s.hub}>${s.hub}</span>`
+          : html`<strong class="hid" title=${s.hub}>${s.hub}</strong>`}
       ${st ? html`<span class="chip ${st[0]}" id="hub-state" title=${st[2]}>${st[1]}</span>` : nothing}
     </div>`;
   }

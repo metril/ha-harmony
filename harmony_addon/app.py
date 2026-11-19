@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import aiohttp
 import voluptuous as vol
@@ -51,9 +51,9 @@ from .auth import (
 )
 from .ha_client import Catalog, HaApi, HaUnavailable
 from .ir_tester import IrSender, SendLimiter, SendRefused
-from .linked import LinkedHubs
+from .linked import HW_ID, LinkedHubs, clean_name
 from .options import Options, load_options
-from .store import HISTORY_MAX, RevConflict, Store, StoreError
+from .store import HISTORY_MAX, HUB_ID, RevConflict, Store, StoreError
 from .supervisor import Discovery
 from .web_util import CLOCK_KEY, error, jresp, query, read_body
 
@@ -77,6 +77,9 @@ WAIT_KEY = web.AppKey("wait_s", float)
 CATALOG_KEY = web.AppKey("catalog", Catalog)
 SEEN_KEY = web.AppKey("bundle_seen", dict)
 LINKED_KEY = web.AppKey("linked_hubs", LinkedHubs)
+HW_HEADER = "X-Hub-Hw"  # a poll names which hub it is: stable hardware id, previous id, display name (docs/addon-api.md)
+PREV_HEADER = "X-Hub-Prev"
+NAME_HEADER = "X-Hub-Name"
 ACKS_KEY = web.AppKey("acks", dict)
 MEMO_KEY = web.AppKey("preview_memo", dict)
 SENDER_KEY = web.AppKey("ir_sender", object)
@@ -116,6 +119,8 @@ def _harden(request: web.Request, resp: web.StreamResponse) -> None:
     resp.headers["Content-Security-Policy"] = CSP
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"
+    if (adopt := request.get("adopt")) is not None:  # the answer to a poll that named a renamed hub
+        resp.headers["X-HH-Adopt"] = adopt
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     elif request.path.startswith("/assets/") and resp.status == 200:
@@ -146,7 +151,14 @@ def make_auth_mw(auth: Auth):
             polling = request.method == "GET" and request.path in (BUNDLE_PREFIX, BUNDLE_PREFIX + "/wait")
             if polling and hub:
                 linked = request.app[LINKED_KEY]
-                if linked.seen(hub):
+                hw = request.headers.get(HW_HEADER)
+                prev = request.headers.get(PREV_HEADER)
+                raw_name = request.headers.get(NAME_HEADER)
+                new = linked.seen(hub)
+                if prev is not None or hw is not None:
+                    request["adopt"] = _adopt_renamed(request.app, hub, prev, hw)
+                linked.note_identity(hub, hw, None if raw_name is None else clean_name(unquote(raw_name)))
+                if new:
                     _auto_adopt(request.app)
                 raw_limits = request.headers.get(LIMITS_HEADER)
                 if raw_limits is not None and len(raw_limits) <= 2000:  # the hub's own limits, as its integration knows them
@@ -172,6 +184,46 @@ def make_auth_mw(auth: Auth):
 
 
 # ------------------------------------------------------------------ helpers
+def _adopt_renamed(app: web.Application, hub: str, prev: str | None, hw: str | None) -> str:
+    """The integration polls for `hub` and says which hub that is: its previous id (`prev`) and/or its stable
+    hardware id (`hw`). When that hub is one the add-on knows under another id, its store (draft, applied
+    revisions, history, ack) moves to `hub` in one atomic rename. Returns the answer for X-HH-Adopt:
+    `moved`, `exists` (a store under `hub` already exists: nothing is overwritten) or `none`."""
+    linked, store = app[LINKED_KEY], app[STORE_KEY]
+    if hw is not None and not HW_ID.fullmatch(hw):
+        hw = None
+    sources: list[str] = []
+    if prev and prev != hub and HUB_ID.fullmatch(prev) and prev != "default":
+        sources.append(prev)
+    if hw:
+        sources += [h for h in linked.ids() if h != hub and h != "default" and linked.hw(h) == hw and h not in sources]
+    try:
+        for src in sources:
+            known = linked.hw(src)
+            if hw and known and known != hw:
+                continue  # that id is another hub
+            if src not in store.hubs():
+                continue
+            if hub in store.hubs():
+                log.warning("hub %s was renamed to %s but %s already has a config: nothing moved", src, hub, hub)
+                return "exists"
+            if not store.adopt(src, hub):
+                continue
+            acks = app[ACKS_KEY]
+            if src in acks:
+                acks[hub] = acks.pop(src)
+            linked.rename(src, hub)
+            app[NOTIFIER_KEY].notify(hub)
+            log.info("moved the config of hub %s to %s (the hub was renamed)", src, hub)
+            return "moved"
+    except OSError, StoreError:
+        log.exception("could not move the config of a renamed hub to %s", hub)
+        return "none"
+    if prev and prev != hub and prev in linked.ids() and (not hw or linked.hw(prev) in (None, hw)):
+        linked.rename(prev, hub)  # no config under the old id: just stop listing it as a hub that is polled
+    return "none"
+
+
 def _auto_adopt(app: web.Application) -> None:
     """A store that exists only under `default` moves to the one hub id an integration polls for."""
     linked = app[LINKED_KEY].ids()

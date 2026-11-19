@@ -94,6 +94,10 @@ class HarmonyHubClient:
         self._state_subs: list[StateCallback] = []
         self._closed = False
         self.hub_id: str | None = None
+        self.hub_name: str = ""  # hello_ack.name: the display name set from Home Assistant ("" = none / old firmware)
+        self.hw_id: str | None = None  # hello_ack.hw_id: the hub's stable hardware id (survives renames)
+        self.can_rename = False  # hello_ack.rename: the hub understands set_hub_id
+        self.id_pinned = False  # hello_ack.id_pinned: hub.conf pins the id on the device
         self.fw_version: str | None = None
         self.activities: list[str] = []
         self.fw_build: int | None = None  # installed firmware build id (absent: hub without OTA)
@@ -140,6 +144,17 @@ class HarmonyHubClient:
     async def async_send(self, msg_type: MsgType, data: dict[str, Any]) -> dict[str, Any]:
         """Send a request and return the reply's `d` (error replies raise)."""
         return await self._request(msg_type, data)
+
+    async def async_set_identity(self, hub_id: str, name: str | None = None) -> dict[str, Any]:
+        """Rename the hub (`set_hub_id`; the current id keeps it, `name` None keeps the stored name, "" clears
+        it). Returns the hub_id_ack `d`; a refusal raises HarmonyCommandError (bad_id, bad_name, id_pinned, io)."""
+        data: dict[str, Any] = {"id": hub_id}
+        if name is not None:
+            data["name"] = name
+        ack = await self._request(MsgType.SET_HUB_ID, data)
+        self.hub_id = ack["hub_id"]
+        self.hub_name = ack.get("name") or ""
+        return ack
 
     async def async_set_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Push a compiled config; returns the final config_ack `d`. A big config travels as
@@ -200,6 +215,10 @@ class HarmonyHubClient:
             if mtype is not MsgType.HELLO_ACK:
                 raise HarmonyConnectionError(f"unexpected handshake reply {mtype.name}")
             self.hub_id = d["hub_id"]
+            self.hub_name = d.get("name") or ""
+            self.hw_id = d.get("hw_id") or None
+            self.can_rename = d.get("rename") is True
+            self.id_pinned = d.get("id_pinned") is True
             self.fw_version = d.get("fw_version")
             self.fw_build = d.get("fw_build")
             self.ota_key = d.get("ota_key")

@@ -273,7 +273,23 @@ int hp_mdns_srv_start(hp_mdns_srv_t *s, hp_sched_t *sched, const hp_mdns_opts_t 
         s->dest.sin_addr = s->group;
         s->have_dest = 1;
     }
+    if (o->hw && strlen(o->hw) < sizeof s->svc.hw) snprintf(s->svc.hw, sizeof s->svc.hw, "%s", o->hw);
     net_try(s, hp_sched_now(sched)); /* first attempt now; failures retry from the scheduler */
+    return 0;
+}
+
+int hp_mdns_srv_rename(hp_mdns_srv_t *s, const char *hub_id) {
+    hp_mdns_svc_t n;
+    if (hp_mdns_svc_init(&n, hub_id, s->svc.port, s->svc.ipv4, s->svc.proto_v) < 0) return -HP_E_INVAL;
+    snprintf(n.hw, sizeof n.hw, "%s", s->svc.hw);
+    if (s->fd >= 0 && s->have_dest) send_to(s, &s->dest, HP_MDNS_ALL, HP_MDNS_F_GOODBYE, 0, NULL); /* old instance and host */
+    s->svc = n;
+    if (s->fd >= 0) {
+        if (s->timer) hp_sched_cancel(s->sched, s->timer);
+        hp_mdns_rl_init(&s->rl);
+        s->announced = 0;
+        s->timer = hp_sched_after(s->sched, 0, announce_cb, s);
+    }
     return 0;
 }
 

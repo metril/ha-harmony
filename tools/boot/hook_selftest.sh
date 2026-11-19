@@ -220,6 +220,22 @@ else
 	fail "bad value (DEMO=$DEMO)"
 fi
 
+# 6a. a hub_id the daemon would ignore ("default", over 63 chars): logged, the daemon starts WITHOUT the pin; 63 chars pins
+id64=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+for bad in default "$id64"; do
+	mkroot "token=abc\nhub_id=$bad\n"
+	run_hook
+	case "$(cat "$T/argv" 2>/dev/null)" in *--hub-id*) hid=pinned ;; *) hid=unpinned ;; esac
+	if [ "$DEMO" = 1 ] && [ "$hid" = unpinned ] && grep -q 'not pinned' "$(CLOG)" 2>/dev/null; then
+		pass "bad hub_id (${#bad} chars): logged, daemon starts without the pin"
+	else
+		fail "bad hub_id ${#bad} (DEMO=$DEMO pin=$hid)"
+	fi
+done
+mkroot "token=abc\nhub_id=${id64%a}\n"
+run_hook
+case "$(cat "$T/argv" 2>/dev/null)" in *"--hub-id ${id64%a}"*) pass "63-char hub_id pins" ;; *) fail "63-char hub_id (DEMO=$DEMO)" ;; esac
+
 # 6b. token over 256 chars: stock, no strike; exactly 256 arms
 long=x
 i=0
