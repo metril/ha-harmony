@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Themes groundwork (no visible change yet): `proto/themes.yaml` is the single source for the remote UI themes (Cards plus midnight, daylight and high-contrast presets, a named 12-colour palette each); `tools/gen_themes.py` derives each colour's ink and pressed shade, enforces WCAG contrast on every text/surface pair, and generates the Python, C and editor tables. Integer-only ink/pressed/RGB565 maths, a 99-byte wire theme, user-theme resolution and contrast fixes are pinned across Python, TypeScript and C by shared vectors (`tests/vectors/themes.json`).
 - Editor: the "Config size" meter's bar now uses the same net figures as its label (the hub's fixed load overhead left out), so 18 KiB of 6.5 MiB no longer draws about 19% full.
 
 ## 0.3.9 (2026-11-18)
