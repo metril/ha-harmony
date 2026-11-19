@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.11 (2026-11-19)
+
+- Colours and themes in the editor: give any button or tile a colour from the palette or a custom one, pick a built-in theme (Cards, Midnight, Daylight, High contrast) or create your own in the new theme editor with a live preview. The remote needs a firmware update to show them; the editor says what a linked remote cannot display yet.
+- Rename a hub from Home Assistant (Reconfigure → Hub ID / Name); the editor keeps the hub's draft, applied config and history under the new id. Needs a hub firmware update.
+- Integration: custom themes are re-sent until the remote confirms them.
+
 ## 0.3.10 (2026-11-18)
 
 - The editor's History page shows one status on the newest revision (On the remote, Sending…, Not sent, or Rejected by hub with a See why reason); older revisions show only Compare and Restore. The apply dialog and the pending banner use the same words and never show a raw hash.
