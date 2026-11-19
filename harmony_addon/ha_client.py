@@ -23,6 +23,7 @@ MAX_BODY = 8 * 1024 * 1024  # a large install's /api/states is a few MB
 MAX_ENTITIES = 5000
 MAX_STR = 200
 CACHE_SECONDS = 5.0
+TIMEOUT_SECONDS = 20  # a few-MB /states on a busy install
 
 ACTION_DOMAINS = frozenset(
     {
@@ -34,7 +35,15 @@ ENTITY_DOMAINS = ACTION_DOMAINS | {"sensor", "binary_sensor"}
 
 
 class HaUnavailable(Exception):
-    """Home Assistant cannot be read right now (no token, network error, bad answer)."""
+    """Home Assistant cannot be read right now (no token, network error, bad answer).
+
+    `reason` is a short machine-readable cause (`status_503`, `too_large`, `not_json`,
+    `unexpected_shape`, an exception type name); it never holds response contents.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class HaApi(Protocol):
@@ -51,7 +60,7 @@ class HttpHaApi:
         return f"HttpHaApi(url={self._url!r})"
 
     async def get(self, path: str) -> Any:
-        timeout = aiohttp.ClientTimeout(total=10)
+        timeout = aiohttp.ClientTimeout(total=TIMEOUT_SECONDS)
         headers = {"Authorization": f"Bearer {self._token}"}
         try:
             async with (
@@ -59,12 +68,17 @@ class HttpHaApi:
                 s.get(f"{self._url}{path}", allow_redirects=False) as r,
             ):
                 if r.status != 200:
-                    raise HaUnavailable(f"Home Assistant answered {r.status}")
-                raw = await r.content.read(MAX_BODY + 1)
-                if len(raw) > MAX_BODY:
-                    raise HaUnavailable("Home Assistant's answer is too large")
-                return json.loads(raw)
-        except (aiohttp.ClientError, OSError, TimeoutError, ValueError) as exc:
+                    raise HaUnavailable(f"status_{r.status}")
+                raw = bytearray()
+                async for chunk in r.content.iter_chunked(65536):
+                    raw += chunk
+                    if len(raw) > MAX_BODY:
+                        raise HaUnavailable("too_large")
+                try:
+                    return json.loads(raw)
+                except ValueError:
+                    raise HaUnavailable("not_json") from None
+        except (aiohttp.ClientError, OSError, TimeoutError) as exc:
             raise HaUnavailable(type(exc).__name__) from None
 
 
@@ -86,22 +100,39 @@ class Catalog:
     def __init__(self, api: HaApi | None, clock: Callable[[], float]) -> None:
         self._api, self._clock = api, clock
         self._cache: dict[str, tuple[float, Any]] = {}
+        self._failing: dict[str, str] = {}  # path -> last logged reason
+
+    def _failed(self, path: str, reason: str) -> None:
+        """One WARNING on the first failure and on a change of cause, never one per poll."""
+        if self._failing.get(path) != reason:
+            self._failing[path] = reason
+            log.warning("Home Assistant %s cannot be read: %s", path, reason)
 
     async def _get(self, path: str) -> Any:
+        try:
+            data = await self._fetch(path)
+        except HaUnavailable as exc:
+            self._failed(path, exc.reason)
+            raise
+        if self._failing.pop(path, None) is not None:
+            log.info("Home Assistant %s can be read again", path)
+        return data
+
+    async def _fetch(self, path: str) -> Any:
         if self._api is None:
-            raise HaUnavailable("no Home Assistant access")
+            raise HaUnavailable("no_access")
         now = self._clock()
         hit = self._cache.get(path)
         if hit and now - hit[0] < CACHE_SECONDS:
             return hit[1]
         data = await self._api.get(path)
+        if not isinstance(data, list):
+            raise HaUnavailable("unexpected_shape")
         self._cache[path] = (now, data)
         return data
 
     async def entities(self, domain: str | None, q: str | None) -> list[dict[str, Any]]:
         states = await self._get("/states")
-        if not isinstance(states, list):
-            raise HaUnavailable("unexpected answer from Home Assistant")
         needle = (q or "").casefold()
         out: list[dict[str, Any]] = []
         for st in states:
@@ -132,8 +163,6 @@ class Catalog:
 
     async def services(self, domain: str | None) -> list[dict[str, Any]]:
         data = await self._get("/services")
-        if not isinstance(data, list):
-            raise HaUnavailable("unexpected answer from Home Assistant")
         out: list[dict[str, Any]] = []
         for entry in data:
             if not isinstance(entry, dict):

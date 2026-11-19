@@ -80,7 +80,9 @@ LINKED_KEY = web.AppKey("linked_hubs", LinkedHubs)
 HW_HEADER = "X-Hub-Hw"  # a poll names which hub it is: stable hardware id, previous id, display name (docs/addon-api.md)
 PREV_HEADER = "X-Hub-Prev"
 NAME_HEADER = "X-Hub-Name"
-REMOTES_HEADER = "X-Hub-Remotes"  # the linked remotes' caps tier and theme notices (docs/addon-api.md)
+REMOTES_HEADER = (
+    "X-Hub-Remotes"  # the linked remotes' caps tier and theme notices (docs/addon-api.md)
+)
 ACKS_KEY = web.AppKey("acks", dict)
 MEMO_KEY = web.AppKey("preview_memo", dict)
 SENDER_KEY = web.AppKey("ir_sender", object)
@@ -149,7 +151,10 @@ def make_auth_mw(auth: Auth):
             request.app[SEEN_KEY]["last_seen"] = int(request.app[CLOCK_KEY]())
             # only a poll names its hub in the query (an ack carries it in the body): no fallback
             hub = request.query.get("hub")
-            polling = request.method == "GET" and request.path in (BUNDLE_PREFIX, BUNDLE_PREFIX + "/wait")
+            polling = request.method == "GET" and request.path in (
+                BUNDLE_PREFIX,
+                BUNDLE_PREFIX + "/wait",
+            )
             if polling and hub:
                 linked = request.app[LINKED_KEY]
                 hw = request.headers.get(HW_HEADER)
@@ -158,17 +163,23 @@ def make_auth_mw(auth: Auth):
                 new = linked.seen(hub)
                 if prev is not None or hw is not None:
                     request["adopt"] = _adopt_renamed(request.app, hub, prev, hw)
-                linked.note_identity(hub, hw, None if raw_name is None else clean_name(unquote(raw_name)))
+                linked.note_identity(
+                    hub, hw, None if raw_name is None else clean_name(unquote(raw_name))
+                )
                 if new:
                     _auto_adopt(request.app)
                 raw_remotes = request.headers.get(REMOTES_HEADER)
-                if raw_remotes is not None and len(raw_remotes) <= 4000:  # the remotes' caps tier and theme notices
+                if (
+                    raw_remotes is not None and len(raw_remotes) <= 4000
+                ):  # the remotes' caps tier and theme notices
                     try:
                         linked.set_remotes(hub, json.loads(raw_remotes))
                     except ValueError:
                         pass
                 raw_limits = request.headers.get(LIMITS_HEADER)
-                if raw_limits is not None and len(raw_limits) <= 2000:  # the hub's own limits, as its integration knows them
+                if (
+                    raw_limits is not None and len(raw_limits) <= 2000
+                ):  # the hub's own limits, as its integration knows them
                     try:
                         linked.set_limits(hub, json.loads(raw_limits))
                     except ValueError:
@@ -203,7 +214,11 @@ def _adopt_renamed(app: web.Application, hub: str, prev: str | None, hw: str | N
     if prev and prev != hub and HUB_ID.fullmatch(prev) and prev != "default":
         sources.append(prev)
     if hw:
-        sources += [h for h in linked.ids() if h != hub and h != "default" and linked.hw(h) == hw and h not in sources]
+        sources += [
+            h
+            for h in linked.ids()
+            if h != hub and h != "default" and linked.hw(h) == hw and h not in sources
+        ]
     try:
         for src in sources:
             known = linked.hw(src)
@@ -212,7 +227,12 @@ def _adopt_renamed(app: web.Application, hub: str, prev: str | None, hw: str | N
             if src not in store.hubs():
                 continue
             if hub in store.hubs():
-                log.warning("hub %s was renamed to %s but %s already has a config: nothing moved", src, hub, hub)
+                log.warning(
+                    "hub %s was renamed to %s but %s already has a config: nothing moved",
+                    src,
+                    hub,
+                    hub,
+                )
                 return "exists"
             if not store.adopt(src, hub):
                 continue
@@ -227,7 +247,9 @@ def _adopt_renamed(app: web.Application, hub: str, prev: str | None, hw: str | N
         log.exception("could not move the config of a renamed hub to %s", hub)
         return "none"
     if prev and prev != hub and prev in linked.ids() and (not hw or linked.hw(prev) in (None, hw)):
-        linked.rename(prev, hub)  # no config under the old id: just stop listing it as a hub that is polled
+        linked.rename(
+            prev, hub
+        )  # no config under the old id: just stop listing it as a hub that is polled
     return "none"
 
 
@@ -386,7 +408,9 @@ async def validate(request: web.Request) -> web.Response:
 
 
 def _warnings(ws: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{"path": w["path"], "msg": w["msg"][:300], "line": None, "severity": "warning"} for w in ws]
+    return [
+        {"path": w["path"], "msg": w["msg"][:300], "line": None, "severity": "warning"} for w in ws
+    ]
 
 
 def _compile(config: dict[str, Any], limits: HubLimits = LEGACY):
@@ -433,11 +457,15 @@ def _compile_tolerant(
             if (json.dumps(path), msg) not in seen:
                 seen.add((json.dumps(path), msg))
                 problems.append((path, msg))
-        new = {
-            path[1]
-            for path, _ in trial
-            if path[:1] == ["pages"] and len(path) > 1 and isinstance(path[1], int)
-        } - blanked - set(compiled.page_of)  # pages that built keep their (over-budget) model
+        new = (
+            {
+                path[1]
+                for path, _ in trial
+                if path[:1] == ["pages"] and len(path) > 1 and isinstance(path[1], int)
+            }
+            - blanked
+            - set(compiled.page_of)
+        )  # pages that built keep their (over-budget) model
         new = {i for i in new if i < len(pages)}
         if not new:
             return compiled, blanked
@@ -482,7 +510,9 @@ def _preview(config: dict[str, Any], limits: HubLimits = LEGACY) -> dict[str, An
             "activities": [],
             "keys": {},
             "pages": [
-                m if m is not None else _blank(raw_pages[i] if isinstance(raw_pages[i], dict) else {}, i)
+                m
+                if m is not None
+                else _blank(raw_pages[i] if isinstance(raw_pages[i], dict) else {}, i)
                 for i, (m, _) in enumerate(shaped)
             ],
         }
@@ -492,7 +522,9 @@ def _preview(config: dict[str, Any], limits: HubLimits = LEGACY) -> dict[str, An
                 errors.append({"path": path, "msg": msg[:300], "line": None})
         model, total_ok = None, False
     by_cfg: dict[int, list[dict[str, Any]]] = {}
-    for m, cfg, u in zip(compiled.models, compiled.page_of, compiled.usage["page_detail"], strict=True):
+    for m, cfg, u in zip(
+        compiled.models, compiled.page_of, compiled.usage["page_detail"], strict=True
+    ):
         by_cfg.setdefault(cfg, []).append(_wire_entry(m, u))
     pages = []
     for i in range(len(raw_pages)):
@@ -501,7 +533,9 @@ def _preview(config: dict[str, Any], limits: HubLimits = LEGACY) -> dict[str, An
         err = _page_error(errors, i)
         ok = bool(wires) and err is None
         pid = raw.get("id") if isinstance(raw.get("id"), str) else None
-        sized = wires and i not in blanked and (model is not None or ok)  # an over-budget page still reports its size
+        sized = (
+            wires and i not in blanked and (model is not None or ok)
+        )  # an over-budget page still reports its size
         pages.append(
             {
                 "index": i,
@@ -517,7 +551,11 @@ def _preview(config: dict[str, Any], limits: HubLimits = LEGACY) -> dict[str, An
                 "widget_limit": MAX_WIDGETS,
             }
         )
-    usage = {k: v for k, v in compiled.usage.items() if k != "page_detail"} if model is not None else None
+    usage = (
+        {k: v for k, v in compiled.usage.items() if k != "page_detail"}
+        if model is not None
+        else None
+    )
     return {
         "ok": not errors,
         "hash": compiled.config_hash if total_ok else None,
@@ -536,12 +574,16 @@ async def preview(request: web.Request) -> web.Response:
     # editor metadata cannot change a preview: leave it out of the memo key
     limits = request.app[LINKED_KEY].limits(q["hub"])
     key = hashlib.sha256(
-        json.dumps([_public(config), limits.to_wire()], sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            [_public(config), limits.to_wire()], sort_keys=True, separators=(",", ":")
+        ).encode()
     ).hexdigest()
     memo: dict[str, dict[str, Any]] = request.app[MEMO_KEY]
     out = memo.pop(key, None)
     if out is None:
-        out = await asyncio.get_running_loop().run_in_executor(None, _preview, _public(config), limits)
+        out = await asyncio.get_running_loop().run_in_executor(
+            None, _preview, _public(config), limits
+        )
     memo[key] = out  # most recently used last
     while len(memo) > PREVIEW_MEMO_MAX:
         memo.pop(next(iter(memo)))
@@ -671,16 +713,17 @@ async def export_yaml(request: web.Request) -> web.Response:
 
 
 # ------------------------------------------------------------------ Home Assistant catalog (GET only)
-def _ha_unavailable() -> web.HTTPException:
-    return error(503, "ha_unavailable", "Home Assistant is not reachable from the add-on")
+def _ha_unavailable(reason: str | None = None) -> web.HTTPException:
+    extra = {"reason": reason} if reason else {}
+    return error(503, "ha_unavailable", "Home Assistant is not reachable from the add-on", **extra)
 
 
 async def ha_entities(request: web.Request) -> web.Response:
     q = query(request, schemas.HA_ENTITIES_QUERY)
     try:
         rows = await request.app[CATALOG_KEY].entities(q.get("domain"), q["q"])
-    except HaUnavailable:
-        raise _ha_unavailable() from None
+    except HaUnavailable as exc:
+        raise _ha_unavailable(exc.reason) from None
     return jresp({"entities": rows})
 
 
@@ -688,8 +731,8 @@ async def ha_services(request: web.Request) -> web.Response:
     q = query(request, schemas.HA_SERVICES_QUERY)
     try:
         rows = await request.app[CATALOG_KEY].services(q.get("domain"))
-    except HaUnavailable:
-        raise _ha_unavailable() from None
+    except HaUnavailable as exc:
+        raise _ha_unavailable(exc.reason) from None
     return jresp({"services": rows})
 
 
@@ -725,8 +768,8 @@ async def ir_test(request: web.Request) -> web.Response:
         raise error(
             502, "send_failed", "Home Assistant refused the test send", http_status=exc.status
         ) from None
-    except HaUnavailable:
-        raise _ha_unavailable() from None
+    except HaUnavailable as exc:
+        raise _ha_unavailable(exc.reason) from None
     _audit(request, "ir_test", body["hub"])
     return jresp({"ok": True, "action": action})
 
@@ -752,7 +795,12 @@ async def list_hubs(request: web.Request) -> web.Response:
     targets = [h for h in linked.ids() if h != "default" and h not in have]
     adopt = {"from": "default", "to": targets} if "default" in have and targets else None
     return jresp(
-        {"hubs": out, "linked": linked.entries(), "now": int(request.app[CLOCK_KEY]()), "adopt": adopt}
+        {
+            "hubs": out,
+            "linked": linked.entries(),
+            "now": int(request.app[CLOCK_KEY]()),
+            "adopt": adopt,
+        }
     )
 
 
