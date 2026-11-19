@@ -134,13 +134,13 @@ async def test_uploads_a_signed_image_in_bounded_chunks_and_reports_progress(has
     assert hub.begins == [{"target": 1, "size": len(img), "build": 12, "sha": hashlib.sha512(img).hexdigest()}]
     assert hub.ends == 1
     states = [s for s, _ in seen]
-    assert states[0] == "uploading" and "applying" in states and states[-1] == "restarting"
+    assert states[0] == "uploading" and "applying" in states and states[-1] == "installed"
     progress = [p for s, p in seen if s == "uploading"]
     assert progress == sorted(progress) and progress[-1] == 100
     st = hass.states.get("sensor.harmony_hub_firmware_update") or next(
         s for s in hass.states.async_all("sensor") if s.attributes.get("build") == 12
     )
-    assert st.state == "restarting" and st.attributes["progress"] == 100
+    assert st.state == "installed" and st.attributes["progress"] == 100
 
 
 @pytest.mark.parametrize(
@@ -217,7 +217,7 @@ async def test_dropped_connection_resumes_from_the_hub_offset(hass, rig, fw_dir)
     await install(hass, f)
     assert hub.dropped and bytes(hub.held) == img  # nothing re-sent, nothing missing
     assert len(hub.begins) == 2 and hub.ends == 1
-    assert c.ota_state == "restarting"
+    assert c.ota_state == "installed"
 
 
 async def test_rollback_report_becomes_a_repair_issue_and_a_good_update_clears_it(hass, rig, fw_dir):
@@ -259,7 +259,7 @@ async def test_a_lost_ota_end_reply_never_uploads_or_applies_twice(hass, rig, fw
     f.write_bytes(img)
     await install(hass, f)
     assert hub.ends == 1 and len(hub.begins) == 1  # exactly one begin and one end
-    assert c.ota_state == "restarting" and c.client.fw_build == 12
+    assert c.ota_state == "installed" and c.client.fw_build == 12
 
 
 async def test_never_confirmed_build_fails_the_update_without_resending(hass, rig, fw_dir, monkeypatch):

@@ -304,6 +304,7 @@ int main(int argc, char **argv) {
     }
     g_tbl.hub_id = hub_id ? hub_id : sim ? "sim-hub" : real_id;
     g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : "ha-harmony-hub";
+    fprintf(stderr, "hub: build %u\n", (unsigned)hp_build_id());
     if (ota_pubkey_is_dev()) fprintf(stderr, "hub: dev OTA key built in (never ship this build)\n");
     hp_ws_cb_t cb = {on_text, on_close};
     hp_ws_server_t *srv = hp_ws_listen((uint16_t)port, token, &cb, NULL);

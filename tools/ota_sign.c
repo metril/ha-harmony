@@ -159,10 +159,20 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (!strcmp(cmd, "sign")) {
-        if (!target || !have_build || pos_n != 2) return die("sign needs -t, -b, PAYLOAD and OUT");
+        if (!target || pos_n != 2) return die("sign needs -t, [-b], PAYLOAD and OUT");
         size_t len;
         uint8_t *payload = slurp(pos[0], &len);
         if (!payload && len == 0 && errno) return die("cannot read payload");
+        if (!have_build && payload && target == OTA_TARGET_HUB) { /* the id the hub binary was built with */
+            static const char tag[] = "HPBUILDID=";
+            for (size_t i = 0; i + sizeof tag < len && !have_build; i++) {
+                if (memcmp(payload + i, tag, sizeof tag - 1) != 0) continue;
+                char *end = NULL;
+                unsigned long v = strtoul((const char *)payload + i + sizeof tag - 1, &end, 10);
+                if (end && *end == ';' && v > 0) { build = v; have_build = 1; }
+            }
+        }
+        if (!have_build) return die("sign needs -b BUILD (a hub binary built here carries its own id)");
         uint8_t h[OTA_HDR_BYTES];
         if (!payload || ota_header_pack(h, target, (uint32_t)build, payload, len, sk) != OTA_OK)
             return die("payload too large or unreadable");

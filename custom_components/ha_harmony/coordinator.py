@@ -1183,7 +1183,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 self._set_ota("failed", error="the hub did not report the new build")
                 raise ha_error("ota_failed", error="the hub did not report the new build")
             self._clear_ota_issues()
-            self._set_ota("restarting", progress=100)
+            self._set_ota("installed", progress=100)
 
     async def _await_build(self, build: int, tries: int = 480) -> bool:
         """Wait (generously: apply + restart is a minute or two) for a connected hub reporting `build`;

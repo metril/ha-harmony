@@ -17,13 +17,14 @@ All commands run from the repo root. Device steps are `[WRITE]` (they replace `/
 
 ```
 cmake -S . -B build-hub -DHP_TARGET=hub -DHP_ALLOW_DEV_OTA_KEY=ON ...   # cross build; see the phase 4 plan for the toolchain env
-build/ota_sign sign --dev -t hub -b <BUILD> build-hub/hub hub-<BUILD>.img      # dev key (bench only)
-build/ota_sign sign -t hub -b <BUILD> build-hub/hub hub-<BUILD>.img            # release key (~/.config/ha-harmony/ota_ed25519)
+build/ota_sign sign --dev -t hub build-hub/hub hub-<BUILD>.img      # dev key (bench only); the build id is read from the binary
+build/ota_sign sign -t hub build-hub/hub hub-<BUILD>.img            # release key (~/.config/ha-harmony/ota_ed25519)
 build/ota_sign verify -t hub --dev hub-<BUILD>.img                             # sanity check before shipping
 ```
 
-`<BUILD>` must be at least the installed build (`/data/ha-harmony/ota-build`); the hub refuses a lower one (`ota_downgrade`).
-Build ids are monotonic: bump for every image, including a re-spin of a rolled-back one.
+The id is the binary's own build id (git commit count, floored by `cmake/build_id_floor.txt`; see `docs/proto/ota-image.md`) and must be newer
+than the installed one (`hub: build N` at startup, `fw_build` in hello_ack, `/data/ha-harmony/ota-build`); the hub refuses an equal or lower one
+(`ota_downgrade`). Rebuild from a newer commit for every image, including a re-spin of a rolled-back one.
 
 ## Install from Home Assistant
 

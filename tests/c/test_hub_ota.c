@@ -380,6 +380,29 @@ static void test_power_loss_between_link_and_rename(void) {
     free(x.img);
 }
 
+static void test_unwritable_marker_aborts_the_swap(void) {
+    fx_t x;
+    hp_ota_t o;
+    int a = 1;
+    char p[340];
+    fixture(&x, 6, OTA_TARGET_HUB, 3000);
+    setup(&o, &x);
+    snprintf(p, sizeof p, "%s/ota-pending.tmp", x.dir);
+    CT_EQ(mkdir(p, 0755), 0); /* the marker cannot be written: no rollback net, so no swap */
+    CT_EQ(hp_ota_begin(&o, &a, 1, (uint32_t)x.len, 6, x.sha), 0);
+    CT_EQ(send_all(&o, &a, &x, 0, 4096), 0);
+    CT_EQ(hp_ota_end(&o, &a, NULL), HP_OTA_E_IO);
+    size_t n;
+    char *got = slurp(x.hub, &n);
+    CT_CHECK(n == 10 && !memcmp(got, "OLD-BINARY", 10)); /* nothing changed */
+    free(got);
+    snprintf(p, sizeof p, "%s/ota-pending", x.dir);
+    CT_CHECK(!exists(p) && !o.restart);
+    snprintf(p, sizeof p, "%s/hub.new", x.dir);
+    CT_CHECK(!exists(p));
+    free(x.img);
+}
+
 static void test_dev_key_and_health_gate(void) {
     fx_t x;
     hp_ota_t o;
@@ -416,7 +439,10 @@ static void test_rollback_info(void) {
     free(x.img);
 }
 
+static uint32_t zero_build(void) { return 0; }
+
 int main(void) {
+    hp_build_id_hook = zero_build; /* the tests pick their own build ids */
     if (!mkdtemp(root)) return 1;
     uint8_t seed[32];
     for (int i = 0; i < 32; i++) seed[i] = (uint8_t)(i + 1);
@@ -428,6 +454,7 @@ int main(void) {
     test_rejected_images_leave_binary_alone();
     test_power_loss_mid_apply();
     test_power_loss_between_link_and_rename();
+    test_unwritable_marker_aborts_the_swap();
     test_dev_key_and_health_gate();
     test_rollback_info();
     char cmd[400];

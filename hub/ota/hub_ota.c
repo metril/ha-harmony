@@ -13,8 +13,14 @@
 #include "common/ota/ota_apply.h"
 
 #ifndef HP_BUILD_ID
-#define HP_BUILD_ID 0 /* -DHP_BUILD_ID=N at configure time: the build id of this binary */
+#define HP_BUILD_ID 0 /* set by CMake (git commit count, floored by cmake/build_id_floor.txt) */
 #endif
+#define HP_STR2(x) #x
+#define HP_STR(x) HP_STR2(x)
+/* tools/ota_sign reads the build id from here when -b is omitted, so image and binary cannot disagree */
+const char hp_build_tag[] = "HPBUILDID=" HP_STR(HP_BUILD_ID) ";";
+uint32_t (*hp_build_id_hook)(void); /* tests only: replaces the compiled-in id */
+uint32_t hp_build_id(void) { return hp_build_id_hook ? hp_build_id_hook() : (uint32_t)HP_BUILD_ID; }
 
 static uint64_t default_avail(const char *dir) {
     struct statvfs v;
@@ -28,16 +34,17 @@ static int join(char *out, size_t cap, const char *dir, const char *name) {
     return snprintf(out, cap, "%s/%s", dir, name) < (int)cap ? 0 : -1;
 }
 
-static void write_small(const char *path, const char *text) { /* tmp + rename, best effort */
+static int write_small(const char *path, const char *text) { /* tmp + fsync + rename; 0 on success */
     char tmp[310];
-    if (snprintf(tmp, sizeof tmp, "%s.tmp", path) >= (int)sizeof tmp) return;
+    if (snprintf(tmp, sizeof tmp, "%s.tmp", path) >= (int)sizeof tmp) return -1;
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) return;
+    if (fd < 0) return -1;
     size_t n = strlen(text);
     int ok = write(fd, text, n) == (ssize_t)n && fsync(fd) == 0;
     close(fd);
-    if (ok) rename(tmp, path);
-    else unlink(tmp);
+    if (ok && rename(tmp, path) == 0) return 0;
+    unlink(tmp);
+    return -1;
 }
 
 void hp_ota_init(hp_ota_t *o, const char *dir, const char *target) {
@@ -66,7 +73,7 @@ void hp_ota_init(hp_ota_t *o, const char *dir, const char *target) {
     if (snprintf(leftover, sizeof leftover, "%s.new", o->target) < (int)sizeof leftover) unlink(leftover);
     if (snprintf(leftover, sizeof leftover, "%s.lnk", o->prev) < (int)sizeof leftover) unlink(leftover);
     unlink(o->restart_file); /* a restart request belongs to the process that wrote it, never the next one */
-    o->min_build = (uint32_t)HP_BUILD_ID;
+    o->min_build = hp_build_id();
     FILE *f = fopen(o->build_file, "r");
     if (f) {
         unsigned long v;
@@ -169,15 +176,17 @@ typedef struct {
     uint32_t build;
 } arm_t;
 
-/* Between "hub.prev is the old binary" and the rename: the only moment the marker may exist. */
-static void arm_pending(void *v) {
+/* Between "hub.prev is the old binary" and the rename: the only moment the marker may exist. Both files must
+ * be durable or the rename does not happen (no swap without a way back). */
+static int arm_pending(void *v) {
     arm_t *a = v;
     char note[64];
     snprintf(note, sizeof note, "build=%" PRIu32 "\nprev=%" PRIu32 "\n", a->build, a->o->min_build);
-    write_small(a->o->pending, note);
+    if (write_small(a->o->pending, note) != 0) return -1;
     snprintf(note, sizeof note, "%" PRIu32 "\n", a->build);
-    write_small(a->o->build_file, note); /* the hook puts "prev=" back if this build does not prove itself */
+    if (write_small(a->o->build_file, note) != 0) return -1; /* the hook puts "prev=" back if this build fails */
     if (a->o->swap_hook) a->o->swap_hook();
+    return 0;
 }
 
 int hp_ota_end(hp_ota_t *o, const void *owner, uint32_t *build_out) {

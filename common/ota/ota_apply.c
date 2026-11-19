@@ -49,7 +49,7 @@ static int copy_payload(FILE *in, const char *dst, const ota_hdr_t *hdr, mode_t 
 }
 
 int ota_apply_staged_cb(const char *staged, const char *target, const char *prev_path, uint32_t min_build,
-                        const uint8_t pubkey[32], uint32_t *build_out, void (*before_swap)(void *), void *ctx) {
+                        const uint8_t pubkey[32], uint32_t *build_out, int (*before_swap)(void *), void *ctx) {
     FILE *in = fopen(staged, "rb");
     if (!in) return OTA_E_IO;
     ota_hdr_t hdr;
@@ -77,7 +77,10 @@ int ota_apply_staged_cb(const char *staged, const char *target, const char *prev
         unlink(neu);
         return OTA_E_IO;
     }
-    if (before_swap) before_swap(ctx);
+    if (before_swap && before_swap(ctx) != 0) {
+        unlink(neu);
+        return OTA_E_IO;
+    }
     if (rename(neu, target) != 0) {
         unlink(neu);
         return OTA_E_IO;

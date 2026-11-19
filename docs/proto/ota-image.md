@@ -101,7 +101,16 @@ removes it. The integration turns that into a repair issue.
 The compiled-in dev key's seed is public. A build carrying it accepts updates only when started with `--ota-allow-dev` (hook conf
 `ota_allow_dev=1`, default 0); otherwise `ota_begin` is `ota_dev_key`. `hello_ack` carries `fw_build` and `ota_key` (`dev` or
 `release`) whenever updates are enabled. The integration shows both on the Firmware update sensor, raises a repair issue for a dev-key hub and
-refuses `install_firmware` on it unless the call sets `allow_dev_key: true`. Set the running build id with `-DHP_BUILD_ID=N`.
+refuses `install_firmware` on it unless the call sets `allow_dev_key: true`. 
+## Build id
+
+The hub's own build id is derived at every CMake configure (never cached): `max(cmake/build_id_floor.txt, git rev-list --count HEAD)`,
+or `-DHP_BUILD_ID_OVERRIDE=N` (outside a git checkout it falls back to the floor with a warning). It is compiled in
+(`hp_build_id()`, the `HPBUILDID=N;` string), printed at startup (`hub: build N`), reported as `hello_ack.fw_build` and is the OTA
+downgrade floor on a hub that never had an update. `ota_sign sign -t hub PAYLOAD OUT` reads the id from the binary, so the image
+and the binary cannot disagree (`-b` overrides). **A history rewrite changes commit counts** (this repo's count has changed once
+already), so an id must never go below the highest released value: raise `cmake/build_id_floor.txt` to the released id when
+cutting a release. No CI change is needed: CI builds with the same derivation.
 
 ## Home Assistant
 

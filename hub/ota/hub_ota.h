@@ -69,6 +69,9 @@ typedef struct {
 
 /* dir NULL: updates disabled (every call returns HP_OTA_E_DISABLED). target NULL: dir/hub. Removes
  * leftovers of an interrupted run (staging file, <target>.new). */
+uint32_t hp_build_id(void); /* the build id compiled into this binary */
+extern const char hp_build_tag[];
+extern uint32_t (*hp_build_id_hook)(void); /* tests only */
 void hp_ota_init(hp_ota_t *o, const char *dir, const char *target);
 int hp_ota_begin(hp_ota_t *o, const void *owner, unsigned target, uint32_t size, uint32_t build, const char *sha_hex);
 int hp_ota_chunk(hp_ota_t *o, const void *owner, uint32_t offset, const uint8_t *data, size_t n);
