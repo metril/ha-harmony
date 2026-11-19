@@ -1,4 +1,5 @@
 import '../src/components/hh-colour-field'; // lazy in the app; loaded up front here (happy-dom cannot upgrade late)
+import '../src/components/hh-ha-browser';
 import { beforeEach, describe, expect, it } from 'vitest';
 import '../src/components/hh-app';
 import keymap from './fixtures/keymap.json';
@@ -19,7 +20,7 @@ async function boot(ha: 'ok' | 'down' = 'ok', caps: { ha_actions?: boolean } = {
     'POST api/v1/config/keymap': () => ({ body: keymap }),
     'GET api/v1/hubs': () => ({ body: { hubs: [{ id: 'h', has_draft: true, has_applied: true, applied_rev: 'a', applied_at: 1 }] } }),
     'GET api/v1/health': () => ({ body: { ok: true, addon_version: '1', capabilities: caps } }),
-    'GET api/v1/ha/entities': () => (ha === 'ok' ? { body: { entities: [{ entity_id: 'light.lamp', name: 'Lamp', domain: 'light', state: 'on' }, { entity_id: 'scene.movie', name: 'Movie', domain: 'scene' }] } } : { status: 503, body: { error: { code: 'ha_unavailable', msg: 'x' } } }),
+    'GET api/v1/ha/entities': () => (ha === 'ok' ? { body: { entities: [{ entity_id: 'light.lamp', name: 'Lamp', domain: 'light', state: 'on' }, { entity_id: 'scene.movie', name: 'Movie', domain: 'scene' }] } } : { status: 503, body: { error: { code: 'ha_unavailable', msg: 'x', reason: 'status_503' } } }),
     'GET api/v1/ha/services': () => ({ body: { services: [{ domain: 'light', service: 'toggle', name: 'Toggle', fields: [] }, { domain: 'light', service: 'turn_on', name: 'Turn on', fields: ['brightness_pct'] }] } }),
   });
   const store = new Store(f.api, 'h', 600);
@@ -115,19 +116,28 @@ describe('remote studio', () => {
     expect(remote.shadowRoot.querySelectorAll('text.xl').length).toBeGreaterThan(0);
   });
 
-  it('Home tab lists Home Assistant entities by domain; a 503 falls back to typing an entity id', async () => {
+  it('Home Assistant tab lists entities, collapsed by type; a 503 says why and falls back to typing an entity id', async () => {
     const a = await boot('ok');
     a.palette.shadowRoot.querySelectorAll<HTMLElement>('[role="tab"]')[2]!.click();
     await tick(a.palette);
     await tick(a.palette);
-    expect(a.palette.shadowRoot.textContent).toContain('Lamp');
-    expect(a.palette.shadowRoot.textContent).toContain('Light');
+    const br = a.palette.shadowRoot.querySelector('hh-ha-browser') as El;
+    await br.updateComplete;
+    expect(a.palette.shadowRoot.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toBe('Home Assistant');
+    expect(br.shadowRoot.textContent).toContain('Lights'); // groups start collapsed: no rows yet
+    expect(br.shadowRoot.querySelectorAll('.ent').length).toBe(0);
+    br.shadowRoot.querySelector<HTMLElement>('.gh')!.click();
+    await br.updateComplete;
+    expect(br.shadowRoot.textContent).toContain('Lamp');
     document.body.replaceChildren();
     const b = await boot('down');
     b.palette.shadowRoot.querySelectorAll<HTMLElement>('[role="tab"]')[2]!.click();
     await tick(b.palette);
     await tick(b.palette);
-    expect(b.palette.shadowRoot.textContent).toContain('cannot be read');
+    const bb = b.palette.shadowRoot.querySelector('hh-ha-browser') as El;
+    await bb.updateComplete;
+    expect(bb.shadowRoot.textContent).toContain('cannot be read');
+    expect(bb.shadowRoot.textContent).toContain('Retry');
     expect(b.palette.shadowRoot.querySelector('input[aria-label="Entity id"]')).toBeTruthy();
   });
 
@@ -192,7 +202,7 @@ describe('remote studio', () => {
     expect([...svc.options].map((o) => o.value)).toEqual(expect.arrayContaining(['light.toggle', 'light.turn_on']));
     svc.value = 'light.turn_on';
     svc.dispatchEvent(new Event('change'));
-    const ent = root.querySelector('input[list="hh-ents"]') as HTMLInputElement;
+    const ent = root.querySelector('input[placeholder="Search entities"]') as HTMLInputElement;
     ent.value = 'light.lamp';
     ent.dispatchEvent(new Event('input'));
     await tick(picker);

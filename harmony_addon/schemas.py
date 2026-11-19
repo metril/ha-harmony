@@ -96,7 +96,13 @@ REVERT = vol.Schema(
 
 _Q = vol.All(str, vol.Length(max=64))
 HA_ENTITIES_QUERY = vol.Schema(
-    {vol.Optional("domain"): vol.In(sorted(ENTITY_DOMAINS)), vol.Optional("q", default=""): _Q},
+    {
+        vol.Optional("domain"): vol.In(sorted(ENTITY_DOMAINS)),
+        vol.Optional("q", default=""): _Q,
+        vol.Optional("area"): _Q,
+        vol.Optional("diagnostic", default="0"): vol.In(["0", "1"]),
+        vol.Optional("state", default="0"): vol.In(["0", "1"]),
+    },
     extra=vol.PREVENT_EXTRA,
 )
 HA_SERVICES_QUERY = vol.Schema(

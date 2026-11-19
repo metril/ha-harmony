@@ -201,11 +201,11 @@ async def test_interaction_timings_on_the_large_config(browser, large):
         times.append(min(tries))
     print("drop -> re-rendered key (CPU ms):", [round(t, 1) for t in times])
     assert max(times) < 100, times
-    # search the palette: 300 entities
-    await page.get_by_role("tab", name="Home", exact=True).click()
-    await page.locator("hh-palette .ent").first.wait_for()
-    rows = await page.locator("hh-palette .ent").count()
-    assert rows >= 250
+    # the Home Assistant tab: 300 entities, only the open groups draw rows
+    await page.get_by_role("tab", name="Home Assistant", exact=True).click()
+    summary = page.locator("hh-palette [role=status][aria-live]")
+    await summary.get_by_text("300 entities").wait_for()
+    assert await page.locator("hh-palette .ent").count() == 0  # collapsed by default
 
 
 async def test_five_late_failures_are_prevented_or_shown_before_apply(browser, large):
@@ -464,9 +464,9 @@ STUDIO_EL = "document.querySelector('hh-app').shadowRoot.querySelector('hh-studi
 @pytest.mark.parametrize("size", [(1440, 900), (1280, 720), (420, 800)])
 async def test_palette_chips_form_an_aligned_grid(browser, large, size):
     page = await open_large(browser, large, *size)
-    for tab in ("Devices", "Activities", "Home", "Widgets"):
+    for tab in ("Devices", "Activities", "Home Assistant", "Widgets"):
         await page.evaluate(
-            f"() => [...{PALETTE}.querySelectorAll('[role=tab]')].find(b => b.textContent.trim() == '{tab}').click()"
+            f"() => [...{PALETTE}.querySelectorAll('[role=tab]')].find(b => b.getAttribute('aria-label') == '{tab}').click()"
         )
         await page.wait_for_timeout(250)
         bad = await page.evaluate(

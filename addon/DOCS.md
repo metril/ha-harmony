@@ -72,10 +72,33 @@ Needs hub firmware with Bluetooth and the Harmony integration connected. Open **
 ## The studio in five lines
 
 1. The remote canvas shows the remote; click a key or a page widget to select it.
-2. The palette lists devices, activities, IR commands and Home Assistant actions.
+2. The palette lists devices, activities, widgets and your Home Assistant entities (the **Home
+   Assistant** tab, see below).
 3. Assign by dragging from the palette onto a key or widget, or by clicking and choosing.
 4. Pages hold the touch layout (buttons, tiles); add, reorder and preview them with the size meters.
 5. **Apply** shows what changed, then publishes it; the integration pushes it to the hub.
+
+### Finding a Home Assistant entity
+
+The **Home Assistant** tab of the palette is made for installs with thousands of entities. Groups are
+collapsed until you open them: group by **Area** (under its floor, when you use floors), **Type**,
+**Device**, **Integration** or **Label** (options without data are hidden). Type the name, entity id,
+area, device, integration or label in the search box (press `/` to jump to it; several words must all
+match); matching groups open by themselves and clearing the search brings your collapsed groups back.
+The Type, Area, Label and Integration lists (with counts) narrow the list together; "n filters"
+and removable pills show what is on and **Clear** resets it. Disabled and hidden entities, and
+diagnostic and config ones unless you tick **Show diagnostic and config entities** in the **⋯**
+menu, are not listed. The same menu has **Refresh the list**; the tab also refreshes when you
+open it or come back to the window after a minute. Star an entity to keep it under **Favourites**; **Used in this config**
+lists what the draft already calls, with the services, and **Recently used** the last eight you
+picked up (the stars and recents stay in this browser). Drag a row onto a key or the screen, or
+select it and then choose the target, as with any other chip. The action picker's "Home Assistant
+action" and the add-device wizard's "Home Assistant entity" step open the same list. Use the arrow
+keys to move through headers and rows, Right and Left to open and close a group.
+
+The "Use an entity id" row at the bottom takes an id you type, for an entity the list does not show.
+If the registries (areas, devices, labels) cannot be read the tab says so and groups by type only; if
+Home Assistant itself cannot be read it says why and offers **Retry**.
 
 ## What it can and cannot reach
 
@@ -103,7 +126,10 @@ Needs hub firmware with Bluetooth and the Harmony integration connected. Open **
 - Home Assistant Core API (`homeassistant_api: true`, through the Supervisor proxy with the
   add-on's own token): the add-on **reads** your entity list (`GET /states`) and service list
   (`GET /services`) so the editor can offer pickers, filtered to the domains a Harmony action can
-  target and cached for a few seconds. Its HTTP client can only issue GET requests. It calls
+  target and cached for a few seconds. Its HTTP client can only issue GET requests. To group entities
+  by area, device, integration and label it also reads the area, device, entity and floor registries
+  over the Supervisor's WebSocket proxy; that client is limited in code to those four `*/list`
+  commands and can change nothing. It calls
   **exactly one service**: `ha_harmony.send_ir`, when you press "test" on an IR code in the editor
   (rate limited to one send per half second and 30 per minute). It calls nothing else, reads no
   configuration files, and never writes to Home Assistant. Without a Supervisor token (plain

@@ -53,3 +53,14 @@ export const shared = css`
   .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   @media (max-width: 720px) { .btn { min-height: 44px; } .btn.sm { min-height: 44px; } .btn.icon { min-width: 44px; } }
 `;
+
+/** The chip look of the palette (Devices tab commands, Home Assistant entity rows). */
+export const chipStyles = css`
+  .chip2 { display: flex; align-items: center; gap: 6px; box-sizing: border-box; height: 30px; min-width: 0; width: 100%; padding: 0 10px; border-radius: 15px; text-align: left; border: 1px solid var(--line); background: var(--sf2); color: var(--tx); font-size: 12.5px; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .chip2:hover { background: var(--sf3); }
+  .chip2 > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip2.used { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+  .chip2[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
+  .chip2 .sic { width: 15px; height: 15px; flex: none; }
+  @media (max-width: 720px) { .chip2 { height: 36px; } }
+`;

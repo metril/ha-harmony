@@ -580,8 +580,9 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
     await page.locator("hh-remote text.xl", has_text="Kitchen · toggle").wait_for()
     await page.get_by_role("button", name="X-ray").click()
 
-    # drag a light from the palette's Home tab onto the screen: a tile with the automatic tap
-    await page.get_by_role("tab", name="Home", exact=True).click()
+    # drag a light from the palette's Home Assistant tab onto the screen: a tile with the automatic tap
+    await page.get_by_role("tab", name="Home Assistant", exact=True).click()
+    await page.locator("hh-palette").get_by_placeholder("Search entities, areas").fill("light.kitchen")
     ent = page.locator("hh-palette .ent", has_text="light.kitchen").first
     await ent.wait_for()
     eb = await ent.bounding_box()

@@ -11,6 +11,7 @@ from aiohttp import web
 from .app import create_app
 from .auth import load_or_create_token
 from .ha_client import default_ha_api
+from .ha_ws import default_ha_registry
 from .ir_tester import default_ir_sender
 from .options import load_options
 from .supervisor import Discovery, default_supervisor
@@ -35,6 +36,7 @@ def main() -> None:
             bundle_token=token,
             discovery=Discovery(default_supervisor(), a.port, token),
             ha_api=default_ha_api(),
+            ha_registry=default_ha_registry(),
             ir_sender=default_ir_sender(),
             static_dir=a.static_dir,
         ),

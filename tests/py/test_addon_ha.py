@@ -47,7 +47,7 @@ def make(aiohttp_client, tmp_path, api, clock=None):
 
 async def test_entities_filter_sort_and_allow_list(aiohttp_client, tmp_path):
     c = await make(aiohttp_client, tmp_path, FakeApi())
-    rows = (await (await c.get("/api/v1/ha/entities")).json())["entities"]
+    rows = (await (await c.get("/api/v1/ha/entities?state=1")).json())["entities"]
     assert [r["entity_id"] for r in rows] == [
         "light.attic",
         "light.kitchen",
@@ -66,12 +66,13 @@ async def test_entities_filter_sort_and_allow_list(aiohttp_client, tmp_path):
     assert [r["entity_id"] for r in rows] == ["light.attic"]
 
 
-async def test_entities_cap(aiohttp_client, tmp_path, monkeypatch):
+async def test_entities_cap_truncates_after_sorting(aiohttp_client, tmp_path, monkeypatch):
     monkeypatch.setattr(ha_client, "MAX_ENTITIES", 3)
-    many = [{"entity_id": f"light.l{i:03}", "state": "on"} for i in range(50)]
+    many = [{"entity_id": f"light.l{i:03}", "state": "on"} for i in range(49, -1, -1)]  # reversed
     c = await make(aiohttp_client, tmp_path, FakeApi(many))
-    rows = (await (await c.get("/api/v1/ha/entities")).json())["entities"]
-    assert len(rows) == 3
+    body = await (await c.get("/api/v1/ha/entities")).json()
+    assert [r["entity_id"] for r in body["entities"]] == ["light.l000", "light.l001", "light.l002"]
+    assert body["truncated"] is True and body["total"] == 50
 
 
 async def test_services_only_allow_listed_domains(aiohttp_client, tmp_path):
