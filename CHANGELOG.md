@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.11 (2026-11-19)
+
 - The integration never marks a custom-theme set as pushed until the remote reports it complete: after the one ack-timeout re-send it stays pending and re-pushes with a bounded exponential backoff (15 s doubling to 5 min, cancelled on unload, per remote), and it re-pushes when the remote reports an empty or partial store while we thought it held the set (a reboot the hub never saw, a theme the hub gave up on). A hub that refuses a theme or page for a transient reason is retried the same way instead of sending the pages without their theme.
 - Hub: a full link queue holds a `theme_push` or `page_push` instead of failing it; tile messages wait behind the theme and their page (page first, latest value per tile), also for pages held for a failed delivery; a queued object that finds nobody home is reported to its owner and a new link starts with nothing counted in flight.
 - The add-on's editor shows what a linked remote cannot display: the integration sends the remotes' colour tier and current notices with its polls (`X-Hub-Remotes`) and `config/status` returns `remotes` and `theme_notices`.
