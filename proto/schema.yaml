@@ -22,6 +22,8 @@ messages:
       - {name: fw_version, type: str, optional: true}
       - {name: activities, type: json, optional: true}
       - {name: config_hash, type: str, optional: true}
+      - {name: fw_build, type: u32, optional: true}   # installed firmware build id (OTA floor)
+      - {name: ota_key, type: str, optional: true}    # "dev" (public test key built in) | "release"; absent = no OTA
 
   - name: error
     code: 3
@@ -153,6 +155,75 @@ messages:
       - {name: tile, type: u8}
       - {name: state, type: u8}
       - {name: text, type: str}
+
+  # --- signed firmware update (docs/proto/ota-image.md) -------------------------------------------
+  # Hub image upload over ws: begin -> chunk* -> end. One upload at a time; offsets are bytes of the
+  # whole HOTA image (header included). `sha` is the lowercase hex SHA-512 of the whole image. A
+  # begin that matches a suspended upload (its connection dropped) resumes it: the reply's offset
+  # says where to continue. Every reply is an ota_status (same id) or an `error` whose code starts
+  # with "ota_". chunk data is at most 4096 bytes decoded.
+  - name: ota_begin
+    code: 20
+    transport: ws
+    fields:
+      - {name: target, type: u8}   # 1 hub (2 remote is reserved for the RF transport)
+      - {name: size, type: u32}
+      - {name: build, type: u32}
+      - {name: sha, type: str}
+
+  - name: ota_chunk
+    code: 21
+    transport: ws
+    fields:
+      - {name: offset, type: u32}
+      - {name: data, type: bytes}
+
+  - {name: ota_end, code: 22, transport: ws, fields: []}
+  - {name: ota_abort, code: 23, transport: ws, fields: []}
+
+  # state: idle | receiving | applied (hub restarts next) | failed | aborted | rolled_back.
+  # rolled_back is also pushed after every hello when the boot hook restored the previous build;
+  # `reason` is the hook's text, `build` the build that was rolled back.
+  - name: ota_status
+    code: 24
+    transport: ws
+    fields:
+      - {name: state, type: str}
+      - {name: offset, type: u32}
+      - {name: size, type: u32}
+      - {name: build, type: u32, optional: true}
+      - {name: reason, type: str, optional: true}
+
+  # 25..29 spare. 30..34 are RESERVED for the remote's RF transport (not implemented): the hub
+  # relays a verified remote image as fragments and the remote answers per window.
+  - name: ota_offer
+    code: 30
+    transport: rf
+    fields:
+      - {name: size, type: u32}
+      - {name: build, type: u32}
+
+  - name: ota_frag
+    code: 31
+    transport: rf
+    fields:
+      - {name: offset, type: u32}
+      - {name: data, type: bytes}
+
+  - name: ota_frag_ack
+    code: 32
+    transport: rf
+    fields:
+      - {name: offset, type: u32}
+
+  - {name: ota_commit, code: 33, transport: rf, fields: []}
+
+  - name: ota_result
+    code: 34
+    transport: rf
+    fields:
+      - {name: code, type: u8}
+      - {name: build, type: u32}
 
 # The 35 physical keys of the Harmony Elite remote (docs/hardware/remote-elite.md, "Input").
 # `id` is the logical key code carried in key_event.key (u8): stable, unique, < 128 (128+ are page

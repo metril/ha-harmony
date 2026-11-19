@@ -35,9 +35,10 @@ BOOTCOUNT = f"{APP_DIR}/bootcount"
 DISABLE = f"{APP_DIR}/DISABLE"
 DEFAULT_APP = "harmony_remote"
 MAX_BOOTS = 3
-# Bench-proven RF settings (bench session 1): without them the app defaults to slot 0 /
-# powermode 0x00 and would boot "healthy" with the radio dead.
-DEFAULT_SLOT = 1
+# Bench-proven RF settings (bench session 1): without them the app would boot "healthy" with the
+# radio dead. The app can learn the slot from the radio (omit --slot); that is opt-in via
+# --learn-slot until the bench gate in docs/runbooks/phase4-persistence.md passes.
+DEFAULT_SLOT: int | None = 1
 DEFAULT_POWERMODE = "0x30"
 SELFTEST_SRC = Path(__file__).resolve().parent / "boot" / "remote_selftest.sh"
 SELFTEST_DIR = "/var/volatile/hah-selftest"  # tmpfs; the ONLY place selftest writes
@@ -142,11 +143,11 @@ exit 0
 def start_script(
     app: str = DEFAULT_APP,
     max_boots: int = MAX_BOOTS,
-    slot: int = DEFAULT_SLOT,
+    slot: int | None = DEFAULT_SLOT,
     powermode: str = DEFAULT_POWERMODE,
 ) -> str:
     """start.sh: boot counter + crash-loop breaker. Paths are overridable for tests."""
-    argv = f"--slot {parse_slot(str(slot))} --powermode {parse_powermode(powermode)}"
+    argv = start_argv(slot, powermode)
     out = START_TEMPLATE
     for k, v in (
         ("@MAX@", str(max_boots)),
@@ -160,8 +161,9 @@ def start_script(
     return out
 
 
-def start_argv(slot: int = DEFAULT_SLOT, powermode: str = DEFAULT_POWERMODE) -> str:
-    return f"--slot {slot} --powermode {powermode}"
+def start_argv(slot: int | None = DEFAULT_SLOT, powermode: str = DEFAULT_POWERMODE) -> str:
+    pm = f"--powermode {parse_powermode(powermode)}"
+    return pm if slot is None else f"--slot {parse_slot(str(slot))} {pm}"
 
 
 def rcs_shape_problem(text: str, hooked: bool) -> str | None:
@@ -378,7 +380,7 @@ class RemoteDeployer:
             hook = "installed" if HOOK_MARKER in _dec(rcs) else "not installed"
         p(f"boot hook: {hook}")
         sh = self.read(START_SH)
-        m = re.search(r"--slot [0-9]+ --powermode 0x[0-9a-f]{2}", _dec(sh)) if sh else None
+        m = re.search(r"(?:--slot [0-9]+ )?--powermode 0x[0-9a-f]{2}", _dec(sh)) if sh else None
         p(f"start.sh app argv: {m[0] if m else 'unknown (start.sh absent or unrecognised)'}")
         p(f"DISABLE: {'PRESENT (hook will not launch)' if self.exists(DISABLE) else 'absent'}")
         count = self.read(BOOTCOUNT)
@@ -416,7 +418,7 @@ class RemoteDeployer:
     def install_hook(
         self,
         app: str = DEFAULT_APP,
-        slot: int = DEFAULT_SLOT,
+        slot: int | None = DEFAULT_SLOT,
         powermode: str = DEFAULT_POWERMODE,
         refresh_backup: bool = False,
     ) -> int:
@@ -465,7 +467,7 @@ class RemoteDeployer:
         return 0
 
     # -- selftest [WRITE /var/volatile only] --------------------------------------------
-    def selftest(self, slot: int = DEFAULT_SLOT, powermode: str = DEFAULT_POWERMODE) -> int:
+    def selftest(self, slot: int | None = DEFAULT_SLOT, powermode: str = DEFAULT_POWERMODE) -> int:
         """Run start.sh + the hook line against a stub app under the device's own sh. Writes only
         under /var/volatile/hah-selftest, which is always removed afterwards."""
         script = start_script(slot=slot, powermode=powermode)
@@ -598,12 +600,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--slot", type=parse_slot, default=DEFAULT_SLOT, help="RF slot 1..15 (default %(default)s)"
     )
+    p.add_argument("--learn-slot", action="store_true",
+                   help="pass no slot: the app learns it from the radio (opt-in, needs the bench gate)")  # fmt: skip
     p.add_argument("--powermode", type=parse_powermode, default=DEFAULT_POWERMODE,
                    help="RF powermode 0xNN (default %(default)s)")  # fmt: skip
     p.add_argument("--refresh-backup", action="store_true",
                    help="replace a stale rcS.local.orig with the current rcS.local")  # fmt: skip
     p = add("selftest", "[WRITE /var/volatile only] run start.sh + hook line against a stub app")
     p.add_argument("--slot", type=parse_slot, default=DEFAULT_SLOT)
+    p.add_argument("--learn-slot", action="store_true")
     p.add_argument("--powermode", type=parse_powermode, default=DEFAULT_POWERMODE)
     add("mark-good", "[WRITE] reset the boot counter to 0")
     p = add("uninstall", "[WRITE] restore rcS.local from the backup (md5-verified)")
@@ -647,9 +652,9 @@ def main(
                 args = a.app_args[1:] if a.app_args[:1] == ["--"] else a.app_args
                 return d.run_app(a.app, args)
             case "install-hook":
-                return d.install_hook(a.app, a.slot, a.powermode, a.refresh_backup)
+                return d.install_hook(a.app, None if a.learn_slot else a.slot, a.powermode, a.refresh_backup)
             case "selftest":
-                return d.selftest(a.slot, a.powermode)
+                return d.selftest(None if a.learn_slot else a.slot, a.powermode)
             case "mark-good":
                 return d.mark_good()
             case "uninstall":

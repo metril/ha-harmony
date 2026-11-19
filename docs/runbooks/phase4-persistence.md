@@ -98,3 +98,16 @@ Run it before the first real arm. (BusyBox 1.13 `ls -ln` has extra columns, so t
 4. Reboot, then `kill -STOP` the daemon: within ~65 s the log shows `heartbeat stale`, it is killed and respawned.
 5. `respawn_max=0` + reboot + kill after 150 s: stays dead (old behaviour).
 6. Confirm `ps` shows no token on argv and the daemon log lines carry `[up Ns]`.
+
+## Bench gate: learned slots (opt-in until this passes)
+
+Learning is opt-in: `install_boot_hook.py install --yes --learn-slot ...` (hub) and `deploy_remote.py install-hook --yes --learn-slot` (Elite). Existing installs keep passing `--rf-slot` / `--slot`.
+
+1. Install both with `--learn-slot`; confirm neither daemon argv carries a slot flag.
+2. Reboot both. Logs: `slot N learned from link report` (or `from data frame`), then `link up (slot ...)`; `rf_slot` exists next to the hub state file and in `/data/app` on the Elite.
+3. Press a key on the Elite: it reaches the hub (HA sees the key event). Push a page from the add-on: it renders on the Elite.
+4. Daemon respawn on a live link: `kill` the hub daemon (log `respawn 1 of 3`). No link-up report arrives; the saved slot is used at once and keys/pages still flow (`slot` unchanged in the log, no `send dropped, slot not learned yet`).
+5. App restart on a live link: kill `harmony_remote` (start.sh relaunches it): the Elite resumes sending at once and the hub sees its keys.
+6. Delete both `rf_slot` files and repeat 4 and 5: the slot is learned from the first data frame instead.
+7. Power-cycle the Elite: the slot is re-learned, nothing was sent while unknown.
+Only after all pass should the defaults change.

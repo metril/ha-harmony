@@ -689,5 +689,5 @@ def test_translations_icons_and_parallel_updates_are_complete():
             assert "PARALLEL_UPDATES = 0" in text, py.name
     for key in re.findall(r'(?:ha_error|invalid)\(\s*"(\w+)"', "".join(p.read_text() for p in pkg.glob("*.py"))):
         assert key in strings["exceptions"], key
-    for svc in ("reload_config", "push_pages", "send_ir", "set_device_state"):
+    for svc in ("reload_config", "push_pages", "send_ir", "set_device_state", "install_firmware"):
         assert svc in icons["services"] and svc in strings["services"]

@@ -230,6 +230,7 @@ class HookInstaller:
         hub_id: str | None,
         *,
         rf_slot: int | None = None,
+        learn_slot: bool = False,
         expect_md5: str | None = None,
         stop_lua: bool = True,
         reboot_on_early_death: bool = True,
@@ -242,6 +243,8 @@ class HookInstaller:
             raise InstallError("port must be 1..65535")
         if expect_md5 is None or not re.fullmatch(r"[0-9a-f]{32}", expect_md5):
             raise InstallError("--expect-md5 <md5 of the local hub build> is required")
+        if rf_slot is not None and learn_slot:
+            raise InstallError("--rf-slot and --learn-slot are mutually exclusive")
         if rf_slot is not None and not 1 <= rf_slot <= 15:
             raise InstallError("--rf-slot must be 1..15 (the remote's HID++ device index)")
         if not self.hook_src.is_file():
@@ -296,6 +299,8 @@ class HookInstaller:
         conf = f"token={token}\nport={port}\n" + (f"hub_id={hub_id}\n" if hub_id else "")
         if rf_slot is not None:
             conf += f"rf=spi\nrf_slot={rf_slot}\n"
+        elif learn_slot:  # opt-in: no slot, the daemon learns it from the radio
+            conf += "rf=spi\n"
         if not stop_lua:
             conf += "stop_lua=0\n"
         if not reboot_on_early_death:
@@ -394,6 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--yes", action="store_true")
     p.add_argument("--token-file", type=Path, help="file holding the WS token (or set HAH_TOKEN)")
     p.add_argument("--rf-slot", type=int, default=None, help="enable the real radio, remote at HID++ slot N")
+    p.add_argument("--learn-slot", action="store_true", help="enable the real radio with no slot: learned from the radio (opt-in, needs the bench gate)")
     p.add_argument("--expect-md5", required=True, help="md5 of the local hub build; arm only if the device matches")
     p.add_argument("--no-reboot-on-early-death", action="store_true",
                    help="do not reboot when the daemon dies inside the 120 s health window")
@@ -442,6 +448,7 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
                     a.hub_port,
                     a.hub_id,
                     rf_slot=a.rf_slot,
+                    learn_slot=a.learn_slot,
                     expect_md5=a.expect_md5,
                     stop_lua=not a.keep_lua,
                     reboot_on_early_death=not a.no_reboot_on_early_death,

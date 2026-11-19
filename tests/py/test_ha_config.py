@@ -55,6 +55,7 @@ BASE_UIDS = {
     for k in [
         "remote",
         "addon_link",
+        "firmware",
         "activity",
         "key_1",
         "battery_1",
@@ -640,7 +641,7 @@ async def test_nothing_applied_loads_with_hub_config_untouched(hass, hub_rf, wri
     assert hass.states.get(SELECT).attributes["options"] == ["TV", "Music", "Off"]
     assert uids(hass, entry) == {
         f"{HUB_ID}_{k}"
-        for k in ["remote", "activity", "key_1", "battery_1", "voltage_1", "pagefmt_1", "addon_link"]
+        for k in ["remote", "activity", "key_1", "battery_1", "voltage_1", "pagefmt_1", "addon_link", "firmware"]
     }
     await hass.config_entries.async_unload(entry.entry_id)
 

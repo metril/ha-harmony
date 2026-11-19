@@ -22,8 +22,11 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (ota_pubkey_is_dev()) fprintf(stderr, "harmony_remote: dev OTA key built in (never ship this build)\n");
-  fprintf(stderr, "harmony_remote: rf=%s powermode=0x%02X%s slot=%u\n", cli.rf_spi ? "spi" : "none", cli.powermode,
-          cli.powermode ? "" : " (default, unvalidated)", cli.slot);
+  char slot_txt[16];
+  if (cli.slot) snprintf(slot_txt, sizeof slot_txt, "%u", cli.slot);
+  else snprintf(slot_txt, sizeof slot_txt, "learned");
+  fprintf(stderr, "harmony_remote: rf=%s powermode=0x%02X%s slot=%s\n", cli.rf_spi ? "spi" : "none", cli.powermode,
+          cli.powermode ? "" : " (default, unvalidated)", slot_txt);
 
   struct sigaction sa = {.sa_handler = on_signal}; /* no SA_RESTART: select() returns EINTR */
   sigemptyset(&sa.sa_mask);
@@ -48,7 +51,8 @@ int main(int argc, char **argv) {
   if (cli.rf_spi) {
     /* After the panel checks, so a refused start never touches the radio. A failed open (stock hal
      * alive, no device) leaves the link dead: the fallback page shows and the app keeps running. */
-    hp_rf_spi_cfg_t cfg = {.slot = cli.slot, .powermode = cli.powermode, .role = HP_RF_SPI_ROLE_REMOTE, .debug = cli.rf_debug};
+    hp_rf_spi_cfg_t cfg = {.slot = cli.slot, .powermode = cli.powermode, .role = HP_RF_SPI_ROLE_REMOTE, .debug = cli.rf_debug,
+                           .slot_file = cli.slot ? NULL : "/data/app/rf_slot"}; /* learned slot, provisional after a restart */
     int rc = rf_link_open(&rf, &cfg);
     if (rc < 0) fprintf(stderr, "harmony_remote: cannot open the radio (%d); running without a link\n", rc);
   }

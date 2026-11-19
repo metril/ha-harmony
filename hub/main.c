@@ -67,6 +67,7 @@ static int rf_fds(void *arg, int out[4]) {
 
 static void on_close(hp_ws_conn_t *c, void *user) {
     (void)user;
+    hub_session_closed(&g_hub, hp_ws_conn_user(c));
     free(hp_ws_conn_user(c));
 }
 
@@ -153,7 +154,7 @@ static void heartbeat_touch(const char *path) {
 int main(int argc, char **argv) {
     bool sim = false, rf_spi = false;
     bool rf_debug = false;
-    long rf_slot = 0; /* 0 = driver default; the Elite measured as HID++ device 2 on this hub */
+    long rf_slot = 0; /* 0 = learn it from the radio's link-up report */
     long port = 8099;
     const char *token = NULL, *token_file = NULL;
     const char *cache = NULL;
@@ -161,6 +162,8 @@ int main(int argc, char **argv) {
     const char *rf_path = NULL;
     const char *hub_id = NULL, *fw_version = NULL;
     const char *hb_path = NULL;
+    const char *ota_dir = NULL, *ota_target = NULL, *health_file = NULL;
+    bool ota_allow_dev = false;
     long hb_secs = 5;
     long ir_ports = HP_HW_DEFAULT_IR_PORTS;
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
@@ -188,6 +191,10 @@ int main(int argc, char **argv) {
         }
         else if (!strcmp(argv[i], "--heartbeat") && i + 1 < argc) hb_path = argv[++i];
         else if (!strcmp(argv[i], "--heartbeat-secs") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 60, &hb_secs)) return bad_num("--heartbeat-secs", argv[i]); }
+        else if (!strcmp(argv[i], "--ota-dir") && i + 1 < argc) ota_dir = argv[++i];
+        else if (!strcmp(argv[i], "--ota-allow-dev")) ota_allow_dev = true;
+        else if (!strcmp(argv[i], "--health-file") && i + 1 < argc) health_file = argv[++i];
+        else if (!strcmp(argv[i], "--ota-target") && i + 1 < argc) ota_target = argv[++i];
         else if (!strcmp(argv[i], "--hub-id") && i + 1 < argc) hub_id = argv[++i];
         else if (!strcmp(argv[i], "--fw-version") && i + 1 < argc) fw_version = argv[++i];
         else if (!strcmp(argv[i], "--ir-ports") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 255, &ir_ports)) return bad_num("--ir-ports", argv[i]); }
@@ -200,7 +207,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
             fprintf(stderr, "usage: hub [--sim] [--port N] (--token T | --token-file PATH) [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
-                            "[--hub-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] "
+                            "[--ota-dir DIR [--ota-target FILE] [--ota-allow-dev] [--health-file FILE]] [--hub-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] "
                             "[--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P]\n");
             return 2;
@@ -210,6 +217,7 @@ int main(int argc, char **argv) {
         if (!cache) cache = "/data/ha-harmony/cache.json";
         if (!state) state = "/data/ha-harmony/state.json";
         if (!rf_path && !rf_spi) rf_path = "/tmp/ha-harmony-rf.sock";
+        if (!ota_dir) ota_dir = "/data/ha-harmony"; /* the dir the boot hook installs the binary in */
     }
     if (rf_spi && (sim || rf_path)) {
         fprintf(stderr, "hub: --rf-spi (the real radio) cannot be combined with --sim or --rf\n");
@@ -237,7 +245,14 @@ int main(int argc, char **argv) {
         hp_sim_init(&g_sim, stdout);
         g_hub.sinks = hp_sim_sinks(&g_sim);
     } else {
-        hp_rf_spi_cfg_t rc_cfg = {NULL, (uint8_t)rf_slot, NULL, HP_RF_SPI_ROLE_HUB, 0, rf_debug, NULL, NULL};
+        /* a learned slot is kept next to the state file (provisional start value after a restart) */
+        char slot_file[256] = "";
+        if (rf_slot == 0 && state) {
+            const char *sl = strrchr(state, '/');
+            int dl = sl ? (int)(sl - state) + 1 : 0;
+            if (dl < 200) snprintf(slot_file, sizeof slot_file, "%.*srf_slot", dl, state);
+        }
+        hp_rf_spi_cfg_t rc_cfg = {NULL, (uint8_t)rf_slot, NULL, HP_RF_SPI_ROLE_HUB, 0, rf_debug, NULL, NULL, slot_file};
         hp_hw_cfg_t hc = {NULL, (uint8_t)ir_ports, NULL, rf_spi ? &rc_cfg : NULL};
         int hr = hp_hw_sinks_open(&hc, &g_hw);
         if (hr == -HP_E_HALBUSY) {
@@ -254,6 +269,9 @@ int main(int argc, char **argv) {
         g_hub.rf_inner_blocks = rf_spi; /* rf_spi carries bare 28-byte inner blocks; the socket carries hub frames */
     }
     g_hub.cache_path = cache;
+    hp_ota_init(&g_hub.ota, ota_dir, ota_target); /* --sim: off unless --ota-dir is given */
+    g_hub.ota.allow_dev = ota_allow_dev; /* with the public dev key built in, updates need this explicit opt-in */
+    g_hub.ota.health_file = health_file; /* the boot hook's health mark: no update before it exists */
     hp_rf_transport *rf = NULL;
     if (rf_path && strlen(rf_path) >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
         fprintf(stderr, "hub: --rf path is %zu bytes; a unix socket path must be shorter than %zu bytes (sun_path)\n",
@@ -293,6 +311,7 @@ int main(int argc, char **argv) {
     }
     g_tbl.hub_id = hub_id ? hub_id : sim ? "sim-hub" : real_id;
     g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : "ha-harmony-hub";
+    fprintf(stderr, "hub: build %u\n", (unsigned)hp_build_id());
     if (ota_pubkey_is_dev()) fprintf(stderr, "hub: dev OTA key built in (never ship this build)\n");
     hp_ws_cb_t cb = {on_text, on_close};
     hp_ws_server_t *srv = hp_ws_listen((uint16_t)port, token, &cb, NULL);
@@ -312,6 +331,7 @@ int main(int argc, char **argv) {
     if (g_mdns.fd >= 0) printf("mdns port=%u\n", hp_mdns_srv_port(&g_mdns));
     fflush(stdout);
     long long hb_last = -1000;
+    int restart_polls = 0; /* applied update: a few more polls to flush the ota_status reply, then exit */
     if (hb_path) heartbeat_touch(hb_path); /* before the loop: the watcher sees us alive at once */
     while (!g_stop) {
         if (hb_path) {
@@ -328,6 +348,7 @@ int main(int argc, char **argv) {
         hp_mdns_srv_service(&g_mdns);
         if (!sim) hp_hw_service(&g_hw);
         hub_run_timers(&g_hub);
+        if (g_hub.ota.restart && ++restart_polls >= 3) break;
     }
     hp_mdns_srv_stop(&g_mdns); /* goodbye (TTL 0) */
     hub_shutdown(&g_hub);
@@ -335,5 +356,5 @@ int main(int argc, char **argv) {
     hp_ws_close(srv);
     hp_rf_pair_destroy(rf);
     hp_map_free(&g_hub.map);
-    return 0;
+    return g_hub.ota.restart ? HP_EXIT_OTA_RESTART : 0; /* the boot hook relaunches the new binary */
 }

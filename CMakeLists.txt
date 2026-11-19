@@ -161,9 +161,32 @@ add_library(hp_hub STATIC
   hub/io/rf_pair.c
   hub/ir/encode.c
   hub/hub_handlers.c
+  hub/ota/hub_ota.c
 )
 find_package(Threads REQUIRED)
 target_link_libraries(hp_hub PUBLIC hp_core cjson m Threads::Threads)
+# Build id of this binary (the OTA downgrade floor on a hub that never had an update); release builds set it.
+# Derived at every configure (a normal variable, never cached): max(floor, git commit count), or -DHP_BUILD_ID_OVERRIDE=N.
+# The floor is the highest id ever released: a history rewrite changes commit counts, an id must never go back.
+file(STRINGS "${CMAKE_SOURCE_DIR}/cmake/build_id_floor.txt" _hp_floor LIMIT_COUNT 1)
+if(HP_BUILD_ID_OVERRIDE)
+  set(_hp_count "${HP_BUILD_ID_OVERRIDE}")
+else()
+  execute_process(COMMAND git -C "${CMAKE_SOURCE_DIR}" rev-list --count HEAD
+                  OUTPUT_VARIABLE _hp_count OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE _hp_rc)
+  if(NOT _hp_rc EQUAL 0 OR NOT _hp_count MATCHES "^[0-9]+$")
+    message(WARNING "build id: not a git checkout (or git missing); using the floor ${_hp_floor}. "
+                    "Pass -DHP_BUILD_ID_OVERRIDE=N for a real release build.")
+    set(_hp_count 0)
+  endif()
+endif()
+if(_hp_count LESS _hp_floor)
+  set(HP_BUILD_ID ${_hp_floor})
+else()
+  set(HP_BUILD_ID ${_hp_count})
+endif()
+message(STATUS "firmware build id ${HP_BUILD_ID}")
+set_source_files_properties(hub/ota/hub_ota.c PROPERTIES COMPILE_DEFINITIONS HP_BUILD_ID=${HP_BUILD_ID})
 
 add_executable(hub hub/main.c)
 target_link_libraries(hub PRIVATE hp_hub)

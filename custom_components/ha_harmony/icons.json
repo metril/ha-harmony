@@ -23,6 +23,17 @@
       },
       "device_input": {
         "default": "mdi:import"
+      },
+      "firmware_update": {
+        "default": "mdi:update",
+        "state": {
+          "uploading": "mdi:upload",
+          "applying": "mdi:cog-sync",
+          "restarting": "mdi:restart",
+          "installed": "mdi:check-circle",
+          "failed": "mdi:alert-circle",
+          "rolled_back": "mdi:undo-variant"
+        }
       }
     },
     "binary_sensor": {
@@ -57,6 +68,9 @@
     },
     "set_device_state": {
       "service": "mdi:power-settings"
+    },
+    "install_firmware": {
+      "service": "mdi:cellphone-arrow-down"
     }
   }
 }

@@ -91,6 +91,8 @@ class HarmonyHubClient:
         self.hub_id: str | None = None
         self.fw_version: str | None = None
         self.activities: list[str] = []
+        self.fw_build: int | None = None  # installed firmware build id (absent: hub without OTA)
+        self.ota_key: str | None = None  # "dev" | "release" | None
         self.config_hash: str | None = None  # hub's CRC-32 hex of its loaded config text
 
     @property
@@ -166,6 +168,8 @@ class HarmonyHubClient:
                 raise HarmonyConnectionError(f"unexpected handshake reply {mtype.name}")
             self.hub_id = d["hub_id"]
             self.fw_version = d.get("fw_version")
+            self.fw_build = d.get("fw_build")
+            self.ota_key = d.get("ota_key")
             self.config_hash = d.get("config_hash")
             acts = d.get("activities")
             self.activities = (
