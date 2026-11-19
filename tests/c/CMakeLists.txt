@@ -113,3 +113,9 @@ endif()
 # Signed OTA images: SHA-512/Ed25519 vectors, verify rejections, hub staged apply (host fs only).
 add_hp_test(ota)
 add_hp_test(hub_ota)
+
+# Bluetooth helper logic (report building, remote key diff, IPC framing).
+if(HH_BT)
+  add_hp_test(bt_logic)
+  target_link_libraries(test_bt_logic PRIVATE hp_bt)
+endif()
