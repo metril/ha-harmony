@@ -67,6 +67,9 @@ typedef struct {
     bool connected;
     hci_con_handle_t handle;
     uint16_t hids_cid;
+    bool pending;         /* new bond waiting for its HID service: not saved, not reported */
+    uint8_t fails;        /* consecutive failed connects (backoff) */
+    uint32_t next_try_ms; /* no new attempt before this */
     bt_rkey_set_t active; /* usages down now */
 } bt_remote_t;
 
@@ -103,6 +106,8 @@ void bt_push_state(void);
 void bt_push_hosts(void);
 void bt_push_remotes(void);
 void bt_push_pairres(uint8_t kind, uint8_t result, int slot);
+void bt_push_candidate(const bd_addr_t addr, uint8_t addr_type, int8_t rssi, const char *name);
+void bt_transport_fatal(int err); /* implemented by bt_main.c */
 void bt_push_rkey(int slot, uint8_t page, uint16_t usage, bool down);
 
 #endif

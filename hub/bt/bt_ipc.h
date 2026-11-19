@@ -18,9 +18,10 @@
  *                 page 0x07 keyboard/keypad, page 0x0C consumer. Queued up to 5 s while the host
  *                 is connecting; a key held 10 s is released.
  *   PAIR    0x03  on u8, secs u16, mode u8      pairing window (secs 0 = default 120, max 600).
- *                 mode 0 = host: discoverable (Classic) + advertising (LE); 1 = remote: scan for an
- *                 advertising HID remote and bond with it. Pairing is accepted only while open;
- *                 one mode at a time (a new window replaces the open one).
+ *                 mode 0 = host: discoverable (Classic) + advertising (LE); 1 = remote: scan and
+ *                 report advertising HID remotes as CANDIDATE; nothing is bonded until PAIR_REMOTE.
+ *                 Pairing is accepted only while open; one mode at a time (a new window replaces it).
+ *   PAIR_REMOTE 0x07  addr[6], addr_type u8     bond with that candidate (remote window must be open)
  *   FORGET  0x04  kind u8, slot u8              drop the bond and the slot
  *   CONNECT 0x05  slot u8                       connect a host now (Classic: page; LE: advertise)
  *   GET     0x06  (empty)                       push STATE, HOSTS and REMOTES again
@@ -31,11 +32,15 @@
  *                 le: 0 when the build or the controller has no LE (Classic only, runtime).
  *                 hosts_max is the slot capacity (255), conn_max the simultaneous host connections.
  *   PAIRRES 0x83  kind u8, result u8, slot u8 (0xFF = none), addr[6], transport u8, name_len u8, name
- *   HOSTS   0x84  n u8, n x { slot u8, transport u8, addr_type u8, connected u8, addr[6], name_len u8, name }
- *   REMOTES 0x85  n u8, n x { slot u8, addr_type u8, connected u8, battery u8 (0xFF unknown), addr[6],
- *                              name_len u8, name }
+ *   HOSTS   0x84  flags u8, n u8, n x { slot u8, transport u8, addr_type u8, connected u8, addr[6], name_len u8, name }
+ *   REMOTES 0x85  flags u8, n u8, n x { slot u8, addr_type u8, connected u8, battery u8 (0xFF unknown),
+ *                              fails u8 (consecutive failed connects; backoff up to 5 min), addr[6], name_len u8, name }
+ *   CANDIDATE 0x87  addr[6], addr_type u8, rssi i8, name_len u8, name   (remote window only; once per
+ *                 address (again when its name first arrives), at most 16 per window)
  *   RKEY    0x86  remote slot u8, page u8, usage u16, down u8       key from a remote (page 0x07/0x0C)
- * STATE, HOSTS and REMOTES are pushed at start and on every change.
+ * HOSTS/REMOTES lists come in chunks of at most BT_IPC_LIST_CHUNK entries; flags bit 0 = first chunk
+ * (replace the list). Frames are never dropped: the helper buffers output and exits when the
+ * parent stops reading. STATE, HOSTS and REMOTES are pushed at start and on every change.
  */
 #ifndef HH_BT_IPC_H
 #define HH_BT_IPC_H
@@ -49,14 +54,15 @@
 #define HH_BT_MAX_REMOTES 32 /* bonded LE remotes, slots 0..31 */
 
 #define BT_IPC_FD 3
-#define BT_IPC_MAX_PAYLOAD 16384 /* HOSTS with 255 entries is about 11 KB */
+#define BT_IPC_MAX_PAYLOAD 1024
+#define BT_IPC_LIST_CHUNK 16 /* HOSTS/REMOTES entries per frame */
 #define BT_IPC_HDR 3
 #define BT_NAME_MAX 32
 
 enum { BT_IPC_PING = 0x01, BT_IPC_KEY = 0x02, BT_IPC_PAIR = 0x03, BT_IPC_FORGET = 0x04,
-       BT_IPC_CONNECT = 0x05, BT_IPC_GET = 0x06 };
+       BT_IPC_CONNECT = 0x05, BT_IPC_GET = 0x06, BT_IPC_PAIR_REMOTE = 0x07 };
 enum { BT_IPC_PONG = 0x81, BT_IPC_STATE = 0x82, BT_IPC_PAIRRES = 0x83, BT_IPC_HOSTS = 0x84,
-       BT_IPC_REMOTES = 0x85, BT_IPC_RKEY = 0x86 };
+       BT_IPC_REMOTES = 0x85, BT_IPC_RKEY = 0x86, BT_IPC_CANDIDATE = 0x87 };
 
 /* STATE.state */
 enum { BT_ST_STARTING = 0, BT_ST_READY = 1, BT_ST_NO_ADAPTER = 2, BT_ST_ERROR = 3 };

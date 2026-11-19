@@ -6,8 +6,11 @@
 #include "bt_state.h"
 
 void bt_remote_init(void);
+uint32_t bt_backoff_ms(unsigned fails); /* retry delay after N failures in a row: 2 s doubling, cap 5 min */
 void bt_remote_scan_update(void);        /* start or stop scanning as the state wants it */
 void bt_remote_forget(int slot);
+/* PAIR_REMOTE: bond with a reported candidate (remote window must be open) */
+void bt_remote_pair(const uint8_t *addr, uint8_t addr_type);
 
 /* BTstack events routed here by bt_main.c */
 void bt_remote_adv_report(const uint8_t *packet);

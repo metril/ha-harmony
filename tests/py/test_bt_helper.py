@@ -69,6 +69,17 @@ def test_bad_arguments_exit_2(built_binaries):
     assert b"usage: hub bt-helper" in res.stderr
 
 
+def test_missing_control_fd_exit_2(built_binaries):
+    res = subprocess.run(
+        [str(built_binaries / "hub"), "bt-helper", "--hci", "15", "--fd", "200"],
+        check=False,
+        capture_output=True,
+        timeout=10,
+    )
+    assert res.returncode == 2
+    assert b"no control channel" in res.stderr
+
+
 @pytest.mark.parametrize("hci", ["16", "-1"])
 def test_bad_hci_index_exit_2(built_binaries, hci):
     res = subprocess.run(

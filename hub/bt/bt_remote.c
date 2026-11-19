@@ -1,5 +1,7 @@
 #include "bt_remote.h"
 
+#include <stdlib.h>
+
 #include "bt_pairing.h"
 
 void bt_rkey_diff(bt_rkey_set_t *old, const bt_rkey_set_t *now, bt_rkey_emit_fn emit, void *ctx) {
@@ -18,6 +20,16 @@ void bt_rkey_diff(bt_rkey_set_t *old, const bt_rkey_set_t *now, bt_rkey_emit_fn 
     *old = *now;
 }
 
+#define BACKOFF_BASE_MS 2000
+#define BACKOFF_MAX_MS 300000 /* 5 min */
+
+/* delay before the next attempt after `fails` failures in a row: doubling, capped */
+uint32_t bt_backoff_ms(unsigned fails) {
+    uint32_t d = BACKOFF_BASE_MS;
+    for (unsigned i = 1; i < fails && d < BACKOFF_MAX_MS; i++) d *= 2;
+    return d > BACKOFF_MAX_MS ? BACKOFF_MAX_MS : d;
+}
+
 #ifdef HH_BT_LE
 #include "ad_parser.h"
 #include "ble/gatt-service/hids_host.h"
@@ -27,12 +39,23 @@ void bt_rkey_diff(bt_rkey_set_t *old, const bt_rkey_set_t *now, bt_rkey_emit_fn 
 #define SCAN_PASSIVE_INT 96
 #define SCAN_PASSIVE_WIN 24
 #define CONNECT_TIMEOUT_MS 10000
+#define MAX_CANDIDATES 16
+#define MAP_BYTES 512         /* report-map storage per concurrently connected remote */
+#define MAP_CONNS 8
 
-static uint8_t s_hid_desc_storage[1000];
+typedef struct {
+    bd_addr_t addr;
+    uint8_t addr_type;
+    char name[BT_NAME_MAX + 1];
+} cand_seen_t;
+static cand_seen_t s_seen[MAX_CANDIDATES];
+static int s_seen_n;
+static bool s_was_window;
 
 static struct {
     bool active;
-    int slot; /* -1: a new remote (inside the window) */
+    int slot;      /* -1: a new remote (inside the window), else the bonded remote's slot */
+    bool new_pend; /* pairing done, waiting for the HID service before it counts */
     uint8_t addr_type;
     bd_addr_t addr;
     char name[BT_NAME_MAX + 1];
@@ -41,15 +64,19 @@ static struct {
 static btstack_timer_source_t s_cand_timer;
 static bool s_scanning;
 
+static uint32_t now_ms(void) { return btstack_run_loop_get_time_ms(); }
+
 static bool wants_scan(void) {
     if (!g_bt_le || g_bt_state != BT_ST_READY || g_classic_paging || s_cand.active) return false;
     if (g_window == 2) return true;
     for (int i = 0; i < g_remotes_n; i++)
-        if (g_remotes[i].used && !g_remotes[i].connected) return true;
+        if (g_remotes[i].used && !g_remotes[i].pending && !g_remotes[i].connected) return true;
     return false;
 }
 
 void bt_remote_scan_update(void) {
+    if (g_window == 2 && !s_was_window) s_seen_n = 0; /* a new window starts with no candidates */
+    s_was_window = g_window == 2;
     bool want = wants_scan();
     if (want) {
         /* the window scans actively (names come in scan responses); waiting for a bonded remote
@@ -65,8 +92,20 @@ void bt_remote_scan_update(void) {
 
 void bt_remote_init(void) {
     gatt_client_init();
-    hids_host_init(s_hid_desc_storage, sizeof s_hid_desc_storage);
-    for (int i = 0; i < g_remotes_n; i++) g_remotes[i].handle = HCI_CON_HANDLE_INVALID;
+    static uint8_t *map;
+    if (!map) map = malloc((size_t)MAP_BYTES * MAP_CONNS);
+    if (map) hids_host_init(map, (uint16_t)(MAP_BYTES * MAP_CONNS));
+}
+
+/* a failed attempt on a bonded remote: exponential backoff, reported to the parent */
+static void remote_failed(int slot) {
+    if (slot < 0 || slot >= g_remotes_n || !g_remotes[slot].used) return;
+    bt_remote_t *r = &g_remotes[slot];
+    if (r->fails < 255) r->fails++;
+    uint32_t d = bt_backoff_ms(r->fails);
+    r->next_try_ms = now_ms() + d;
+    bt_logf("remote %d: attempt failed (%u in a row), next try in %u s", slot, r->fails, d / 1000);
+    bt_push_remotes();
 }
 
 static void cand_clear(void) {
@@ -75,11 +114,24 @@ static void cand_clear(void) {
     bt_remote_scan_update();
 }
 
+/* an attempt ended without a working HID link */
+static void cand_failed(void) {
+    int slot = s_cand.slot;
+    if (s_cand.new_pend && slot >= 0) {
+        gap_delete_bonding((bd_addr_type_t)s_cand.addr_type, s_cand.addr);
+        bt_remote_free(slot);
+        bt_pair_finish(BT_KIND_REMOTE, BT_PR_FAILED, BT_SLOT_NONE);
+    } else if (!s_cand.new_pend) {
+        remote_failed(slot);
+    }
+    cand_clear();
+}
+
 static void cand_timeout(btstack_timer_source_t *ts) {
     (void)ts;
     log_msg("remote: connection attempt timed out");
     gap_connect_cancel();
-    cand_clear();
+    cand_failed();
 }
 
 static void start_connect(int slot, const bd_addr_t addr, uint8_t addr_type, const char *name) {
@@ -100,7 +152,7 @@ static void start_connect(int slot, const bd_addr_t addr, uint8_t addr_type, con
 }
 
 void bt_remote_adv_report(const uint8_t *packet) {
-    if (!s_scanning || s_cand.active) return;
+    if (!s_scanning || s_cand.active || g_classic_paging) return;
     bd_addr_t addr;
     gap_event_advertising_report_get_address(packet, addr);
     uint8_t type = gap_event_advertising_report_get_address_type(packet);
@@ -109,7 +161,9 @@ void bt_remote_adv_report(const uint8_t *packet) {
 
     int slot = bt_remote_find_addr(addr);
     if (slot >= 0) {
-        if (!g_remotes[slot].connected) start_connect(slot, addr, g_remotes[slot].addr_type, g_remotes[slot].name);
+        bt_remote_t *r = &g_remotes[slot];
+        if (!r->connected && !r->pending && (int32_t)(now_ms() - r->next_try_ms) >= 0)
+            start_connect(slot, addr, r->addr_type, r->name);
         return;
     }
     if (g_window != 2) return;
@@ -128,7 +182,34 @@ void bt_remote_adv_report(const uint8_t *packet) {
         }
     }
     bool hid = ad_data_contains_uuid16(ad_len, ad, 0x1812) || (appearance >= 0x03C0 && appearance <= 0x03C4);
-    if (hid) start_connect(-1, addr, type, name);
+    if (!hid) return;
+    /* only report: the parent picks one (PAIR_REMOTE). Once per address, again when its name arrives. */
+    int i;
+    for (i = 0; i < s_seen_n; i++)
+        if (memcmp(s_seen[i].addr, addr, 6) == 0) break;
+    if (i == s_seen_n) {
+        if (s_seen_n == MAX_CANDIDATES) return;
+        memcpy(s_seen[i].addr, addr, 6);
+        s_seen[i].addr_type = type;
+        snprintf(s_seen[i].name, sizeof s_seen[i].name, "%s", name);
+        s_seen_n++;
+    } else if (s_seen[i].name[0] || !name[0]) {
+        return;
+    } else {
+        snprintf(s_seen[i].name, sizeof s_seen[i].name, "%s", name);
+    }
+    bt_push_candidate(addr, type, gap_event_advertising_report_get_rssi(packet), s_seen[i].name);
+}
+
+void bt_remote_pair(const uint8_t *addr, uint8_t addr_type) {
+    if (g_window != 2 || s_cand.active) return;
+    for (int i = 0; i < s_seen_n; i++) {
+        if (memcmp(s_seen[i].addr, addr, 6) == 0) {
+            start_connect(-1, s_seen[i].addr, addr_type, s_seen[i].name);
+            return;
+        }
+    }
+    log_msg("remote: PAIR_REMOTE for an address that was not a candidate");
 }
 
 bool bt_remote_owns_handle(hci_con_handle_t handle) {
@@ -141,13 +222,16 @@ bool bt_remote_owns_handle(hci_con_handle_t handle) {
 bool bt_remote_le_connected(hci_con_handle_t handle) {
     if (!s_cand.active) return false;
     btstack_run_loop_remove_timer(&s_cand_timer);
+    btstack_run_loop_set_timer_handler(&s_cand_timer, cand_timeout); /* the whole sequence is time-boxed */
+    btstack_run_loop_set_timer(&s_cand_timer, CONNECT_TIMEOUT_MS);
+    btstack_run_loop_add_timer(&s_cand_timer);
     s_cand.handle = handle;
     sm_request_pairing(handle); /* new remote: pairing (confirmed in the window); bonded: re-encryption */
     return true;
 }
 
 void bt_remote_le_connect_failed(void) {
-    if (s_cand.active) cand_clear();
+    if (s_cand.active) cand_failed();
 }
 
 void bt_remote_just_works(hci_con_handle_t handle) {
@@ -164,21 +248,40 @@ static void release_all(int slot) {
     bt_rkey_diff(&g_remotes[slot].active, &none, report_key, (void *)(intptr_t)slot);
 }
 
+static int slot_for_cid(uint16_t cid) {
+    for (int i = 0; i < g_remotes_n; i++)
+        if (g_remotes[i].used && g_remotes[i].hids_cid == cid) return i;
+    return -1;
+}
+
 static void hids_event(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel; (void)size;
     if (packet_type != HCI_EVENT_PACKET || hci_event_packet_get_type(packet) != HCI_EVENT_GATTSERVICE_META) return;
     switch (hci_event_gattservice_meta_get_subevent_code(packet)) {
     case GATTSERVICE_SUBEVENT_HID_SERVICE_CONNECTED: {
-        uint16_t cid = gattservice_subevent_hid_service_connected_get_hids_cid(packet);
-        int slot = s_cand.active ? s_cand.slot : -1;
-        for (int i = 0; i < g_remotes_n; i++) if (g_remotes[i].used && g_remotes[i].hids_cid == cid) slot = i;
+        int slot = slot_for_cid(gattservice_subevent_hid_service_connected_get_hids_cid(packet));
         if (gattservice_subevent_hid_service_connected_get_status(packet) != ERROR_CODE_SUCCESS || slot < 0) {
             log_msg("remote: HIDS connect failed");
-            if (slot >= 0 && g_remotes[slot].handle != HCI_CON_HANDLE_INVALID) gap_disconnect(g_remotes[slot].handle);
+            if (s_cand.active) {
+                hci_con_handle_t h = s_cand.handle;
+                cand_failed(); /* a new remote's bond is deleted again */
+                if (h != HCI_CON_HANDLE_INVALID) gap_disconnect(h);
+            }
             return;
         }
-        g_remotes[slot].connected = true;
+        bt_remote_t *r = &g_remotes[slot];
+        r->connected = true;
+        r->fails = 0;
+        r->next_try_ms = 0;
         bt_logf("remote %d: connected", slot);
+        if (r->pending) { /* the pairing counts only now */
+            r->pending = false;
+            bt_remote_save(slot);
+            bt_push_remotes();
+            if (s_cand.active) cand_clear();
+            bt_pair_finish(BT_KIND_REMOTE, BT_PR_OK, slot);
+            break;
+        }
         if (s_cand.active) cand_clear();
         bt_push_remotes();
         break;
@@ -186,9 +289,8 @@ static void hids_event(uint8_t packet_type, uint16_t channel, uint8_t *packet, u
     case GATTSERVICE_SUBEVENT_HID_REPORT: {
         uint16_t cid = gattservice_subevent_hid_report_get_hids_cid(packet);
         uint8_t svc = gattservice_subevent_hid_report_get_service_index(packet);
-        int slot = -1;
-        for (int i = 0; i < g_remotes_n; i++) if (g_remotes[i].used && g_remotes[i].connected && g_remotes[i].hids_cid == cid) slot = i;
-        if (slot < 0) return;
+        int slot = slot_for_cid(cid);
+        if (slot < 0 || !g_remotes[slot].connected) return;
         btstack_hid_parser_t p;
         btstack_hid_parser_init(&p, hids_host_descriptor_storage_get_descriptor_data(cid, svc),
                                 hids_host_descriptor_storage_get_descriptor_len(cid, svc), HID_REPORT_TYPE_INPUT,
@@ -206,9 +308,8 @@ static void hids_event(uint8_t packet_type, uint16_t channel, uint8_t *packet, u
         break;
     }
     case GATTSERVICE_SUBEVENT_HID_SERVICE_DISCONNECTED: {
-        uint16_t cid = gattservice_subevent_hid_service_disconnected_get_hids_cid(packet);
-        for (int i = 0; i < g_remotes_n; i++)
-            if (g_remotes[i].used && g_remotes[i].hids_cid == cid) bt_remote_gone(g_remotes[i].handle);
+        int slot = slot_for_cid(gattservice_subevent_hid_service_disconnected_get_hids_cid(packet));
+        if (slot >= 0) bt_remote_gone(g_remotes[slot].handle);
         break;
     }
     default:
@@ -223,6 +324,7 @@ static void hids_start(int slot, hci_con_handle_t handle) {
     g_remotes[slot].hids_cid = cid;
     if (st != ERROR_CODE_SUCCESS) {
         bt_logf("remote %d: hids_host_connect 0x%02x", slot, st);
+        cand_failed();
         gap_disconnect(handle);
     }
 }
@@ -244,13 +346,15 @@ void bt_remote_pairing_complete(hci_con_handle_t handle, const bd_addr_t addr, u
             bt_pair_finish(BT_KIND_REMOTE, BT_PR_FULL, BT_SLOT_NONE);
             return;
         }
-        bt_remote_save(slot);
+        /* not saved, not reported: it counts when the HID service is up (hids_event) */
+        g_remotes[slot].pending = true;
         s_cand.slot = slot;
-        bt_pair_finish(BT_KIND_REMOTE, BT_PR_OK, slot);
+        s_cand.new_pend = true;
+        s_cand.addr_type = addr_type;
+        memcpy(s_cand.addr, addr, 6);
     }
     gap_request_connection_parameter_update(handle, 6, 12, 0, 200);
     hids_start(slot, handle);
-    bt_push_remotes();
 }
 
 void bt_remote_reencrypted(hci_con_handle_t handle, uint8_t status) {
@@ -258,6 +362,7 @@ void bt_remote_reencrypted(hci_con_handle_t handle, uint8_t status) {
     if (status != ERROR_CODE_SUCCESS) {
         /* the bond stays: only a window (not an advertiser claiming the address) replaces it */
         bt_logf("remote %d: re-encryption failed (0x%02x)", s_cand.slot, status);
+        cand_failed();
         gap_disconnect(handle);
         return;
     }
@@ -266,7 +371,7 @@ void bt_remote_reencrypted(hci_con_handle_t handle, uint8_t status) {
 }
 
 void bt_remote_gone(hci_con_handle_t handle) {
-    if (s_cand.active && s_cand.handle == handle) cand_clear();
+    if (s_cand.active && s_cand.handle == handle) cand_failed();
     for (int i = 0; i < g_remotes_n; i++) {
         bt_remote_t *r = &g_remotes[i];
         if (!r->used || r->handle != handle) continue;
@@ -285,7 +390,12 @@ void bt_remote_forget(int slot) {
     if (slot < 0 || slot >= g_remotes_n || !g_remotes[slot].used) return;
     bt_remote_t *r = &g_remotes[slot];
     bt_logf("remote %d: forgotten", slot);
-    if (s_cand.active && s_cand.slot == slot) { gap_connect_cancel(); cand_clear(); }
+    if (s_cand.active && s_cand.slot == slot) {
+        s_cand.new_pend = false;
+        s_cand.slot = -2; /* nothing left to fail */
+        gap_connect_cancel();
+        cand_clear();
+    }
     release_all(slot);
     if (r->handle != HCI_CON_HANDLE_INVALID) gap_disconnect(r->handle);
     gap_delete_bonding((bd_addr_type_t)r->addr_type, r->addr);
@@ -295,6 +405,7 @@ void bt_remote_forget(int slot) {
 }
 #else
 void bt_remote_init(void) {}
+void bt_remote_pair(const uint8_t *addr, uint8_t addr_type) { (void)addr; (void)addr_type; }
 void bt_remote_scan_update(void) {}
 void bt_remote_forget(int slot) { (void)slot; }
 void bt_remote_adv_report(const uint8_t *packet) { (void)packet; }

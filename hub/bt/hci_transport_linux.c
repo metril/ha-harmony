@@ -88,14 +88,18 @@ static int hci_socket = -1;
 static const hci_transport_config_linux_t * hci_transport_config_linux;
 
 extern void log_msg(const char *msg);
+extern void bt_transport_fatal(int err);
 
 static void hci_transport_linux_process_read(btstack_data_source_t * ds) {
     UNUSED(ds);
     int bytes_read = read(hci_socket, hci_packet, HCI_INCOMING_PACKET_BUFFER_SIZE);
-    if (bytes_read < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            fprintf(stderr, "[hci_transport_linux] Read error: %s (errno=%d)\n", strerror(errno), errno);
-        }
+    if (bytes_read <= 0) {
+        int err = bytes_read == 0 ? ENODEV : errno;
+        if (err == EAGAIN || err == EWOULDBLOCK || err == EINTR) return;
+        /* fatal (adapter removed, socket broken): stop polling the fd and tell the application */
+        fprintf(stderr, "[hci_transport_linux] Read error: %s (errno=%d)\n", strerror(err), err);
+        btstack_run_loop_remove_data_source(&hci_transport_linux_data_source);
+        bt_transport_fatal(err);
         return;
     }
     if (bytes_read > 1) {

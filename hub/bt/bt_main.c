@@ -5,13 +5,16 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "bt_bonds.h"
 #include "bt_hid.h"
 #include "bt_main.h"
+#include "bt_txq.h"
 #include "bt_pairing.h"
 #include "bt_remote.h"
 #include "bt_hid_queue.h"
@@ -35,20 +38,59 @@
 
 /* ---- IPC ---- */
 
+#define TX_CAP 65536 /* parent stuck beyond this: exit instead of dropping frames */
+
 static int s_fd = -1;
 static uint8_t s_rx[2 * (BT_IPC_MAX_PAYLOAD + BT_IPC_HDR)];
 static size_t s_rx_n;
+static uint8_t s_tx[TX_CAP];
 static btstack_data_source_t s_ipc_ds;
+static bool s_ipc_registered;
 static volatile sig_atomic_t s_stop;
+static int s_exit_code;
 
+static void ipc_stop(void) {
+    s_stop = 1;
+    btstack_run_loop_trigger_exit();
+}
+
+static bt_txq_t s_txq = {s_tx, 0, TX_CAP};
+
+/* writes what the socket takes; false when the peer is gone */
+static bool tx_drain(void) {
+    if (bt_txq_drain(&s_txq, s_fd) < 0) return false;
+    if (s_ipc_registered) {
+        if (s_txq.n) btstack_run_loop_enable_data_source_callbacks(&s_ipc_ds, DATA_SOURCE_CALLBACK_WRITE);
+        else btstack_run_loop_disable_data_source_callbacks(&s_ipc_ds, DATA_SOURCE_CALLBACK_WRITE);
+    }
+    return true;
+}
+
+/* frames are queued whole and in order; nothing is dropped or split */
 static void ipc_send(uint8_t type, const uint8_t *p, size_t n) {
-    if (s_fd < 0) return;
-    static uint8_t buf[BT_IPC_HDR + BT_IPC_MAX_PAYLOAD];
+    if (s_fd < 0 || s_stop) return;
+    uint8_t buf[BT_IPC_HDR + BT_IPC_MAX_PAYLOAD];
     size_t len = bt_ipc_frame(buf, type, p, n);
     if (!len) return;
-    ssize_t w = write(s_fd, buf, len);
-    if (w != (ssize_t)len && w >= 0) bt_logf("ipc: short write (%zd of %zu), frame lost", w, len);
-    /* EAGAIN: the parent does not read; it asks again with GET */
+    if (bt_txq_push(&s_txq, buf, len) < 0) {
+        log_msg("ipc: parent is not reading, exiting");
+        s_exit_code = 1;
+        ipc_stop();
+        return;
+    }
+    if (!tx_drain()) {
+        log_msg("ipc: write failed, exiting");
+        s_exit_code = 1;
+        ipc_stop();
+    }
+}
+
+/* before exit: give the parent a moment to take what is queued */
+static void ipc_flush_blocking(void) {
+    for (int i = 0; i < 100 && s_txq.n && s_fd >= 0; i++) {
+        if (!tx_drain()) return;
+        if (s_txq.n) usleep(10000);
+    }
 }
 
 void bt_push_state(void) {
@@ -63,14 +105,52 @@ static size_t put_name(uint8_t *out, const char *name) {
     return n + 1;
 }
 
+/* chunked list frames: flags (bit 0 = first chunk), n, entries */
+typedef struct {
+    uint8_t type, n;
+    bool first;
+    size_t o;
+    uint8_t buf[BT_IPC_MAX_PAYLOAD];
+} list_t;
+
+static void list_begin(list_t *l, uint8_t type) {
+    l->type = type;
+    l->n = 0;
+    l->first = true;
+    l->o = 2;
+}
+
+static void list_flush(list_t *l) {
+    l->buf[0] = l->first;
+    l->buf[1] = l->n;
+    ipc_send(l->type, l->buf, l->o);
+    l->first = false;
+    l->n = 0;
+    l->o = 2;
+}
+
+static uint8_t *list_room(list_t *l) {
+    if (l->n == BT_IPC_LIST_CHUNK) list_flush(l);
+    return l->buf + l->o;
+}
+
+static void list_added(list_t *l, size_t len) {
+    l->o += len;
+    l->n++;
+}
+
+static void list_end(list_t *l) {
+    if (l->n || l->first) list_flush(l);
+}
+
 void bt_push_hosts(void) {
-    uint8_t *p = malloc(1 + (size_t)g_hosts_n * (10 + 1 + BT_NAME_MAX));
-    if (!p) return;
-    size_t o = 1;
-    uint8_t n = 0;
+    static list_t l;
+    list_begin(&l, BT_IPC_HOSTS);
     for (int i = 0; i < g_hosts_n; i++) {
         const bt_host_t *h = &g_hosts[i];
         if (!h->used) continue;
+        uint8_t *p = list_room(&l);
+        size_t o = 0;
         p[o++] = (uint8_t)i;
         p[o++] = h->transport;
         p[o++] = h->addr_type;
@@ -78,33 +158,39 @@ void bt_push_hosts(void) {
         memcpy(p + o, h->addr, 6);
         o += 6;
         o += put_name(p + o, h->name);
-        n++;
+        list_added(&l, o);
     }
-    p[0] = n;
-    ipc_send(BT_IPC_HOSTS, p, o);
-    free(p);
+    list_end(&l);
 }
 
 void bt_push_remotes(void) {
-    uint8_t *p = malloc(1 + (size_t)g_remotes_n * (10 + 1 + BT_NAME_MAX));
-    if (!p) return;
-    size_t o = 1;
-    uint8_t n = 0;
+    static list_t l;
+    list_begin(&l, BT_IPC_REMOTES);
     for (int i = 0; i < g_remotes_n; i++) {
         const bt_remote_t *r = &g_remotes[i];
-        if (!r->used) continue;
+        if (!r->used || r->pending) continue;
+        uint8_t *p = list_room(&l);
+        size_t o = 0;
         p[o++] = (uint8_t)i;
         p[o++] = r->addr_type;
         p[o++] = r->connected;
         p[o++] = BT_BATTERY_UNKNOWN;
+        p[o++] = r->fails;
         memcpy(p + o, r->addr, 6);
         o += 6;
         o += put_name(p + o, r->name);
-        n++;
+        list_added(&l, o);
     }
-    p[0] = n;
-    ipc_send(BT_IPC_REMOTES, p, o);
-    free(p);
+    list_end(&l);
+}
+
+void bt_push_candidate(const bd_addr_t addr, uint8_t addr_type, int8_t rssi, const char *name) {
+    uint8_t p[6 + 3 + 1 + BT_NAME_MAX];
+    memcpy(p, addr, 6);
+    p[6] = addr_type;
+    p[7] = (uint8_t)rssi;
+    size_t n = 8 + put_name(p + 8, name);
+    ipc_send(BT_IPC_CANDIDATE, p, n);
 }
 
 void bt_push_pairres(uint8_t kind, uint8_t result, int slot) {
@@ -138,9 +224,13 @@ static void push_all(void) {
     bt_push_remotes();
 }
 
-static void ipc_stop(void) {
-    s_stop = 1;
-    btstack_run_loop_trigger_exit();
+/* the transport hit a fatal read error: report it and leave (never spin) */
+void bt_transport_fatal(int err) {
+    g_bt_state = (err == ENODEV || err == ENXIO || err == ENETDOWN) ? BT_ST_NO_ADAPTER : BT_ST_ERROR;
+    bt_logf("HCI transport failed (errno %d)", err);
+    bt_push_state();
+    s_exit_code = 1;
+    ipc_stop();
 }
 
 static void ipc_handle(uint8_t type, const uint8_t *p, size_t n) {
@@ -166,6 +256,9 @@ static void ipc_handle(uint8_t type, const uint8_t *p, size_t n) {
     case BT_IPC_GET:
         push_all();
         break;
+    case BT_IPC_PAIR_REMOTE:
+        if (n >= 7) bt_remote_pair(p, p[6]);
+        break;
     default:
         break;
     }
@@ -173,6 +266,13 @@ static void ipc_handle(uint8_t type, const uint8_t *p, size_t n) {
 
 static void ipc_process(btstack_data_source_t *ds, btstack_data_source_callback_type_t type) {
     (void)ds;
+    if (type == DATA_SOURCE_CALLBACK_WRITE) {
+        if (!tx_drain()) {
+            log_msg("ipc: write failed, exiting");
+            ipc_stop();
+        }
+        return;
+    }
     if (type != DATA_SOURCE_CALLBACK_READ) return;
     ssize_t r = read(s_fd, s_rx + s_rx_n, sizeof s_rx - s_rx_n);
     if (r == 0 || (r < 0 && errno != EAGAIN && errno != EINTR)) {
@@ -434,6 +534,7 @@ static int fail(uint8_t state, const char *why) {
     g_bt_state = state;
     log_msg(why);
     bt_push_state();
+    ipc_flush_blocking();
     return 1;
 }
 
@@ -454,9 +555,10 @@ int bt_helper_main(int argc, char **argv) {
         return 2;
     }
 
-    /* a small, polite process: 16 MB of address space, low priority (ASan needs the address space) */
+    /* a small, polite process: an address-space cap with margin over the hub image (BENCH: measure the
+     * helper's real VmPeak and tighten), low priority. ASan needs the address space. */
 #if !defined(__SANITIZE_ADDRESS__)
-    struct rlimit rl = {16u << 20, 16u << 20};
+    struct rlimit rl = {32u << 20, 32u << 20};
     if (setrlimit(RLIMIT_AS, &rl) != 0) log_msg("setrlimit(RLIMIT_AS) failed");
 #endif
     if (nice(5) == -1 && errno) log_msg("nice failed");
@@ -469,17 +571,19 @@ int bt_helper_main(int argc, char **argv) {
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
 
-    if (fcntl((int)fd, F_GETFD) >= 0) {
-        s_fd = (int)fd;
-        fcntl(s_fd, F_SETFL, fcntl(s_fd, F_GETFL) | O_NONBLOCK);
-    } else {
-        log_msg("no control channel on the inherited fd; running without IPC");
+    prctl(PR_SET_PDEATHSIG, SIGKILL); /* the parent is gone: so are we */
+    if (fcntl((int)fd, F_GETFD) < 0) {
+        fprintf(stderr, "hub bt-helper: no control channel on fd %ld\n", fd);
+        return 2;
     }
+    s_fd = (int)fd;
+    fcntl(s_fd, F_SETFL, fcntl(s_fd, F_GETFL) | O_NONBLOCK);
     bt_push_state();
 
     if (!adapter_present((int)hci)) return fail(BT_ST_NO_ADAPTER, "no Bluetooth adapter");
 
     mkdir_parents(keys);
+    if (bt_bonds_prepare(keys) < 0) log_msg("bond file could not be rewritten");
     btstack_memory_init();
     btstack_run_loop_init(btstack_run_loop_posix_get_instance());
     hci_transport_config_linux_t tcfg = {.type = HCI_TRANSPORT_CONFIG_LINUX, .device_id = (uint16_t)hci};
@@ -530,15 +634,16 @@ int bt_helper_main(int argc, char **argv) {
     s_hci_cb.callback = &hci_handler;
     hci_add_event_handler(&s_hci_cb);
 
-    if (s_fd >= 0) {
-        btstack_run_loop_set_data_source_fd(&s_ipc_ds, s_fd);
-        btstack_run_loop_set_data_source_handler(&s_ipc_ds, &ipc_process);
-        btstack_run_loop_add_data_source(&s_ipc_ds);
-        btstack_run_loop_enable_data_source_callbacks(&s_ipc_ds, DATA_SOURCE_CALLBACK_READ);
-    }
+    btstack_run_loop_set_data_source_fd(&s_ipc_ds, s_fd);
+    btstack_run_loop_set_data_source_handler(&s_ipc_ds, &ipc_process);
+    btstack_run_loop_add_data_source(&s_ipc_ds);
+    btstack_run_loop_enable_data_source_callbacks(&s_ipc_ds, DATA_SOURCE_CALLBACK_READ);
+    s_ipc_registered = true;
+    tx_drain(); /* arms the writable callback when the early pushes are still queued */
 
     if (hci_power_control(HCI_POWER_ON) != 0) return fail(BT_ST_ERROR, "hci_power_control failed");
     if (!s_stop) btstack_run_loop_execute();
     hci_power_control(HCI_POWER_OFF);
-    return 0;
+    ipc_flush_blocking();
+    return s_exit_code;
 }

@@ -32,7 +32,6 @@ void bt_classic_acl_gone(hci_con_handle_t handle);
 void bt_le_host_connected(hci_con_handle_t handle, const bd_addr_t addr, uint8_t addr_type);
 void bt_le_host_identified(hci_con_handle_t handle, const bd_addr_t addr, uint8_t addr_type, bool new_bond);
 void bt_le_host_gone(hci_con_handle_t handle);
-bool bt_le_handle_is_host(hci_con_handle_t handle);
 void bt_adv_update(void);
 
 #endif

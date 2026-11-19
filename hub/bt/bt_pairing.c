@@ -134,6 +134,7 @@ static void classic_try(int slot) {
     uint8_t st = hid_device_connect(h->addr, &cid);
     if (st != ERROR_CODE_SUCCESS || cid == 0) {
         bt_logf("slot %d: connect request failed (0x%02x)", slot, st);
+        if (bt_hosts_connected() >= HH_BT_MAX_CONN) make_room(); /* the stack has no free instance */
         return;
     }
     s_connecting = true;
@@ -272,7 +273,12 @@ void bt_classic_acl_gone(hci_con_handle_t handle) {
 static btstack_timer_source_t s_adv_timer;
 static bool s_adv_on;
 static uint32_t s_le_reconn_until;
-static hci_con_handle_t s_pending[HH_BT_MAX_CONN + 2];
+#define UNIDENTIFIED_MS 10000 /* an LE central that is neither a known host nor pairing is dropped */
+static struct {
+    hci_con_handle_t handle;
+    uint32_t t_ms;
+} s_pending[HH_BT_MAX_CONN + 2];
+static btstack_timer_source_t s_pend_timer;
 static uint8_t s_adv_data[] = {2, 0x01, 0x06, 3, 0x03, 0x12, 0x18, 3, 0x19, 0xC1, 0x03,
                                12, 0x09, 'H', 'a', 'r', 'm', 'o', 'n', 'y', ' ', 'H', 'u', 'b'};
 
@@ -304,16 +310,36 @@ void bt_adv_update(void) {
     bt_logf("LE advertising %s", want ? "on" : "off");
 }
 
-bool bt_le_handle_is_host(hci_con_handle_t handle) {
-    for (size_t i = 0; i < sizeof s_pending / sizeof s_pending[0]; i++)
-        if (s_pending[i] == handle) return true;
-    return bt_host_find_handle(handle) >= 0;
+static void pending_check(btstack_timer_source_t *ts) {
+    (void)ts;
+    bool any = false;
+    for (size_t i = 0; i < sizeof s_pending / sizeof s_pending[0]; i++) {
+        if (!s_pending[i].handle) continue;
+        if (g_window != 1 && now_ms() - s_pending[i].t_ms > UNIDENTIFIED_MS) {
+            bt_logf("LE link 0x%04x not identified: disconnecting", s_pending[i].handle);
+            gap_disconnect(s_pending[i].handle);
+            s_pending[i].handle = 0;
+        } else {
+            any = true;
+        }
+    }
+    if (any) {
+        btstack_run_loop_set_timer_handler(&s_pend_timer, pending_check);
+        btstack_run_loop_set_timer(&s_pend_timer, 1000);
+        btstack_run_loop_add_timer(&s_pend_timer);
+    }
 }
 
 static void pending_set(hci_con_handle_t handle, bool on) {
     for (size_t i = 0; i < sizeof s_pending / sizeof s_pending[0]; i++) {
-        if (on && s_pending[i] == 0) { s_pending[i] = handle; return; }
-        if (!on && s_pending[i] == handle) s_pending[i] = 0;
+        if (on && s_pending[i].handle == 0) {
+            s_pending[i].handle = handle;
+            s_pending[i].t_ms = now_ms();
+            btstack_run_loop_remove_timer(&s_pend_timer);
+            pending_check(NULL);
+            return;
+        }
+        if (!on && s_pending[i].handle == handle) s_pending[i].handle = 0;
     }
 }
 
@@ -392,7 +418,7 @@ void bt_connect_slot(int slot) {
     if (slot < 0 || slot >= g_hosts_n) return;
     bt_host_t *h = &g_hosts[slot];
     if (!h->used || h->connected || g_bt_state != BT_ST_READY) return;
-    make_room();
+    /* room is made when a connection really succeeds (a key for an unreachable host evicts nothing) */
     if (h->transport == BT_TR_LE) {
 #ifdef HH_BT_LE
         if (!g_bt_le) return;

@@ -1,6 +1,7 @@
 #include "bt_hid_queue.h"
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -76,23 +77,22 @@ static hidq_report_t *at(hidq_host_t *h, int i) {
     return &h->q[(h->head + i) % HIDQ_DEPTH];
 }
 
-/* Full queue: drop the oldest press (never a release); if only releases wait, the oldest one */
-static void make_room(hidq_host_t *h) {
-    int victim = 0;
-    for (int i = 0; i < h->count; i++) {
-        hidq_report_t *r = at(h, i);
-        if (!hidq_is_release(r->data, r->len)) {
-            victim = i;
-            break;
-        }
-    }
-    for (int i = victim; i < h->count - 1; i++) {
-        *at(h, i) = *at(h, i + 1);
-    }
+/* Full queue: drop the oldest press; else a release that a later release of the same report
+ * makes redundant (a release whose press was already sent is never dropped); else false. */
+static bool make_room(hidq_host_t *h) {
+    int victim = -1;
+    for (int i = 0; i < h->count && victim < 0; i++)
+        if (!hidq_is_release(at(h, i)->data, at(h, i)->len)) victim = i;
+    for (int i = 0; i < h->count && victim < 0; i++)
+        for (int j = i + 1; j < h->count; j++)
+            if (at(h, j)->data[1] == at(h, i)->data[1]) { victim = i; break; }
+    if (victim < 0) return false;
+    for (int i = victim; i < h->count - 1; i++) *at(h, i) = *at(h, i + 1);
     h->count--;
     s_dropped++;
     logf_line("HID reports for cid 0x%04x: queue full, dropped one waiting report (%u dropped since start)",
               (unsigned)h->cid, s_dropped);
+    return true;
 }
 
 /* Short name of a report for the log: which key or which release */
@@ -153,7 +153,11 @@ void hidq_send(uint16_t cid, const uint8_t *report, uint16_t len, uint32_t now_m
         return;
     }
     /* Behind any waiting report, so the host gets them in order */
-    if (h->count == HIDQ_DEPTH) make_room(h);
+    if (h->count == HIDQ_DEPTH && !make_room(h)) {
+        s_dropped++;
+        logf_line("HID report for cid 0x%04x dropped: queue full of releases", (unsigned)cid);
+        return;
+    }
     hidq_report_t *r = at(h, h->count);
     memcpy(r->data, report, len);
     r->len = (uint8_t)len;
