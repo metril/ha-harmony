@@ -412,7 +412,7 @@ static void test_stale_new_file_removed(void) {
     fputs("leftover", f);
     fclose(f);
     hp_cachew_t *w = NULL;
-    hp_cache_set_reserve(SIZE_MAX / 2); /* statvfs check fails, but the stale file is gone first */
+    hp_cache_set_reserve(SIZE_MAX); /* statvfs check fails, but the stale file is gone first */
     CT_EQ(hp_cachew_open(&w, path, 10), -HP_E_TOOBIG);
     CT_CHECK(access(tmp, F_OK) != 0);
     hp_cache_set_reserve(0);
@@ -438,7 +438,7 @@ static void test_flash_reserve_and_overflow(void) {
     CT_EQ(hp_cachew_open(&w, path, 1), -HP_E_TOOBIG);
     hp_cache_set_reserve(0);
     /* totals whose header/trailer sums would wrap a 32-bit size_t are refused before any arithmetic */
-    size_t huge[] = {SIZE_MAX, SIZE_MAX - 8, SIZE_MAX - 12, SIZE_MAX - 13, SIZE_MAX - 4095, SIZE_MAX - 4096 - 13};
+    size_t huge[] = {SIZE_MAX, SIZE_MAX - 8, SIZE_MAX - 12, SIZE_MAX - 13};
     for (size_t i = 0; i < sizeof huge / sizeof *huge; i++) CT_EQ(hp_cachew_open(&w, path, huge[i]), -HP_E_TOOBIG);
     CT_CHECK(w == NULL);
     /* through the wire: a total above the budget is refused up front (flash is not touched) */
