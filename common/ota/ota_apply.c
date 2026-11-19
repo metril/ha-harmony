@@ -48,8 +48,8 @@ static int copy_payload(FILE *in, const char *dst, const ota_hdr_t *hdr, mode_t 
     return rc;
 }
 
-int ota_apply_staged(const char *staged, const char *target, const char *prev_path, uint32_t min_build,
-                     const uint8_t pubkey[32], uint32_t *build_out) {
+int ota_apply_staged_cb(const char *staged, const char *target, const char *prev_path, uint32_t min_build,
+                        const uint8_t pubkey[32], uint32_t *build_out, int (*before_swap)(void *), void *ctx) {
     FILE *in = fopen(staged, "rb");
     if (!in) return OTA_E_IO;
     ota_hdr_t hdr;
@@ -77,12 +77,21 @@ int ota_apply_staged(const char *staged, const char *target, const char *prev_pa
         unlink(neu);
         return OTA_E_IO;
     }
+    if (before_swap && before_swap(ctx) != 0) {
+        unlink(neu);
+        return OTA_E_IO;
+    }
     if (rename(neu, target) != 0) {
         unlink(neu);
         return OTA_E_IO;
     }
     if (build_out) *build_out = hdr.build_id;
     return OTA_OK;
+}
+
+int ota_apply_staged(const char *staged, const char *target, const char *prev_path, uint32_t min_build,
+                     const uint8_t pubkey[32], uint32_t *build_out) {
+    return ota_apply_staged_cb(staged, target, prev_path, min_build, pubkey, build_out, NULL, NULL);
 }
 
 int ota_rollback(const char *target, const char *prev_path) {
