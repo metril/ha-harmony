@@ -17,6 +17,21 @@
 #include "proto/gen/harmony_proto.h"
 #include "remote/app/app.h"
 
+/* Default-preset tokens for the tests (the app itself has no colour literals). */
+#define RA_HEX_BG (ra_themes[0].bg)
+#define RA_HEX_S1 (ra_themes[0].s1)
+#define RA_HEX_S2 (ra_themes[0].s2)
+#define RA_HEX_S3 (ra_themes[0].s3)
+#define RA_HEX_TX (ra_themes[0].tx)
+#define RA_HEX_TX2 (ra_themes[0].tx2)
+#define RA_HEX_TX3 (ra_themes[0].tx3)
+#define RA_HEX_ACC (ra_themes[0].acc)
+#define RA_HEX_ONACC (ra_themes[0].onacc)
+#define RA_HEX_WARM (ra_themes[0].warm)
+#define RA_HEX_ONWARM (ra_themes[0].onwarm)
+#define RA_HEX_BAD (ra_themes[0].bad)
+#define RA_HEX_ONBAD (ra_themes[0].onbad)
+
 #define FK_MAXLOG 4096
 #define FK_FB_BYTES (240 * 320 * 2)
 

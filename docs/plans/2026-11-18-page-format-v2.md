@@ -36,16 +36,16 @@ Header, 11 + tlen bytes:
 | 4 | count | 0..32 |
 | 5 | gen | low byte of the config hash; a new gen clears the remote's page store |
 | 6 | total | pages in the set, 1..255 |
-| 7 | pflags | bits 0-1 kind (0 normal, 1 home, 2 favorites); bit 2 BACK (back chevron, Exit goes Home); other bits 0 |
+| 7 | pflags | bits 0-1 kind (0 normal, 1 home, 2 favorites); bit 2 BACK (back chevron, Exit goes Home); bits 3-5 theme id (section 7); bits 6-7 0 |
 | 8 | seq | `idx<<4 \| cnt`; 0 = not paged; else 1≤idx≤cnt, cnt≥2; group = consecutive ids `id-idx+1 .. id+cnt-idx`, all < total |
 | 9 | act | 0, or activity index+1: page auto-shows when that activity starts |
 | 10 | tlen | 0..24 |
 | 11.. | title | UTF-8; tlen 0 → "Harmony" |
 
-Widget, 5 + optional bytes + len: `kind` · `id` · `xy` · `wh` · [style] [icon] [bind] · `len` · label.
+Widget, 5 + optional bytes + len: `kind` · `id` · `xy` · `wh` · [style] [icon] [bind] [color] · `len` · label.
 
 - `kind`: bits 0-1 kind (0 button, 1 tile, 2 label; 3 rejected); bit 4 HAS_STYLE; bit 5 HAS_ICON;
-  bit 6 HAS_BIND; bits 2, 3, 7 must be 0.
+  bit 6 HAS_BIND; bit 7 HAS_COLOR (section 7); bits 2, 3 must be 0.
 - `style`: bits 0-2 role (0 default, 1 primary, 2 secondary, 3 danger, 4 nav; 5-7 rejected);
   bits 3-4 shape (0 card, 1 row, 2 pill, 3 monogram); bit 5 icon_only (label kept for the editor,
   not drawn); bits 6-7 must be 0.
@@ -158,6 +158,40 @@ tiles on/off/unavailable/stale, paged "2/3".
 | T17 | labels and nav widgets stop using global soft-key ids | T9 | S | core |
 | T18 | docs: `page-format.md` v2, `ha-config.md`, handshake | each | S | docs |
 | T19 | add-on TypeScript renderer from the `page_to_dict` vectors | T3 | M | addon |
+
+## 7. Colours and theme id (additive, still version 2)
+
+Both additions use bits the first v2 decoders rejected, so the capability gate (another package)
+must keep colour pages away from old remotes: an old remote returns `HP_E_INVAL` for a page with
+kind bit 7 or pflags bits 3-5 and drops it. Pages with no colour and theme 0 encode to exactly the
+same bytes as before.
+
+- `pflags` bits 3-5: theme preset id 0..7 (0 default, 7 custom theme delivered separately).
+  Bits 6-7 stay reserved and rejected.
+- `kind` bit 7 HAS_COLOR: one byte after the optional `bind` byte and before `len`:
+  low nibble = fill, high nibble = tile "on" fill. Nibble 0 = role default, 1..12 = palette index
+  (`PALETTE_NAMES`: red, orange, amber, yellow, lime, green, teal, cyan, blue, indigo, purple, pink),
+  15 = RGB565 follows, 13 and 14 rejected. A non-zero "on" nibble is only valid on tiles. A colour
+  byte of 0x00 is rejected (the encoder omits the byte instead), so encodings are canonical.
+- After the colour byte come 2 bytes big-endian RGB565 for the fill if its nibble is 15, then 2 for
+  the on colour if its nibble is 15. Python takes `"#RRGGBB"` and snaps it (`theme_math.snap565`);
+  decoding gives the snapped value back, so decode then encode is the identity.
+- Cost: +0 none, +1 palette only, +3 one rgb, +5 two rgb. `page_codec.widget_cost(w)` returns
+  `{base, label, style, icon, bind, color}` (base = 5: kind, id, xy, wh, len) and sums to `widget_size`.
+- Model: Python `Widget.color` / `Widget.on_color` (palette name, `"#RRGGBB"` or None) and
+  `Page.theme`; the same keys (`color`, `on_color`, `theme`) in `page_to_dict`. C: `hp_widget_t.color_fill`
+  / `color_on` as `hp_color_t {kind: HP_COLOR_NONE|PALETTE|RGB, value: index or RGB565}`, `hp_page_t.theme`.
+- v1 pages cannot carry either; the v1 view drops them.
+
+Worked example, theme 3, 4x6 page, one tile `Hi` with fill red and on colour `#FF8040` (snapped F88040):
+
+    02 00 04 06 01 00 01 18 00 00 00      header: v2, pflags 0x18 = theme 3<<3, total 1, tlen 0
+    81 01 00 22                           kind tile|HAS_COLOR, id 1, xy 0,0, wh 2x2
+    f1 fc 08                              colour byte (on nibble f, fill nibble 1 red), on RGB565 0xFC08
+    02 48 69                              len 2, "Hi"
+
+Vectors: `valid_v2c` (colour/theme pages, kept apart from `valid_v2` so the render goldens do not
+need them yet) and the `v2c_` entries of `invalid_v2`.
 
 ## Implementation notes (device side)
 

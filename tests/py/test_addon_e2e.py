@@ -139,14 +139,14 @@ async def test_import_preview_apply_ack_under_an_ingress_prefix(browser, site):
     await bar.get_by_role("button", name="Review & apply").click()
     await page.get_by_role("button", name="Apply to hub").click()
     await page.get_by_text("Saved as rev 1").wait_for()
-    await page.get_by_text("Waiting for Home Assistant").wait_for()
+    await page.get_by_text("Sending to the remote").wait_for()
     assert await page.get_by_text("(pending)").count() == 1
     if SHOTS:
         await shots(page, "apply-waiting")
 
     await ack(site)  # the integration pulled the bundle and applied it
     await page.get_by_text("(pending)").wait_for(state="detached", timeout=8000)
-    await page.get_by_text("Remote pages updated").wait_for()
+    await page.get_by_text("On the remote").wait_for()
     await page.get_by_role("button", name="Done").click()
     await bar.get_by_text("No changes since rev 1").wait_for()
     # 404s for the favicon are fine; CSP violations and script errors are not
@@ -192,7 +192,7 @@ async def test_waiting_message_after_30s_is_reachable_and_late_ack_still_complet
     await page.get_by_role("button", name="Apply to hub").click()
     await page.get_by_text("Home Assistant has not picked it up yet").wait_for(timeout=8000)
     await ack(site)
-    await page.get_by_text("Remote pages updated").wait_for(timeout=8000)
+    await page.get_by_text("On the remote").wait_for(timeout=8000)
 
 
 async def shots(page, name):
@@ -644,7 +644,36 @@ async def test_editor_follows_the_hub_id_the_integration_polls(browser, site):
     body = {"hub": hub, "rev": got["rev"], "result": "ok"}
     assert (await api(site, "POST", "/api/v1/bundle/ack", json=body, headers=auth))[0] == 200
     await page.get_by_text("(pending)").wait_for(state="detached", timeout=8000)
-    await page.get_by_text("Remote pages updated").wait_for()
+    await page.get_by_text("On the remote").wait_for()
     st = (await api(site, "GET", f"/api/v1/config/status?hub={hub}"))[1]
     assert st["acked_rev"] == st["applied_rev"] and st["result"] == "ok"
     assert [p for p in problems if "Failed to load resource" not in p] == []
+
+
+async def test_history_status_follows_the_remote(browser, site):
+    """One status chip on the newest rev: Sending... until the integration acks, then On the remote; a rejection says why."""
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    await seed(site, YAML, SMALL)
+    await api(site, "GET", "/api/v1/bundle?hub=default", headers=auth)  # the integration polls: linked, not acked
+    page = await open_editor(browser, site)
+    await page.goto(f"{site}{PREFIX}/#/history")
+    status = page.locator("hh-history li").first.locator(".chip")
+    await status.get_by_text("Sending…").wait_for()
+    assert await page.get_by_role("button", name="Restore rev 1").count() == 1
+    await page.get_by_text("is being sent to the remote").wait_for()
+    if SHOTS:
+        await shots(page, "history-sending")
+    await ack(site)
+    await page.reload()
+    await page.get_by_text("On the remote").wait_for()
+    if SHOTS:
+        await shots(page, "history-on-remote")
+    await seed(site, YAML)
+    await api(site, "GET", "/api/v1/bundle?hub=default", headers=auth)
+    await ack(site, "error", "bad key map")
+    await page.reload()
+    await page.get_by_text("Rejected by hub").wait_for()
+    await page.get_by_role("button", name="See why").click()
+    await page.get_by_text("bad key map").first.wait_for()
+    if SHOTS:
+        await shots(page, "history-rejected")

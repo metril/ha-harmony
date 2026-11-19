@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
+from .theme_math import PALETTE_NAMES, from565, to565
+
 VERSION = 1  # the original format; encode_page() still produces it
 VERSION_2 = 2
 MAX_WIDGETS = 32
@@ -27,10 +29,16 @@ ICON_STOCK_MAX = 159
 ICON_CUSTOM_MAX = 254
 
 # widget kind byte
-_HAS_STYLE, _HAS_ICON, _HAS_BIND = 0x10, 0x20, 0x40
-_KIND_RESERVED = 0x8C  # bits 2, 3, 7
+_HAS_STYLE, _HAS_ICON, _HAS_BIND, _HAS_COLOR = 0x10, 0x20, 0x40, 0x80
+_KIND_RESERVED = 0x0C  # bits 2, 3
 _ICON_ONLY = 0x20
 _BACK = 0x04
+_THEME_SHIFT, _THEME_MASK = (
+    3,
+    0x38,
+)  # pflags bits 3-5: theme preset id 0..7 (7 = custom, delivered separately)
+THEME_MAX = 7
+_RGB = 15  # colour nibble: 2-byte big-endian RGB565 follows
 
 
 @dataclass(frozen=True)
@@ -47,6 +55,10 @@ class Widget:
     icon_only: bool = False  # v2
     icon: int = 0  # v2: 0 none, 1..159 stock, 160..254 custom
     bind: int | None = None  # v2: nav -> target page id; otherwise activity index
+    color: str | None = (
+        None  # v2: fill; palette name or "#RRGGBB" (snapped to RGB565); None = role default
+    )
+    on_color: str | None = None  # v2, tiles only: fill when on; same forms
 
 
 @dataclass(frozen=True)
@@ -64,6 +76,7 @@ class Page:
     seq_cnt: int = 0  # v2: 0 or >= 2
     act: int = 0  # v2: 0, or activity index + 1
     title: str = ""  # v2: "" -> the remote shows "Harmony"
+    theme: int = 0  # v2: preset id 0..7 (0 default, 7 custom)
 
 
 def _encode_text(s: str, limit: int, what: str) -> bytes:
@@ -121,6 +134,8 @@ def _validate_header_v2(page: Page) -> None:
         raise ValueError(f"gen {page.gen} out of range 0..255")
     if page.kind not in PAGE_KINDS:
         raise ValueError(f"unknown page kind {page.kind!r}")
+    if not 0 <= page.theme <= THEME_MAX:
+        raise ValueError(f"theme {page.theme} out of range 0..{THEME_MAX}")
     if not 0 <= page.act <= 255:
         raise ValueError(f"act {page.act} out of range 0..255")
     _encode_text(page.title, MAX_TITLE, "title")
@@ -148,6 +163,56 @@ def _validate_widget_v2(page: Page, w: Widget) -> None:
             raise ValueError(f"nav widget {w.id} targets page {w.bind} (total {page.total})")
     if w.bind is not None and not 0 <= w.bind <= 255:
         raise ValueError(f"widget {w.id} bind {w.bind} out of range 0..255")
+    _color_parts(w.color, f"widget {w.id} color")
+    if _color_parts(w.on_color, f"widget {w.id} on_color")[0] and w.kind != "tile":
+        raise ValueError(f"widget {w.id} on_color is only valid on tiles")
+
+
+def _color_parts(c: str | None, what: str) -> tuple[int, bytes]:
+    """(colour nibble, RGB565 bytes): 0 none, 1..12 palette index, 15 + 2 bytes for "#RRGGBB"."""
+    if c is None:
+        return 0, b""
+    if c in PALETTE_NAMES:
+        return PALETTE_NAMES.index(c) + 1, b""
+    if (
+        isinstance(c, str)
+        and len(c) == 7
+        and c[0] == "#"
+        and all(ch in "0123456789abcdefABCDEF" for ch in c[1:])
+    ):
+        return _RGB, to565(int(c[1:], 16)).to_bytes(2, "big")
+    raise ValueError(f"{what} {c!r} is neither a palette name nor #RRGGBB")
+
+
+def _color_bytes(w: Widget) -> bytes:
+    """The HAS_COLOR payload (colour byte + RGB565 values), or b"" when the widget has no colour."""
+    f, fb = _color_parts(w.color, "color")
+    o, ob = _color_parts(w.on_color, "on_color")
+    return bytes([f | o << 4]) + fb + ob if f | o else b""
+
+
+def _color_name(nib: int, data: bytes, off: int) -> tuple[str | None, int]:
+    if nib == 0:
+        return None, off
+    if nib == _RGB:
+        return f"#{from565(int.from_bytes(data[off : off + 2], 'big')):06X}", off + 2
+    return PALETTE_NAMES[nib - 1], off
+
+
+def widget_cost(w: Widget) -> dict[str, int]:
+    """Exact v2 byte cost of one widget by part; the values sum to widget_size(w).
+
+    base = kind, id, x/y, w/h and the label length byte (5); label = label bytes; style/icon/bind
+    = 0 or 1; color = 0 (none), 1 (palette), 3 (one rgb) or 5 (two rgb)."""
+    style = ROLES.index(w.role) | SHAPES.index(w.shape) << 3 | (_ICON_ONLY if w.icon_only else 0)
+    return {
+        "base": WIDGET_BYTES,
+        "label": len(w.label.encode()),
+        "style": 1 if style else 0,
+        "icon": 1 if w.icon else 0,
+        "bind": 1 if w.bind is not None else 0,
+        "color": len(_color_bytes(w)),
+    }
 
 
 def _widget_bytes(w: Widget, v2: bool) -> bytes:
@@ -167,6 +232,9 @@ def _widget_bytes(w: Widget, v2: bool) -> bytes:
         if w.bind is not None:
             kind |= _HAS_BIND
             extra += bytes([w.bind])
+        if cb := _color_bytes(w):
+            kind |= _HAS_COLOR
+            extra += cb
     head = bytes([kind, w.id, (w.x << 4) | w.y, (w.w << 4) | w.h])
     return head + extra + bytes([len(label)]) + label
 
@@ -198,7 +266,9 @@ def encode(page: Page, version: int = 2) -> bytes:
     if v2:
         t = page.title.encode()
         seq = (page.seq_idx << 4) | page.seq_cnt
-        pflags = PAGE_KINDS.index(page.kind) | (_BACK if page.back else 0)
+        pflags = (
+            PAGE_KINDS.index(page.kind) | (_BACK if page.back else 0) | page.theme << _THEME_SHIFT
+        )
         out = bytearray(
             [2, page.page_id, page.cols, page.rows, len(page.widgets), page.gen, page.total]
             + [pflags, seq, page.act, len(t)]
@@ -263,7 +333,7 @@ def decode_page(data: bytes) -> Page:
     off = hdr
     if v2:
         pflags, seq, act, tlen = data[7:11]
-        if pflags & 3 == 3 or pflags & ~(3 | _BACK):
+        if pflags & 3 == 3 or pflags & ~(3 | _BACK | _THEME_MASK):
             raise ValueError(f"reserved page flag bits set ({pflags:#04x})")
         if tlen > MAX_TITLE:
             raise ValueError(f"title exceeds {MAX_TITLE} bytes")
@@ -281,6 +351,7 @@ def decode_page(data: bytes) -> Page:
             "seq_cnt": seq & 15,
             "act": act,
             "title": title,
+            "theme": (pflags & _THEME_MASK) >> _THEME_SHIFT,
         }
     widgets = []
     for _ in range(count):
@@ -293,10 +364,11 @@ def decode_page(data: bytes) -> Page:
         if v2 and (kind & _KIND_RESERVED or kind & 3 == 3):
             raise ValueError(f"bad widget kind byte {kind:#04x}")
         role, shape, icon_only, icon, bind = "default", "card", False, 0, None
+        color = on_color = None
         wid, xy, wh = data[off : off + 3]
         off += 3
         if v2:
-            need = bool(kind & _HAS_STYLE) + bool(kind & _HAS_ICON) + bool(kind & _HAS_BIND) + 1
+            need = sum(bool(kind & f) for f in (_HAS_STYLE, _HAS_ICON, _HAS_BIND, _HAS_COLOR)) + 1
             if len(data) - off < need:
                 raise ValueError("truncated widget")
             if kind & _HAS_STYLE:
@@ -313,6 +385,18 @@ def decode_page(data: bytes) -> Page:
             if kind & _HAS_BIND:
                 bind = data[off]
                 off += 1
+            if kind & _HAS_COLOR:
+                cb = data[off]
+                off += 1
+                fn, on = cb & 15, cb >> 4
+                if cb == 0 or {fn, on} & {13, 14}:
+                    raise ValueError(f"bad colour byte {cb:#04x}")
+                if on and kind & 3 != KINDS["tile"]:
+                    raise ValueError("on colour on a non-tile widget")
+                if len(data) - off < 2 * ((fn == _RGB) + (on == _RGB)) + 1:
+                    raise ValueError("truncated widget")
+                color, off = _color_name(fn, data, off)
+                on_color, off = _color_name(on, data, off)
         ll = data[off]
         off += 1
         if ll > MAX_LABEL:
@@ -335,6 +419,8 @@ def decode_page(data: bytes) -> Page:
                 icon_only,
                 icon,
                 bind,
+                color,
+                on_color,
             )
         )
     if off != len(data):
@@ -358,6 +444,7 @@ def page_to_dict(page: Page) -> dict[str, Any]:
         "seq": {"idx": page.seq_idx, "cnt": page.seq_cnt} if page.seq_cnt else None,
         "act": page.act,
         "title": page.title,
+        "theme": page.theme,
         "widgets": [
             {
                 "kind": w.kind,
@@ -372,6 +459,8 @@ def page_to_dict(page: Page) -> dict[str, Any]:
                 "icon_only": w.icon_only,
                 "icon": w.icon,
                 "bind": w.bind,
+                "color": w.color,
+                "on_color": w.on_color,
             }
             for w in page.widgets
         ],

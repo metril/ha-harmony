@@ -107,6 +107,8 @@ if(NOT CMAKE_CROSSCOMPILING OR HP_TARGET STREQUAL "remote")
     remote/app/display.c
     remote/app/ui.c
     remote/app/theme.c
+    remote/app/theme_presets.c
+    remote/app/theme_derive.c
     remote/app/fonts/ra_font_b20.c
     remote/app/fonts/ra_font_b18.c
     remote/app/fonts/ra_font_m16.c

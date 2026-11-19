@@ -51,21 +51,34 @@ static void try_decode(const uint8_t *src, size_t n) {
         CT_CHECK(w->w && w->h && w->x + w->w <= p.cols && w->y + w->h <= p.rows);
         CT_CHECK(strlen(w->label) <= HP_PAGE_MAX_LABEL);
         CT_CHECK(w->role != HP_ROLE_NAV || (w->has_bind && w->bind < p.total));
+        CT_CHECK(w->color_fill.kind <= HP_COLOR_RGB && w->color_on.kind <= HP_COLOR_RGB);
+        CT_CHECK(w->color_fill.kind != HP_COLOR_PALETTE || (w->color_fill.value >= 1 && w->color_fill.value <= HP_PAGE_PALETTE_MAX));
+        CT_CHECK(w->color_on.kind != HP_COLOR_PALETTE || (w->color_on.value >= 1 && w->color_on.value <= HP_PAGE_PALETTE_MAX));
+        CT_CHECK(w->color_on.kind == HP_COLOR_NONE || w->kind == HP_WIDGET_TILE); /* on colour is tiles only */
+        CT_CHECK(p.version == 2 || (w->color_fill.kind == HP_COLOR_NONE && w->color_on.kind == HP_COLOR_NONE));
     }
+    CT_CHECK(p.theme <= 7 && (p.version == 2 || p.theme == 0));
+}
+
+static uint64_t xs(uint64_t *s) { /* xorshift64* */
+    *s ^= *s >> 12; *s ^= *s << 25; *s ^= *s >> 27;
+    return *s * 0x2545F4914F6CDD1Dull;
 }
 
 int main(int argc, char **argv) {
+    const char *ie = getenv("HP_FUZZ_ITERS");
+    unsigned iters = ie ? (unsigned)strtoul(ie, NULL, 10) : 20000;
     int shard = argc > 2 ? atoi(argv[1]) : 0, shards = argc > 2 ? atoi(argv[2]) : 1;
     FILE *f = fopen(HP_VECTORS, "rb");
     if (!f) { fprintf(stderr, "cannot open vectors\n"); return 1; }
-    static char text[1 << 16];
+    static char text[1 << 18];
     size_t tn = fread(text, 1, sizeof text - 1, f);
     fclose(f);
     text[tn] = 0;
     cJSON *root = cJSON_Parse(text);
     if (!root) return 1;
-    static const char *sets[] = {"valid", "valid_v2"};
-    for (unsigned s = 0; s < 2; s++) {
+    static const char *sets[] = {"valid", "valid_v2", "valid_v2c"};
+    for (unsigned s = 0; s < 3; s++) {
         const cJSON *v;
         cJSON_ArrayForEach(v, cJSON_GetObjectItem(root, sets[s])) {
             uint8_t raw[300];
@@ -80,6 +93,27 @@ int main(int argc, char **argv) {
                     m[i] = (uint8_t)b;
                     try_decode(m, n);
                 }
+            }
+            /* seeded random phase: 1..4 random byte overwrites, an insertion, a deletion (HP_FUZZ_ITERS per vector per shard) */
+            uint64_t rng = 0x9E3779B97F4A7C15ull ^ ((uint64_t)shard << 32) ^ n;
+            for (unsigned it = 0; it < iters; it++) {
+                uint8_t m[300];
+                size_t mn = n;
+                memcpy(m, raw, n);
+                unsigned op = (unsigned)(xs(&rng) % 6);
+                if (op < 4) {
+                    for (unsigned k = 0; k <= op && n; k++) m[xs(&rng) % n] = (uint8_t)xs(&rng);
+                } else if (op == 4 && n < sizeof m) {
+                    size_t at = xs(&rng) % (n + 1);
+                    memmove(m + at + 1, m + at, n - at);
+                    m[at] = (uint8_t)xs(&rng);
+                    mn = n + 1;
+                } else if (n) {
+                    size_t at = xs(&rng) % n;
+                    memmove(m + at, m + at + 1, n - at - 1);
+                    mn = n - 1;
+                }
+                try_decode(m, mn);
             }
         }
     }

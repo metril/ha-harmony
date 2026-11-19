@@ -1,13 +1,13 @@
 {
   "name": "harmony-editor-frontend",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
+    "lint": "eslint src scripts",
     "test": "vitest run",
     "size": "node scripts/check-size.mjs"
   },

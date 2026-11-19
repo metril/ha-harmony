@@ -20,7 +20,6 @@
 #define RA_UI_PAGE_BOOT 0xFE
 #define RA_UI_PAGE_FALLBACK 0xFF /* ...but tile_update on them finds no tile and is ignored */
 
-#define RA_UI_BG RA_HEX_BG
 
 typedef struct {
   hp_page_t page; /* what is on screen (boot / fallback / pushed); built-in pages have count 0 */
@@ -36,6 +35,8 @@ typedef struct {
   int pressed;    /* widget index drawn pressed, or -1 */
   /* state screens and the empty page: main message and caption labels (else NULL) */
   lv_obj_t *msg, *cap;
+  int msg_bad;          /* msg drawn in the BAD colour (else TX) */
+  lv_obj_t *err_msg;    /* the error overlay's headline */
   lv_obj_t *prog_fill;  /* receiving screen: progress bar fill */
   int recv_total;       /* receiving screen showing "k of N" (N), else 0 */
   /* status bar */

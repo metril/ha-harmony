@@ -7,6 +7,8 @@
 
 #include "hub/hp_errors.h"
 
+#define TH (ra_theme_cur())
+
 #define ELLIPSIS "\xe2\x80\xa6"
 
 static void paint(ra_ui_t *ui, unsigned i);
@@ -95,16 +97,16 @@ static lv_obj_t *rect(lv_obj_t *parent, int x, int y, int w, int h, const lv_sty
 
 static void chrome_apply(ra_ui_t *ui) {
   if (!ui->bar || !ui->title || !ui->rf[0] || !ui->rf[1] || !ui->rf[2] || !ui->pct || !ui->batt || !ui->batt_fill) return;
-  lv_color_t rf = RA_COLOR(ui->link_lost ? RA_HEX_BAD : RA_HEX_TX2);
+  lv_color_t rf = ra_color(ui->link_lost ? TH->bad : TH->tx2);
   for (int i = 0; i < 3; i++) {
     lv_obj_set_style_bg_color(ui->rf[i], rf, 0);
     if (i) set_hidden(ui->rf[i], ui->link_lost); /* lost: one short red bar */
   }
   int low = ui->soc >= 0 && ui->soc <= RA_LOWBATT_PCT && !ui->charging;
-  lv_color_t c = RA_COLOR(low ? RA_HEX_BAD : ui->charging ? RA_HEX_ACC : RA_HEX_TX2);
+  lv_color_t c = ra_color(low ? TH->bad : ui->charging ? TH->acc : TH->tx2);
   lv_obj_set_style_border_color(ui->batt, c, 0);
   lv_obj_set_style_bg_color(ui->batt_fill, c, 0);
-  lv_obj_set_style_text_color(ui->pct, RA_COLOR(low ? RA_HEX_BAD : RA_HEX_TX2), 0);
+  lv_obj_set_style_text_color(ui->pct, ra_color(low ? TH->bad : TH->tx2), 0);
   set_hidden(ui->batt_fill, ui->soc < 0);
   set_hidden(ui->pct, ui->soc < 0);
   if (ui->soc >= 0) {
@@ -146,7 +148,7 @@ static int bar_build(ra_ui_t *ui, lv_obj_t *scr, const char *title, const bar_ct
     lv_obj_t *q = make_label(bar, sq, &ra_st_txt_cap, NULL, 40);
     if (!q) return -1;
     lv_obj_set_style_text_align(q, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_color(q, RA_COLOR(RA_HEX_TX3), 0);
+    lv_obj_set_style_text_color(q, ra_color(TH->tx3), 0);
     lv_obj_set_pos(q, SEQ_RIGHT - 40, 9);
     ui->seq = q;
     tw = SEQ_RIGHT - 40 - 4 - tx;
@@ -266,12 +268,13 @@ static int screen_reset(ra_ui_t *ui, const char *title, unsigned widgets, unsign
 }
 
 /* Centred two-line state message in the content area; 0 ok, -1 out of memory. */
-static int message(ra_ui_t *ui, const char *head, const char *sub, uint32_t head_hex) {
+static int message(ra_ui_t *ui, const char *head, const char *sub, int head_bad) {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_t *m = make_label(scr, head, &ra_st_txt_display, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
   if (!m) return -1;
   ui->msg = m;
-  lv_obj_set_style_text_color(m, RA_COLOR(head_hex), 0);
+  ui->msg_bad = head_bad;
+  lv_obj_set_style_text_color(m, ra_color(head_bad ? TH->bad : TH->tx), 0);
   lv_obj_set_pos(m, RA_MARGIN, 148);
   lv_obj_t *c = make_label(scr, sub, &ra_st_txt_cap, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
   if (!c) return -1;
@@ -292,21 +295,21 @@ static wcol_t widget_colors(const ra_ui_t *ui, const hp_widget_t *w, int active)
   if (w->kind == HP_WIDGET_TILE) {
     wcol_t c;
     switch (w->tstate) {
-    case HP_TILE_ON: c = (wcol_t){RA_HEX_WARM, RA_HEX_ONWARM, RA_HEX_ONWARM, RA_HEX_ONWARM}; break;
-    case HP_TILE_UNAVAILABLE: c = (wcol_t){RA_HEX_S1, RA_HEX_TX3, RA_HEX_TX3, RA_HEX_TX3}; break;
-    case HP_TILE_OFF: c = (wcol_t){RA_HEX_S1, RA_HEX_TX2, RA_HEX_TX3, RA_HEX_TX3}; break;
-    default: c = (wcol_t){RA_HEX_S1, RA_HEX_TX, RA_HEX_TX2, RA_HEX_TX2}; break;
+    case HP_TILE_ON: c = (wcol_t){TH->warm, TH->onwarm, TH->onwarm, TH->onwarm}; break;
+    case HP_TILE_UNAVAILABLE: c = (wcol_t){TH->s1, TH->tx3, TH->tx3, TH->tx3}; break;
+    case HP_TILE_OFF: c = (wcol_t){TH->s1, TH->tx2, TH->tx3, TH->tx3}; break;
+    default: c = (wcol_t){TH->s1, TH->tx, TH->tx2, TH->tx2}; break;
     }
-    if (is_stale_tile(ui, w) && w->tstate != HP_TILE_ON) c.ink = RA_HEX_TX3;
+    if (is_stale_tile(ui, w) && w->tstate != HP_TILE_ON) c.ink = TH->tx3;
     return c;
   }
-  if (active) return (wcol_t){RA_HEX_ACC, RA_HEX_ONACC, RA_HEX_ONACC, RA_HEX_ONACC};
+  if (active) return (wcol_t){TH->acc, TH->onacc, TH->onacc, TH->onacc};
   switch (w->role) {
-  case HP_ROLE_PRIMARY: return (wcol_t){RA_HEX_S2, RA_HEX_ACC, RA_HEX_ACC, RA_HEX_TX2};
-  case HP_ROLE_SECONDARY: return (wcol_t){RA_HEX_S1, RA_HEX_TX2, RA_HEX_TX3, RA_HEX_TX3};
-  case HP_ROLE_DANGER: return (wcol_t){RA_HEX_S2, RA_HEX_BAD, RA_HEX_BAD, RA_HEX_BAD};
-  case HP_ROLE_NAV: return (wcol_t){RA_HEX_S1, RA_HEX_TX, RA_HEX_ACC, RA_HEX_TX2};
-  default: return (wcol_t){RA_HEX_S2, RA_HEX_TX, RA_HEX_TX2, RA_HEX_TX2};
+  case HP_ROLE_PRIMARY: return (wcol_t){TH->s2, TH->acc, TH->acc, TH->tx2};
+  case HP_ROLE_SECONDARY: return (wcol_t){TH->s1, TH->tx2, TH->tx3, TH->tx3};
+  case HP_ROLE_DANGER: return (wcol_t){TH->s2, TH->bad, TH->bad, TH->bad};
+  case HP_ROLE_NAV: return (wcol_t){TH->s1, TH->tx, TH->acc, TH->tx2};
+  default: return (wcol_t){TH->s2, TH->tx, TH->tx2, TH->tx2};
   }
 }
 
@@ -327,10 +330,10 @@ static void paint(ra_ui_t *ui, unsigned i) {
   if (!ui->obj[i] || w->kind == HP_WIDGET_LABEL) return;
   int act = widget_active(ui, w);
   wcol_t c = widget_colors(ui, w, act);
-  lv_obj_set_style_bg_color(ui->obj[i], RA_COLOR(c.fill), 0);
-  if (ui->lbl[i]) lv_obj_set_style_text_color(ui->lbl[i], RA_COLOR(c.ink), 0);
-  if (ui->ico[i]) lv_obj_set_style_text_color(ui->ico[i], RA_COLOR(c.icon), 0);
-  if (ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], RA_COLOR(c.cap), 0);
+  lv_obj_set_style_bg_color(ui->obj[i], ra_color(c.fill), 0);
+  if (ui->lbl[i]) lv_obj_set_style_text_color(ui->lbl[i], ra_color(c.ink), 0);
+  if (ui->ico[i]) lv_obj_set_style_text_color(ui->ico[i], ra_color(c.icon), 0);
+  if (ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], ra_color(c.cap), 0);
   if (act) ui->active |= 1u << i;
   else ui->active &= ~(1u << i);
 }
@@ -511,10 +514,10 @@ static void build(ra_ui_t *ui) {
     l = make_label(o, txt, ts, NULL, bw - 8);
     if (!l) return fail(ui);
     lv_obj_center(l);
-    if (btn && !strcasecmp(w->label, "Power Off")) lv_obj_set_style_text_color(l, RA_COLOR(RA_HEX_BAD), 0);
+    if (btn && !strcasecmp(w->label, "Power Off")) lv_obj_set_style_text_color(l, ra_color(TH->bad), 0);
     ui->lbl[i] = l;
   }
-  if (!interactive_or_text && message(ui, "No activities yet", "Add some in Home Assistant", RA_HEX_TX) < 0) fail(ui);
+  if (!interactive_or_text && message(ui, "No activities yet", "Add some in Home Assistant", 0) < 0) fail(ui);
 }
 
 void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p) {
@@ -523,16 +526,34 @@ void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p) {
   build(ui);
 }
 
-static void show_builtin(ra_ui_t *ui, uint8_t id, const char *head, const char *sub, uint32_t head_hex) {
+static void show_builtin(ra_ui_t *ui, uint8_t id, const char *head, const char *sub, int head_bad) {
   memset(&ui->page, 0, sizeof ui->page);
   ui->page.page_id = id;
   ui->page.cols = ui->page.rows = 1;
   if (screen_reset(ui, "Harmony", 0, 0, NULL) < 0) return;
-  if (message(ui, head, sub, head_hex) < 0) fail(ui);
+  if (message(ui, head, sub, head_bad) < 0) fail(ui);
+}
+
+/* Theme switched: recolour what carries a local colour (the shared styles were already updated in place). */
+static void retheme(void *ctx) {
+  ra_ui_t *ui = ctx;
+  chrome_apply(ui);
+  if (ui->seq) lv_obj_set_style_text_color(ui->seq, ra_color(TH->tx3), 0);
+  if (ui->msg) lv_obj_set_style_text_color(ui->msg, ra_color(ui->msg_bad ? TH->bad : TH->tx), 0);
+  if (ui->err_msg) lv_obj_set_style_text_color(ui->err_msg, ra_color(TH->bad), 0);
+  if (ui->prog_fill) lv_obj_set_style_bg_color(ui->prog_fill, ra_color(TH->acc), 0);
+  if (ui->page.page_id >= RA_UI_PAGE_ERROR) return; /* built-in screens: no widgets */
+  for (unsigned i = 0; i < ui->page.count; i++) {
+    if (ui->page.version == 2) paint(ui, i);
+    else if (ui->lbl[i] && ui->page.widgets[i].kind == HP_WIDGET_BUTTON && !strcasecmp(ui->page.widgets[i].label, "Power Off"))
+      lv_obj_set_style_text_color(ui->lbl[i], ra_color(TH->bad), 0);
+  }
 }
 
 void ra_ui_init(ra_ui_t *ui) {
   memset(ui, 0, sizeof *ui);
+  ra_theme_init();
+  ra_theme_set_listener(retheme, ui);
   ui->soc = -1;
   ui->title_idx = ui->pressed = -1;
   /* The error state, built once while the pool is empty and kept hidden on the top layer. */
@@ -540,8 +561,9 @@ void ra_ui_init(ra_ui_t *ui) {
   if (ui->err) {
     lv_obj_t *m = make_label(ui->err, "Display error", &ra_st_txt_display, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
     lv_obj_t *c = make_label(ui->err, "Waiting for the next page", &ra_st_txt_cap, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
+    ui->err_msg = m;
     if (m) {
-      lv_obj_set_style_text_color(m, RA_COLOR(RA_HEX_BAD), 0);
+      lv_obj_set_style_text_color(m, ra_color(TH->bad), 0);
       lv_obj_set_pos(m, RA_MARGIN, 148);
     }
     if (c) lv_obj_set_pos(c, RA_MARGIN, 176);
@@ -551,12 +573,12 @@ void ra_ui_init(ra_ui_t *ui) {
 }
 
 void ra_ui_show_boot(ra_ui_t *ui) {
-  show_builtin(ui, RA_UI_PAGE_BOOT, "Connecting" ELLIPSIS, "Looking for the hub", RA_HEX_TX);
+  show_builtin(ui, RA_UI_PAGE_BOOT, "Connecting" ELLIPSIS, "Looking for the hub", 0);
   ui->fallback = 0;
 }
 
 void ra_ui_show_receiving(ra_ui_t *ui) {
-  show_builtin(ui, RA_UI_PAGE_RECEIVING, "Receiving config" ELLIPSIS, "Waiting for the first page", RA_HEX_TX);
+  show_builtin(ui, RA_UI_PAGE_RECEIVING, "Receiving config" ELLIPSIS, "Waiting for the first page", 0);
   ui->fallback = 0;
 }
 
@@ -580,7 +602,7 @@ void ra_ui_show_receiving_n(ra_ui_t *ui, unsigned k, unsigned n) {
     recv_texts(ui, k, n); /* same screen: only the numbers change */
     return;
   }
-  show_builtin(ui, RA_UI_PAGE_RECEIVING, "Receiving page", "", RA_HEX_TX);
+  show_builtin(ui, RA_UI_PAGE_RECEIVING, "Receiving page", "", 0);
   if (ui->page.page_id != RA_UI_PAGE_RECEIVING) return; /* the error state */
   lv_obj_t *scr = lv_screen_active();
   lv_obj_t *track = rect(scr, PROG_X, PROG_Y, PROG_W, PROG_H, &ra_st_btn);
@@ -588,7 +610,7 @@ void ra_ui_show_receiving_n(ra_ui_t *ui, unsigned k, unsigned n) {
   if (!track || !fill) return fail(ui);
   lv_obj_set_style_radius(track, 3, 0);
   lv_obj_set_style_radius(fill, 3, 0);
-  lv_obj_set_style_bg_color(fill, RA_COLOR(RA_HEX_ACC), 0);
+  lv_obj_set_style_bg_color(fill, ra_color(TH->acc), 0);
   ui->prog_fill = fill;
   ui->fallback = 0;
   ui->recv_total = (int)n;
@@ -596,7 +618,7 @@ void ra_ui_show_receiving_n(ra_ui_t *ui, unsigned k, unsigned n) {
 }
 
 void ra_ui_show_fallback(ra_ui_t *ui) {
-  show_builtin(ui, RA_UI_PAGE_FALLBACK, "Hub unreachable", "Reconnecting automatically", RA_HEX_BAD);
+  show_builtin(ui, RA_UI_PAGE_FALLBACK, "Hub unreachable", "Reconnecting automatically", 1);
   ui->fallback = 1;
 }
 

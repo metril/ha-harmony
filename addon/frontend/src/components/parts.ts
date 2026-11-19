@@ -4,6 +4,7 @@ import { setStyle } from '../lib/set-style';
 import type { Store } from '../lib/store';
 import { LIMITS, counts } from '../lib/model';
 import type { Problem } from '../lib/problems';
+import { icon } from '../lib/icons';
 
 export function meter(label: string, text: string, value: number, max: number, hint?: string, tip?: string): TemplateResult {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
@@ -78,4 +79,11 @@ export function problemList(list: Problem[], onOpen?: (p: Problem) => void): Tem
     <h2>${list.length} problem${list.length === 1 ? '' : 's'} to fix before applying</h2>
     <ul>${list.map((p) => html`<li id=${'f-' + p.path.join('.').replace(/[^A-Za-z0-9_.-]/g, '_')}><b>${p.label}</b> <span>${p.msg}</span>${p.open && onOpen ? html`<button class="btn sm" @click=${() => onOpen(p)}>Open</button>` : nothing}</li>`)}</ul>
   </section>`;
+}
+
+/** The one status chip: tone ok (green) / bad (red) / ir (amber) / '' (neutral), sentence-case text, optional check icon.
+ * Header link state, "Valid", and the History row status all come from here, so they cannot drift apart. */
+export type ChipTone = 'ok' | 'bad' | 'ir' | '';
+export function statusChip(tone: ChipTone, label: string, o: { check?: boolean; title?: string; id?: string } = {}): TemplateResult {
+  return html`<span class="chip ${tone}" id=${o.id ?? nothing} title=${o.title ?? nothing}>${o.check ? icon('check') : nothing}${label}</span>`;
 }

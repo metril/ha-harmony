@@ -119,9 +119,7 @@ export class HhApplyDialog extends StoreElement {
     return [
       { label: 'Validated', state: 'done' },
       { label: `Saved as rev ${this.rev}`, state: 'done' },
-      { label: 'Waiting for Home Assistant', state: w },
-      { label: 'Pushed to hub', state: this.ack === 'ok' ? 'done' : 'todo' },
-      { label: 'Remote pages updated', state: this.ack === 'ok' ? 'done' : 'todo' },
+      { label: this.ack === 'ok' ? 'On the remote' : this.ack === 'error' ? 'Rejected by hub' : 'Sending to the remote', state: w },
     ];
   }
 
@@ -153,7 +151,7 @@ export class HhApplyDialog extends StoreElement {
         <button slot="footer" class="btn" @click=${() => this.close()}>Close</button>
       </hh-dialog>`;
     }
-    return html`<hh-dialog .open=${this.open} heading="Applied as rev ${this.rev}" @close=${() => this.close()}>
+    return html`<hh-dialog .open=${this.open} heading="Rev ${this.rev} saved" @close=${() => this.close()}>
       <ul class="steps" aria-live="polite" aria-label="Progress">
         ${this.steps().map(
           (st) => html`<li class=${st.state}>${st.state === 'done' ? icon('check') : html`<span class="dot"></span>`}${st.label}${st.state === 'pending' ? html` <span class="muted">(pending)</span>` : nothing}</li>`,
@@ -161,10 +159,10 @@ export class HhApplyDialog extends StoreElement {
       </ul>
       ${this.ack === 'waiting' ? html`<p class="muted">You can close this: the add-on has saved the config, and the rest happens in the background.</p>` : nothing}
       ${this.ack === 'timeout'
-        ? html`<div class="banner ir" role="status">Saved as rev ${this.rev}.
+        ? html`<div class="banner ir" role="status">Rev ${this.rev} is saved but not on the remote yet.
             ${linkProblem(linkInfo(this.lastStatus, s.hub), s.hub) ??
             (this.linked
-              ? 'Home Assistant has not picked it up yet. It will apply as soon as the integration is connected.'
+              ? 'Home Assistant has not picked it up yet. It will be sent as soon as the integration is connected.'
               : 'Home Assistant has not picked it up yet. Is the Harmony integration set up and linked to this add-on?')}</div>`
         : nothing}
       ${this.ack === 'error'
