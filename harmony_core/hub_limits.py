@@ -122,6 +122,15 @@ CURRENT = HubLimits(
 )
 
 
+def bt_table_limits(lim: HubLimits) -> tuple[int, int]:
+    """(max bt devices, max bt remotes) a hub takes. HOOK: the model's own constants for now; once
+    the hub advertises its bt table sizes in hello_ack.limits, read them from `lim` here and let the
+    push-time check (not written yet) compare the compiled `bt_hosts` / `bt_remotes` against this."""
+    from .bt_codes import BT_MAX_HOSTS, BT_MAX_REMOTES
+
+    return BT_MAX_HOSTS, BT_MAX_REMOTES
+
+
 def estimate_bytes(
     lim: HubLimits,
     *,
@@ -130,12 +139,14 @@ def estimate_bytes(
     inputs: int,
     keys: int,
     words: int,
+    bt_hosts: int = 0,
+    bt_remotes: int = 0,
     **_ignored: int,
 ) -> int:
     """What the hub needs to load a config (hub/engine/mapping.c est_full); a budget compares to this."""
     return (
         lim.slack_b
-        + devices * lim.dev_b
+        + (devices + bt_hosts + bt_remotes) * lim.dev_b  # a bt table entry is budgeted as a device
         + (commands + inputs) * lim.cmd_b
         + keys * lim.key_b
         + words * lim.word_b

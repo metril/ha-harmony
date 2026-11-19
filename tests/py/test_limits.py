@@ -114,7 +114,16 @@ def test_precheck_accepts_and_refuses_exactly_where_the_hub_does(name):
 def test_estimate_equals_the_c_golden():
     cfg = json.loads(_c_golden())
     stats = config_stats(cfg)
-    assert stats == {"text": 135, "devices": 1, "commands": 2, "inputs": 0, "keys": 0, "words": 4}
+    assert stats == {
+        "text": 135,
+        "devices": 1,
+        "commands": 2,
+        "inputs": 0,
+        "keys": 0,
+        "words": 4,
+        "bt_hosts": 0,
+        "bt_remotes": 0,
+    }
     assert compact_json(cfg) == _c_golden()
     assert estimate_bytes(CURRENT, **stats) == 1573336  # tests/c/test_budget.c asserts the same number
 

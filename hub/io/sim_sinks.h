@@ -11,10 +11,10 @@
  *
  *   ir port=<port_mask decimal> hz=<carrier> n=<duration count> us=<d0>,<d1>,...
  *       durations are decimal microseconds (the once-part of the signal only)
- *   bt usage=<4-digit lowercase hex> down=<0|1>
+ *   bt host=<slot decimal> page=<2-digit hex> usage=<4-digit lowercase hex> down=<0|1>
  *
  * Example:  ir port=3 hz=38029 n=2 us=631,631
- *           bt usage=00e9 down=1
+ *           bt host=0 page=0c usage=00e9 down=1
  */
 
 #include <stdio.h>
@@ -34,6 +34,7 @@ typedef struct {
     uint32_t hz;
     size_t n;                   /* durations sent */
     uint16_t us[HP_SIM_MAX_US]; /* first min(n, HP_SIM_MAX_US) durations */
+    uint8_t host, page;
     uint16_t usage;
     int down;
 } hp_sim_rec_t;

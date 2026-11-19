@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "hub/engine/mapping.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libgen.h>
@@ -21,6 +22,8 @@
 _Static_assert(sizeof(hp_device_t) + 16 <= HP_MAP_DEV_BYTES, "HP_MAP_DEV_BYTES too small");
 _Static_assert(sizeof(hp_devcmd_t) + 16 <= HP_MAP_CMD_BYTES, "HP_MAP_CMD_BYTES too small");
 _Static_assert(sizeof(hp_keybind_t) <= HP_MAP_KEY_BYTES, "HP_MAP_KEY_BYTES too small");
+_Static_assert(sizeof(hp_bt_host_t) + 16 <= HP_MAP_DEV_BYTES, "HP_MAP_DEV_BYTES too small for a bt host");
+_Static_assert(sizeof(hp_bt_remote_t) + 16 <= HP_MAP_DEV_BYTES, "HP_MAP_DEV_BYTES too small for a bt remote");
 
 void hp_map_init(hp_map_t *m) {
     memset(m, 0, sizeof *m);
@@ -67,6 +70,12 @@ static void release_tables(hp_map_t *m) {
     m->ncmds = m->ninputs = 0;
     m->pool_n = m->pool_cap = 0;
     m->mask_dev = m->mask_cmd = m->mask_in = 0;
+    free(m->bt_hosts);
+    for (uint16_t i = 0; i < m->nbt_remotes; i++) free(m->bt_remotes[i].keys);
+    free(m->bt_remotes);
+    m->bt_hosts = NULL;
+    m->bt_remotes = NULL;
+    m->nbt_hosts = m->nbt_remotes = 0;
 }
 
 void hp_map_free(hp_map_t *m) {
@@ -131,6 +140,139 @@ static int parse_name(hp_map_t *m, const cJSON *v, char *dst, const char *what) 
     if (n == 0) return fail(m, INVAL, "%s must not be empty", what);
     if (n >= HP_MAP_NAME_MAX) return fail(m, TOOBIG, "%s longer than %d bytes", what, HP_MAP_NAME_MAX - 1);
     memcpy(dst, v->valuestring, n + 1);
+    return 0;
+}
+
+/* {"type":"bt","usage":..,"page":7|12 (12),"host":0..HH_BT_MAX_HOSTS-1 (0)} */
+static int parse_bt(hp_map_t *m, const cJSON *j, hp_action_t *a) {
+    const cJSON *u = cJSON_GetObjectItemCaseSensitive(j, "usage");
+    const cJSON *pg = cJSON_GetObjectItemCaseSensitive(j, "page");
+    const cJSON *ho = cJSON_GetObjectItemCaseSensitive(j, "host");
+    if (!int_in(u, 0, 65535)) return fail(m, INVAL, "bt usage must be 0..65535");
+    if (pg && !(int_in(pg, 7, 7) || int_in(pg, 12, 12))) return fail(m, INVAL, "bt page must be 7 or 12");
+    if (ho && !int_in(ho, 0, HH_BT_MAX_HOSTS - 1)) return fail(m, INVAL, "bt host must be 0..%d", HH_BT_MAX_HOSTS - 1);
+    a->type = HP_ACT_BT;
+    a->usage = (uint16_t)u->valuedouble;
+    a->page = pg ? (uint8_t)pg->valuedouble : 12;
+    a->host = ho ? (uint8_t)ho->valuedouble : 0;
+    return 0;
+}
+
+static bool bt_addr_ok(const char *s) {
+    if (strlen(s) != 17) return false;
+    for (int i = 0; i < 17; i++)
+        if (i % 3 == 2 ? s[i] != ':' : !isxdigit((unsigned char)s[i])) return false;
+    return true;
+}
+typedef struct {
+    size_t ndevs, ncmds, ninputs, keys, pool;
+    size_t nbthosts, nbtremotes; /* bt_hosts / bt_remotes entries (a remote's keys are counted in `keys`) */
+    size_t rest_bytes; /* text of the retained top-level sections (format, activities, keys), held as cJSON trees */
+} dims_t;
+
+static int oom(hp_map_t *m);
+
+const hp_bt_host_t *hp_map_bt_host(const hp_map_t *m, uint8_t slot) {
+    for (uint16_t i = 0; m && i < m->nbt_hosts; i++)
+        if (m->bt_hosts[i].slot == slot) return &m->bt_hosts[i];
+    return NULL;
+}
+
+const hp_bt_remote_t *hp_map_bt_remote(const hp_map_t *m, uint8_t slot) {
+    for (uint16_t i = 0; m && i < m->nbt_remotes; i++)
+        if (m->bt_remotes[i].slot == slot) return &m->bt_remotes[i];
+    return NULL;
+}
+
+/* Pass 1: entries (and a remote's keys) of the "bt_hosts" / "bt_remotes" array, for the byte estimate. */
+static int count_bt_tables(hp_map_t *m, const cJSON *arr, bool remotes, dims_t *d) {
+    if (!cJSON_IsArray(arr)) return fail(m, INVAL, "%s must be an array", remotes ? "bt_remotes" : "bt_hosts");
+    size_t n = (size_t)cJSON_GetArraySize(arr);
+    if (n > (remotes ? HH_BT_MAX_REMOTES : HH_BT_MAX_HOSTS))
+        return fail(m, TOOBIG, "more than %d %s", remotes ? HH_BT_MAX_REMOTES : HH_BT_MAX_HOSTS,
+                    remotes ? "bt_remotes" : "bt_hosts");
+    if (!remotes) {
+        d->nbthosts = n;
+        return 0;
+    }
+    d->nbtremotes = n;
+    for (const cJSON *e = arr->child; e; e = e->next) {
+        const cJSON *k = cJSON_IsObject(e) ? cJSON_GetObjectItemCaseSensitive(e, "keys") : NULL;
+        if (cJSON_IsArray(k)) d->keys += (size_t)cJSON_GetArraySize(k); /* budgeted as key-map entries */
+    }
+    return 0;
+}
+
+/* The address / name members shared by a bt_hosts and a bt_remotes entry. */
+static int parse_bt_ident(hp_map_t *m, const cJSON *e, bool *has_addr, char *addr, char *name) {
+    const cJSON *ad = cJSON_GetObjectItemCaseSensitive(e, "addr");
+    if (cJSON_IsString(ad)) {
+        if (!bt_addr_ok(ad->valuestring)) return fail(m, INVAL, "bt addr is not AA:BB:CC:DD:EE:FF");
+        for (int i = 0; i < 17; i++) addr[i] = (char)toupper((unsigned char)ad->valuestring[i]);
+        *has_addr = true;
+    } else if (ad && !cJSON_IsNull(ad)) {
+        return fail(m, INVAL, "bt addr must be a string or null");
+    }
+    const cJSON *nm = cJSON_GetObjectItemCaseSensitive(e, "name");
+    return nm ? parse_name(m, nm, name, "bt name") : 0;
+}
+
+/* The top-level "bt_hosts" array into the table alloc_tables sized for it. */
+static int parse_bt_hosts(hp_map_t *m, const cJSON *arr) {
+    if (!cJSON_IsArray(arr)) return fail(m, INVAL, "bt_hosts must be an array");
+    for (const cJSON *e = arr->child; e; e = e->next) {
+        const cJSON *sl = cJSON_IsObject(e) ? cJSON_GetObjectItemCaseSensitive(e, "slot") : NULL;
+        if (!int_in(sl, 0, HH_BT_MAX_HOSTS - 1)) return fail(m, INVAL, "bt_hosts slot must be 0..%d", HH_BT_MAX_HOSTS - 1);
+        if (hp_map_bt_host(m, (uint8_t)sl->valuedouble)) return fail(m, INVAL, "duplicate bt_hosts slot %d", (int)sl->valuedouble);
+        if (!m->bt_hosts) return fail(m, INVAL, "config changed while loading");
+        hp_bt_host_t *h = &m->bt_hosts[m->nbt_hosts++];
+        h->slot = (uint8_t)sl->valuedouble;
+        int r = parse_bt_ident(m, e, &h->has_addr, h->addr, h->name);
+        if (r < 0) return r;
+        const cJSON *tr = cJSON_GetObjectItemCaseSensitive(e, "transport");
+        if (tr) {
+            if (!cJSON_IsString(tr)) return fail(m, INVAL, "bt_hosts transport must be a string");
+            if (!strcmp(tr->valuestring, "auto")) h->transport = HP_BT_AUTO;
+            else if (!strcmp(tr->valuestring, "classic")) h->transport = HP_BT_CLASSIC;
+            else if (!strcmp(tr->valuestring, "le")) h->transport = HP_BT_LE;
+            else return fail(m, INVAL, "bt_hosts transport must be auto, classic or le");
+        }
+    }
+    return 0;
+}
+
+/* The top-level "bt_remotes" array. */
+static int parse_bt_remotes(hp_map_t *m, const cJSON *arr) {
+    if (!cJSON_IsArray(arr)) return fail(m, INVAL, "bt_remotes must be an array");
+    for (const cJSON *e = arr->child; e; e = e->next) {
+        const cJSON *sl = cJSON_IsObject(e) ? cJSON_GetObjectItemCaseSensitive(e, "slot") : NULL;
+        if (!int_in(sl, 0, HH_BT_MAX_REMOTES - 1)) return fail(m, INVAL, "bt_remotes slot must be 0..%d", HH_BT_MAX_REMOTES - 1);
+        if (hp_map_bt_remote(m, (uint8_t)sl->valuedouble)) return fail(m, INVAL, "duplicate bt_remotes slot %d", (int)sl->valuedouble);
+        if (!m->bt_remotes) return fail(m, INVAL, "config changed while loading");
+        hp_bt_remote_t *r = &m->bt_remotes[m->nbt_remotes++];
+        r->slot = (uint8_t)sl->valuedouble;
+        int rc = parse_bt_ident(m, e, &r->has_addr, r->addr, r->name);
+        if (rc < 0) return rc;
+        const cJSON *ks = cJSON_GetObjectItemCaseSensitive(e, "keys");
+        if (!ks) continue;
+        if (!cJSON_IsArray(ks)) return fail(m, INVAL, "bt_remotes keys must be an array");
+        int n = cJSON_GetArraySize(ks);
+        if (n > 65535) return fail(m, TOOBIG, "too many bt_remotes keys");
+        if (n == 0) continue;
+        if (!(r->keys = xcalloc((size_t)n, sizeof *r->keys))) return oom(m);
+        for (const cJSON *k = ks->child; k; k = k->next) {
+            const cJSON *pg = cJSON_IsArray(k) ? cJSON_GetArrayItem(k, 0) : NULL;
+            const cJSON *us = pg ? cJSON_GetArrayItem(k, 1) : NULL;
+            const cJSON *id = us ? cJSON_GetArrayItem(k, 2) : NULL;
+            if (!id || cJSON_GetArraySize(k) != 3 || !(int_in(pg, 7, 7) || int_in(pg, 12, 12)) || !int_in(us, 0, 65535) ||
+                !int_in(id, 0, 255))
+                return fail(m, INVAL, "bt_remotes key must be [page 7|12, usage 0..65535, key 0..255]");
+            for (uint16_t i = 0; i < r->nkeys; i++)
+                if (r->keys[i].page == (uint8_t)pg->valuedouble && r->keys[i].usage == (uint16_t)us->valuedouble)
+                    return fail(m, INVAL, "duplicate usage in bt_remotes keys");
+            r->keys[r->nkeys++] = (hp_bt_rkey_t){(uint8_t)pg->valuedouble, (uint8_t)id->valuedouble, (uint16_t)us->valuedouble};
+        }
+    }
     return 0;
 }
 
@@ -348,10 +490,7 @@ static int parse_action(hp_map_t *m, const cJSON *j, hp_action_t *a, bool allow_
     if (!strcmp(ty, "none")) {
         a->type = HP_ACT_NONE;
     } else if (!strcmp(ty, "bt")) {
-        const cJSON *u = cJSON_GetObjectItemCaseSensitive(j, "usage");
-        if (!int_in(u, 0, 65535)) return fail(m, INVAL, "bt usage must be 0..65535");
-        a->type = HP_ACT_BT;
-        a->usage = (uint16_t)u->valuedouble;
+        return parse_bt(m, j, a);
     } else if (!strcmp(ty, "ha")) {
         a->type = HP_ACT_HA_EVENT;
         return parse_name(m, cJSON_GetObjectItemCaseSensitive(j, "event"), a->event, "ha event");
@@ -444,7 +583,10 @@ static int add_irmap_entry(hp_map_t *m, const char *name, const cJSON *val, int 
     int r = parse_name(m, &(cJSON){.type = cJSON_String, .valuestring = (char *)name}, e->name, what);
     if (r < 0) return r;
     if (find_named_i(tbl, idx, mask, dev, e->name) >= 0) return fail(m, INVAL, "duplicate %s '%s'", what, e->name);
-    if ((r = parse_ir_v2(m, val, &e->act)) < 0) return r;
+    const cJSON *ty = cJSON_IsObject(val) ? cJSON_GetObjectItemCaseSensitive(val, "type") : NULL;
+    if (cJSON_IsString(ty) && !strcmp(ty->valuestring, "bt")) r = parse_bt(m, val, &e->act); /* a Bluetooth device */
+    else r = parse_ir_v2(m, val, &e->act);
+    if (r < 0) return r;
     idx_put(idx, mask, hname((uint32_t)dev, e->name), *n);
     (*n)++;
     return 0;
@@ -604,11 +746,6 @@ static size_t pool_words(const cJSON *j) {
  * parses ONE small value at a time with cJSON (a command, a device's header, `keys`, one
  * activity) and frees it. Peak memory is the final tables plus the one value in hand.
  * Pass 1 counts what the tables need (and checks the byte budget); pass 2 fills them. */
-
-typedef struct {
-    size_t ndevs, ncmds, ninputs, keys, pool;
-    size_t rest_bytes; /* text of the retained top-level sections (format, activities, keys), held as cJSON trees */
-} dims_t;
 
 #define REST_TREE_FACTOR 16 /* bytes of cJSON tree per byte of text, worst case (a node is ~64 bytes for a 4-byte token) */
 
@@ -825,7 +962,7 @@ static int do_device(sctx_t *s) { /* the `{` was consumed */
 }
 
 static int top_member(sctx_t *s, const char *key, int c) {
-    static const char *const once[] = {"devices", "format", "activities", "keys"};
+    static const char *const once[] = {"devices", "format", "activities", "keys", "bt_hosts", "bt_remotes"};
     for (unsigned i = 0; i < sizeof once / sizeof *once; i++) {
         if (strcmp(key, once[i])) continue;
         if (s->seen & (1u << i)) return fail(s->w, INVAL, "duplicate \"%s\" in the config", key);
@@ -847,6 +984,20 @@ static int top_member(sctx_t *s, const char *key, int c) {
             if (c == ']') return 0;
             return fail(s->w, INVAL, "config is not valid JSON");
         }
+    }
+    bool bth = !strcmp(key, "bt_hosts"), btr = !strcmp(key, "bt_remotes");
+    if (bth || btr) { /* sized in pass 1, parsed straight into the map's own tables in pass 2 */
+        int rb = rd_value(s, c, true, VAL_SECTION_MAX);
+        if (rb < 0) return too_big_value(s, rb, key);
+        cJSON *v = vb_tree(s);
+        if (!v) return INVAL;
+        if (s->pass == 1) {
+            rb = count_bt_tables(s->w, v, btr, &s->d);
+        } else {
+            rb = bth ? parse_bt_hosts(s->w, v) : parse_bt_remotes(s->w, v);
+        }
+        cJSON_Delete(v);
+        return rb;
     }
     bool want = s->pass == 1 && (!strcmp(key, "format") || !strcmp(key, "activities") || !strcmp(key, "keys"));
     int r = rd_value(s, c, want, VAL_SECTION_MAX);
@@ -893,13 +1044,15 @@ static void count_rest(const cJSON *rest, dims_t *d) {
 }
 
 static size_t est_full(const dims_t *d) {
-    return HP_MAP_SLACK_BYTES + d->ndevs * HP_MAP_DEV_BYTES + (d->ncmds + d->ninputs) * HP_MAP_CMD_BYTES +
+    return HP_MAP_SLACK_BYTES + (d->ndevs + d->nbthosts + d->nbtremotes) * HP_MAP_DEV_BYTES + (d->ncmds + d->ninputs) * HP_MAP_CMD_BYTES +
            d->keys * HP_MAP_KEY_BYTES + d->pool * HP_MAP_WORD_BYTES + d->rest_bytes * REST_TREE_FACTOR;
 }
 
 /* One allocation per table, each exactly as large as this config needs. */
 static int alloc_tables(hp_map_t *m, const dims_t *d) {
     if (d->ndevs > HP_MAP_MAX_DEVICES) return fail(m, TOOBIG, "more than %d devices", HP_MAP_MAX_DEVICES);
+    if (d->nbthosts && !(m->bt_hosts = xcalloc(d->nbthosts, sizeof *m->bt_hosts))) return oom(m);
+    if (d->nbtremotes && !(m->bt_remotes = xcalloc(d->nbtremotes, sizeof *m->bt_remotes))) return oom(m);
     if (d->ndevs && !(m->devs = xcalloc(d->ndevs, sizeof *m->devs))) return oom(m);
     if (d->ndevs && !(m->idx_dev = idx_new(d->ndevs, &m->mask_dev))) return oom(m);
     if (d->ncmds && !(m->cmds = xcalloc(d->ncmds, sizeof *m->cmds))) return oom(m);
@@ -1023,8 +1176,13 @@ void hp_map_commit(hp_map_t *m, hp_map_t *scratch, char *src) {
     hp_irout_t *outrt = m->out;
     hp_map_actops_t ops = m->actops;
     size_t budget = m->budget;
+    hp_bt_held_t held = m->bt_held;
+    hp_bt_rdown_t rdown[HH_BT_MAX_REMOTES];
+    memcpy(rdown, m->bt_rdown, sizeof rdown);
     hp_map_free(m);
     *m = *scratch;
+    m->bt_held = held;
+    memcpy(m->bt_rdown, rdown, sizeof rdown);
     m->out = outrt;
     m->actops = ops;
     m->budget = budget;
@@ -1139,8 +1297,8 @@ static int apply_action(const hp_map_t *m, const hp_action_t *a, const hp_sinks_
     }
     case HP_ACT_BT: {
         if (!s->bt) return -HP_E_INVAL;
-        int r = s->bt->key(s->bt->self, a->usage, true);
-        return r < 0 ? r : s->bt->key(s->bt->self, a->usage, false);
+        int r = s->bt->key(s->bt->self, a->host, a->page, a->usage, true);
+        return r < 0 ? r : s->bt->key(s->bt->self, a->host, a->page, a->usage, false);
     }
     case HP_ACT_HA_EVENT:
     case HP_ACT_NONE:
@@ -1213,26 +1371,70 @@ static int apply_key_action(hp_map_t *m, const hp_action_t *a, const hp_sinks_t 
     return r < 0 ? r : 0;
 }
 
+/* Sends the key up of the bt key a physical press holds down, if any. */
+static int bt_release_held(hp_map_t *m, const hp_sinks_t *s) {
+    hp_bt_held_t h = m->bt_held;
+    if (!h.active) return 0;
+    m->bt_held.active = false;
+    return s->bt ? s->bt->key(s->bt->self, h.host, h.page, h.usage, false) : 0;
+}
+
 int hp_key_handle(hp_map_t *m, const hp_sinks_t *s, uint8_t remote, uint8_t key, hp_key_action_t action,
                   hp_key_emit_fn emit, void *ctx) {
     if (!m || !s) return -HP_E_INVAL;
     int rc = 0;
     if (action == HP_KEY_ACTION_PRESS) {
         hp_irout_cancel(m->out); /* a new press ends any hold */
+        bt_release_held(m, s);   /* ... and a bt key still down */
         const char *cur = m->current >= 0 && m->current < m->nacts ? m->acts[m->current].name : NULL;
         hp_action_t a;
         if (hp_map_lookup(m, cur, key, &a) == 1) {
             if (a.type != HP_ACT_ACTIVITY && m->actops.busy && m->actops.busy(m->actops.ctx))
                 rc = 0; /* mid-transition: the key would overlap the planned frames */
-            else rc = apply_key_action(m, &a, s, key);
+            else if (a.type == HP_ACT_BT && s->bt) { /* down now, up at the release */
+                rc = s->bt->key(s->bt->self, a.host, a.page, a.usage, true);
+                if (rc >= 0) m->bt_held = (hp_bt_held_t){true, key, a.host, a.page, a.usage};
+            } else rc = apply_key_action(m, &a, s, key);
         }
     } else if (action == HP_KEY_ACTION_HOLD) {
         hp_irout_hold(m->out, key);
     } else if (action == HP_KEY_ACTION_RELEASE) {
         hp_irout_release(m->out, key);
+        if (m->bt_held.active && m->bt_held.key == key) rc = bt_release_held(m, s);
     }
     if (emit) emit(ctx, remote, key, action);
     return rc;
+}
+
+int hp_map_bt_remote_key(hp_map_t *m, const hp_sinks_t *s, uint8_t slot, uint8_t page, uint16_t usage, bool down,
+                         hp_key_emit_fn emit, void *ctx) {
+    if (!m || !s) return -HP_E_INVAL;
+    if (slot >= HH_BT_MAX_REMOTES) return 0;
+    const hp_bt_remote_t *r = hp_map_bt_remote(m, slot);
+    uint8_t remote = (uint8_t)(HH_BT_REMOTE_ID_BASE + slot);
+    hp_bt_rdown_t *st = &m->bt_rdown[slot];
+    bool same = st->active && st->page == page && st->usage == usage;
+    if (!down) { /* the up of the key that is down (its id was kept: a reload cannot lose it) */
+        if (!same) return 0;
+        st->active = false;
+        return hp_key_handle(m, s, remote, st->key, HP_KEY_ACTION_RELEASE, emit, ctx);
+    }
+    if (same) return hp_key_handle(m, s, remote, st->key, HP_KEY_ACTION_HOLD, emit, ctx);
+    int key = -1;
+    for (uint16_t i = 0; r && i < r->nkeys; i++)
+        if (r->keys[i].page == page && r->keys[i].usage == usage) {
+            key = r->keys[i].key;
+            break;
+        }
+    if (key < 0) return 0; /* unmapped: ignored */
+    int rc = 0;
+    if (st->active) { /* another usage still down: release it first */
+        st->active = false;
+        rc = hp_key_handle(m, s, remote, st->key, HP_KEY_ACTION_RELEASE, emit, ctx);
+    }
+    *st = (hp_bt_rdown_t){true, (uint8_t)key, page, usage};
+    int rp = hp_key_handle(m, s, remote, (uint8_t)key, HP_KEY_ACTION_PRESS, emit, ctx);
+    return rp < 0 ? rp : rc;
 }
 
 /* --------------------------------------------------------------- cache */

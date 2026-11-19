@@ -306,7 +306,7 @@ static void test_open_errors(void) {
 static void test_stubs(void) {
     setup();
     CHECK(open_hw(0) == 0);
-    CHECK(g_h->sinks.bt->key(g_h->sinks.bt->self, 0xe9, true) == -HP_E_NOSYS);
+    CHECK(g_h->sinks.bt->key(g_h->sinks.bt->self, 0, 12, 0xe9, true) == -HP_E_NOSYS);
     uint8_t b[4] = {0};
     CHECK(g_h->sinks.rf->send(g_h->sinks.rf->self, b, 4) == -HP_E_NOSYS);
     CHECK(g_h->sinks.rf->recv(g_h->sinks.rf->self, b, 4, 0) == -HP_E_NOSYS);

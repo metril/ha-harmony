@@ -25,7 +25,9 @@
  * <key>    decimal string of the key code, 0..65535. Duplicate keys in one map are an error.
  * <action> one of
  *   {"type":"ir", "port_mask":1..255, "pronto":[w0,w1,...]}   Pronto words as integers (4..512)
- *   {"type":"bt", "usage":0..65535}     HID consumer usage; apply = key down then up
+ *   {"type":"bt", "usage":0..65535, "page":7|12 (default 12), "host":0..HH_BT_MAX_HOSTS-1 (default 0)}
+ *                                       HID key; apply = key down then up; a physical key press is key down
+ *                                       until its release (hp_key_handle)
  *   {"type":"ha", "event":"<name>"}     forwarded to HA only (1..31 bytes); no sink call
  *   {"type":"none"}
  *
@@ -92,6 +94,9 @@
 #define HP_MAP_KEY_BYTES 72
 #define HP_MAP_WORD_BYTES 2
 #define HP_MAP_NAME_MAX 32
+#define HH_BT_MAX_REMOTES 32  /* physical Bluetooth remotes (input): "slot" of a bt_remotes entry, 0..31 */
+#define HH_BT_REMOTE_ID_BASE 0x80 /* `remote` id of Bluetooth remote slot n in key events: base + n */
+#define HH_BT_MAX_HOSTS 255 /* Bluetooth host slots 0..254: "host" of a bt action, "slot" of a bt_hosts entry */
 #define HP_MAP_ERR_MAX 96
 
 #define HP_TARGET_OFF 0xFF /* HP_ACT_ACTIVITY target meaning "power down" */
@@ -112,6 +117,8 @@ typedef struct {
     uint32_t addr, cmd;            /* PROTO */
     uint32_t hz;                   /* RAW */
     uint16_t usage;                /* HP_ACT_BT */
+    uint8_t page;                  /* HP_ACT_BT: 7 keyboard, 12 consumer */
+    uint8_t host;                  /* HP_ACT_BT: host slot */
     char event[HP_MAP_NAME_MAX];   /* HP_ACT_HA_EVENT */
 } hp_action_t;
 
@@ -163,8 +170,58 @@ typedef struct {
     bool (*busy)(void *ctx);
 } hp_map_actops_t;
 
+typedef enum { HP_BT_AUTO = 0, HP_BT_CLASSIC, HP_BT_LE } hp_bt_transport_t;
+
+/* One entry of the top-level "bt_hosts": [{"slot":n,"addr":"AA:BB:CC:DD:EE:FF"|null,"name":"..","transport":
+ * "auto"|"classic"|"le"}]. A table of the map allocated per load, budgeted like a device. */
+typedef struct {
+    uint8_t slot;
+    bool has_addr;
+    uint8_t transport; /* hp_bt_transport_t */
+    char addr[18];     /* upper case, NUL-terminated */
+    char name[HP_MAP_NAME_MAX];
+} hp_bt_host_t;
+
+/* One physical Bluetooth remote of the top-level "bt_remotes": [{"slot":n,"addr":..|null,"name":"..",
+ * "keys":[[page,usage,key_id],...]}]. A HID usage the remote reports is looked up in `keys` and
+ * dispatched as that key id, exactly like a key of an RF remote. `keys` is a table of the map, counted
+ * as key-map entries in the byte budget. */
+typedef struct {
+    uint8_t page, key;
+    uint16_t usage;
+} hp_bt_rkey_t;
+
+typedef struct {
+    uint8_t slot;
+    bool has_addr;
+    char addr[18];
+    char name[HP_MAP_NAME_MAX];
+    uint16_t nkeys;
+    hp_bt_rkey_t *keys; /* nkeys entries, owned by the map */
+} hp_bt_remote_t;
+
+/* The key a Bluetooth remote has down (per slot). Survives reloads. */
+typedef struct {
+    bool active;
+    uint8_t key, page;
+    uint16_t usage;
+} hp_bt_rdown_t;
+
+/* The bt key a physical key press holds down (its up goes out at the release). Survives reloads. */
+typedef struct {
+    bool active;
+    uint8_t key, host, page;
+    uint16_t usage;
+} hp_bt_held_t;
+
 typedef struct {
     int format;
+    hp_bt_host_t *bt_hosts;   /* nbt_hosts entries in file order (look up with hp_map_bt_host) */
+    uint16_t nbt_hosts;
+    hp_bt_held_t bt_held;
+    hp_bt_remote_t *bt_remotes; /* nbt_remotes entries (look up with hp_map_bt_remote) */
+    uint16_t nbt_remotes;
+    hp_bt_rdown_t bt_rdown[HH_BT_MAX_REMOTES]; /* by slot */
     uint8_t ndevs, nacts;
     uint16_t nkeys;
     uint32_t ncmds, ninputs;
@@ -289,6 +346,19 @@ int hp_activity_off(hp_map_t *, const hp_sinks_t *);
 typedef void (*hp_key_emit_fn)(void *ctx, uint8_t remote, uint8_t key, hp_key_action_t action);
 int hp_key_handle(hp_map_t *, const hp_sinks_t *, uint8_t remote, uint8_t key,
                   hp_key_action_t action, hp_key_emit_fn emit, void *ctx);
+
+/* The bt_hosts / bt_remotes entry of `slot`, or NULL. */
+const hp_bt_host_t *hp_map_bt_host(const hp_map_t *, uint8_t slot);
+const hp_bt_remote_t *hp_map_bt_remote(const hp_map_t *, uint8_t slot);
+
+/* A usage event from the Bluetooth remote in `slot` (page 7 or 12, HID usage id, down = pressed). The
+ * usage is looked up in the remote's key table; an unmapped usage, an unknown slot or an up of a key that
+ * is not down is ignored (returns 0). Otherwise it is dispatched through hp_key_handle as remote
+ * HH_BT_REMOTE_ID_BASE + slot with the semantics of an RF remote: the first down is PRESS, a down of the
+ * key already down is HOLD (a host's auto-repeat), the up is RELEASE; a different usage going down
+ * releases the previous one first. Returns hp_key_handle's result. */
+int hp_map_bt_remote_key(hp_map_t *, const hp_sinks_t *, uint8_t slot, uint8_t page, uint16_t usage, bool down,
+                         hp_key_emit_fn emit, void *ctx);
 
 /* Cache (HA-offline fallback). File = "HPMC" | version u8 (1) | len u32 BE |
  * config text | CRC-32 (IEEE) u32 BE over everything before it, written with hp_atomic_write.

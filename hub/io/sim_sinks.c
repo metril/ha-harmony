@@ -29,14 +29,16 @@ static int sim_ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig)
     return 0;
 }
 
-static int sim_bt_key(void *self, uint16_t usage, bool down) {
+static int sim_bt_key(void *self, uint8_t host, uint8_t page, uint16_t usage, bool down) {
     hp_sim_t *s = self;
     hp_sim_rec_t *r = next_rec(s);
     r->kind = HP_SIM_BT;
+    r->host = host;
+    r->page = page;
     r->usage = usage;
     r->down = down ? 1 : 0;
     if (s->mirror) {
-        fprintf(s->mirror, "bt usage=%04x down=%d\n", (unsigned)usage, r->down);
+        fprintf(s->mirror, "bt host=%u page=%02x usage=%04x down=%d\n", (unsigned)host, (unsigned)page, (unsigned)usage, r->down);
         fflush(s->mirror);
     }
     return 0;

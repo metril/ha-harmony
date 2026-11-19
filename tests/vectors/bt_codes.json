@@ -1,0 +1,48 @@
+{
+  "names": [
+    {"name": "DirectionUp", "page": 7, "usage": 82},
+    {"name": "up", "page": 7, "usage": 82},
+    {"name": "ArrowDown", "page": 7, "usage": 81},
+    {"name": "left", "page": 7, "usage": 80},
+    {"name": "DirectionRight", "page": 7, "usage": 79},
+    {"name": "OK", "page": 7, "usage": 40},
+    {"name": "select", "page": 7, "usage": 40},
+    {"name": "Back", "page": 12, "usage": 548},
+    {"name": "Home", "page": 12, "usage": 547},
+    {"name": "Menu", "page": 12, "usage": 141},
+    {"name": "Info", "page": 12, "usage": 445},
+    {"name": "PlayPause", "page": 12, "usage": 205},
+    {"name": "play_pause", "page": 12, "usage": 205},
+    {"name": "Stop", "page": 12, "usage": 183},
+    {"name": "next", "page": 12, "usage": 181},
+    {"name": "prev", "page": 12, "usage": 182},
+    {"name": "VolumeUp", "page": 12, "usage": 233},
+    {"name": "vol_down", "page": 12, "usage": 234},
+    {"name": "mute", "page": 12, "usage": 226},
+    {"name": "power", "page": 12, "usage": 48},
+    {"name": "ch_up", "page": 12, "usage": 156},
+    {"name": "red", "page": 12, "usage": 105},
+    {"name": "0", "page": 7, "usage": 39},
+    {"name": "1", "page": 7, "usage": 30},
+    {"name": "Number9", "page": 7, "usage": 38},
+    {"name": "esc", "page": 7, "usage": 41},
+    {"name": "F1", "page": 7, "usage": 58},
+    {"name": "F12", "page": 7, "usage": 69},
+    {"name": "a", "page": 7, "usage": 4},
+    {"name": "z", "page": 7, "usage": 29},
+    {"name": "0x0221", "page": 12, "usage": 545},
+    {"name": "HID:0C:0223", "page": 12, "usage": 547},
+    {"name": "HID:0c:0223", "page": 12, "usage": 547},
+    {"name": "HID:07:004F", "page": 7, "usage": 79},
+    {"name": "HID:0C:03FF", "page": 12, "usage": 1023}
+  ],
+  "invalid": [
+    "", "Nope", "A", "ctrl+c", "HID:0C", "HID:0C:223", "HID:08:0001", "HID:01:0001",
+    "HID:0C:0000", "HID:0C:0400", "HID:07:0100", "HID:0G:0001", "HID:0C:0223:1", "0x0", "0x0400"
+  ],
+  "addresses": [
+    ["aa:bb:cc:dd:ee:ff", "AA:BB:CC:DD:EE:FF"],
+    ["01:23:45:67:89:aB", "01:23:45:67:89:AB"]
+  ],
+  "bad_addresses": ["AA:BB:CC:DD:EE", "AABBCCDDEEFF", "AA-BB-CC-DD-EE-FF", "GG:BB:CC:DD:EE:FF", "AA:BB:CC:DD:EE:FF:00", ""]
+}

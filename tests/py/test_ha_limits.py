@@ -230,3 +230,26 @@ async def test_the_option_creates_them_and_existing_enabled_buttons_survive_turn
     assert {b.entity_id for b in after} == ids and not any(b.disabled_by for b in after)
     assert all(hass.states.get(i) for i in ids)
     await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_bt_devices_get_the_same_command_buttons_as_ir_ones(hass, fake_hub, write_yaml):
+    cmds = {f"c{j}": f"HID:0C:{j + 1:04X}" for j in range(COMMAND_BUTTON_LIMIT + 5)}
+    cfg = {
+        "devices": [
+            {"id": "d0", "kind": "bt", "commands": {"Home": "Home", "Ok": "OK"}},
+            {"id": "big", "kind": "bt", "commands": cmds},
+        ]
+    }
+    log = []
+    hub = await fake_hub(_fake_hub_handler(CURRENT.to_wire(), log))
+    write_yaml(cfg)
+    entry = await setup(hass, hub)
+    await _compiled(hass, entry)
+    coord = entry.runtime_data
+    buttons = _buttons(hass, entry)
+    assert len(buttons) == 2  # d0's two; the device over the limit gets none
+    assert all(b.disabled_by is er.RegistryEntryDisabler.INTEGRATION for b in buttons)
+    assert len(coord.device_commands("big")) == COMMAND_BUTTON_LIMIT + 5
+    await coord.async_device_command("big", "c7")  # still reachable by name
+    assert any(e["t"] == "command" and "c7" in json.dumps(e["d"]) for e in log)
+    await hass.config_entries.async_unload(entry.entry_id)

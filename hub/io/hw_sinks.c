@@ -153,8 +153,8 @@ fail:
     return rc;
 }
 
-static int bt_key(void *self, uint16_t usage, bool down) {
-    (void)self; (void)usage; (void)down;
+static int bt_key(void *self, uint8_t host, uint8_t page, uint16_t usage, bool down) {
+    (void)self; (void)host; (void)page; (void)usage; (void)down;
     return -HP_E_NOSYS;
 }
 static int rf_send(void *self, const uint8_t *f, size_t n) { (void)self; (void)f; (void)n; return -HP_E_NOSYS; }

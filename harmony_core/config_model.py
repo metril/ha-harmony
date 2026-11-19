@@ -15,6 +15,19 @@ from typing import Any
 import voluptuous as vol
 import yaml
 
+from .bt_codes import (
+    BT_MAX_HOSTS,
+    BT_MAX_REMOTES,
+    DEFAULT_COMMANDS,
+    DEFAULT_REMOTE_KEYS,
+    REMOTE_MAX_KEYS,
+    TRANSPORTS,
+    BtCodeError,
+    norm_address,
+)
+from .bt_codes import (
+    resolve as bt_resolve,
+)
 from .ha_actions import default_tap, validate_ha
 from .harmony_proto import SOFT_KEY_BASE
 from .icons import ICON_IDS
@@ -258,6 +271,52 @@ def _cmd_name(v: Any) -> str:
     return v
 
 
+def _bt_address(v: Any) -> str:
+    if isinstance(v, int) and not isinstance(v, bool):  # YAML reads 11:22:33:44:55:66 as a number
+        raise vol.Invalid('quote the Bluetooth address: "11:22:33:44:55:66"')
+    try:
+        return norm_address(v)
+    except BtCodeError as exc:
+        raise vol.Invalid(str(exc)) from None
+
+
+def _bt_command(v: Any) -> dict[str, Any]:
+    """A bt device command: a built-in name or `HID:<page hex>:<usage hex>` -> a bt action (the
+    compiler adds the host slot)."""
+    try:
+        page, usage = bt_resolve(v)
+    except BtCodeError as exc:
+        raise vol.Invalid(str(exc)) from None
+    return {"type": "bt", "page": page, "usage": usage}
+
+
+def _bt_remote_keys(v: Any) -> list[list[Any]]:
+    """`{usage name | HID:pp:uuuu: key name}` merged over the defaults -> [[page, usage, key], ...]
+    sorted by (page, usage). The key names are the Elite's own (`up`, `volume_up`, `key_<n>`)."""
+    if v is None:
+        v = {}
+    if not isinstance(v, dict):
+        raise vol.Invalid("keys must be a mapping of usage -> key name")
+    out: dict[tuple[int, int], str] = {}
+    for spec, key in DEFAULT_REMOTE_KEYS:
+        out[bt_resolve(spec)] = key
+    seen: dict[tuple[int, int], str] = {}
+    for spec, key in v.items():
+        try:
+            pu = bt_resolve(spec)
+        except BtCodeError as exc:
+            raise vol.Invalid(f"{spec!r}: {exc}") from None
+        if pu in seen:
+            raise vol.Invalid(f"{spec!r} is the same usage as {seen[pu]!r}")
+        seen[pu] = spec
+        out[pu] = _keyname(key)
+    if len(out) > REMOTE_MAX_KEYS:
+        raise vol.Invalid(
+            f"too many keys: {len(out)} (at most {REMOTE_MAX_KEYS}, defaults included)"
+        )
+    return [[p, u, k] for (p, u), k in sorted(out.items())]
+
+
 def _title(v: Any) -> str:
     if not isinstance(v, str) or "\x00" in v:
         raise vol.Invalid("must be text")
@@ -369,9 +428,43 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("commands", default=dict): {_cmd_name: ir},
     }
     ir_device = vol.Schema(device)
+    bt_device = vol.Schema(
+        {
+            vol.Required("id"): _slug,
+            vol.Required("kind"): "bt",
+            vol.Optional("name"): _name,
+            vol.Optional("aliases", default=list): [_name],
+            vol.Optional("address"): _bt_address,  # none until the host is paired
+            vol.Optional("transport", default="auto"): vol.In(TRANSPORTS),
+            vol.Optional("commands"): {_cmd_name: _bt_command},  # default: every built-in
+        }
+    )
+
+    def bt_dev(v: Any) -> dict[str, Any]:
+        out = bt_device(v)
+        if "commands" not in out:
+            out["commands"] = {n: _bt_command(n) for n in DEFAULT_COMMANDS}
+        out["inputs"] = {}  # a bt device has no inputs and no power codes
+        return out
 
     def any_device(v: Any) -> dict[str, Any]:
-        return ha_device(v) if isinstance(v, dict) and v.get("kind") == "ha" else ir_device(v)
+        kind = v.get("kind") if isinstance(v, dict) else None
+        if kind == "ha":
+            return ha_device(v)
+        return bt_dev(v) if kind == "bt" else ir_device(v)
+
+    bt_remote = vol.Schema(
+        {
+            vol.Required("name"): _name,
+            vol.Optional("address"): _bt_address,
+            vol.Optional("keys"): vol.Any(None, dict),
+        }
+    )
+
+    def bt_rem(v: Any) -> dict[str, Any]:
+        out = bt_remote(v)
+        out["keys"] = _bt_remote_keys(out.get("keys"))
+        return out
 
     activity = {
         vol.Required("id"): vol.All(_slug, vol.NotIn(["off"], msg="`off` is reserved")),
@@ -418,6 +511,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             vol.Optional("devices", default=list): [any_device],
             vol.Optional("activities", default=list): [activity],
             vol.Optional("keys", default=dict): keys,
+            vol.Optional("bt_remotes"): [bt_rem],
             vol.Optional("pages", default=list): [vol.All(page, _check_page)],
             # User themes (`extends` a preset or another user theme) and the one active theme.
             vol.Optional("themes"): {_slug: _THEME},
@@ -611,6 +705,18 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
     uniq(model["devices"], "devices", "device")
     uniq(model["activities"], "activities", "activity")
     uniq(model["pages"], "pages", "page")
+
+    if len(model.get("bt_remotes", ())) > BT_MAX_REMOTES:
+        fail(
+            ["bt_remotes", BT_MAX_REMOTES],
+            f"too many Bluetooth remotes: {len(model['bt_remotes'])} (a hub handles at most {BT_MAX_REMOTES})",
+        )
+    bts = [i for i, d in enumerate(model["devices"]) if d.get("kind") == "bt"]
+    if len(bts) > BT_MAX_HOSTS:
+        fail(
+            ["devices", bts[BT_MAX_HOSTS]],
+            f"too many Bluetooth devices: {len(bts)} (a hub handles at most {BT_MAX_HOSTS})",
+        )
 
     # An alias must name exactly one device, and never shadow another device's real id --
     # otherwise `device: X` would silently reach a different device than it says.

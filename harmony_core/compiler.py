@@ -228,8 +228,12 @@ def config_stats(hub_json: dict[str, Any], max_pronto: int = 520) -> dict[str, i
         "devices": len(devs),
         "commands": sum(len(d.get("commands", ())) for d in devs),
         "inputs": sum(len(d.get("inputs", ())) for d in devs),
-        "keys": len(hub_json.get("keys", ())) + sum(len(a.get("keys", ())) for a in acts),
+        "keys": len(hub_json.get("keys", ()))
+        + sum(len(a.get("keys", ())) for a in acts)
+        + sum(len(r["keys"]) for r in hub_json.get("bt_remotes", ())),  # counted as key-map entries
         "words": _pool_words(hub_json, max_pronto),
+        "bt_hosts": len(hub_json.get("bt_hosts", ())),
+        "bt_remotes": len(hub_json.get("bt_remotes", ())),
     }
 
 
@@ -330,10 +334,24 @@ def compile_config(
         return None
 
     devices: list[dict[str, Any]] = []
+    bt_hosts: list[dict[str, Any]] = []
     for d in model["devices"]:
         if d["id"] in ha_devs:
             continue
         dev: dict[str, Any] = {"id": d["id"], "name": d.get("name", d["id"])}
+        if d.get("kind") == "bt":  # slot = index among the bt devices, in config order
+            slot = len(bt_hosts)
+            bt_hosts.append(
+                {
+                    "slot": slot,
+                    "addr": d.get("address"),
+                    "name": dev["name"],
+                    "transport": d.get("transport", "auto"),
+                }
+            )
+            dev["commands"] = {n: {**c, "host": slot} for n, c in d["commands"].items()}
+            devices.append(dev)
+            continue
         if d.get("power"):
             dev["power"] = d["power"]
         if d["inputs"]:
@@ -424,6 +442,18 @@ def compile_config(
         )
 
     hub: dict[str, Any] = {"format": 2, "devices": devices, "activities": activities, "keys": keys}
+    if bt_hosts:
+        hub["bt_hosts"] = bt_hosts
+    if model.get("bt_remotes"):
+        hub["bt_remotes"] = [
+            {
+                "slot": i,
+                "addr": r.get("address"),
+                "name": r["name"],
+                "keys": [[p, u, key_code(k)] for p, u, k in r["keys"]],
+            }
+            for i, r in enumerate(model["bt_remotes"])
+        ]
     try:
         stats = config_stats(hub, limits.max_pronto)
     except CompileError as exc:
