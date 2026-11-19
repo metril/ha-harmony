@@ -24,6 +24,7 @@
 #include "hub/net/ident.h"
 #include "hub/net/jsonrpc.h"
 #include "hub/net/mdns_srv.h"
+#include "hub/net/peers.h"
 #include "hub/net/ws.h"
 #ifdef HH_BT
 #include "hub/bt/bt_main.h"
@@ -39,6 +40,28 @@ static hp_handler_tbl_t g_tbl;
 static hub_ctx_t g_hub;
 static hp_sim_t g_sim;
 static hp_hw_t g_hw;
+static hp_peers_t g_peers; /* authenticated peers: ARP keepalive (hub/net/peers.h) */
+static uint32_t g_live[HP_WS_MAX_CONNS];
+static int g_nlive;
+
+static void live_cb(hp_ws_conn_t *c, void *arg) {
+    (void)arg;
+    hp_session_t *s = hp_ws_conn_user(c);
+    if (s && s->authed && g_nlive < HP_WS_MAX_CONNS) g_live[g_nlive++] = hp_ws_conn_peer(c);
+}
+
+/* Every ~30 s: a unicast datagram to each remembered peer without a live authenticated connection, so
+ * the kernel ARPs for it and the peer learns the hub's MAC. Never blocks; errors ignored. */
+static void peers_keepalive(hp_ws_server_t *srv) {
+    struct timespec t;
+    if (g_peers.n == 0 || clock_gettime(CLOCK_MONOTONIC, &t) != 0) return;
+    if (!hp_peers_due(&g_peers, (int64_t)t.tv_sec * 1000 + t.tv_nsec / 1000000)) return;
+    g_nlive = 0;
+    hp_ws_foreach(srv, live_cb, NULL);
+    uint32_t todo[HP_PEERS_MAX];
+    int n = hp_peers_pending(&g_peers, g_live, g_nlive, todo, HP_PEERS_MAX);
+    for (int i = 0; i < n; i++) hp_peers_poke(todo[i]);
+}
 
 static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     (void)user;
@@ -55,7 +78,11 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     if (r < 0) { hp_ws_conn_close(c, 1011); return; }
     if (rl && hp_ws_send(c, reply, rl) < 0) { hp_ws_conn_close(c, 1011); return; }
     if (sess->authed) hp_ws_conn_set_authed(c);
-    if (!was_authed && sess->authed) hub_send_state(&g_hub, c); /* live state right after hello_ack */
+    if (!was_authed && sess->authed) {
+        hub_send_state(&g_hub, c); /* live state right after hello_ack */
+        if (hp_peers_note(&g_peers, hp_ws_conn_peer(c)) && hp_peers_save(&g_peers) < 0)
+            fprintf(stderr, "hub: cannot save the peer list\n");
+    }
     if (r == HP_DISPATCH_CLOSE) hp_ws_conn_close(c, 1008);
     hub_flush_pending(&g_hub); /* after the reply, so clients see it first */
 }
@@ -420,6 +447,13 @@ int main(int argc, char **argv) {
     g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : "ha-harmony-hub";
     fprintf(stderr, "hub: build %u\n", (unsigned)hp_build_id());
     if (ota_pubkey_is_dev()) fprintf(stderr, "hub: dev OTA key built in (never ship this build)\n");
+    { /* peer list next to the state file */
+        char pp[300] = "";
+        const char *sl = state ? strrchr(state, '/') : NULL;
+        if (sl && snprintf(pp, sizeof pp, "%.*speers", (int)(sl - state) + 1, state) >= (int)sizeof pp) pp[0] = 0;
+        hp_peers_init(&g_peers, pp[0] ? pp : NULL);
+        hp_peers_load(&g_peers);
+    }
     hp_ws_cb_t cb = {on_text, on_close};
     hp_ws_server_t *srv = hp_ws_listen((uint16_t)port, token, &cb, NULL);
     if (!srv) {
@@ -468,6 +502,7 @@ int main(int argc, char **argv) {
         hp_mdns_srv_service(&g_mdns);
         if (!sim) hp_hw_service(&g_hw);
         hub_run_timers(&g_hub);
+        peers_keepalive(srv);
         if (g_hub.ota.restart && ++restart_polls >= 3) break;
     }
     hp_mdns_srv_stop(&g_mdns); /* goodbye (TTL 0) */

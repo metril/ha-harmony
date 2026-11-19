@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <signal.h>
@@ -283,6 +284,7 @@ struct hp_ws_conn {
     int64_t auth_dl;  /* 0 = none: hello must complete by then (open conns) */
     int64_t idle_dl;  /* 0 = none: next inbound frame must arrive by then */
     void *user;
+    uint32_t peer; /* IPv4 of the peer, host order (0 = unknown) */
 };
 
 struct hp_ws_server {
@@ -360,6 +362,7 @@ void hp_ws_foreach(hp_ws_server_t *s, void (*fn)(hp_ws_conn_t *, void *), void *
 }
 void hp_ws_conn_set_user(hp_ws_conn_t *c, void *u) { c->user = u; }
 void *hp_ws_conn_user(const hp_ws_conn_t *c) { return c->user; }
+uint32_t hp_ws_conn_peer(const hp_ws_conn_t *c) { return c->peer; }
 
 static void conn_free(hp_ws_conn_t *c) {
     hp_ws_server_t *s = c->srv;
@@ -580,7 +583,9 @@ static void conn_readable(hp_ws_conn_t *c) {
 }
 
 static void accept_one(hp_ws_server_t *s) {
-    int fd = accept(s->lfd, NULL, NULL);
+    struct sockaddr_in pa;
+    socklen_t pl = sizeof pa;
+    int fd = accept(s->lfd, (struct sockaddr *)&pa, &pl);
     if (fd < 0) return;
     hp_ws_conn_t *c = NULL;
     for (int i = 0; i < HP_WS_MAX_CONNS; i++)
@@ -592,6 +597,7 @@ static void accept_one(hp_ws_server_t *s) {
     }
     set_nb(fd);
     c->fd = fd;
+    c->peer = pl >= sizeof pa && pa.sin_family == AF_INET ? ntohl(pa.sin_addr.s_addr) : 0;
     c->rbuf = rb;
     c->state = ST_HANDSHAKE;
     c->deadline = now_ms() + HP_WS_HANDSHAKE_MS;

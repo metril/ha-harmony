@@ -135,3 +135,13 @@ The hub keeps `2 x hub binary + 256 KiB` free for OTA staging and `state.json`; 
    `config needs ~N KiB of flash`; confirm `df -k /data` after the refusal is unchanged and that no
    `cache.json.new` remains. Then confirm an OTA stage (`hub.prev` copy) still fits with the largest accepted cache.
 4. Record the numbers in this runbook (partition size, free before/after, largest accepted cache).
+
+## Peer ARP keepalive
+
+A peer on the hub's own L2 segment (Home Assistant) may fail to ARP for the hub after a reboot (the hub's Wi-Fi can miss
+broadcast ARP); routed clients are unaffected. The hub keeps `peers` (one IPv4 per line, newest first, max 64, private
+ranges only) next to `state.json`, adds an address when a peer authenticates (written atomically, only when a new
+address appears), and every 30 s (first round at startup) sends one byte of UDP to port 9 of each remembered peer
+with no live authenticated connection. The hub's kernel then ARPs for the peer and the peer learns the hub's MAC.
+Check on the bench after a hub reboot: `cat /proc/net/arp` on the hub lists the peer within ~30 s and the peer
+connects without a manual ping. Deleting `peers` is safe (it is relearned on the next authentication).

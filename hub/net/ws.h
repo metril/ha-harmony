@@ -55,6 +55,8 @@ void hp_ws_set_extra_fds(hp_ws_server_t *, int (*fn)(void *arg, int out[8]), voi
 /* Per-connection opaque pointer (owner frees it in on_close). */
 void hp_ws_conn_set_user(hp_ws_conn_t *, void *);
 void *hp_ws_conn_user(const hp_ws_conn_t *);
+/* The peer IPv4 address (host order; 0 = unknown). */
+uint32_t hp_ws_conn_peer(const hp_ws_conn_t *);
 /* Closes all connections (calling on_close) and the listener. NULL-safe. */
 void hp_ws_close(hp_ws_server_t *);
 

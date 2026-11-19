@@ -28,6 +28,7 @@ add_hp_test(rf_spi)
 target_compile_definitions(test_rf_spi PRIVATE HP_LINK_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/rf/link_status.json")
 add_hp_test(mdns)
 add_hp_test(ident)
+add_hp_test(peers)
 # test_bt_stub builds the stub itself: hp_hub carries the real supervisor (hub/bt_link.c) when HH_BT is on.
 add_executable(test_bt_stub test_bt_stub.c ${CMAKE_SOURCE_DIR}/hub/bt_link_stub.c)
 target_link_libraries(test_bt_stub PRIVATE hp_hub)
