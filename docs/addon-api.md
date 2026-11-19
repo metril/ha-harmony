@@ -39,7 +39,7 @@ the table below.
 | GET | `/api/v1/config/status` | ingress | Did the integration apply it? |
 | GET | `/api/v1/hubs` | ingress | Hubs known to the store, hub ids integrations poll for, adoptable stores |
 | POST | `/api/v1/hubs/adopt` | ingress | Move a store (default: `default`) to a linked hub id |
-| GET | `/api/v1/ha/entities` | ingress | Home Assistant entities for pickers |
+| GET | `/api/v1/ha/entities` | ingress | Home Assistant entities for pickers, with area, device, integration and labels |
 | GET | `/api/v1/ha/services` | ingress | Home Assistant services for pickers |
 | POST | `/api/v1/ir/test` | ingress | Fire one IR code through `ha_harmony.send_ir` |
 | GET | `/api/v1/ir/brands` | ingress | Brand search |
@@ -160,10 +160,29 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
 
 ### Home Assistant (read only)
 
-- `GET ha/entities?domain=&q=` -> `{entities: [{entity_id, name, domain, state?, device_class?}]}`,
-  sorted by domain then name; `domain` must be on the allow-list, `q` at most 64 characters.
+- `GET ha/entities?domain=&q=&area=&diagnostic=0|1` -> `{entities: [{entity_id, name, domain, state?,
+  device_class?, area?, device?, platform?, labels?: [str], diag?: true}], areas: [{name, floor?}],
+  registries: bool}`, sorted by domain then name. `area` is the entity's own area, else its device's;
+  `device` is the device's name (the user's name wins); `platform` is the integration; `areas` lists
+  the areas that appear, with their floor. Disabled and hidden entities are always left out, and so
+  are `diagnostic` and `config` entities unless `diagnostic=1` (they then carry `diag: true`).
+  `domain` must be on the allow-list; `q` (at most 64 characters, words are ANDed over name, entity id,
+  area, device, integration and labels) and `area` (exact name, any case) filter on the server. The
+  editor fetches the whole list once (about 150 bytes per entity: 3,000 entities are ~450 KB) and
+  filters in the browser; the answer carries an `ETag` and `Cache-Control: no-cache`, and a request
+  with a matching `If-None-Match` gets an empty `304`. `registries` is false when the registries could
+  not be read (see below): the rows then carry no area, device, integration or labels and nothing is
+  excluded by flag, so the editor can only group by type. That is not an error.
 - `GET ha/services?domain=` -> `{services: [{domain, service, name, fields: [str]}]}`.
-- Both: `503 ha_unavailable` when Home Assistant cannot be read (no token, network, bad answer).
+- Both: `503 ha_unavailable` when Home Assistant cannot be read (no token, network, bad answer);
+  `error.reason` is a short cause (`no_access`, `status_503`, `too_large`, `not_json`, `TimeoutError`, ...).
+- Registries: the add-on reads the area, device, entity and floor registries through the Supervisor's
+  WebSocket proxy (`ws://supervisor/core/websocket`, authenticated with the add-on's own token). The
+  client can send exactly four commands, enforced in code: `config/area_registry/list`,
+  `config/device_registry/list`, `config/entity_registry/list` and `config/floor_registry/list`
+  (floors are optional). Messages are capped at 8 MiB and the whole conversation at 20 s; the result is
+  cached for 60 s (a failed refresh keeps the last good copy and is not retried for 15 s) and a failure
+  is logged once per cause, never with the token.
 
 ### IR database
 
@@ -235,7 +254,7 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
   plus a `Retry-After` header.
 - Draft rev is an integer counter. It appears as top-level `rev` in GET config and in the PUT, apply,
   revert and import responses; `If-Match` takes `3`, `"3"` or `W/"3"`. `rev` is separate from `applied.rev`.
-- `GET /ha/entities` returns `{entities:[{entity_id,name,domain,state?,device_class?}]}` and
+- `GET /ha/entities` returns `{entities:[{entity_id,name,domain,state?,device_class?,area?,device?,platform?,labels?,diag?}],areas,registries}` and
   `GET /ha/services` returns `{services:[{domain,service,name,fields:[...]}]}`. Both reject repeated
   query params.
 - Validation: `errors:[{path:[...],msg,line:null}]` (up to 100). `POST validate?all=0` gives the first

@@ -16,6 +16,8 @@ from typing import Any, Protocol
 
 import aiohttp
 
+from .ha_ws import HaRegistryApi, RegistryUnavailable
+
 log = logging.getLogger(__name__)
 
 CORE_API_URL = "http://supervisor/core/api"
@@ -24,6 +26,8 @@ MAX_ENTITIES = 5000
 MAX_STR = 200
 CACHE_SECONDS = 5.0
 TIMEOUT_SECONDS = 20  # a few-MB /states on a busy install
+REGISTRY_SECONDS = 60.0
+FAILED_RETRY_SECONDS = 15.0
 
 ACTION_DOMAINS = frozenset(
     {
@@ -95,10 +99,16 @@ def _text(v: Any) -> str | None:
 
 
 class Catalog:
-    """Entities and services, filtered to the allow-listed domains and cached for a few seconds."""
+    """Entities (with area/device from the registries when readable) and services, filtered to the allow-listed domains and cached for a few seconds."""
 
-    def __init__(self, api: HaApi | None, clock: Callable[[], float]) -> None:
-        self._api, self._clock = api, clock
+    def __init__(
+        self,
+        api: HaApi | None,
+        clock: Callable[[], float],
+        registry: HaRegistryApi | None = None,
+    ) -> None:
+        self._api, self._clock, self._registry = api, clock, registry
+        self._reg_cache: tuple[float, dict[str, Any] | None] | None = None
         self._cache: dict[str, tuple[float, Any]] = {}
         self._failing: dict[str, str] = {}  # path -> last logged reason
 
@@ -106,7 +116,8 @@ class Catalog:
         """One WARNING on the first failure and on a change of cause, never one per poll."""
         if self._failing.get(path) != reason:
             self._failing[path] = reason
-            log.warning("Home Assistant %s cannot be read: %s", path, reason)
+            what = "registries" if path == "registry" else path
+            log.warning("Home Assistant %s cannot be read: %s", what, reason)
 
     async def _get(self, path: str) -> Any:
         try:
@@ -131,10 +142,68 @@ class Catalog:
         self._cache[path] = (now, data)
         return data
 
-    async def entities(self, domain: str | None, q: str | None) -> list[dict[str, Any]]:
+    async def _registries(self) -> dict[str, Any] | None:
+        """Area, device and entity registries merged into lookups, cached ~60 s.
+
+        None when they cannot be read (no WebSocket access, refused, too slow): the catalog then
+        carries no areas, devices or flags. A failed refresh keeps serving the last good copy and is
+        not retried for a few seconds, so a dead socket does not cost a timeout per request.
+        """
+        if self._registry is None:
+            return None
+        now = self._clock()
+        hit = self._reg_cache
+        if hit and now - hit[0] < (REGISTRY_SECONDS if hit[1] is not None else FAILED_RETRY_SECONDS):
+            return hit[1]
+        try:
+            raw = await self._registry.lists()
+        except RegistryUnavailable as exc:
+            self._failed("registry", exc.reason)
+            old = hit[1] if hit else None
+            self._reg_cache = (now, old)
+            return old
+        if self._failing.pop("registry", None) is not None:
+            log.info("Home Assistant registries can be read again")
+        floors = {
+            f.get("floor_id"): _text(f.get("name")) for f in raw.get("config/floor_registry/list", [])
+        }
+        areas = {
+            a.get("area_id"): (_text(a.get("name")), floors.get(a.get("floor_id")))
+            for a in raw.get("config/area_registry/list", [])
+        }
+        labels = {
+            lb.get("label_id"): _text(lb.get("name")) for lb in raw.get("config/label_registry/list", [])
+        }
+        devices = {}
+        for d in raw.get("config/device_registry/list", []):
+            devices[d.get("id")] = (
+                _text(d.get("name_by_user")) or _text(d.get("name")),
+                d.get("area_id"),
+                d.get("labels"),
+            )
+        entities = {e.get("entity_id"): e for e in raw.get("config/entity_registry/list", [])}
+        data = {"areas": areas, "devices": devices, "entities": entities, "labels": labels}
+        self._reg_cache = (now, data)
+        return data
+
+    async def catalog(
+        self,
+        domain: str | None = None,
+        q: str | None = None,
+        area: str | None = None,
+        diagnostic: bool = False,
+    ) -> dict[str, Any]:
+        """Entities in a compact shape plus the areas they use.
+
+        Disabled and hidden entities are left out; so are diagnostic and config ones unless
+        `diagnostic`. `registries` says whether area/device/platform data could be read.
+        """
         states = await self._get("/states")
-        needle = (q or "").casefold()
+        reg = await self._registries()
+        words = (q or "").casefold().split()
+        want_area = (area or "").casefold()
         out: list[dict[str, Any]] = []
+        used: dict[str, str | None] = {}
         for st in states:
             if not isinstance(st, dict):
                 continue
@@ -145,21 +214,66 @@ class Catalog:
             if dom not in ENTITY_DOMAINS or (domain and dom != domain):
                 continue
             attrs = st.get("attributes") if isinstance(st.get("attributes"), dict) else {}
-            name = _text(attrs.get("friendly_name")) or eid
-            if needle and needle not in eid.casefold() and needle not in name.casefold():
-                continue
-            row: dict[str, Any] = {"entity_id": eid, "name": name, "domain": dom}
+            row: dict[str, Any] = {
+                "entity_id": eid,
+                "name": _text(attrs.get("friendly_name")) or eid,
+                "domain": dom,
+            }
             for key, val in (
                 ("state", _text(st.get("state"))),
                 ("device_class", _text(attrs.get("device_class"))),
             ):
                 if val is not None:
                     row[key] = val
+            floor = None
+            if reg is not None and (ent := reg["entities"].get(eid)):
+                if ent.get("disabled_by") or ent.get("hidden_by"):
+                    continue
+                if ent.get("entity_category") in ("diagnostic", "config"):
+                    if not diagnostic:
+                        continue
+                    row["diag"] = True
+                dev_name, dev_area, dev_labels = reg["devices"].get(
+                    ent.get("device_id"), (None, None, None)
+                )
+                area_name, floor = reg["areas"].get(ent.get("area_id") or dev_area, (None, None))
+                for key, val in (
+                    ("area", area_name),
+                    ("device", dev_name),
+                    ("platform", _text(ent.get("platform"))),
+                ):
+                    if val:
+                        row[key] = val
+                names = {
+                    reg["labels"].get(i)
+                    for i in [*(ent.get("labels") or []), *(dev_labels or [])]
+                    if isinstance(i, str)
+                } - {None}
+                if names:
+                    row["labels"] = sorted(names, key=str.casefold)[:16]
+            if want_area and want_area != str(row.get("area", "")).casefold():
+                continue
+            if words:
+                hay = (
+                    " ".join(str(row.get(k, "")) for k in ("name", "entity_id", "area", "device", "platform"))
+                    + " "
+                    + " ".join(row.get("labels", []))
+                ).casefold()
+                if not all(w in hay for w in words):
+                    continue
+            if "area" in row:
+                used[row["area"]] = floor
             out.append(row)
             if len(out) >= MAX_ENTITIES:
                 break
         out.sort(key=lambda r: (r["domain"], r["name"].casefold()))
-        return out
+        areas = [
+            {"name": n, **({"floor": f} if f else {})} for n, f in sorted(used.items(), key=lambda kv: kv[0].casefold())
+        ]
+        return {"entities": out, "areas": areas, "registries": reg is not None}
+
+    async def entities(self, domain: str | None, q: str | None) -> list[dict[str, Any]]:
+        return (await self.catalog(domain, q))["entities"]
 
     async def services(self, domain: str | None) -> list[dict[str, Any]]:
         data = await self._get("/services")

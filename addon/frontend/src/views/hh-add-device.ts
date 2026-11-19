@@ -110,7 +110,6 @@ export class HhAddDevice extends StoreElement {
   @state() private kind: 'pronto' | 'flipper' | 'smartir' = 'pronto';
   @state() private parsed: IrParsed | null = null;
   @state() private parseErr = '';
-  @state() private eq = '';
   @state() private otherType = '14';
   @state() private choosingOther = false;
   @query('hh-send-ir') private sender?: HhSendIr;
@@ -236,7 +235,10 @@ export class HhAddDevice extends StoreElement {
   private pickSource(s: 'archive' | 'paste' | 'ha') {
     this.dispatch({ t: 'source', source: s });
     if (s === 'archive') void this.loadBrands('');
-    if (s === 'ha') void this.ha.loadHa();
+    if (s === 'ha') {
+      void import('../components/hh-ha-browser'); // the navigator is a lazy chunk, only this source needs it
+      void this.ha.loadHa();
+    }
   }
   private pickBrand(b: IrBrand) {
     try {
@@ -448,12 +450,10 @@ export class HhAddDevice extends StoreElement {
     }
   }
   private entity() {
-    const ents = (this.ha.entities ?? []).filter((e) => (PROPOSAL_DOMAINS as readonly string[]).includes(e.domain ?? e.entity_id.split('.')[0] ?? '') && `${e.name ?? ''} ${e.entity_id}`.toLowerCase().includes(this.eq.toLowerCase()));
     return html`<h1>Pick a Home Assistant entity</h1><p class="lead">We propose commands from what the entity's services can do. We cannot read its source list or remote presets, so those are left for you to fill in.</p>
-      <input class="search" type="search" aria-label="Search entities" placeholder="Search media players and remotes" .value=${this.eq} @input=${(e: Event) => (this.eq = (e.target as HTMLInputElement).value)} />
-      ${!this.ha.haLoaded ? html`<p class="lead" role="status">Loading Home Assistant…</p>` : this.ha.entities === null ? html`<div class="banner bad" role="alert">Home Assistant cannot be read right now.<span class="sp"></span><button class="btn sm" @click=${() => void this.ha.loadHa(true)}>Retry</button></div>` : nothing}
-      <div class="ents">${ents.slice(0, 80).map((e) => html`<button class="model" @click=${() => this.useEntity(e)}><b>${e.name ?? e.entity_id}</b><span class="muted">${e.entity_id}${e.state ? ` · ${e.state}` : ''}</span></button>`)}</div>
-      ${this.ha.entities && !ents.length ? html`<p class="why">No media players, remotes, switches, lights or fans${this.eq ? ' match' : ''}.</p>` : nothing}`;
+      <hh-ha-browser mode="select" scope="wizard" label="media players, remotes, switches, lights and fans" .entities=${this.ha.entities} .loaded=${this.ha.haLoaded} .loading=${this.ha.haLoading} .reason=${this.ha.haReason}
+        .registries=${this.ha.haRegistries} .areas=${this.ha.haAreas} .domains=${PROPOSAL_DOMAINS}
+        @hh-ha-pick=${(e: CustomEvent<{ entity_id: string; name?: string }>) => this.useEntity(e.detail)} @hh-ha-retry=${() => void this.ha.loadHa(true)}></hh-ha-browser>`;
   }
   private useEntity(e: { entity_id: string; name?: string }) {
     const p = proposeFromEntity(this.store.config, e);

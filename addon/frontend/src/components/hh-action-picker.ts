@@ -5,7 +5,7 @@ import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { HA_DOMAINS } from '../lib/studio-state';
 import { ACTION_DOMAINS, haProblem } from '../lib/ha-rules';
-import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, entityDomain, isHaAction, fieldData, groupCommand, pretty, resolveIr, type Source } from '../lib/studio-model';
+import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, isHaAction, fieldData, groupCommand, pretty, resolveIr, type Source } from '../lib/studio-model';
 import './hh-send-ir';
 
 type Kind = 'command' | 'input' | 'activity' | 'alloff' | 'ha';
@@ -32,6 +32,7 @@ export class HhActionPicker extends LitElement {
       .sug { display: flex; gap: 6px; flex-wrap: wrap; }
       .sug button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--sf); color: var(--tx); cursor: pointer; font-size: 12px; }
       .sug button:hover { background: var(--sf2); }
+      hh-ha-browser { max-height: 340px; overflow: auto; }
       .why { color: var(--tx3); font-size: 12px; }
       .chk { display: flex; gap: 8px; align-items: center; font-weight: 500; color: var(--tx); }
     `,
@@ -53,6 +54,7 @@ export class HhActionPicker extends LitElement {
   @state() private repeatHeld = false;
   @state() private fields: Record<string, string> = {};
   @state() private q = '';
+  @state() private browse = false;
 
   private get cfg() {
     return this.host.state.store.config;
@@ -144,7 +146,8 @@ export class HhActionPicker extends LitElement {
   private haFields() {
     const st = this.host.state;
     const services = this.serviceOptions();
-    const ents = (st.entities ?? []).filter((e) => !this.service || entityDomain(e.entity_id) === this.service.split('.')[0] || HA_DOMAINS.includes(entityDomain(e.entity_id)));
+    const dom = this.service.split('.')[0] ?? '';
+    const domains = dom && HA_DOMAINS.includes(dom) ? [dom] : HA_DOMAINS;
     return html`
       ${st.haWritable ? nothing : html`<p class="why" role="note">Home Assistant actions need a newer add-on and integration (this one cannot store them yet).</p>`}
       <label>Service
@@ -156,9 +159,14 @@ export class HhActionPicker extends LitElement {
           : html`<input type="text" placeholder="light.toggle" .value=${this.service} @input=${(e: Event) => (this.service = (e.target as HTMLInputElement).value.trim())} />`}
       </label>
       <label>Entity
-        <input type="text" list="hh-ents" placeholder=${st.entities ? 'Search entities' : 'light.living_room'} .value=${this.entity} @input=${(e: Event) => (this.entity = (e.target as HTMLInputElement).value.trim())} />
-        <datalist id="hh-ents">${ents.slice(0, 200).map((e) => html`<option value=${e.entity_id}>${e.name ?? ''}${e.state ? ` · ${e.state}` : ''}</option>`)}</datalist>
+        <input type="text" placeholder=${st.entities ? 'Search entities' : 'light.living_room'} .value=${this.entity} @input=${(e: Event) => (this.entity = (e.target as HTMLInputElement).value.trim())} />
       </label>
+      ${st.entities ? html`<button class="btn sm" aria-expanded=${this.browse} @click=${() => { this.browse = !this.browse; void import('./hh-ha-browser'); }}>${this.browse ? 'Hide' : 'Browse'} Home Assistant entities</button>` : nothing}
+      ${this.browse
+        ? html`<hh-ha-browser mode="select" scope="picker" .entities=${st.entities} .loaded=${st.haLoaded} .loading=${st.haLoading} .reason=${st.haReason} .registries=${st.haRegistries} .areas=${st.haAreas} .domains=${domains}
+            @hh-ha-pick=${(e: CustomEvent<{ entity_id: string }>) => { this.entity = e.detail.entity_id; this.browse = false; }}
+            @hh-ha-retry=${() => void st.loadHa(true)}></hh-ha-browser>`
+        : nothing}
       ${st.entities === null && st.haLoaded ? html`<p class="why">Home Assistant could not be read, so type the entity id.</p>` : nothing}
       ${this.entity && !HA_ENTITY_ID.test(this.entity) ? html`<p class="why" role="alert">Entity ids look like light.living_room.</p>` : this.haIssue() ? html`<p class="why" role="alert">${this.haIssue()}</p>` : nothing}
       ${this.serviceFields().map((f) => html`<label>${f}<input type="text" aria-label="Field ${f}" placeholder="optional" .value=${this.fields[f] ?? ''} @input=${(e: Event) => (this.fields = { ...this.fields, [f]: (e.target as HTMLInputElement).value })} /></label>`)}

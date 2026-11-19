@@ -50,6 +50,7 @@ from .auth import (
     load_or_create_token,
 )
 from .ha_client import Catalog, HaApi, HaUnavailable
+from .ha_ws import HaRegistryApi
 from .ir_tester import IrSender, SendLimiter, SendRefused
 from .linked import HW_ID, LinkedHubs, clean_name
 from .options import Options, load_options
@@ -721,10 +722,17 @@ def _ha_unavailable(reason: str | None = None) -> web.HTTPException:
 async def ha_entities(request: web.Request) -> web.Response:
     q = query(request, schemas.HA_ENTITIES_QUERY)
     try:
-        rows = await request.app[CATALOG_KEY].entities(q.get("domain"), q["q"])
+        body = await request.app[CATALOG_KEY].catalog(
+            q.get("domain"), q["q"], q.get("area"), q["diagnostic"] == "1"
+        )
     except HaUnavailable as exc:
         raise _ha_unavailable(exc.reason) from None
-    return jresp({"entities": rows})
+    text = json.dumps(body, separators=(",", ":"))
+    etag = '"' + hashlib.sha256(text.encode()).hexdigest()[:16] + '"'
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
+    if request.headers.get("If-None-Match") == etag:
+        return web.Response(status=304, headers=headers)
+    return web.Response(text=text, content_type="application/json", headers=headers)
 
 
 async def ha_services(request: web.Request) -> web.Response:
@@ -1002,6 +1010,7 @@ def create_app(
     discovery: Discovery | None = None,
     wait_seconds: float = WAIT_SECONDS,
     ha_api: HaApi | None = None,
+    ha_registry: HaRegistryApi | None = None,
     irdb: IrdbArchive | None = None,
     ir_sender: IrSender | None = None,
     send_clock: Callable[[], float] = time.monotonic,
@@ -1026,7 +1035,7 @@ def create_app(
     app[CLOCK_KEY] = clock
     app[NOTIFIER_KEY] = ApplyNotifier()
     app[WAIT_KEY] = wait_seconds
-    app[CATALOG_KEY] = Catalog(ha_api, clock)
+    app[CATALOG_KEY] = Catalog(ha_api, clock, ha_registry)
     app[SEEN_KEY] = {}
     app[LINKED_KEY] = LinkedHubs(data_dir, clock)
     _auto_adopt(app)

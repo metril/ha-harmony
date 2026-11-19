@@ -1,11 +1,11 @@
 // UI state of the remote studio (what is selected, which layer, zoom...) plus the data the studio
 // fetches around the draft: key map per layer, add-on capabilities, Home Assistant entities/services.
-import { ApiError, haEntitiesOrNull, haServicesOrNull, type HaEntity, type HaService, type Keymap, type KeymapRow, type PreviewPage } from './api';
+import { ApiError, haCatalogOrReason, haServicesOrNull, type HaCatalog, type HaEntity, type HaService, type Keymap, type KeymapRow, type PreviewPage } from './api';
 import type { Store } from './store';
 import { DEFAULT_LAYER, keyActionLabel, pageIndexForLayer, type Layer } from './studio-model';
 
 export type Sel = { kind: 'key'; name: string } | { kind: 'widget'; page: number; index: number } | { kind: 'page' } | null;
-export type PaletteTab = 'devices' | 'activities' | 'home' | 'widgets';
+export type PaletteTab = 'devices' | 'activities' | 'ha' | 'widgets';
 export const HA_DOMAINS = ['light', 'switch', 'scene', 'script', 'media_player', 'remote', 'fan', 'cover', 'climate', 'input_boolean', 'input_button', 'button', 'number', 'select', 'sensor', 'binary_sensor'];
 
 /** The add-on's summary of a device / activity / none action (harmony_core/keymap.summarize); null: leave it to the add-on. */
@@ -47,6 +47,12 @@ export class StudioState extends EventTarget {
   services: HaService[] | null = null;
   haLoaded = false;
   haLoading = false;
+  /** why the entities could not be read (the 503's `reason`), when `entities` is null */
+  haReason = '';
+  haAreas: HaCatalog['areas'] = [];
+  haRegistries = false;
+  /** list diagnostic and config entities too (asked of the add-on, which leaves them out by default) */
+  haDiag = false;
   private lastGood = new Map<string, PreviewPage>();
   private kmTimer: ReturnType<typeof setTimeout> | null = null;
   private kmSeq = 0;
@@ -161,21 +167,35 @@ export class StudioState extends EventTarget {
     }
     this.emit();
   }
-  /** Entities and services for the Home tab and the action picker. null = Home Assistant cannot be read (typed ids fall back). */
+  /** Entities and services for the Home Assistant tab and the action picker. null = Home Assistant cannot be read (typed ids fall back). */
   async loadHa(force = false): Promise<void> {
     if (this.haLoading || (this.haLoaded && !force)) return;
     this.haLoading = true;
     try {
-      const [e, s] = await Promise.all([haEntitiesOrNull(this.store.api), haServicesOrNull(this.store.api)]);
-      this.entities = e;
+      const [e, s] = await Promise.all([haCatalogOrReason(this.store.api, this.haDiag), haServicesOrNull(this.store.api)]);
+      if ('catalog' in e) {
+        this.entities = e.catalog.entities;
+        this.haAreas = e.catalog.areas ?? [];
+        this.haRegistries = e.catalog.registries === true;
+        this.haReason = '';
+      } else {
+        this.entities = null;
+        this.haReason = e.reason;
+      }
       this.services = s;
     } catch {
       this.entities = null;
       this.services = null;
+      this.haReason = '';
     }
     this.haLoaded = true;
     this.haLoading = false;
     this.emit();
+  }
+  setHaDiag(on: boolean): void {
+    if (on === this.haDiag) return;
+    this.haDiag = on;
+    void this.loadHa(true);
   }
   get haWritable(): boolean {
     return this.haAction === true;
