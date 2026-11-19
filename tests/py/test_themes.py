@@ -52,11 +52,14 @@ def test_palette_order_is_wire_index():
         assert swatch(t.id, 0) is None and swatch(t.id, 13) is None
 
 
-def test_default_equals_theme_h():
-    h = (ROOT / "remote" / "app" / "theme.h").read_text()
-    hexes = {m[0].lower(): int(m[1], 16) for m in re.findall(r"#define RA_HEX_(\w+) 0x([0-9A-Fa-f]{6})", h)}
-    assert hexes == dict(PRESETS["default"].tokens)
-    assert list(hexes) == list(tm.TOKEN_NAMES)  # the header's tokens are the schema
+def test_default_equals_remote_table():
+    # theme.h no longer holds colour literals: the remote's default is row 0 of the generated theme_presets.c
+    c = (ROOT / "remote" / "app" / "theme_presets.c").read_text()
+    row = re.search(r'\{0, "default", "[^"]*",\s*((?:0x[0-9A-Fa-f]{6},?\s*){13})', c)
+    assert row
+    vals = [int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{6})", row[1])]
+    assert vals == list(PRESETS["default"].tokens.values())
+    assert list(PRESETS["default"].tokens) == list(tm.TOKEN_NAMES)
 
 
 @pytest.mark.parametrize("t", THEMES, ids=lambda t: t.key)

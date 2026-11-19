@@ -36,10 +36,10 @@ static void test_default_matches_header(void)
 {
     const ra_theme_t *t = ra_theme_find(RA_THEME_DEFAULT);
     CT_CHECK(t != NULL);
-    CT_EQ(t->bg, RA_HEX_BG); CT_EQ(t->s1, RA_HEX_S1); CT_EQ(t->s2, RA_HEX_S2); CT_EQ(t->s3, RA_HEX_S3);
-    CT_EQ(t->tx, RA_HEX_TX); CT_EQ(t->tx2, RA_HEX_TX2); CT_EQ(t->tx3, RA_HEX_TX3); CT_EQ(t->acc, RA_HEX_ACC);
-    CT_EQ(t->onacc, RA_HEX_ONACC); CT_EQ(t->warm, RA_HEX_WARM); CT_EQ(t->onwarm, RA_HEX_ONWARM);
-    CT_EQ(t->bad, RA_HEX_BAD); CT_EQ(t->onbad, RA_HEX_ONBAD);
+    CT_EQ(t->bg, 0x101820); CT_EQ(t->s1, 0x182430); CT_EQ(t->s2, 0x202C38); CT_EQ(t->s3, 0x304050);
+    CT_EQ(t->tx, 0xF8FCF8); CT_EQ(t->tx2, 0xA8B4C0); CT_EQ(t->tx3, 0x687888); CT_EQ(t->acc, 0x20C8B0);
+    CT_EQ(t->onacc, 0x081C18); CT_EQ(t->warm, 0xF8C040); CT_EQ(t->onwarm, 0x101820);
+    CT_EQ(t->bad, 0xF85848); CT_EQ(t->onbad, 0x100808);
     CT_CHECK(ra_theme_find(RA_THEME_CUSTOM_ID) == NULL);
 }
 

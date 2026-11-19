@@ -276,7 +276,7 @@ static void test_goldens(void) {
 }
 
 static void test_tokens_are_rgb565_exact(void) {
-  static const uint32_t t[] = {RA_HEX_BG, RA_HEX_S1, RA_HEX_S2, RA_HEX_S3, RA_HEX_TX, RA_HEX_TX2, RA_HEX_TX3,
+  const uint32_t t[] = {RA_HEX_BG, RA_HEX_S1, RA_HEX_S2, RA_HEX_S3, RA_HEX_TX, RA_HEX_TX2, RA_HEX_TX3,
                                RA_HEX_ACC, RA_HEX_ONACC, RA_HEX_WARM, RA_HEX_ONWARM, RA_HEX_BAD, RA_HEX_ONBAD};
   for (unsigned i = 0; i < sizeof t / sizeof t[0]; i++) {
     CT_EQ((t[i] >> 16) & 7, 0); /* R and B keep 5 bits, G 6: nothing is lost on the panel */
