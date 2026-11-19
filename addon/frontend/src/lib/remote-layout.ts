@@ -1,20 +1,29 @@
-// Geometry of the Harmony Elite drawing, in one place, in a 340x1160 viewBox.
-// Positions are traced from a product photo (written below in photo pixels: `r(x0, y0, x1, y1)`) and scaled so the
-// screen is the firmware's exact 240x320 logical area. Keys are keyed by the backend's snake_case key names
-// (proto/schema.yaml), checked by test/renderer.test.ts. Which firmware key sits at the return key and the
-// home-control block (measured on the device) is the one table PHYSICAL_KEYS.
-export const VIEW = { w: 340, h: 1160 };
+// Geometry of the Harmony Elite drawing, in one place.
+// Everything is a fraction of the remote's body, measured from a product photo (body 267 x 979 px, aspect 3.67:1):
+// x fractions are of the body width, y fractions of the body height. The scale is set so the screen is the
+// firmware's exact 240x320 logical area. To move or resize a key, edit its row in LAYOUT. Keys are named by the
+// backend's snake_case key names (proto/schema.yaml), checked by test/renderer.test.ts. Which firmware key sits at
+// the return key and the home-control block (measured on the device) is the one table PHYSICAL_KEYS.
 
-// photo pixels -> viewBox units (the photo's screen is 190 px wide, ours 240)
+// body size in viewBox units: the photo's screen is 190 px wide, ours 240, so one photo px = 240/190 units
 const S = 240 / 190;
-const X = (p: number): number => Math.round(170 + (p - 527) * S);
-const Y = (p: number): number => Math.round(86 + (p - 92) * S);
-const r = (x0: number, y0: number, x1: number, y1: number) => ({ x: X(x0), y: Y(y0), w: X(x1) - X(x0), h: Y(y1) - Y(y0) });
+export const BODY = { x: 8, y: 8, w: Math.round(267 * S), h: Math.round(979 * S), rTop: 46, rBottom: 84 };
+export const VIEW = { w: BODY.w + 16, h: BODY.h + 16 };
+/** the mini remote shows just the body (no margin) so its keys stay as large as the width allows */
+export const MINI_VIEW = { x: BODY.x - 3, y: BODY.y - 3, w: BODY.w + 6, h: BODY.h + 6 };
+const fx = (f: number): number => Math.round((BODY.x + f * BODY.w) * 2) / 2;
+const fy = (f: number): number => Math.round((BODY.y + f * BODY.h) * 2) / 2;
+/** the 240x320 display, centred where the photo's screen is */
+export const SCREEN = { w: 240, h: 320, x: Math.round(fx(0.498) - 120), y: Math.round(fy(0.2217) - 160) };
+/** the black glass face around the screen and the Off key */
+export const GLASS = { x: BODY.x + 14, y: BODY.y + 14, w: BODY.w - 28, h: Math.round(0.371 * BODY.h), r: 30 };
 
-export const BODY = { x: 8, y: 8, w: 324, h: 1143, r: 52 };
-export const GLASS = { x: 20, y: 16, w: 300, h: 436, r: 30 };
-/** the 240x320 display */
-export const SCREEN = { x: 50, y: 86, w: 240, h: 320 };
+/** Rounded-rectangle path of the body: tighter at the top, a rounder grip at the bottom. `inset` shrinks it. */
+export function bodyPath(inset = 0): string {
+  const x = BODY.x + inset, y = BODY.y + inset, w = BODY.w - 2 * inset, h = BODY.h - 2 * inset;
+  const t = BODY.rTop - inset, b = BODY.rBottom - inset;
+  return `M${x + t} ${y}h${w - 2 * t}a${t} ${t} 0 0 1 ${t} ${t}v${h - t - b}a${b} ${b} 0 0 1 -${b} ${b}h-${w - 2 * b}a${b} ${b} 0 0 1 -${b} -${b}v-${h - t - b}a${t} ${t} 0 0 1 ${t} -${t}z`;
+}
 
 /**
  * MAPPING TABLE (measured on the device's input): which firmware key sits at each physical position.
@@ -48,62 +57,75 @@ export interface KeyGeom {
   /** colour keys */
   color?: string;
 }
-/** Static printed text on the body (not a control). */
+type Opts = { printed?: string; color?: string };
+/** name, label, group, shape, centre x, centre y, width, height (fractions of the body), options */
+type Row = readonly [string, string, string, KeyShape, number, number, number, number, Opts?];
+
+/** Static printed text on the body (not a control): text, centre x, y (fractions). */
 export const PRINTED: readonly { text: string; x: number; y: number }[] = [
-  { text: 'Vol', x: X(439), y: Y(624) + 3 },
-  { text: 'Ch/Pg', x: X(615), y: Y(624) + 3 },
+  { text: 'Vol', x: fx(0.170), y: fy(0.634) + 3 },
+  { text: 'Ch/Pg', x: fx(0.825), y: fy(0.634) + 3 },
 ];
 
 const STOCK: Record<string, string> = { prev_channel: 'PrevChannel', home_control_1: 'HomeControl1', home_control_2: 'HomeControl2', home_control_3: 'HomeControl3', home_control_4: 'HomeControl4' };
 const stockOf = (name: string): string => STOCK[name] ?? name.replace(/(^|_)([a-z0-9])/g, (_m, _u, c: string) => c.toUpperCase());
-type Box = { x: number; y: number; w: number; h: number };
-const k = (name: string, label: string, group: string, shape: KeyShape, b: Box, o: { printed?: string; color?: string } = {}): KeyGeom => ({ name, stock: stockOf(name), label, group, shape, ...b, ...o });
+const geom = ([name, label, group, shape, cx, cy, w, h, o]: Row): KeyGeom => ({
+  name, stock: stockOf(name), label, group, shape,
+  x: fx(cx) - (w * BODY.w) / 2, y: fy(cy) - (h * BODY.h) / 2, w: w * BODY.w, h: h * BODY.h, ...o,
+});
 
-// the d-pad: a ring around OK, centred at photo (527, 622)
-const DC = { x: X(527), y: Y(622) };
-const DR = Math.round(62 * S);
-const DI = Math.round(34 * S);
-export const DPAD = { x: DC.x, y: DC.y, r: DR };
+// the d-pad: a ring around OK. Centre and radii as fractions of the body width.
+const DPAD_C = { x: 0.498, y: 0.633 };
+const DPAD_R = 0.24;
+const DPAD_IN = 0.127;
+/** ring centre and outer radius in viewBox units (the ring is drawn behind the wedges) */
+export const DPAD = { x: fx(DPAD_C.x), y: fy(DPAD_C.y), r: Math.round(DPAD_R * BODY.w) };
+const DR = DPAD.r;
+const DI = Math.round(DPAD_IN * BODY.w);
+const dpadKeys: KeyGeom[] = ([
+  { name: 'up', label: '', group: 'nav', shape: 'wedge-up', x: DPAD.x - DR + 14, y: DPAD.y - DR, w: 2 * DR - 28, h: DR - DI },
+  { name: 'left', label: '', group: 'nav', shape: 'wedge-left', x: DPAD.x - DR, y: DPAD.y - DR + 14, w: DR - DI, h: 2 * DR - 28 },
+  { name: 'select', label: 'OK', group: 'nav', shape: 'circle', x: DPAD.x - DI, y: DPAD.y - DI, w: 2 * DI, h: 2 * DI },
+  { name: 'right', label: '', group: 'nav', shape: 'wedge-right', x: DPAD.x + DI, y: DPAD.y - DR + 14, w: DR - DI, h: 2 * DR - 28 },
+  { name: 'down', label: '', group: 'nav', shape: 'wedge-down', x: DPAD.x - DR + 14, y: DPAD.y + DI, w: 2 * DR - 28, h: DR - DI },
+] satisfies Omit<KeyGeom, 'stock'>[]).map((g) => ({ ...g, stock: stockOf(g.name) }));
+
 const PK = PHYSICAL_KEYS;
-
 /** In keyboard order: top to bottom, left to right. */
-export const KEYS: readonly KeyGeom[] = [
-  k('power_off_activity', 'Off', 'power', 'pill', r(437, 42, 481, 56), { color: '#7a2b27' }),
-  k('home', 'ACTIVITIES', 'strip', 'rect', r(428, 405, 497, 427), { printed: 'ACTIVITIES' }),
-  k('favorites', 'DEVICES', 'strip', 'rect', r(557, 405, 626, 427), { printed: 'DEVICES' }),
-  k('rewind', '', 'transport', 'rect', r(421, 454, 491, 479)),
-  k('play', '', 'transport', 'rock-top', r(507, 454, 545, 485)),
-  k('fast_forward', '', 'transport', 'rect', r(563, 454, 633, 479)),
-  k('record', '', 'transport', 'rect', r(421, 492, 491, 517)),
-  k('pause', '', 'transport', 'rock-bottom', r(507, 488, 545, 517)),
-  k('stop', '', 'transport', 'rect', r(563, 492, 633, 517)),
-  k('exit', 'Exit', 'menu', 'rect', r(421, 532, 533, 558)),
-  k('menu', 'Menu', 'menu', 'rect', r(541, 532, 633, 558)),
-  k('volume_up', '+', 'volume', 'rock-top', r(421, 572, 458, 614), { printed: 'Vol +' }),
-  k('up', '', 'nav', 'wedge-up', { x: DC.x - DR + 14, y: DC.y - DR, w: 2 * DR - 28, h: DR - DI }),
-  k('left', '', 'nav', 'wedge-left', { x: DC.x - DR, y: DC.y - DR + 14, w: DR - DI, h: 2 * DR - 28 }),
-  k('select', 'OK', 'nav', 'circle', { x: DC.x - DI, y: DC.y - DI, w: 2 * DI, h: 2 * DI }),
-  k('right', '', 'nav', 'wedge-right', { x: DC.x + DI, y: DC.y - DR + 14, w: DR - DI, h: 2 * DR - 28 }),
-  k('down', '', 'nav', 'wedge-down', { x: DC.x - DR + 14, y: DC.y + DI, w: 2 * DR - 28, h: DR - DI }),
-  k('channel_up', '+', 'channel', 'rock-top', r(596, 572, 633, 614), { printed: 'Ch/Pg +' }),
-  k('volume_down', '−', 'volume', 'rock-bottom', r(421, 634, 458, 676), { printed: 'Vol −' }),
-  k('channel_down', '−', 'channel', 'rock-bottom', r(596, 634, 633, 676), { printed: 'Ch/Pg −' }),
-  k('volume_mute', 'Mute', 'volume', 'rect', r(421, 688, 514, 713)),
-  k(PK.return, '', 'channel', 'rect', r(541, 688, 633, 713), { printed: 'Back' }),
-  k('dvr', 'DVR', 'guide', 'rect', r(421, 733, 489, 758)),
-  k('guide', 'Guide', 'guide', 'rect', r(495, 733, 559, 758)),
-  k('info', 'Info', 'guide', 'rect', r(565, 733, 633, 758)),
-  k('red', 'Red', 'colour', 'pill', r(421, 774, 469, 790), { color: '#b8423a' }),
-  k('green', 'Green', 'colour', 'pill', r(477, 774, 525, 790), { color: '#3e8e52' }),
-  k('yellow', 'Yellow', 'colour', 'pill', r(529, 774, 577, 790), { color: '#bc9727' }),
-  k('blue', 'Blue', 'colour', 'pill', r(585, 774, 633, 790), { color: '#3b69b8' }),
-  k(PK.lightUpper, '', 'home', 'rect', r(421, 807, 491, 836), { printed: 'upper light' }),
-  k('home_control_plus', '+', 'home', 'rock-top', r(507, 807, 545, 838)),
-  k(PK.socketUpper, '', 'home', 'rect', r(563, 807, 633, 836), { printed: 'upper socket' }),
-  k(PK.lightLower, '', 'home', 'rect', r(421, 845, 491, 874), { printed: 'lower light' }),
-  k('home_control_minus', '−', 'home', 'rock-bottom', r(507, 842, 545, 874)),
-  k(PK.socketLower, '', 'home', 'rect', r(563, 845, 633, 874), { printed: 'lower socket' }),
+const LAYOUT: readonly (Row | 'dpad')[] = [
+  ['power_off_activity', 'Off', 'power', 'pill', 0.243, 0.048, 0.165, 0.014, { color: '#7a2b27' }],
+  ['home', 'ACTIVITIES', 'strip', 'rect', 0.257, 0.423, 0.258, 0.022, { printed: 'ACTIVITIES' }],
+  ['favorites', 'DEVICES', 'strip', 'rect', 0.740, 0.423, 0.258, 0.022, { printed: 'DEVICES' }],
+  ['rewind', '', 'transport', 'rect', 0.232, 0.474, 0.262, 0.026],
+  ['play', '', 'transport', 'rock-top', 0.494, 0.478, 0.142, 0.032],
+  ['fast_forward', '', 'transport', 'rect', 0.764, 0.474, 0.262, 0.026],
+  ['record', '', 'transport', 'rect', 0.232, 0.513, 0.262, 0.026],
+  ['pause', '', 'transport', 'rock-bottom', 0.494, 0.511, 0.142, 0.030],
+  ['stop', '', 'transport', 'rect', 0.764, 0.513, 0.262, 0.026],
+  ['exit', 'Exit', 'menu', 'rect', 0.311, 0.555, 0.419, 0.027],
+  ['menu', 'Menu', 'menu', 'rect', 0.723, 0.555, 0.345, 0.027],
+  ['volume_up', '+', 'volume', 'rock-top', 0.170, 0.604, 0.139, 0.043, { printed: 'Vol +' }],
+  'dpad',
+  ['channel_up', '+', 'channel', 'rock-top', 0.825, 0.604, 0.139, 0.043, { printed: 'Ch/Pg +' }],
+  ['volume_down', '−', 'volume', 'rock-bottom', 0.170, 0.667, 0.139, 0.043, { printed: 'Vol −' }],
+  ['channel_down', '−', 'channel', 'rock-bottom', 0.825, 0.667, 0.139, 0.043, { printed: 'Ch/Pg −' }],
+  ['volume_mute', 'Mute', 'volume', 'rect', 0.275, 0.713, 0.348, 0.026],
+  [PK.return, '', 'channel', 'rect', 0.723, 0.713, 0.345, 0.026, { printed: 'Back' }],
+  ['dvr', 'DVR', 'guide', 'rect', 0.228, 0.759, 0.255, 0.026],
+  ['guide', 'Guide', 'guide', 'rect', 0.498, 0.759, 0.240, 0.026],
+  ['info', 'Info', 'guide', 'rect', 0.768, 0.759, 0.255, 0.026],
+  ['red', 'Red', 'colour', 'pill', 0.191, 0.797, 0.180, 0.016, { color: '#b8423a' }],
+  ['green', 'Green', 'colour', 'pill', 0.401, 0.797, 0.180, 0.016, { color: '#3e8e52' }],
+  ['yellow', 'Yellow', 'colour', 'pill', 0.596, 0.797, 0.180, 0.016, { color: '#bc9727' }],
+  ['blue', 'Blue', 'colour', 'pill', 0.805, 0.797, 0.180, 0.016, { color: '#3b69b8' }],
+  [PK.lightUpper, '', 'home', 'rect', 0.232, 0.837, 0.262, 0.030, { printed: 'upper light' }],
+  ['home_control_plus', '+', 'home', 'rock-top', 0.494, 0.838, 0.142, 0.032],
+  [PK.socketUpper, '', 'home', 'rect', 0.764, 0.837, 0.262, 0.030, { printed: 'upper socket' }],
+  [PK.lightLower, '', 'home', 'rect', 0.232, 0.876, 0.262, 0.030, { printed: 'lower light' }],
+  ['home_control_minus', '−', 'home', 'rock-bottom', 0.494, 0.874, 0.142, 0.033],
+  [PK.socketLower, '', 'home', 'rect', 0.764, 0.876, 0.262, 0.030, { printed: 'lower socket' }],
 ];
+export const KEYS: readonly KeyGeom[] = LAYOUT.flatMap((r) => (r === 'dpad' ? dpadKeys : [geom(r)]));
 
 export const keyByName = new Map(KEYS.map((g) => [g.name, g]));
 /** "Volume Up" style name for tooltips and announcements, plus what is printed on the real key when that differs */
