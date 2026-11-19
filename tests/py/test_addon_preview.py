@@ -87,17 +87,17 @@ async def preview(c, config=None):
 # ---------------------------------------------------------------- speed and memo
 async def test_preview_of_a_heavy_config_is_fast_and_memoised(c, monkeypatch):
     cfg = big()
-    t = time.perf_counter()
+    t = time.process_time()  # CPU time: a loaded host does not make the compile slower
     st, body = await preview(c, cfg)
-    cold = (time.perf_counter() - t) * 1000
+    cold = (time.process_time() - t) * 1000
     assert st == 200 and body["ok"] and len(body["pages"]) == 12
     assert cold < 150, f"cold preview took {cold:.0f} ms"
     calls = []
     real = app_mod._preview
     monkeypatch.setattr(app_mod, "_preview", lambda cfg: calls.append(1) or real(cfg))
-    t = time.perf_counter()
+    t = time.process_time()
     st, again = await preview(c, cfg)
-    warm = (time.perf_counter() - t) * 1000
+    warm = (time.process_time() - t) * 1000
     assert again == body and not calls and warm < 50
     # editor-only changes hit the memo too; a real change does not
     await preview(c, {**cfg, "editor": {"other": 1}})

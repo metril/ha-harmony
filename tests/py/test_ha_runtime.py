@@ -396,6 +396,9 @@ async def test_burst_of_changes_is_one_message_with_the_latest_value(hass, rig, 
     hub, _c = await rig()
     await hub.push("remote_info", V2_INFO)
     await settle(hass, lambda: hub.tiles())
+    # the page push's own full tile resend must be over, or it lands inside the burst window
+    await settle(hass, lambda: all(lk.task is None or lk.task.done() for lk in _c.links.values()))
+    await settle(hass, lambda: hub.tiles_inflight == 0)
     hub.got.clear()
     for i in range(2, 12):
         hass.states.async_set("sensor.t", str(i), {"unit_of_measurement": "C"})

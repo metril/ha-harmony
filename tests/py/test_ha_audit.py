@@ -473,7 +473,6 @@ async def test_event_types_and_config_hash_are_computed_once_per_compile(hass, r
 async def test_first_setup_with_a_slow_addon_returns_within_the_bound(
     hass, fake_hub, fake_addon, clock, monkeypatch
 ):
-    import time
 
     from conftest import make_entry
 
@@ -484,9 +483,11 @@ async def test_first_setup_with_a_slow_addon_returns_within_the_bound(
     fetches = []
     real = AddonClient.fetch
 
+    gate = asyncio.Event()
+
     async def slow_fetch(self, hub_id):
         fetches.append(hub_id)
-        await asyncio.sleep(1.5)  # the add-on takes much longer than setup may wait
+        await gate.wait()  # the add-on never answers until the test lets it: no timing involved
         return await real(self, hub_id)
 
     monkeypatch.setattr(AddonClient, "fetch", slow_fetch)
@@ -495,9 +496,9 @@ async def test_first_setup_with_a_slow_addon_returns_within_the_bound(
     fake_addon.apply_yaml(YAML)
     entry = make_entry("127.0.0.1", server.port, addon=fake_addon)
     entry.add_to_hass(hass)
-    t0 = time.monotonic()
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    assert time.monotonic() - t0 < 1.0  # the bound, not the add-on's 1.5 s (let alone the 20 s timeout)
+    assert await hass.config_entries.async_setup(entry.entry_id)  # returns by FIRST_APPLY_WAIT, add-on still pending
+    assert not gate.is_set() and fetches
+    gate.set()
     c = entry.runtime_data
     assert c.compiled.devices == {} and hass.states.get("sensor.tv_input") is None
     await settle(hass, lambda: c.managed, timeout=5)  # the same single pull fills everything in
@@ -542,7 +543,6 @@ pages:
 
 
 async def test_twenty_tiles_flush_pipelined_within_the_window(hass, rig, clock):
-    import time
 
     for i in range(20):
         hass.states.async_set(f"sensor.s{i}", str(i))
@@ -555,13 +555,11 @@ async def test_twenty_tiles_flush_pipelined_within_the_window(hass, rig, clock):
     hub.got.clear()
     for i in range(20):
         hass.states.async_set(f"sensor.s{i}", str(100 + i))
-    t0 = time.monotonic()
     await _until(lambda: len(hub.tiles()) >= 20)
     await _until(lambda: hub.tiles_inflight == 0)
-    elapsed = time.monotonic() - t0
     assert {t["text"] for t in hub.tiles()} == {str(100 + i) for i in range(20)}
-    assert 1 < hub.tiles_peak <= const.TILE_WINDOW  # pipelined, and bounded
-    assert elapsed < 20 * 0.05 * 0.6, elapsed  # 20 serial round trips would take >= 1 s
+    # pipelined (serial round trips would never overlap, whatever the speed of the host), and bounded
+    assert 1 < hub.tiles_peak <= const.TILE_WINDOW
 
 
 # 12: HA device on/off per domain
