@@ -29,7 +29,7 @@ send, LE supported). Values come from the link, never constants. Absent: no `bt_
 
 - `state`: `off` | `starting` | `ready` | `no_adapter` | `disabled`.
 - `discoverable_secs`: seconds left while discoverable.
-- `pairing`: the last pairing outcome `{result: "ok"|"failed"|"refused", addr, name?, transport?, kind?: "host"|"remote"}`.
+- `pairing`: the last pairing outcome `{result: "ok"|"failed"|"refused", addr, name?, transport?, kind?: "host"|"remote"}`. Opening a pairing window (`bt_pair` on) clears it, bumps `gen` and pushes, so a result seen afterwards belongs to the new window. A client should still compare it with the snapshot it took and with `gen` (older firmware kept the last result after the window closed).
 - `hosts`: `[{slot, addr, name?, transport: "classic"|"le", connected, configured?}]`.
 - `remotes`: `[{slot, addr, name?, connected, battery?, configured?}]` (`battery` percent, omitted when unknown).
 - `configured` (optional, additive): `true` when a `bt_hosts` / `bt_remotes` entry of the loaded config carries this address,

@@ -33,7 +33,7 @@ export class HhBtPanel extends BtElement {
     if (!yes) return;
     this.busy = e.addr;
     try {
-      await this.store.api.btForget(this.hub, e.slot, kind, this.cForget.id());
+      await this.store.api.btForget(this.hub, e.slot, kind, this.cForget.id('forget', { slot: e.slot, kind }));
       this.cForget.settle();
       this.store.toast(`Forgot ${label}.`);
       this.notes = { ...this.notes, [e.addr]: '' };
@@ -111,7 +111,7 @@ export class HhBtPanel extends BtElement {
       ${this.downBanner()}
       ${ok && link && s && s.state !== 'ready' ? html`<div class="banner ${link.tone === 'bad' ? 'bad' : 'ir'}" role="status"><span>${link.help}</span></div>` : nothing}
       ${ok && s?.window
-        ? html`<div class="banner" role="status"><span><b>A pairing window for a ${s.window === 'host' ? 'device' : 'remote'} is open${s.discoverable_secs !== undefined ? ` · ${clock(left)} left` : ''}.</b></span><span class="sp"></span>
+        ? html`<div class="banner"><span role="status"><b>A pairing window for a ${s.window === 'host' ? 'device' : 'remote'} is open.</b></span>${s.discoverable_secs !== undefined ? html`<span role="timer" aria-live="off" aria-label="Time left">${clock(left)} left</span>` : nothing}<span class="sp"></span>
             <a class="btn sm" href=${hashFor('bluetooth', s.window)}>Open</a><button class="btn sm" @click=${() => void this.stopWindow()}>Stop</button></div>`
         : nothing}
       ${ok && s

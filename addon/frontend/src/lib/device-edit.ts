@@ -138,11 +138,12 @@ export function commandCount(d: Device): number {
   return commandNames(d).length;
 }
 
-/** Total commands / inputs of the IR devices (Home Assistant devices are not compiled, and Bluetooth commands are
- *  not IR codes, so neither counts against the IR limits). */
+/** Total commands / inputs of the devices the hub compiles (Home Assistant devices are not). Bluetooth commands count like the
+ *  backend's `config_stats` does (a bt device without `commands` counts its default set), so the editor never allows more
+ *  than the hub accepts. */
 export function irTotals(cfg: Config): { commands: number; inputs: number } {
-  const ir = (cfg.devices ?? []).filter((d) => !isHaDevice(d) && d.kind !== 'bt');
-  return { commands: ir.reduce((n, d) => n + Object.keys(d.commands ?? {}).length, 0), inputs: ir.reduce((n, d) => n + Object.keys(d.inputs ?? {}).length, 0) };
+  const ir = (cfg.devices ?? []).filter((d) => !isHaDevice(d));
+  return { commands: ir.reduce((n, d) => n + commandNames(d).length, 0), inputs: ir.reduce((n, d) => n + Object.keys(d.inputs ?? {}).length, 0) };
 }
 /** Why adding `n` more of this kind would pass the hub's limit (compiler MAX_*), or null. `ha`: the target is a Home Assistant device. */
 export function capProblem(cfg: Config, kind: 'command' | 'input' | 'device', n = 1, ha = false): string | null {

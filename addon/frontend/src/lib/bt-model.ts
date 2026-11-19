@@ -1,7 +1,7 @@
 // Pure logic of the Bluetooth views: error sentences, pairing countdown and outcome, signal bars, HID codes, the
 // config edits (a `kind: bt` device, a `bt_remotes` entry) and the remote key table. No DOM; loaded with the views.
 import { ApiError, type BtCodes, type BtHost, type BtRemote, type BtState, type BtStatus } from './api';
-import { trimBytes } from './codes';
+import { byteCounter, trimBytes } from './codes';
 import { deviceIdFor } from './device-edit';
 import type { Config, Device } from './model';
 
@@ -47,14 +47,18 @@ export function btError(e: unknown): string {
   return API_CODES[e.code] ?? (e.isNetwork ? (API_CODES['network'] as string) : `The add-on could not do that (${e.status}). Try again.`);
 }
 
-/** One command id per user action. `id()` hands out the same one until `settle` says the action is over: a timeout or a lost
- *  connection keeps it (the retry joins the first request instead of running the command again), anything else drops it. */
+/** One command id per user action. `id(endpoint, body)` hands out the same one while the action (endpoint and canonical body) is
+ *  the same and `settle` has not ended it: a timeout or a lost connection keeps it (the retry joins the first request instead of
+ *  running the command again), anything else drops it. A different action gets a fresh id, so it never meets another action's stored result. */
 export class CmdId {
   private cur: string | null = null;
-  id(): string {
-    if (!this.cur) {
+  private bound = '';
+  id(endpoint = '', body: unknown = null): string {
+    const key = `${endpoint}|${canon(body)}`;
+    if (!this.cur || key !== this.bound) {
       const a = 'abcdefghijklmnopqrstuvwxyz0123456789';
       this.cur = Array.from({ length: 12 }, () => a[Math.floor(Math.random() * a.length)]).join('');
+      this.bound = key;
     }
     return this.cur;
   }
@@ -63,6 +67,8 @@ export class CmdId {
     if (!(e instanceof ApiError) || !(e.isNetwork || e.code === 'hub_timeout')) this.cur = null;
   }
 }
+const canon = (v: unknown): string =>
+  v && typeof v === 'object' && !Array.isArray(v) ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon((v as Record<string, unknown>)[k])}`).join(',')}}` : JSON.stringify(v ?? null);
 
 // ------------------------------------------------------------------ hub state
 export const LINK_CHIP: Record<string, { tone: Tone; label: string; help: string }> = {
@@ -177,7 +183,15 @@ export interface BtRemoteCfg {
   keys?: KeyMap;
 }
 export const remotesOf = (cfg: Config): BtRemoteCfg[] => ((cfg['bt_remotes'] as BtRemoteCfg[] | undefined) ?? []).filter((r) => r && typeof r === 'object');
-export const btDevices = (cfg: Config): Device[] => (cfg.devices ?? []).filter((d) => d.kind === 'bt');
+/** Why `name` cannot be a remote's name (empty, over the hub's byte limit, or another remote's; `self` is the remote being renamed), or ''. */
+export function remoteNameProblem(cfg: Config, name: string, self = -1): string {
+  const n = name.trim();
+  if (!n) return 'Give it a name.';
+  if (byteCounter(n).over > 0) return 'That name is too long.';
+  if (remotesOf(cfg).some((r, i) => i !== self && r.name === n)) return 'Another remote has this name.';
+  return '';
+}
+export const btDevices =(cfg: Config): Device[] => (cfg.devices ?? []).filter((d) => d.kind === 'bt');
 export const sameAddr = (a?: string, b?: string): boolean => !!a && !!b && a.toUpperCase() === b.toUpperCase();
 
 export interface NewHost {

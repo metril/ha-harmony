@@ -1,4 +1,5 @@
 // Config shapes (docs/ha-config.md). Loose on purpose: the server validates.
+import { commandNames } from './bt';
 export interface IrAction {
   proto?: string;
   addr?: number;
@@ -117,7 +118,7 @@ export function counts(c: Config | null) {
   return {
     devices: devices.length,
     activities: (c?.activities ?? []).length,
-    commands: devices.reduce((n, d) => n + Object.keys(d.commands ?? {}).length, 0),
+    commands: devices.reduce((n, d) => n + commandNames(d).length, 0), // a Bluetooth device on the default set counts it
     inputs: devices.reduce((n, d) => n + Object.keys(d.inputs ?? {}).length, 0),
     widgets: (c?.pages ?? []).reduce((n, p) => n + (p.widgets ?? []).length, 0),
     pages: (c?.pages ?? []).length,

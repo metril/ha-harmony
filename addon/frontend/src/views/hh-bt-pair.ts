@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { signal, BtElement, btCss } from './bt-base';
 import './hh-bt-commands';
 import './hh-bt-keys';
-import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, clock, outcome, remotesOf, secsLeft, nextCountdown, sameAddr, type Countdown } from '../lib/bt-model';
+import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, clock, outcome, remoteNameProblem, remotesOf, secsLeft, nextCountdown, sameAddr, type Countdown } from '../lib/bt-model';
 import { announce, derive, observe, startRun, type Phase, type Run } from '../lib/bt-wizard';
 import { byteCounter, trimBytes } from '../lib/codes';
 import { capProblem } from '../lib/device-edit';
@@ -39,7 +39,7 @@ export class HhBtPair extends BtElement {
   private defaultsApplied = false;
 
   override disconnectedCallback(): void {
-    if (this.step === 'pair' && this.run) void this.store.api.btPairStop(this.hub).catch(() => undefined);
+    if (this.step === 'pair' && this.run) this.closeWindow();
     super.disconnectedCallback();
   }
   protected override willUpdate(): void {
@@ -85,18 +85,23 @@ export class HhBtPair extends BtElement {
     this.err = '';
     this.busy = true;
     try {
-      const r = await this.store.api.btPair(this.hub, this.mode, this.mode === 'host' ? this.transport : 'le', 120, this.cStart.id());
+      const r = await this.store.api.btPair(this.hub, this.mode, this.mode === 'host' ? this.transport : 'le', 120, this.cStart.id('pair', { mode: this.mode, transport: this.mode === 'host' ? this.transport : 'le' }));
       this.cStart.settle();
+      if (!this.isConnected) return void this.closeWindow(); // left while the request was in flight: the hub opened a window nobody watches
       this.run = startRun(this.mode, r.state ?? this.bt, Date.now());
       this.countdown = null;
       this.step = 'pair';
       void this.poll.refresh();
     } catch (e) {
       this.cStart.settle(e);
+      if (!this.isConnected) return void this.closeWindow(); // a timeout may still have opened it
       this.err = btError(e);
     } finally {
       this.busy = false;
     }
+  }
+  private closeWindow() {
+    void this.store.api.btPairStop(this.hub).catch(() => undefined);
   }
   private async stop() {
     try {
@@ -115,11 +120,13 @@ export class HhBtPair extends BtElement {
     this.picking = addr;
     this.err = '';
     try {
-      await this.store.api.btPick(this.hub, addr, this.cPick.id());
+      await this.store.api.btPick(this.hub, addr, this.cPick.id('pick', { addr }));
       this.cPick.settle();
+      if (!this.isConnected) return void this.closeWindow(); // left while pairing was requested: do not leave the scan window open
       this.run = { ...this.run, picked: addr };
     } catch (e) {
       this.cPick.settle(e);
+      if (!this.isConnected) return void this.closeWindow();
       this.err = btError(e);
     } finally {
       this.picking = '';
@@ -139,7 +146,7 @@ export class HhBtPair extends BtElement {
     const cfg = this.store.config;
     const name = trimBytes(this.name.trim());
     if (this.mode === 'host') {
-      const full = capProblem(cfg, 'device');
+      const full = capProblem(cfg, 'device') ?? capProblem(cfg, 'command', Object.keys(this.commands).length);
       if (full) return void this.store.toast(full, 'error');
       const r = addHostDevice(cfg, { name, address: p.addr, transport: this.transport === 'any' ? 'auto' : this.transport, commands: this.commands });
       this.store.replace(r.config);
@@ -152,11 +159,10 @@ export class HhBtPair extends BtElement {
     }
   }
   private nameProblem(): string {
+    if (this.mode === 'remote') return remoteNameProblem(this.store.config, this.name);
     const n = this.name.trim();
     if (!n) return 'Give it a name.';
-    if (byteCounter(n).over > 0) return 'That name is too long.';
-    if (this.mode === 'remote' && remotesOf(this.store.config).some((r) => r.name === n)) return 'Another remote has this name.';
-    return '';
+    return byteCounter(n).over > 0 ? 'That name is too long.' : '';
   }
 
   // ------------------------------------------------------------ steps
@@ -184,7 +190,7 @@ export class HhBtPair extends BtElement {
     const ph = this.phase();
     const host = this.mode === 'host';
     const left = secsLeft(this.countdown, this.now);
-    const timer = this.countdown ? html`<div class="timer" role="timer" aria-label="Time left">${clock(left)}</div>` : nothing;
+    const timer = this.countdown ? html`<div class="timer" role="timer" aria-live="off" aria-label="Time left">${clock(left)}</div>` : nothing;
     const stopBtn = html`<button class="btn" @click=${() => void this.stop()}>Stop pairing</button>`;
     let body;
     if (ph.t === 'failed') {
@@ -224,7 +230,7 @@ export class HhBtPair extends BtElement {
         <div class="form">
           ${host
             ? html`<hh-bt-commands .codes=${this.codes} .value=${this.commands} @change=${(e: CustomEvent<Record<string, string>>) => (this.commands = e.detail)}></hh-bt-commands>`
-            : html`<hh-bt-keys .codes=${this.codes} .value=${this.keys} .peer=${slot} .api=${this.store.api} hub=${this.hub} @change=${(e: CustomEvent<KeyMap>) => (this.keys = e.detail)}></hh-bt-keys>`}
+            : html`<hh-bt-keys .codes=${this.codes} .pages=${this.st?.limits?.pages ?? [7, 12]} .value=${this.keys} .peer=${slot} .api=${this.store.api} hub=${this.hub} @change=${(e: CustomEvent<KeyMap>) => (this.keys = e.detail)}></hh-bt-keys>`}
           ${this.codesErr ? html`<div class="banner bad" role="alert"><span>${this.codesErr}</span><span class="sp"></span><button class="btn sm" @click=${() => void this.loadCodes()}>Retry</button></div>` : nothing}
         </div>
         <aside class="side card pad" aria-label="Summary">

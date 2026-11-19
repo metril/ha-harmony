@@ -237,6 +237,7 @@ export class Store extends EventTarget {
     this.hasDraft = true;
     if (this.saveState !== 'conflict') this.saveState = 'dirty';
     this.emit();
+    void primeBtDefaults(this.api, next, () => this.emit()); // a pasted or restored config may bring a Bluetooth device on the default set
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.save(), this.debounceMs);
     if (this.retryTimer) clearTimeout(this.retryTimer);

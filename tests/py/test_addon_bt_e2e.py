@@ -83,6 +83,7 @@ class FakeIntegration:
             return {"id": cmd["id"], "ok": False, "code": code, "msg": msg}
         st = self.state
         if op == "pair":
+            st.pop("pairing", None)  # the hub clears the last outcome when a window opens
             st.update(discoverable=cmd.get("mode", "host") == "host", window=cmd.get("mode", "host"), discoverable_secs=cmd.get("secs", 120))
             if cmd.get("mode") == "remote":
                 st["candidates"] = list(self._candidates)
@@ -279,6 +280,22 @@ async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
     await page.get_by_role("link", name="Edit buttons").first.click()
     await page.get_by_role("list", name="Remote buttons and their keys").wait_for()
     await shot(page, "10-remote-keys")
+    # phone width: a key row is two lines (name, usage and Default/Reset, then the picker) and nothing scrolls sideways
+    await page.set_viewport_size({"width": 390, "height": 844})
+    await page.wait_for_timeout(200)
+    rows = await page.evaluate(
+        """() => {
+          const find = (root, sel) => { const f = root.querySelector(sel); if (f) return f;
+            for (const e of root.querySelectorAll('*')) if (e.shadowRoot) { const r = find(e.shadowRoot, sel); if (r) return r; } return null; };
+          const kr = find(document, '.kr');
+          const tops = [...kr.children].map((c) => Math.round(c.getBoundingClientRect().top));
+          return { h: kr.getBoundingClientRect().height, tops, over: document.documentElement.scrollWidth - window.innerWidth };
+        }"""
+    )
+    assert rows["over"] <= 0
+    name, use, pick, end = rows["tops"]  # DOM order: name, usage, picker, Default/Reset
+    assert abs(name - use) <= 6 and abs(name - end) <= 6 and pick > name + 14, rows
+    assert rows["h"] < 90, rows
     assert clean(problems) == []
 
 
@@ -350,6 +367,7 @@ async def test_errors_are_sentences_and_pairing_results_say_what_next(browser, b
     await page.get_by_role("timer").wait_for()
     bt.close_window()  # the window closes with nothing paired
     bt.state["pairing"] = {"result": "failed", "kind": "host"}
+    bt.state["gen"] += 1  # the hub bumps gen with every outcome
     await page.get_by_role("alert").get_by_text("Pairing did not finish.").wait_for()
     await shot(page, "18-result-failed")
 

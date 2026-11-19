@@ -4,7 +4,10 @@ import { commandNames, setBtDefaults } from '../src/lib/bt';
 import { CmdId, addHostDevice, addRemote, bars, btError, clock, dropRowKey, hidCode, keyLabel, keyOptions, keyProblem, keyRows, nextCountdown, outcome, parseHid, patchRemote, removeRemote, secsLeft, setRowKey } from '../src/lib/bt-model';
 import { announce, derive, observe, startRun } from '../src/lib/bt-wizard';
 import { deviceChips } from '../src/lib/studio-model';
-import { irTotals } from '../src/lib/device-edit';
+import { capProblem, irTotals } from '../src/lib/device-edit';
+import { counts } from '../src/lib/model';
+import { BtPoll } from '../src/lib/bt-poll';
+import { vi } from 'vitest';
 import { resolveIr } from '../src/lib/studio-model';
 import type { Config, Device } from '../src/lib/model';
 
@@ -193,9 +196,92 @@ describe('bt devices in the shared editor code', () => {
     expect(commandNames({ id: 'tv', commands: { a: {} } })).toEqual(['a']);
     setBtDefaults([]);
   });
-  it('is not IR: no code to test-fire, no IR limits used', () => {
+  it('is not IR (no code to test-fire) but its commands count like the backend counts them', () => {
     const cfg: Config = { devices: [{ ...bt, commands: { Home: 'Home' } as never }] };
     expect(resolveIr(cfg, { device: 'box', command: 'Home' })).toBeNull();
-    expect(irTotals(cfg)).toEqual({ commands: 0, inputs: 0 });
+    expect(irTotals(cfg)).toEqual({ commands: 1, inputs: 0 });
+    setBtDefaults(['Home', 'Select', 'Back']);
+    expect(irTotals({ devices: [bt] })).toEqual({ commands: 3, inputs: 0 }); // no `commands`: the default set
+    expect(irTotals({ devices: [bt, { id: 'ha', kind: 'ha', commands: { a: {} } } as never] }).commands).toBe(3); // HA is not compiled
+    expect(counts({ devices: [bt] }).commands).toBe(3);
+    expect(capProblem({ devices: [bt, { id: 'tv', commands: Object.fromEntries(Array.from({ length: 253 }, (_, i) => [`c${i}`, {}])) } as never] }, 'command')).toContain('at most 256');
+    setBtDefaults([]);
+  });
+});
+
+describe('stale pairing results', () => {
+  const addrX = 'AA:BB:CC:DD:EE:01';
+  const stale = { result: 'ok' as const, addr: addrX, name: 'X', kind: 'host' as const };
+  const host = (o: Partial<BtState> = {}) => state({ window: 'host', discoverable: true, discoverable_secs: 100, ...o });
+  it('a run for Y that times out after X paired earlier is a timeout, not "Paired with X"', () => {
+    const before = state({ gen: 5, hosts: [{ slot: 0, addr: addrX, transport: 'le', connected: true }], pairing: stale });
+    let run = startRun('host', before, 0);
+    run = observe(run, host({ gen: 6, hosts: before.hosts, pairing: stale })); // an older hub keeps the result while the window is open
+    expect(derive(run, host({ gen: 6, hosts: before.hosts, pairing: stale }), 1000).t).toBe('waiting');
+    expect(derive(run, state({ gen: 7, hosts: before.hosts, pairing: stale }), 125000)).toEqual({ t: 'failed', result: 'timeout' });
+  });
+  it('a result is taken only when it changed, gen moved on, and an ok one is in the list', () => {
+    const run = observe(startRun('host', state({ gen: 5, pairing: stale, hosts: [{ slot: 0, addr: addrX, transport: 'le', connected: true }] }), 0), host());
+    const y = { slot: 1, addr: 'AA:BB:CC:DD:EE:02', transport: 'le' as const, connected: true };
+    const x = { slot: 0, addr: addrX, transport: 'le' as const, connected: true };
+    const okY = { result: 'ok' as const, addr: y.addr, kind: 'host' as const };
+    expect(derive(run, state({ gen: 9, hosts: [x, y], pairing: okY }), 5000)).toMatchObject({ t: 'paired', addr: y.addr });
+    expect(derive(run, state({ gen: 4, hosts: [x], pairing: okY }), 5000)).toEqual({ t: 'failed', result: 'timeout' }); // gen did not advance
+    expect(derive(run, state({ gen: 9, hosts: [x], pairing: okY }), 5000)).toEqual({ t: 'failed', result: 'timeout' }); // ok for an address the hub does not list
+    expect(derive(run, state({ gen: 9, hosts: [x], pairing: { result: 'refused', kind: 'host' } }), 5000)).toEqual({ t: 'failed', result: 'refused' });
+  });
+});
+
+describe('command ids bound to the action', () => {
+  it('a different body or endpoint gets a fresh id even after a timeout', () => {
+    const c = new CmdId();
+    const a = c.id('pick', { addr: 'A' });
+    c.settle(new ApiError(504, 'hub_timeout', 'x'));
+    expect(c.id('pick', { addr: 'A' })).toBe(a); // the retry of the same action
+    expect(c.id('pick', { addr: 'A' })).toBe(a);
+    const b = c.id('pick', { addr: 'B' });
+    expect(b).not.toBe(a);
+    c.settle(new ApiError(504, 'hub_timeout', 'x'));
+    expect(c.id('pick', { addr: 'B' })).toBe(b);
+    expect(c.id('forget', { addr: 'B' })).not.toBe(b);
+  });
+  it('key order of the body does not matter', () => {
+    const c = new CmdId();
+    expect(c.id('key', { page: 7, usage: 1 })).toBe(c.id('key', { usage: 1, page: 7 }));
+  });
+});
+
+describe('BtPoll', () => {
+  const st = (gen: number, tag = '') => ({ hub: 'h', status: 'ok' as const, state: { ...state({ gen }), tag } as BtState, limits: null, listening: false, age_s: 0 });
+  it('keeps one timer and drops a response that was overtaken', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending: ((s: ReturnType<typeof st>) => void)[] = [];
+      const api = { btStatus: () => new Promise((res) => pending.push(res as never)) } as never;
+      const p = new BtPoll(api, 'h', 1000);
+      p.start(); // fetch 1
+      const r2 = p.refresh(); // manual refresh while 1 is in flight: fetch 2
+      pending[1]!(st(8)); // the newer one answers first
+      await r2;
+      expect(p.status?.state?.gen).toBe(8);
+      pending[0]!(st(7)); // the older one arrives late
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(p.status?.state?.gen).toBe(8);
+      expect(vi.getTimerCount()).toBe(1); // a single timer
+      p.stop();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('prefers the higher gen once, then follows a hub that restarted', async () => {
+    const seq = [st(9), st(3), st(3)];
+    const p = new BtPoll({ btStatus: async () => seq.shift() } as never, 'h');
+    await p.refresh();
+    await p.refresh();
+    expect(p.status?.state?.gen).toBe(9);
+    await p.refresh();
+    expect(p.status?.state?.gen).toBe(3);
   });
 });

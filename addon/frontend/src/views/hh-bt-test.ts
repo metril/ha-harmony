@@ -38,7 +38,7 @@ export class HhBtTest extends LitElement {
     this.busy = true;
     this.msg = null;
     try {
-      await this.api.btKey(this.hub, this.peer, code.page, code.usage, 'press', this.cid.id());
+      await this.api.btKey(this.hub, this.peer, code.page, code.usage, 'press', this.cid.id('key', { peer: this.peer, page: code.page, usage: code.usage }));
       this.cid.settle();
       this.msg = { ok: true, text: `Sent ${name}.` };
     } catch (e) {

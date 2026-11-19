@@ -282,6 +282,14 @@ static void remotes_lost_check(void) {
 
 /* ------------------------------------------------------------------ process */
 
+/* Forget the last pairing outcome (a new window, a dead helper): a stale "ok" must never be read as the new window's result. */
+static void clear_pairing(void) {
+    L.st.pairing = BT_PAIR_NONE;
+    L.st.pairing_kind = BT_KIND_HOST;
+    L.st.pairing_addr[0] = L.st.pairing_name[0] = 0;
+    L.st.pairing_transport = BT_TRANSPORT_ANY;
+}
+
 static void clear_cache(void) {
     memset(L.hh, 0, sizeof L.hh);
     memset(L.hr, 0, sizeof L.hr);
@@ -293,9 +301,7 @@ static void clear_cache(void) {
     L.out_n = 0;
     L.n_dd = 0;
     L.backlog = false;
-    L.st.pairing = BT_PAIR_NONE;
-    L.st.pairing_addr[0] = L.st.pairing_name[0] = 0;
-    L.st.pairing_transport = BT_TRANSPORT_ANY;
+    clear_pairing();
 }
 
 /* The helper is gone (or being removed): close the link, tell the engine, clear everything it told us. `pid` keeps being reaped. */
@@ -813,7 +819,7 @@ int bt_link_pair(bool on, unsigned secs, enum bt_link_transport transport, enum 
     }
     if (L.st.status == BT_NO_ADAPTER) return BT_LINK_E_NOT_READY;
     uint8_t m = mode == BT_MODE_REMOTE ? 1 : 0;
-    L.st.pairing = BT_PAIR_NONE;
+    clear_pairing(); /* rebuild() below bumps gen and fires the listener, so a poller sees the result go */
     L.n_cand = 0;
     if (L.st.status == BT_READY) {
         uint8_t f[4] = {1, (uint8_t)(secs >> 8), (uint8_t)secs, m};

@@ -494,6 +494,22 @@ static void test_pairing_windows(void) {
     CT_EQ(stats().deaths, 0);
     bt_link_reset();
 
+    setup("normal"); /* opening a new window clears the previous outcome (gen bump + listener): a stale "ok" is never the new result */
+    CT_EQ(bt_link_pair(true, 60, BT_TRANSPORT_ANY, BT_MODE_REMOTE), BT_LINK_OK);
+    CT_CHECK(PUMP(st()->n_candidates == 2, 4000));
+    CT_EQ(bt_link_pair_remote("11:22:33:44:55:77"), BT_LINK_OK);
+    CT_CHECK(PUMP(st()->pairing == BT_PAIR_OK && st()->window == BT_WIN_NONE, 3000));
+    {
+        uint32_t g0 = st()->gen;
+        int l0 = ev_listener;
+        CT_EQ(bt_link_pair(true, 60, BT_TRANSPORT_ANY, BT_MODE_HOST), BT_LINK_OK);
+        CT_EQ(st()->pairing, BT_PAIR_NONE);
+        CT_CHECK(st()->pairing_addr[0] == 0 && st()->pairing_name[0] == 0 && st()->pairing_transport == BT_TRANSPORT_ANY);
+        bt_link_service(); /* the push is made by the service pass */
+        CT_CHECK(st()->gen != g0 && ev_listener > l0);
+    }
+    bt_link_reset();
+
     setup("normal"); /* a host window counts down by itself and can be closed */
     usual_cfg();
     CT_CHECK(PUMP(ready(), 3000));

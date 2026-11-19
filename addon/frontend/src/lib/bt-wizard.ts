@@ -5,7 +5,7 @@ import type { BtState } from './api';
 export interface Run {
   mode: 'host' | 'remote';
   /** addresses and the last pairing outcome the hub reported before we opened the window */
-  before: { hosts: string[]; remotes: string[]; pairing: string };
+  before: { hosts: string[]; remotes: string[]; pairing: string; gen: number | null };
   /** a remote chosen from the candidates */
   picked: string | null;
   /** the window was seen open at least once after we asked */
@@ -26,7 +26,7 @@ export const OPEN_GRACE_MS = 8000;
 export function startRun(mode: Run['mode'], state: BtState | null, now: number): Run {
   return {
     mode,
-    before: { hosts: (state?.hosts ?? []).map((h) => h.addr), remotes: (state?.remotes ?? []).map((r) => r.addr), pairing: JSON.stringify(state?.pairing ?? null) },
+    before: { hosts: (state?.hosts ?? []).map((h) => h.addr), remotes: (state?.remotes ?? []).map((r) => r.addr), pairing: JSON.stringify(state?.pairing ?? null), gen: state?.gen ?? null },
     picked: null,
     seenOpen: false,
     startedAt: now,
@@ -43,8 +43,11 @@ export function derive(run: Run, s: BtState | null, now: number): Phase {
   const open = isOpen(run, s);
   const before = new Set(run.mode === 'host' ? run.before.hosts : run.before.remotes);
   const now_ = (run.mode === 'host' ? s?.hosts : s?.remotes) ?? [];
-  const fresh = (run.seenOpen && !open) || JSON.stringify(s?.pairing ?? null) !== run.before.pairing;
-  const p = s?.pairing && fresh && (!s.pairing.kind || s.pairing.kind === run.mode) ? s.pairing : null;
+  // A result is this run's only if it differs from the one the hub held when we opened the window and (when both are known) `gen`
+  // moved on since: the hub keeps the last outcome after a window closes, so a closed window alone says nothing about it.
+  const fresh = JSON.stringify(s?.pairing ?? null) !== run.before.pairing && (run.before.gen === null || s?.gen === undefined || s.gen > run.before.gen);
+  const listed = (a?: string) => !!a && now_.some((e) => e.addr.toUpperCase() === a.toUpperCase());
+  const p = s?.pairing && fresh && (!s.pairing.kind || s.pairing.kind === run.mode) && (s.pairing.result !== 'ok' || listed(s.pairing.addr)) ? s.pairing : null;
   const added = now_.find((e) => !before.has(e.addr) && (!p?.addr || e.addr === p.addr)) ?? now_.find((e) => !before.has(e.addr));
   if (added) return { t: 'paired', addr: added.addr, ...(added.name ? { name: added.name } : {}), ...('transport' in added ? { transport: added.transport } : {}) };
   if (p?.result === 'ok' && p.addr) return { t: 'paired', addr: p.addr, ...(p.name ? { name: p.name } : {}), ...(p.transport ? { transport: p.transport } : {}) };
