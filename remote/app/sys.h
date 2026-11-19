@@ -6,7 +6,7 @@
  *
  * Allowed: open /dev/fb0 O_RDWR; /dev/input/event0 and event2 O_RDONLY; the backlight and key-LED
  * brightness nodes O_WRONLY; the three power nodes O_RDONLY; the boot-counter file named by
- * HARMONY_BOOTCOUNT_FILE (write); /sys/power/state O_WRONLY, only through ra_suspend (writes "mem"). ioctl: the two fb GETs,
+ * HARMONY_BOOTCOUNT_FILE (write); /sys/power/state O_WRONLY, only through ra_suspend (writes the msp430 `wakeup` seconds, then "mem"); wakeup_event O_RDONLY, only through ra_wake_event. ioctl: the two fb GETs,
  * plus FBIOBLANK with FB_BLANK_UNBLANK (ra_fb_unblank: the panel stays dark until it is issued) or FB_BLANK_POWERDOWN
  * (ra_fb_blank, before a suspend); never EVIOCGRAB, FBIOPUT_*, FBIOPAN, any other blank level. mmap: the fb fd only. exec: /sbin/poweroff, only from the battery guard.
  * Never: /dev/rfspi (Task 3 owns it via its own module), /dev/rffw, /dev/mspfw, /dev/watchdog,
@@ -24,6 +24,9 @@
 #define RA_PATH_POWERSRC "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/powersource"
 #define RA_PATH_BATTCHARGE "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/battcharge"
 #define RA_POWEROFF_PATH "/sbin/poweroff"
+#define RA_PATH_WAKEUP "/sys/bus/i2c/devices/1-0034/wakeup"           /* msp430 RTC alarm: seconds from now; written only by ra_suspend */
+#define RA_PATH_WAKEEVENT "/sys/bus/i2c/devices/1-0034/wakeup_event" /* what woke it: none|key|alarm|touch; read only by ra_wake_event */
+#define RA_SUSPEND_WAKE_S 3600                                        /* hourly timed wake so the battery guard runs (upstream's value) */
 #define RA_PATH_POWERSTATE "/sys/power/state"
 
 typedef struct ra_ops {
@@ -69,8 +72,11 @@ int ra_close(ra_sys_t *s, int fd);
 int ra_sysfs_write(ra_sys_t *s, const char *path, const char *val);
 int ra_sysfs_read(ra_sys_t *s, const char *path, char *buf, size_t n); /* NUL-terminated, <0 on error */
 int ra_write_bootcount(ra_sys_t *s);
-/* Write "mem" to /sys/power/state: returns when the kernel resumes (0), or -1 with errno if the suspend was refused. */
+/* Arm the msp430 timed wake (RA_SUSPEND_WAKE_S seconds; -1 and no suspend if that fails: a remote that sleeps with no alarm
+ * never runs the battery guard), then write "mem" to /sys/power/state: returns when the kernel resumes (0), or -1 with errno. */
 int ra_suspend(ra_sys_t *s);
+/* Read the msp430 wakeup_event (what ended the last suspend) into buf, trimmed; -1 if unreadable. */
+int ra_wake_event(ra_sys_t *s, char *buf, size_t n);
 uint64_t ra_wall_ms(ra_sys_t *s);
 int ra_poweroff(ra_sys_t *s); /* battery guard only */
 void ra_logf(ra_sys_t *s, const char *fmt, ...) __attribute__((format(printf, 2, 3)));

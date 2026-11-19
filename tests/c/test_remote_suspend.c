@@ -66,6 +66,30 @@ static void test_battery_suspend_and_resume(void) {
   app_destroy(&app);
 }
 
+static void test_timed_wake_armed_before_suspend(void) {
+  begin(RA_SUSPEND_BATTERY, "battery\n");
+  idle(45000);
+  CT_EQ(fk.nsuspend, 1);
+  CT_EQ(fk.wake_before_suspend, 1); /* the RTC alarm was written before "mem" */
+  CT_EQ(atoi(fk.wake_val), RA_SUSPEND_WAKE_S);
+  CT_EQ(RA_SUSPEND_WAKE_S, 3600); /* upstream's hourly wake */
+  idle(RA_OFF_AFTER_MS + RA_SUSPEND_AFTER_MS + RA_SUSPEND_WAKE_HOLD_MS + 5000);
+  CT_EQ(fk.nsuspend, 2);
+  CT_EQ(fk.nwake, 2); /* armed again for every sleep */
+  CT_CHECK(fk_log_is_safe(&fk, NULL));
+  app_destroy(&app);
+}
+
+static void test_unarmable_alarm_refuses_suspend(void) {
+  begin(RA_SUSPEND_BATTERY, "battery\n");
+  fk.wake_errno = EIO;
+  idle(45000);
+  CT_EQ(fk.nsuspend, 0); /* never sleep without a timed wake: the battery guard could not run */
+  CT_EQ(fk.blank_arg, 0);
+  CT_EQ(app.power.suspends, 0);
+  app_destroy(&app);
+}
+
 static void test_powered_never_suspends_in_battery_mode(void) {
   const char *src[] = {"cradle\n", "usb\n", "garbage\n"};
   for (int i = 0; i < 3; i++) {
@@ -184,6 +208,9 @@ static void test_suspend_only_via_ra_suspend(void) {
   char buf[8];
   CT_EQ(ra_sysfs_write(&s, "/sys/power/state", "mem"), -1); /* the generic writer still refuses it */
   CT_EQ(errno, EPERM);
+  CT_EQ(ra_sysfs_write(&s, RA_PATH_WAKEUP, "3600"), -1); /* so does the wake node: only ra_suspend arms it */
+  CT_EQ(errno, EPERM);
+  CT_EQ(ra_sysfs_read(&s, RA_PATH_WAKEUP, buf, sizeof buf), -1);
   CT_EQ(ra_sysfs_read(&s, "/sys/power/state", buf, sizeof buf), -1);
   CT_EQ(ra_fb_blank(&s, 1), -1); /* no fb open */
   CT_EQ(errno, EPERM);
@@ -192,6 +219,8 @@ static void test_suspend_only_via_ra_suspend(void) {
 int main(void) {
   CT_RUN(test_default_never_suspends);
   CT_RUN(test_battery_suspend_and_resume);
+  CT_RUN(test_timed_wake_armed_before_suspend);
+  CT_RUN(test_unarmable_alarm_refuses_suspend);
   CT_RUN(test_powered_never_suspends_in_battery_mode);
   CT_RUN(test_always_mode_for_bench);
   CT_RUN(test_refused_suspend_backs_off);

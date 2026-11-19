@@ -346,14 +346,16 @@ static void suspend_now(app_t *a) {
   int rc = ra_suspend(&a->sys);
   uint64_t now = a->sys.ops.now_ms(a->sys.ops.ctx);
   ra_fb_blank(&a->sys, 0);
+  char ev[16] = "?";
+  if (rc == 0) ra_wake_event(&a->sys, ev, sizeof ev);
   if (rc < 0) {
     ra_logf(&a->sys, "suspend refused (errno %d), retrying later", errno);
     ra_power_suspend_failed(&a->power, now);
     return;
   }
   uint64_t gap = ra_power_gap_ms(wall0, mono0, ra_wall_ms(&a->sys), now);
-  ra_logf(&a->sys, "resumed after %llu ms asleep (%u suspends, %llu ms total)", (unsigned long long)gap, a->power.suspends + 1,
-          (unsigned long long)(a->power.suspended_ms + gap));
+  ra_logf(&a->sys, "resumed after %llu ms asleep (woke: %s; %u suspends, %llu ms total)", (unsigned long long)gap, ev,
+          a->power.suspends + 1, (unsigned long long)(a->power.suspended_ms + gap));
   ra_power_resumed(&a->power, now, gap);
   a->last_rx_ms = now; /* the hub was silent for the sleep, not failing: no fallback page for it */
   a->fail_run = 0;

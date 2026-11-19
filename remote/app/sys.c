@@ -100,7 +100,39 @@ int ra_write_bootcount(ra_sys_t *s) {
   return w == 2 ? 0 : -1;
 }
 
+static int write_wakeup(ra_sys_t *s) {
+  char v[16];
+  int n = snprintf(v, sizeof v, "%d", RA_SUSPEND_WAKE_S);
+  int fd = s->ops.open(s->ops.ctx, RA_PATH_WAKEUP, O_WRONLY, 0);
+  if (fd < 0) return -1;
+  ssize_t w = s->ops.write(s->ops.ctx, fd, v, (size_t)n);
+  int e = errno;
+  s->ops.close(s->ops.ctx, fd);
+  if (w != n) {
+    errno = w < 0 ? e : EIO;
+    return -1;
+  }
+  return 0;
+}
+
+int ra_wake_event(ra_sys_t *s, char *buf, size_t n) {
+  if (n < 2) return eperm();
+  int fd = s->ops.open(s->ops.ctx, RA_PATH_WAKEEVENT, O_RDONLY, 0);
+  if (fd < 0) return -1;
+  ssize_t r = s->ops.read(s->ops.ctx, fd, buf, n - 1);
+  int e = errno;
+  s->ops.close(s->ops.ctx, fd);
+  if (r < 0) {
+    errno = e;
+    return -1;
+  }
+  while (r > 0 && (buf[r - 1] == '\n' || buf[r - 1] == ' ')) r--;
+  buf[r] = 0;
+  return (int)r;
+}
+
 int ra_suspend(ra_sys_t *s) {
+  if (write_wakeup(s) < 0) return -1;
   int fd = s->ops.open(s->ops.ctx, RA_PATH_POWERSTATE, O_WRONLY, 0);
   if (fd < 0) return -1;
   ssize_t w = s->ops.write(s->ops.ctx, fd, "mem\n", 4);

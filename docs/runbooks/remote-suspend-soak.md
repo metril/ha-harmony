@@ -5,8 +5,13 @@ Suspend to RAM is opt-in. Start the app with `HARMONY_SUSPEND=battery` (suspends
 The app never writes any CPU-frequency node (enforced by `tests/py/test_remote_no_cpufreq.py`).
 
 Behaviour: screen idle 10 s dims, 30 s switches the backlight off; 10 s later (`RA_SUSPEND_AFTER_MS`) the panel is blanked
-(`FB_BLANK_POWERDOWN`) and `mem` is written to `/sys/power/state`. A refused suspend backs off 60 s. Wake sources are whatever the
-MSP430 wakes the SoC for (hard keys, the cradle); there is no touch or lift wake. On resume the panel is unblanked, the screen
+(`FB_BLANK_POWERDOWN`); the MSP430 timed wake is armed (`3600` written to `1-0034/wakeup`, as upstream does) and `mem` is
+written to `/sys/power/state`. If the alarm cannot be armed the suspend is not attempted (a remote asleep with no alarm would
+never run the battery guard) and it backs off like a refusal. A refused suspend backs off 60 s. Wake sources: the hard
+buttons, the motion sensor (LIS3DH), and the hourly alarm. Touch does not wake the remote (the kernel masks the Clearpad
+during suspend). The resume logs what woke it (`1-0034/wakeup_event`: `key`, `alarm`, `none`...). An hourly alarm wake
+polls the battery guard at once, then sleeps again after the 8 s hold. `/dev/rfspi` is deliberately NOT closed or reopened
+around the suspend (upstream does not either: a resume keeps it); step 1's 5 s re-link bound is what verifies that on the bench. On resume the panel is unblanked, the screen
 goes active (the waking key goes on to the hub), the link announces itself again (remote_info + battery), the battery guard
 polls at once, and sleep is held 8 s. The sleep length is the wall-clock delta less the monotonic delta (logged as
 `resumed after N ms asleep`).
@@ -23,7 +28,7 @@ Run on a bench remote with a serial/log tap, never the only unit. Another agent 
 
 ## 2. Cradle charge transition
 1. `HARMONY_SUSPEND=battery`, on battery: it suspends after the idle time. Place it on the cradle while asleep: it must wake
-   (cradle wake), show the page, and the status bar shows charging.
+   (motion or a button; the cradle itself is not a known wake source, so note which one it was), show the page, and the status bar shows charging.
 2. On the cradle, idle for 5 min: it must NOT suspend (log has no `suspend to RAM`); screen off, backlight 0.
 3. Lift it off the cradle, idle: it suspends within about 30 s (`RA_SUSPEND_RECHECK_MS`) of the unplug plus the idle time.
 
@@ -43,7 +48,6 @@ Run on a bench remote with a serial/log tap, never the only unit. Another agent 
 4. Then remove the env and confirm normal boot.
 
 ## Not covered yet
-- No hourly RTC alarm wake (the allow-list has no MSP430 `wakeup` node): a remote left asleep for days is not polled by the guard.
-- No lift/tilt wake (no `event1`), no touch wake (the kernel masks it during suspend).
-- Whether `/dev/rfspi` must be closed before and reopened after the suspend is unmeasured: if the link does not return within
-  5 s in step 1, the next change is a close/reopen around `ra_suspend` (rf_link already re-announces on resume).
+- No touch wake (the kernel masks the touch panel during suspend), by design.
+- Whether the LIS3DH wakes a suspended remote is read from the kernel survey, not yet measured on this build: check it in step 1
+  (shake a suspended unit) and record it.

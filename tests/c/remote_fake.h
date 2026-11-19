@@ -35,7 +35,7 @@ typedef struct {
   uint8_t fb[FK_FB_BYTES];
   struct input_event q[2][512];
   int qn[2], qh[2];
-  fk_file_t files[8];
+  fk_file_t files[16];
   int nfiles;
   int bl_w[2048], nbl, led_w[64], nled;
   int boot_writes;
@@ -48,6 +48,9 @@ typedef struct {
   uint64_t suspend_sleep_ms; /* each accepted suspend sleeps this long on the wall clock only */
   const char *resume_soc, *resume_chg; /* sysfs values that appear while "asleep" (the cell drained) */
   int suspend_order[64];     /* nblank value at each suspend: the panel is blanked first */
+  int nwake, wake_errno;     /* writes to the msp430 wakeup node; errno to refuse them with (0 = accept) */
+  char wake_val[8];          /* the last value written there (seconds) */
+  int wake_before_suspend;   /* nwake at the moment of each "mem" write: the alarm is armed first */
   char msgs[64][160];
   int nmsgs;
 } fk_t;
@@ -133,10 +136,15 @@ static __attribute__((unused)) ssize_t fk_write(void *c, int fd, const void *buf
   memcpy(s, buf, n < 15 ? n : 15);
   if (!strcmp(p, "/sys/class/backlight/ap3156_backlight/brightness") && f->nbl < 2048) f->bl_w[f->nbl++] = atoi(s);
   else if (!strcmp(p, "/sys/class/leds/tps6507x:white/brightness") && f->nled < 64) f->led_w[f->nled++] = atoi(s);
-  else if (!strcmp(p, "/sys/power/state")) {
+  else if (!strcmp(p, "/sys/bus/i2c/devices/1-0034/wakeup")) {
+    if (f->wake_errno) { errno = f->wake_errno; return -1; }
+    f->nwake++;
+    snprintf(f->wake_val, sizeof f->wake_val, "%.*s", (int)(n < 7 ? n : 7), (const char *)buf);
+  } else if (!strcmp(p, "/sys/power/state")) {
     if (f->suspend_errno) { errno = f->suspend_errno; return -1; }
     if (n != 4 || memcmp(buf, "mem\n", 4)) { errno = EINVAL; return -1; }
     if (f->nsuspend < 64) f->suspend_order[f->nsuspend] = f->blank_arg;
+    f->wake_before_suspend = f->nwake;
     f->nsuspend++;
     f->slept += f->suspend_sleep_ms;
     if (f->resume_soc) fk_set_file(f, "/sys/bus/i2c/devices/1-0070/soc", f->resume_soc);
@@ -223,6 +231,8 @@ static __attribute__((unused)) void fk_init(fk_t *f) {
   fk_set_file(f, "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/powersource", "cradle\n");
   fk_set_file(f, "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/battcharge", "0.00 0x0000\n");
   fk_set_file(f, "/sys/power/state", "");
+  fk_set_file(f, "/sys/bus/i2c/devices/1-0034/wakeup", "");
+  fk_set_file(f, "/sys/bus/i2c/devices/1-0034/wakeup_event", "alarm\n");
   fk_set_file(f, "/tmp/bootcount", NULL); /* absent until the app writes it */
 }
 
@@ -320,6 +330,8 @@ static __attribute__((unused)) int fk_log_is_safe(const fk_t *f, const char *boo
                  (!strcmp(path, "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/powersource") && fl == O_RDONLY) ||
                  (!strcmp(path, "/sys/bus/i2c/devices/1-0048/tps6507x-juniper/battcharge") && fl == O_RDONLY) ||
                  (!strcmp(path, "/sys/power/state") && fl == O_WRONLY) ||
+                 (!strcmp(path, "/sys/bus/i2c/devices/1-0034/wakeup") && fl == O_WRONLY) ||
+                 (!strcmp(path, "/sys/bus/i2c/devices/1-0034/wakeup_event") && fl == O_RDONLY) ||
                  (bootcount_path && !strcmp(path, bootcount_path) && acc == O_WRONLY);
       if (!good) { fprintf(stderr, "unsafe syscall: %s\n", l); ok = 0; }
     } else if (!strncmp(l, "exec ", 5)) {

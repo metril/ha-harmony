@@ -155,6 +155,8 @@ no `df` on the device.
   table; per-device `power/wakeup` files exist (msp430 `1-0034` and `cc2544.1` expose `wakeup_count` etc.). Kernel 2.6.37 PREEMPT.
 - Input: `event0` msp430 (buttons), `event1` LIS3DH accelerometer (INT on GPIO 108), `event2` Synaptics Clearpad (touch, GPIO 118; masked at
   suspend, touch does not wake a suspended remote). IRQs: msp430 GPIO 132, rfspi GPIO 112, tps6507x GPIO 170.
+  Wake sources: the hard buttons (msp430) and the motion sensor (LIS3DH), plus the msp430 timed alarm; not touch.
+  The app's suspend path arms the hourly alarm (`3600`) before `mem` and logs `wakeup_event` on resume.
 - RTC: `rtc0` is the MSP430 (`name: msp430`, no `/dev/rtc0` node, no `wakealarm`). The wake alarm is the sysfs file
   `/sys/bus/i2c/devices/1-0034/wakeup` (seconds; upstream writes `3600` before suspending); `1-0034/wakeup_event` says what woke it
   (`alarm` or other); also `alarm`, `time` (epoch, set/read), `button`, `extbutton`, `status`, `version` 202.
