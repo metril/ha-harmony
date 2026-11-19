@@ -149,3 +149,15 @@ describe('remote layout', () => {
     expect(keyTitle('prev_channel')).toBe('Prev Channel (Back)');
   });
 });
+
+describe('colour and home-control keys', () => {
+  it('colour keys are wide, evenly spaced and span the home-control block', () => {
+    const c = ['red', 'green', 'yellow', 'blue'].map((n) => keyByName.get(n)!);
+    c.forEach((k) => expect(k.w / k.h).toBeGreaterThan(2));
+    const gaps = c.slice(1).map((k, i) => k.x - (c[i]!.x + c[i]!.w));
+    gaps.forEach((g) => expect(g).toBeCloseTo(gaps[0]!, 0));
+    const l = keyByName.get(PHYSICAL_KEYS.lightUpper)!, r = keyByName.get(PHYSICAL_KEYS.socketUpper)!;
+    expect(c[0]!.x).toBeCloseTo(l.x, 0);
+    expect(c[3]!.x + c[3]!.w).toBeCloseTo(r.x + r.w, 0);
+  });
+});

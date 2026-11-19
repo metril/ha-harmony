@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add-on editor: the palette lists commands in a uniform grid (equal-height rows, ellipsis and tooltip for long names); a selected key or widget clears on a second click, a click on the remote body, the canvas background or Escape; key labels, the Vol and Ch legends and glyphs keep AA contrast in every key state; the four colour keys are wide dark keys with a coloured ring, and the light and socket keys show a spotlight and a US outlet.
+
 ## 0.3.11 (2026-11-19)
 
 - The integration never marks a custom-theme set as pushed until the remote reports it complete: after the one ack-timeout re-send it stays pending and re-pushes with a bounded exponential backoff (15 s doubling to 5 min, cancelled on unload, per remote), and it re-pushes when the remote reports an empty or partial store while we thought it held the set (a reboot the hub never saw, a theme the hub gave up on). A hub that refuses a theme or page for a transient reason is retried the same way instead of sending the pages without their theme.

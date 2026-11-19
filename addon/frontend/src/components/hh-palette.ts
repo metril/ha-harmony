@@ -32,10 +32,10 @@ export class HhPalette extends LitElement {
       summary small { margin-left: auto; color: var(--tx3); font-weight: 500; font-size: 11px; }
       .grp { padding: 0 10px 10px; }
       .grp h2 { margin: 8px 0 5px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; }
-      .chips { display: flex; flex-wrap: wrap; gap: 5px; }
-      .chip2 { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; max-width: 100%; padding: 0 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--sf2); color: var(--tx); font-size: 12.5px; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      .chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.25rem, 1fr)); gap: 6px; }
+      .chip2 { display: flex; align-items: center; gap: 6px; box-sizing: border-box; height: 30px; min-width: 0; width: 100%; padding: 0 10px; border-radius: 15px; text-align: left; border: 1px solid var(--line); background: var(--sf2); color: var(--tx); font-size: 12.5px; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
       .chip2:hover { background: var(--sf3); }
-      .chip2 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .chip2 span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chip2.used { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
       .chip2[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
       .hab { flex: none; font-style: normal; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; border: 1px solid var(--line); color: var(--tx2); background: var(--sf); }
@@ -62,7 +62,7 @@ export class HhPalette extends LitElement {
       .prim[aria-pressed="true"] .sic { color: inherit; }
       .typed { display: grid; gap: 6px; margin-top: 8px; }
       .hint { color: var(--tx3); font-size: 11.5px; margin: 6px 2px 0; }
-      @media (max-width: 720px) { .chip2 { min-height: 36px; } .ent { min-height: 44px; } }
+      @media (max-width: 720px) { .chip2 { height: 36px; } .ent { min-height: 44px; } }
     `,
   ];
   @property({ attribute: false }) host!: StudioHost;

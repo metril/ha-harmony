@@ -131,7 +131,7 @@ async def test_axe_finds_no_violation_on_any_route(browser, large, scheme):
             )
             bad += [f"{route}@{width}: {v}" for v in found]
         await page.context.close()
-    assert bad == []
+    assert bad == [], "\n".join(bad)
 
 
 async def test_studio_at_1024x768_leaves_the_remote_520px(browser, large):
@@ -452,3 +452,178 @@ async def test_hub_limits_are_refused_in_the_ui_with_the_reason(browser, large):
     await page.goto(f"{large}{PREFIX}/#/devices")
     await page.locator("hh-devices .add[aria-disabled=true]").wait_for()
     assert await page.locator("hh-devices a.add").count() == 0
+
+
+# ---------------------------------------------------------------- studio: palette list, selection, key contrast
+REMOTE = f"{STUDIO}.querySelector('hh-remote').shadowRoot"
+PALETTE = f"{STUDIO}.querySelector('hh-palette').shadowRoot"
+STUDIO_EL = "document.querySelector('hh-app').shadowRoot.querySelector('hh-studio')"
+
+
+@pytest.mark.parametrize("size", [(1440, 900), (1280, 720), (420, 800)])
+async def test_palette_chips_form_an_aligned_grid(browser, large, size):
+    page = await open_large(browser, large, *size)
+    for tab in ("Devices", "Activities", "Home", "Widgets"):
+        await page.evaluate(
+            f"() => [...{PALETTE}.querySelectorAll('[role=tab]')].find(b => b.textContent.trim() == '{tab}').click()"
+        )
+        await page.wait_for_timeout(250)
+        bad = await page.evaluate(
+            f"""() => {{
+          const body = {PALETTE}.querySelector('.body'), bb = body.getBoundingClientRect(), out = [];
+          if (body.scrollWidth > body.clientWidth) out.push('horizontal overflow');
+          for (const grp of {PALETTE}.querySelectorAll('.chips')) {{
+            const cs = [...grp.querySelectorAll('.chip2')].map(c => c.getBoundingClientRect());
+            if (!cs.length) continue;
+            const lefts = new Set(cs.map(r => Math.round(r.left))), hs = new Set(cs.map(r => Math.round(r.height)));
+            if (lefts.size > 3) out.push('ragged left edges ' + [...lefts]);
+            if (hs.size > 1) out.push('unequal heights ' + [...hs]);
+            if (cs.some(r => r.right > bb.right + 0.5 || r.left < bb.left - 0.5)) out.push('chip outside the list');
+          }}
+          return out;
+        }}"""
+        )
+        assert bad == [], (tab, size, bad)
+    await page.context.close()
+
+
+async def _sel(page):
+    return await page.evaluate(f"() => JSON.stringify({STUDIO_EL}.st.sel)")
+
+
+async def _key_centre(page, name="select"):
+    return await page.evaluate(
+        f"() => {{ const r = {REMOTE}.querySelector('[data-key={name}] .cap').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }}"
+    )
+
+
+@pytest.mark.parametrize("how", ["reclick", "body", "canvas", "escape", "layer"])
+async def test_selection_can_be_cleared(browser, large, how):
+    page = await open_large(browser, large)
+    x, y = await _key_centre(page)
+    await page.mouse.click(x, y)
+    await page.wait_for_timeout(250)
+    assert '"key"' in await _sel(page)
+    pressed = f"() => {REMOTE}.querySelector('[data-key=select]').getAttribute('aria-pressed')"
+    assert await page.evaluate(pressed) == "true"
+    if how in ("reclick", "body"):  # the popover may sit over the key: dismiss it first, the key stays selected
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(150)
+        assert '"key"' in await _sel(page)
+    if how == "reclick":
+        await page.mouse.click(x, y)
+    elif how == "body":  # the dark body below every key
+        r = await page.evaluate(
+            f"() => {{ const r = {REMOTE}.querySelector('.body').getBoundingClientRect(); return [r.x + r.width * 0.5, r.y + r.height * 0.985]; }}"
+        )
+        await page.mouse.click(*r)
+    elif how == "canvas":
+        r = await page.evaluate(
+            f"() => {{ const r = {STUDIO}.querySelector('.canvas').getBoundingClientRect(); return [r.x + 12, r.y + r.height / 2]; }}"
+        )
+        await page.mouse.click(*r)
+    elif how == "escape":
+        await page.keyboard.press("Escape")  # the first Escape closes the popover
+        await page.wait_for_timeout(150)
+        await page.keyboard.press("Escape")
+    else:
+        await page.evaluate(f"() => {STUDIO_EL}.st.setLayer('watch_tv')")
+    await page.wait_for_timeout(250)
+    assert await _sel(page) == "null"
+    assert await page.evaluate(pressed) == "false"
+    assert await page.evaluate(f"() => !{STUDIO}.querySelector('.pop')")
+    await page.context.close()
+
+
+async def test_widget_selection_clears_on_reclick(browser, large):
+    page = await open_large(browser, large)
+    await page.evaluate(f"() => {STUDIO_EL}.st.set({{mode: 'screen'}})")
+    await page.wait_for_timeout(300)
+    box = await page.evaluate(
+        f"() => {{ const r = {REMOTE}.querySelector('[data-widget]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }}"
+    )
+    await page.mouse.click(*box)
+    await page.wait_for_timeout(250)
+    assert '"widget"' in await _sel(page)
+    await page.mouse.click(*box)
+    await page.wait_for_timeout(250)
+    assert await _sel(page) == "null"
+    await page.context.close()
+
+
+def _lum(c):
+    def f(v):
+        v /= 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+
+
+def _ratio(a, b):
+    la, lb = sorted((_lum(a), _lum(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+PROBE = """
+async (args) => {
+  const img = await createImageBitmap(await (await fetch('data:image/png;base64,' + args.shot)).blob());
+  const cv = new OffscreenCanvas(img.width, img.height), cx = cv.getContext('2d', { willReadFrequently: true });
+  cx.drawImage(img, 0, 0);
+  return args.boxes.map((b) => {
+    const d = cx.getImageData(b.x, b.y, b.w, b.h).data, px = [];
+    for (let i = 0; i < d.length; i += 4) px.push([d[i], d[i + 1], d[i + 2]]);
+    return px;
+  });
+}
+"""
+
+
+async def _measure(page, scale=2):
+    """Foreground colour and effective background (pixels with the legends hidden) of every visible label and glyph."""
+    items = await page.evaluate(
+        f"""() => {{
+      const root = {REMOTE};
+      return [...root.querySelectorAll('.key .lab, .key .gs, .key .gl, .pr, .prl')].filter((e) => getComputedStyle(e).opacity > 0.5 && getComputedStyle(e).display !== 'none').map((e) => {{
+        const cs = getComputedStyle(e), r = e.getBoundingClientRect();
+        const c = e.matches('.gs, .prl') ? cs.stroke : cs.fill;
+        return {{ key: e.closest('.key')?.dataset.key ?? 'printed:' + e.textContent, text: e.matches('.lab, .pr'), col: c.match(/\\d+/g).slice(0, 3).map(Number), x: r.x, y: r.y, w: r.width, h: r.height }};
+      }}).filter((i) => i.w > 0 && i.h > 0);
+    }}"""
+    )
+    await page.evaluate(
+        f"() => {{ const s = document.createElement('style'); s.id = 'hide'; s.textContent = '.lab,.pr,.prl,.gs,.gl{{visibility:hidden}}'; {REMOTE}.appendChild(s); }}"
+    )
+    import base64
+
+    shot = base64.b64encode(await page.screenshot()).decode()
+    await page.evaluate(f"() => {REMOTE}.getElementById('hide').remove()")
+    boxes = [
+        {"x": int(i["x"] * scale), "y": int(i["y"] * scale), "w": max(1, int(i["w"] * scale)), "h": max(1, int(i["h"] * scale))}
+        for i in items
+    ]
+    px = await page.evaluate(PROBE, {"shot": shot, "boxes": boxes})
+    out = []
+    for i, p in zip(items, px, strict=True):
+        p.sort(key=_lum)
+        bg = p[int(len(p) * 0.75)]  # the light end of the backdrop; a hairline key outline does not count
+        out.append((i["key"], i["text"], i["col"], bg, _ratio(i["col"], bg)))
+    return out
+
+
+async def test_every_key_label_and_glyph_is_readable_when_selected(browser, large):
+    page = await open_large(browser, large, 1440, 900, device_scale_factor=2)
+    names = await page.evaluate(f"() => [...{REMOTE}.querySelectorAll('[data-key]')].map((e) => e.dataset.key)")
+    assert len(names) >= 35
+    bad = []
+    for state in ("idle", "hover", "selected", "selected+hover"):
+        for name in names:
+            sel = "null" if state in ("idle", "hover") else f"{{kind: 'key', name: '{name}'}}"
+            await page.evaluate(f"() => {STUDIO_EL}.st.set({{sel: {sel}}})")
+            hover = state.endswith("hover")
+            await page.mouse.move(*(await _key_centre(page, name))) if hover else await page.mouse.move(0, 0)
+            await page.wait_for_timeout(150)
+            for key, is_text, col, bg, ratio in await _measure(page):
+                if ratio < (4.5 if is_text else 3.0):
+                    bad.append(f"{state} {name}: {key} {col} on {bg} = {ratio:.2f}")
+    assert bad == [], "\n".join(bad)
+    await page.context.close()

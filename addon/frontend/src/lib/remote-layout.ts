@@ -196,16 +196,16 @@ const LAYOUT: readonly (Row | string)[] = [
   ['dvr', 'DVR', 'guide', 'rect', 0.232, 0.759, 0.262, 0.027, { radii: [14, 2, 2, 14] }],
   ['guide', 'Guide', 'guide', 'rect', 0.496, 0.759, 0.266, 0.027, { radii: [2, 2, 2, 2] }],
   ['info', 'Info', 'guide', 'rect', 0.762, 0.759, 0.266, 0.027, { radii: [2, 14, 14, 2] }],
-  ['red', 'Red', 'colour', 'rect', 0.180, 0.800, 0.157, 0.016, { color: '#e0584c', radii: [6, 6, 6, 6] }],
-  ['green', 'Green', 'colour', 'rect', 0.393, 0.800, 0.157, 0.016, { color: '#4fb56a', radii: [6, 6, 6, 6] }],
-  ['yellow', 'Yellow', 'colour', 'rect', 0.607, 0.800, 0.157, 0.016, { color: '#e6c23a', radii: [6, 6, 6, 6] }],
-  ['blue', 'Blue', 'colour', 'rect', 0.816, 0.800, 0.157, 0.016, { color: '#5b8fe0', radii: [6, 6, 6, 6] }],
+  ['red', 'Red', 'colour', 'rect', 0.1825, 0.800, 0.163, 0.020, { color: '#e0584c', radii: [11, 4, 4, 11] }],
+  ['green', 'Green', 'colour', 'rect', 0.3928, 0.800, 0.163, 0.020, { color: '#4fb56a', radii: [4, 4, 4, 4] }],
+  ['yellow', 'Yellow', 'colour', 'rect', 0.6031, 0.800, 0.163, 0.020, { color: '#e6c23a', radii: [4, 4, 4, 4] }],
+  ['blue', 'Blue', 'colour', 'rect', 0.8134, 0.800, 0.163, 0.020, { color: '#5b8fe0', radii: [4, 11, 11, 4] }],
   [PK.lightUpper, '', 'home', 'rect', 0.234, 0.836, 0.266, 0.026, { printed: 'upper light', radii: [6, 6, 6, 6] }],
   ['home_control_plus', '+', 'home', 'rock-top', 0.498, 0.840, 0.150, 0.033],
   [PK.socketUpper, '', 'home', 'rect', 0.762, 0.836, 0.266, 0.026, { printed: 'upper socket', radii: [6, 6, 6, 6] }],
-  [PK.lightLower, '', 'home', 'rect', 0.234, 0.876, 0.266, 0.027, { printed: 'lower light', radii: [6, 6, 6, 6] }],
+  [PK.lightLower, '', 'home', 'rect', 0.234, 0.876, 0.266, 0.027, { printed: 'lower light', radii: [6, 6, 6, 20] }],
   ['home_control_minus', '−', 'home', 'rock-bottom', 0.498, 0.873, 0.150, 0.033],
-  [PK.socketLower, '', 'home', 'rect', 0.762, 0.876, 0.266, 0.027, { printed: 'lower socket', radii: [6, 6, 6, 6] }],
+  [PK.socketLower, '', 'home', 'rect', 0.762, 0.876, 0.266, 0.027, { printed: 'lower socket', radii: [6, 6, 20, 6] }],
 ];
 /** Keys that are one visual plate with separate hit areas (no seam drawn at rest): the D-pad, Vol, Ch/Pg and the home +/- key. */
 export const JOINED: ReadonlySet<string> = new Set(['up', 'down', 'left', 'right', 'volume_up', 'volume_down', 'channel_up', 'channel_down', 'home_control_plus', 'home_control_minus']);
@@ -250,6 +250,6 @@ export function keyPath(g: KeyGeom): string {
 }
 /** The outlined pill drawn inside a colour key, in its colour. */
 export function tintPath(g: KeyGeom): string {
-  const ix = g.x + 5, iy = g.y + 4.5, iw = g.w - 10, ih = g.h - 9, r = ih / 2;
+  const iw = g.w * 0.6, ih = g.h * 0.45, ix = g.x + (g.w - iw) / 2, iy = g.y + (g.h - ih) / 2, r = ih / 2;
   return `M${ix + r} ${iy}h${iw - 2 * r}a${r} ${r} 0 0 1 0 ${ih}h-${iw - 2 * r}a${r} ${r} 0 0 1 0 -${ih}z`;
 }
