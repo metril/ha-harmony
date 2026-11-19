@@ -40,8 +40,8 @@ static void test_errors(void) {
     CT_CHECK(has("\"bad_request\""));
     run(&s, "{\"v\":1,\"id\":9,\"t\":\"key_event\",\"d\":{\"remote\":1,\"key\":1,\"action\":7}}");
     CT_CHECK(has("\"bad_request\""));
-    run(&s, "{\"v\":1,\"id\":9,\"t\":\"ping\",\"d\":{\"x\":1}}"); /* unknown field */
-    CT_CHECK(has("\"bad_request\""));
+    run(&s, "{\"v\":1,\"id\":9,\"t\":\"ping\",\"d\":{\"x\":1}}"); /* unknown field: ignored */
+    CT_CHECK(!has("\"bad_request\"") && has("\"pong\""));
     run(&s, "{\"v\":1,\"id\":-1,\"t\":\"ping\"}");
     CT_CHECK(has("\"bad_request\"") && has("\"id\":0"));
     run(&s, "not json");

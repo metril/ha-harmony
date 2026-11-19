@@ -132,7 +132,6 @@ def test_generated_python_rejects_version_mismatch(tmp_path):
         {"v": 1, "id": 1, "t": "foo", "d": {"a": "x"}},  # wrong type
         {"v": 1, "id": 1, "t": "foo", "d": {"a": True}},  # bool is not u8
         {"v": 1, "id": 1, "t": "foo", "d": {"a": 256}},  # out of range
-        {"v": 1, "id": 1, "t": "foo", "d": {"a": 1, "zz": 1}},  # unknown field
         {"v": 1, "id": 1, "t": "nope", "d": {}},  # unknown message
         {"v": 1, "id": 1, "t": "bar", "d": {"c": 9}},  # bad enum value
         {"v": 1, "t": "foo", "d": {"a": 1}},  # missing id
@@ -364,3 +363,32 @@ def test_remote_info_and_tile_state_round_trip():
         ns["encode_ws"](T.REMOTE_INFO, {k: v for k, v in d.items() if k != "gen"})
     with pytest.raises(ns["ProtoError"]):  # rf-only: not a ws message
         ns["encode_ws"](T.TILE_STATE, {"remote": 1, "page": 0, "tile": 1, "state": 2, "text": "x"})
+
+
+def test_receiver_ignores_unknown_fields_sender_stays_strict(tmp_path):
+    out = tmp_path / "out"
+    generate(write(tmp_path, MINI), out)
+    ns = load_gen_py(out)
+    msg_type, data = ns["decode_ws"]({"v": 1, "id": 1, "t": "foo", "d": {"a": 1, "zz": "new"}})
+    assert (msg_type, data) == (ns["MsgType"].FOO, {"a": 1})
+    with pytest.raises(ns["ProtoError"]):
+        ns["encode_ws"](ns["MsgType"].FOO, {"a": 1, "zz": 1})
+    with pytest.raises(ns["ProtoError"]):  # known fields stay checked
+        ns["decode_ws"]({"v": 1, "id": 1, "t": "foo", "d": {"a": 999, "zz": 1}})
+
+
+def test_v036_decoder_accepts_main_hello_ack(tmp_path):
+    """The 0.3.6 schema knew hello_ack without fw_build / ota_key."""
+    old = (tmp_path / "old.yaml")
+    old.write_text(
+        "version: 1\nmessages:\n  - name: hello_ack\n    code: 2\n    transport: ws\n    fields:\n"
+        "      - {name: hub_id, type: str}\n      - {name: fw_version, type: str, optional: true}\n"
+    )
+    out = tmp_path / "out"
+    generate(old, out)
+    ns = load_gen_py(out)
+    env = {"v": 1, "id": 1, "t": "hello_ack",
+           "d": {"hub_id": "h", "fw_version": "0.3.7", "fw_build": 366, "ota_key": "dev"}}
+    assert ns["decode_ws"](env)[1] == {"hub_id": "h", "fw_version": "0.3.7"}
+    with pytest.raises(ns["ProtoError"]):
+        ns["decode_ws"]({**env, "d": {"fw_build": 366}})  # required field still enforced
