@@ -32,10 +32,9 @@ export class HhPalette extends LitElement {
       summary small { margin-left: auto; color: var(--tx3); font-weight: 500; font-size: 11px; }
       .grp { padding: 0 10px 10px; }
       .grp h2 { margin: 8px 0 5px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; }
-      .chips { display: flex; flex-wrap: wrap; gap: 5px; }
-      .chip2 { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; max-width: 100%; padding: 0 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--sf2); color: var(--tx); font-size: 12.5px; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      .chip2 { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 15px; border: 1px solid var(--line); background: var(--sf2); color: var(--tx); font-size: 12.5px; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
       .chip2:hover { background: var(--sf3); }
-      .chip2 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .chip2 span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chip2.used { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
       .chip2[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
       .hab { flex: none; font-style: normal; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; border: 1px solid var(--line); color: var(--tx2); background: var(--sf); }
@@ -62,7 +61,7 @@ export class HhPalette extends LitElement {
       .prim[aria-pressed="true"] .sic { color: inherit; }
       .typed { display: grid; gap: 6px; margin-top: 8px; }
       .hint { color: var(--tx3); font-size: 11.5px; margin: 6px 2px 0; }
-      @media (max-width: 720px) { .chip2 { min-height: 36px; } .ent { min-height: 44px; } }
+      @media (max-width: 720px) { .chip2 { height: 36px; } .ent { min-height: 44px; } }
     `,
   ];
   @property({ attribute: false }) host!: StudioHost;
@@ -137,7 +136,7 @@ export class HhPalette extends LitElement {
       const cards = GROUPS.map((grp) => {
         const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
-          ? html`<h2>${pretty(grp)}</h2><div class="chips" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
+          ? html`<h2>${pretty(grp)}</h2><div class="cells" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
               ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(commandIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
             </div>`
           : nothing;
@@ -149,7 +148,7 @@ export class HhPalette extends LitElement {
     const used = this.usedKeys();
     const acts = (this.cfg().activities ?? []).filter((a) => this.match(a.name ?? '', a.id));
     return html`
-      <div class="chips">
+      <div class="cells">
         ${acts.map((a) => this.chip(a.name ?? a.id, { kind: 'activity', id: a.id }, used.has(`activity:${a.id}`), stockIconSvg(stockIconByName('play')?.id ?? 26, 'sic')))}
         ${this.match('all off', 'power off') ? this.chip('All off', { kind: 'alloff' }, used.has('activity:off'), stockIconSvg(stockIconByName('power')?.id ?? 7, 'sic')) : nothing}
       </div>
@@ -175,7 +174,7 @@ export class HhPalette extends LitElement {
     const typedSource: Source | null = HA_ENTITY_ID.test(this.typed) ? { kind: 'entity', entity_id: this.typed } : null;
     const typed = html`<div class="typed">
       <input type="text" aria-label="Entity id" placeholder="light.living_room" .value=${this.typed} @input=${(e: Event) => (this.typed = (e.target as HTMLInputElement).value.trim())} />
-      ${typedSource ? html`<div class="chips">${this.chip(this.typed, typedSource, false)}</div>` : html`<span class="hint">Type an entity id to get a chip you can drag.</span>`}
+      ${typedSource ? html`<div class="cells">${this.chip(this.typed, typedSource, false)}</div>` : html`<span class="hint">Type an entity id to get a chip you can drag.</span>`}
     </div>`;
     if (!st.haLoaded) return html`<p class="empty" role="status">Loading Home Assistant…</p>`;
     if (ents === null) return html`<p class="empty" role="status">Home Assistant cannot be read right now, so entities are not listed. You can still type an entity id.</p>${typed}`;

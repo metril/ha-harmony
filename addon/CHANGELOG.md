@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.13 (2026-11-19)
+
+- The command list in the left sidebar and the free-keys list on the right are now tidy grids: equal rows, a common left edge, long names shortened with a tooltip.
+- A selection can be cleared: click the key or widget again, click empty space on the remote or canvas, or press Escape.
+- Key labels stay readable when a key is selected, including the Vol and Ch legends.
+- The drawn remote's colour keys are dark keys with a coloured ring, and the light and socket keys show the symbols printed on the real remote.
+
 ## 0.3.12 (2026-11-19)
 
 - Fixed "Home Assistant cannot be read" on larger installs: the add-on cut Home Assistant's answer short when it arrived in more than one piece, so entities and services never loaded. The add-on log now says why whenever Home Assistant cannot be read.

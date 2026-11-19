@@ -236,11 +236,18 @@ export class HhStudio extends StoreElement implements StudioHost {
       this.assigner.choose({ kind: 'key', name });
       return;
     }
-    const same = this.st.sel?.kind === 'key' && this.st.sel.name === name;
+    if (this.st.sel?.kind === 'key' && this.st.sel.name === name) {
+      this.deselect();
+      return;
+    }
     this.st.set({ sel: { kind: 'key', name } });
     this.st.say(`${keyTitle(name)} selected`);
-    if (same && this.pop) this.pop = null;
-    else void this.updateComplete.then(() => this.openPopover());
+    void this.updateComplete.then(() => this.openPopover());
+  }
+  deselect(): void {
+    this.pop = null;
+    if (this.st.sel && this.st.sel.kind !== 'page') this.st.set({ sel: null });
+    this.st.say('Selection cleared');
   }
   activateWidget(page: number, index: number): void {
     if (this.assigner.phase.name === 'picked') {
@@ -257,7 +264,7 @@ export class HhStudio extends StoreElement implements StudioHost {
       return;
     }
     this.pop = null;
-    this.st.set({ sel: this.st.sel?.kind === 'widget' ? null : this.st.sel });
+    this.st.set({ sel: this.st.sel?.kind === 'page' ? this.st.sel : null });
   }
   setBox(page: number, index: number, box: { x: number; y: number; w: number; h: number }): void {
     this.store.replace(placeWidget(this.store.config, page, index, box));
@@ -575,7 +582,7 @@ export class HhStudio extends StoreElement implements StudioHost {
             </div>
           </div>
           <div class="cw">
-          <div class="canvas" @pointerdown=${(e: PointerEvent) => { if ((e.target as HTMLElement).closest('hh-remote') === null && this.pop) this.pop = null; }} @scroll=${() => (this.pop = null)}>
+          <div class="canvas" @click=${(e: MouseEvent) => { const t = e.composedPath()[0] as HTMLElement; if ((t === e.currentTarget || t.localName === 'hh-remote') && this.assigner.phase.name === 'idle') this.deselect(); }} @pointerdown=${(e: PointerEvent) => { if ((e.target as HTMLElement).closest('hh-remote') === null && this.pop) this.pop = null; }} @scroll=${() => (this.pop = null)}>
             ${picked
               ? html`<div class="banner2" role="status"><span>Click a key or the screen for ${describeSource(s.config, picked)}</span><span class="sp"></span><button @click=${() => this.assigner.cancel()}>Cancel</button></div>`
               : nothing}
