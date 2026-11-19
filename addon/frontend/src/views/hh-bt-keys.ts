@@ -31,11 +31,11 @@ export class HhBtKeys extends LitElement {
       .unm { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
       select { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; width: 100%; max-width: 230px; }
       .got select { width: 200px; }
-      .head, .kr { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.7fr) minmax(0, 1.5fr) 84px; gap: 8px; align-items: center; padding: 4px 8px; }
+      .head, .kr { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.6fr) minmax(0, 1.2fr) 84px; gap: 8px; align-items: center; padding: 4px 8px; }
       .head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tx3); border-bottom: 1px solid var(--line); padding-block: 6px; }
       .kr { border-bottom: 1px solid var(--line); min-height: 46px; }
       .kr.hit { background: var(--accs); }
-      .kr b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .kr b { overflow-wrap: anywhere; }
       .kr .end { justify-self: end; }
       .hint { color: var(--tx3); font-size: 12.5px; margin: 0; }
       .err { color: var(--bad); font-size: 12.5px; }

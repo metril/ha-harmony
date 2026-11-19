@@ -393,16 +393,33 @@ async def test_the_top_of_the_tab_is_compact_and_the_tab_icons_stay_put(browser,
     await shot(page, "15-tab-tooltip-1440")
 
 
-@pytest.mark.parametrize("size", [(1440, 900), (1280, 720), (1024, 700)])
-async def test_the_top_of_the_tab_survives_a_wide_fallback_font(browser, big, size):
+TAB_NAMES = ["Devices", "Activities", "Home Assistant", "Widgets"]
+
+
+async def check_tab_label(page):
+    """the selected tab's name is whole or absent: never cut"""
+    st = await page.locator(f"{P} .tn").evaluate(
+        "e => ({ hidden: getComputedStyle(e).visibility === 'hidden', text: e.textContent, ok: e.scrollWidth <= e.clientWidth })"
+    )
+    assert st["hidden"] or st["ok"], f"tab label cut: {st}"
+    return st
+
+
+@pytest.mark.parametrize("size", [(1440, 900), (1280, 720), (1024, 700), (900, 700)])
+@pytest.mark.parametrize("zoom", [1, 1.25])
+async def test_the_top_of_the_tab_survives_a_wide_fallback_font(browser, big, size, zoom):
     page = await open_tab(browser, big, *size)
-    await page.add_style_tag(content=WIDE_CSS)
+    await page.add_style_tag(content=WIDE_CSS + (f"html{{zoom:{zoom}}}" if zoom != 1 else ""))
     await page.evaluate("() => document.fonts.ready")
-    await shot(page, f"16-wide-font-{size[0]}")
+    await shot(page, f"16-wide-font-{size[0]}-{zoom}")
     await check_top_of_tab(page)
+    # chips: all four show icon + word, or all four are icons alone (never a mix, never an abbreviation)
+    modes = await page.locator(f"{P} .fchips .fchip .l").evaluate_all("els => els.map(e => getComputedStyle(e).display !== 'none')")
+    assert len(set(modes)) == 1, modes
+    for name in TAB_NAMES:
+        await page.get_by_role("tab", name=name, exact=True).click()
+        st = await check_tab_label(page)
+        assert st["hidden"] or st["text"] == name
+    await page.get_by_role("tab", name="Home Assistant", exact=True).click()
     await page.locator(P).get_by_role("button", name="Ground").click()
     await page.locator(f"{P} .gh.d1").first.wait_for()
-    cut = await page.locator(P).evaluate(
-        "(el) => [...el.shadowRoot.querySelectorAll('.tn')].filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.className || e.tagName)"
-    )
-    assert cut == [], cut

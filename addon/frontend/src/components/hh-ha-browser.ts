@@ -19,11 +19,11 @@ const ICON: Record<string, string> = {
   light: 'bulb', switch: 'switch', scene: 'scene', script: 'play', media_player: 'tv', climate: 'thermo', cover: 'blinds', fan: 'fan', input: 'plus', sensor: 'info', lock: 'lock',
 };
 const GROUP_ICON: Record<string, string> = { floor: 'home', area: 'home', device: 'app', integration: 'settings', label: 'star' };
-const DIMS: { dim: Dim; label: string }[] = [
-  { dim: 'types', label: 'Type' },
-  { dim: 'areas', label: 'Area' },
-  { dim: 'labels', label: 'Label' },
-  { dim: 'integrations', label: 'Integration' },
+const DIMS: { dim: Dim; label: string; ic: string }[] = [
+  { dim: 'types', label: 'Type', ic: 'list' },
+  { dim: 'areas', label: 'Area', ic: 'home' },
+  { dim: 'labels', label: 'Label', ic: 'star' },
+  { dim: 'integrations', label: 'Integration', ic: 'settings' },
 ];
 const icon = (name: string) => stockIconSvg(stockIconByName(name)?.id ?? 13);
 const sourceOf = (e: HaEntity): Source => ({ kind: 'entity', entity_id: e.entity_id, name: e.name });
@@ -53,7 +53,8 @@ export class HhHaBrowser extends LitElement {
       .clr:hover { background: var(--sf2); }
       .tools { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; height: 30px; }
       .tools label { display: flex; align-items: center; gap: 6px; color: var(--tx2); font-size: 12px; font-weight: 600; min-width: 0; white-space: nowrap; }
-      .tools select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+      .tools select { flex: none; }
+      @container (max-width: 230px) { .tools .gb { display: none; } }
       .tools .btn, .tools .fchip { flex: none; }
       input[type="search"]::placeholder { text-overflow: ellipsis; }
       select { height: 28px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 6px; font-size: 12px; }
@@ -61,12 +62,12 @@ export class HhHaBrowser extends LitElement {
       .tools .btn { padding: 0 6px; }
       .tools .btn.icon { width: 30px; padding: 0; }
       .fchip.menu { font-size: 16px; line-height: 1; padding: 0 9px; }
-      .fchips { display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; }
-      .fchips .fchip { flex: 0 1 auto; min-width: 0; }
-      .fchip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.fchips { display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; }
+      .fchips .fchip { flex: none; }
       .fchip .car { flex: none; }
-      .fchip .s { display: none; }
-      @container (max-width: 300px) { .fchips .fchip:not(.menu) { flex: 1 1 0; justify-content: center; padding: 0 4px; gap: 3px; } .fchip .car { display: none; } .fchip .l.x { display: none; } .fchip .s { display: inline; } }
+      .fchip .sic { width: 14px; height: 14px; flex: none; }
+      .fchips.ic .l, .fchips.ic .car { display: none; }
+      .fchips.ic .fchip { padding: 0 8px; }
       .fchip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 7px; border-radius: 13px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
       .fchip:hover { background: var(--sf2); }
       .fchip small { color: var(--tx3); font-weight: 500; font-size: 11px; }
@@ -167,12 +168,29 @@ export class HhHaBrowser extends LitElement {
   private memo: { key: string; list: HaEntity[]; groups: Group[]; facets: Map<Dim, Map<string, number>> } | null = null;
   private memoSrc: unknown;
 
+  private ro?: ResizeObserver;
+  /** the filter buttons show icon + word when all four fit on the line, else the same four as icons alone (the tooltip and aria-label keep the word) */
+  private fitChips = () => {
+    const row = this.shadowRoot?.querySelector<HTMLElement>('.fchips');
+    if (!row) return;
+    row.classList.remove('ic');
+    row.classList.toggle('ic', row.scrollWidth > row.clientWidth + 0.5);
+  };
+  protected override updated(): void {
+    this.fitChips();
+    if (!this.ro) {
+      this.ro = new ResizeObserver(this.fitChips);
+      this.ro.observe(this);
+    }
+  }
   override connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener('keydown', this.slash);
     window.addEventListener('click', this.outside);
   }
   override disconnectedCallback(): void {
+    this.ro?.disconnect();
+    this.ro = undefined;
     window.removeEventListener('keydown', this.slash);
     window.removeEventListener('click', this.outside);
     clearTimeout(this.qTimer);
@@ -367,7 +385,7 @@ export class HhHaBrowser extends LitElement {
   }
   private header(id: string, title: string, count: number, open: boolean, ic: TemplateResult | typeof nothing, words: readonly string[], sub = '', depth = 0, onToggle?: () => void) {
     return html`<button class="gh d${Math.min(depth, 3)} ${depth > 1 ? 'sub' : ''}" data-nav aria-expanded=${open} @click=${onToggle ?? (() => this.toggle(id))}>
-      <i class="chev" aria-hidden="true"></i>${ic}<span class="gt">${this.hl(title, words)}</span>${sub ? html`<span class="gs">${sub}</span>` : nothing}<span class="cnt">${count.toLocaleString('en')}</span>
+      <i class="chev" aria-hidden="true"></i>${ic}<span class="gt" title=${title}>${this.hl(title, words)}</span>${sub ? html`<span class="gs">${sub}</span>` : nothing}<span class="cnt">${count.toLocaleString('en')}</span>
     </button>`;
   }
   private group(g: Group, depth: number, budget: { n: number }, words: readonly string[]): TemplateResult {
@@ -404,13 +422,12 @@ export class HhHaBrowser extends LitElement {
       </div>`;
     });
   }
-  private dropdown(dim: Dim, label: string) {
+  private dropdown(dim: Dim, label: string, ic: string) {
     const has: Record<string, GroupBy | ''> = { types: '', areas: 'area', labels: 'label', integrations: 'integration' };
     const n = this.f[dim].size;
     const g = has[dim] as GroupBy | '';
-    const short = label === 'Integration' ? 'Integ.' : '';
     if (g && !this.bys.includes(g) && !n) return nothing; // no data to filter by
-    return html`<button class="fchip" aria-expanded=${this.pop === dim} aria-haspopup="true" aria-label=${n ? `${label} ${n}` : label} title=${label} @click=${() => { this.pop = this.pop === dim ? null : dim; this.popQ = ''; }}><span class="l${short ? ' x' : ''}">${label}</span>${short ? html`<span class="s">${short}</span>` : nothing}${n ? html`<small>${n}</small>` : nothing}<i class="car" aria-hidden="true"></i></button>`;
+    return html`<button class="fchip" aria-expanded=${this.pop === dim} aria-haspopup="true" aria-label=${n ? `${label} ${n}` : label} title=${label} @click=${() => { this.pop = this.pop === dim ? null : dim; this.popQ = ''; }}>${icon(ic)}<span class="l">${label}</span>${n ? html`<small>${n}</small>` : nothing}<i class="car" aria-hidden="true"></i></button>`;
   }
   private menu() {
     return html`<button class="fchip menu" aria-label="Options" title="Options" aria-expanded=${this.pop === 'menu'} aria-haspopup="true" @click=${() => (this.pop = this.pop === 'menu' ? null : 'menu')}>⋯</button>`;
@@ -481,12 +498,12 @@ export class HhHaBrowser extends LitElement {
         ${this.draft ? html`<button class="clr" aria-label="Clear search" @click=${() => { this.draft = ''; this.setQ('', true); this.shadowRoot?.querySelector<HTMLInputElement>('input.q')?.focus(); }}>×</button>` : nothing}
       </div>
       <div class="fchips" role="group" aria-label="Filters">
-        ${DIMS.map((d) => this.dropdown(d.dim, d.label))}
+        ${DIMS.map((d) => this.dropdown(d.dim, d.label, d.ic))}
       </div>
       ${this.pop === 'menu' ? nothing : this.popPanel()}
       ${nf ? html`<div class="pills"><span class="count">${nf} ${nf === 1 ? 'filter' : 'filters'}</span>${this.pills()}<button class="btn ghost sm" @click=${() => this.clearFilters()}>Clear</button></div>` : nothing}
       <div class="tools">
-        <label>Group by
+        <label><span class="gb">Group by</span>
           <select aria-label="Group by" .value=${this.by} @change=${(e: Event) => this.setBy((e.target as HTMLSelectElement).value as GroupBy)}>
             ${GROUP_BY.filter((g) => this.bys.includes(g.id)).map((g) => html`<option value=${g.id} ?selected=${g.id === this.by}>${g.label}</option>`)}
           </select>

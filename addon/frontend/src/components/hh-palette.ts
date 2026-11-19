@@ -29,7 +29,8 @@ export class HhPalette extends LitElement {
       .tabs button .sic { width: 17px; height: 17px; }
       .tabs button::after { content: attr(aria-label); position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; padding: 3px 8px; border-radius: var(--r1); background: var(--tx); color: var(--bg); font-size: 11.5px; font-weight: 600; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 80ms; }
       .tabs button:hover::after, .tabs button:focus-visible::after { opacity: 1; }
-      .tabs .tn { flex: 1; min-width: 0; padding: 0 6px; font-size: 12px; font-weight: 650; color: var(--tx); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .tabs .tn { flex: 1 0 auto; padding: 0 6px; font-size: 12px; font-weight: 650; color: var(--tx); white-space: nowrap; }
+      .tabs .tn.off { position: absolute; visibility: hidden; pointer-events: none; }
       details.typed-d { margin: 10px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding-top: 4px; }
       .typed-d summary { min-height: 32px; padding: 0 2px; font-weight: 600; font-size: 12px; color: var(--tx2); border-radius: var(--r1); }
       input[type="search"], .typed input { height: 34px; width: 100%; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; }
@@ -38,7 +39,8 @@ export class HhPalette extends LitElement {
       summary { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 10px; cursor: pointer; font-weight: 650; list-style: none; border-radius: var(--r2); }
       summary::-webkit-details-marker { display: none; }
       summary .sic { width: 20px; height: 20px; color: var(--acc); }
-      summary small { margin-left: auto; color: var(--tx3); font-weight: 500; font-size: 11px; }
+      summary > span { min-width: 0; overflow-wrap: anywhere; }
+      summary small { margin-left: auto; flex: none; white-space: nowrap; color: var(--tx3); font-weight: 500; font-size: 11px; }
       .grp { padding: 0 10px 10px; }
       .grp h2 { margin: 8px 0 5px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; }
       .hab { flex: none; font-style: normal; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; border: 1px solid var(--line); color: var(--tx2); background: var(--sf); }
@@ -59,7 +61,23 @@ export class HhPalette extends LitElement {
   @state() private typed = '';
   private bound: EventTarget[] = [];
   private rerender = () => this.requestUpdate();
+  private ro?: ResizeObserver;
+  /** the tab's name shows in full or not at all: hidden when it does not fit beside the icons (the icon, tooltip and aria-label name it) */
+  private fitName = () => {
+    const tabs = this.renderRoot.querySelector<HTMLElement>('.tabs');
+    const tn = tabs?.querySelector<HTMLElement>('.tn');
+    const last = tabs?.querySelector<HTMLElement>('button:last-of-type');
+    if (!tabs || !tn || !last) return;
+    const fits = last.offsetLeft + last.offsetWidth + 2 + tn.scrollWidth + 2 <= tabs.clientWidth;
+    tn.classList.toggle('off', !fits);
+  };
   protected override updated(): void {
+    const tabs = this.renderRoot.querySelector('.tabs');
+    if (tabs && !this.ro) {
+      this.ro = new ResizeObserver(this.fitName);
+      this.ro.observe(tabs);
+    }
+    this.fitName();
     const now = this.host ? [this.host.state, this.host.state.store, this.assigner] : [];
     if (now.length === this.bound.length && now.every((t, i) => t === this.bound[i])) return;
     this.bound.forEach((t) => t.removeEventListener('change', this.rerender));
@@ -76,6 +94,8 @@ export class HhPalette extends LitElement {
   };
   override disconnectedCallback(): void {
     window.removeEventListener('focus', this.onFocus);
+    this.ro?.disconnect();
+    this.ro = undefined;
     this.bound.forEach((t) => t.removeEventListener('change', this.rerender));
     this.bound = [];
     super.disconnectedCallback();
@@ -138,7 +158,7 @@ export class HhPalette extends LitElement {
             </div>`
           : nothing;
       });
-      return html`<details open><summary>${stockIconSvg(1)}<span>${d.name ?? d.id}</span>${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant device">HA</i>` : nothing}<small>${commandNames(d).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
+      return html`<details open><summary>${stockIconSvg(1)}<span title=${d.name ?? d.id}>${d.name ?? d.id}</span>${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant device">HA</i>` : nothing}<small>${commandNames(d).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
     });
   }
   private activities() {
@@ -198,7 +218,7 @@ export class HhPalette extends LitElement {
           ${TABS.map(([id, label, ic]) => html`<button role="tab" id=${`pt-${id}`} aria-selected=${st.tab === id} aria-label=${label} aria-controls="pbody" @click=${() => { st.set({ tab: id }); if (id === 'ha' && st.haLoaded) void st.loadHa(true); }}>${stockIconSvg(stockIconByName(ic)?.id ?? 13)}</button>`)}
           <span class="tn" aria-hidden="true">${TABS.find(([id]) => id === st.tab)?.[1]}</span>
         </div>
-        ${st.tab === 'ha' ? nothing : html`<input type="search" aria-label="Search the palette" placeholder="Search commands, activities, widgets" .value=${st.query} @input=${(e: Event) => this.search((e.target as HTMLInputElement).value)} />`}
+        ${st.tab === 'ha' ? nothing : html`<input type="search" aria-label="Search the palette" placeholder="Search the palette" .value=${st.query} @input=${(e: Event) => this.search((e.target as HTMLInputElement).value)} />`}
       </div>
       <div class="body" id="pbody" role="tabpanel" aria-labelledby=${`pt-${st.tab}`}>
         ${st.tab === 'devices' ? this.devices() : st.tab === 'activities' ? this.activities() : st.tab === 'ha' ? this.ha() : this.widgets()}

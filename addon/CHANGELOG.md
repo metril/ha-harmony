@@ -5,7 +5,7 @@
 - The Home Assistant tab is rebuilt for large installs: it is called "Home Assistant", everything starts collapsed with counts, and you can search by name, entity id, area, device or integration, filter by type, area and integration, and group by area (with floors), type, device or integration. Favourites, "Used in this config" and "Recently used" are pinned at the top. Hidden and disabled entities are left out; diagnostic ones are behind an option. The same browser is used when picking an entity for an action and when adding a device.
 - To group by area the add-on now also reads Home Assistant's area, floor, device and entity lists over a second read-only connection that can send only those four requests. If it cannot, the tab still works, grouped by type.
 - Bluetooth: a new Bluetooth page to pair devices (Shield, Apple TV, Fire TV…) and Bluetooth LE remotes, map a remote's buttons and test commands. It needs hub firmware with Bluetooth, which is not released yet; until then the page says so.
-- The Home Assistant tab keeps its filter row and group-by row on one line whatever font or width the browser uses: the filter buttons share the row and shorten ("Integ.") instead of wrapping, and nothing in the narrow side panel scrolls sideways.
+- The Home Assistant tab and the palette hold up at any font or width: the filter buttons show an icon and word, or four icons with tooltips when they do not fit; the group-by row stays on one line; the selected tab name is shown whole or not at all; long names wrap or have a tooltip instead of being cut; nothing scrolls sideways.
 - Test hardening and a smaller hub firmware build (no visible change).
 
 ## 0.3.13 (2026-11-19)
