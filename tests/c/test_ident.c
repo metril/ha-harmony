@@ -150,7 +150,7 @@ static void test_precedence_and_persistence(void) {
     host[81] = 0;
     CT_EQ(hp_ident_init(&t, NULL, NULL, host, NULL), 0); /* overlong derived id: truncated to a valid id */
     CT_CHECK(strlen(t.id) == 63 && hp_ident_id_valid(t.id) && t.warn[0]);
-    CT_EQ(hp_ident_init(&t, NULL, NULL, "my.host", NULL), 0);
+    CT_EQ(hp_ident_init(&t, NULL, NULL, "my host", NULL), 0);
     CT_CHECK(!strcmp(t.id, "my-host") && hp_ident_id_valid(t.id));
     CT_EQ(hp_ident_init(&t, NULL, NULL, "default", NULL), 0);
     CT_CHECK(hp_ident_id_valid(t.id) && strcmp(t.id, "default"));
@@ -339,10 +339,47 @@ static void test_mdns(void) {
     hp_mdns_srv_stop(&m);
 }
 
+/* Upgrade safety: older firmware used "ha-harmony-<hostname>" unvalidated. Wherever that id was usable (the add-on's
+ * rule: 1-63 of A-Za-z0-9._-) it must come out byte-identical, and it is saved so it never drifts. */
+static void test_old_derivation_is_kept(void) {
+    char h63[64], h52[53];
+    memset(h63, 'h', 63);
+    h63[63] = 0;
+    memset(h52, 'h', 52);
+    h52[52] = 0; /* "ha-harmony-" + 52 = 63 chars: the longest usable */
+    const char *hosts[] = {"hub", "x.lan", "my_host", "Host-9", "ha.rmony.local", h52};
+    for (int i = 0; i < 6; i++) {
+        char old[120], b[100];
+        snprintf(old, sizeof old, "ha-harmony-%s", hosts[i]);
+        hp_ident_t t;
+        char *d = newdir();
+        CT_EQ(hp_ident_init(&t, d, NULL, old, NULL), 0);
+        CT_CHECK(!strcmp(t.id, old) && !t.warn[0] && !t.pinned);
+        CT_CHECK(slurp(d, "hub_id", b, sizeof b) && !strcmp(b, old)); /* persisted on first boot */
+        CT_EQ(hp_ident_init(&t, d, NULL, "ha-harmony-renamed-host", NULL), 0); /* a hostname change cannot move it */
+        CT_CHECK(!strcmp(t.id, old));
+    }
+    /* unusable then: 74 chars, or a space */
+    char old[120], b[100];
+    snprintf(old, sizeof old, "ha-harmony-%s", h63);
+    hp_ident_t t;
+    char *d = newdir();
+    CT_EQ(hp_ident_init(&t, d, NULL, old, NULL), 0);
+    CT_CHECK(strlen(t.id) == 63 && t.warn[0] && slurp(d, "hub_id", b, sizeof b) && !strcmp(b, t.id));
+    CT_EQ(hp_ident_init(&t, newdir(), NULL, "ha-harmony-a b", NULL), 0);
+    CT_CHECK(!strcmp(t.id, "ha-harmony-a-b"));
+    /* an existing dotted id can still change its name */
+    CT_EQ(hp_ident_init(&t, newdir(), NULL, "ha-harmony-x.lan", NULL), 0);
+    CT_EQ(hp_ident_set(&t, "ha-harmony-x.lan", "Den"), HP_IDENT_OK);
+    CT_CHECK(!strcmp(t.id, "ha-harmony-x.lan") && !strcmp(t.name, "Den"));
+    CT_EQ(hp_ident_set(&t, "other.dotted", NULL), HP_IDENT_BAD_ID);
+}
+
 int main(void) {
     CT_CHECK(mkdtemp(root) != NULL);
     CT_RUN(test_validation);
     CT_RUN(test_precedence_and_persistence);
+    CT_RUN(test_old_derivation_is_kept);
     CT_RUN(test_io_failure_changes_nothing);
     CT_RUN(test_hw_read);
     CT_RUN(test_dispatch);

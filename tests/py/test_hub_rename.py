@@ -82,7 +82,7 @@ async def test_invalid_input_is_refused_and_changes_nothing(start_hub, ident_dir
     _, rep = await call(hub, "set_hub_id", data)
     assert rep["t"] == "error" and rep["d"]["code"] == code and rep["id"] == 2
     assert (await hello(hub))["hub_id"] == "sim-hub"
-    assert not (ident_dir / "hub_id").exists()
+    assert (ident_dir / "hub_id").read_text() == "sim-hub"  # only the first-boot default was saved
 
 
 async def test_hub_conf_pin_refuses_the_rename(start_hub, ident_dir):

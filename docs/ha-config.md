@@ -324,7 +324,7 @@ hardware id: it cannot be renamed from Home Assistant.
 
 **Pinning (advanced).** `hub_id=<id>` in `/data/ha-harmony/hub.conf` (or `tools/install_boot_hook.py --hub-id`) pins the
 id; Home Assistant then refuses to rename it (`id_pinned`), the name still works. An unusable pin (`default`, over 63
-characters) is refused by the boot hook; the daemon never exits over an id. Precedence: pin, then the id saved by Home
+characters) is logged and ignored (not pinned); the daemon never exits over an id. The default is saved on first boot. Precedence: pin, then the id saved by Home
 Assistant (`/data/ha-harmony/hub_id`), then the hostname default. Delete `hub_id` and `hub_name` there to reset. Older
 dotted ids keep working (announced on mDNS with `-` for the dot); new ids cannot contain a dot.
 

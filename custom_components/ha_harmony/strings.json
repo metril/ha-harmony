@@ -58,6 +58,7 @@
       "migration_failed": "Renaming failed part-way and was undone; the hub keeps its old id. {detail}"
     },
     "abort": {
+      "hub_renamed_not_applied": "The hub's id was changed on the device; the connection is saved and Home Assistant follows the new id. The id or name you entered was not applied: open Reconfigure again to rename.",
       "already_configured": "This hub is already configured.",
       "reauth_successful": "Re-authentication was successful.",
       "wrong_hub": "The token belongs to a different hub.",

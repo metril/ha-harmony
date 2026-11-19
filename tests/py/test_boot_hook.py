@@ -627,8 +627,6 @@ def test_token_containing_equals_survives_intact(root: Path) -> None:
         "token=ok\nhub_id=a b\n",
         "token=ok\nhub_id=$(touch PWN)\n",
         "token=ok\nhub_id=\n",
-        "token=ok\nhub_id=default\n",
-        "token=ok\nhub_id=" + "a" * 64 + "\n",
         "token=a b\n",
         "token=ok;touch PWN\n",
         "token=ok\r\n",

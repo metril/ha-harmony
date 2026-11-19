@@ -242,10 +242,10 @@ else
 		hub_id)
 			case "$hah_v" in
 			'' | *[!A-Za-z0-9._-]*) hah_bad="hub_id (outside [A-Za-z0-9._-])" ;;
-			default) hah_bad="hub_id (default is reserved)" ;;
+			default) hah_budnote="hub_id=default is reserved - ignored, not pinned" ;;
 			*)
 				if [ "${#hah_v}" -gt 63 ]; then
-					hah_bad="hub_id (over 63 chars)"
+					hah_budnote="hub_id is over 63 chars - ignored, not pinned" # logged after the per-boot truncation
 				else
 					hah_id="$hah_v"
 				fi

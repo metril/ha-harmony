@@ -75,6 +75,12 @@ static int write_file(const char *path, const char *s) {
     return hp_atomic_write(path, (const uint8_t *)s, strlen(s)) < 0 ? -1 : 0;
 }
 
+/* A resolved default id is saved so it can never drift (hostname change, new derivation rules). Best effort. */
+static void persist_resolved(const hp_ident_t *t) {
+    char p[300];
+    if (path_of(t, "hub_id", p, sizeof p)) (void)write_file(p, t->id);
+}
+
 int hp_ident_init(hp_ident_t *t, const char *dir, const char *flag_id, const char *def, const char *hw) {
     memset(t, 0, sizeof *t);
     if (dir && strlen(dir) < sizeof t->dir) snprintf(t->dir, sizeof t->dir, "%s", dir);
@@ -90,9 +96,13 @@ int hp_ident_init(hp_ident_t *t, const char *dir, const char *flag_id, const cha
     }
     if (!t->id[0]) {
         if (path_of(t, "hub_id", p, sizeof p) && read_line(p, buf, sizeof buf) && hp_ident_id_existing_ok(buf)) memcpy(t->id, buf, strlen(buf) + 1);
-        else if (def && hp_ident_id_valid(def)) snprintf(t->id, sizeof t->id, "%s", def);
+        else if (def && hp_ident_id_existing_ok(def)) { /* byte-identical to what older firmware derived whenever that id is usable */
+            snprintf(t->id, sizeof t->id, "%s", def);
+            persist_resolved(t);
+        }
         else {
             derive_default(def, t->id);
+            persist_resolved(t);
             if (!t->warn[0]) snprintf(t->warn, sizeof t->warn, "the hostname-derived id is not a valid id: using %s", t->id);
         }
     }
@@ -102,7 +112,8 @@ int hp_ident_init(hp_ident_t *t, const char *dir, const char *flag_id, const cha
 
 int hp_ident_set(hp_ident_t *t, const char *id, const char *name) {
     /* a new id must also start with a letter or digit: the add-on keys its store files by it */
-    if (!hp_ident_id_valid(id) || !((id[0] >= 'a' && id[0] <= 'z') || (id[0] >= 'A' && id[0] <= 'Z') || (id[0] >= '0' && id[0] <= '9'))) return HP_IDENT_BAD_ID;
+    bool same = id && strcmp(id, t->id) == 0; /* an unchanged id (maybe an older dotted one) is not re-validated */
+    if (!same && (!hp_ident_id_valid(id) || !((id[0] >= 'a' && id[0] <= 'z') || (id[0] >= 'A' && id[0] <= 'Z') || (id[0] >= '0' && id[0] <= '9')))) return HP_IDENT_BAD_ID;
     if (name && !hp_ident_name_valid(name)) return HP_IDENT_BAD_NAME;
     bool id_change = strcmp(id, t->id) != 0;
     if (id_change && t->pinned) return HP_IDENT_PINNED;

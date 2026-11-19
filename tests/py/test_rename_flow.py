@@ -618,3 +618,24 @@ async def test_reconfigure_accepts_the_hubs_current_id_when_the_hardware_id_matc
     assert res["type"] is FlowResultType.ABORT and res["reason"] == "reconfigure_successful"
     await hass.async_block_till_done()
     assert entry.unique_id == "from-hub-conf"  # setup followed it
+
+
+async def test_reconfigure_says_when_a_typed_rename_was_not_applied(hass, hub, fake_addon):
+    entry = await set_up(hass, hub, fake_addon)
+    await raw_rename(hub, "from-hub-conf")
+    res = await reconfigure(hass, entry, "something-else", "Den")
+    assert res["type"] is FlowResultType.ABORT and res["reason"] == "hub_renamed_not_applied"
+
+
+async def test_entry_from_older_code_without_hw_id_learns_it_and_is_not_a_different_hub(
+    hass, hub, fake_addon
+):
+    """Upgrade: the entry has no hw_id, the hub answers under the SAME id and now reports one."""
+    fake_addon.apply_yaml(YAML)
+    entry = make_entry("127.0.0.1", hub.port, addon=fake_addon)
+    assert const.CONF_HW_ID not in entry.data
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED and entry.unique_id == HUB_ID
+    assert entry.data[const.CONF_HW_ID] == HW
