@@ -151,6 +151,36 @@ pages:
     data: {device: tv, command: input_hdmi2}
     ```
 
+### Colours and themes
+Optional; a config without `color`/`theme` compiles to the same pages as before. Colours are widget keys,
+a theme is chosen once per config (one active theme per remote):
+
+```yaml
+themes:                          # your own; `extends` a preset (default, midnight, daylight, high_contrast) or another of yours (<= 4 deep)
+  dusk: {extends: midnight, tokens: {ACC: "#FF8A3D"}, palette: {3: {fill: "#2E7D32"}}}
+theme: dusk                      # a preset or one of yours; default: "default"
+pages:
+  - {id: p, cols: 3, rows: 1, widgets: [
+      {type: button, id: a, x: 0, y: 0, label: Netflix, color: red, action: {none: true}},
+      {type: button, id: b, x: 1, y: 0, label: Custom, color: "#3355FF", action: {none: true}},
+      {type: tile, id: t, x: 2, y: 0, entity: light.x, on_color: amber}]}
+```
+
+- **Palette names**: red, orange, amber, yellow, lime, green, teal, cyan, blue, indigo, purple, pink (index 1..12; a
+  theme may change a fill by index). Text on the fill is chosen by the remote. Costs 1 byte per coloured widget.
+- **Free colours** `"#RRGGBB"` (rounded to 5-6-5 bits): 2 more bytes per colour, so a page can run out of its 251
+  bytes; the error then says `page 'tv': 6 bytes over (3 custom colours = 6 B, 2 colour bytes = 2 B); use palette
+  colours, ...`. `on_color` is only for tiles (the fill while on). A free colour whose best text colour is under
+  4.5:1 gives a warning with the nearest colour that passes.
+- **Themes**: `tokens` (bg, s1, s2, s3, tx, tx2, tx3, acc, onacc, warm, onwarm, bad, onbad; names are case-insensitive)
+  and `palette: {1..12: {fill}}` override the parent. A user theme cannot reuse a preset's name. Contrast problems
+  (e.g. `tx on bg`) are warnings, never errors; the pages still build. A theme edit re-sends the pages.
+- **Older remote firmware** (the remote reports `caps` bit 2 = colours, bit 3 = custom colours and themes): without
+  bit 2 colours and the theme are dropped (role colours); with bit 2 only, free colours snap to the nearest palette
+  entry and a user theme shows as its base preset. A remote whose firmware is updated gets its pages again. What was
+  lost is listed in the *Remote N page format* sensor (`theme_notices`) and in the diagnostics. Sending a user theme
+  to the remote needs a transport that does not exist yet, so for now bit 3 counts as bit 2 only.
+
 ## Home Assistant actions
 
 `{ha: {service: "domain.service", target: {entity_id: <id or [ids]>}, data: {...}, repeat: false}}` is an

@@ -134,8 +134,8 @@ class RemoteLink:
 
     info: RemoteInfo | None = None
     epoch: int = 0  # bumped at every link-up: the remote may have lost its page store
-    pushed: tuple[int, int, int] | None = None  # (config gen, format, epoch) of the last complete set
-    inflight: tuple[int, int, int] | None = None
+    pushed: tuple[int, int, int, int] | None = None  # (config gen, format, epoch, theme caps) of the last complete set
+    inflight: tuple[int, int, int, int] | None = None
     waiting: bool = False  # waiting for remote_info
     attached: bool = True  # False after "no remote" until the remote shows signs of life
     pending: bool = False  # a push failed for want of a remote: redo when it is back
@@ -146,6 +146,15 @@ class RemoteLink:
     @property
     def page_fmt(self) -> int:
         return 2 if self.info is not None and self.info.page_fmt >= 2 else 1
+
+    @property
+    def page_caps(self) -> int:
+        """The theme caps the pages are built for: 0 for v1 or an unknown remote. Bit 3 counts only
+        once a theme can be sent (const.THEME_TRANSPORT); until then a user theme is its base preset."""
+        if self.page_fmt < 2 or self.info is None:
+            return 0
+        mask = const.CAP_THEME_COLOR | (const.CAP_THEME_CUSTOM if const.THEME_TRANSPORT else 0)
+        return self.info.caps & mask
 
     @property
     def tile_state(self) -> bool:
@@ -765,7 +774,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 return old if running else None
             if running and link.waiting:
                 return old  # it reads the format and generation when remote_info arrives
-            want = (self._cfg_gen, link.page_fmt, link.epoch)
+            want = (self._cfg_gen, link.page_fmt, link.epoch, link.page_caps)
             if want in (link.pushed, link.inflight):
                 return old if running else None
         if running:
@@ -790,7 +799,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if not self.hub_accepted:
             link.pending = True
             return
-        want = (self._cfg_gen, link.page_fmt, link.epoch)
+        want = (self._cfg_gen, link.page_fmt, link.epoch, link.page_caps)
         if not force and link.pushed == want:
             return
         if not force and self._remote_holds_set(link):
@@ -812,13 +821,15 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def _remote_holds_set(self, link: RemoteLink) -> bool:
         """The remote reported exactly the v2 set we would send: same format, generation and count."""
         c, info = self.compiled, link.info
-        return (
-            info is not None
-            and link.page_fmt == 2
-            and bool(c.pages_v2)
-            and info.gen == c.gen
-            and info.pages == len(c.pages_v2)
-        )
+        if info is None or link.page_fmt != 2 or not c.pages_v2:
+            return False
+        rp = c.for_caps(link.page_caps)
+        return info.gen == rp.gen and info.pages == len(rp.pages_v2)
+
+    def theme_notices(self, remote: int) -> list[dict[str, Any]]:
+        """What this remote's caps cost it in colours and themes (empty when nothing is degraded)."""
+        link = self._rlink(remote)
+        return self.compiled.for_caps(link.page_caps).notices if link.page_fmt == 2 else []
 
     async def _wait_info(self, link: RemoteLink) -> None:
         """Up to INFO_WAIT seconds for the remote's `remote_info`; never blocks the loop."""
@@ -834,7 +845,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """Send every page of format `fmt`, one after the other (each command result is the
         backpressure). False when it did not complete (no remote, link down, newer config)."""
         gen = self._cfg_gen
-        for idx, b64 in enumerate(self.compiled.encoded_pages_b64(fmt)):
+        if self.compiled.theme_wire is not None and link.info is not None and link.info.caps & const.CAP_THEME_CUSTOM:
+            # seam: the 99-byte theme (compiled.theme_wire) goes out here once a transport exists
+            _LOGGER.info("Custom theme %r needs transport; remote %s shows %r", self.compiled.theme_name, remote, self.compiled.theme_base)
+        pages = (
+            self.compiled.for_caps(link.page_caps).pages_v2_b64 if fmt >= 2 else self.compiled.encoded_pages_b64(1)
+        )
+        for idx, b64 in enumerate(pages):
             if gen != self._cfg_gen:
                 return False
             payload = {"remote": remote, "page": idx, "data": b64}

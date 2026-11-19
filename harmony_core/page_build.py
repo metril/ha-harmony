@@ -24,6 +24,7 @@ from .page_codec import (
     Widget,
     encode,
     page_size,
+    widget_cost,
     widget_size,
 )
 
@@ -96,6 +97,8 @@ class _Spec:
     icon: int
     bind: int | None
     nav: str | None
+    color: str | None = None
+    on_color: str | None = None
     x: int = 0
     y: int = 0
     w: int = 1
@@ -138,7 +141,9 @@ def _spec(w: dict[str, Any], act_ids: list[str], act_names: dict[str, str], in_l
             if icon is None:
                 icon = ICON_IDS["power"]
         elif target is not None:
-            bind = act_ids.index(target) if target in act_ids else None  # unknown: validated elsewhere
+            bind = (
+                act_ids.index(target) if target in act_ids else None
+            )  # unknown: validated elsewhere
             if icon is None:
                 icon = icon_for_text(f"{act_names.get(target, target)} {target}")
         if icon is None:
@@ -155,6 +160,8 @@ def _spec(w: dict[str, Any], act_ids: list[str], act_names: dict[str, str], in_l
         icon or 0,
         bind,
         nav,
+        w.get("color"),
+        w.get("on_color"),
         w.get("x", 0),
         w.get("y", 0),
         w["w"],
@@ -164,7 +171,20 @@ def _spec(w: dict[str, Any], act_ids: list[str], act_names: dict[str, str], in_l
 
 def _probe(s: _Spec) -> Widget:
     return Widget(
-        s.kind, 0, s.x, s.y, s.w, s.h, s.label, s.role, s.shape, s.icon_only, s.icon, s.bind
+        s.kind,
+        0,
+        s.x,
+        s.y,
+        s.w,
+        s.h,
+        s.label,
+        s.role,
+        s.shape,
+        s.icon_only,
+        s.icon,
+        s.bind,
+        s.color,
+        s.on_color,
     )
 
 
@@ -239,7 +259,7 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
 
 
 def build_pages(
-    model: Model, act_ids: list[str], names: dict[int, str], keys: dict[str, Any]
+    model: Model, act_ids: list[str], names: dict[int, str], keys: dict[str, Any], theme: int = 0
 ) -> tuple[list[Page], list[str], list[Tile]]:
     """v2 page models (gen 0), the config id behind each wire page, and the tiles.
 
@@ -262,7 +282,9 @@ def build_pages(
         rel = {"next": u.cfg_index + 1, "prev": u.cfg_index - 1, "home": home}
         want = rel[nav] if nav in rel else by_id.get(nav)
         if want not in first:
-            raise CompileError(f"page {u.cfg_id!r}: nav target {nav!r} does not exist", ["pages", u.cfg_index])
+            raise CompileError(
+                f"page {u.cfg_id!r}: nav target {nav!r} does not exist", ["pages", u.cfg_index]
+            )
         return first[want]
 
     pages: list[Page] = []
@@ -294,7 +316,9 @@ def build_pages(
                 if tap is None or tap == "toggle":
                     tap = default_tap(s.cfg["entity"])
                 if tap not in (None, "none"):
-                    keys[str(code)] = tap  # an HA tap never reaches the hub (compiler splits it off)
+                    keys[str(code)] = (
+                        tap  # an HA tap never reaches the hub (compiler splits it off)
+                    )
             wire += 1
         free = (i for i in range(128) if i not in set(gids.values()))
         ws = []
@@ -315,6 +339,8 @@ def build_pages(
                     s.icon_only,
                     s.icon,
                     bind,
+                    s.color,
+                    s.on_color,
                 )
             )
         pages.append(
@@ -332,9 +358,24 @@ def build_pages(
                 u.seq[1],
                 u.act,
                 u.title,
+                theme,
             )
         )
     return pages, [u.cfg_id for u in units], tiles
+
+
+def _over_msg(cid: str, p: Page, over: int) -> str:
+    """The over-budget message; with colours on the page it says what they cost."""
+    costs = [widget_cost(w)["color"] for w in p.widgets]
+    free = sum(c.startswith("#") for w in p.widgets for c in (w.color, w.on_color) if c)
+    if not sum(costs):
+        return f"page {cid!r}: {over} bytes over; shorten labels, use icon_only, or make it a list"
+    bytes_ = sum(1 for c in costs if c)
+    return (
+        f"page {cid!r}: {over} bytes over ({free} custom colour{'s' * (free != 1)} = {2 * free} B,"
+        f" {bytes_} colour byte{'s' * (bytes_ != 1)} = {bytes_} B); use palette colours,"
+        " shorten labels, use icon_only, or make it a list"
+    )
 
 
 def encode_pages(
@@ -343,7 +384,7 @@ def encode_pages(
     seed: bytes,
     problems: list[tuple[list[Any], str]] | None = None,
 ) -> tuple[list[Page], list[bytes], list[bytes]]:
-    """Fill gen (low byte of a CRC over `seed` and every page layout) and encode both formats.
+    """Fill gen (low byte of a CRC over `seed` - the hub config plus a user theme's wire bytes - and every page layout) and encode both formats.
 
     Returns (models with gen, v1 bytes, v2 bytes). A page over the byte budget is a CompileError
     with the exact overage; nothing is ever truncated. With `problems` (previews) nothing is
@@ -365,7 +406,7 @@ def encode_pages(
     for k, (p, cid) in enumerate(zip(pages, cfg_ids, strict=True)):
         over = page_size(p, 2) - MAX_BYTES
         if over > 0:
-            reject(k, f"page {cid!r}: {over} bytes over; shorten labels, use icon_only, or make it a list")
+            reject(k, _over_msg(cid, p, over))
             continue
         try:
             layout += encode(p, 2)

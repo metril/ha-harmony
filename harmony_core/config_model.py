@@ -20,6 +20,8 @@ from .harmony_proto import SOFT_KEY_BASE
 from .icons import ICON_IDS
 from .ir import IrCode, IrImportError, parse_flipper_file, parse_smartir_file
 from .keys import KEY_CODES, key_code
+from .theme_math import MAX_DEPTH, PALETTE_NAMES, TOKEN_NAMES, ThemeError, resolve_theme
+from .themes import PRESETS
 
 Model = dict[str, Any]
 
@@ -148,7 +150,10 @@ class _Resolver:
         form = forms[0]
         try:
             if form == "proto":
-                if set(v) - {"proto", "addr", "cmd", "port_mask", "repeats"} or not {"addr", "cmd"} <= set(v):
+                if set(v) - {"proto", "addr", "cmd", "port_mask", "repeats"} or not {
+                    "addr",
+                    "cmd",
+                } <= set(v):
                     raise vol.Invalid("proto needs addr and cmd")
                 out = IrCode(proto=v["proto"], addr=v["addr"], cmd=v["cmd"]).to_hub_json()
             elif form == "raw":
@@ -222,7 +227,9 @@ class _Resolver:
     def ha_only(self, v: Any) -> dict[str, Any]:
         """A step of a Home Assistant device: only `{ha: ...}` is accepted."""
         if not isinstance(v, dict) or set(v) != {"ha"}:
-            raise vol.Invalid("a Home Assistant device takes `{ha: {service, target, ...}}` actions")
+            raise vol.Invalid(
+                "a Home Assistant device takes `{ha: {service, target, ...}}` actions"
+            )
         return validate_ha(v["ha"])
 
 
@@ -257,6 +264,48 @@ def _title(v: Any) -> str:
     if len(v.encode()) > 24:
         raise vol.Invalid("must be at most 24 bytes")
     return v
+
+
+_HEX6 = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _hexcol(v: Any) -> str:
+    if not isinstance(v, str) or not _HEX6.match(v):
+        raise vol.Invalid(f"bad colour {v!r}; want #RRGGBB (six hex digits)")
+    return v.upper()
+
+
+def _color(v: Any) -> str:
+    """A widget colour: a palette name or a free `#RRGGBB`."""
+    if isinstance(v, str):
+        if v in PALETTE_NAMES:
+            return v
+        if v.startswith("#"):
+            return _hexcol(v)
+    raise vol.Invalid(f"unknown colour {v!r}; one of: {', '.join(PALETTE_NAMES)}, or #RRGGBB")
+
+
+def _token_key(k: Any) -> str:
+    if not isinstance(k, str) or k.lower() not in TOKEN_NAMES:
+        raise vol.Invalid(f"unknown token {k!r}; one of: {', '.join(TOKEN_NAMES)}")
+    return k.lower()
+
+
+def _palette_key(k: Any) -> int:
+    try:
+        n = int(k) if isinstance(k, (int, str)) and not isinstance(k, bool) else 0
+    except ValueError:
+        n = 0
+    if not 1 <= n <= len(PALETTE_NAMES):
+        raise vol.Invalid(f"palette index {k!r} must be 1..{len(PALETTE_NAMES)}")
+    return n
+
+
+_THEME = {
+    vol.Optional("extends", default="default"): vol.All(str, vol.Length(min=1, max=31)),
+    vol.Optional("tokens", default=dict): {_token_key: _hexcol},
+    vol.Optional("palette", default=dict): {_palette_key: {vol.Required("fill"): _hexcol}},
+}
 
 
 def _int(lo: int, hi: int):
@@ -349,6 +398,8 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("role"): vol.In(ROLES),
         vol.Optional("shape"): vol.In(SHAPES),
         vol.Optional("icon_only"): bool,
+        vol.Optional("color"): _color,
+        vol.Optional("on_color"): _color,
         vol.Optional("nav"): vol.All(str, vol.Match(_NAV, msg="use next, prev, home or a page id")),
     }
     page = {
@@ -368,6 +419,9 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             vol.Optional("activities", default=list): [activity],
             vol.Optional("keys", default=dict): keys,
             vol.Optional("pages", default=list): [vol.All(page, _check_page)],
+            # User themes (`extends` a preset or another user theme) and the one active theme.
+            vol.Optional("themes"): {_slug: _THEME},
+            vol.Optional("theme"): _slug,
             # Opaque editor metadata: bounded, never compiled, never sent to the hub.
             vol.Optional("editor"): _editor,
         }
@@ -475,9 +529,13 @@ def _check_widget(w: dict[str, Any]) -> dict[str, Any]:
         if kind != "tile":
             raise vol.Invalid("`tap` belongs on a tile")
         if w["tap"] == "toggle" and default_tap(w["entity"]) is None:
-            raise vol.Invalid(f"`tap: toggle` does not work on a {w['entity'].split('.')[0]} entity")
+            raise vol.Invalid(
+                f"`tap: toggle` does not work on a {w['entity'].split('.')[0]} entity"
+            )
     if kind != "button" and "action" in w or kind != "tile" and "entity" in w:
         raise vol.Invalid(f"unexpected `{'action' if 'action' in w else 'entity'}` on a {kind}")
+    if "on_color" in w and kind != "tile":
+        raise vol.Invalid("`on_color` belongs on a tile")
     if nav and "role" in w:
         raise vol.Invalid("a `nav` button has the nav role; drop `role`")
     return w
@@ -521,6 +579,27 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
 
     devs = {d["id"]: d for d in model["devices"]}
     acts = {a["id"] for a in model["activities"]}
+    themes = model.get("themes", {})
+    for tname in themes:
+        if tname in PRESETS:
+            fail(["themes", tname], f"user theme {tname!r} reuses a preset name; pick another")
+            continue
+        try:
+            resolve_theme(tname, themes, PRESETS)
+        except ThemeError as exc:
+            msg = str(exc)
+            if msg.startswith("unknown theme"):
+                msg += f" (extends a preset ({', '.join(PRESETS)}) or a theme of this file)"
+            elif "deeper than" in msg:
+                msg = f"extends chain deeper than {MAX_DEPTH}"
+            fail(["themes", tname, "extends"], f"theme {tname!r}: {msg}")
+    chosen = model.get("theme")
+    if chosen is not None and chosen not in PRESETS and chosen not in themes:
+        fail(
+            ["theme"],
+            f"unknown theme {chosen!r}; presets: {', '.join(PRESETS)}"
+            + (f"; yours: {', '.join(themes)}" if themes else ""),
+        )
 
     def uniq(items: list[dict[str, Any]], section: str, what: str) -> None:
         seen: set[str] = set()

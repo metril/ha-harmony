@@ -130,6 +130,7 @@ static hp_page_t tiles_page(void) {
 static hp_page_t empty_page(void) { return page(5, 4, 6); }
 
 #include "v2_screens.h"
+#include "colour_screens.h"
 
 static void fresh(void) {
   fk_init(&fk);
@@ -192,6 +193,19 @@ int main(int argc, char **argv) {
     fresh();
     v2s[i].fn();
     shot(d2, v2s[i].name);
+    app_destroy(&app);
+  }
+  /* coloured widgets under each theme go to <outdir>/colours/ */
+  char d3[512];
+  snprintf(d3, sizeof d3, "%s/colours", argv[1]);
+  mkdir(d3, 0777);
+  static const struct { const char *name; void (*fn)(void); } cs[] = {
+      {"default", col_default}, {"midnight", col_midnight}, {"daylight", col_daylight}, {"pressed", col_pressed},
+      {"stale_daylight", col_stale}};
+  for (unsigned i = 0; i < sizeof cs / sizeof cs[0]; i++) {
+    fresh();
+    cs[i].fn();
+    shot(d3, cs[i].name);
     app_destroy(&app);
   }
   return 0;

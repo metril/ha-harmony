@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from harmony_core.theme_math import PALETTE_NAMES, TOKEN_NAMES
+from .theme_math import PALETTE_NAMES, TOKEN_NAMES
 
 CUSTOM_ID = 7  # reserved for a custom theme; presets are 0..6
 __all__ = ["CUSTOM_ID", "PALETTE_NAMES", "TOKEN_NAMES"]
@@ -68,12 +68,12 @@ THEMES: tuple[Theme, ...] = (
         'Midnight',
         {
             'bg': 0x000000,
-            's1': 0x080C10,
-            's2': 0x101418,
-            's3': 0x283038,
+            's1': 0x182028,
+            's2': 0x283038,
+            's3': 0x405060,
             'tx': 0xD8DCD8,
             'tx2': 0x9098A0,
-            'tx3': 0x606870,
+            'tx3': 0x707880,
             'acc': 0x7888F8,
             'onacc': 0x000010,
             'warm': 0xF8B040,

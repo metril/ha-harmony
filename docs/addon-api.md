@@ -72,7 +72,9 @@ editor disables the Home Assistant action picker (with a reason) when `ha_action
   `409 conflict` with `error.rev` set to the current revision. No header = unconditional.
   -> `{hub, draft_updated, applied, history, history_max, rev}`. Import and revert also bump `rev`.
 - `POST config/validate?hub=&all=1|0` body `{config?}` (default: the draft) -> `{ok, errors}`;
-  `all=0` returns only the first error.
+  `all=0` returns only the first error. After a valid parse, `errors` may also hold non-blocking warnings
+  `{path, msg, line:null, severity:"warning"}` (theme contrast, weak-ink free colours); they never make `ok` false, and
+  errors carry no `severity` key. `config/preview` adds the same warnings to its `errors` (its `ok` ignores them).
 - `POST config/apply?hub=` body `{}` -> `{ok:true, ...meta}`; `409 no_draft`; `422 {ok:false, errors}`.
   Apply is strict; the preview's tolerance does not apply to it.
 - `POST config/revert?hub=` body `{target: "applied"|"previous"}` -> `{ok, ...meta}`; `409 store`

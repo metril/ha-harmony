@@ -14,7 +14,7 @@ themes:
   - key: midnight # true-black ground for night use: dimmer fills, no glare
     id: 1
     name: Midnight
-    tokens: {bg: "#000000", s1: "#080c10", s2: "#101418", s3: "#283038", tx: "#d8dcd8", tx2: "#9098a0", tx3: "#606870", acc: "#7888f8", onacc: "#000010", warm: "#f8b040", onwarm: "#000000", bad: "#f86060", onbad: "#000000"}
+    tokens: {bg: "#000000", s1: "#182028", s2: "#283038", s3: "#405060", tx: "#d8dcd8", tx2: "#9098a0", tx3: "#707880", acc: "#7888f8", onacc: "#000010", warm: "#f8b040", onwarm: "#000000", bad: "#f86060", onbad: "#000000"}
     palette: {red: "#e85048", orange: "#e88038", amber: "#e0b040", yellow: "#d8d050", lime: "#a0c850", green: "#50b870", teal: "#38b8a8", cyan: "#48b8e0", blue: "#6890e8", indigo: "#8088e8", purple: "#a880e0", pink: "#e070a8"}
   - key: daylight # light ground, white cards, deep saturated fills
     id: 2

@@ -41,7 +41,8 @@ async def async_get_config_entry_diagnostics(
                 "stored_gen": info.gen,
                 "stored_pages": info.pages,
             },
-            "pushed_as": link.pushed,  # (config gen, format, link epoch) of the last complete set
+            "pushed_as": link.pushed,  # (config gen, format, link epoch, theme caps) of the last complete set
+            "theme_notices": [n["msg"] for n in c.theme_notices(r)],
             "pending": link.pending,
             "attached": link.attached,
             "last_push_ms": link.push_ms,
@@ -81,6 +82,9 @@ async def async_get_config_entry_diagnostics(
             "pages_v1": len(comp.pages),
             "pages_v2": len(comp.pages_v2),
             "page_gen": comp.gen,
+            "theme": comp.theme_name,
+            "theme_id": comp.theme_id,
+            "warnings": [w["msg"] for w in comp.warnings],
             "page_bytes_v2": sum(len(p) for p in comp.pages_v2),
         },
         "remotes": remotes,

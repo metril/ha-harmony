@@ -287,29 +287,73 @@ static int message(ra_ui_t *ui, const char *head, const char *sub, int head_bad)
 
 typedef struct {
   uint32_t fill, ink, icon, cap;
+  uint32_t pressed;
+  uint8_t local;   /* fill / pressed / outline come from a swatch: set them as local styles */
+  uint8_t outline; /* 1 px TX3 outline (the fill is too close to the theme ground) */
+  uint8_t border;  /* 1: a 3 px active border in border_rgb */
+  uint32_t border_rgb;
 } wcol_t;
+
+#define WC(f, i, ic, cp) ((wcol_t){.fill = (f), .ink = (i), .icon = (ic), .cap = (cp)})
 
 static int is_stale_tile(const ra_ui_t *ui, const hp_widget_t *w) { return w->kind == HP_WIDGET_TILE && ui->link_lost; }
 
+/* A widget colour in the current theme: a palette entry or a free RGB565. 0 = none / not resolvable. */
+static int colour_swatch(hp_color_t c, ra_swatch_t *s, int *outline) {
+  if (c.kind == HP_COLOR_PALETTE) {
+    const ra_swatch_t *p = ra_theme_palette(c.value);
+    if (!p) return 0;
+    *s = *p;
+    *outline = ra_needs_outline(p->fill, TH->bg);
+    return 1;
+  }
+  if (c.kind == HP_COLOR_RGB) {
+    ra_theme_free_colour((uint16_t)c.value, s, outline);
+    return 1;
+  }
+  return 0;
+}
+
+static wcol_t from_swatch(const ra_swatch_t *s, int outline) {
+  return (wcol_t){s->fill, s->ink, s->ink, s->ink, s->pressed, 1, (uint8_t)outline, 0, 0};
+}
+
 static wcol_t widget_colors(const ra_ui_t *ui, const hp_widget_t *w, int active) {
+  ra_swatch_t sw;
+  int ol = 0;
   if (w->kind == HP_WIDGET_TILE) {
     wcol_t c;
+    int stale = is_stale_tile(ui, w);
     switch (w->tstate) {
-    case HP_TILE_ON: c = (wcol_t){TH->warm, TH->onwarm, TH->onwarm, TH->onwarm}; break;
-    case HP_TILE_UNAVAILABLE: c = (wcol_t){TH->s1, TH->tx3, TH->tx3, TH->tx3}; break;
-    case HP_TILE_OFF: c = (wcol_t){TH->s1, TH->tx2, TH->tx3, TH->tx3}; break;
-    default: c = (wcol_t){TH->s1, TH->tx, TH->tx2, TH->tx2}; break;
+    case HP_TILE_ON:
+      if (colour_swatch(w->color_on, &sw, &ol)) return from_swatch(&sw, ol);
+      c = WC(TH->warm, TH->onwarm, TH->onwarm, TH->onwarm);
+      break;
+    case HP_TILE_UNAVAILABLE: c = WC(TH->s1, TH->tx3, TH->tx3, TH->tx3); break;
+    case HP_TILE_OFF: c = WC(TH->s1, TH->tx2, TH->tx3, TH->tx3); break;
+    default: c = WC(TH->s1, TH->tx, TH->tx2, TH->tx2); break;
     }
-    if (is_stale_tile(ui, w) && w->tstate != HP_TILE_ON) c.ink = TH->tx3;
+    /* state wins: stale / unavailable keep the theme's state colours; a set fill recolours off / value only */
+    if (!stale && w->tstate != HP_TILE_ON && w->tstate != HP_TILE_UNAVAILABLE && colour_swatch(w->color_fill, &sw, &ol))
+      return from_swatch(&sw, ol);
+    if (stale && w->tstate != HP_TILE_ON) c.ink = TH->tx3;
     return c;
   }
-  if (active) return (wcol_t){TH->acc, TH->onacc, TH->onacc, TH->onacc};
+  if (w->kind == HP_WIDGET_BUTTON && colour_swatch(w->color_fill, &sw, &ol)) {
+    wcol_t c = from_swatch(&sw, ol);
+    if (active) { /* the highlight keeps the fill: a 3 px ACC border (TX when the fill is the accent) */
+      c.border = 1;
+      c.border_rgb = sw.fill == TH->acc ? TH->tx : TH->acc;
+    }
+    return c;
+  }
+  if (active) return WC(TH->acc, TH->onacc, TH->onacc, TH->onacc);
   switch (w->role) {
-  case HP_ROLE_PRIMARY: return (wcol_t){TH->s2, TH->acc, TH->acc, TH->tx2};
-  case HP_ROLE_SECONDARY: return (wcol_t){TH->s1, TH->tx2, TH->tx3, TH->tx3};
-  case HP_ROLE_DANGER: return (wcol_t){TH->s2, TH->bad, TH->bad, TH->bad};
-  case HP_ROLE_NAV: return (wcol_t){TH->s1, TH->tx, TH->acc, TH->tx2};
-  default: return (wcol_t){TH->s2, TH->tx, TH->tx2, TH->tx2};
+  case HP_ROLE_PRIMARY: return WC(TH->s2, TH->acc, TH->acc, TH->tx2);
+  case HP_ROLE_SECONDARY: return WC(TH->s1, TH->tx2, TH->tx3, TH->tx3);
+  case HP_ROLE_DANGER: return WC(TH->s2, TH->bad, TH->bad, TH->bad);
+  case HP_ROLE_NAV: return WC(TH->s1, TH->tx, TH->acc, TH->tx2);
+  default: return WC(TH->s2, TH->tx, TH->tx2, TH->tx2);
   }
 }
 
@@ -327,10 +371,30 @@ static const char *tile_caption(const ra_ui_t *ui, const hp_widget_t *w) { retur
  * widget's area is invalidated. */
 static void paint(ra_ui_t *ui, unsigned i) {
   const hp_widget_t *w = &ui->page.widgets[i];
-  if (!ui->obj[i] || w->kind == HP_WIDGET_LABEL) return;
+  if (!ui->obj[i]) return;
+  if (w->kind == HP_WIDGET_LABEL) { /* a coloured section label: its colour when readable on the ground, else TX */
+    ra_swatch_t sw;
+    int ol;
+    if (ui->lbl[i] && colour_swatch(w->color_fill, &sw, &ol))
+      lv_obj_set_style_text_color(ui->lbl[i], ra_color(ra_meets(sw.fill, TH->bg, 9, 2) ? sw.fill : TH->tx), 0);
+    return;
+  }
   int act = widget_active(ui, w);
   wcol_t c = widget_colors(ui, w, act);
-  lv_obj_set_style_bg_color(ui->obj[i], ra_color(c.fill), 0);
+  lv_obj_t *o = ui->obj[i];
+  lv_obj_set_style_bg_color(o, ra_color(c.fill), 0);
+  if (c.local) {
+    ra_swatch_t sw = {c.fill, c.ink, c.pressed};
+    ra_theme_local(o, NULL, &sw, c.outline);
+    if (c.border) {
+      lv_obj_set_style_border_width(o, 3, 0);
+      lv_obj_set_style_border_color(o, ra_color(c.border_rgb), 0);
+    }
+  } else if (w->color_fill.kind || w->color_on.kind) { /* coloured elsewhere (another tile state): the shared look */
+    lv_obj_remove_local_style_prop(o, LV_STYLE_BG_COLOR, LV_STATE_PRESSED);
+    lv_obj_remove_local_style_prop(o, LV_STYLE_BORDER_WIDTH, 0);
+    lv_obj_remove_local_style_prop(o, LV_STYLE_BORDER_COLOR, 0);
+  }
   if (ui->lbl[i]) lv_obj_set_style_text_color(ui->lbl[i], ra_color(c.ink), 0);
   if (ui->ico[i]) lv_obj_set_style_text_color(ui->ico[i], ra_color(c.icon), 0);
   if (ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], ra_color(c.cap), 0);
@@ -471,6 +535,7 @@ static void build(ra_ui_t *ui) {
     if (w->kind == HP_WIDGET_TILE) /* as build_v2_content: the icon needs a 56 px cell, the caption 44 px of height */
       extra += (icon && bh >= 56 && bw >= 56) + (bh >= 44 && (w->label[0] || ui->link_lost));
     else if (w->kind == HP_WIDGET_BUTTON) extra += icon;
+    extra += 2 * (w->color_fill.kind || w->color_on.kind); /* local styles */
   }
   bar_ctx_t bc = {.back = v2 && p->back, .seq_idx = v2 ? p->seq_idx : 0, .seq_cnt = v2 ? p->seq_cnt : 0};
   if (screen_reset(ui, title, p->count, extra, &bc) < 0) return;
@@ -494,6 +559,7 @@ static void build(ra_ui_t *ui) {
       lv_obj_center(l);
       ui->obj[i] = o;
       ui->lbl[i] = l;
+      paint(ui, i);
       continue;
     }
     int btn = w->kind == HP_WIDGET_BUTTON;
@@ -520,7 +586,35 @@ static void build(ra_ui_t *ui) {
   if (!interactive_or_text && message(ui, "No activities yet", "Add some in Home Assistant", 0) < 0) fail(ui);
 }
 
+/* The custom theme slot (wire form), kept for pages with theme id 7. */
+static uint8_t custom_wire[RA_WIRE_LEN];
+static int custom_loaded;
+static ra_ui_t *theme_ui;
+
+static void apply_custom(void) {
+  if (!custom_loaded || ra_theme_apply_wire(custom_wire, sizeof custom_wire) < 0) ra_theme_apply_preset(RA_THEME_DEFAULT);
+}
+
+int ra_ui_set_custom_theme(const uint8_t *bytes, size_t n) {
+  ra_theme_t t;
+  if (!bytes || n != RA_WIRE_LEN || ra_theme_decode(bytes, (unsigned)n, &t) < 0) return -1;
+  memcpy(custom_wire, bytes, n);
+  custom_loaded = 1;
+  if (theme_ui && theme_ui->page_theme == HP_PAGE_THEME_CUSTOM) apply_custom();
+  return 0;
+}
+
+/* A v2 page names its theme: apply it when it differs from the previous page's (cheap no-op otherwise). v1 pages
+ * and the built-in screens leave the theme alone. */
+static void page_theme(ra_ui_t *ui, const hp_page_t *p) {
+  if (p->version != 2 || p->theme == ui->page_theme) return;
+  ui->page_theme = p->theme;
+  if (p->theme == HP_PAGE_THEME_CUSTOM) apply_custom();
+  else if (ra_theme_apply_preset(p->theme) < 0) ra_theme_apply_preset(RA_THEME_DEFAULT);
+}
+
 void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p) {
+  page_theme(ui, p);
   ui->page = *p;
   ui->fallback = 0;
   build(ui);
@@ -552,6 +646,7 @@ static void retheme(void *ctx) {
 
 void ra_ui_init(ra_ui_t *ui) {
   memset(ui, 0, sizeof *ui);
+  theme_ui = ui;
   ra_theme_init();
   ra_theme_set_listener(retheme, ui);
   ui->soc = -1;
