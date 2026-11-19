@@ -193,6 +193,7 @@ else
 	hah_rf=''
 	hah_slot=''
 	hah_budget=''
+	hah_budnote=''
 	hah_stoplua=1
 	hah_reboot=1
 	hah_rmax=3
@@ -259,7 +260,13 @@ else
 		config_budget_kib)
 			case "$hah_v" in
 			'' | *[!0-9]* | ???????*) hah_bad="config_budget_kib=$hah_v" ;;
-			*) hah_budget="$hah_v" ;;
+			*)
+				if [ "$hah_v" -lt 256 ]; then # the daemon's floor: ignore it (default budget), start anyway
+					hah_budnote="config_budget_kib=$hah_v is below 256 - ignored" # logged after the per-boot truncation
+				else
+					hah_budget="$hah_v"
+				fi
+				;;
 			esac
 			;;
 		stop_lua)
@@ -349,6 +356,7 @@ else
 
 				( : >"$hah_log" ) 2>/dev/null
 				[ -n "$hah_rbnote" ] && hah_say "$hah_rbnote" # the per-boot truncation above ate the sync-path line
+				[ -n "$hah_budnote" ] && hah_say "$hah_budnote"
 				hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099}, rf=${hah_rf:-none}, launch in ${hah_delay}s, reboot_on_early_death=$hah_reboot, respawn_max=$hah_rmax, rf_debug=$hah_rdebug)"
 
 				# Everything below runs in the background: the delay, the optional lua
@@ -576,5 +584,5 @@ fi
 
 unset hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
 unset hah_otadev hah_bfile hah_health hah_rbp hah_rbnote hah_prev hah_pending hah_restart hah_rbfile hah_rbl hah_t hah_ok hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
-unset hah_rf hah_slot hah_budget hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr
+unset hah_rf hah_slot hah_budget hah_budnote hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr
 unset -f hah_say hah_blog hah_stamp hah_num hah_rollback 2>/dev/null

@@ -79,20 +79,28 @@ the config being loaded, and the only size limit is ONE memory budget.
   duration, not a parsed tree. A single command may be at most 64 KiB of text, `keys` / one activity /
   `format` at most 128 KiB.
 - **Budget** (`HP_MAP_BUDGET_BYTES`, 8 MiB; `hub.conf` `config_budget_kib`, hard-capped by the daemon at 20%
-  of the memory free at its start and reported in `hello_ack.limits.budget`). It bounds the new map:
+  of the reclaimable memory at its start, MemFree + Buffers + Cached, minimum 256 KiB (a lower value is
+  clamped; `hub.conf` values below 256 are ignored with a log line), and reported in `hello_ack.limits.budget`). It bounds the new map:
   `slack_b + devices * dev_b + (commands + inputs) * cmd_b + keys * key_b + pool_words * word_b`
   (`hp_map_estimate`; `harmony_core.hub_limits.estimate_bytes` is the same formula and
   `tests/c/test_budget.c` / `tests/py/test_limits.py` assert the same golden number). Checked before
   anything is allocated; over it: `-HP_E_TOOBIG`, `config needs ~N KiB of hub memory, the hub allows M KiB`.
   A load builds the new map beside the old one, so its peak is up to twice the budget: at most 40% of the
-  free RAM at start (the Elite hub had 39.5 MB free with the daemon at ~1 MB RSS).
+  free RAM at start (the Elite hub had 39.5 MB free with the daemon at ~1 MB RSS). The budget gates new
+  pushes only: the cache the hub already accepted is loaded at boot without it, so a restart with less free
+  memory (or a lowered `config_budget_kib`) never turns an accepted config into "no config". The retained
+  top-level `format` / `activities` / `keys` sections are counted (16 bytes per text byte) and a duplicate
+  top-level member is a load error.
 - **All-or-nothing, memory and flash.** The received text is written to `cache.json.new` as it arrives, the
   config is loaded from that file, and only then is the file renamed over `cache.json` and the new map
   swapped in. Any failure (bad config, over budget, out of memory, a full flash, a lost connection) deletes
   the temp file and leaves the previous map, its hash, the running activity AND the previous cache untouched.
   The hub refuses a transfer that cannot fit before writing (`config needs ~N KiB of flash, the hub has M KiB
-  free`, from `statvfs` of the cache directory; `hello_ack.limits.flash_free` reports it so clients refuse
-  first). The cache is read back the same streaming way at boot.
+  free`, from `statvfs` of the cache directory minus a fixed reserve of 2 x the hub binary size + 256 KiB for
+  OTA staging (`hub.prev`, the new image) and `state.json`; `hello_ack.limits.flash_free` reports the same
+  net value so clients refuse first). A leftover `cache.json.new` is deleted at startup and before the
+  check; a transfer is dropped when its connection closes or after 60 s without a chunk. A total above the
+  memory budget is refused before anything else. The cache is read back the same streaming way at boot.
 - **Lookups**: commands, inputs and devices are found through hash indexes built at load time
   (`hp_map_find_cmd`); nothing on the key path is linear in the number of commands.
 - **Per-item bounds that remain**: 255 devices (uint8 index in the activity plan, the state file and

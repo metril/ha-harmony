@@ -607,7 +607,10 @@ static size_t pool_words(const cJSON *j) {
 
 typedef struct {
     size_t ndevs, ncmds, ninputs, keys, pool;
+    size_t rest_bytes; /* text of the retained top-level sections (format, activities, keys), held as cJSON trees */
 } dims_t;
+
+#define REST_TREE_FACTOR 16 /* bytes of cJSON tree per byte of text, worst case (a node is ~64 bytes for a 4-byte token) */
 
 #define VAL_CMD_MAX (64u * 1024)      /* one command / device header */
 #define VAL_SECTION_MAX (128u * 1024) /* `keys`, one activity, `format`: parsed as a tree, sized in the slack */
@@ -620,6 +623,7 @@ typedef struct {
     bool fmt2;
     dims_t d;
     cJSON *rest;   /* format, activities, keys (small): collected in pass 1 */
+    unsigned seen; /* top-level members already read in this pass (a duplicate is refused) */
     cJSON *dev;    /* the device header being read */
     long dev_off[2], dev_end; /* [0] inputs, [1] commands: offset of the `{`, -1 if absent; end of the device */
     char *vb;      /* the one value in hand */
@@ -821,6 +825,12 @@ static int do_device(sctx_t *s) { /* the `{` was consumed */
 }
 
 static int top_member(sctx_t *s, const char *key, int c) {
+    static const char *const once[] = {"devices", "format", "activities", "keys"};
+    for (unsigned i = 0; i < sizeof once / sizeof *once; i++) {
+        if (strcmp(key, once[i])) continue;
+        if (s->seen & (1u << i)) return fail(s->w, INVAL, "duplicate \"%s\" in the config", key);
+        s->seen |= 1u << i;
+    }
     if (!strcmp(key, "devices")) {
         if (c != '[') return fail(s->w, INVAL, "devices must be an array");
         c = rd_ws(s->f);
@@ -844,6 +854,7 @@ static int top_member(sctx_t *s, const char *key, int c) {
     if (!want) return 0;
     cJSON *v = vb_tree(s);
     if (!v) return INVAL;
+    if (strcmp(key, "format")) s->d.rest_bytes += s->vn; /* format is a number */
     if (!cJSON_AddItemToObject(s->rest, key, v)) {
         cJSON_Delete(v);
         return oom(s->w);
@@ -853,6 +864,7 @@ static int top_member(sctx_t *s, const char *key, int c) {
 
 static int stream_pass(sctx_t *s, size_t len, off_t base) {
     if (fseeko(s->f, base, SEEK_SET) < 0) return fail(s->w, -HP_E_IO, "cannot read the config");
+    s->seen = 0;
     int c = rd_ws(s->f);
     if (c != '{') return fail(s->w, INVAL, "config must be an object");
     int r = rd_members(s, top_member);
@@ -882,7 +894,7 @@ static void count_rest(const cJSON *rest, dims_t *d) {
 
 static size_t est_full(const dims_t *d) {
     return HP_MAP_SLACK_BYTES + d->ndevs * HP_MAP_DEV_BYTES + (d->ncmds + d->ninputs) * HP_MAP_CMD_BYTES +
-           d->keys * HP_MAP_KEY_BYTES + d->pool * HP_MAP_WORD_BYTES;
+           d->keys * HP_MAP_KEY_BYTES + d->pool * HP_MAP_WORD_BYTES + d->rest_bytes * REST_TREE_FACTOR;
 }
 
 /* One allocation per table, each exactly as large as this config needs. */
@@ -1235,8 +1247,14 @@ static uint32_t get32(const uint8_t *p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
 }
 
+static void cache_unlink_stale(const char *path) {
+    char tmp[1024];
+    if (snprintf(tmp, sizeof tmp, "%s.new", path) < (int)sizeof tmp) unlink(tmp);
+}
+
 int hp_map_save_cache(const hp_map_t *m, const char *path) {
     if (!m || !path || !m->src) return -HP_E_INVAL;
+    if (m->src_len > SIZE_MAX - CACHE_HDR - 4) return -HP_E_TOOBIG;
     size_t total = CACHE_HDR + m->src_len + 4;
     uint8_t *buf = malloc(total);
     if (!buf) return -HP_E_IO;
@@ -1253,6 +1271,7 @@ int hp_map_save_cache(const hp_map_t *m, const char *path) {
 /* Loads the cache file by streaming it: the text is never held in RAM. */
 int hp_map_load_cache(hp_map_t *m, const char *path) {
     if (!m || !path) return -HP_E_INVAL;
+    cache_unlink_stale(path); /* a transfer the last run died in */
     FILE *f = fopen(path, "rb");
     if (!f) return errno == ENOENT ? -HP_E_NOENT : -HP_E_IO;
     uint8_t hdr[CACHE_HDR];
@@ -1267,8 +1286,13 @@ int hp_map_load_cache(hp_map_t *m, const char *path) {
             if (fseek(f, (long)(CACHE_HDR + len), SEEK_SET) == 0 && fread(tail, 1, 4, f) == 4 && get32(tail) == crc) {
                 hp_map_t *scratch = NULL;
                 fseek(f, CACHE_HDR, SEEK_SET);
+                /* an accepted cache is never re-judged against the budget (free memory differs per boot);
+                 * the budget only gates new pushes */
+                size_t keep = m->budget;
+                m->budget = SIZE_MAX;
                 rc = len ? prepare_impl(m, f, len, &scratch, NULL) : -HP_E_INVAL;
                 if (rc == 0) hp_map_commit(m, scratch, NULL);
+                m->budget = keep;
             }
         }
     }
@@ -1286,6 +1310,10 @@ struct hp_cachew {
     uint32_t crc;
 };
 
+static size_t g_cache_reserve = HP_CACHE_RESERVE_DEFAULT;
+void hp_cache_set_reserve(size_t bytes) { g_cache_reserve = bytes; }
+size_t hp_cache_reserve(void) { return g_cache_reserve; }
+
 size_t hp_cache_free_bytes(const char *path) {
     if (!path) return SIZE_MAX;
     char *dir = strdup(path);
@@ -1295,7 +1323,11 @@ size_t hp_cache_free_bytes(const char *path) {
     else strcpy(dir, ".");
     struct statvfs sv;
     size_t r = SIZE_MAX;
-    if (statvfs(dir, &sv) == 0 && sv.f_bavail != (fsblkcnt_t)-1) r = (size_t)sv.f_bavail * (size_t)sv.f_frsize;
+    if (statvfs(dir, &sv) == 0 && sv.f_bavail != (fsblkcnt_t)-1) {
+        uint64_t raw = (uint64_t)sv.f_bavail * (uint64_t)sv.f_frsize;
+        if (raw >= SIZE_MAX) raw = SIZE_MAX - 1;
+        r = (size_t)raw > g_cache_reserve ? (size_t)raw - g_cache_reserve : 0;
+    }
     free(dir);
     return r;
 }
@@ -1305,8 +1337,10 @@ int hp_cachew_open(hp_cachew_t **out, const char *path, size_t total) {
     if (!w) return -HP_E_IO;
     w->total = total;
     if (path) {
-        size_t need = total + CACHE_HDR + 4 + 4096; /* jffs2 compresses, but never count on it */
-        if (hp_cache_free_bytes(path) < need) {
+        cache_unlink_stale(path); /* its space counts as free */
+        /* jffs2 compresses, but never count on it. Compared by subtraction: a huge total cannot wrap. */
+        size_t fr = hp_cache_free_bytes(path);
+        if (total > SIZE_MAX - CACHE_HDR - 4 || fr < CACHE_HDR + 4 || fr - (CACHE_HDR + 4) < total) {
             free(w);
             return -HP_E_TOOBIG;
         }

@@ -13,7 +13,7 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
 3. `md5sum <build>/hub`, then:
    `tools/install_boot_hook.py install --yes --token-file F --rf-slot 2 --expect-md5 <md5>`
    Refuses if `/data/ha-harmony/hub` on the device differs from that md5. Keys written to `hub.conf`:
-   (the hook launches `hub --token-file /data/ha-harmony/hub.conf --port P ...`, so the token is never on argv.) `token`, `port`, `hub_id`, `rf=spi`, `rf_slot=N`, `config_budget_kib=N` (memory budget of one config load, default 8192, hard-capped by the daemon at 20% of the memory free at its start; reported in `hello_ack.limits`), `stop_lua=0|1` (default on: the boot subshell runs `killall lua luaworks luadraws`
+   (the hook launches `hub --token-file /data/ha-harmony/hub.conf --port P ...`, so the token is never on argv.) `token`, `port`, `hub_id`, `rf=spi`, `rf_slot=N`, `config_budget_kib=N` (memory budget of one config load, default 8192, hard-capped by the daemon at 20% of MemFree+Buffers+Cached at its start (below 256 is ignored with a log line), for new pushes only; reported in `hello_ack.limits`), `stop_lua=0|1` (default on: the boot subshell runs `killall lua luaworks luadraws`
    before starting the daemon; `--keep-lua` writes `stop_lua=0`), `reboot_on_early_death=0|1` (default 1;
    `--no-reboot-on-early-death` writes 0). `install` clears the strike counter before arming. If the rcS.local
    replace is not a provable atomic rename it only warns (rcS sources rcS.local under `[ -x ]`, so a missing file
@@ -111,3 +111,17 @@ Learning is opt-in: `install_boot_hook.py install --yes --learn-slot ...` (hub) 
 6. Delete both `rf_slot` files and repeat 4 and 5: the slot is learned from the first data frame instead.
 7. Power-cycle the Elite: the slot is re-learned, nothing was sent while unknown.
 Only after all pass should the defaults change.
+
+## Bench: measure real flash headroom for the config cache
+
+The hub keeps `2 x hub binary + 256 KiB` free for OTA staging and `state.json`; the cache gets the rest of the
+`/data` partition. Measure it instead of trusting a size guess (run on the hub, read-only):
+
+1. `df -k /data` (free KiB) and `ls -l /data/ha-harmony/` (hub, hub.prev, cache.json, state.json sizes). jffs2
+   needs ~5% plus a few erase blocks of overhead beyond `df`'s figure; treat `df` free minus ~10% as usable.
+2. Connect any client and read `hello_ack.limits.flash_free` (it is `df` free minus the reserve). It should be
+   about `df` free minus `2 x hub + 256 KiB`.
+3. Push growing configs (`config_chunk`, a large learned-code config) until one is refused with
+   `config needs ~N KiB of flash`; confirm `df -k /data` after the refusal is unchanged and that no
+   `cache.json.new` remains. Then confirm an OTA stage (`hub.prev` copy) still fits with the largest accepted cache.
+4. Record the numbers in this runbook (partition size, free before/after, largest accepted cache).

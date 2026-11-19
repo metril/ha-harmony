@@ -51,8 +51,15 @@ void hub_set_clock(hub_ctx_t *c, hp_clock_fn fn, void *ctx) {
     c->sched.clock_ctx = ctx;
 }
 
+static void xfer_drop(hub_ctx_t *h);
+
 int hub_next_timeout_ms(const hub_ctx_t *c) {
     int t = hp_sched_next_timeout_ms(&c->sched);
+    if (c->xfer) {
+        int32_t left = (int32_t)(c->xfer_deadline - hp_sched_now(&c->sched));
+        int r = left > 0 ? (int)(left < 1000000 ? left : 1000000) : 0;
+        if (t < 0 || r < t) t = r;
+    }
     if (c->link_bound) { /* an in-flight RF object needs a pump at its retry deadline */
         int r = hp_rf_link_next_timeout_ms(&c->link, hp_sched_now(&c->sched));
         if (r >= 0 && (t < 0 || r < t)) t = r;
@@ -60,6 +67,7 @@ int hub_next_timeout_ms(const hub_ctx_t *c) {
     return t;
 }
 void hub_run_timers(hub_ctx_t *c) {
+    if (c->xfer && (int32_t)(hp_sched_now(&c->sched) - c->xfer_deadline) >= 0) xfer_drop(c); /* abandoned */
     hp_sched_run(&c->sched, hp_sched_now(&c->sched));
     hub_flush_pending(c); /* a transition may have completed / changed device state */
 }
@@ -426,6 +434,8 @@ static void xfer_drop(hub_ctx_t *h) {
     h->chunk_owner = NULL;
 }
 
+static void xfer_touch(hub_ctx_t *h) { h->xfer_deadline = hp_sched_now(&h->sched) + HP_XFER_IDLE_MS; }
+
 static int xfer_nack(hub_ctx_t *h, uint32_t id, const char *msg, char *reply, size_t cap, size_t *len) {
     xfer_drop(h);
     return reply_ok(id, "config_ack", false, msg, reply, cap, len);
@@ -438,10 +448,14 @@ static int xfer_begin(hub_ctx_t *h, hp_session_t *sess, size_t total, char *msg,
         snprintf(msg, msgcap, "empty config");
         return -HP_E_INVAL;
     }
+    if (total > hp_map_budget(&h->map)) { /* before any size arithmetic or flash use */
+        snprintf(msg, msgcap, "config needs ~%zu KiB of hub memory, the hub allows %zu KiB", total / 1024, hp_map_budget(&h->map) / 1024);
+        return -HP_E_TOOBIG;
+    }
     int rc = hp_cachew_open(&h->xfer, h->cache_path, total);
     if (rc == -HP_E_TOOBIG) {
         size_t fr = hp_cache_free_bytes(h->cache_path);
-        snprintf(msg, msgcap, "config needs ~%zu KiB of flash, the hub has %zu KiB free", (total + 4096 + 1023) / 1024, fr / 1024);
+        snprintf(msg, msgcap, "config needs ~%zu KiB of flash, the hub has %zu KiB free", (total + 1023) / 1024, fr / 1024);
         return rc;
     }
     if (rc < 0) {
@@ -450,6 +464,7 @@ static int xfer_begin(hub_ctx_t *h, hp_session_t *sess, size_t total, char *msg,
     }
     h->chunk_total = total;
     h->chunk_owner = sess;
+    xfer_touch(h);
     return 0;
 }
 
@@ -520,6 +535,7 @@ static int on_config_chunk(void *vctx, hp_session_t *sess, uint32_t id, const cJ
         return xfer_nack(h, id, "could not write the config on the hub (out of flash space?); the previous config is kept", reply, cap, len);
     h->chunk_got += n;
     h->chunk_next = seq + 1;
+    xfer_touch(h);
     if (h->chunk_got < h->chunk_total) return reply_ok(id, "config_ack", true, NULL, reply, cap, len);
     return xfer_finish(h, sess, id, reply, cap, len);
 }
@@ -756,7 +772,10 @@ static int on_ota_abort(void *vctx, hp_session_t *sess, uint32_t id, const cJSON
     return ota_reply(h, id, "aborted", NULL, reply, cap, len);
 }
 
-void hub_session_closed(hub_ctx_t *h, const hp_session_t *sess) { hp_ota_owner_gone(&h->ota, sess); }
+void hub_session_closed(hub_ctx_t *h, const hp_session_t *sess) {
+    if (h->xfer && h->chunk_owner == sess) xfer_drop(h); /* its transfer can never finish: free the flash */
+    hp_ota_owner_gone(&h->ota, sess);
+}
 
 static void on_hello_extra(void *vctx, cJSON *ack) {
     hub_ctx_t *h = vctx;

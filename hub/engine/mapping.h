@@ -220,7 +220,13 @@ int hp_cachew_append(hp_cachew_t *, const void *p, size_t n);
 int hp_cachew_finish(hp_cachew_t *, FILE **text); /* *text: positioned at the text, for hp_map_prepare */
 int hp_cachew_publish(hp_cachew_t *);             /* rename over the live cache and free */
 void hp_cachew_abort(hp_cachew_t *);              /* delete the temp file and free */
-size_t hp_cache_free_bytes(const char *path);     /* SIZE_MAX when unknown */
+/* Flash the cache may still take: raw free space minus the reserve (0 when less than that; SIZE_MAX unknown). */
+size_t hp_cache_free_bytes(const char *path);
+/* Flash kept free for OTA staging (hub.prev + the new image), state.json and slack. Default
+ * HP_CACHE_RESERVE_DEFAULT; the daemon sets 2 x its binary size + 256 KiB. */
+#define HP_CACHE_RESERVE_DEFAULT (2u * 1024u * 1024u + 256u * 1024u)
+void hp_cache_set_reserve(size_t bytes);
+size_t hp_cache_reserve(void);
 
 /* Test hook: the n-th allocation of the next load fails (1 = the first); 0 = off. */
 void hp_map_test_fail_alloc(unsigned n);

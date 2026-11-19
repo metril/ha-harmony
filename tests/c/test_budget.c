@@ -360,6 +360,176 @@ static void test_cache_is_all_or_nothing(void) {
     free(other);
 }
 
+/* ---- review fixes: boot load ignores the budget, stale .new, flash reserve, overflow, dup sections, xfer lifetime */
+
+static uint32_t g_now;
+static uint32_t fake_clock(void *ctx) { (void)ctx; return g_now; }
+
+static void test_boot_cache_ignores_budget(void) {
+    char path[] = "/tmp/hp_budget_boot_XXXXXX";
+    int fd = mkstemp(path);
+    CT_CHECK(fd >= 0);
+    close(fd);
+    unlink(path);
+    hub_ctx_init(&H);
+    hub_install(&tbl, &H);
+    H.cache_path = path;
+    hp_session_t s = {.authed = true};
+    size_t n;
+    char *cfg = gen(4, 3000, 0, &n);
+    CT_CHECK(push(&s, cfg, n));
+    hub_shutdown(&H);
+    hp_map_free(&H.map);
+    /* restart with a much smaller budget (less free memory this time): the accepted cache still loads */
+    hp_map_t boot;
+    hp_map_init(&boot);
+    hp_map_set_budget(&boot, 256u * 1024);
+    CT_EQ(hp_map_load_cache(&boot, path), 0);
+    CT_EQ(boot.ncmds, 3000);
+    CT_EQ(hp_map_budget(&boot), 256u * 1024); /* the budget is kept for new pushes */
+    CT_CHECK(hp_map_load(&boot, cfg, n) < 0);  /* ...and applies to them */
+    hp_map_free(&boot);
+    unlink(path);
+    free(cfg);
+}
+
+static void test_stale_new_file_removed(void) {
+    char path[] = "/tmp/hp_budget_stale_XXXXXX";
+    int fd = mkstemp(path);
+    CT_CHECK(fd >= 0);
+    close(fd);
+    unlink(path);
+    char tmp[64];
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    FILE *f = fopen(tmp, "w");
+    fputs("leftover", f);
+    fclose(f);
+    hp_map_t m;
+    hp_map_init(&m);
+    CT_EQ(hp_map_load_cache(&m, path), -HP_E_NOENT);
+    CT_CHECK(access(tmp, F_OK) != 0); /* startup load removed it */
+    f = fopen(tmp, "w");
+    fputs("leftover", f);
+    fclose(f);
+    hp_cachew_t *w = NULL;
+    hp_cache_set_reserve(SIZE_MAX / 2); /* statvfs check fails, but the stale file is gone first */
+    CT_EQ(hp_cachew_open(&w, path, 10), -HP_E_TOOBIG);
+    CT_CHECK(access(tmp, F_OK) != 0);
+    hp_cache_set_reserve(0);
+    hp_map_free(&m);
+}
+
+static void test_flash_reserve_and_overflow(void) {
+    char path[] = "/tmp/hp_budget_flash_XXXXXX";
+    int fd = mkstemp(path);
+    CT_CHECK(fd >= 0);
+    close(fd);
+    unlink(path);
+    CT_CHECK(HP_CACHE_RESERVE_DEFAULT >= 2u * 1024 * 1024); /* default never zero */
+    hp_cache_set_reserve(0);
+    size_t raw = hp_cache_free_bytes(path);
+    CT_CHECK(raw != SIZE_MAX && raw > 0);
+    hp_cache_set_reserve(1024);
+    CT_CHECK(hp_cache_free_bytes(path) <= raw);
+    CT_EQ(hp_cache_reserve(), 1024);
+    hp_cache_set_reserve(SIZE_MAX); /* more than the partition: reported as 0 free, not wrapped */
+    CT_EQ(hp_cache_free_bytes(path), 0);
+    hp_cachew_t *w = NULL;
+    CT_EQ(hp_cachew_open(&w, path, 1), -HP_E_TOOBIG);
+    hp_cache_set_reserve(0);
+    /* totals whose header/trailer sums would wrap a 32-bit size_t are refused before any arithmetic */
+    size_t huge[] = {SIZE_MAX, SIZE_MAX - 8, SIZE_MAX - 12, SIZE_MAX - 13, SIZE_MAX - 4095, SIZE_MAX - 4096 - 13};
+    for (size_t i = 0; i < sizeof huge / sizeof *huge; i++) CT_EQ(hp_cachew_open(&w, path, huge[i]), -HP_E_TOOBIG);
+    CT_CHECK(w == NULL);
+    /* through the wire: a total above the budget is refused up front (flash is not touched) */
+    hub_ctx_init(&H);
+    hub_install(&tbl, &H);
+    H.cache_path = path;
+    hp_session_t s = {.authed = true};
+    CT_EQ(send_chunk(&s, 0, 0xFFFFFFF0u, "{", 1), HP_DISPATCH_OK);
+    CT_CHECK(strstr(rep, "\"ok\":false") && strstr(rep, "hub memory"));
+    CT_CHECK(H.xfer == NULL);
+    char tmp[64];
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    CT_CHECK(access(tmp, F_OK) != 0);
+    /* the flash message and limits.flash_free both use the reserve */
+    hp_cache_set_reserve(SIZE_MAX);
+    CT_EQ(send_chunk(&s, 0, 100, "{", 1), HP_DISPATCH_OK);
+    CT_CHECK(strstr(rep, "of flash"));
+    hp_cache_set_reserve(0);
+    hub_shutdown(&H);
+    hp_map_free(&H.map);
+}
+
+static void test_duplicate_top_level_sections(void) {
+    const char *keys[] = {"keys", "activities", "format", "devices"};
+    for (size_t k = 0; k < 4; k++) {
+        char cfg[256];
+        const char *v = k == 2 ? "2" : k == 1 ? "[]" : k == 3 ? "[]" : "{}";
+        int n = snprintf(cfg, sizeof cfg, "{\"format\":2,\"%s\":%s,\"%s\":%s}", keys[k], v, keys[k], v);
+        if (k == 2) n = snprintf(cfg, sizeof cfg, "{\"format\":2,\"format\":2}");
+        hp_map_t m;
+        hp_map_init(&m);
+        CT_CHECK(hp_map_load(&m, cfg, (size_t)n) < 0);
+        CT_CHECK(strstr(hp_map_last_error(&m), "duplicate"));
+        hp_map_free(&m);
+    }
+    /* many duplicates of a retained section: refused at the second, never accumulated */
+    size_t cap = 4u * 1024 * 1024, n = 0;
+    char *b = malloc(cap);
+    n += (size_t)snprintf(b + n, cap - n, "{\"format\":2,\"devices\":[]");
+    while (n + 100 < cap) n += (size_t)snprintf(b + n, cap - n, ",\"keys\":{\"1\":{\"type\":\"activity\",\"activity\":\"off\"}}");
+    n += (size_t)snprintf(b + n, cap - n, "}");
+    hp_map_t m;
+    hp_map_init(&m);
+    CT_CHECK(hp_map_load(&m, b, n) < 0);
+    CT_CHECK(strstr(hp_map_last_error(&m), "duplicate"));
+    hp_map_free(&m);
+    free(b);
+    /* the retained sections are counted in the estimate */
+    const char *a = "{\"format\":2,\"devices\":[]}";
+    const char *c = "{\"format\":2,\"devices\":[],\"activities\":[{\"id\":\"x\",\"name\":\"X\",\"steps\":[],\"off\":[]}]}";
+    size_t e1 = 0, e2 = 0;
+    CT_EQ(hp_map_estimate(a, strlen(a), &e1), 0);
+    CT_EQ(hp_map_estimate(c, strlen(c), &e2), 0);
+    CT_CHECK(e2 > e1);
+}
+
+static void test_xfer_dropped_on_close_and_idle(void) {
+    hub_ctx_init(&H);
+    hub_set_clock(&H, fake_clock, NULL);
+    hub_install(&tbl, &H);
+    g_now = 1000;
+    hp_session_t a = {.authed = true}, b = {.authed = true};
+    size_t n;
+    char *cfg = gen(2, 1000, 0, &n);
+    CT_EQ(send_chunk(&a, 0, (uint32_t)n, cfg, 1000), HP_DISPATCH_OK);
+    CT_CHECK(H.xfer != NULL && H.chunk_owner == &a);
+    hub_session_closed(&H, &b); /* someone else's close does not touch it */
+    CT_CHECK(H.xfer != NULL);
+    hub_session_closed(&H, &a);
+    CT_CHECK(H.xfer == NULL && H.chunk_owner == NULL);
+    /* idle: dropped once 60 s pass without a chunk, kept before; each chunk restarts the clock */
+    CT_EQ(send_chunk(&a, 0, (uint32_t)n, cfg, 1000), HP_DISPATCH_OK);
+    g_now += 59000;
+    hub_run_timers(&H);
+    CT_CHECK(H.xfer != NULL);
+    CT_EQ(send_chunk(&a, 1, (uint32_t)n, cfg + 1000, 1000), HP_DISPATCH_OK);
+    g_now += 59000;
+    hub_run_timers(&H);
+    CT_CHECK(H.xfer != NULL);
+    CT_CHECK(hub_next_timeout_ms(&H) >= 0 && hub_next_timeout_ms(&H) <= 1000);
+    g_now += 1001;
+    hub_run_timers(&H);
+    CT_CHECK(H.xfer == NULL && H.chunk_owner == NULL);
+    /* a later chunk of the dropped transfer is refused, a fresh one starts */
+    CT_EQ(send_chunk(&a, 2, (uint32_t)n, cfg + 2000, 1000), HP_DISPATCH_OK);
+    CT_CHECK(strstr(rep, "out of order"));
+    hub_shutdown(&H);
+    hp_map_free(&H.map);
+    free(cfg);
+}
+
 int main(int argc, char **argv) {
     SELF = argv[0];
     if (argc > 2 && !strcmp(argv[1], "peak")) { /* child of test_peak_memory */
@@ -378,5 +548,10 @@ int main(int argc, char **argv) {
     CT_RUN(test_parse_tree_alloc_failure);
     CT_RUN(test_chunked_config);
     CT_RUN(test_cache_is_all_or_nothing);
+    CT_RUN(test_boot_cache_ignores_budget);
+    CT_RUN(test_stale_new_file_removed);
+    CT_RUN(test_flash_reserve_and_overflow);
+    CT_RUN(test_duplicate_top_level_sections);
+    CT_RUN(test_xfer_dropped_on_close_and_idle);
     return CT_DONE();
 }

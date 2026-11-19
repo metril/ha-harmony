@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
@@ -151,18 +152,25 @@ static void heartbeat_touch(const char *path) {
     else unlink(tmp);
 }
 
-/* The config memory budget: the asked KiB (hub.conf config_budget_kib), hard-capped at 20% of the memory free
- * now. A load builds the new map beside the old one, so its peak is up to twice the budget: at most 40% of
- * MemFree at daemon start (re-evaluated at every start; reported in hello_ack.limits). */
+/* The config memory budget for NEW pushes: the asked KiB (hub.conf config_budget_kib), hard-capped at 20% of
+ * the reclaimable memory now (MemFree + Buffers + Cached: on the hub's 2.6.31 kernel MemFree alone excludes
+ * page cache and tmpfs). A load builds the new map beside the old one, so its peak is up to twice the budget.
+ * Re-evaluated at every start and reported in hello_ack.limits; the cache already accepted is never held to
+ * it at boot (hp_map_load_cache), so a restart cannot turn an accepted config into "no config". */
 static size_t config_budget_bytes(size_t want_kib) {
     FILE *f = fopen("/proc/meminfo", "r");
     char line[128];
     size_t free_kib = 0;
     while (f && fgets(line, sizeof line, f))
-        if (!strncmp(line, "MemFree:", 8)) free_kib = (size_t)strtoul(line + 8, NULL, 10);
+        if (!strncmp(line, "MemFree:", 8) || !strncmp(line, "Buffers:", 8) || !strncmp(line, "Cached:", 7))
+            free_kib += (size_t)strtoul(line + (line[0] == 'C' ? 7 : 8), NULL, 10);
     if (f) fclose(f);
     size_t cap = free_kib ? free_kib / 5 : want_kib;
     if (cap < 256) cap = 256;
+    if (want_kib < 256) { /* below the smallest useful budget: clamp, never refuse to start */
+        fprintf(stderr, "hub: config budget %zu KiB raised to the 256 KiB minimum\n", want_kib);
+        want_kib = 256;
+    }
     size_t kib = want_kib < cap ? want_kib : cap;
     if (kib < want_kib) fprintf(stderr, "hub: config budget capped at %zu KiB (20%% of the %zu KiB free)\n", kib, free_kib);
     return kib * 1024;
@@ -207,7 +215,7 @@ int main(int argc, char **argv) {
                 return 2;
             }
         }
-        else if (!strcmp(argv[i], "--config-budget") && i + 1 < argc) { if (hp_parse_num(argv[++i], 256, 1048576, &budget_kib)) return bad_num("--config-budget", argv[i]); }
+        else if (!strcmp(argv[i], "--config-budget") && i + 1 < argc) { if (hp_parse_num(argv[++i], 0, 1048576, &budget_kib)) return bad_num("--config-budget", argv[i]); }
         else if (!strcmp(argv[i], "--heartbeat") && i + 1 < argc) hb_path = argv[++i];
         else if (!strcmp(argv[i], "--heartbeat-secs") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 60, &hb_secs)) return bad_num("--heartbeat-secs", argv[i]); }
         else if (!strcmp(argv[i], "--ota-dir") && i + 1 < argc) ota_dir = argv[++i];
@@ -261,6 +269,11 @@ int main(int argc, char **argv) {
 
     hub_ctx_init(&g_hub);
     hp_map_set_budget(&g_hub.map, config_budget_bytes((size_t)budget_kib));
+    { /* flash kept free for OTA staging (hub.prev + the new image) and state.json */
+        struct stat est;
+        size_t bin = (stat("/proc/self/exe", &est) == 0 && est.st_size > 0) ? (size_t)est.st_size : 0;
+        hp_cache_set_reserve(bin ? 2 * bin + 256u * 1024u : HP_CACHE_RESERVE_DEFAULT);
+    }
     if (sim) {
         hp_sim_init(&g_sim, stdout);
         g_hub.sinks = hp_sim_sinks(&g_sim);
