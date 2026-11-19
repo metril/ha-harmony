@@ -367,13 +367,19 @@ static void test_remote_info_broadcast_when_the_stored_set_changes(void) {
 }
 
 /* ---- theme_push: queued like a page_push, delivered before the pages of its gen ---- */
-typedef struct { uint8_t type, key; } seen_t; /* key: the page id of a page_push, the gen of a theme_push */
+typedef struct { uint8_t type, key; char c; } seen_t; /* key: the page id of a page_push, the gen of a theme_push, the tile of a tile message (c: its text's first byte) */
 static seen_t seen[64];
 static int nseen;
 static void th_hook(const hp_rf_msg_t *m) {
-    hp_rf_val_t v[3];
+    hp_rf_val_t v[5];
+    if (m->type == HP_MSG_TILE_UPDATE || m->type == HP_MSG_TILE_STATE) {
+        size_t nv = m->type == HP_MSG_TILE_UPDATE ? 4 : 5;
+        if (hp_rf_unpack(m->type, m->payload, m->len, v, nv) == 0 && nseen < 64)
+            seen[nseen++] = (seen_t){(uint8_t)m->type, (uint8_t)v[2].u, (char)v[nv - 1].p[0]};
+        return;
+    }
     if ((m->type != HP_MSG_PAGE_PUSH && m->type != HP_MSG_THEME_PUSH) || hp_rf_unpack(m->type, m->payload, m->len, v, 3) != 0) return;
-    if (nseen < 64) seen[nseen++] = (seen_t){(uint8_t)m->type, (uint8_t)v[1].u};
+    if (nseen < 64) seen[nseen++] = (seen_t){(uint8_t)m->type, (uint8_t)v[1].u, 0};
     if (m->type == HP_MSG_PAGE_PUSH) (void)hp_store_put(&ST, v[2].p, v[2].len);
     else (void)hp_store_theme(&ST, (uint8_t)v[1].u, v[2].p, v[2].len);
 }
@@ -495,7 +501,72 @@ static void test_stale_failed_theme_is_not_resent(void) {
     for (int i = 0; i < nseen; i++) CT_CHECK(seen[i].key != 5 || seen[i].type != HP_MSG_THEME_PUSH);
 }
 
+static int first_seen(bool tile) {
+    for (int i = 0; i < nseen; i++)
+        if ((seen[i].type == HP_MSG_TILE_UPDATE || seen[i].type == HP_MSG_TILE_STATE) == tile && (tile || seen[i].type == HP_MSG_PAGE_PUSH)) return i;
+    return -1;
+}
+
+/* a burst that fills the 8-slot link queue must not lose the theme or a page: they are held and sent when there is room */
+static void test_busy_link_holds_theme_and_page(void) {
+    th_world();
+    uint8_t raw[40];
+    for (uint8_t t = 0; t < HP_LINK_QUEUE; t++) CT_CHECK(tile_cmd(1, t, "x", -1));
+    CT_CHECK(push_theme(5, 1));
+    CT_CHECK(push_raw(0, raw, themed(raw, 0, 1, 5)));
+    run(12000);
+    int th = -1, pg = -1;
+    for (int i = 0; i < nseen; i++) {
+        if (seen[i].type == HP_MSG_THEME_PUSH) th = i;
+        if (seen[i].type == HP_MSG_PAGE_PUSH) pg = i;
+    }
+    CT_CHECK(th >= 0 && pg > th);
+    CT_CHECK(hp_store_complete(&ST) && hp_store_theme_ok(&ST));
+    CT_EQ(H.npend, 0);
+}
+
+/* live tile values during a themed push reach the remote after their page, once per tile, latest value */
+static void test_tiles_follow_the_theme_and_their_page(void) {
+    th_world();
+    uint8_t raw[40];
+    CT_CHECK(push_theme(5, 1));
+    CT_CHECK(push_raw(0, raw, themed(raw, 0, 1, 5)));
+    CT_CHECK(tile_cmd(0, 3, "A", -1));
+    CT_CHECK(tile_cmd(0, 3, "B", -1));
+    CT_CHECK(tile_cmd(0, 4, "C", -1));
+    run(12000);
+    int pg = first_seen(false), tl = first_seen(true);
+    CT_CHECK(pg >= 0 && tl > pg);
+    int n3 = 0, n4 = 0;
+    for (int i = 0; i < nseen; i++) {
+        if (seen[i].key == 3 && seen[i].type == HP_MSG_TILE_UPDATE) { n3++; CT_EQ(seen[i].c, 'B'); }
+        if (seen[i].key == 4 && seen[i].type == HP_MSG_TILE_UPDATE) n4++;
+    }
+    CT_EQ(n3, 1);
+    CT_EQ(n4, 1);
+    CT_EQ(H.npend, 0);
+}
+
+/* the same without a theme: a page held for a failed delivery is not overtaken by tiles of that page */
+static void test_tiles_do_not_overtake_a_resent_page(void) {
+    th_world();
+    uint8_t raw[40];
+    R.drop_dl = 1000;
+    CT_CHECK(push_raw(0, raw, mkpage(raw, 0, 1, 7, 0, 0)));
+    for (int i = 0; i < 400 && !count_pend(HP_MSG_PAGE_PUSH); i++) run(50); /* until the failed page is held again */
+    CT_EQ(count_pend(HP_MSG_PAGE_PUSH), 1);
+    CT_CHECK(tile_cmd(0, 3, "T", -1));
+    R.drop_dl = 0;
+    run(12000);
+    int pg = first_seen(false), tl = first_seen(true);
+    CT_CHECK(pg >= 0 && tl > pg);
+    CT_EQ(H.npend, 0);
+}
+
 int main(void) {
+    test_busy_link_holds_theme_and_page();
+    test_tiles_follow_the_theme_and_their_page();
+    test_tiles_do_not_overtake_a_resent_page();
     test_theme_arrives_before_its_pages();
     test_held_themes_supersede_and_a_newer_gen_cancels_the_old_set();
     test_failed_theme_is_resent_before_its_pages_and_bounded();

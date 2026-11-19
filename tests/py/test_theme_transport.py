@@ -172,3 +172,173 @@ async def test_a_caps_change_that_adds_bit_3_sends_the_theme(hass, rig, clock): 
     await hub.push("remote_info", info_of(c))
     await idle(hass, c)
     assert c.theme_status(1)["acked"] is True
+
+
+# ------------------------------------------------------------------ a set the remote never confirms
+async def drain(hass, clock, until):
+    """Release the manual clock until `until()` holds (a signal, never a real sleep)."""
+    for _ in range(40):
+        if until():
+            return
+        await settle(hass, lambda: clock.active() or until())
+        if until():
+            return
+        clock.elapse()
+    await settle(hass, until)
+
+
+def retrying(link):
+    return link.retry_task is not None and not link.retry_task.done()
+
+
+async def test_an_unconfirmed_theme_set_is_not_marked_pushed_and_is_retried_with_backoff(hass, rig, clock):  # noqa: F811
+    hub, c = await start(hass, rig)
+    link = c.links[1]
+    n = len(c.compiled.for_caps(15).pages_v2)
+    one = 1 + n
+    await settle(hass, lambda: len(sent(hub)) == one)
+    await settle(hass, clock.active)
+    clock.elapse()  # first ack wait over: sent once more
+    await settle(hass, lambda: len(sent(hub)) == 2 * one)
+    await settle(hass, clock.active)
+    clock.elapse()  # second ack wait over, still nothing from the remote
+    await settle(hass, lambda: retrying(link))
+    assert link.pushed is None and link.pending is True  # never "pushed" without the remote's word
+    await settle(hass, clock.active)
+    assert clock.waits[-1] == const.PUSH_RETRY_BASE
+    clock.elapse()  # the retry is due
+    await settle(hass, lambda: len(sent(hub)) == 3 * one)
+    await settle(hass, clock.active)
+    clock.elapse()  # the retry's own ack wait
+    await settle(hass, lambda: len(sent(hub)) == 4 * one)
+    await settle(hass, clock.active)
+    clock.elapse()
+    await settle(hass, lambda: retrying(link))
+    await settle(hass, clock.active)
+    assert clock.waits[-1] == 2 * const.PUSH_RETRY_BASE  # backing off
+    await hub.push("remote_info", info_of(c))  # the remote finally reports the whole set
+    await settle(hass, lambda: link.pushed is not None and link.retries == 0)
+    await idle(hass, c)
+    assert c.theme_status(1)["acked"] is True
+
+
+async def test_backoff_is_bounded(hass, rig, clock, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(const, "THEME_ACK_WAIT", 1.0)
+    hub, c = await start(hass, rig)
+    link = c.links[1]
+    for _ in range(12):  # many rounds with a remote that never confirms
+        await drain(hass, clock, lambda: retrying(link))
+        await settle(hass, clock.active)
+        clock.elapse()
+    assert const.PUSH_RETRY_MAX in clock.waits
+    assert max(w for w in clock.waits if w != 1.0 and w != const.INFO_WAIT) <= const.PUSH_RETRY_MAX
+
+
+async def test_the_hub_giving_up_on_the_theme_while_the_remote_stays_attached(hass, rig, clock):  # noqa: F811
+    hub, c = await start(hass, rig)
+    link = c.links[1]
+    rp = c.compiled.for_caps(15)
+    n = len(rp.pages_v2)
+    await settle(hass, lambda: len(sent(hub)) == 1 + n)
+    # the hub dropped the theme (resends exhausted): the remote holds the pages but no theme and no
+    # link loss is ever seen
+    await hub.push("remote_info", {**FULL, "gen": rp.gen, "pages": n - 1})
+    await drain(hass, clock, lambda: len(sent(hub)) >= 3 * (1 + n))
+    await hub.push("remote_info", info_of(c))
+    await settle(hass, lambda: link.pushed is not None)
+    await idle(hass, c)
+    assert c.theme_status(1)["acked"] is True
+
+
+async def test_a_remote_reboot_the_hub_never_saw_is_pushed_again(hass, rig, clock):  # noqa: F811
+    hub, c = await start(hass, rig)
+    link = c.links[1]
+    n = len(c.compiled.for_caps(15).pages_v2)
+    await settle(hass, lambda: len(sent(hub)) == 1 + n)
+    await hub.push("remote_info", info_of(c))
+    await idle(hass, c)
+    assert link.pushed is not None
+    await hub.push("remote_info", FULL)  # it rebooted and says its store is empty; no remote_attached
+    await settle(hass, lambda: len(sent(hub)) == 2 * (1 + n))  # at once the first time
+    assert [k for k, _ in sent(hub)] == (["theme"] + ["page"] * n) * 2
+    await hub.push("remote_info", info_of(c))
+    await settle(hass, lambda: link.pushed is not None and link.retries == 0)
+    await idle(hass, c)
+
+
+async def test_repeated_reboots_back_off_when_nothing_confirms_the_set(hass, rig, clock):  # noqa: F811
+    hub, c = await start(hass, rig, yaml=YAML + "theme: midnight\n", info={**FULL, "caps": 7})
+    link = c.links[1]
+    n = len(c.compiled.for_caps(7).pages_v2)
+    await settle(hass, lambda: link.pushed is not None and len(hub.pages()) == n)
+    await idle(hass, c)
+    await hub.push("remote_info", {**FULL, "caps": 7})  # store empty although we pushed: at once
+    await settle(hass, lambda: len(hub.pages()) == 2 * n)
+    await idle(hass, c)
+    await hub.push("remote_info", {**FULL, "caps": 7})  # still nothing held: now it waits
+    await settle(hass, lambda: retrying(link))
+    await settle(hass, clock.active)
+    assert len(hub.pages()) == 2 * n and clock.waits[-1] == 2 * const.PUSH_RETRY_BASE
+    clock.elapse()
+    await settle(hass, lambda: len(hub.pages()) == 3 * n)
+
+
+async def test_a_refused_theme_holds_the_pages_back_and_recovers(hass, rig, clock):  # noqa: F811
+    hub, c = await rig(USER, pages=False)
+    hub.refuse["theme_push"] = 1  # the hub's link queue was full
+    await hub.push("remote_attached", {})
+    await hub.push("remote_info", FULL)
+    link = c.links[1]
+    await settle(hass, lambda: retrying(link))
+    assert hub.pages() == []  # no page without its theme
+    assert link.pushed is None and link.pending is True
+    await settle(hass, clock.active)
+    clock.elapse()
+    rp = c.compiled.for_caps(15)
+    await settle(hass, lambda: len(hub.pages()) == len(rp.pages_v2))
+    assert [k for k, _ in sent(hub)] == ["theme", "theme"] + ["page"] * len(rp.pages_v2)  # the refused one counts
+    await hub.push("remote_info", info_of(c))
+    await idle(hass, c)
+    assert link.pushed is not None and c.theme_status(1)["acked"] is True
+
+
+async def test_a_refused_page_is_retried_not_marked_pushed(hass, rig, clock):  # noqa: F811
+    hub, c = await rig(YAML + "theme: midnight\n", pages=False)
+    hub.refuse["page_push"] = 1
+    await hub.push("remote_attached", {})
+    await hub.push("remote_info", {**FULL, "caps": 7})
+    link = c.links[1]
+    await settle(hass, lambda: retrying(link))
+    assert link.pushed is None
+    await settle(hass, clock.active)
+    clock.elapse()
+    await settle(hass, lambda: link.pushed is not None)
+
+
+async def test_unload_cancels_a_pending_retry(hass, rig, clock):  # noqa: F811
+    hub, c = await rig(USER, pages=False)
+    hub.refuse["theme_push"] = 1
+    await hub.push("remote_attached", {})
+    await hub.push("remote_info", FULL)
+    link = c.links[1]
+    await settle(hass, lambda: retrying(link))
+    task = link.retry_task
+    await c.async_shutdown()
+    await settle(hass, task.done)
+    assert task.cancelled()
+
+
+async def test_tiles_are_resent_after_the_pages_of_an_ack_timeout_resend(hass, rig, clock):  # noqa: F811
+    hass.states.async_set("sensor.t", "21", {"unit_of_measurement": "C"})
+    hub, c = await start(hass, rig)
+    n = len(c.compiled.for_caps(15).pages_v2)
+    await settle(hass, lambda: len(sent(hub)) == 1 + n)
+    hass.states.async_set("sensor.t", "22", {"unit_of_measurement": "C"})  # a live update mid-push
+    await settle(hass, clock.active)
+    clock.elapse()  # the re-send: the remote's page store drops the tile values it had
+    await settle(hass, lambda: len(sent(hub)) == 2 * (1 + n))
+    await hub.push("remote_info", info_of(c))
+    await idle(hass, c)
+    last_page = max(i for i, (t, _) in enumerate(hub.got) if t == "page_push")
+    after = [d["args"] for t, d in hub.got[last_page + 1 :] if t == "command" and d["command"] == "tile_update"]
+    assert any(a["text"] == "22 C" for a in after)  # every tile value again, after the final page

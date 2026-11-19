@@ -49,6 +49,8 @@ CAP_TILE_STATE = 1  # remote_info.caps bit 0 (bit 1 = page store / paging)
 CAP_PAGING = 2
 # bit 2 = CAP_THEME_COLOR (palette + presets), bit 3 = CAP_THEME_CUSTOM (free colours + user theme)
 THEME_TRANSPORT = True  # theme_push exists: bit 3 counts (False = an integration without it: bit 2 behaviour only)
+PUSH_RETRY_BASE = 15.0  # seconds before the first re-push of a set the remote did not confirm; doubles each time
+PUSH_RETRY_MAX = 300.0  # ... up to this
 THEME_ACK_WAIT = 20.0  # seconds a pushed custom theme gets to show up as a complete set in the remote's remote_info
 TILE_TEXT_MAX = 31  # bytes, docs/proto/page-format.md
 

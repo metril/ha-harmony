@@ -220,6 +220,20 @@ static bool theme_pending(const hub_ctx_t *h, uint8_t remote, bool v2_page) {
     return false;
 }
 
+/* ORDER of tiles: a tile_update/tile_state of a page must reach the remote AFTER that page (a page arriving drops the
+ * tiles it already shows). So a tile is held while its page is held for any reason (a failed delivery waiting to be
+ * resent, the set's theme in flight) or while a theme of the remote is in flight or held (the pages wait for it). The
+ * link is ordered, so a page already handed to it keeps its tiles behind it. */
+static bool tile_blocked(const hub_ctx_t *h, uint8_t remote, uint8_t page) {
+    if (h->theme_out) return true;
+    for (uint8_t i = 0; i < h->npend; i++) {
+        const hub_pend_t *p = &h->pend[i];
+        if (p->remote != remote) continue;
+        if (p->type == HP_MSG_THEME_PUSH || (p->type == HP_MSG_PAGE_PUSH && p->page == page)) return true;
+    }
+    return false;
+}
+
 /* Packs and queues one RF message on the link (stop-and-wait, driven by hub_pump_rf). While the remote
  * is not attached the message is held instead (latest per key) and sent when the link comes up: that
  * is 0 too. -HP_E_NOENT only without an RF transport; -HP_E_TOOBIG (nothing sent); -HP_E_BUSY (link
@@ -245,11 +259,13 @@ static int rf_send_keyed(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, si
             h->has_last_gen = true;
         }
     }
-    if (rf_up(h) && !(t == HP_MSG_PAGE_PUSH && theme_pending(h, remote, has_gen))) { /* a page waits for its theme */
+    bool set_msg = t == HP_MSG_PAGE_PUSH || theme;
+    if (rf_up(h) && !(t == HP_MSG_PAGE_PUSH && theme_pending(h, remote, has_gen)) && /* a page waits for its theme */
+        !(is_tile_msg((uint8_t)t) && tile_blocked(h, remote, page))) { /* a tile waits for its page */
         rc = hp_rf_link_send(&h->link, t, payload, plen, hp_sched_now(&h->sched));
         if (rc == 0 && t == HP_MSG_PAGE_PUSH) h->page_out[page]++;
         if (rc == 0 && theme) h->theme_out++;
-        if (rc != -HP_E_NOENT) return rc;
+        if (rc != -HP_E_NOENT && !(rc == -HP_E_BUSY && set_msg)) return rc; /* a full link queue holds a page or theme */
     }
     hub_pend_t n = {.type = (uint8_t)t, .remote = remote, .page = page, .tile = tile, .has_gen = has_gen, .gen = gen,
                     .len = plen};
@@ -270,7 +286,8 @@ static void pend_flush(hub_ctx_t *h) {
             i++;
             continue;
         }
-        if (p->type == HP_MSG_PAGE_PUSH && theme_pending(h, p->remote, p->has_gen)) { /* the set's theme goes first */
+        if ((p->type == HP_MSG_PAGE_PUSH && theme_pending(h, p->remote, p->has_gen)) || /* the set's theme goes first */
+            (is_tile_msg(p->type) && tile_blocked(h, p->remote, p->page))) { /* and a page before its tiles */
             i++;
             continue;
         }
@@ -900,6 +917,8 @@ static void rf_link_up(hub_ctx_t *h) {
     if (h->rf_attached) return;
     h->rf_attached = true;
     h->info_fresh = true;
+    h->theme_out = 0; /* nothing is in flight on a new link, whatever a lost result left counted */
+    memset(h->page_out, 0, sizeof h->page_out);
     cJSON *d = cJSON_CreateObject();
     if (d) hub_broadcast(h, "remote_attached", d);
     for (unsigned i = 0; i < HUB_INFO_MAX; i++) {

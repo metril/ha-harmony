@@ -165,7 +165,9 @@ int hp_rf_link_send(hp_rf_link_t *l, hp_msg_type_t type, const uint8_t *body, si
     l->qn++;
     if (l->qn == 1) { /* nothing ahead of it: transmit now, so "no peer" is reported synchronously */
         l->noent = false;
+        l->sending = true; /* the caller learns of a refusal from the return value: no result callback for it */
         drive_tx(l, now_ms);
+        l->sending = false;
         if (l->noent) {
             l->noent = false;
             return -HP_E_NOENT;
@@ -230,6 +232,7 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
             if (rc == -HP_E_IO && l->last_rc == -HP_E_NOENT) { /* nobody there: not a retryable failure */
                 l->start_tries = 0;
                 l->noent = true;
+                if (!l->sending) report(l, o, false); /* a queued object: its owner counts it in flight */
                 pop(l);
                 continue;
             }

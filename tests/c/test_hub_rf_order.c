@@ -305,6 +305,18 @@ static void test_first_frame_announces_first(void) {
     CT_CHECK(streq(seq(), "abb"));
 }
 
+/* a new link starts with nothing in flight, whatever a previous link left in the counters */
+static void test_link_up_resets_in_flight_counters(void) {
+    world();
+    H.theme_out = 2;
+    H.page_out[3] = 1;
+    int b = make_battery();
+    r_frames(b, nframes_since(b));
+    pump();
+    CT_EQ(H.theme_out, 0);
+    CT_EQ(H.page_out[3], 0);
+}
+
 int main(void) {
     test_attach_during_pump_recv();
     test_attach_between_recv_and_flag();
@@ -314,5 +326,6 @@ int main(void) {
     test_cached_info_follows_the_announcement();
     test_frames_before_loss_delivered_then_cleared();
     test_first_frame_announces_first();
+    test_link_up_resets_in_flight_counters();
     return CT_DONE();
 }
