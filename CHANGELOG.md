@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add-on: the editor no longer reports "Home Assistant cannot be read" on a large install. The add-on read only the first network chunk of the entity list, so any answer over one chunk looked like broken JSON; it now reads the whole answer (still capped at 8 MB, 20 s total). When Home Assistant cannot be read the add-on logs one warning with the path and cause (not repeated while the cause stays the same, plus a line on recovery), and the 503 carries a short `reason`.
+
 ## 0.3.11 (2026-11-19)
 
 - The integration never marks a custom-theme set as pushed until the remote reports it complete: after the one ack-timeout re-send it stays pending and re-pushes with a bounded exponential backoff (15 s doubling to 5 min, cancelled on unload, per remote), and it re-pushes when the remote reports an empty or partial store while we thought it held the set (a reboot the hub never saw, a theme the hub gave up on). A hub that refuses a theme or page for a transient reason is retried the same way instead of sending the pages without their theme.
