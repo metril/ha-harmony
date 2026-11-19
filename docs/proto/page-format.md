@@ -59,20 +59,22 @@ golden vectors: `tests/vectors/pages.json`.
 
 Full design and rationale: [docs/plans/2026-11-18-page-format-v2.md](../plans/2026-11-18-page-format-v2.md).
 v1 above stays valid and unchanged; one decoder (`harmony_core/page_codec.py`, `decode_page`) reads both.
-Golden vectors: `tests/vectors/pages.json` keys `valid` / `invalid` (v1), `valid_v2` / `invalid_v2`
+Golden vectors: `tests/vectors/pages.json` keys `valid` / `invalid` (v1), `valid_v2` / `valid_v2c` (colours, theme) / `invalid_v2`
 (each valid entry carries its `page_to_dict` JSON, the contract the add-on renderer mirrors).
 
 ## Header (11 + tlen bytes)
 `version`=2 · `page id` (< total) · `cols` · `rows` · `count` 0..32 · `gen` (low byte of a CRC over the hub
 config and every page layout; a new gen clears the remote's page store) · `total` 1..255 · `pflags`
-(bits 0-1 kind: 0 normal, 1 home, 2 favorites, 3 rejected; bit 2 BACK; bits 3-7 must be 0) · `seq`
+(bits 0-1 kind: 0 normal, 1 home, 2 favorites, 3 rejected; bit 2 BACK; bits 3-5 theme preset id 0..7, 7 = custom; bits 6-7 must be 0) · `seq`
 (`idx<<4|cnt`; 0 = not paged, else 1 <= idx <= cnt, cnt >= 2; the group is the consecutive ids
 `id-idx+1 .. id+cnt-idx`, all < total) · `act` (0, or activity index + 1) · `tlen` 0..24 · `title`
 (UTF-8, no NUL; empty = "Harmony").
 
-## Widget: `kind id xy wh [style] [icon] [bind] len label`
-`kind` bits 0-1: 0 button, 1 tile, 2 label (3 rejected); bit 4 HAS_STYLE, 5 HAS_ICON, 6 HAS_BIND;
-bits 2, 3, 7 must be 0. `style`: bits 0-2 role (0 default, 1 primary, 2 secondary, 3 danger, 4 nav;
+## Widget: `kind id xy wh [style] [icon] [bind] [color] len label`
+`kind` bits 0-1: 0 button, 1 tile, 2 label (3 rejected); bit 4 HAS_STYLE, 5 HAS_ICON, 6 HAS_BIND, 7 HAS_COLOR;
+bits 2, 3 must be 0. `color` (after `bind`): low nibble fill, high nibble tile on-fill; 0 default,
+1..12 palette, 15 = RGB565 big-endian follows (fill, then on), 13/14 and a 0x00 byte rejected, on only
+on tiles; see docs/plans/2026-11-18-page-format-v2.md section 7. `style`: bits 0-2 role (0 default, 1 primary, 2 secondary, 3 danger, 4 nav;
 5-7 rejected), bits 3-4 shape (0 card, 1 row, 2 pill, 3 monogram), bit 5 icon_only, bits 6-7 must be 0.
 `icon`: 0 none, 1..159 stock (`proto/icons.yaml`, glyph U+E000+id), 160..254 reserved custom, 255
 rejected. `bind`: role nav -> target page id (< total, a nav widget must have one); otherwise the

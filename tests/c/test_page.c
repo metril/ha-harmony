@@ -29,7 +29,7 @@ static const char *vec_path = HP_VECTORS; /* argv[1] overrides (running on the h
 static cJSON *load(void) {
     FILE *f = fopen(vec_path, "rb");
     if (!f) { fprintf(stderr, "cannot open %s\n", vec_path); exit(1); }
-    static char buf[1 << 16];
+    static char buf[1 << 18];
     size_t n = fread(buf, 1, sizeof buf - 1, f);
     fclose(f);
     buf[n] = 0;
@@ -41,6 +41,25 @@ static cJSON *load(void) {
 static const char *kind_str[] = {"normal", "home", "favorites"};
 static const char *role_str[] = {"default", "primary", "secondary", "danger", "nav"};
 static const char *shape_str[] = {"card", "row", "pill", "monogram"};
+
+static const char *palette_str[] = {"red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo", "purple", "pink"};
+
+/* A colour equals the dict's null | palette name | "#RRGGBB" (RGB565 expanded: R,B = v<<3, G = v<<2). */
+static void check_color(const hp_color_t *c, const cJSON *j) {
+    if (cJSON_IsNull(j)) {
+        CT_EQ(c->kind, HP_COLOR_NONE);
+        CT_EQ(c->value, 0);
+    } else if (c->kind == HP_COLOR_PALETTE) {
+        CT_CHECK(c->value >= 1 && c->value <= HP_PAGE_PALETTE_MAX);
+        CT_CHECK(!strcmp(palette_str[c->value - 1], j->valuestring));
+    } else {
+        char hx[8];
+        unsigned v = c->value;
+        snprintf(hx, sizeof hx, "#%02X%02X%02X", ((v >> 11) & 31) << 3, ((v >> 5) & 63) << 2, (v & 31) << 3);
+        CT_EQ(c->kind, HP_COLOR_RGB);
+        CT_CHECK(!strcmp(hx, j->valuestring));
+    }
+}
 
 static int jint(const cJSON *o, const char *k) { return cJSON_GetObjectItem(o, k)->valueint; }
 static const char *jstr(const cJSON *o, const char *k) { return cJSON_GetObjectItem(o, k)->valuestring; }
@@ -65,6 +84,7 @@ static void check_dict(const char *name, const hp_page_t *p, const cJSON *m) {
         CT_EQ(p->seq_cnt, jint(sq, "cnt"));
     }
     CT_EQ(p->act, jint(m, "act"));
+    CT_EQ(p->theme, jint(m, "theme"));
     CT_CHECK(!strcmp(p->title, jstr(m, "title")));
     const cJSON *ws = cJSON_GetObjectItem(m, "widgets");
     CT_EQ(p->count, cJSON_GetArraySize(ws));
@@ -85,6 +105,8 @@ static void check_dict(const char *name, const hp_page_t *p, const cJSON *m) {
         const cJSON *bd = cJSON_GetObjectItem(w, "bind");
         CT_EQ(o->has_bind, !cJSON_IsNull(bd));
         if (o->has_bind) CT_EQ(o->bind, bd->valueint);
+        check_color(&o->color_fill, cJSON_GetObjectItem(w, "color"));
+        check_color(&o->color_on, cJSON_GetObjectItem(w, "on_color"));
         CT_EQ(o->text[0], 0);
         CT_EQ(o->tstate, 0);
     }
@@ -181,6 +203,7 @@ int main(int argc, char **argv) {
     test_valid_vectors(root, "valid");
     test_invalid_vectors(root, "invalid");
     test_valid_vectors(root, "valid_v2");
+    test_valid_vectors(root, "valid_v2c");
     test_invalid_vectors(root, "invalid_v2");
     cJSON_Delete(root);
     CT_RUN(test_hit);
