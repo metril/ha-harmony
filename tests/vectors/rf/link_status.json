@@ -1,0 +1,17 @@
+{
+ "comment": "Link-status reports `10 NN 41 04 <status> <wpid_lo> <wpid_hi>` fed to rf_spi with no configured slot. Status bit 0x40 = link lost. Measured on the bench: hub log 'link up (slot 2, status 0x87, wpid 4021)', remote log '(slot 1, status 0x07, wpid 880b)'. 'slot' is what the transport must report afterwards (-1 = not learned), 'attached' its link state.",
+ "vectors": [
+  {"name": "hub link up", "role": "hub", "reports": ["10024104872140"], "slot": 2, "attached": true},
+  {"name": "remote link up", "role": "remote", "reports": ["10014104070b88"], "slot": 1, "attached": true},
+  {"name": "hub lost before any up learns nothing", "role": "hub", "reports": ["10024104472140"], "slot": -1, "attached": false},
+  {"name": "remote lost before any up learns nothing", "role": "remote", "reports": ["10014104470b88"], "slot": -1, "attached": false},
+  {"name": "hub slot 0 is not a remote", "role": "hub", "reports": ["10004104872140"], "slot": -1, "attached": false},
+  {"name": "slot above 15 is rejected", "role": "hub", "reports": ["10104104872140"], "slot": -1, "attached": false},
+  {"name": "hub re-link on another slot is picked up", "role": "hub", "reports": ["10024104872140", "10024104472140", "10034104872140"], "slot": 3, "attached": true},
+  {"name": "remote re-link on another slot is picked up", "role": "remote", "reports": ["10014104070b88", "10014104470b88", "10024104070b88"], "slot": 2, "attached": true},
+  {"name": "second remote cannot hijack a live link", "role": "hub", "reports": ["10024104872140", "10034104872140"], "slot": 2, "attached": true},
+  {"name": "another slot's loss does not detach", "role": "hub", "reports": ["10024104872140", "10034104472140"], "slot": 2, "attached": true},
+  {"name": "five-byte report without wpid", "role": "hub", "reports": ["1002410487"], "slot": 2, "attached": true},
+  {"name": "0x11 shaped report", "role": "remote", "reports": ["11014104070b88"], "slot": 1, "attached": true}
+ ]
+}

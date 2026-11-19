@@ -191,7 +191,7 @@ run.
   (`10 02 41 04 87 21 40` = link up, wpid 0x4021), and the hub is device **1** on the remote
   (`10 01 41 04 07 0b 88`, wpid 0x880B). The pipe table had been read off by one (pipe `0x20` is
   device 1). Addressing the wrong index gives `10 01 8f 40 0d 09 00` (error 0x09) per frame.
-  `--rf-slot` (hub) and `--slot` (remote) set them; learning them from link status is a follow-up.
+  Both sides now learn the slot from the link-up report; `--rf-slot` (hub) and `--slot` (remote) are optional overrides.
 - `deploy_hub.py run` forces a TTY (`ssh -tt`) and fails from a non-interactive session; the
   daemon was started detached on the device instead. Needs a `--detach` mode.
 - A `ps | grep` stop-check matched its own ssh command line and reported the app as still running;
@@ -282,8 +282,8 @@ link-up was not exercised (link was up at push time).
    The retry reaches the hub as `rx duplicate seq 9 (ack only)` (57602574) and the coalesced ack goes out in
    the same slot, so one more 300 ms wait follows. The first object of a pair (radio idle) is acked in ~13 ms.
    Fix is (1), or retry timer > one frame-release time (~300 ms+); harmless meanwhile (dedup by seq works).
-3. Carried over from session 1: `deploy_hub.py run --detach` (the TTY forced by `ssh -tt`), and learning the
-   hub/remote slots from link status instead of `--rf-slot` / `--slot`.
+3. Carried over from session 1: `deploy_hub.py run --detach` (the TTY forced by `ssh -tt`). Learning the
+   hub/remote slots from link status is implemented (bench gate: `docs/runbooks/phase4-persistence.md`).
 
 ## Bench session 4 (2026-11-18, 02:00-02:07 UTC) — release-by-uplink fix verified
 

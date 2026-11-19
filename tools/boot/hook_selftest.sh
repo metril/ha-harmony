@@ -177,6 +177,16 @@ else
 	fail "argv quoting (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
 fi
 
+# 5a. rf=spi alone: the radio is enabled and no slot flag is passed (the hub learns it)
+mkroot 'token=abc\nrf=spi\n'
+run_hook
+want="--token-file $R/data/ha-harmony/hub.conf --port 8099 --rf-spi --heartbeat $R/var/volatile/ha-harmony.hb"
+if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ]; then
+	pass "rf=spi without rf_slot passes no --rf-slot"
+else
+	fail "rf without slot (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
+fi
+
 # 5b. the token never appears in the daemon argv
 if ! grep -q 'abc==' "$T/argv" 2>/dev/null; then pass "token absent from daemon argv"; else fail "token leaked into argv"; fi
 

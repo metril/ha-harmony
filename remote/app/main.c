@@ -22,8 +22,11 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (ota_pubkey_is_dev()) fprintf(stderr, "harmony_remote: dev OTA key built in (never ship this build)\n");
-  fprintf(stderr, "harmony_remote: rf=%s powermode=0x%02X%s slot=%u\n", cli.rf_spi ? "spi" : "none", cli.powermode,
-          cli.powermode ? "" : " (default, unvalidated)", cli.slot);
+  char slot_txt[16];
+  if (cli.slot) snprintf(slot_txt, sizeof slot_txt, "%u", cli.slot);
+  else snprintf(slot_txt, sizeof slot_txt, "learned");
+  fprintf(stderr, "harmony_remote: rf=%s powermode=0x%02X%s slot=%s\n", cli.rf_spi ? "spi" : "none", cli.powermode,
+          cli.powermode ? "" : " (default, unvalidated)", slot_txt);
 
   struct sigaction sa = {.sa_handler = on_signal}; /* no SA_RESTART: select() returns EINTR */
   sigemptyset(&sa.sa_mask);

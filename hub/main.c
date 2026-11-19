@@ -153,7 +153,7 @@ static void heartbeat_touch(const char *path) {
 int main(int argc, char **argv) {
     bool sim = false, rf_spi = false;
     bool rf_debug = false;
-    long rf_slot = 0; /* 0 = driver default; the Elite measured as HID++ device 2 on this hub */
+    long rf_slot = 0; /* 0 = learn it from the radio's link-up report */
     long port = 8099;
     const char *token = NULL, *token_file = NULL;
     const char *cache = NULL;

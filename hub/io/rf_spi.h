@@ -15,13 +15,19 @@
  *  - `powermode`: the stock value of the power-mode byte was NOT recovered. The default 0x00 is
  *    UNVALIDATED; only the upper nibble is used. The remote app exposes it as a command-line option
  *    so it can be tried at the bench without a rebuild.
- *  - the slot defaults to 0 (the hub's pipe on the remote).
+ *  - the slot is learned from the link-up report (measured: the hub is slot 1 on the remote, wpid 0x880B,
+ *    status 0x07); a configured slot overrides it.
  *  - hp_rf_spi_set_pairing / hp_rf_spi_unpair are host-chip operations: -HP_E_INVAL, nothing written.
  *  - the init command `10 FF 80 00 00 01 00` is sent in both roles (measured on the remote's chip).
  *  - link-status `10 <slot> 41 04 <status>` is assumed to have the same shape as on the hub; this is
  *    UNVALIDATED on the remote.
  * READER. Received entries queue in kernel heap even with no opener, so the reader thread runs for
  * the whole time the device is open (from open() to destroy()) in both roles; do not stop it early.
+ *
+ * SLOT. `cfg.slot` != 0 fixes the slot (only that slot's reports are used, as before). With 0 the slot is
+ * learned from the link-up report `10 NN 41 04 <status> <wpid>` (status 0x87 / wpid 0x4021 on the hub,
+ * 0x07 / 0x880B on the remote): taken only while detached, so a re-link on another slot is picked up.
+ * Until it is known data and TX statuses are dropped (debug line) and send() is -HP_E_NOENT with no write.
  *
  * SAFETY. Opens only /dev/rfspi (and /proc, for the preflight): never /dev/rffw, the chip-flash
  * programmer. Opening is refused, fail closed, while stock `hal` is alive OR when that cannot be
@@ -61,8 +67,6 @@
 #include "hub/io/sinks.h"
 
 #define HP_RF_SPI_DEV "/dev/rfspi"
-#define HP_RF_SPI_SLOT 1        /* hub role: the single paired remote (measured pipe table) */
-#define HP_RF_SPI_REMOTE_SLOT 0 /* remote role: the hub is in the remote's slot 0 (measured pipe table) */
 #define HP_RF_SPI_REMOTE_WRITE_CAP 32 /* the remote driver's kernel slab: see ROLES */
 #define HP_RF_SPI_BACKOFF_MIN_MS 50
 #define HP_RF_SPI_BACKOFF_MAX_MS 1000
@@ -84,7 +88,7 @@ typedef enum { HP_RF_SPI_ROLE_HUB = 0, HP_RF_SPI_ROLE_REMOTE = 1 } hp_rf_spi_rol
 
 typedef struct {
     const char *dev_path;        /* NULL = /dev/rfspi */
-    uint8_t slot;                /* peer slot; 0 = the role's default (hub: 1, remote: 0) */
+    uint8_t slot;                /* peer slot override; 0 = learn it from the link-up report (hub 1..15, remote 0..15) */
     const hp_rf_spi_ops_t *ops;  /* NULL = real syscalls */
     hp_rf_spi_role_t role;       /* default HP_RF_SPI_ROLE_HUB */
     uint8_t powermode;           /* remote role only: upper-nibble value OR'd into frame byte 1 */
@@ -103,6 +107,8 @@ int hp_rf_spi_open(const hp_rf_spi_cfg_t *cfg, hp_rf_transport **out);
 void hp_rf_spi_destroy(hp_rf_transport *t);
 /* Readable when recv() has something (frame or link-loss) to return; -1 if t is not an rf_spi. */
 int hp_rf_spi_wake_fd(const hp_rf_transport *t);
+/* The peer slot in use (configured or learned), -1 while unknown or if t is not an rf_spi. */
+int hp_rf_spi_slot(const hp_rf_transport *t);
 
 /* Test seam: the guarded single write site, so a test can prove an over-long write never reaches
  * the syscall. Not for production use. */

@@ -91,12 +91,12 @@ static ssize_t f_write(void *c, int fd, const void *b, size_t n) {
   pthread_mutex_unlock(&f->mu);
   if (peer && !drop && n >= 30) {
     uint8_t o[32];
-    if (f->is_remote && n == 32 && p[0] == 0x20) { /* the remote is slot 1 on the hub */
-      o[0] = 0x12, o[1] = 1;
+    if (f->is_remote && n == 32 && p[0] == 0x20) { /* the remote is slot 2 on the hub (bench) */
+      o[0] = 0x12, o[1] = 2;
       memcpy(o + 2, p + 4, 28);
       feed(peer, o, 30);
-    } else if (!f->is_remote && n == 30 && p[0] == 0x12) { /* the hub is slot 0 on the remote */
-      o[0] = 0x20, o[1] = 0, o[2] = 0x12, o[3] = 0;
+    } else if (!f->is_remote && n == 30 && p[0] == 0x12) { /* the hub is slot 1 on the remote (bench) */
+      o[0] = 0x20, o[1] = 1, o[2] = 0x12, o[3] = 1;
       memcpy(o + 4, p + 2, 28);
       feed(peer, o, 32);
     }
@@ -236,6 +236,15 @@ static void tick(uint64_t ms) {
   settle(3);
 }
 
+/* The radios' link-up reports (bench, docs/hardware/hub-rf-cc2544.md): neither side is given a slot,
+ * both learn it from these. Queued before the open: the reader picks them up first. */
+static void radios_link_up(void) {
+  const uint8_t hub_up[7] = {0x10, 0x02, 0x41, 0x04, 0x87, 0x21, 0x40};
+  const uint8_t rem_up[7] = {0x10, 0x01, 0x41, 0x04, 0x07, 0x0B, 0x88};
+  feed(&fh, hub_up, 7);
+  feed(&fr, rem_up, 7);
+}
+
 static int setup_ex(int hal, int soc_missing) {
   fk_init(&fk);
   if (soc_missing) fk_set_file(&fk, RA_PATH_SOC, NULL);
@@ -248,6 +257,7 @@ static int setup_ex(int hal, int soc_missing) {
   rec_n = 0;
   hp_rf_spi_ops_t ho = fake_ops(&fh);
   hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
+  radios_link_up();
   CT_EQ(hp_rf_spi_open(&hc, &hub_tp), 0);
   CT_EQ(hub_tp->claim(hub_tp->self), 0);
   hp_rf_link_init(&hub_link, hub_tp, false, 1, hub_deliver, NULL);
@@ -260,7 +270,13 @@ static int setup_ex(int hal, int soc_missing) {
   rf_link_set_store(&rf, &app.store); /* as main.c does */
   hp_rf_spi_ops_t ro = fake_ops(&fr);
   hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL};
-  return rf_link_open(&rf, &rc);
+  int orc = rf_link_open(&rf, &rc);
+  if (orc == 0) { /* both radios have learned their slot from the link-up reports before anything is driven */
+    for (int i = 0; i < 3000 && (hp_rf_spi_slot(rf.tp) != 1 || hp_rf_spi_slot(hub_tp) != 2); i++) ms_sleep(1);
+    CT_EQ(hp_rf_spi_slot(rf.tp), 1);
+    CT_EQ(hp_rf_spi_slot(hub_tp), 2);
+  }
+  return orc;
 }
 /* open, and wait until the remote has spoken: the hub only then knows it is attached */
 static void setup(void) {
@@ -463,6 +479,7 @@ static void test_remote_info_reports_a_store_it_already_holds(void) {
   nhkeys = nhbatt = nhinfo = nhother = hord = 0;
   hp_rf_spi_ops_t ho = fake_ops(&fh);
   hp_rf_spi_cfg_t hc = {NULL, 0, &ho, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
+  radios_link_up();
   CT_EQ(hp_rf_spi_open(&hc, &hub_tp), 0);
   CT_EQ(hub_tp->claim(hub_tp->self), 0);
   hp_rf_link_init(&hub_link, hub_tp, false, 1, hub_deliver, NULL);
@@ -478,6 +495,7 @@ static void test_remote_info_reports_a_store_it_already_holds(void) {
   hp_rf_spi_ops_t ro = fake_ops(&fr);
   hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL};
   CT_EQ(rf_link_open(&rf, &rc), 0);
+  WAIT_FOR(hp_rf_spi_slot(rf.tp) == 1 && hp_rf_spi_slot(hub_tp) == 2);
   WAIT_FOR(nhinfo >= 1);
   CT_EQ(hinfo[0].gen, 0x3C);
   CT_EQ(hinfo[0].pages, 1);

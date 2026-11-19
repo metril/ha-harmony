@@ -140,7 +140,7 @@ class FakeRemote:
     def selftest(self, a):
         """Stand-in for the on-device script: assert what was uploaded, report a result."""
         t = a[2]
-        assert a[3] == "--slot 1 --powermode 0x30"
+        assert a[3] == "--powermode 0x30"
         assert f"{t}/start.sh" in self.files and f"{t}/hookline.sh" in self.files
         self.files[f"{t}/app/ran"] = b"x"  # a file the run created: cleanup must remove it
         return self.selftest_rc, b"PASS  fake\nremote selftest done: 0 failure(s)\n", b""
@@ -309,7 +309,7 @@ def test_install_hook_happy_path_order_and_atomicity():
     assert d.install_hook() == 0
     assert dev.files[dr.RCS_BACKUP] == RCS.encode()
     assert dev.files[dr.START_SH] == dr.start_script().encode()
-    assert "--slot 1 --powermode 0x30" in dev.files[dr.START_SH].decode()
+    assert "--powermode 0x30" in dev.files[dr.START_SH].decode()
     text = hooked(dev)
     assert text == dr.insert_hook(RCS) and text.count(dr.HOOK_MARKER) == 1
     assert dev.modes[dr.START_SH] == "755" and dev.modes[dr.RCS_LOCAL] == "755"
@@ -592,9 +592,16 @@ def test_hooked_rcs_local_is_valid_shell_and_exits_zero():
 # --- review fixes: argv, backup hygiene, rcS vetting, hardened start.sh, selftest -----------
 
 
-def test_start_sh_runs_app_with_exact_slot_and_powermode(boot):
+def test_start_sh_runs_app_with_no_slot_by_default_and_exact_powermode(boot):
     boot.start()
-    assert boot.argv.read_text().strip() == "--slot 1 --powermode 0x30"
+    assert boot.argv.read_text().strip() == "--powermode 0x30"
+
+
+def test_slot_is_an_optional_override_in_argv():
+    assert dr.start_argv() == "--powermode 0x30"
+    assert dr.start_argv(1, "0x30") == "--slot 1 --powermode 0x30"
+    assert '"$APP_BIN" --powermode 0x30 2>&1' in dr.start_script()
+    assert "--slot" not in dr.start_script()
 
 
 @pytest.mark.parametrize(("slot", "pm"), [(7, "0xAB"), (15, "0x00")])
@@ -629,7 +636,7 @@ def test_install_hook_builds_slot_powermode_into_start_sh_and_status_shows_them(
 def test_cli_install_hook_defaults_and_flags():
     d, dev, _ = make()
     assert dr.main(["install-hook", "--yes"], deployer=d) == 0
-    assert b"--slot 1 --powermode 0x30" in dev.files[dr.START_SH]
+    assert b"--powermode 0x30" in dev.files[dr.START_SH]
     d2, dev2, _ = make()
     assert (
         dr.main(["install-hook", "--yes", "--slot", "9", "--powermode", "0x31"], deployer=d2) == 0
@@ -687,7 +694,7 @@ def test_selftest_script_passes_on_the_host(tmp_path):
     (t / "rcS.local.hooked").write_text(dr.insert_hook(RCS))
     (t / "hookline.sh").write_text(dr.hook_line(str(t / "app")) + "\n")
     p = subprocess.run(
-        [*_CUR["shell"], str(dr.SELFTEST_SRC), str(t), "--slot 1 --powermode 0x30"],
+        [*_CUR["shell"], str(dr.SELFTEST_SRC), str(t), "--powermode 0x30"],
         capture_output=True, text=True, timeout=120, check=False,
         env={**os.environ, "REAL_COUNT_FILE": str(tmp_path / "real-bootcount"), **FAST},
     )  # fmt: skip
@@ -702,7 +709,7 @@ def test_selftest_script_catches_a_broken_start_sh(tmp_path):
     (t / "start.sh").write_text(dr.start_script().replace("n=$((n + 1))", "n=$((n + 2))"))
     (t / "rcS.local.hooked").write_text(dr.insert_hook(RCS))
     (t / "hookline.sh").write_text(dr.hook_line(str(t / "app")) + "\n")
-    p = subprocess.run([*_CUR["shell"], str(dr.SELFTEST_SRC), str(t), "--slot 1 --powermode 0x30"],
+    p = subprocess.run([*_CUR["shell"], str(dr.SELFTEST_SRC), str(t), "--powermode 0x30"],
                        capture_output=True, text=True, timeout=120, check=False, env={**os.environ, **FAST})  # fmt: skip
     assert p.returncode != 0 and "FAIL" in p.stdout
 

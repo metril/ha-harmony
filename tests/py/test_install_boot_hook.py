@@ -412,6 +412,16 @@ def test_rf_slot_lands_in_conf(hub: FakeHub) -> None:
         install(FakeHub(), rf_slot=16)
 
 
+def test_rf_flag_enables_radio_without_a_slot(hub: FakeHub) -> None:
+    install(hub, rf=True)
+    conf = hub.files[ibh.CONF].decode()
+    assert "rf=spi\n" in conf
+    assert "rf_slot" not in conf
+    hub2 = FakeHub()
+    install(hub2)
+    assert "rf=" not in hub2.files[ibh.CONF].decode()
+
+
 def test_keep_lua_writes_the_switch(hub: FakeHub) -> None:
     install(hub, stop_lua=False)
     assert "stop_lua=0\n" in hub.files[ibh.CONF].decode()

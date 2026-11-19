@@ -98,3 +98,11 @@ Run it before the first real arm. (BusyBox 1.13 `ls -ln` has extra columns, so t
 4. Reboot, then `kill -STOP` the daemon: within ~65 s the log shows `heartbeat stale`, it is killed and respawned.
 5. `respawn_max=0` + reboot + kill after 150 s: stays dead (old behaviour).
 6. Confirm `ps` shows no token on argv and the daemon log lines carry `[up Ns]`.
+
+## Bench gate: learned slots (no `--rf-slot` / `--slot`)
+
+1. Hub: `install_boot_hook.py install --yes --rf ...` (no `--rf-slot`); Elite: `deploy_remote.py install-hook --yes` (no `--slot`). Confirm neither daemon argv carries a slot flag.
+2. Reboot both. Hub log: `slot 2 learned from link report` then `link up (slot 2, status 0x87, wpid 4021)`; remote log (`--rf-debug`): `slot 1 learned ...` then `link up (slot 1, status 0x07, wpid 880b)`.
+3. Press a key on the Elite: it reaches the hub (HA sees the key event).
+4. Push a page from the add-on: it renders on the Elite.
+5. Power-cycle the Elite and check the slot is learned again, and no `send dropped, slot not learned yet` repeats once the link is up.

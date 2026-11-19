@@ -64,7 +64,7 @@ void ra_cli_usage(FILE *f, const char *prog) {
           "usage: %s [--rf spi|none] [--powermode 0xN0] [--slot N] [--rf-debug] [--ui-debug]\n"
           "  --rf         spi = the radio (device default), none = no link (bench display tests)\n"
           "  --powermode  upper nibble OR'd into frame byte 1, 0x00..0xF0 (default 0x00, UNVALIDATED)\n"
-          "  --slot       the hub's slot on the remote, 0..15 (default 0, measured)\n"
+          "  --slot       override the hub's slot on the remote, 1..15 (default: learned from the link-up report)\n"
           "  --rf-debug   log every radio frame and link event to stderr\n"
           "  --ui-debug   one stderr line per screen refresh: flushes, pixels, render/flush time, why, touch-to-flush ms\n",
           prog);

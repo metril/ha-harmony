@@ -230,6 +230,7 @@ class HookInstaller:
         hub_id: str | None,
         *,
         rf_slot: int | None = None,
+        rf: bool = False,
         expect_md5: str | None = None,
         stop_lua: bool = True,
         reboot_on_early_death: bool = True,
@@ -294,8 +295,8 @@ class HookInstaller:
 
         # --- 3. config: parsed by the hook, never sourced -----------------------
         conf = f"token={token}\nport={port}\n" + (f"hub_id={hub_id}\n" if hub_id else "")
-        if rf_slot is not None:
-            conf += f"rf=spi\nrf_slot={rf_slot}\n"
+        if rf or rf_slot is not None:  # the slot is learned from the radio's link-up report unless given
+            conf += "rf=spi\n" + (f"rf_slot={rf_slot}\n" if rf_slot is not None else "")
         if not stop_lua:
             conf += "stop_lua=0\n"
         if not reboot_on_early_death:
@@ -393,7 +394,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("install", help="[WRITE] install and arm the boot hook", allow_abbrev=False)
     p.add_argument("--yes", action="store_true")
     p.add_argument("--token-file", type=Path, help="file holding the WS token (or set HAH_TOKEN)")
-    p.add_argument("--rf-slot", type=int, default=None, help="enable the real radio, remote at HID++ slot N")
+    p.add_argument("--rf", action="store_true", help="enable the real radio (the remote's slot is learned from the link-up report)")
+    p.add_argument("--rf-slot", type=int, default=None, help="enable the real radio and override the learned slot (1..15)")
     p.add_argument("--expect-md5", required=True, help="md5 of the local hub build; arm only if the device matches")
     p.add_argument("--no-reboot-on-early-death", action="store_true",
                    help="do not reboot when the daemon dies inside the 120 s health window")
@@ -442,6 +444,7 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
                     a.hub_port,
                     a.hub_id,
                     rf_slot=a.rf_slot,
+                    rf=a.rf,
                     expect_md5=a.expect_md5,
                     stop_lua=not a.keep_lua,
                     reboot_on_early_death=not a.no_reboot_on_early_death,

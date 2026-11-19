@@ -24,6 +24,7 @@ add_hp_test(link_v2)
 add_hp_test(hub_rf_order)
 add_hp_test(store)
 add_hp_test(rf_spi)
+target_compile_definitions(test_rf_spi PRIVATE HP_LINK_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/rf/link_status.json")
 add_hp_test(mdns)
 add_hp_test(hwkeys)
 
