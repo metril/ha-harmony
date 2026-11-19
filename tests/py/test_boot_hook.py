@@ -765,7 +765,7 @@ def test_onhub_selftest_script_passes_under_host_shells(tmp_path: Path) -> None:
     failed = [ln for ln in out.splitlines() if ln.startswith("FAIL")]
     assert not failed, f"failing selftest cases: {failed}\n{out}"
     assert pr.returncode == 0 and "0 failure(s)" in out, out
-    assert out.count("PASS") >= 12
+    assert out.count("PASS") >= 18
     assert not (Path("/etc/ha-harmony-enable")).exists()
 
 
@@ -921,3 +921,160 @@ def test_log_lines_carry_uptime_stamps(root: Path) -> None:
     lines = _clog(root).splitlines()
     assert lines and all(re.match(r"\[up \d+s( \d{4}-\d\d-\d\d [\d:]+)?\] ha-harmony: ", ln) for ln in lines)
     assert any(re.match(r"\[up \d+s \d{4}-", ln) for ln in lines), "background lines carry the date"
+
+
+# --- signed update: relaunch into the new build, probation, rollback once ------------------------
+
+NEW_OK = 'D=$(dirname "$0"); echo x >>"$D/runs_new"; sleep 30'
+NEW_BAD = 'D=$(dirname "$0"); echo x >>"$D/runs_new"; exit 1'
+# The build that applies an update: lives past the health mark (waits for `go`), then does what
+# hub/ota/hub_ota.c does (pending marker, hub.prev hard link, atomic swap, restart marker) and exits 42.
+# A second run of the same file (after a rollback) just serves.
+OLD_APPLIER = (
+    'D=$(dirname "$0"); echo x >>"$D/runs_old"\n'
+    'if [ -e "$D/applied" ]; then sleep 30; exit 0; fi\n'
+    'while [ ! -e "$D/go" ]; do sleep 0.02; done\n'
+    ': >"$D/applied"; echo build=2 >"$D/ota-pending"\n'
+    'ln "$D/hub" "$D/hub.tmp" && mv "$D/hub.tmp" "$D/hub.prev"\n'
+    'mv "$D/hub.new" "$D/hub"; echo 2 >"$D/ota-restart"; exit 42'
+)
+
+
+def _hub_dir(root: Path) -> Path:
+    return root / "data" / "ha-harmony"
+
+
+def _install_new(root: Path, body: str) -> None:
+    f = _hub_dir(root) / "hub.new"
+    f.write_text(f"#!/bin/sh\n{body}\n")
+    f.chmod(0o755)
+
+
+def _count(root: Path, name: str) -> int:
+    f = _hub_dir(root) / name
+    return len(f.read_text().split()) if f.exists() else 0
+
+
+def _wait_count(root: Path, name: str, n: int) -> None:
+    for _ in range(500):
+        if _count(root, name) >= n:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"{name}: wanted {n}, saw {_count(root, name)}")
+
+
+def test_good_update_relaunches_into_the_new_build_and_keeps_prev(root: Path) -> None:
+    install_daemon(root, OLD_APPLIER)
+    _install_new(root, NEW_OK)
+    install_conf(root, "token=t\nrespawn_max=0\n")  # an update never needs the respawn budget
+    source_hook(root, healthy=1)
+    _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    (_hub_dir(root) / "go").touch()
+    log = _wait_text(root / "cache" / "ha-harmony.log", "updated build healthy")
+    assert "launching the new build" in log
+    assert _count(root, "runs_new") == 1 and _count(root, "runs_old") == 1
+    assert not (_hub_dir(root) / "ota-pending").exists()
+    assert not (_hub_dir(root) / "ota-restart").exists()
+    assert "runs_old" in (_hub_dir(root) / "hub.prev").read_text()  # the build we came from
+    assert not (_hub_dir(root) / "ota-rollback").exists()
+    assert not (root / "reboot.log").exists()
+
+
+def test_bad_update_is_rolled_back_once_and_reported(root: Path) -> None:
+    install_daemon(root, OLD_APPLIER)
+    _install_new(root, NEW_BAD)
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    source_hook(root, healthy=1)
+    _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    (_hub_dir(root) / "go").touch()
+    log = _wait_text(root / "cache" / "ha-harmony.log", "restored hub.prev")
+    assert "updated build died" in log and "died_early" in log
+    _wait_count(root, "runs_old", 2)  # the previous build is serving again
+    rb = (_hub_dir(root) / "ota-rollback").read_text().split("\n")
+    assert rb[0] == "build=2" and rb[1] == "reason=died_early"
+    assert not (_hub_dir(root) / "ota-pending").exists()
+    assert not (_hub_dir(root) / "hub.prev").exists()  # consumed: a second rollback is impossible
+    assert 'runs_old' in (_hub_dir(root) / "hub").read_text()
+    assert _count(root, "runs_new") == 1 and _count(root, "runs_old") == 2
+    assert not (root / "reboot.log").exists()
+
+
+def _arm_pending_boot(root: Path, new_body: str, old_body: str, counter: str | None = "1") -> None:
+    """The state a fresh build leaves when its boot never got healthy: new hub, hub.prev, marker."""
+    install_daemon(root, new_body)
+    prev = _hub_dir(root) / "hub.prev"
+    prev.write_text(f"#!/bin/sh\n{old_body}\n")
+    prev.chmod(0o755)
+    (_hub_dir(root) / "ota-pending").write_text("build=3\n")
+    if counter is not None:
+        (root / "cache" / "ha-harmony-boot.n").write_text(counter + "\n")
+
+
+def test_boot_after_unhealthy_fresh_build_restores_prev_and_resets_strikes(root: Path) -> None:
+    _arm_pending_boot(root, "exit 1", 'echo "$@" >"$(dirname "$0")/argv.txt"; sleep 30', counter="2")
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    _, demo = source_hook(root, healthy=1)
+    assert demo == "1"  # the previous build was started, not stock
+    rb = (_hub_dir(root) / "ota-rollback").read_text().split("\n")
+    assert rb[0] == "build=3" and rb[1] == "reason=boot_unclean"
+    assert not (_hub_dir(root) / "ota-pending").exists() and not (_hub_dir(root) / "hub.prev").exists()
+    log = _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    assert "restored hub.prev" in log and "boot strike 1 of 3" in log  # slate wiped, not strike 3
+    _wait_for(_hub_dir(root) / "argv.txt")  # the restored (previous) build is the one running
+    assert (root / "etc" / "ha-harmony-enable").exists()
+
+
+def test_rollback_happens_once_only_then_normal_strikes_apply(root: Path) -> None:
+    bad = "exit 1"
+    _arm_pending_boot(root, bad, bad, counter="1")
+    install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=0\n")
+    source_hook(root, healthy=1)
+    _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    first = (_hub_dir(root) / "ota-rollback").read_text()
+    assert "reason=boot_unclean" in first
+    (_hub_dir(root) / "ota-rollback").unlink()
+    # the restored build is bad too: boots 2 and 3 are ordinary strikes, never another rollback
+    source_hook(root, healthy=1)  # strike 2
+    _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    assert not (_hub_dir(root) / "ota-rollback").exists()
+    assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "2"
+    _, demo = source_hook(root, healthy=1)  # strike 3: back to stock semantics, hook disables itself
+    assert demo == "unset"
+    assert not (root / "etc" / "ha-harmony-enable").exists()
+    assert not (_hub_dir(root) / "ota-rollback").exists()
+
+
+def test_power_loss_before_the_swap_leaves_the_old_binary_and_only_clears_the_marker(root: Path) -> None:
+    install_daemon(root, IMMORTAL)
+    before = (_hub_dir(root) / "hub").read_text()
+    (_hub_dir(root) / "ota-pending").write_text("build=4\n")  # armed, then the power went
+    (_hub_dir(root) / "hub.new").write_text("half a binary")
+    install_conf(root)
+    _, demo = source_hook(root, healthy=1)
+    assert demo == "1"
+    assert (_hub_dir(root) / "hub").read_text() == before
+    assert not (_hub_dir(root) / "ota-pending").exists()
+    assert not (_hub_dir(root) / "ota-rollback").exists()  # nothing to roll back to, nothing to report
+    assert "no previous build to restore" in _wait_text(root / "cache" / "ha-harmony.log", "no previous build")
+
+
+def test_power_loss_after_the_link_before_the_rename_is_harmless(root: Path) -> None:
+    install_daemon(root, IMMORTAL)
+    before = (_hub_dir(root) / "hub").read_text()
+    os.link(_hub_dir(root) / "hub", _hub_dir(root) / "hub.prev")  # hub.prev IS hub (same inode)
+    (_hub_dir(root) / "ota-pending").write_text("build=4\n")
+    install_conf(root)
+    _, demo = source_hook(root, healthy=1)
+    assert demo == "1"
+    assert (_hub_dir(root) / "hub").read_text() == before
+    assert not (_hub_dir(root) / "ota-pending").exists()
+    assert not (_hub_dir(root) / "ota-rollback").exists()
+
+
+def test_a_junk_pending_marker_cannot_inject_into_the_rollback_record(root: Path) -> None:
+    _arm_pending_boot(root, "exit 1", "sleep 30", counter=None)
+    (_hub_dir(root) / "ota-pending").write_text("build=1; touch /tmp/pwned\nrest\n")
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    source_hook(root, healthy=1)
+    rb = (_hub_dir(root) / "ota-rollback").read_text().split("\n")
+    assert rb[0] == "build=0" and rb[1] == "reason=boot_unclean"
