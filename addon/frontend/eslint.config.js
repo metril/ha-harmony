@@ -6,6 +6,7 @@ export default tseslint.config(
   { ignores: ['dist', 'node_modules'] },
   js.configs.recommended,
   ...tseslint.configs.strict,
+  { files: ['scripts/**'], languageOptions: { globals: { URL: 'readonly', console: 'readonly', process: 'readonly' } } },
   { files: ['test/**'], rules: { '@typescript-eslint/no-non-null-assertion': 'off' } },
   {
     files: ['src/**'],

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.10 (2026-11-18)
+
+- The editor's History page shows one status on the newest revision (On the remote, Sending…, Not sent, or Rejected by hub with a See why reason); older revisions show only Compare and Restore. The apply dialog and the pending banner use the same words and never show a raw hash.
+- The "Config size" meter bar uses the same net figures as its label.
+
 ## 0.3.9 (2026-11-18)
 
 - The editor shows one "Config size X of Y KiB on this hub" meter using the hub's own limits (current firmware has no fixed 256-command limit; old firmware keeps its count meters). Over budget it says what to remove; a full hub flash is reported plainly.
