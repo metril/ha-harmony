@@ -129,8 +129,7 @@ export class HhColourField extends LitElement {
         ? html`<div class="read" role="status">
             <span class="chip ${info.ok ? 'ok' : 'ir'}">${info.ok ? '' : 'Low contrast: '}label contrast ${ratioText(info.ratio_x100)}:1</span>
             ${!info.ok && info.fix ? html`<button class="btn sm" @click=${() => { const f = info.fix as string; this.draft = f; this.emit(f); this.remember(f); }}>Use nearest readable (${info.fix})</button>` : nothing}
-          </div>
-          ${!info.ok ? html`<p class="why">The remote picks the best text colour for this fill, and even that is hard to read (4.5:1 is the goal).</p>` : nothing}`
+          </div>`
         : html`<p class="why">Type a hex colour such as #3355FF. The remote shows the nearest of its 65,536 colours.</p>`}
       ${this.canAdd && cur
         ? html`<div class="row">
