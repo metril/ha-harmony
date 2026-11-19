@@ -82,7 +82,7 @@ def emit_py(names: list[str], themes: list[dict]) -> str:
         'Colours are 0xRRGGBB ints. Maths lives in harmony_core/theme_math.py."""\n\n'
         "from __future__ import annotations\n\n"
         "from typing import NamedTuple\n\n"
-        "from harmony_core.theme_math import PALETTE_NAMES, TOKEN_NAMES\n\n"
+        "from .theme_math import PALETTE_NAMES, TOKEN_NAMES\n\n"
         f"CUSTOM_ID = {CUSTOM_ID}  # reserved for a custom theme; presets are 0..{CUSTOM_ID - 1}\n"
         "__all__ = [\"CUSTOM_ID\", \"PALETTE_NAMES\", \"TOKEN_NAMES\"]\n\n\n"
         "class Swatch(NamedTuple):\n    name: str\n    fill: int\n    ink: int\n    pressed: int\n\n\n"

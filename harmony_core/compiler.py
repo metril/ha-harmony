@@ -6,7 +6,7 @@ import base64
 import json
 import zlib
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from typing import Any
 
@@ -18,6 +18,17 @@ from .keymap import effective
 from .keys import KEY_NAMES, UNKNOWN_KEY, key_code
 from .page_build import MAX_PAGES, MAX_SOFT_KEYS, CompileError, Tile, build_pages, encode_pages
 from .page_codec import MAX_BYTES, MAX_WIDGETS, Page, page_size
+from .theme_build import (
+    CAP_THEME_COLOR,
+    CAP_THEME_CUSTOM,
+    CAPS_ALL,
+    ActiveTheme,
+    active_theme,
+    degrade_pages,
+    has_theming,
+    theme_warnings,
+)
+from .theme_math import ThemeError
 
 __all__ = ["MAX_SOFT_KEYS", "CompileError", "Tile", "config_stats", "fit_error"]
 
@@ -70,8 +81,23 @@ class HaActivity:
 
     id: str
     devices: tuple[str, ...]  # HA devices the activity uses, in order
-    start: tuple[HaStep, ...]  # power-on, inputs, then extra steps: after the hub reports it running
+    start: tuple[
+        HaStep, ...
+    ]  # power-on, inputs, then extra steps: after the hub reports it running
     off: tuple[HaStep, ...]  # extra `off` steps: when the hub reports everything off
+
+
+@dataclass(frozen=True)
+class RemotePages:
+    """The v2 page set for one remote: the compiled pages degraded to what its caps can show."""
+
+    models: list[Page]
+    pages_v2: list[bytes]
+    pages_v2_b64: list[str]
+    gen: int
+    theme_id: int
+    theme_wire: bytes | None  # a user theme's 99 bytes, only when the caps can take it
+    notices: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -84,10 +110,61 @@ class Compiled:
     devices: dict[str, CompiledDevice] = field(default_factory=dict)
     pages_v2: list[bytes] = field(default_factory=list)  # page format v2, same page ids
     models: list[Page] = field(default_factory=list)  # the v2 page models (gen filled)
+    theme_id: int = 0  # preset id 0..6, or 7 for a user theme
+    theme_wire: bytes | None = None  # the 99 wire bytes of a user theme (None for presets)
+    theme_name: str = "default"
+    theme_base: str = "default"  # the preset a user theme extends (itself for a preset)
+    # Non-blocking problems ({path, msg, severity: "warning"}); not part of equality.
+    warnings: list[dict[str, Any]] = field(default_factory=list, compare=False)
+    cfg_ids: list[str] = field(default_factory=list, compare=False)
+    seed: bytes = field(default=b"", compare=False)  # the gen seed without the theme bytes
+
+    @cached_property
+    def _variants(self) -> dict[int, RemotePages]:
+        return {}
+
+    def for_caps(self, caps: int) -> RemotePages:
+        """The v2 set for a remote announcing `caps` (bit 2 colours, bit 3 free colours + user
+        theme): degraded as docs/ha-config.md "Colours and themes" says, with its own gen."""
+        tier = caps & (CAP_THEME_COLOR | CAP_THEME_CUSTOM)
+        if tier not in self._variants:
+            self._variants[tier] = self._for_tier(tier)
+        return self._variants[tier]
+
+    def _for_tier(self, tier: int) -> RemotePages:
+        enc = base64.b64encode
+        if tier == CAPS_ALL or not has_theming(self.models):
+            return RemotePages(
+                self.models,
+                self.pages_v2,
+                self._pages_b64[1],
+                self.gen,
+                self.theme_id,
+                self.theme_wire,
+                [],
+            )
+        at = ActiveTheme(self.theme_name, self.theme_id, self.theme_base, self.theme_wire)
+        pages, notices = degrade_pages(self.models, self.cfg_ids, at, tier)
+        if pages is self.models:  # this remote can show everything there is
+            return RemotePages(
+                self.models, self.pages_v2, self._pages_b64[1], self.gen, self.theme_id, None, notices
+            )
+        pages = [replace(p, gen=0) for p in pages]
+        models, _v1, v2 = encode_pages(pages, self.cfg_ids, self.seed, [])
+        return RemotePages(
+            models,
+            v2,
+            [enc(p).decode() for p in v2],
+            models[0].gen if models else 0,
+            models[0].theme if models else 0,
+            None,
+            notices,
+        )
 
     def encoded_pages(self, version: int) -> list[bytes]:
         """The page set for a remote speaking page format `version` (1 or 2)."""
         return self.pages_v2 if version >= 2 else self.pages
+
     page_of: list[int] = field(default_factory=list)  # config page index behind each wire page
     # Home Assistant side (never sent to the hub): the action table is flattened with the keymap's
     # inheritance rule: layer (activity id, None = default / nothing running) -> key code -> call.
@@ -304,7 +381,12 @@ def compile_config(
     act_ids = [a["id"] for a in model["activities"]]
     wire_count = 0
     try:
-        pages, cfg_ids, tiles = build_pages(model, act_ids, names, keys)
+        at = active_theme(model)
+    except ThemeError as exc:  # parse_model rejects these; a partial preview model may not
+        fail(str(exc), ["theme"])
+        at = ActiveTheme()
+    try:
+        pages, cfg_ids, tiles = build_pages(model, act_ids, names, keys, at.id)
     except CompileError as exc:
         fail(str(exc), exc.path or ["pages"])
         pages, cfg_ids, tiles = [], [], []
@@ -320,7 +402,9 @@ def compile_config(
     for ai, a in enumerate(model["activities"]):
         own = {int(c): x for c, x in act_keys[ai].items()}
         ha_keys[a["id"]] = {
-            c: h for c, (_s, x) in effective(own, default_full).items() if (h := ha_of(x)) is not None
+            c: h
+            for c, (_s, x) in effective(own, default_full).items()
+            if (h := ha_of(x)) is not None
         }
         hub_own: dict[str, Any] = {}
         for c, x in own.items():
@@ -350,10 +434,9 @@ def compile_config(
     size, words = stats["text"], stats["words"]
     need = estimate_bytes(limits, **stats)
 
+    seed = compact_json(hub).encode()
     try:
-        models, pages_v1, pages_v2 = encode_pages(
-            pages, cfg_ids, compact_json(hub).encode(), collect
-        )
+        models, pages_v1, pages_v2 = encode_pages(pages, cfg_ids, seed + (at.wire or b""), collect)
     except CompileError as exc:
         fail(str(exc), exc.path or ["pages"])
         models, pages_v1, pages_v2 = [], [], []
@@ -438,7 +521,9 @@ def compile_config(
         # a current hub: one byte budget for the whole config (None on a legacy hub)
         "config_bytes": need if not limits.legacy else None,
         "config_budget": limits.budget if not limits.legacy else None,
-        "config_overhead": limits.slack_b if not limits.legacy else None,  # the hub's fixed part of a load, from its own limits
+        "config_overhead": limits.slack_b
+        if not limits.legacy
+        else None,  # the hub's fixed part of a load, from its own limits
         "soft_keys": sum(1 for c in names if c >= SOFT_KEY_BASE),
         "soft_keys_max": MAX_SOFT_KEYS,
         "pages": max(wire_count, len(models)),
@@ -450,6 +535,13 @@ def compile_config(
         pages=pages_v1,
         pages_v2=pages_v2,
         models=models,
+        theme_id=at.id,
+        theme_wire=at.wire,
+        theme_name=at.name,
+        theme_base=at.base,
+        warnings=theme_warnings(model),
+        cfg_ids=cfg_ids,
+        seed=seed,
         page_of=page_of,
         key_names=names,
         tiles=tiles,
