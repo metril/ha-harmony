@@ -49,6 +49,7 @@ from .auth import (
 )
 from .ha_client import Catalog, HaApi, HaUnavailable
 from .ir_tester import IrSender, SendLimiter, SendRefused
+from .linked import LinkedHubs
 from .options import Options, load_options
 from .store import HISTORY_MAX, RevConflict, Store, StoreError
 from .supervisor import Discovery
@@ -73,6 +74,7 @@ NOTIFIER_KEY = web.AppKey("notifier", object)
 WAIT_KEY = web.AppKey("wait_s", float)
 CATALOG_KEY = web.AppKey("catalog", Catalog)
 SEEN_KEY = web.AppKey("bundle_seen", dict)
+LINKED_KEY = web.AppKey("linked_hubs", LinkedHubs)
 ACKS_KEY = web.AppKey("acks", dict)
 MEMO_KEY = web.AppKey("preview_memo", dict)
 SENDER_KEY = web.AppKey("ir_sender", object)
@@ -137,6 +139,9 @@ def make_auth_mw(auth: Auth):
         bundle = request.path == BUNDLE_PREFIX or request.path.startswith(BUNDLE_PREFIX + "/")
         if bundle:  # authenticated (auth.check passed): remember that the integration is linked
             request.app[SEEN_KEY]["last_seen"] = int(request.app[CLOCK_KEY]())
+            hub = request.query.get("hub", "default")  # the schema default
+            if hub and request.app[LINKED_KEY].seen(hub):
+                _auto_adopt(request.app)
         if request.method in MUTATING:
             if bundle:  # bearer-authenticated machine client: no ambient credential, so no CSRF
                 if request.content_type not in JSON_TYPES:
@@ -155,6 +160,22 @@ def make_auth_mw(auth: Auth):
 
 
 # ------------------------------------------------------------------ helpers
+def _auto_adopt(app: web.Application) -> None:
+    """A store that exists only under `default` moves to the one hub id an integration polls for."""
+    linked = app[LINKED_KEY].ids()
+    ids = [h for h in linked if h != "default"]
+    if len(ids) != 1 or "default" in linked:  # something polls for `default` itself: it is in use
+        return
+    try:
+        moved = app[STORE_KEY].adopt("default", ids[0])
+    except OSError, StoreError:
+        log.exception("could not move the config of hub default to %s", ids[0])
+        return
+    if moved:
+        log.info("moved the config of hub default to %s (the id Home Assistant polls for)", ids[0])
+        app[NOTIFIER_KEY].notify(ids[0])
+
+
 MAX_ERRORS = 100
 
 
@@ -646,7 +667,28 @@ async def list_hubs(request: web.Request) -> web.Response:
                 "applied_at": None if a is None else a["at"],
             }
         )
-    return jresp({"hubs": out})
+    linked = request.app[LINKED_KEY]
+    have = set(store.hubs())
+    targets = [h for h in linked.ids() if h != "default" and h not in have]
+    adopt = {"from": "default", "to": targets} if "default" in have and targets else None
+    return jresp(
+        {"hubs": out, "linked": linked.entries(), "now": int(request.app[CLOCK_KEY]()), "adopt": adopt}
+    )
+
+
+async def adopt_hub(request: web.Request) -> web.Response:
+    """Explicit move of a store (default: `default`) to a hub id an integration polls for."""
+    body = await read_body(request, schemas.ADOPT)
+    store, src, dst = request.app[STORE_KEY], body["from"], body["to"]
+    if dst not in request.app[LINKED_KEY].ids():
+        raise error(409, "not_linked", "no Home Assistant integration polls for that hub id")
+    if dst in store.hubs():
+        raise error(409, "hub_exists", "that hub already has a config")
+    if not _store_call(store.adopt, src, dst):
+        raise error(404, "nothing_to_adopt", "that hub has no config to move")
+    request.app[NOTIFIER_KEY].notify(dst)
+    _audit(request, f"adopt:{src}", dst)
+    return jresp({"ok": True, "hub": dst})
 
 
 async def config_status(request: web.Request) -> web.Response:
@@ -665,6 +707,9 @@ async def config_status(request: web.Request) -> web.Response:
             "acked_at": ack.get("at"),
             "linked": last_seen is not None,
             "last_seen": last_seen,
+            "hub_last_seen": request.app[LINKED_KEY].last_seen(q["hub"]),
+            "linked_hubs": request.app[LINKED_KEY].entries(),
+            "now": int(request.app[CLOCK_KEY]()),
         }
     )
 
@@ -845,6 +890,8 @@ def create_app(
     app[WAIT_KEY] = wait_seconds
     app[CATALOG_KEY] = Catalog(ha_api, clock)
     app[SEEN_KEY] = {}
+    app[LINKED_KEY] = LinkedHubs(data_dir, clock)
+    _auto_adopt(app)
     app[MEMO_KEY] = {}
     app[SENDER_KEY] = ir_sender
     app[LIMITER_KEY] = SendLimiter(send_clock)
@@ -900,6 +947,7 @@ def create_app(
     ir_routes.add_routes(app, api)
     app.router.add_post(f"{api}/ir/test", ir_test)
     app.router.add_get(f"{api}/hubs", list_hubs)
+    app.router.add_post(f"{api}/hubs/adopt", adopt_hub)
     app.router.add_get(f"{api}/config/status", config_status)
     app.router.add_post(f"{api}/bundle/ack", post_ack)
     app.router.add_get(f"{api}/bundle", get_bundle)

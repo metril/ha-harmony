@@ -5,7 +5,8 @@ import { icon } from '../lib/icons';
 import { counts } from '../lib/model';
 import { Router, hashFor } from '../lib/router';
 import { shared } from '../lib/styles';
-import { ApiError, type HubInfo } from '../lib/api';
+import { ApiError, type ApplyStatus, type HubsResponse } from '../lib/api';
+import { linkInfo, linkProblem, pickHub } from '../lib/hubs';
 import { StoreElement, type ConfirmRequest } from './base';
 import './hh-apply-dialog';
 import './hh-dialog';
@@ -95,7 +96,9 @@ export class HhApp extends StoreElement {
   @state() private applyOpen = false;
   @state() private importOpen = false;
   @state() private confirm: ConfirmRequest | null = null;
-  @state() private hubs: HubInfo[] = [];
+  @state() private hubs: HubsResponse | null = null;
+  @state() private link: ApplyStatus | null = null;
+  private linkTimer?: ReturnType<typeof setInterval>;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -114,11 +117,41 @@ export class HhApp extends StoreElement {
       this.confirm = (e as CustomEvent<ConfirmRequest>).detail;
     });
     void this.loadHubs();
+    void this.loadLink();
+    this.linkTimer = setInterval(() => void this.loadLink(), 15000);
+  }
+  override disconnectedCallback(): void {
+    clearInterval(this.linkTimer);
+    super.disconnectedCallback();
+  }
+
+  /** Applied vs acked rev and whether Home Assistant polls for this hub: visible after navigating away from the apply dialog. */
+  private async loadLink() {
+    try {
+      this.link = await this.store.api.applyStatus(this.store.hub);
+    } catch {
+      /* transient */
+    }
+  }
+
+  private goHub(hub: string) {
+    const u = new URL(location.href);
+    u.searchParams.set('hub', hub);
+    location.href = u.toString();
+  }
+
+  private async adopt(to: string) {
+    try {
+      await this.store.api.adoptHub(to);
+      this.goHub(to);
+    } catch (e) {
+      this.store.toast(e instanceof Error ? e.message : String(e), 'error');
+    }
   }
 
   private async loadHubs() {
     try {
-      this.hubs = (await this.store.api.hubs()).hubs;
+      this.hubs = await this.store.api.hubs();
     } catch (e) {
       if (!(e instanceof ApiError)) throw e; // endpoint not there yet: single hub
     }
@@ -127,6 +160,27 @@ export class HhApp extends StoreElement {
   private answer(yes: boolean) {
     this.confirm?.resolve(yes);
     this.confirm = null;
+  }
+
+  private hubChoices(): string[] {
+    const ids = pickHub(`?hub=${encodeURIComponent(this.store.hub)}`, this.hubs).choices;
+    return ids.includes(this.store.hub) ? ids : [this.store.hub, ...ids];
+  }
+
+  private linkBanners() {
+    const s = this.store;
+    const out = [];
+    const adopt = this.hubs?.adopt;
+    if (adopt)
+      out.push(html`<div class="banner ir" role="status"><span>The config under "${adopt.from}" is not the id Home Assistant polls for. Move it to:</span><span class="sp"></span>
+        ${adopt.to.map((id) => html`<button class="btn sm" @click=${() => void this.adopt(id)}>${id}</button>`)}</div>`);
+    const info = linkInfo(this.link, s.hub);
+    const problem = linkProblem(info, s.hub);
+    if (problem) out.push(html`<div class="banner ir" role="status" id="link-problem">${problem}</div>`);
+    const l = this.link;
+    if (!problem && l && l.applied_rev !== null && l.acked_rev !== l.applied_rev)
+      out.push(html`<div class="banner" role="status" id="link-pending">Applied ${l.applied_rev.slice(0, 8)}; Home Assistant has not confirmed it yet${l.acked_rev ? ` (last confirmed ${l.acked_rev.slice(0, 8)})` : ''}.</div>`);
+    return out;
   }
 
   private rail(): RailItem[] {
@@ -187,9 +241,9 @@ export class HhApp extends StoreElement {
         <button class="skip" @click=${() => this.shadowRoot?.querySelector('main')?.focus()}>Skip to content</button>
         <button class="btn ghost icon menu" aria-label="Menu" aria-expanded=${this.railOpen} @click=${() => (this.railOpen = !this.railOpen)}>${icon('menu')}</button>
         <span class="brand">${icon('hub')} Harmony Editor</span>
-        ${this.hubs.length > 1
-          ? html`<select aria-label="Hub" @change=${(e: Event) => { const u = new URL(location.href); u.searchParams.set('hub', (e.target as HTMLSelectElement).value); location.href = u.toString(); }}>
-              ${this.hubs.map((h) => html`<option value=${h.id} ?selected=${h.id === s.hub}>${h.id}${h.has_applied ? '' : ' (no config yet)'}</option>`)}
+        ${this.hubChoices().length > 1
+          ? html`<select aria-label="Hub" @change=${(e: Event) => this.goHub((e.target as HTMLSelectElement).value)}>
+              ${this.hubChoices().map((id) => html`<option value=${id} ?selected=${id === s.hub}>${id}${this.hubs?.hubs.find((h) => h.id === id)?.has_applied ? '' : ' (no config yet)'}</option>`)}
             </select>`
           : nothing}
         <span class="sp"></span>
@@ -209,6 +263,7 @@ export class HhApp extends StoreElement {
         <div class="col">
           <hh-draft-bar></hh-draft-bar>
           <main id="main" tabindex="-1" class=${classMap({ wide: sec === 'remote' })}>
+            ${this.linkBanners()}
             ${s.saveState === 'conflict'
               ? html`<div class="banner ir" role="alert">
                   <span>Changed in another tab or session.</span><span class="sp"></span>

@@ -606,3 +606,34 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
         FLOW_FIXTURE.parent.mkdir(exist_ok=True)
         FLOW_FIXTURE.write_text(json.dumps(got["draft"]["config"], indent=1, sort_keys=True) + "\n")
     assert [p for p in problems if "Failed to load resource" not in p] == []
+
+
+async def test_editor_follows_the_hub_id_the_integration_polls(browser, site):
+    """The reported bug: the integration polls the add-on with its own hub id (404 until something is
+    applied), while the editor used `default`, so nothing was ever fetched or acked."""
+    hub = "living-room-hub"
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    assert (await api(site, "GET", f"/api/v1/bundle?hub={hub}", headers=auth))[0] == 404
+    assert (await api(site, "GET", f"/api/v1/bundle/wait?hub={hub}&rev=", headers=auth))[0] == 204
+
+    problems: list[str] = []
+    page = await open_editor(browser, site, problems)  # no ?hub=
+    await page.get_by_text("Set up your first hub config").wait_for()
+    await page.get_by_role("button", name="Import YAML", exact=True).click()
+    await page.locator("textarea").fill(YAML)
+    await page.get_by_role("button", name="Import as draft").click()
+    bar = page.get_by_role("region", name="Draft")
+    await bar.get_by_text("1 change not applied").wait_for()
+    await bar.get_by_role("button", name="Review & apply").click()
+    await page.get_by_role("button", name="Apply to hub").click()
+    await page.get_by_text("Saved as rev 1").wait_for()
+
+    status, got = await api(site, "GET", f"/api/v1/bundle?hub={hub}", headers=auth)
+    assert status == 200 and got["hub_id"] == hub  # servable to the integration's id
+    body = {"hub": hub, "rev": got["rev"], "result": "ok"}
+    assert (await api(site, "POST", "/api/v1/bundle/ack", json=body, headers=auth))[0] == 200
+    await page.get_by_text("(pending)").wait_for(state="detached", timeout=8000)
+    await page.get_by_text("Remote pages updated").wait_for()
+    st = (await api(site, "GET", f"/api/v1/config/status?hub={hub}"))[1]
+    assert st["acked_rev"] == st["applied_rev"] and st["result"] == "ok"
+    assert [p for p in problems if "Failed to load resource" not in p] == []

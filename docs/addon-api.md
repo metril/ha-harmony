@@ -37,7 +37,8 @@ the table below.
 | POST | `/api/v1/config/import_yaml` | ingress | Upload YAML as the draft |
 | GET | `/api/v1/config/export_yaml` | ingress | Draft or applied config as YAML |
 | GET | `/api/v1/config/status` | ingress | Did the integration apply it? |
-| GET | `/api/v1/hubs` | ingress | Hubs known to the store |
+| GET | `/api/v1/hubs` | ingress | Hubs known to the store, hub ids integrations poll for, adoptable stores |
+| POST | `/api/v1/hubs/adopt` | ingress | Move a store (default: `default`) to a linked hub id |
 | GET | `/api/v1/ha/entities` | ingress | Home Assistant entities for pickers |
 | GET | `/api/v1/ha/services` | ingress | Home Assistant services for pickers |
 | POST | `/api/v1/ir/test` | ingress | Fire one IR code through `ha_harmony.send_ir` |
@@ -130,9 +131,23 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
 ### Status and hubs
 
 - `GET config/status?hub=` -> `{hub, applied_rev, acked_rev, result: "ok"|"error"|null, detail, acked_at,
-  linked, last_seen}`. `applied_rev` is the bundle rev (a content hash). `linked` is true once any
-  authenticated bundle request was seen since the add-on started.
-- `GET hubs` -> `{hubs: [{id, has_draft, has_applied, applied_rev, applied_at}]}`.
+  linked, last_seen, hub_last_seen, linked_hubs, now}`. `applied_rev` is the bundle rev (a content
+  hash). `linked` is true once any authenticated bundle request was seen since the add-on started.
+  `hub_last_seen` is when an integration last polled for **this** hub id (null: never), `linked_hubs`
+  is every id polled for, `[{id, last_seen}]` newest first, and `now` the add-on clock (unix seconds),
+  so a client can judge freshness without its own clock. The integration long-polls (about 55 s), so
+  a `hub_last_seen` older than a few minutes means nothing is polling for that id.
+- Linked hub ids: every authenticated `GET bundle` or `bundle/wait` with a valid `hub` records the id
+  and the time (404s included), in memory and in `/data/linked_hubs.json` (at most 32 ids).
+- `GET hubs` -> `{hubs: [{id, has_draft, has_applied, applied_rev, applied_at}], linked: [{id,
+  last_seen}], now, adopt: {from: "default", to: [id]}|null}`. `adopt` is set when a store exists
+  under `default` and some linked hub id has no store of its own (the editor offers the move).
+- **Adoption.** When exactly one hub id other than `default` is linked and has no store, and `default`
+  has one, the add-on moves the `default` store file to that id automatically (one atomic rename,
+  logged, repeating it does nothing), so a config applied under `default` is servable to the
+  integration without re-importing. With several linked ids it only offers it (`adopt` above).
+- `POST hubs/adopt` body `{from?: "default", to}` -> `{ok:true, hub}`; `409 not_linked` (no integration
+  polls for `to`), `409 hub_exists` (`to` already has a store), `404 nothing_to_adopt`.
 
 ### Home Assistant (read only)
 

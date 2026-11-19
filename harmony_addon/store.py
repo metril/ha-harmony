@@ -98,6 +98,20 @@ class Store:
             return []
         return [n for n in names if HUB_ID.fullmatch(n)][:limit]
 
+    def adopt(self, src: str, dst: str) -> bool:
+        """Move hub `src`'s state to `dst` (one atomic rename). False, and nothing changes, when `src`
+        has no state or `dst` already has some, so repeating it is harmless."""
+        a, b = self._path(src), self._path(dst)
+        if not a.exists() or b.exists():
+            return False
+        os.replace(a, b)
+        dfd = os.open(self.dir, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+        return True
+
     def set_ack(self, hub: str, ack: dict[str, Any]) -> dict[str, Any]:
         state = self.load(hub)
         state["ack"] = ack

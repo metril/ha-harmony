@@ -1,20 +1,17 @@
 import './app.css';
 import { Api } from './lib/api';
-import { hubFromSearch } from './lib/router';
+import { pickHub } from './lib/hubs';
 import { Store, setStore } from './lib/store';
 import './components/hh-app';
 
 async function boot(): Promise<void> {
   const api = new Api();
-  let hub = hubFromSearch(location.search);
-  if (!new URLSearchParams(location.search).has('hub')) {
-    // No ?hub=: use the hub the add-on already holds (the integration's id) rather than an empty "default".
-    try {
-      const ids = (await api.hubs()).hubs.map((h) => h.id);
-      if (ids.length && !ids.includes(hub)) hub = ids[0] as string;
-    } catch {
-      /* single-hub fallback */
-    }
+  // ?hub= wins; else the hub id Home Assistant polls for; never `default` once a linked hub exists.
+  let hub = 'default';
+  try {
+    hub = pickHub(location.search, await api.hubs()).hub;
+  } catch {
+    hub = pickHub(location.search, null).hub;
   }
   const store = new Store(api, hub);
   setStore(store);

@@ -23,6 +23,7 @@ from custom_components.ha_harmony.addon_link import (
     BundleRejected,
     parse_bundle,
 )
+from harmony_addon.app import LINKED_KEY
 from harmony_core import BUNDLE_SCHEMA
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
@@ -647,3 +648,19 @@ async def test_first_link_confirm_shows_what_is_linked(hass, fake_addon):
     res = await hassio_flow(hass, host="addon-host", port=8199, token="t")
     assert res["type"] is FlowResultType.FORM and res["step_id"] == "hassio_confirm"
     assert res["description_placeholders"] == {"slug": "ha_harmony_editor", "host": "addon-host:8199"}
+
+
+async def test_link_says_nothing_applied_after_a_quiet_poll(hass, fake_hub, fake_addon):
+    """The add-on holds a wait open for a hub with nothing applied (204). That must not read as
+    `connecting`: the integration asks once per cycle and the state stays `nothing_applied`; the
+    add-on also learns the hub id from those polls."""
+    hub = await fake_hub(hub_handler([]))
+    entry = await setup(hass, hub, fake_addon.link_data())
+    coord = entry.runtime_data
+    await until(lambda: coord.link_state == "nothing_applied")
+    await asyncio.sleep(2.6)  # past the add-on's 2 s wait (the fake's `wait_seconds`)
+    assert coord.link_state == "nothing_applied"
+    assert HUB_ID in fake_addon.app[LINKED_KEY].ids()
+    fake_addon.apply(SOURCE)
+    await until(lambda: coord.link_state in ("ok", "connecting") and coord.rev is not None)
+    await hass.config_entries.async_unload(entry.entry_id)

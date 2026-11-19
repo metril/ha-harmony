@@ -109,6 +109,18 @@ export interface ApplyStatus {
   acked_at: number | null;
   linked: boolean;
   last_seen: number | null;
+  /** when an integration last polled for THIS hub id (older add-ons omit the three fields below) */
+  hub_last_seen?: number | null;
+  linked_hubs?: { id: string; last_seen: number }[];
+  /** add-on clock, unix seconds */
+  now?: number;
+}
+export interface HubsResponse {
+  hubs: HubInfo[];
+  linked: { id: string; last_seen: number }[];
+  now?: number;
+  /** a store under `default` that can move to one of these linked ids */
+  adopt: { from: string; to: string[] } | null;
 }
 export interface HubInfo {
   id: string;
@@ -289,7 +301,11 @@ export class Api {
   }
 
   health = () => this.request<Health>('GET', 'api/v1/health');
-  hubs = () => this.request<{ hubs: HubInfo[] }>('GET', 'api/v1/hubs');
+  hubs = async (): Promise<HubsResponse> => {
+    const r = await this.request<Partial<HubsResponse> & { hubs: HubInfo[] }>('GET', 'api/v1/hubs');
+    return { linked: [], adopt: null, ...r };
+  };
+  adoptHub = (to: string, from = 'default') => this.request<{ ok: true; hub: string }>('POST', 'api/v1/hubs/adopt', { body: { from, to } });
   getConfig = (hub: string, full = false) =>
     this.request<ConfigResponse>('GET', 'api/v1/config', { query: { hub, full: full ? '1' : undefined } });
   /** The source config of the applied version or one history row, by its integer rev. */
