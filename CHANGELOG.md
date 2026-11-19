@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Themes groundwork (no visible change yet): `proto/themes.yaml` is the single source for the remote UI themes (Cards plus midnight, daylight and high-contrast presets, a named 12-colour palette each); `tools/gen_themes.py` derives each colour's ink and pressed shade, enforces WCAG contrast on every text/surface pair, and generates the Python, C and editor tables. Integer-only ink/pressed/RGB565 maths, a 99-byte wire theme, user-theme resolution and contrast fixes are pinned across Python, TypeScript and C by shared vectors (`tests/vectors/themes.json`).
+
 ## 0.3.10 (2026-11-18)
 
 - Editor: History shows one status on the newest revision (On the remote, Sending..., Not sent, or Rejected by hub with a See why reason) instead of three badges; older revisions show only Compare and Restore. One shared status chip now draws the Valid chip and the History status, and the apply dialog, the pending banner (no more raw hash) and the toasts use the same wording: saved, sending, on the remote, rejected.

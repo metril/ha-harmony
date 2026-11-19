@@ -91,6 +91,13 @@ if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
   endforeach()
 endif()
 
+# Theme tables vs theme.h and the shared integer-derivation vectors.
+if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
+  add_executable(test_theme test_theme.c)
+  target_link_libraries(test_theme PRIVATE hp_remote_app hp_hub cjson)
+  add_test(NAME theme COMMAND test_theme ${CMAKE_SOURCE_DIR}/tests/vectors/themes.json)
+endif()
+
 # Host tool: dump the remote UI's reference screens as PNGs (build/tests/c/dump_remote_png <outdir>).
 if(TARGET hp_remote_app AND NOT CMAKE_CROSSCOMPILING)
   add_executable(dump_remote_png dump_remote_png.c)
