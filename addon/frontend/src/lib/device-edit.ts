@@ -1,4 +1,5 @@
 // Pure edits of one device: commands, power, inputs, ports, repeats, naming rules. No DOM.
+import { commandNames } from './bt';
 import { utf8Bytes, NAME_MAX } from './codes';
 import { LIMITS, type Config, type Device, type IrAction } from './model';
 
@@ -116,6 +117,7 @@ export const setPowerCode = (cfg: Config, id: string, which: 'on' | 'off' | 'tog
 /** Status line of the power model for cards. */
 export function powerStatus(d: Device): { text: string; tone: 'ok' | 'ir' | 'none' } {
   const p = d.power;
+  if (d.kind === 'bt') return { text: 'Bluetooth', tone: 'none' };
   if (p?.on && p.off) return { text: 'Power on + off', tone: 'ok' };
   if (p?.toggle) return { text: 'Power toggle only', tone: 'ir' };
   if (p?.on || p?.off) return { text: 'Half a power pair', tone: 'ir' };
@@ -125,6 +127,7 @@ export function powerStatus(d: Device): { text: string; tone: 'ok' | 'ir' | 'non
 /** Where the device came from, for the source chip. */
 export function sourceLabel(d: Device): string {
   if (isHaDevice(d)) return 'Home Assistant';
+  if (d.kind === 'bt') return d.address ? `Bluetooth · ${d.address}` : 'Bluetooth · not paired yet';
   const s = d.source;
   if (s?.['kind'] === 'harmony_archive') return `IR archive · ${String(s['mfr'] ?? '')} ${String(s['model_file'] ?? '').replace(/\.json$/, '')}`.trim();
   if (s?.['kind']) return `Imported · ${String(s['kind'])}`;
@@ -132,12 +135,13 @@ export function sourceLabel(d: Device): string {
 }
 
 export function commandCount(d: Device): number {
-  return Object.keys(d.commands ?? {}).length;
+  return commandNames(d).length;
 }
 
-/** Total commands / inputs of the IR devices (Home Assistant devices are not compiled, so they do not count). */
+/** Total commands / inputs of the IR devices (Home Assistant devices are not compiled, and Bluetooth commands are
+ *  not IR codes, so neither counts against the IR limits). */
 export function irTotals(cfg: Config): { commands: number; inputs: number } {
-  const ir = (cfg.devices ?? []).filter((d) => !isHaDevice(d));
+  const ir = (cfg.devices ?? []).filter((d) => !isHaDevice(d) && d.kind !== 'bt');
   return { commands: ir.reduce((n, d) => n + Object.keys(d.commands ?? {}).length, 0), inputs: ir.reduce((n, d) => n + Object.keys(d.inputs ?? {}).length, 0) };
 }
 /** Why adding `n` more of this kind would pass the hub's limit (compiler MAX_*), or null. `ha`: the target is a Home Assistant device. */

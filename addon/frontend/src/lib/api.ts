@@ -234,6 +234,63 @@ export interface Health {
   capabilities?: { ha_actions?: boolean; page_format?: number };
 }
 
+export type BtLinkState = 'off' | 'starting' | 'ready' | 'no_adapter' | 'disabled';
+export interface BtHost {
+  slot: number;
+  addr: string;
+  name?: string;
+  transport: 'classic' | 'le';
+  connected: boolean;
+  configured?: boolean;
+}
+export interface BtRemote {
+  slot: number;
+  addr: string;
+  name?: string;
+  connected: boolean;
+  battery?: number;
+  configured?: boolean;
+}
+export interface BtState {
+  state: BtLinkState;
+  discoverable: boolean;
+  discoverable_secs?: number;
+  le?: boolean;
+  gen?: number;
+  window?: 'host' | 'remote';
+  pairing?: { result: 'ok' | 'failed' | 'refused'; addr?: string; name?: string; transport?: 'classic' | 'le'; kind?: 'host' | 'remote' };
+  hosts: BtHost[];
+  remotes: BtRemote[];
+  candidates?: { addr: string; name?: string; rssi: number }[];
+}
+export interface BtLimits {
+  hosts_max: number;
+  conn_max: number;
+  remotes_max: number;
+  le_bonds_max: number;
+  pages: number[];
+  le: boolean;
+}
+export interface BtStatus {
+  hub: string;
+  status: 'ok' | 'unsupported' | 'offline' | 'unknown';
+  state: BtState | null;
+  limits: BtLimits | null;
+  listening: boolean;
+  age_s: number | null;
+}
+export interface BtCodes {
+  builtins: { name: string; page: number; usage: number; default: boolean }[];
+  remote_keys: { name: string; page: number; usage: number; key: string }[];
+  keys: string[];
+}
+export interface BtEvents {
+  events: { seq: number; slot: number; page: number; usage: number; down: boolean; t: number }[];
+  last: number;
+  listening: boolean;
+  dropped: boolean;
+}
+
 export const KEEPALIVE_MAX = 60 * 1024;
 export class ApiError extends Error {
   constructor(
@@ -378,6 +435,18 @@ export class Api {
     this.request<IrCandidates>('GET', 'api/v1/ir/candidates', { query: { brand, type, limit: String(limit) } });
   irParse = (kind: 'pronto' | 'flipper' | 'smartir', text: string) =>
     this.request<IrParsed>('POST', 'api/v1/ir/parse', { body: { kind, text } });
+  // Bluetooth relay (docs/addon-api.md "Bluetooth relay"). Commands answer once the integration has run them on the hub.
+  btStatus = (hub: string) => this.request<BtStatus>('GET', 'api/v1/bt/status', { query: { hub } });
+  btCodes = () => this.request<BtCodes>('GET', 'api/v1/bt/codes');
+  btPair = (hub: string, mode: 'host' | 'remote', transport: 'any' | 'classic' | 'le' = 'any', secs = 120) =>
+    this.request<{ ok: true; state: BtState | null }>('POST', 'api/v1/bt/pair', { body: { hub, mode, transport, secs } });
+  btPairStop = (hub: string) => this.request<{ ok: true }>('POST', 'api/v1/bt/pair/stop', { body: { hub } });
+  btPick = (hub: string, addr: string) => this.request<{ ok: true }>('POST', 'api/v1/bt/pick', { body: { hub, addr } });
+  btForget = (hub: string, slot: number, kind: 'host' | 'remote') => this.request<{ ok: true }>('POST', 'api/v1/bt/forget', { body: { hub, slot, kind } });
+  btKey = (hub: string, slot: number, page: number, usage: number, action: 'down' | 'up' | 'press' = 'press') =>
+    this.request<{ ok: true }>('POST', 'api/v1/bt/key', { body: { hub, slot, page, usage, action } });
+  btListen = (hub: string, on: boolean) => this.request<{ ok: true; listening: boolean }>('POST', 'api/v1/bt/listen', { body: { hub, on } });
+  btEvents = (hub: string, after: number) => this.request<BtEvents>('GET', 'api/v1/bt/events', { query: { hub, after: String(after) } });
   /** Fire one inline code through Home Assistant. 429 carries retry_after_ms. */
   irTest = (hub: string, ir: IrAction, portMask?: number) =>
     this.request<{ ok: true; action: IrAction }>('POST', 'api/v1/ir/test', {

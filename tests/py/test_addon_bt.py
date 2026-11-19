@@ -305,3 +305,15 @@ async def test_editor_routes_need_the_csrf_header_and_exchange_needs_the_token(c
     assert r.status == 403
     r = await c.post("/api/v1/bundle/bt", json={"hub": HUB, "supported": True, "online": True}, headers=H)
     assert r.status == 401  # the editor's header is not the integration's token
+
+
+async def test_codes_tables_match_the_core_and_need_no_hub(c):
+    from harmony_core.bt_codes import BUILTINS, DEFAULT_COMMANDS, DEFAULT_REMOTE_KEYS
+
+    r = await c.get("/api/v1/bt/codes")
+    assert r.status == 200
+    got = await r.json()
+    assert {b["name"] for b in got["builtins"]} == set(BUILTINS)
+    assert {b["name"] for b in got["builtins"] if b["default"]} == set(DEFAULT_COMMANDS)
+    assert [(k["name"], k["key"]) for k in got["remote_keys"]] == list(DEFAULT_REMOTE_KEYS)
+    assert {"volume_up", "key_100", "key_109"} <= set(got["keys"])

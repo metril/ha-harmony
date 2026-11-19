@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
+import { commandNames } from '../lib/bt';
 import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { HA_DOMAINS } from '../lib/studio-state';
@@ -116,7 +117,7 @@ export class HhActionPicker extends LitElement {
   private deviceFields() {
     const devs = this.cfg.devices ?? [];
     const d = devs.find((x) => x.id === this.device);
-    const names = !d ? [] : this.kind === 'input' ? Object.keys(d.inputs ?? {}) : Object.keys(d.commands ?? {});
+    const names = !d ? [] : this.kind === 'input' ? Object.keys(d.inputs ?? {}) : commandNames(d);
     return html`
       <label>Device
         <select .value=${this.device} @change=${(e: Event) => { this.device = (e.target as HTMLSelectElement).value; this.name = ''; }}>

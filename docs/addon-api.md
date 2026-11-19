@@ -48,6 +48,7 @@ the table below.
 | GET | `/api/v1/ir/candidates` | ingress | Power code candidates |
 | POST | `/api/v1/ir/parse` | ingress | Parse pasted Pronto / Flipper / SmartIR |
 | GET | `/api/v1/bt/status` | ingress | Bluetooth: the hub's latest `bt_state` and limits, or why there is none |
+| GET | `/api/v1/bt/codes` | ingress | Bluetooth: built-in command names, default command set, default remote key map, key names |
 | POST | `/api/v1/bt/pair` | ingress | Bluetooth: open a pairing window (host or remote) |
 | POST | `/api/v1/bt/pair/stop` | ingress | Bluetooth: close the pairing window |
 | POST | `/api/v1/bt/pick` | ingress | Bluetooth: bond a scanned remote by address |
@@ -254,6 +255,10 @@ validates every command again against the hub's limits.
   remotes: [{slot, addr, name?, connected, battery?, configured?}], candidates?: [{addr, name?, rssi}]}`, addresses upper-case);
   it is `null` when none is known. `limits` is `hello_ack.bt`: `{hosts_max, conn_max, remotes_max, le_bonds_max, pages, le}`.
   The editor polls this (1 s while its Bluetooth view is open); polling it keeps the integration on its fast poll.
+- `GET bt/codes` -> `{builtins: [{name, page, usage, default}], remote_keys: [{name, page, usage, key}], keys: [str]}`: static
+  tables from `harmony_core.bt_codes` / `keys` (needs no hub): every built-in command name with its HID code (`default`: part of
+  the default command set), the default usage -> key map of a remote (`name` is the built-in whose code it is), and the key
+  names a remote's `keys` may map to (`key_<n>`, n < 128, also works).
 - Commands, each `{hub?, ...}`, answered `200 {ok: true, state}` once the integration has run it against the hub (up to 10 s;
   `state` is the snapshot reported with the outcome, the pairing result itself arrives later in `bt/status`):
   - `POST bt/pair` `{mode?: "host"|"remote" (host), transport?: "any"|"classic"|"le" (any), secs?: 1..300 (120)}`.

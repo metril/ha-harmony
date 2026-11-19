@@ -263,6 +263,26 @@ async def status(request: web.Request) -> web.Response:
     )
 
 
+_CODES: dict[str, Any] = {}
+
+
+async def codes(request: web.Request) -> web.Response:
+    """Read-only tables the editor needs (so it never copies them): built-in command names with their HID code, the
+    default command set, the default remote usage -> key map and the key names a remote's `keys` may use."""
+    if not _CODES:
+        from harmony_core.bt_codes import BUILTINS, DEFAULT_COMMANDS, DEFAULT_REMOTE_KEYS
+        from harmony_core.keys import KEY_CODES
+
+        _CODES["builtins"] = [
+            {"name": n, "page": p, "usage": u, "default": n in DEFAULT_COMMANDS} for n, (p, u) in BUILTINS.items()
+        ]
+        _CODES["remote_keys"] = [
+            {"name": n, "page": BUILTINS[n][0], "usage": BUILTINS[n][1], "key": k} for n, k in DEFAULT_REMOTE_KEYS
+        ]
+        _CODES["keys"] = [*KEY_CODES, *(f"key_{n}" for n in range(100, 110))]
+    return jresp(_CODES)
+
+
 async def pair(request: web.Request) -> web.Response:
     body = await read_body(request, PAIR)
     cmd = {"op": "pair", **{k: v for k, v in body.items() if k != "hub"}}
@@ -327,6 +347,7 @@ async def events(request: web.Request) -> web.Response:
 def add_routes(app: web.Application, api: str) -> None:
     app[BT_KEY] = BtRelay()
     app.router.add_get(f"{api}/bt/status", status)
+    app.router.add_get(f"{api}/bt/codes", codes)
     app.router.add_post(f"{api}/bt/pair", pair)
     app.router.add_post(f"{api}/bt/pair/stop", pair_stop)
     app.router.add_post(f"{api}/bt/pick", pick)

@@ -214,6 +214,7 @@ export class HhDevices extends StoreElement {
           <span class="chip">${commandCount(d)} command${commandCount(d) === 1 ? '' : 's'}</span>
           ${inputs ? html`<span class="chip">${inputs} input${inputs === 1 ? '' : 's'}</span>` : nothing}
           ${ha ? html`<span class="chip acc">Home Assistant</span>` : nothing}
+          ${d.kind === 'bt' ? html`<span class="chip acc">Bluetooth</span>` : nothing}
           ${errs ? html`<span class="chip bad">${errs} error${errs === 1 ? '' : 's'}</span>` : nothing}
         </div>
       </div>
@@ -392,6 +393,8 @@ export class HhDevices extends StoreElement {
   // ------------------------------------------------------------ page
   private devicePage(d: Device) {
     const ha = isHaDevice(d);
+    const bt = d.kind === 'bt';
+    if (bt) void import('./hh-bt-device');
     const idx = this.devices.indexOf(d);
     const bytes = byteCounter(d.name ?? d.id);
     return html`
@@ -406,7 +409,9 @@ export class HhDevices extends StoreElement {
         <input class="name" aria-label="Device name" .value=${d.name ?? d.id} @change=${(e: Event) => this.put(patchDevice(this.store.config, d.id, { name: trimBytes((e.target as HTMLInputElement).value.trim()) || undefined }), `name${d.id}`)} />
         <span class="muted">${bytes.used}/31 B · id <span class="mono">${d.id}</span> · ${sourceLabel(d)}${this.errorsOf(idx) ? ` · ${this.errorsOf(idx)} errors` : ''}</span>
       </div>
-      ${ha
+      ${bt
+        ? html`<div class="page"><div class="side full"><hh-bt-device .device=${d}></hh-bt-device></div></div>`
+        : ha
         ? html`<div class="page"><div class="side full">${this.haDevice(d)}</div></div>`
         : html`<div class="page">
             <div>${this.view === 'keypad' ? this.keypad(d) : this.list(d)}</div>
