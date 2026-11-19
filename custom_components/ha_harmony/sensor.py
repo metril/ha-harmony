@@ -158,6 +158,8 @@ class HarmonyFirmwareUpdate(HarmonyEntity, SensorEntity):
             "build": c.ota_build,
             "error": c.ota_error,
             "rollback_reason": c.ota_reason,
+            "fw_build": c.client.fw_build,
+            "ota_key": c.client.ota_key,  # "dev" = the hub trusts the public test key
         }
 
 

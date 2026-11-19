@@ -44,7 +44,7 @@ Messages (`proto/schema.yaml`; every reply carries the request id):
 
 | id | name | fields | notes |
 |---:|------|--------|-------|
-| 20 | `ota_begin` | `target` (1), `size`, `build`, `sha` | `size` = whole image bytes, `sha` = hex SHA-512 of the whole file (transfer check); refused: target not hub, size outside 144..144+32 MiB, build below the installed one (`ota-build`), too little space (`statvfs`, needs 2x size + 64 KiB when it reports) |
+| 20 | `ota_begin` | `target` (1), `size`, `build`, `sha` | `size` = whole image bytes, `sha` = hex SHA-512 of the whole file (transfer check); refused: target not hub, size outside 144..144+32 MiB, build not newer than the running one (floor = max(`ota-build`, compiled-in `HP_BUILD_ID`); an equal build is refused too: `ota_downgrade`), too little space (`statvfs`, needs 2x size + 64 KiB when it reports) |
 | 21 | `ota_chunk` | `offset`, `data` (base64) | at most 4096 bytes decoded; must start at the hub's offset (a retransmit of held bytes is accepted, a gap is `ota_offset`) |
 | 22 | `ota_end` | | hub checks size, whole-file digest, declared == signed build, then `ota_apply_staged` |
 | 23 | `ota_abort` | | drops the upload (owner only) |
@@ -52,7 +52,7 @@ Messages (`proto/schema.yaml`; every reply carries the request id):
 
 Errors are `error` with code `ota_unsupported` (no `--ota-dir`), `ota_busy`, `ota_state`, `ota_offset`, `ota_size`,
 `ota_target`, `ota_chunk`, `ota_no_space`, `ota_io`, `ota_sha`, `ota_verify` (message names the signature/digest/format
-failure), `ota_downgrade`, `ota_bad_request`.
+failure), `ota_downgrade`, `ota_not_ready` (the hook has not written its health mark this boot, or `ota-pending` still exists), `ota_dev_key`, `ota_bad_request`.
 
 One upload at a time. A second `ota_begin` from another connection while the first is connected is `ota_busy`; when the
 owner's connection drops the upload stays and any `ota_begin` with the same size/build/sha resumes it (the reply's
@@ -71,9 +71,10 @@ Files in the daemon's data dir (`/data/ha-harmony`; `--ota-dir`, default on a re
 |------|--------|---------|
 | `hub` | apply | the binary the boot hook runs |
 | `hub.prev` | apply | hard link to the build before the last update |
-| `ota-pending` | daemon before the swap, hook at the health mark | `build=N`: a fresh build that has not proven itself |
+| `ota-pending` | daemon, after `hub.prev` is in place and immediately before the rename; hook at the health mark | `build=N`, `prev=M`: a fresh build that has not proven itself. A cut earlier leaves `hub.prev` hard-linked to `hub`, so the hook's rename is a no-op and an older `hub.prev` can never be installed |
 | `ota-restart` | daemon after the swap | asks the hook for an immediate relaunch (it cannot see the exit status) |
-| `ota-build` | daemon | build id of the last applied image: the downgrade floor |
+| `ota-build` | daemon (with the marker), hook on rollback (`prev=M`) | build id of the installed binary: the downgrade floor |
+| `ha-harmony.healthy` (tmpfs) | hook | written at the health mark; the daemon (`--health-file`) refuses `ota_begin` until it exists. Removed while an updated build is on probation |
 | `ota-rollback` | hook | `build=N`, `reason=boot_unclean\|died_early`, `at=...`: what was rolled back and why |
 
 `ota_apply_staged` verifies, copies the payload to `hub.new` re-hashing it against the signed digest, hard-links the
@@ -95,6 +96,13 @@ Boot hook (`tools/boot/rcS.harmony`):
 The daemon reports `ota-rollback` as `ota_status rolled_back` after every hello until the next successful update
 removes it. The integration turns that into a repair issue.
 
+## Dev key
+
+The compiled-in dev key's seed is public. A build carrying it accepts updates only when started with `--ota-allow-dev` (hook conf
+`ota_allow_dev=1`, default 0); otherwise `ota_begin` is `ota_dev_key`. `hello_ack` carries `fw_build` and `ota_key` (`dev` or
+`release`) whenever updates are enabled. The integration shows both on the Firmware update sensor, raises a repair issue for a dev-key hub and
+refuses `install_firmware` on it unless the call sets `allow_dev_key: true`. Set the running build id with `-DHP_BUILD_ID=N`.
+
 ## Home Assistant
 
 Service `ha_harmony.install_firmware {path, config_entry?}`. A service rather than an `update` entity because there is no
@@ -103,7 +111,8 @@ release feed to compare versions against: an install is a deliberate act on a lo
 the `HOTA` magic, format, target (hub) and exact file size for a friendly error and never sends anything else; the hub's
 verification is the authority. Progress: `sensor.<hub>_firmware_update` (`idle`, `uploading`, `applying`, `restarting`,
 `installed`, `failed`, `rolled_back`; attributes `progress`, `build`, `error`, `rollback_reason`). A dropped connection
-mid-upload is resumed from the hub's offset (3 attempts). A rollback becomes a warning repair issue
+mid-upload is resumed from the hub's offset (3 attempts). `ota_end` is sent once and never retried: after it only the hub's reconnect
+reporting the new `fw_build` (or a rollback of that build) decides the outcome. A rollback becomes a warning repair issue
 `ota_rolled_back_<hub>_<build>`, cleared by the next successful install. Procedure and bench gate:
 `docs/runbooks/ota-update.md`.
 

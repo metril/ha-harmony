@@ -30,10 +30,14 @@ def make_image(payload: bytes, build: int = 12, target: int = 1, trim: int = 0) 
 class ScriptedHub:
     """Holds one upload like the daemon does: begin returns the offset it has, chunks append in order."""
 
-    def __init__(self, *, rollback=None, drop_after=None, fail_end=None):
+    def __init__(self, *, rollback=None, drop_after=None, fail_end=None, ota_key="release", lose_end_reply=False):
         self.rollback = rollback  # (build, reason) pushed after hello
         self.drop_after = drop_after  # close the first connection after this many chunks
         self.fail_end = fail_end  # error code answered to ota_end
+        self.ota_key = ota_key
+        self.lose_end_reply = lose_end_reply  # apply, then vanish without answering ota_end (the daemon exits)
+        self.fw_build = 11
+        self.pending_build = 0
         self.held = bytearray()
         self.begins = []
         self.ends = 0
@@ -45,12 +49,13 @@ class ScriptedHub:
         self.seen.append(t)
         reply = {"v": 1, "id": rid}
         if t == "hello":
-            await ws.send_json({**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": []}})
+            await ws.send_json({**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "fw_build": self.fw_build, "ota_key": self.ota_key}})
             if self.rollback:
                 await ws.send_json({"v": 1, "id": 0, "t": "ota_status", "d": {
                     "state": "rolled_back", "offset": 0, "size": 0, "build": self.rollback[0], "reason": self.rollback[1]}})  # fmt: skip
         elif t == "ota_begin":
             self.begins.append(d)
+            self.pending_build = d["build"]
             await ws.send_json({**reply, "t": "ota_status", "d": {"state": "receiving", "offset": len(self.held), "size": d["size"]}})  # fmt: skip
         elif t == "ota_chunk":
             assert d["offset"] == len(self.held), "chunks must continue at the held offset"
@@ -65,7 +70,10 @@ class ScriptedHub:
             if self.fail_end:
                 await ws.send_json({**reply, "t": "error", "d": {"code": self.fail_end, "message": "signature check failed"}})  # fmt: skip
             else:
-                await ws.send_json({**reply, "t": "ota_status", "d": {"state": "applied", "offset": 0, "size": 0, "build": 12}})  # fmt: skip
+                self.fw_build = self.pending_build
+                if not self.lose_end_reply:
+                    await ws.send_json({**reply, "t": "ota_status", "d": {"state": "applied", "offset": 0, "size": 0, "build": self.fw_build}})  # fmt: skip
+                await ws.close()  # the daemon exits for the supervisor; the client reconnects
         elif t == "ping":
             await ws.send_json({**reply, "t": "pong", "d": {}})
 
@@ -241,3 +249,55 @@ def test_parse_image_reads_build_and_whole_file_digest():
     img = make_image(b"abc", build=77)
     info = parse_image(img)
     assert info.build == 77 and info.sha512 == hashlib.sha512(img).hexdigest() and info.size == len(img)
+
+
+async def test_a_lost_ota_end_reply_never_uploads_or_applies_twice(hass, rig, fw_dir):
+    hub = ScriptedHub(lose_end_reply=True)
+    c = await rig(hub)
+    img = make_image(bytes(range(256)) * 40, build=12)
+    f = fw_dir / "lost.img"
+    f.write_bytes(img)
+    await install(hass, f)
+    assert hub.ends == 1 and len(hub.begins) == 1  # exactly one begin and one end
+    assert c.ota_state == "restarting" and c.client.fw_build == 12
+
+
+async def test_never_confirmed_build_fails_the_update_without_resending(hass, rig, fw_dir, monkeypatch):
+    hub = ScriptedHub(lose_end_reply=True)
+    c = await rig(hub)
+    hub.pending_build = 0
+    monkeypatch.setattr(type(c), "_await_build", lambda self, build, tries=480: _never(self, build), raising=True)
+    f = fw_dir / "x.img"
+    f.write_bytes(make_image(b"k" * 300, build=12))
+    with pytest.raises(HomeAssistantError):
+        await install(hass, f)
+    assert hub.ends == 1 and c.ota_state == "failed"
+
+
+async def _never(self, build):
+    return False
+
+
+async def test_dev_key_hub_needs_an_explicit_opt_in(hass, rig, fw_dir):
+    hub = ScriptedHub(ota_key="dev")
+    c = await rig(hub)
+    reg = ir.async_get(hass)
+    assert reg.async_get_issue("ha_harmony", f"ota_dev_key_{HUB_ID}") is not None
+    f = fw_dir / "d.img"
+    f.write_bytes(make_image(b"d" * 200, build=12))
+    with pytest.raises(ServiceValidationError) as e:
+        await install(hass, f)
+    assert e.value.translation_key == "ota_dev_key"
+    assert not any(t.startswith("ota_") for t in hub.seen)
+    await hass.services.async_call(
+        "ha_harmony", "install_firmware", {"path": str(f), "allow_dev_key": True}, blocking=True
+    )
+    assert hub.ends == 1
+    assert c.client.ota_key == "dev"
+    st = next(x for x in hass.states.async_all("sensor") if "ota_key" in x.attributes)
+    assert st.attributes["ota_key"] == "dev"
+
+
+async def test_release_key_hub_has_no_dev_issue(hass, rig):
+    await rig(ScriptedHub())
+    assert ir.async_get(hass).async_get_issue("ha_harmony", f"ota_dev_key_{HUB_ID}") is None

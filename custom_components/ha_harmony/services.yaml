@@ -41,3 +41,8 @@ install_firmware:
       example: /config/ha_harmony/firmware/hub-12.img
       selector:
         text:
+    allow_dev_key:
+      required: false
+      default: false
+      selector:
+        boolean:

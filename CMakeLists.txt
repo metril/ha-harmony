@@ -165,6 +165,9 @@ add_library(hp_hub STATIC
 )
 find_package(Threads REQUIRED)
 target_link_libraries(hp_hub PUBLIC hp_core cjson m Threads::Threads)
+# Build id of this binary (the OTA downgrade floor on a hub that never had an update); release builds set it.
+set(HP_BUILD_ID 0 CACHE STRING "Firmware build id compiled into the hub (monotonic)")
+set_source_files_properties(hub/ota/hub_ota.c PROPERTIES COMPILE_DEFINITIONS HP_BUILD_ID=${HP_BUILD_ID})
 
 add_executable(hub hub/main.c)
 target_link_libraries(hub PRIVATE hp_hub)

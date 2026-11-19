@@ -7,7 +7,9 @@ All commands run from the repo root. Device steps are `[WRITE]` (they replace `/
 
 - The hub runs the boot-hook build with this feature (`tools/install_boot_hook.py install`, runbook `phase4-persistence.md`),
   so the hook has the update/rollback logic, and the daemon was started by the hook (default `--ota-dir /data/ha-harmony`).
-- `hub.conf` unchanged; `respawn_max` and `reboot_on_early_death` at their defaults are fine.
+- A dev-key build needs `ota_allow_dev=1` in `hub.conf` (and `allow_dev_key: true` in the service call); a release build needs neither.
+  Updates are refused (`ota_not_ready`) until the boot's health mark (about 2.5 min after boot) and while a previous update is unproven.
+- `hub.conf` otherwise unchanged; `respawn_max` and `reboot_on_early_death` at their defaults are fine.
 - The running daemon's compiled-in public key matches the key that signs the image. A dev-key build (`-DHP_ALLOW_DEV_OTA_KEY=ON`)
   accepts only `--dev`-signed images; a release build accepts only the release key. Mixing them is `ota_verify: bad signature`.
 

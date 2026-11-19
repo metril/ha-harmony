@@ -77,6 +77,10 @@
     "ota_rolled_back": {
       "title": "Hub firmware update rolled back",
       "description": "Hub {hub} did not come up healthy after installing build {build} and went back to its previous firmware ({reason}). Nothing was lost; check the build and try again."
+    },
+    "ota_dev_key": {
+      "title": "Hub firmware trusts the public dev key",
+      "description": "Hub {hub} was built with the public development OTA key: anyone who can reach its WebSocket and token can install firmware on it. Install a build with your own release key."
     }
   },
   "services": {
@@ -147,6 +151,10 @@
         "path": {
           "name": "Image path",
           "description": "Path of the signed .img file, under config/ha_harmony/firmware or a directory in allowlist_external_dirs."
+        },
+        "allow_dev_key": {
+          "name": "Allow dev key",
+          "description": "Install on a hub that trusts the public dev test key (anyone can sign images for it). Leave off for a real hub."
         }
       }
     }
@@ -274,6 +282,9 @@
     },
     "ota_failed": {
       "message": "The firmware update failed: {error}"
+    },
+    "ota_dev_key": {
+      "message": "This hub trusts the public dev OTA key, so any image signed with it would be accepted. Rebuild the hub with a release key, or set allow_dev_key to install anyway."
     }
   },
   "options": {

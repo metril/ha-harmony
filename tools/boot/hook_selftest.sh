@@ -127,7 +127,7 @@ echo "selftest in $T (hook $HOOK)"
 # 1. conf loop terminates, including a last line with no trailing newline
 mkroot 'port=8099\ntoken=lastline'
 run_hook
-if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "--token-file $R/data/ha-harmony/hub.conf --port 8099 --heartbeat $R/var/volatile/ha-harmony.hb" ]; then
+if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "--token-file $R/data/ha-harmony/hub.conf --port 8099 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy" ]; then
 	pass "conf without trailing newline"
 else
 	fail "conf without trailing newline (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
@@ -170,7 +170,7 @@ if [ "$nl" = 4 ]; then pass "read-based line count stops over the cap"; else fai
 # 5. optional argv pieces expand correctly (${var:+...})
 mkroot 'token=abc==\nhub_id=my-hub\nrf=spi\nrf_slot=2\nport=8100\n'
 run_hook
-want="--token-file $R/data/ha-harmony/hub.conf --port 8100 --hub-id my-hub --rf-spi --rf-slot 2 --heartbeat $R/var/volatile/ha-harmony.hb"
+want="--token-file $R/data/ha-harmony/hub.conf --port 8100 --hub-id my-hub --rf-spi --rf-slot 2 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy"
 if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ]; then
 	pass "argv quoting with rf, hub_id and '=' in token"
 else
@@ -470,6 +470,32 @@ if [ "$DEMO" = 1 ] && [ ! -e "$HD/ota-pending" ] && [ ! -e "$HD/ota-rollback" ] 
 	pass "power cut mid-apply: binary intact, marker cleared, nothing reported"
 else
 	fail "power cut mid-apply (DEMO=$DEMO runs=$(cnt runs_old))"
+fi
+: >"$T/stop"
+wait_log "watcher done"
+
+# 19. an update applied INSIDE the health window is a planned relaunch: no strike, no reboot, fresh window
+mkroot 'token=abc\nrespawn_max=0\n'
+ota_clean
+cat >"$HD/hub" <<EOF
+#!/bin/sh
+echo old >>"$T/runs_old"
+if [ -e "$T/applied" ]; then while [ ! -e "$T/stop" ]; do sleep $TICK; done; exit 0; fi
+: >"$T/applied"
+printf 'build=2\nprev=1\n' >"$HD/ota-pending"
+ln "$HD/hub" "$HD/hub.tmp" && mv "$HD/hub.tmp" "$HD/hub.prev"
+mv "$HD/hub.new" "$HD/hub"
+echo 2 >"$HD/ota-restart"
+exit 42
+EOF
+chmod 755 "$HD/hub"
+ota_new good
+run_hook
+wait_log "healthy after"
+if [ "$(cnt runs_new)" = 1 ] && [ ! -e "$T/reboot.log" ] && [ ! -e "$HD/ota-pending" ] && [ -e "$R/var/volatile/ha-harmony.healthy" ]; then
+	pass "update inside the health window: planned relaunch, no strike or reboot"
+else
+	fail "update inside the window (new=$(cnt runs_new) reboot=$(yn "$T/reboot.log") pending=$(yn "$HD/ota-pending"))"
 fi
 : >"$T/stop"
 wait_log "watcher done"

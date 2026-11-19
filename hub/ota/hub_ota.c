@@ -12,6 +12,10 @@
 
 #include "common/ota/ota_apply.h"
 
+#ifndef HP_BUILD_ID
+#define HP_BUILD_ID 0 /* -DHP_BUILD_ID=N at configure time: the build id of this binary */
+#endif
+
 static uint64_t default_avail(const char *dir) {
     struct statvfs v;
     if (statvfs(dir, &v) != 0 || v.f_blocks == 0) return UINT64_MAX; /* unknown: rely on ENOSPC */
@@ -40,6 +44,7 @@ void hp_ota_init(hp_ota_t *o, const char *dir, const char *target) {
     memset(o, 0, sizeof *o);
     o->fd = -1;
     o->pubkey = ota_pubkey();
+    o->key_dev = ota_pubkey_is_dev() != 0;
     o->avail_fn = default_avail;
     o->write_fn = default_write;
     if (!dir || strlen(dir) >= sizeof o->dir - 1) return;
@@ -61,10 +66,11 @@ void hp_ota_init(hp_ota_t *o, const char *dir, const char *target) {
     if (snprintf(leftover, sizeof leftover, "%s.new", o->target) < (int)sizeof leftover) unlink(leftover);
     if (snprintf(leftover, sizeof leftover, "%s.lnk", o->prev) < (int)sizeof leftover) unlink(leftover);
     unlink(o->restart_file); /* a restart request belongs to the process that wrote it, never the next one */
+    o->min_build = (uint32_t)HP_BUILD_ID;
     FILE *f = fopen(o->build_file, "r");
     if (f) {
         unsigned long v;
-        if (fscanf(f, "%lu", &v) == 1 && v <= UINT32_MAX) o->min_build = (uint32_t)v;
+        if (fscanf(f, "%lu", &v) == 1 && v <= UINT32_MAX && v > o->min_build) o->min_build = (uint32_t)v;
         fclose(f);
     }
 }
@@ -99,11 +105,14 @@ static int hex_digest(const char *s, uint8_t out[64]) {
 
 int hp_ota_begin(hp_ota_t *o, const void *owner, unsigned target, uint32_t size, uint32_t build, const char *sha_hex) {
     if (!o->enabled) return HP_OTA_E_DISABLED;
+    if (o->key_dev && !o->allow_dev) return HP_OTA_E_DEVKEY;
+    if (o->health_file && access(o->health_file, F_OK) != 0) return HP_OTA_E_NOTREADY;
+    if (access(o->pending, F_OK) == 0) return HP_OTA_E_NOTREADY;
     uint8_t sha[64];
     if (hex_digest(sha_hex, sha) != 0) return HP_OTA_E_ARG;
     if (target != OTA_TARGET_HUB) return HP_OTA_E_TARGET;
     if (size < OTA_HDR_BYTES || size > OTA_HDR_BYTES + OTA_MAX_PAYLOAD) return HP_OTA_E_SIZE;
-    if (build < o->min_build) return HP_OTA_E_DOWNGRADE;
+    if (build <= o->min_build) return HP_OTA_E_DOWNGRADE; /* older than or the same as what runs */
     if (o->receiving) {
         bool same = o->size == size && o->build == build && !memcmp(o->sha, sha, 64);
         if (o->owner_alive && (o->owner != owner || !same)) return HP_OTA_E_BUSY;
@@ -155,6 +164,22 @@ int hp_ota_chunk(hp_ota_t *o, const void *owner, uint32_t offset, const uint8_t 
     return HP_OTA_OK;
 }
 
+typedef struct {
+    hp_ota_t *o;
+    uint32_t build;
+} arm_t;
+
+/* Between "hub.prev is the old binary" and the rename: the only moment the marker may exist. */
+static void arm_pending(void *v) {
+    arm_t *a = v;
+    char note[64];
+    snprintf(note, sizeof note, "build=%" PRIu32 "\nprev=%" PRIu32 "\n", a->build, a->o->min_build);
+    write_small(a->o->pending, note);
+    snprintf(note, sizeof note, "%" PRIu32 "\n", a->build);
+    write_small(a->o->build_file, note); /* the hook puts "prev=" back if this build does not prove itself */
+    if (a->o->swap_hook) a->o->swap_hook();
+}
+
 int hp_ota_end(hp_ota_t *o, const void *owner, uint32_t *build_out) {
     if (!o->enabled) return HP_OTA_E_DISABLED;
     if (!mine(o, owner)) return HP_OTA_E_STATE;
@@ -184,21 +209,20 @@ int hp_ota_end(hp_ota_t *o, const void *owner, uint32_t *build_out) {
         return hok ? HP_OTA_E_VERIFY : HP_OTA_E_IO;
     }
     char note[48];
-    snprintf(note, sizeof note, "build=%" PRIu32 "\n", declared);
-    /* The pending marker goes down BEFORE the swap: the boot hook treats "pending" as "this build has
-     * not proven itself". Power loss before the rename leaves the old binary + a marker; the hook
-     * then finds hub.prev missing (or identical) and just clears it. */
-    write_small(o->pending, note);
+    arm_t arm = {o, declared};
     uint32_t built = 0;
-    int rc = ota_apply_staged(o->staged, o->target, o->prev, o->min_build, o->pubkey, &built);
+    int rc = ota_apply_staged_cb(o->staged, o->target, o->prev, o->min_build + 1, o->pubkey, &built, arm_pending, &arm);
     if (rc != OTA_OK) {
         o->verify_rc = rc;
-        unlink(o->pending);
+        if (access(o->pending, F_OK) == 0) { /* armed, then the rename failed: undo */
+            unlink(o->pending);
+            snprintf(note, sizeof note, "%" PRIu32 "\n", o->min_build);
+            write_small(o->build_file, note);
+        }
         drop_upload(o);
         return rc == OTA_E_DOWNGRADE ? HP_OTA_E_DOWNGRADE : rc == OTA_E_IO ? HP_OTA_E_IO : HP_OTA_E_VERIFY;
     }
     snprintf(note, sizeof note, "%" PRIu32 "\n", built);
-    write_small(o->build_file, note);
     o->min_build = built;
     unlink(o->rollback);
     unlink(o->staged);
@@ -238,6 +262,8 @@ const char *hp_ota_code(int e) {
     case HP_OTA_E_SHA: return "ota_sha";
     case HP_OTA_E_VERIFY: return "ota_verify";
     case HP_OTA_E_DOWNGRADE: return "ota_downgrade";
+    case HP_OTA_E_NOTREADY: return "ota_not_ready";
+    case HP_OTA_E_DEVKEY: return "ota_dev_key";
     default: return "ota_bad_request";
     }
 }
@@ -255,7 +281,9 @@ const char *hp_ota_message(const hp_ota_t *o, int e) {
     case HP_OTA_E_IO: return "hub storage error";
     case HP_OTA_E_SHA: return "image was corrupted in transfer (digest mismatch)";
     case HP_OTA_E_VERIFY: return ota_strerror(o->verify_rc);
-    case HP_OTA_E_DOWNGRADE: return "image build is older than the installed one";
+    case HP_OTA_E_DOWNGRADE: return "image build is not newer than the installed one";
+    case HP_OTA_E_NOTREADY: return "the hub has not confirmed its current build healthy yet; try again in a few minutes";
+    case HP_OTA_E_DEVKEY: return "this hub trusts the public dev key; start it with --ota-allow-dev to accept updates";
     default: return "bad update request";
     }
 }

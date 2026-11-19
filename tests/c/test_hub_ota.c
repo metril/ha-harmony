@@ -78,6 +78,7 @@ static void fixture(fx_t *x, uint32_t build, int target, size_t plen) {
 static void setup(hp_ota_t *o, fx_t *x) {
     hp_ota_init(o, x->dir, NULL);
     o->pubkey = pk;
+    o->allow_dev = true; /* these builds carry the public dev key */
 }
 
 static int send_all(hp_ota_t *o, const void *own, const fx_t *x, size_t from, size_t step) {
@@ -114,6 +115,9 @@ static void test_good_update(void) {
     CT_CHECK(!exists(p));
     snprintf(p, sizeof p, "%s/ota-pending", x.dir);
     CT_CHECK(exists(p)); /* stays until the boot hook sees the health mark */
+    got = slurp(p, &n);
+    CT_CHECK(got && !strncmp(got, "build=7\nprev=0\n", 15)); /* what the hook needs to roll back */
+    free(got);
     snprintf(p, sizeof p, "%s/ota-restart", x.dir);
     CT_CHECK(exists(p));
     snprintf(p, sizeof p, "%s/ota-build", x.dir);
@@ -123,10 +127,15 @@ static void test_good_update(void) {
     /* the next process: build 7 is now the floor; restart request does not survive into it */
     hp_ota_t o2;
     hp_ota_init(&o2, x.dir, NULL);
+    o2.allow_dev = true;
     CT_EQ(o2.min_build, 7);
     snprintf(p, sizeof p, "%s/ota-restart", x.dir);
     CT_CHECK(!exists(p));
+    CT_EQ(hp_ota_begin(&o2, &own, 1, (uint32_t)x.len, 6, x.sha), HP_OTA_E_NOTREADY); /* unproven update pending */
+    snprintf(p, sizeof p, "%s/ota-pending", x.dir);
+    unlink(p); /* the hook's health mark */
     CT_EQ(hp_ota_begin(&o2, &own, 1, (uint32_t)x.len, 6, x.sha), HP_OTA_E_DOWNGRADE);
+    CT_EQ(hp_ota_begin(&o2, &own, 1, (uint32_t)x.len, 7, x.sha), HP_OTA_E_DOWNGRADE); /* the same build as the running one */
     free(x.img);
 }
 
@@ -327,7 +336,7 @@ static void test_power_loss_mid_apply(void) {
     CT_CHECK(s.st_mode & 0100);
     char p[320];
     snprintf(p, sizeof p, "%s/ota-pending", x.dir);
-    CT_CHECK(exists(p)); /* armed, but there is no hub.prev: the hook only clears it */
+    CT_CHECK(!exists(p)); /* cut during verify/copy: the marker is not armed yet, so nothing can roll back */
     CT_CHECK(!exists(x.prev));
     hp_ota_t o;
     setup(&o, &x);
@@ -337,6 +346,56 @@ static void test_power_loss_mid_apply(void) {
     CT_EQ(hp_ota_begin(&o, &a, 1, (uint32_t)x.len, 6, x.sha), 0);
     CT_EQ(send_all(&o, &a, &x, 0, 4096), 0);
     CT_EQ(hp_ota_end(&o, &a, NULL), 0);
+    free(x.img);
+}
+
+static void die_at_swap(void) { _exit(9); }
+
+static void test_power_loss_between_link_and_rename(void) {
+    fx_t x;
+    int a = 1;
+    fixture(&x, 6, OTA_TARGET_HUB, 8000);
+    put_file(x.prev, "OLDER-PREV", 10); /* an earlier update's prev: must not outlive a cut as a rollback source */
+    pid_t pid = fork();
+    if (pid == 0) {
+        hp_ota_t o;
+        setup(&o, &x);
+        o.swap_hook = die_at_swap;
+        hp_ota_begin(&o, &a, 1, (uint32_t)x.len, 6, x.sha);
+        send_all(&o, &a, &x, 0, 4096);
+        hp_ota_end(&o, &a, NULL);
+        _exit(0);
+    }
+    int st = 0;
+    CT_EQ(waitpid(pid, &st, 0), pid);
+    CT_CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 9);
+    struct stat h, p;
+    CT_EQ(stat(x.hub, &h), 0);
+    CT_EQ(stat(x.prev, &p), 0);
+    CT_CHECK(h.st_ino == p.st_ino); /* hub.prev IS the running binary: the hook's rollback is a no-op, never N-2 */
+    size_t n;
+    char *got = slurp(x.hub, &n);
+    CT_CHECK(n == 10 && !memcmp(got, "OLD-BINARY", 10));
+    free(got);
+    free(x.img);
+}
+
+static void test_dev_key_and_health_gate(void) {
+    fx_t x;
+    hp_ota_t o;
+    int a = 1;
+    char p[320];
+    fixture(&x, 3, OTA_TARGET_HUB, 100);
+    setup(&o, &x);
+    o.key_dev = true;
+    o.allow_dev = false;
+    CT_EQ(hp_ota_begin(&o, &a, 1, (uint32_t)x.len, 3, x.sha), HP_OTA_E_DEVKEY);
+    o.allow_dev = true;
+    snprintf(p, sizeof p, "%s/healthy", x.dir);
+    o.health_file = p;
+    CT_EQ(hp_ota_begin(&o, &a, 1, (uint32_t)x.len, 3, x.sha), HP_OTA_E_NOTREADY); /* the hook has not marked this boot healthy */
+    put_file(p, "1", 1);
+    CT_EQ(hp_ota_begin(&o, &a, 1, (uint32_t)x.len, 3, x.sha), 0);
     free(x.img);
 }
 
@@ -368,6 +427,8 @@ int main(void) {
     test_space_and_enospc();
     test_rejected_images_leave_binary_alone();
     test_power_loss_mid_apply();
+    test_power_loss_between_link_and_rename();
+    test_dev_key_and_health_gate();
     test_rollback_info();
     char cmd[400];
     snprintf(cmd, sizeof cmd, "rm -rf %s", root);

@@ -22,6 +22,8 @@ static const hp_field_desc_t hp_fields_hello_ack[] = {
     {"fw_version", HP_T_STR, true, NULL},
     {"activities", HP_T_JSON, true, NULL},
     {"config_hash", HP_T_STR, true, NULL},
+    {"fw_build", HP_T_U32, true, NULL},
+    {"ota_key", HP_T_STR, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_error[] = {
@@ -150,7 +152,7 @@ static const hp_field_desc_t hp_fields_ota_result[] = {
 
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
-    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 4, hp_fields_hello_ack},
+    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 6, hp_fields_hello_ack},
     {"error", HP_MSG_ERROR, HP_TRANSPORT_WS, 3, hp_fields_error},
     {"ping", HP_MSG_PING, HP_TRANSPORT_WS, 0, NULL},
     {"pong", HP_MSG_PONG, HP_TRANSPORT_WS, 0, NULL},

@@ -765,7 +765,7 @@ def test_onhub_selftest_script_passes_under_host_shells(tmp_path: Path) -> None:
     failed = [ln for ln in out.splitlines() if ln.startswith("FAIL")]
     assert not failed, f"failing selftest cases: {failed}\n{out}"
     assert pr.returncode == 0 and "0 failure(s)" in out, out
-    assert out.count("PASS") >= 18
+    assert out.count("PASS") >= 19
     assert not (Path("/etc/ha-harmony-enable")).exists()
 
 
@@ -839,7 +839,23 @@ def test_heartbeat_and_rf_debug_flags_in_argv(root: Path) -> None:
     source_hook(root)
     argv = _argv(root)
     assert f"--heartbeat {root}/var/volatile/ha-harmony.hb" in argv
-    assert argv.split()[-1] == "--rf-debug"
+    assert f"--health-file {root}/var/volatile/ha-harmony.healthy" in argv
+    assert "--ota-allow-dev" not in argv  # off unless the conf says so
+    assert "--rf-debug" in argv.split()
+
+
+def test_ota_allow_dev_is_a_conf_key_and_validated(root: Path) -> None:
+    install_daemon(root, IMMORTAL)
+    install_conf(root, "token=t\nota_allow_dev=1\n")
+    source_hook(root)
+    assert "--ota-allow-dev" in _argv(root).split()
+
+
+def test_bad_ota_allow_dev_value_is_stock(root: Path) -> None:
+    install_daemon(root, IMMORTAL)
+    install_conf(root, "token=t\nota_allow_dev=yes\n")
+    _, demo = source_hook(root)
+    assert demo == "unset"
 
 
 @pytest.mark.parametrize("junk", ["respawn_max=x", "respawn_max=100", "respawn_max=-1", "rf_debug=2"])
@@ -1078,3 +1094,77 @@ def test_a_junk_pending_marker_cannot_inject_into_the_rollback_record(root: Path
     source_hook(root, healthy=1)
     rb = (_hub_dir(root) / "ota-rollback").read_text().split("\n")
     assert rb[0] == "build=0" and rb[1] == "reason=boot_unclean"
+
+
+# --- review fixes: update inside the health window, marker/ota-build semantics, health file -------------
+
+OLD_EARLY = (  # applies immediately: inside the first health window
+    'D=$(dirname "$0"); echo x >>"$D/runs_old"\n'
+    'if [ -e "$D/applied" ]; then sleep 30; exit 0; fi\n'
+    ': >"$D/applied"; echo build=2 >"$D/ota-pending"; echo prev=1 >>"$D/ota-pending"; echo 2 >"$D/ota-build"\n'
+    'ln "$D/hub" "$D/hub.tmp" && mv "$D/hub.tmp" "$D/hub.prev"\n'
+    'mv "$D/hub.new" "$D/hub"; echo 2 >"$D/ota-restart"; exit 42'
+)
+
+
+def test_update_inside_the_health_window_is_a_planned_relaunch_not_a_death(root: Path) -> None:
+    install_daemon(root, OLD_EARLY)
+    _install_new(root, NEW_OK)
+    install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=1\n")
+    source_hook(root, healthy=1)
+    log = _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    assert "inside the health window - launching the new build" in log
+    assert "died within" not in log and not (root / "reboot.log").exists()
+    assert _count(root, "runs_new") == 1
+    assert not (_hub_dir(root) / "ota-pending").exists()  # cleared at the health mark of the new build
+    assert not (_hub_dir(root) / "ota-rollback").exists()
+    assert (root / "var" / "volatile" / "ha-harmony.healthy").exists()
+
+
+def test_update_inside_the_window_that_dies_rolls_back_once_and_restores_ota_build(root: Path) -> None:
+    install_daemon(root, OLD_EARLY)
+    _install_new(root, NEW_BAD)
+    install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=0\n")
+    source_hook(root, healthy=1)
+    _wait_text(root / "cache" / "ha-harmony.log", "restored hub.prev")
+    _wait_count(root, "runs_old", 2)
+    assert (_hub_dir(root) / "ota-build").read_text().strip() == "1"  # the previous build id is back
+    assert "reason=died_early" in (_hub_dir(root) / "ota-rollback").read_text()
+    assert _count(root, "runs_new") == 1 and not (root / "reboot.log").exists()
+
+
+def test_boot_rollback_restores_ota_build_from_the_marker(root: Path) -> None:
+    _arm_pending_boot(root, "exit 1", "sleep 30", counter="1")
+    (_hub_dir(root) / "ota-pending").write_text("build=5\nprev=4\n")
+    (_hub_dir(root) / "ota-build").write_text("5\n")
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    source_hook(root, healthy=1)
+    assert (_hub_dir(root) / "ota-build").read_text().strip() == "4"
+    assert "build=5" in (_hub_dir(root) / "ota-rollback").read_text()
+
+
+def test_cut_before_the_rename_never_installs_an_older_prev(root: Path) -> None:
+    """hub.prev is hard-linked to the running binary before the marker is armed: rolling back is a no-op."""
+    install_daemon(root, IMMORTAL)
+    before = (_hub_dir(root) / "hub").read_text()
+    os.link(_hub_dir(root) / "hub", _hub_dir(root) / "hub.prev")
+    (_hub_dir(root) / "ota-pending").write_text("build=9\nprev=8\n")
+    (_hub_dir(root) / "ota-build").write_text("9\n")
+    install_conf(root)
+    source_hook(root, healthy=1)
+    assert (_hub_dir(root) / "hub").read_text() == before
+    assert not (_hub_dir(root) / "ota-rollback").exists()
+    assert (_hub_dir(root) / "ota-build").read_text().strip() == "8"  # the old binary is what runs
+
+
+def test_health_file_appears_at_the_health_mark_and_goes_while_an_update_is_unproven(root: Path) -> None:
+    install_daemon(root, OLD_APPLIER)
+    _install_new(root, NEW_OK)
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    source_hook(root, healthy=1)
+    _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    hf = root / "var" / "volatile" / "ha-harmony.healthy"
+    assert hf.exists()
+    (_hub_dir(root) / "go").touch()
+    _wait_text(root / "cache" / "ha-harmony.log", "updated build healthy")
+    assert hf.exists()  # proven again

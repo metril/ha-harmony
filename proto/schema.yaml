@@ -22,6 +22,8 @@ messages:
       - {name: fw_version, type: str, optional: true}
       - {name: activities, type: json, optional: true}
       - {name: config_hash, type: str, optional: true}
+      - {name: fw_build, type: u32, optional: true}   # installed firmware build id (OTA floor)
+      - {name: ota_key, type: str, optional: true}    # "dev" (public test key built in) | "release"; absent = no OTA
 
   - name: error
     code: 3

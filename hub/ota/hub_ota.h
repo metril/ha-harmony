@@ -8,8 +8,11 @@
  * tools/boot/rcS.harmony):
  *   hub             the installed binary (target)        hub.prev          the build before the last update
  *   ota-staged.img  the upload in flight                 ota-build         build id of the last applied image
- *   ota-pending     "build=N": a fresh build that has not reached the health mark yet (written BEFORE
- *                   the apply; removed by the hook at the health mark, or by us if the apply fails)
+ *   ota-pending     "build=N" + "prev=M": a fresh build that has not reached the health mark yet. Written after
+ *                   hub.prev is in place, immediately before the rename; removed by the hook at the health mark,
+ *                   or by us if the apply fails. A cut before the rename leaves hub.prev == hub (same inode), so
+ *                   the hook's rollback is a no-op.
+ *   ota-build       the installed build (the hook restores M from "prev=M" on rollback)
  *   ota-restart     asks the hook to relaunch immediately (the exit status is not visible to it)
  *   ota-rollback    written by the hook after it restored hub.prev: "build=N" "reason=..." lines */
 
@@ -37,7 +40,9 @@ enum {
     HP_OTA_E_SHA,      /* transfer corrupted: whole-image digest differs from begin.sha */
     HP_OTA_E_VERIFY,   /* common/ota refused it (o->verify_rc: OTA_E_*) */
     HP_OTA_E_DOWNGRADE,
-    HP_OTA_E_ARG
+    HP_OTA_E_ARG,
+    HP_OTA_E_NOTREADY, /* the hook has not marked this boot healthy, or an update is still unproven */
+    HP_OTA_E_DEVKEY    /* dev key built in and --ota-allow-dev not given */
 };
 
 typedef struct {
@@ -45,7 +50,9 @@ typedef struct {
     char dir[240];
     char staged[300], target[300], prev[300], pending[300], restart_file[300], build_file[300], rollback[300];
     const uint8_t *pubkey; /* default: the compiled-in key */
-    uint32_t min_build;    /* loaded from ota-build */
+    uint32_t min_build;    /* the running build: max(ota-build file, compiled-in HP_BUILD_ID); a new image must be newer */
+    bool key_dev, allow_dev; /* dev key built in / explicitly allowed (--ota-allow-dev) */
+    const char *health_file; /* set by the hook at the health mark; NULL = not supervised, no check */
     bool receiving, owner_alive;
     const void *owner;
     uint32_t size, build, offset;
@@ -57,6 +64,7 @@ typedef struct {
     /* test seams */
     uint64_t (*avail_fn)(const char *dir); /* free bytes, or UINT64_MAX when unknown */
     long (*write_fn)(int fd, const void *p, size_t n);
+    void (*swap_hook)(void); /* runs right after the pending marker is written, before the rename */
 } hp_ota_t;
 
 /* dir NULL: updates disabled (every call returns HP_OTA_E_DISABLED). target NULL: dir/hub. Removes

@@ -639,8 +639,16 @@ static int on_ota_abort(void *vctx, hp_session_t *sess, uint32_t id, const cJSON
 
 void hub_session_closed(hub_ctx_t *h, const hp_session_t *sess) { hp_ota_owner_gone(&h->ota, sess); }
 
+static void on_hello_extra(void *vctx, cJSON *ack) {
+    hub_ctx_t *h = vctx;
+    if (!h->ota.enabled) return;
+    cJSON_AddNumberToObject(ack, "fw_build", h->ota.min_build);
+    cJSON_AddStringToObject(ack, "ota_key", h->ota.key_dev ? "dev" : "release");
+}
+
 void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->ctx = ctx;
+    tbl->hello_extra = on_hello_extra;
     tbl->activities = on_activities;
     tbl->config_hash = on_config_hash;
     tbl->handler[HP_MSG_SET_CONFIG] = on_set_config;

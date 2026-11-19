@@ -26,6 +26,14 @@ async def connect(session, hub):
     return ws
 
 
+async def _hello_ack(session, hub):
+    ws = await session.ws_connect(hub.url)
+    await ws.send_str(env("hello", {"token": TOKEN}))
+    ack = (await ws.receive_json(timeout=5))["d"]
+    await ws.close()
+    return ack
+
+
 async def call(ws, t, d=None, id=2):
     await ws.send_str(env(t, d, id))
     msg = await ws.receive_json(timeout=5)
@@ -54,7 +62,7 @@ def ota_hub(start_hub, tmp_path):
     hubfile.chmod(0o755)
 
     def _start(*extra: str):
-        h = start_hub("--ota-dir", str(d), "--ota-target", str(hubfile), *extra)
+        h = start_hub("--ota-dir", str(d), "--ota-target", str(hubfile), "--ota-allow-dev", *extra)
         h.dir = d
         return h
 
@@ -76,7 +84,7 @@ async def test_good_update_applies_then_exits_for_the_supervisor(ota_hub, sign_i
     assert hub.proc.wait(timeout=10) == EXIT_OTA_RESTART
     assert (hub.dir / "hub").read_bytes() == payload
     assert (hub.dir / "hub.prev").read_bytes() == OLD
-    assert (hub.dir / "ota-restart").exists() and (hub.dir / "ota-pending").read_text() == "build=5\n"
+    assert (hub.dir / "ota-restart").exists() and (hub.dir / "ota-pending").read_text() == "build=5\nprev=0\n"
     assert not (hub.dir / "ota-staged.img").exists()
 
 
@@ -179,11 +187,21 @@ async def test_downgrade_is_refused_at_begin(ota_hub, sign_image):
         await upload(ws, img_new)
         assert (await call(ws, "ota_end", id=3))["d"]["state"] == "applied"
     assert hub.proc.wait(timeout=10) == EXIT_OTA_RESTART
-    # the next process (what the hook launches) knows the floor from ota-build
+    # the next process (what the hook launches) knows the floor from ota-build; the unproven update blocks
+    # a new upload until the hook's health mark removes the marker
+    hub_blocked = ota_hub()
+    async with aiohttp.ClientSession() as s:
+        ws = await connect(s, hub_blocked)
+        assert (await call(ws, "ota_begin", begin(img_old, 3)))["d"]["code"] == "ota_not_ready"
+    hub_blocked.stop()
+    (hub.dir / "ota-pending").unlink()
     hub2 = ota_hub()
     async with aiohttp.ClientSession() as s:
         ws = await connect(s, hub2)
         assert (await call(ws, "ota_begin", begin(img_old, 3)))["d"]["code"] == "ota_downgrade"
+        assert (await call(ws, "ota_begin", begin(img_new, hub_dir_build)))["d"]["code"] == "ota_downgrade"  # same build
+        ack = await _hello_ack(s, hub2)
+        assert ack["fw_build"] == hub_dir_build and ack["ota_key"] == "dev"
 
 
 async def test_updates_are_off_without_an_ota_dir(hub_process):
@@ -206,3 +224,35 @@ async def test_rollback_record_is_pushed_to_each_new_client(start_hub, tmp_path)
         st = await ws.receive_json(timeout=5)
         assert st["t"] == "ota_status"
         assert st["d"] == {"state": "rolled_back", "offset": 0, "size": 0, "build": 7, "reason": "died_early"}
+
+
+async def test_dev_key_hub_refuses_updates_without_the_explicit_flag(start_hub, tmp_path, sign_image):
+    d = tmp_path / "devdir"
+    d.mkdir()
+    hub = start_hub("--ota-dir", str(d))  # this build carries the public dev key
+    img = sign_image(b"x" * 100, 2)
+    async with aiohttp.ClientSession() as s:
+        ack = await _hello_ack(s, hub)
+        assert ack["ota_key"] == "dev"
+        ws = await connect(s, hub)
+        r = await call(ws, "ota_begin", begin(img, 2))
+        assert r["t"] == "error" and r["d"]["code"] == "ota_dev_key"
+
+
+async def test_no_update_before_the_hooks_health_mark(start_hub, tmp_path, sign_image):
+    d = tmp_path / "hdir"
+    d.mkdir()
+    mark = d / "healthy"
+    hub = start_hub("--ota-dir", str(d), "--ota-allow-dev", "--health-file", str(mark))
+    img = sign_image(b"x" * 100, 2)
+    async with aiohttp.ClientSession() as s:
+        ws = await connect(s, hub)
+        assert (await call(ws, "ota_begin", begin(img, 2)))["d"]["code"] == "ota_not_ready"
+        mark.write_text("")  # the hook's health mark
+        assert (await call(ws, "ota_begin", begin(img, 2), id=3))["d"]["state"] == "receiving"
+
+
+async def test_hello_ack_has_no_ota_fields_when_updates_are_off(hub_process):
+    async with aiohttp.ClientSession() as s:
+        ack = await _hello_ack(s, hub_process)
+        assert "ota_key" not in ack and "fw_build" not in ack
