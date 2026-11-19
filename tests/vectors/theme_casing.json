@@ -1,0 +1,18 @@
+{
+ "note": "Token keys are case-insensitive in a config (ACC, Acc, acc); both resolvers return the same snapped colours.",
+ "themes": {
+  "t": {
+   "extends": "midnight",
+   "tokens": {
+    "ACC": "#FF8A3D",
+    "Tx": "#E0E0E0",
+    "bg": "#000010"
+   }
+  }
+ },
+ "expect": {
+  "acc": 16288832,
+  "tx": 14737632,
+  "bg": 16
+ }
+}

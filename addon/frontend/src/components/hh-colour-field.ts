@@ -4,7 +4,8 @@ import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import { PALETTE_NAMES, css as hex6 } from '../lib/themes';
 import { needsOutline } from '../lib/theme-math';
-import { contrastInfo, hexOf, isFree, loadRecent, nearestSlot, parseHex, pushRecent, ratioText, resolveColour, saveRecent, type RenderTheme } from '../lib/theme-model';
+import { contrastInfo, loadRecent, nearestSlot, pushRecent, ratioText, saveRecent } from '../lib/theme-edit';
+import { hexOf, isFree, parseHex, resolveColour, type RenderTheme } from '../lib/theme-model';
 
 export interface ColourDetail {
   /** palette name, `#RRGGBB`, or undefined for the role's own colour */

@@ -8,10 +8,9 @@ import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { meter } from './parts';
 import { confirmAction } from './base';
-import './hh-colour-field';
 import type { AddPaletteDetail } from './hh-colour-field';
 import { PALETTE_NAMES } from '../lib/themes';
-import { PRESETS, activeName, activeTheme, colourBytes, createTheme, selectTheme, setPaletteFill, uniqueThemeName, widgetColors } from '../lib/theme-model';
+import { PRESETS, activeName, activeTheme, colourBytes, widgetColors } from '../lib/theme-model';
 import {
   DEFAULT_LAYER, LABEL_MAX, PAGE_BUDGET, describeAction, errorTarget, gridOf, isList, labelBytes, labelRoom, pageBytes, setPage, setWidget, trimToBytes,
   sourceAction, type Source,
@@ -215,6 +214,7 @@ export class HhInspector extends LitElement {
   }
 
   private colourRows(pi: number, wi: number, w: Widget) {
+    void import('./hh-colour-field'); // the colour field and its maths load with the first widget that shows them
     const theme = activeTheme(this.cfg).theme;
     const kind = w.type === 'tile' ? 'tile' : w.type === 'label' ? 'label' : 'button';
     const look = (o: { state?: 'on' | 'value' }) => widgetColors({ kind, role: w.role ?? 'default' }, o, theme);
@@ -233,19 +233,20 @@ export class HhInspector extends LitElement {
   }
   /** Adds a colour to the active user theme's palette (making one of the user's own first when a preset is active) and points the widget at it. */
   private async addToPalette(pi: number, wi: number, key: 'color' | 'on_color', d: AddPaletteDetail) {
+    const E = await import('../lib/theme-edit');
     const cfg = this.cfg;
     const name = activeName(cfg);
     const slot = PALETTE_NAMES[d.slot] as string;
     let next;
     if (name in PRESETS) {
-      const mine = uniqueThemeName(cfg, `my_${name}`);
+      const mine = E.uniqueThemeName(cfg, `my_${name}`);
       const ok = await confirmAction(this, {
         title: 'Make a theme of your own?',
         body: `"${PRESETS[name]?.name}" is built in and cannot be changed. This creates your theme "${mine}" on top of it, with ${slot} set to ${d.hex}, and switches the remote to it.`,
         ok: 'Create theme and add',
       });
       if (!ok) return;
-      next = selectTheme(createTheme(cfg, mine, name, { palette: { [String(d.slot + 1)]: { fill: d.hex } } }), mine);
+      next = E.selectTheme(E.createTheme(cfg, mine, name, { palette: { [String(d.slot + 1)]: { fill: d.hex } } }), mine);
     } else {
       const ok = await confirmAction(this, {
         title: `Replace ${slot} in "${name}"?`,
@@ -253,7 +254,7 @@ export class HhInspector extends LitElement {
         ok: `Replace ${slot}`,
       });
       if (!ok) return;
-      next = setPaletteFill(cfg, name, d.slot, d.hex);
+      next = E.setPaletteFill(cfg, name, d.slot, d.hex);
     }
     this.st.store.replace(setWidget(next, pi, wi, { [key]: slot }));
   }

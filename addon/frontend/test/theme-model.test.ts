@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { Config } from '../src/lib/model';
 import { diffConfig } from '../src/lib/diff';
 import { pageBytes } from '../src/lib/studio-model';
+import { activeName, activeTheme, colourBytes, degradeText, hexOf, parseHex, themeNamed } from '../src/lib/theme-model';
 import {
-  activeName, activeTheme, colourBytes, createTheme, degradeText, deleteTheme, duplicateTheme, exportTheme, fixAll, hexOf, importTheme, overridesToken,
-  parseHex, pushRecent, renameTheme, resetToken, selectTheme, setPaletteFill, setToken, themeNamed, themeProblems, themeUsage, uniqueThemeName,
-} from '../src/lib/theme-model';
+  createTheme, deleteTheme, duplicateTheme, exportTheme, fixAll, importTheme, overridesToken, pushRecent, renameTheme, resetToken, selectTheme,
+  setPaletteFill, setToken, themeProblems, themeUsage, uniqueThemeName,
+} from '../src/lib/theme-edit';
 import { snap565 } from '../src/lib/theme-math';
 
 const base = (): Config => ({ pages: [{ id: 'p', widgets: [{ type: 'button', id: 'a', label: 'A', action: { none: true } }] }] });

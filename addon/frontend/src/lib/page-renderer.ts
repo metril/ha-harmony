@@ -32,6 +32,8 @@ export type Prim =
 export interface TileSample {
   state: TileState;
   text: string;
+  /** link lost: the remote greys every tile that is not on */
+  stale?: boolean;
 }
 export interface RenderOpts {
   /** activity index that is running; widgets bound to it show the active highlight */
@@ -156,7 +158,7 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
   }
   const active = w.bind !== null && w.role !== 'nav' && o.activeAct != null && w.bind === o.activeAct;
   const tile = w.kind === 'tile' ? sampleTile(p, w, o) : null;
-  const c = widgetColors(w, { active: !!active && w.kind === 'button', ...(tile ? { state: tile.state } : {}) }, T);
+  const c = widgetColors(w, { active: !!active && w.kind === 'button', ...(tile ? { state: tile.state, stale: !!tile.stale } : {}) }, T);
   const ink = hex(c.ink);
   const icon = hex(c.icon);
   const cap = hex(c.cap);

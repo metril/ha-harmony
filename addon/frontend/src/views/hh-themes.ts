@@ -1,51 +1,84 @@
 import { css, html, nothing, svg } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { V2Page, V2Widget } from '../lib/api';
-import { pageGroup } from '../lib/page-renderer';
+import { layoutPage, pageGroup, primTemplate, type Prim, type TileSample } from '../lib/page-renderer';
 import { icon } from '../lib/icons';
-import { stockIconByName } from '../lib/stock-icons';
 import { shared } from '../lib/styles';
 import { setStyle } from '../lib/set-style';
-import { PALETTE_NAMES, css as hex6, type TokenName } from '../lib/themes';
+import { PALETTE_NAMES, TOKEN_NAMES, css as hex6, type TokenName } from '../lib/themes';
 import {
-  PRESETS, PRESET_KEYS, TOKEN_GROUPS, TOKEN_LABEL, activeName, applyFix, deleteTheme, duplicateTheme, exportTheme, fixAll, hexOf, importTheme,
-  overridesSlot, overridesToken, parseHex, renameTheme, resetPaletteFill, resetToken, selectTheme, setPaletteFill, setToken, slugOf, themeNamed, themeProblems, themeUsage, userThemeNames,
-  ratioText, type RenderTheme,
-} from '../lib/theme-model';
+  TOKEN_GROUPS, TOKEN_LABEL, applyFix, deleteTheme, duplicateTheme, exportTheme, fixAll, importTheme, overridesSlot, overridesToken, ratioText, renameTheme,
+  resetPaletteFill, resetToken, selectTheme, setPaletteFill, setToken, slugOf, themeProblems, themeUsage, type ThemeProblem,
+} from '../lib/theme-edit';
+import { PRESETS, PRESET_KEYS, activeName, hexOf, parseHex, themeNamed, userThemeNames, type RenderTheme } from '../lib/theme-model';
 import { StoreElement, confirmAction } from '../components/base';
-import '../components/hh-mini-remote';
 import { statusChip, themeNotice } from '../components/parts';
-import type { TileSample } from '../lib/page-renderer';
 
-const ic = (n: string): number => stockIconByName(n)?.id ?? 0;
 const sw = (id: number, kind: V2Widget['kind'], x: number, y: number, w: number, label: string, extra: Partial<V2Widget> = {}): V2Widget => ({
   kind, id, x, y, w, h: 1, label, role: 'default', shape: 'card', icon_only: false, icon: 0, bind: null, ...extra,
 });
-/** A page that shows every colour rule: roles, palette colours, a free colour, tile states. */
+/** A page that exercises every token: roles, the running activity, palette and free colours, tile states; the palette strip and a toast are drawn on top. */
 export const SAMPLE_PAGE: V2Page = {
-  version: 2, id: 0, cols: 3, rows: 5, gen: 0, total: 1, kind: 'normal', back: false, seq: null, act: 0, title: 'Sample', theme: 0,
+  version: 2, id: 0, cols: 4, rows: 6, gen: 0, total: 1, kind: 'normal', back: false, seq: { idx: 1, cnt: 2 }, act: 0, title: 'Sample', theme: 0,
   widgets: [
-    sw(0, 'label', 0, 0, 3, 'Living room', { color: 'blue' }),
-    sw(1, 'button', 0, 1, 1, 'Watch', { role: 'primary', icon: ic('tv') }),
-    sw(2, 'button', 1, 1, 1, 'Music', { icon: ic('music') }),
-    sw(3, 'button', 2, 1, 1, 'More', { role: 'secondary' }),
-    sw(4, 'button', 0, 2, 1, 'Red', { color: 'red', icon: ic('power') }),
-    sw(5, 'button', 1, 2, 1, 'Green', { color: 'green', icon: ic('play') }),
-    sw(6, 'button', 2, 2, 1, 'Custom', { color: '#E0B040' }),
-    sw(7, 'tile', 0, 3, 1, 'Lamp', { icon: ic('bulb') }),
-    sw(8, 'tile', 1, 3, 1, 'Temp'),
-    sw(9, 'tile', 2, 3, 1, 'Door', { on_color: 'teal' }),
-    sw(10, 'button', 0, 4, 3, 'Power Off', { role: 'danger', shape: 'pill' }),
+    sw(0, 'label', 0, 0, 4, 'Living room', { color: 'blue' }),
+    sw(1, 'button', 0, 1, 1, 'Main', { role: 'primary' }),
+    sw(2, 'button', 1, 1, 1, 'Side', { role: 'secondary' }),
+    sw(3, 'button', 2, 1, 1, 'Next', { role: 'nav' }),
+    sw(4, 'button', 3, 1, 1, 'Plain'),
+    sw(5, 'button', 0, 2, 1, 'Active', { bind: 0 }),
+    sw(6, 'button', 1, 2, 1, 'Off', { role: 'danger' }),
+    sw(7, 'button', 2, 2, 1, 'Red', { color: 'red' }),
+    sw(8, 'button', 3, 2, 1, 'Mine', { color: '#E0B040' }),
+    sw(9, 'tile', 0, 3, 1, 'On'),
+    sw(10, 'tile', 1, 3, 1, 'Off'),
+    sw(11, 'tile', 2, 3, 1, 'Gone'),
+    sw(12, 'tile', 3, 3, 1, 'Stale'),
   ],
 };
-const SAMPLE_TILES: Record<number, TileSample> = { 7: { state: 'on', text: 'On' }, 8: { state: 'value', text: '21.5' }, 9: { state: 'on', text: 'On' } };
+export const SAMPLE_TILES: Record<number, TileSample> = {
+  9: { state: 'on', text: '1' },
+  10: { state: 'off', text: '0' },
+  11: { state: 'unavailable', text: 'n/a' },
+  12: { state: 'off', text: '5', stale: true },
+};
+const num = (c: string | undefined): number | null => (c && /^#[0-9a-f]{6}$/i.test(c) ? parseInt(c.slice(1), 16) : null);
+/** The theme's own overlay on the sample screen: the 12 palette fills and an alert toast. */
+function overlay(th: RenderTheme): Prim[] {
+  const out: Prim[] = [];
+  th.swatches.forEach((s, i) => {
+    const x = 12 + (i % 6) * 36;
+    const y = 232 + Math.floor(i / 6) * 24;
+    out.push({ t: 'rect', x, y, w: 32, h: 20, r: 5, fill: hex6(s.fill), wi: 101 + i });
+    out.push({ t: 'text', x: x + 16, y: y + 14, s: 'Aa', size: 11, fill: hex6(s.ink), anchor: 'middle', weight: 600, wi: 101 + i });
+  });
+  out.push({ t: 'rect', x: 12, y: 282, w: 216, h: 28, r: 14, fill: hex6(th.tokens.bad), wi: 100 });
+  out.push({ t: 'text', x: 120, y: 301, s: 'Alert: power off', size: 13, fill: hex6(th.tokens.onbad), anchor: 'middle', weight: 500, wi: 100 });
+  return out;
+}
+function bbox(q: Prim): [number, number, number, number] | null {
+  switch (q.t) {
+    case 'rect': return [q.x, q.y, q.w, q.h];
+    case 'circle': return [q.x - q.r, q.y - q.r, 2 * q.r, 2 * q.r];
+    case 'icon': return [q.x, q.y, q.size, q.size];
+    case 'text': {
+      const w = Array.from(q.s).length * q.size * 0.54;
+      return [q.anchor === 'middle' ? q.x - w / 2 : q.anchor === 'end' ? q.x - w : q.x, q.y - q.size * 0.8, w, q.size];
+    }
+    default: return null;
+  }
+}
+function colours(q: Prim): number[] {
+  const l = q.t === 'rect' || q.t === 'circle' ? [num(q.fill), num(q.stroke)] : q.t === 'text' ? [num(q.fill)] : q.t === 'icon' ? [num(q.color)] : [num(q.stroke)];
+  return l.filter((v): v is number => v !== null);
+}
 
 @customElement('hh-themes')
 export class HhThemes extends StoreElement {
   static override styles = [
     shared,
     css`
-      :host { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+      :host { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding-bottom: 120px; }
       header.top { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
       header.top > div { flex: 1 1 280px; display: grid; gap: 4px; }
       h2.t { margin: 0; font-size: 20px; font-weight: 650; }
@@ -56,19 +89,27 @@ export class HhThemes extends StoreElement {
       .thumbs { display: flex; gap: 8px; align-items: flex-start; }
       .thumbs svg { width: calc(50% - 4px); height: auto; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); display: block; }
       .acts { display: flex; gap: 6px; flex-wrap: wrap; }
-      .ed { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; align-items: start; }
+      .ed { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
       @media (max-width: 900px) { .ed { grid-template-columns: minmax(0, 1fr); } }
-      .ed .side { position: sticky; top: 64px; display: grid; gap: 10px; justify-items: center; }
-      @media (max-width: 900px) { .ed .side { position: static; } }
-      .side hh-mini-remote { width: 200px; }
-      .side .th { display: flex; gap: 6px; }
-      .side .th svg { width: 76px; height: auto; border-radius: 6px; box-shadow: 0 0 0 1px var(--line); display: block; }
+      .side { position: sticky; top: 144px; display: grid; gap: 8px; z-index: 2; background: var(--bg); padding-bottom: 4px; }
+      @media (max-width: 900px) { .side { top: 48px; order: -1; } }
+      .side .sbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .side .tabs { display: flex; gap: 4px; }
+      .side .tabs button { height: 28px; padding: 0 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 600; font-size: 12px; cursor: pointer; }
+      .side .tabs button[aria-pressed="true"] { background: var(--accs); border-color: var(--acc); color: var(--tx); }
+      svg.pv { width: 100%; height: auto; max-height: 560px; border-radius: 10px; box-shadow: 0 0 0 1px var(--line); display: block; cursor: pointer; touch-action: manipulation; }
+      @media (max-width: 900px) { svg.pv { max-height: 40vh; } }
+      svg.pv [data-i]:focus-visible { outline: none; }
+      .pager { display: flex; gap: 8px; align-items: center; justify-content: center; font-size: 12px; color: var(--tx2); }
+      .hint { font-size: 12px; color: var(--tx3); margin: 0; }
       .grp { display: grid; gap: 6px; margin-bottom: 14px; }
       .grp h3, .pal h3 { margin: 0; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; }
-      .tk { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
+      .tk { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 6px 4px; border-top: 1px solid var(--line); border-radius: 4px; }
+      .tk.hl, .pc.hl { background: var(--accs); outline: 2px solid var(--acc); }
       .tk .nm { display: grid; min-width: 0; }
       .tk .nm b { font-size: 13px; font-weight: 600; }
       .tk .nm span { font-size: 11px; color: var(--tx3); }
+      .tk .pi { grid-column: 2 / -1; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--ir); }
       @media (max-width: 520px) { .tk .nm span { display: none; } }
       .tk .nm button.rs { justify-self: start; margin-top: 2px; }
       input[type="color"] { width: 40px; height: 34px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); cursor: pointer; }
@@ -76,9 +117,9 @@ export class HhThemes extends StoreElement {
       input.hx { width: 10.5ch; font-family: var(--mono); }
       input.nm2 { width: 100%; max-width: 280px; }
       input[aria-invalid="true"] { border-color: var(--bad); }
-      .pal .row { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 6px; }
+      .pal .row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 6px; }
       .pc { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 4px 8px; align-items: center; padding: 6px; border: 1px solid var(--line); border-radius: var(--r1); }
-      .pc .a { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+      .pc .a { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
       .pc .a b { font-size: 12px; text-transform: capitalize; }
       .pc .a code { font-size: 11px; color: var(--tx3); }
       .pc .aa { height: 34px; border-radius: 7px; display: grid; place-items: center; font-weight: 650; font-size: 13px; }
@@ -99,6 +140,12 @@ export class HhThemes extends StoreElement {
   @property({ attribute: false }) notices: string[] = [];
   @state() private fileError = '';
   @state() private nameDraft: string | null = null;
+  @state() private tab: 'sample' | 'pages' = 'sample';
+  @state() private pageIdx = 0;
+  /** tokens ('bg', ...) and palette slots ('p3') that colour the element last clicked in the preview */
+  @state() private hl = new Set<string>();
+  /** colour of the token row under the pointer: its uses are outlined in the preview */
+  @state() private hover: number | null = null;
   private raf = 0;
 
   override disconnectedCallback(): void {
@@ -112,13 +159,13 @@ export class HhThemes extends StoreElement {
   private edit(next: ReturnType<typeof selectTheme>, key?: string) {
     this.store.replace(next, key);
   }
-  private userPage(): V2Page | null {
-    return this.store.pages.find((p) => p.ok && p.page)?.page ?? null;
+  private userPages(): V2Page[] {
+    return this.store.pages.flatMap((p) => (p.ok && p.page ? [p.page] : []));
   }
 
   // ------------------------------------------------------------------ gallery
   private thumbs(th: RenderTheme) {
-    const mine = this.userPage();
+    const mine = this.userPages()[0];
     const one = (p: V2Page, label: string, tiles?: Record<number, TileSample>) =>
       html`<svg viewBox="0 0 240 320" role="img" aria-label=${label}>${pageGroup(p, { noStatus: true, theme: th, ...(tiles ? { tiles } : {}) })}</svg>`;
     return html`<div class="thumbs">${one(SAMPLE_PAGE, `Sample page in ${th.name}`, SAMPLE_TILES)}${one(mine ?? SAMPLE_PAGE, mine ? `Your first page in ${th.name}` : `Sample page in ${th.name}`, mine ? undefined : SAMPLE_TILES)}</div>`;
@@ -142,8 +189,8 @@ export class HhThemes extends StoreElement {
   private duplicate(name: string) {
     const { config, name: nn } = duplicateTheme(this.cfg, name);
     this.edit(config);
+    this.tab = 'sample';
     location.hash = '#/themes/' + encodeURIComponent(nn);
-    this.store.toast(`Created "${nn}". Change its colours here, then switch to it with Use.`);
   }
   private download(name: string) {
     const url = URL.createObjectURL(new Blob([exportTheme(this.cfg, name)], { type: 'application/json' }));
@@ -162,7 +209,6 @@ export class HhThemes extends StoreElement {
       const { config, name } = importTheme(this.cfg, await f.text());
       this.fileError = '';
       this.edit(config);
-      this.store.toast(`Imported "${name}".`);
       location.hash = '#/themes/' + encodeURIComponent(name);
     } catch (err) {
       this.fileError = err instanceof Error ? err.message : String(err);
@@ -174,30 +220,41 @@ export class HhThemes extends StoreElement {
     cancelAnimationFrame(this.raf);
     this.raf = requestAnimationFrame(fn);
   }
-  private tokenRow(name: string, th: RenderTheme, t: TokenName) {
+  private rowEvents(value: number) {
+    return { enter: () => (this.hover = value), leave: () => (this.hover = null) };
+  }
+  private problemLines(ps: ThemeProblem[], name: string) {
+    return ps.map((p) => html`<div class="pi" role="note">${statusChip('ir', `${ratioText(p.ratio_x100)}:1`)}<span>${p.target.kind === 'token' ? `on ${(TOKEN_LABEL[p.surface as TokenName]?.name ?? p.surface).toLowerCase()}` : `text on ${p.surface}`}, needs ${ratioText(p.min_x100)}:1</span>
+      <button class="btn rs" aria-label="Fix ${p.title}" @click=${() => this.edit(applyFix(this.cfg, name, p))}>Fix</button></div>`);
+  }
+  private tokenRow(name: string, th: RenderTheme, t: TokenName, probs: ThemeProblem[]) {
     const v = hexOf(th.tokens[t]);
     const own = overridesToken(this.cfg, name, t);
     const lab = TOKEN_LABEL[t];
     const set = (h: string, key = `th-${name}-${t}`) => this.edit(setToken(this.cfg, name, t, h), key);
-    return html`<div class="tk" role="group" aria-label=${lab.name}>
+    const ev = this.rowEvents(th.tokens[t]);
+    return html`<div class="tk ${this.hl.has(t) ? 'hl' : ''}" role="group" aria-label=${lab.name} data-token=${t} @mouseenter=${ev.enter} @mouseleave=${ev.leave} @focusin=${ev.enter} @focusout=${ev.leave}>
       <input type="color" aria-label="${lab.name} colour" .value=${v.toLowerCase()} @input=${(e: Event) => { const h = (e.target as HTMLInputElement).value; this.later(() => set(h.toUpperCase())); }} />
       <div class="nm"><b>${lab.name} <span class="muted">${t.toUpperCase()}</span></b><span>${lab.where}</span>
         <button class="btn rs" ?hidden=${!own} aria-label="Reset ${lab.name}" title="Back to the value of ${this.cfg.themes?.[name]?.extends ?? 'default'}" @click=${() => this.edit(resetToken(this.cfg, name, t))}>Reset</button></div>
       <input class="hx" type="text" maxlength="7" spellcheck="false" aria-label="${lab.name} hex" .value=${v} @change=${(e: Event) => { const el = e.target as HTMLInputElement; const h = parseHex(el.value); if (h) set(h); else el.value = v; }} />
+      ${this.problemLines(probs.filter((p) => p.target.kind === 'token' && p.target.token === t), name)}
     </div>`;
   }
-  private paletteCell(name: string, th: RenderTheme, slot: number) {
+  private paletteCell(name: string, th: RenderTheme, slot: number, probs: ThemeProblem[]) {
     const s = th.swatches[slot];
     if (!s) return nothing;
     const n = PALETTE_NAMES[slot] as string;
     const own = overridesSlot(this.cfg, name, slot);
     const set = (h: string) => this.edit(setPaletteFill(this.cfg, name, slot, h), `th-${name}-p${slot}`);
-    return html`<div class="pc" role="group" aria-label=${n}>
+    const ev = this.rowEvents(s.fill);
+    return html`<div class="pc ${this.hl.has('p' + slot) ? 'hl' : ''}" role="group" aria-label=${n} @mouseenter=${ev.enter} @mouseleave=${ev.leave} @focusin=${ev.enter} @focusout=${ev.leave}>
       <div class="aa" style=${setStyle({ background: hex6(s.fill), color: hex6(s.ink) })}>Aa</div>
       <div><input type="color" aria-label="${n} fill" .value=${hexOf(s.fill).toLowerCase()} @input=${(e: Event) => { const h = (e.target as HTMLInputElement).value; this.later(() => set(h.toUpperCase())); }} /></div>
       <div class="a"><b>${n}</b><code>${hexOf(s.fill)}</code></div>
       <div class="a"><input class="hx" type="text" maxlength="7" spellcheck="false" aria-label="${n} hex" .value=${hexOf(s.fill)} @change=${(e: Event) => { const el = e.target as HTMLInputElement; const h = parseHex(el.value); if (h) set(h); else el.value = hexOf(s.fill); }} />
         <button class="btn rs" ?hidden=${!own} aria-label="Reset ${n}" @click=${() => this.edit(resetPaletteFill(this.cfg, name, slot))}>Reset</button></div>
+      ${probs.filter((p) => p.target.kind === 'slot' && p.target.slot === slot).map((p) => html`<div class="a">${statusChip('ir', `text ${ratioText(p.ratio_x100)}:1`)}<button class="btn rs" aria-label="Fix ${p.title}" @click=${() => this.edit(applyFix(this.cfg, name, p))}>Fix</button></div>`)}
     </div>`;
   }
   private async removeTheme(name: string) {
@@ -229,14 +286,46 @@ export class HhThemes extends StoreElement {
     location.hash = '#/themes/' + encodeURIComponent(to);
   }
 
+  /** The screen at full size in the theme under edit: the sample page (every token) or one of the user's pages. Click an element to find its tokens. */
+  private preview(th: RenderTheme) {
+    const pages = this.userPages();
+    const useMine = this.tab === 'pages' && pages.length > 0;
+    const idx = Math.min(this.pageIdx, Math.max(0, pages.length - 1));
+    const page = useMine ? (pages[idx] as V2Page) : SAMPLE_PAGE;
+    const prims = [...layoutPage(page, useMine ? { theme: th } : { theme: th, tiles: SAMPLE_TILES, activeAct: 0 }).prims, ...(useMine ? [] : overlay(th))];
+    const marks: Prim[] = [];
+    if (this.hover !== null)
+      for (const q of prims) {
+        const b = bbox(q);
+        if (b && colours(q).includes(this.hover) && !(q.t === 'rect' && q.w >= 240 && q.h >= 320 && q.x === 0)) marks.push({ t: 'rect', x: b[0] - 1, y: b[1] - 1, w: b[2] + 2, h: b[3] + 2, r: 3, fill: 'none', stroke: '#ff2bd6', sw: 1.5, dash: true });
+      }
+    return html`<svg class="pv" viewBox="0 0 240 320" role="group" aria-label="Preview of ${th.name}" @click=${(e: Event) => this.pick(e, prims, th)}>
+      <g font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif">${prims.map((q, i) => svg`<g data-i=${i}>${primTemplate(q)}</g>`)}</g>
+      ${marks.map((m) => primTemplate(m))}
+    </svg>`;
+  }
+  private pick(e: Event, prims: Prim[], th: RenderTheme) {
+    const g = (e.target as Element).closest('[data-i]');
+    const q = prims[Number(g?.getAttribute('data-i'))];
+    if (!q) return;
+    const group = q.wi === undefined ? [q] : prims.filter((p) => p.wi === q.wi);
+    const vals = new Set(group.flatMap(colours));
+    const hl = new Set<string>();
+    for (const t of TOKEN_NAMES) if (vals.has(th.tokens[t])) hl.add(t);
+    th.swatches.forEach((s, i) => vals.has(s.fill) && hl.add('p' + i));
+    this.hl = hl;
+    const first = [...hl][0];
+    if (first) this.renderRoot.querySelector(`[data-token="${first}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
   private editor(name: string) {
     const { theme: th, error } = themeNamed(this.cfg, name);
     const probs = themeProblems(th);
     const parent = this.cfg.themes?.[name]?.extends ?? 'default';
-    const pages = this.store.pages.flatMap((p) => (p.ok && p.page ? [p.page] : [])).slice(0, 3);
-    const first = pages[0] ?? SAMPLE_PAGE;
+    const pages = this.userPages();
     const used = activeName(this.cfg) === name;
     const bad = this.nameDraft !== null && !/^[a-z0-9_]{1,31}$/.test(this.nameDraft);
+    const idx = Math.min(this.pageIdx, Math.max(0, pages.length - 1));
     return html`<a class="back" href="#/themes">${icon('overview')} All themes</a>
       <div class="ed">
         <div class="card">
@@ -245,20 +334,18 @@ export class HhThemes extends StoreElement {
             <input id="tname" class="nm2" type="text" maxlength="31" spellcheck="false" .value=${this.nameDraft ?? name} aria-invalid=${bad ? 'true' : 'false'} aria-describedby="tname-h"
               @input=${(e: Event) => (this.nameDraft = (e.target as HTMLInputElement).value)} @change=${() => this.rename(name)} />
             ${statusChip(used ? 'ok' : '', used ? 'In use' : 'Not in use', { check: used })}
-            <span class="muted" id="tname-h">Builds on ${PRESETS[parent]?.name ?? parent}. Letters a-z, digits and _ only.</span>
+            <span class="muted" id="tname-h">Builds on ${PRESETS[parent]?.name ?? parent}. Name: letters a-z (lower case), digits, underscore.</span>
           </div>
           ${error ? html`<div class="banner bad" role="alert">${error}</div>` : nothing}
           ${probs.length
             ? html`<section class="banner ir blk" role="group" aria-label="Problems" id="theme-problems">
-                <div class="nmrow">${statusChip('ir', `${probs.length} contrast problem${probs.length === 1 ? '' : 's'}`)}<span class="sp"></span>
-                  <button class="btn sm" @click=${() => this.edit(fixAll(this.cfg, name))}>Fix all</button></div>
                 ${probs.map((p) => html`<div class="prob"><span><b>${p.title}</b>: ${ratioText(p.ratio_x100)}:1, needs ${ratioText(p.min_x100)}:1. Nearest that works <i style=${setStyle({ background: hex6(p.fix) })}></i> ${hexOf(p.fix)}.</span>
                   <button class="btn sm" aria-label="Fix ${p.title}" @click=${() => this.edit(applyFix(this.cfg, name, p))}>Fix</button></div>`)}
               </section>`
             : html`<p>${statusChip('ok', 'Text is readable everywhere', { check: true })}</p>`}
-          ${TOKEN_GROUPS.map((g) => html`<div class="grp"><h3>${g.title}</h3>${g.tokens.map((t) => this.tokenRow(name, th, t))}</div>`)}
+          ${TOKEN_GROUPS.map((g) => html`<div class="grp"><h3>${g.title}</h3>${g.tokens.map((t) => this.tokenRow(name, th, t, probs))}</div>`)}
           <div class="pal"><h3>Palette</h3><p class="muted">The 12 colours widgets can use. Text on each is chosen automatically.</p>
-            <div class="row">${PALETTE_NAMES.map((_n, i) => this.paletteCell(name, th, i))}</div></div>
+            <div class="row">${PALETTE_NAMES.map((_n, i) => this.paletteCell(name, th, i, probs))}</div></div>
           <div class="acts end">
             <button class="btn" @click=${() => this.edit(selectTheme(this.cfg, name))} ?hidden=${used}>Use this theme</button>
             <button class="btn" @click=${() => this.duplicate(name)}>Duplicate</button>
@@ -267,8 +354,22 @@ export class HhThemes extends StoreElement {
           </div>
         </div>
         <div class="side" aria-label="Preview">
-          <hh-mini-remote .page=${first} .theme=${th} label="Your remote in ${name}"></hh-mini-remote>
-          <div class="th">${pages.slice(1).map((p) => svg`<svg viewBox="0 0 240 320" role="img" aria-label="Page in ${name}">${pageGroup(p, { noStatus: true, theme: th })}</svg>`)}${pages.length < 2 ? svg`<svg viewBox="0 0 240 320" role="img" aria-label="Sample page in ${name}">${pageGroup(SAMPLE_PAGE, { noStatus: true, theme: th, tiles: SAMPLE_TILES })}</svg>` : nothing}</div>
+          <div class="sbar">
+            ${probs.length ? statusChip('ir', `${probs.length} contrast problem${probs.length === 1 ? '' : 's'}`, { id: 'prob-chip' }) : statusChip('ok', 'Readable', { check: true })}
+            ${probs.length ? html`<button class="btn sm" @click=${() => this.edit(fixAll(this.cfg, name))}>Fix all</button>` : nothing}
+            <span class="sp"></span>
+            <div class="tabs" role="group" aria-label="Preview page">
+              <button aria-pressed=${this.tab === 'sample'} @click=${() => (this.tab = 'sample')}>Sample</button>
+              <button aria-pressed=${this.tab === 'pages'} ?disabled=${!pages.length} @click=${() => (this.tab = 'pages')}>Your pages</button>
+            </div>
+          </div>
+          ${this.preview(th)}
+          ${this.tab === 'pages' && pages.length
+            ? html`<div class="pager"><button class="btn sm" aria-label="Previous page" ?disabled=${idx === 0} @click=${() => (this.pageIdx = idx - 1)}>‹</button>
+                <span>${pages[idx]?.title || 'Page'} · ${idx + 1} of ${pages.length}</span>
+                <button class="btn sm" aria-label="Next page" ?disabled=${idx >= pages.length - 1} @click=${() => (this.pageIdx = idx + 1)}>›</button></div>`
+            : nothing}
+          <p class="hint">Click anything on the screen to find the colours behind it. Point at a colour to outline where it is used.</p>
         </div>
       </div>`;
   }

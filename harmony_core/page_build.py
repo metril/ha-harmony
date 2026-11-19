@@ -369,10 +369,10 @@ def _over_msg(cid: str, p: Page, over: int) -> str:
     costs = [widget_cost(w)["color"] for w in p.widgets]
     free = sum(c.startswith("#") for w in p.widgets for c in (w.color, w.on_color) if c)
     if not sum(costs):
-        return f"page {cid!r}: {over} bytes over; shorten labels, use icon_only, or make it a list"
+        return f"page {cid!r}: {over} byte{'s' * (over != 1)} over; shorten labels, use icon_only, or make it a list"
     bytes_ = sum(1 for c in costs if c)
     return (
-        f"page {cid!r}: {over} bytes over ({free} custom colour{'s' * (free != 1)} = {2 * free} B,"
+        f"page {cid!r}: {over} byte{'s' * (over != 1)} over ({free} custom colour{'s' * (free != 1)} = {2 * free} B,"
         f" {bytes_} colour byte{'s' * (bytes_ != 1)} = {bytes_} B); use palette colours,"
         " shorten labels, use icon_only, or make it a list"
     )

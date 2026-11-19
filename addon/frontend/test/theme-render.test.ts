@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import fw from './fixtures/firmware-fills.json';
 import type { V2Page, V2Widget } from '../src/lib/api';
 import { layoutPage, type Prim } from '../src/lib/page-renderer';
-import { activeTheme, contrastInfo, deriveSwatches, labelColor, presetTheme, resolveColour, themeNamed, widgetColors } from '../src/lib/theme-model';
+import { contrastInfo } from '../src/lib/theme-edit';
+import { activeTheme, deriveSwatches, labelColor, presetTheme, resolveColour, themeNamed, widgetColors } from '../src/lib/theme-model';
 import { css, PALETTE_NAMES, THEMES } from '../src/lib/themes';
 import { from565, snap565 } from '../src/lib/theme-math';
 

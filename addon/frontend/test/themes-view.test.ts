@@ -54,11 +54,12 @@ describe('themes view', () => {
     el.selected = 'x';
     await settle(el);
     const root = el.shadowRoot!;
-    expect(root.querySelector('#theme-problems')?.textContent).toContain('contrast problem');
+    expect(root.querySelector('#prob-chip')?.textContent).toContain('contrast problem');
+    expect(root.querySelectorAll('.tk .pi').length).toBeGreaterThan(0);
     expect(root.querySelectorAll('.tk').length).toBe(13);
-    [...root.querySelectorAll<HTMLButtonElement>('#theme-problems button')].find((b) => b.textContent === 'Fix all')!.click();
+    [...root.querySelectorAll<HTMLButtonElement>('.side button')].find((b) => b.textContent === 'Fix all')!.click();
     await settle(el);
-    expect(root.querySelector('#theme-problems')).toBeNull();
+    expect(root.querySelector('#prob-chip')).toBeNull();
     expect(store.config.themes?.['x']?.tokens?.['tx']).toMatch(/^#[0-9A-F]{6}$/);
   });
 });
@@ -94,5 +95,27 @@ describe('colour field', () => {
     el.shadowRoot!.querySelector<HTMLButtonElement>('.sw[aria-label="red"]')!.click();
     el.shadowRoot!.querySelector<HTMLButtonElement>('.sw.def')!.click();
     expect(got).toEqual(['red', undefined]);
+  });
+});
+
+describe('theme editor preview', () => {
+  it('clicking an element lists the tokens behind it; hovering a token outlines its uses', async () => {
+    const cfg = { ...tvConfig(), themes: { x: { extends: 'default' } } };
+    const { el } = await mount(cfg);
+    el.selected = 'x';
+    await settle(el);
+    const root = el.shadowRoot!;
+    const svg = root.querySelector('svg.pv')!;
+    expect(svg.getBoundingClientRect).toBeTruthy();
+    // the sample's "Main" button: ACC text on S2
+    const texts = [...svg.querySelectorAll('g[data-i] text')];
+    const main = texts.find((t) => t.textContent === 'Main')!;
+    main.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    await settle(el);
+    expect([...root.querySelectorAll('.tk.hl')].map((r) => r.getAttribute('data-token')).sort()).toEqual(['acc', 's2']);
+    const row = root.querySelector('[data-token="bad"]')!;
+    row.dispatchEvent(new MouseEvent('mouseenter'));
+    await settle(el);
+    expect(root.querySelectorAll('svg.pv rect[stroke="#ff2bd6"]').length).toBeGreaterThan(0);
   });
 });

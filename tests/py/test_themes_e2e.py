@@ -175,7 +175,7 @@ async def test_over_budget_page_says_so_in_the_inspector(browser, site):
     await page.reload()
     await page.locator("hh-remote [data-widget]").first.wait_for()
     await page.locator("hh-remote [data-widget]").first.click()
-    await page.get_by_text("bytes over").first.wait_for()
+    await page.get_by_text("1 byte over").first.wait_for()
     await shot(page, "colour-over-budget")
     await page.context.close()
 
@@ -216,7 +216,12 @@ async def test_axe_on_the_theme_views_and_the_colour_row(browser, site, scheme):
         )  # a contrast problem shows too
         await page.get_by_label("Main text hex", exact=True).press("Tab")
         await page.get_by_text("contrast problem").first.wait_for()
+        await page.evaluate("() => window.scrollTo(0, 0)")
+        await page.wait_for_timeout(300)
         await shot(page, f"theme-editor-{scheme}-{width}")
+        await page.mouse.wheel(0, 700)
+        await page.wait_for_timeout(300)
+        await shot(page, f"theme-editor-scrolled-{scheme}-{width}")
         await page.add_script_tag(path=str(AXE))
         found = await page.evaluate(
             "axe.run(document, {resultTypes:['violations']}).then(r => r.violations.map(v => v.id + ' ' + v.nodes[0].target.join(' ')))"

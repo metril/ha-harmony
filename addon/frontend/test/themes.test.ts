@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import vec from '../../../tests/vectors/themes.json';
 import {
-  contrastX100, from565, ink, is565, meets, nearestPalette, needsOutline, pressed, resolveTheme, serialiseTheme,
-  snap565, to565, validateTheme, WIRE_LEN, type Tokens, type UserTheme,
+  contrastX100, from565, ink, is565, meets, needsOutline, pressed, resolveTheme,
+  snap565, to565, type Tokens, type UserTheme,
 } from '../src/lib/theme-math';
+import { nearestPalette, serialiseTheme, validateTheme, WIRE_LEN } from '../src/lib/theme-fix';
 import { css, CUSTOM_THEME_ID, LIN, PALETTE_NAMES, swatchOf, themeById, THEMES, TOKEN_NAMES } from '../src/lib/themes';
 
 const hex = (u: Uint8Array): string => Array.from(u, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -91,5 +92,13 @@ describe('resolveTheme', () => {
     const chain: Record<string, UserTheme> = { t5: { extends: 'default' } };
     for (let i = 0; i < 5; i++) chain[`t${i}`] = { extends: `t${i + 1}` };
     bad('t0', chain, /deeper than 4/);
+  });
+});
+
+import casing from '../../../tests/vectors/theme_casing.json';
+describe('token key casing (shared vector)', () => {
+  it('ACC, Tx and bg all resolve like the Python model', () => {
+    const t = resolveTheme('t', casing.themes as Record<string, UserTheme>, presets);
+    for (const [k, v] of Object.entries(casing.expect)) expect(t.tokens[k as keyof Tokens]).toBe(v);
   });
 });
