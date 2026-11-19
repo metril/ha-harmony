@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { KeymapRow, V2Page } from '../lib/api';
 import type { Assigner, Spot } from '../lib/assigner';
 import { cellAt, pageGroup, widgetRect } from '../lib/page-renderer';
-import { BODY, DPAD, GLASS, GRIP_Y, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, bodyPath, gripPath, keyPath, keyTitle, tintPath, type KeyGeom } from '../lib/remote-layout';
+import { BODY, DPAD, GLASS, GRIP_Y, JOINED, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, bodyPath, gripPath, keyPath, keyTitle, tintPath, type KeyGeom } from '../lib/remote-layout';
 import type { StudioHost } from '../lib/studio-state';
 import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
@@ -56,13 +56,16 @@ export class HhRemote extends LitElement {
     .gl { fill: #eef1f3; pointer-events: none; }
     .gs { fill: none; stroke: #eef1f3; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     .gs.rec { stroke: #f0665a; }
-    .mk { opacity: 0.4; } .dir { opacity: 0; }
-    .key:hover .mk, .key:focus-visible .mk, .key.sel .mk { opacity: 1; }
-    .key:hover .dir, .key:focus-visible .dir, .key.sel .dir { opacity: 0.9; }
+    .mk, .dir { opacity: 0; }
+    .key:hover .mk, .key:focus-visible .mk, .key.sel .mk, .key.ov .mk { opacity: 1; }
+    .key:hover .dir, .key:focus-visible .dir, .key.sel .dir, .key.ov .dir { opacity: 0.9; }
+    /* joined keys: one flat plate, no seam at rest; the half under the pointer or assigned shows itself */
+    .jn .cap { fill: #4d5257; stroke: #4d5257; stroke-width: 0.7; }
+    .jn:hover .cap { fill: #61676d; stroke: #61676d; }
     .key.colour .lab { display: none; }
     .key:hover .cap { fill: url(#keyh); }
-    .key.ov .glow { fill: rgba(32, 200, 176, 0.28); stroke: #20c8b0; stroke-width: 1.6; }
-    .key.none .glow { fill: rgba(5, 8, 11, 0.55); }
+    .key.ov .glow { fill: none; stroke: #20c8b0; stroke-width: 1.8; }
+    .key.none .glow { fill: rgba(5, 8, 11, 0.18); }
     .key.colour.none .glow { fill: rgba(5, 8, 11, 0.2); }
     .key.ex .glow { fill: rgba(5, 8, 11, 0.4); stroke: #687888; stroke-width: 1; stroke-dasharray: 3 2; }
     .key.bad .glow { stroke: #f85848; stroke-width: 2; }
@@ -70,7 +73,7 @@ export class HhRemote extends LitElement {
     .key.tgt .glow { fill: rgba(32, 200, 176, 0.1); stroke: #20c8b0; stroke-width: 1.4; stroke-dasharray: 4 3; animation: pulse 1.2s ease-in-out infinite; }
     .key.over .glow { fill: rgba(32, 200, 176, 0.38); stroke: #5fe3cf; stroke-width: 2; stroke-dasharray: none; animation: none; }
     .key.invalid .glow { stroke: #f85848; fill: rgba(248, 88, 72, 0.18); animation: none; }
-    .key.sel .glow { stroke: #fff; stroke-width: 2.2; stroke-dasharray: none; filter: drop-shadow(0 0 4px #20c8b0); }
+    .key.sel .glow { fill: rgba(32, 200, 176, 0.5); stroke: #fff; stroke-width: 2.2; stroke-dasharray: none; filter: drop-shadow(0 0 4px #20c8b0); }
     .key:focus-visible .glow { stroke: #5fe3cf; stroke-width: 2.4; stroke-dasharray: none; filter: drop-shadow(0 0 3px #5fe3cf); }
     @keyframes pulse { 50% { stroke-opacity: 0.35; } }
     .screen-frame { fill: none; stroke: transparent; stroke-width: 3; pointer-events: none; }
@@ -352,7 +355,7 @@ export class HhRemote extends LitElement {
     const a = this.assigner.phase;
     const cur = this.assigner.cursor;
     const tgt = this.canTarget('key');
-    const cls = ['key', `g-${g.group}`, g.color ? 'colour' : '', ...this.keyState(row)];
+    const cls = ['key', `g-${g.group}`, JOINED.has(g.name) ? 'jn' : '', g.color ? 'colour' : '', ...this.keyState(row)];
     const sel = this.st.sel?.kind === 'key' && this.st.sel.name === g.name;
     if (sel) cls.push('sel');
     if (errs.has(g.name)) cls.push('bad');

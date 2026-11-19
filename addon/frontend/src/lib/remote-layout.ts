@@ -120,12 +120,14 @@ const polyKey = (name: string, group: string, crop: Pt[], o: { label?: string; p
 };
 const EXIT: Pt[] = [[62, 35], [345, 35], [345, 60], [290, 113], [62, 113]];
 const MUTE: Pt[] = [[62, 503], [290, 503], [345, 558], [345, 580], [62, 580]];
-const VOL_TOP: Pt[] = [[62, 152], [215, 152], [148, 308], [62, 308]];
-const VOL_BOT: Pt[] = [[62, 308], [148, 308], [215, 465], [62, 465]];
+const VOL_TOP: Pt[] = [[62, 152], [215, 152], [152, 308], [62, 308]];
+const VOL_BOT: Pt[] = [[62, 308], [152, 308], [215, 465], [62, 465]];
 
 // the diamond (a square turned 45 degrees, rounded), split into four kites that meet round the OK button
-const DC = cp(382, 305);
-const DT = cp(382, 110), DR_ = cp(575, 305), DB = cp(382, 500), DL = cp(189, 305);
+// the sharp square's half-diagonal is 239 crop px; rounding the tips (0.45 along each flank) leaves a visible half of ~185,
+// which puts the side points a thin gap from Vol and Ch/Pg and the top and bottom points between Exit/Menu and Mute/Back
+const DC = cp(382, 308);
+const DT = cp(382, 69), DR_ = cp(621, 308), DB = cp(382, 547), DL = cp(143, 308);
 const OK_R = Math.round((80 / 3) * (BODY.w / 267));
 /** diamond centre and half-diagonal in viewBox units */
 export const DPAD = { x: DC[0], y: DC[1], r: Math.round((DR_[0] - DL[0]) / 2) };
@@ -137,7 +139,7 @@ const kite = (name: string, tip: Pt, a: Pt, b: Pt, ang: number): KeyGeom => {
   const on = (t: number): Pt => [DC[0] + ra * Math.cos(t), DC[1] + ra * Math.sin(t)];
   const a0 = on(ang - Math.PI / 4), a1 = on(ang + Math.PI / 4);
   const m1 = mid(tip, a), m2 = mid(tip, b);
-  const p1 = lerp(tip, a, 0.3), p2 = lerp(tip, b, 0.3);
+  const p1 = lerp(tip, a, 0.45), p2 = lerp(tip, b, 0.45);
   const f = (p: Pt) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`;
   const d = `M${f(a0)}L${f(m1)}L${f(p1)}Q${f(tip)} ${f(p2)}L${f(m2)}L${f(a1)}A${ra} ${ra} 0 0 0 ${f(a0)}z`;
   return { name, stock: stockOf(name), label: '', group: 'nav', shape: 'path', ...bbox([m1, p1, tip, p2, m2, a0, a1]), d };
@@ -205,6 +207,8 @@ const LAYOUT: readonly (Row | string)[] = [
   ['home_control_minus', '−', 'home', 'rock-bottom', 0.498, 0.873, 0.150, 0.033],
   [PK.socketLower, '', 'home', 'rect', 0.762, 0.876, 0.266, 0.027, { printed: 'lower socket', radii: [6, 6, 6, 6] }],
 ];
+/** Keys that are one visual plate with separate hit areas (no seam drawn at rest): the D-pad, Vol, Ch/Pg and the home +/- key. */
+export const JOINED: ReadonlySet<string> = new Set(['up', 'down', 'left', 'right', 'volume_up', 'volume_down', 'channel_up', 'channel_down', 'home_control_plus', 'home_control_minus']);
 export const KEYS: readonly KeyGeom[] = LAYOUT.map((r) => (typeof r === 'string' ? (SPECIAL[r] as KeyGeom) : geom(r)));
 
 export const keyByName = new Map(KEYS.map((g) => [g.name, g]));

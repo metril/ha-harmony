@@ -9,6 +9,7 @@
 
 ## 0.3.6 (2026-11-18)
 
+- Editor: assigned keys are outlined in teal instead of filled (filled only for the selected key); the D-pad is one plain rounded diamond and Vol, Ch/Pg and the +/- key are plain keys, their halves showing only on hover, focus, selection or when assigned.
 - Editor: the Elite drawing is now shaped like the real remote: a rounded-diamond D-pad with OK, single tall Vol and Ch/Pg keys with two hit areas, notched Exit/Menu/Mute/Back, one play/pause key, one DVR/Guide/Info bar, outlined ACTIVITIES/DEVICES, ringed colour keys, a single +/- key and printed icons, with a dome top and a matte grip.
 - Editor: the Elite drawing's proportions now follow the photo (taller body, Off lower and inset, screen centred, keys and the D-pad ring placed from one table of body fractions, empty rounded grip at the bottom).
 - Editor: History page simplified (Compare and Restore actions per entry) and the hub indicator sits in the header.

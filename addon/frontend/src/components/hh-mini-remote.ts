@@ -2,7 +2,7 @@ import { LitElement, css, nothing, svg } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import type { V2Page } from '../lib/api';
 import { pageGroup } from '../lib/page-renderer';
-import { GLASS, KEYS, MINI_VIEW, SCREEN, bodyPath, gripPath, keyPath, tintPath } from '../lib/remote-layout';
+import { GLASS, JOINED, KEYS, MINI_VIEW, SCREEN, bodyPath, gripPath, keyPath, tintPath } from '../lib/remote-layout';
 
 /** A small, read-only Elite drawing: optional screen page, and keys marked on / changed / missing / dim. */
 @customElement('hh-mini-remote')
@@ -17,8 +17,9 @@ export class HhMiniRemote extends LitElement {
     .g-colour .cap { fill: #2c3135; }
     .g-strip .cap { fill: #030405; stroke: #e8edf0; stroke-width: 2; }
     .tint { fill: none; stroke-width: 3; }
-    .on .cap { fill: #20c8b0; stroke: #5fe3cf; stroke-width: 2; }
-    .chg .cap { fill: #f8c040; stroke: #ffe08a; stroke-width: 2; }
+    .jn .cap { fill: #565d65; stroke: #565d65; stroke-width: 0.7; }
+    .on .cap { stroke: #20c8b0; stroke-width: 3; }
+    .chg .cap { stroke: #f8c040; stroke-width: 3; }
     .miss .cap { fill: #1b2024; stroke: #f8c040; stroke-width: 2; stroke-dasharray: 5 3; }
     .dim .cap { opacity: 0.35; }
     .pulse .cap { stroke: #5fe3cf; stroke-width: 2.5; stroke-dasharray: 5 3; }
@@ -36,7 +37,7 @@ export class HhMiniRemote extends LitElement {
         ${this.page ? pageGroup(this.page, {}) : svg`<rect width="240" height="320" fill="#101820"></rect>`}
       </svg>
       <path class="grip" d=${gripPath()}></path>
-      ${KEYS.map((g) => svg`<g class="${this.marks[g.name] ?? ''} g-${g.group}"><path class="cap" d=${keyPath(g)}></path>${g.color ? svg`<path class="tint" d=${tintPath(g)} stroke=${g.color}></path>` : nothing}</g>`)}
+      ${KEYS.map((g) => svg`<g class="${this.marks[g.name] ?? ''} g-${g.group} ${JOINED.has(g.name) ? 'jn' : ''}"><path class="cap" d=${keyPath(g)}></path>${g.color ? svg`<path class="tint" d=${tintPath(g)} stroke=${g.color}></path>` : nothing}</g>`)}
     </svg>`;
   }
 }
