@@ -4,9 +4,11 @@ Every other HA test uses hand-written fixtures. This one loads the 85-command co
 `tools/stock_to_ha_config.py` produced from the stock IR database extracted off the rooted
 hub, into a real HA instance, against the real `hub --sim`, and presses real buttons.
 
-The file lives in the gitignored `backups/` tree (it is device data, not source), so this
-module skips cleanly wherever it is absent -- CI included. Point HAH_REAL_CONFIG at another
-copy to run it elsewhere.
+The file lives in the gitignored `backups/` tree (it is device data, not source), so the "real"
+runs skip cleanly wherever it is absent -- CI included. Point HAH_REAL_CONFIG at another copy to
+run it elsewhere. Every test also runs against fixtures/living_room.yaml, an invented config of
+the same structure (5 devices, 148 commands, 3 activities, 14 pages), so CI exercises these
+bodies too. Command buttons are created disabled by default, so the tests enable them.
 """
 
 from __future__ import annotations
@@ -38,23 +40,40 @@ def _find_real_config() -> Path | None:
 
 
 REAL = _find_real_config()
-pytestmark = [
-    pytest.mark.skipif(REAL is None, reason="real hub config not present (gitignored backups/)"),
-    pytest.mark.usefixtures("enable_custom_integrations", "fast_client"),
-]
+LIVING_ROOM = REPO / "tests/py/fixtures/living_room.yaml"
+COMMANDS = {"living_room": 148, "real": 85}  # the number of device commands in each source
+pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client", "buttons_enabled")
 
 
 @pytest.fixture
-def real_cfg() -> dict:
-    assert REAL is not None
-    return yaml.safe_load(REAL.read_text(encoding="utf-8"))
+def buttons_enabled(monkeypatch):
+    """New command buttons are created disabled (the default), and pressing a disabled entity is a no-op."""
+    monkeypatch.setattr("custom_components.ha_harmony.button.ENABLED_BY_DEFAULT", True)
+
+
+@pytest.fixture(params=["living_room", "real"])
+def source(request) -> str:
+    if request.param == "real" and REAL is None:
+        pytest.skip("real hub config not present (gitignored backups/)")
+    return request.param
 
 
 @pytest.fixture
-async def loaded(hass, hub_rf, fake_addon):
-    """HA with the real config applied in the add-on and the entry set up against hub --sim."""
-    assert REAL is not None
-    fake_addon.apply_yaml(REAL.read_text(encoding="utf-8"))
+def cfg_path(source) -> Path:
+    path = LIVING_ROOM if source == "living_room" else REAL
+    assert path is not None
+    return path
+
+
+@pytest.fixture
+def real_cfg(cfg_path) -> dict:
+    return yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+async def loaded(hass, hub_rf, fake_addon, cfg_path):
+    """HA with the config applied in the add-on and the entry set up against hub --sim."""
+    fake_addon.apply_yaml(cfg_path.read_text(encoding="utf-8"))
 
     entry = make_entry("127.0.0.1", hub_rf.port, addon=fake_addon)
     entry.add_to_hass(hass)
@@ -81,7 +100,7 @@ async def test_real_config_loads_and_is_pushed_once(hass, loaded):
     assert coord.config_pushes == 1, "the real config must reach the hub, exactly once"
 
 
-async def test_one_button_per_real_command(hass, loaded, real_cfg):
+async def test_one_button_per_real_command(hass, loaded, real_cfg, source):
     missing = [
         f"{d['id']}:{name}"
         for d in real_cfg["devices"]
@@ -90,7 +109,7 @@ async def test_one_button_per_real_command(hass, loaded, real_cfg):
     ]
     assert not missing, f"commands with no button entity: {missing[:10]}"
     total = sum(len(d["commands"]) for d in real_cfg["devices"])
-    assert total == 85, "the extraction yielded 85 IR commands; a different count means it changed"
+    assert total == COMMANDS[source], f"expected {COMMANDS[source]} IR commands; a different count means it changed"
 
 
 async def test_each_real_device_is_an_ha_device(hass, loaded, real_cfg):
@@ -145,16 +164,15 @@ def test_stock_power_timing_and_activities_survive_conversion(real_cfg):
     assert tv["inputs"]["TV"] == tv["commands"]["InputTV"], "stock's InputTv/InputTV case clash"
     acts = {a["name"]: a for a in real_cfg["activities"]}
     assert acts["SHIELD TV"]["devices"] == [{"device": "samsung_tv", "input": "HDMI 1"}]
-    assert acts["Watch Roku"]["devices"] == [{"device": "samsung_tv", "input": "HDMI 3"}]
+    assert acts["Watch Roku"]["devices"][0] == {"device": "samsung_tv", "input": "HDMI 3"}
 
 
 @pytest.fixture
-async def loaded_fast(hass, hub_rf, fake_addon):
+async def loaded_fast(hass, hub_rf, fake_addon, real_cfg):
     """As `loaded`, but with settle_ms shrunk to 20: the hub waits out settle in real time,
     and these tests are about WHICH IR is sent in WHAT order, not the stock delay values
     (those are pinned by test_stock_power_timing_and_activities_survive_conversion)."""
-    assert REAL is not None
-    cfg = yaml.safe_load(REAL.read_text(encoding="utf-8"))
+    cfg = real_cfg
     for d in cfg["devices"]:
         if "settle_ms" in d:
             d["settle_ms"] = 20
@@ -168,9 +186,11 @@ async def loaded_fast(hass, hub_rf, fake_addon):
     return cfg
 
 
-async def test_activity_select_offers_the_stock_activities(hass, loaded):
+async def test_activity_select_offers_the_stock_activities(hass, loaded, real_cfg):
     sel = er.async_get(hass).async_get_entity_id("select", "ha_harmony", f"{HUB_ID}_activity")
-    assert hass.states.get(sel).attributes["options"] == ["SHIELD TV", "Watch Roku", "Off"]
+    names = [a["name"] for a in real_cfg["activities"]]
+    assert {"SHIELD TV", "Watch Roku"} <= set(names)
+    assert hass.states.get(sel).attributes["options"] == [*names, "Off"]
 
 
 async def test_stock_activities_drive_the_tv_like_stock_does(hass, loaded_fast, hub_rf):
@@ -200,30 +220,23 @@ async def test_stock_activities_drive_the_tv_like_stock_does(hass, loaded_fast, 
     assert read_lines(hub_rf, 1) == [line("PowerOff")]
 
 
-@pytest.mark.parametrize(
-    ("device", "command", "target"),
-    [
-        # verbatim from the user's own automation and scripts written for the stock integration
-        ("51887071", "VolumeUp", "audioengine_a5"),  # Hue Tap Dial, dial right
-        ("51887071", "Mute", "audioengine_a5"),  # Hue Tap Dial, button 4 hold
-        ("81729894", "PowerOn", "kvm_1"),  # script.kvm_on
-        ("Audioengine A5+ Speakers", "VolumeDown", "audioengine_a5"),  # stock also takes names
-    ],
-)
-async def test_stock_automations_work_after_an_entity_swap(
-    hass, loaded, real_cfg, hub_rf, device, command, target
-):
+async def test_stock_automations_work_after_an_entity_swap(hass, loaded, real_cfg, hub_rf):
     """Migration: an automation written for `remote.harmony` (stock) keeps its `device` and
-    `command` verbatim -- stock's numeric device id -- and only its entity_id changes."""
+    `command` verbatim -- stock's numeric device id, or the device's name -- and only its
+    entity_id changes. Every alias of every device, with the device's first and last command."""
     remote = er.async_get(hass).async_get_entity_id("remote", "ha_harmony", f"{HUB_ID}_remote")
-    await hass.services.async_call(
-        "remote",
-        "send_command",
-        {"entity_id": remote, "device": device, "command": command},
-        blocking=True,
-    )
-    raw = {d["id"]: d for d in real_cfg["devices"]}[target]["commands"][command]["raw"]
-    assert read_lines(hub_rf, 1) == [_ir_line(raw["hz"], raw["us"])]
+    for dev in real_cfg["devices"]:
+        assert dev["aliases"], dev["id"]
+        for alias in dev["aliases"]:
+            for command in (next(iter(dev["commands"])), list(dev["commands"])[-1]):
+                await hass.services.async_call(
+                    "remote",
+                    "send_command",
+                    {"entity_id": remote, "device": alias, "command": command},
+                    blocking=True,
+                )
+                raw = dev["commands"][command]["raw"]
+                assert read_lines(hub_rf, 1) == [_ir_line(raw["hz"], raw["us"])], (dev["id"], alias, command)
 
 
 async def test_restart_does_not_re_push_an_unchanged_config(hass, loaded):
