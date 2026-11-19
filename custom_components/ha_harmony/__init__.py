@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -152,8 +153,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
     dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, **_device_kwargs(coordinator)
     )
-    await _flag_leftover_yaml(hass, coordinator)
-    await coordinator.async_load_cached()  # the remote keeps its config while the add-on is down
+    # the remote keeps its config while the add-on is down
+    cached = await coordinator.async_load_cached()
+    await _flag_leftover_yaml(hass, coordinator, cached)
     if entry.data.get(CONF_ADDON_HOST):
         coordinator.async_start_link(
             AddonClient(
@@ -170,23 +172,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
     return True
 
 
-async def _flag_leftover_yaml(hass: HomeAssistant, coordinator: HarmonyCoordinator) -> None:
-    """0.3.0 dropped the YAML source. Only look for the file (never read or delete it) and point
-    the user at the add-on's import."""
+_LOGGER = logging.getLogger(__name__)
+
+
+async def _flag_leftover_yaml(
+    hass: HomeAssistant, coordinator: HarmonyCoordinator, cached: bool
+) -> None:
+    """The YAML source is gone. Only look for the file (never read, move or delete it). It is
+    harmless once an add-on config is cached/accepted, so the notice is only raised before that."""
     path = Path(hass.config.path(CONFIG_SUBDIR, f"{coordinator.hub_id}.yaml"))
     issue = f"{ISSUE_YAML}_{coordinator.hub_id}"
-    if await hass.async_add_executor_job(path.is_file):
+    if not await hass.async_add_executor_job(path.is_file):
+        ir.async_delete_issue(hass, DOMAIN, issue)
+    elif cached:
+        ir.async_delete_issue(hass, DOMAIN, issue)
+        _LOGGER.info("%s is no longer used (the add-on config is active); safe to delete", path)
+    else:
         ir.async_create_issue(
             hass,
             DOMAIN,
             issue,
             is_fixable=False,
+            is_persistent=False,
             severity=ir.IssueSeverity.WARNING,
             translation_key=ISSUE_YAML,
             translation_placeholders={"hub": coordinator.hub_id, "path": str(path)},
         )
-    else:
-        ir.async_delete_issue(hass, DOMAIN, issue)
 
 
 def _device_kwargs(coordinator: HarmonyCoordinator) -> dict[str, Any]:

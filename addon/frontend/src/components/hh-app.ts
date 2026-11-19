@@ -37,6 +37,10 @@ export class HhApp extends StoreElement {
       .brand { font-weight: 650; display: flex; gap: 8px; align-items: center; }
       .brand .ic { color: var(--acc); }
       .menu { display: none; }
+      .hub { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 12px; border-left: 1px solid var(--line); height: 28px; }
+      .hub .hl { color: var(--tx3); font-size: 12px; }
+      .hub .hid { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16ch; font-family: var(--mono); font-size: 12px; }
+      .hub select { max-width: 22ch; }
       select { height: 32px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 8px; }
       .layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: calc(100vh - 48px); }
       @media (min-width: 721px) {
@@ -75,6 +79,11 @@ export class HhApp extends StoreElement {
         nav.open { display: flex; }
         main { padding: 16px 16px 96px; }
         header { padding: 0 8px 0 8px; gap: 4px; }
+        .brand { display: none; }
+        .hub { border-left: 0; padding-left: 4px; }
+        .hub .hid { max-width: 10ch; }
+        .hub select { max-width: 12ch; }
+        .hub .chip { padding: 0 6px; font-size: 11px; }
         .hdr-btn span { display: none; }
         .toasts { bottom: 76px; }
       }
@@ -168,6 +177,29 @@ export class HhApp extends StoreElement {
     return ids.includes(this.store.hub) ? ids : [this.store.hub, ...ids];
   }
 
+  /** Always-visible "Hub: id" with whether Home Assistant is polling for it; a switcher when several hubs exist. */
+  private hubIndicator() {
+    const s = this.store;
+    const info = linkInfo(this.link, s.hub);
+    const state: Record<string, [string, string, string]> = {
+      polling: ['ok', 'Linked, polling', 'Home Assistant is polling for this hub.'],
+      stale: ['ir', 'Not polling', 'Home Assistant is not polling for this hub right now.'],
+      other: ['ir', 'Not polling', 'Home Assistant polls for a different hub id.'],
+      none: ['', 'No Home Assistant linked', 'No Home Assistant integration is linked to this add-on yet.'],
+    };
+    const st = state[info.kind];
+    const choices = this.hubChoices();
+    return html`<div class="hub" role="group" aria-label="Hub">
+      <span class="hl">Hub:</span>
+      ${choices.length > 1
+        ? html`<select aria-label="Hub" @change=${(e: Event) => this.goHub((e.target as HTMLSelectElement).value)}>
+            ${choices.map((id) => html`<option value=${id} ?selected=${id === s.hub}>${id}${this.hubs?.hubs.find((h) => h.id === id)?.has_applied ? '' : ' (no config yet)'}</option>`)}
+          </select>`
+        : html`<strong class="hid" title=${s.hub}>${s.hub}</strong>`}
+      ${st ? html`<span class="chip ${st[0]}" id="hub-state" title=${st[2]}>${st[1]}</span>` : nothing}
+    </div>`;
+  }
+
   private linkBanners() {
     const s = this.store;
     const out = [];
@@ -242,11 +274,7 @@ export class HhApp extends StoreElement {
         <button class="skip" @click=${() => this.shadowRoot?.querySelector('main')?.focus()}>Skip to content</button>
         <button class="btn ghost icon menu" aria-label="Menu" aria-expanded=${this.railOpen} @click=${() => (this.railOpen = !this.railOpen)}>${icon('menu')}</button>
         <span class="brand">${icon('hub')} Harmony Editor</span>
-        ${this.hubChoices().length > 1
-          ? html`<select aria-label="Hub" @change=${(e: Event) => this.goHub((e.target as HTMLSelectElement).value)}>
-              ${this.hubChoices().map((id) => html`<option value=${id} ?selected=${id === s.hub}>${id}${this.hubs?.hubs.find((h) => h.id === id)?.has_applied ? '' : ' (no config yet)'}</option>`)}
-            </select>`
-          : nothing}
+        ${this.hubIndicator()}
         <span class="sp"></span>
         <button class="btn ghost hdr-btn" aria-label="Import YAML" @click=${() => (this.importOpen = true)}>${icon('upload')}<span>Import YAML</span></button>
         <a class="btn ghost hdr-btn" aria-label="Export YAML" aria-disabled=${s.isFirstRun ? 'true' : 'false'} href=${s.isFirstRun ? '#/overview' : s.api.exportUrl(s.hub)} download="harmony-${s.hub}.yaml">${icon('download')}<span>Export YAML</span></a>

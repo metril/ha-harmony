@@ -43,7 +43,21 @@ jobs:
         run: |
           cmake -S . -B build
           cmake --build build -j --target hub remote_sim
+      # browser e2e (tests/py/test_addon_e2e.py): the runner's preinstalled Chrome + the built bundle
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: addon/frontend/package-lock.json
+      - name: Build frontend bundle
+        working-directory: addon/frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
       - name: Test
+        env:
+          HH_CHROMIUM: /usr/bin/google-chrome
+          HH_REQUIRE_E2E: "1"  # a missing browser/bundle/playwright fails instead of skipping
         run: >-
           uv run pytest tests/py -n auto
           --shard-id=${{ matrix.shard }} --num-shards=3

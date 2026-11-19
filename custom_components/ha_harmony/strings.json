@@ -72,7 +72,7 @@
     },
     "yaml_unused": {
       "title": "Upload your Harmony YAML in the Harmony Editor add-on",
-      "description": "Integration 0.3.0 no longer reads {path} for hub {hub}. Upload that file in the Harmony Editor add-on (import YAML, then apply). The file is untouched; delete it once imported."
+      "description": "This integration no longer reads {path} for hub {hub}. Upload that file in the Harmony Editor add-on (import YAML, then apply). This notice disappears once a config applied in the add-on has been accepted by the hub. The file is untouched; delete it once imported."
     }
   },
   "services": {

@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { KeymapRow, V2Page } from '../lib/api';
 import type { Assigner, Spot } from '../lib/assigner';
 import { cellAt, pageGroup, widgetRect } from '../lib/page-renderer';
-import { BODY, DPAD, GLASS, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, keyPath, keyTitle, type KeyGeom } from '../lib/remote-layout';
+import { DPAD, bodyPath, GLASS, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, keyPath, keyTitle, type KeyGeom } from '../lib/remote-layout';
 import type { StudioHost } from '../lib/studio-state';
 import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
@@ -457,8 +457,8 @@ export class HhRemote extends LitElement {
         <linearGradient id="keyh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#48515a"></stop><stop offset="1" stop-color="#2d343a"></stop></linearGradient>
       </defs>
       ${st.xray && !screenMode ? this.xray(rows) : nothing}
-      <rect class="body" x=${BODY.x} y=${BODY.y} width=${BODY.w} height=${BODY.h} rx=${BODY.r}></rect>
-      <rect class="rim" x=${BODY.x + 3} y=${BODY.y + 3} width=${BODY.w - 6} height=${BODY.h - 6} rx=${BODY.r - 3}></rect>
+      <path class="body" d=${bodyPath()}></path>
+      <path class="rim" d=${bodyPath(3)}></path>
       <rect class="glass" x=${GLASS.x} y=${GLASS.y} width=${GLASS.w} height=${GLASS.h} rx=${GLASS.r}></rect>
       <svg class="scr" x=${SCREEN.x} y=${SCREEN.y} width=${SCREEN.w} height=${SCREEN.h} viewBox="0 0 240 320" @pointerdown=${(e: PointerEvent) => this.onScreenDown(e)}>
         ${v2 ? pageGroup(v2, { activeAct: activityIndex(this.store.config, st.layer) }) : svg`<rect width="240" height="320" fill="#101820"></rect><text x="120" y="164" font-size="13" fill="#687888" text-anchor="middle">${this.store.pages.length || !this.store.loaded ? 'No preview for this page' : 'Add a page to see the screen'}</text>`}

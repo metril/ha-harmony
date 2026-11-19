@@ -6,6 +6,12 @@
 - Hub: `hello_ack.limits` reports the budget and bounds; new `config_chunk` message sends configs over the 64 KiB frame size in pieces. The integration and add-on use the hub's reported limits and fall back to the old fixed ones for older firmware (no chunks). The editor shows "Config size X of Y KiB on this hub" for a current hub.
 - Integration (behaviour change): command buttons are created disabled, and a device with more than 200 commands gets none unless the new option `all_command_buttons` is set. Existing buttons keep working and stay enabled; every command stays reachable with `remote.send_command`. See `docs/ha-config.md`.
 - Add-on: request body cap 4 MiB, 250k JSON values per config, `ir/parse` 4096 actions / 1 MiB; the integration compiles a pulled bundle through the fast dict path (was ~0.5 ms per command).
+
+## 0.3.6 (2026-11-18)
+
+- Editor: the Elite drawing's proportions now follow the photo (taller body, Off lower and inset, screen centred, keys and the D-pad ring placed from one table of body fractions, empty rounded grip at the bottom).
+- Editor: History page simplified (Compare and Restore actions per entry) and the hub indicator sits in the header.
+- Fix: the "upload your YAML in the add-on" repair clears itself once the hub accepts a config applied in the add-on, is not raised again while an add-on config is cached (a log line says the file is safe to delete), and can be dismissed. The file is never touched.
 - Hub boot hook: bounded daemon respawn (`respawn_max`, default 3, 0 = off) with a heartbeat wedge cover, an `rf_debug` conf key and uptime-stamped logs; the boot-strike counter is never touched by a respawn.
 - Remote: opt-in suspend to RAM after idle (`HARMONY_SUSPEND=battery|always`) with an hourly timed wake (msp430 `wakeup`, 3600 s) so the battery guard still runs, resume re-link and sleep-gap accounting. Touch does not wake it; buttons and motion do. See `docs/runbooks/remote-suspend-soak.md`.
 - OTA: signed image container with Ed25519 verification (`ota_sign` tool, staged apply helper on the hub). Builds that bake in the public dev key need `-DHP_ALLOW_DEV_OTA_KEY=ON`.

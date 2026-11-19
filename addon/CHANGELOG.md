@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6 (2026-11-18)
+
+- Editor: the Elite drawing follows the photo proportions.
+- Fix: the "upload your YAML in the add-on" repair clears once the hub accepts an add-on config and can be dismissed.
+
+- History page: each earlier version has the same two actions in an aligned column, Compare and Restore (Restore loads it as the draft; nothing reaches the hub until Apply). The Revert button is gone (Restore, then Apply, covers it). Rows show the revision, relative time (exact on hover), a one-line summary and Applied / Acknowledged by Home Assistant / Rejected badges.
+- The editor header always shows "Hub: id" with whether Home Assistant is polling for it (the hub switcher when several are linked).
+
 ## 0.3.5 (2026-11-18)
 
 - Fix: the editor applied the config to hub id `default` while the integration polled the add-on with its own hub id, so nothing was ever fetched or acknowledged and the apply dialog waited forever. The add-on now records the hub ids integrations poll for (`GET hubs`, `config/status`), the editor opens on the linked hub id (an explicit `?hub=` still wins; a switcher appears when several are linked), and a config stored under `default` moves to the single linked hub id automatically (several: an explicit "move" action, `POST hubs/adopt`).

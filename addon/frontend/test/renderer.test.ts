@@ -3,7 +3,7 @@ import { render } from 'lit';
 import vectors from '../../../tests/vectors/pages.json';
 import keymap from './fixtures/keymap.json';
 import { PAL, cellAt, hitWidget, layoutPage, pageSvg, widgetRect, type Prim } from '../src/lib/page-renderer';
-import { BODY, KEYS, PHYSICAL_KEYS, SCREEN, keyByName, keyTitle } from '../src/lib/remote-layout';
+import { BODY, DPAD, KEYS, PHYSICAL_KEYS, SCREEN, keyByName, keyTitle } from '../src/lib/remote-layout';
 import type { V2Page } from '../src/lib/api';
 
 type Vec = { name: string; dict: V2Page };
@@ -128,6 +128,16 @@ describe('remote layout', () => {
     expect(g(lu).x).toBeLessThan(g('home_control_plus').x);
     expect(g('home_control_plus').x).toBeLessThan(g(su).x);
     expect(g('home_control_plus').y).toBeLessThan(g('home_control_minus').y);
+  });
+  it('keeps the photo proportions: tall body, Off well below the top, empty grip at the bottom, 240x320 page', () => {
+    const g = (n: string) => keyByName.get(n)!;
+    const fy = (k: { y: number; h: number }) => (k.y + k.h / 2 - BODY.y) / BODY.h;
+    expect(BODY.h / BODY.w).toBeGreaterThan(3.55);
+    expect(BODY.h / BODY.w).toBeLessThan(3.8);
+    expect(fy(g('power_off_activity'))).toBeGreaterThan(0.04);
+    expect(Math.max(...KEYS.map((k) => (k.y + k.h - BODY.y) / BODY.h))).toBeLessThan(0.9);
+    expect(fy({ y: DPAD.y, h: 0 })).toBeCloseTo(0.633, 2);
+    expect([SCREEN.w, SCREEN.h]).toEqual([240, 320]);
   });
   it('names keys with their function and what is printed on them', () => {
     expect(keyTitle('home')).toBe('Home (ACTIVITIES)');
