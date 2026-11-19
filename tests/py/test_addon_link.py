@@ -377,6 +377,52 @@ async def test_leftover_yaml_raises_one_issue_and_is_left_alone(hass, fake_hub, 
     await hass.config_entries.async_unload(entry.entry_id)
 
 
+def _yaml_issue(hass):
+    return ir.async_get(hass).async_get_issue(const.DOMAIN, f"yaml_unused_{HUB_ID}")
+
+
+def _leftover(hass, tmp_path):
+    hass.config.config_dir = str(tmp_path / "cfg")
+    f = tmp_path / "cfg" / "ha_harmony" / f"{HUB_ID}.yaml"
+    f.parent.mkdir(parents=True)
+    f.write_text("x: 1", encoding="utf-8")
+    return f
+
+
+async def test_leftover_issue_is_ignorable_and_cleared_on_acceptance(hass, fake_hub, tmp_path):
+    f = _leftover(hass, tmp_path)
+    hub = await fake_hub(hub_handler([]))
+    entry = make_entry("127.0.0.1", hub.port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    issue = _yaml_issue(hass)
+    assert issue and not issue.is_fixable and not issue.is_persistent
+    coord = entry.runtime_data
+    from custom_components.ha_harmony.addon_link import compile_source
+
+    coord.pending = compile_source(SOURCE, HUB_ID)
+    coord._promote()  # the hub accepted a config from the add-on
+    assert _yaml_issue(hass) is None and f.exists()
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_leftover_not_reraised_with_cache_but_raised_without(
+    hass, fake_hub, hass_storage, tmp_path
+):
+    f = _leftover(hass, tmp_path)
+    preseed(hass_storage)
+    hub = await fake_hub(hub_handler([]))
+    entry = make_entry("127.0.0.1", hub.port)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    assert _yaml_issue(hass) is None and f.exists()
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass_storage.clear()
+    await hass.config_entries.async_setup(entry.entry_id)
+    assert _yaml_issue(hass) is not None
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_reload_service_needs_a_link_and_send_ir_refuses_files(hass, fake_hub):
     hub = await fake_hub(hub_handler([]))
     entry = make_entry("127.0.0.1", hub.port)
@@ -647,7 +693,10 @@ async def test_first_link_confirm_shows_what_is_linked(hass, fake_addon):
     entry.add_to_hass(hass)
     res = await hassio_flow(hass, host="addon-host", port=8199, token="t")
     assert res["type"] is FlowResultType.FORM and res["step_id"] == "hassio_confirm"
-    assert res["description_placeholders"] == {"slug": "ha_harmony_editor", "host": "addon-host:8199"}
+    assert res["description_placeholders"] == {
+        "slug": "ha_harmony_editor",
+        "host": "addon-host:8199",
+    }
 
 
 async def test_link_says_nothing_applied_after_a_quiet_poll(hass, fake_hub, fake_addon):
