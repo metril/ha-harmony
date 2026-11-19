@@ -314,6 +314,7 @@ typedef enum {
 } hp_msg_type_t;
 
 #define HP_MSG_COUNT %(count)d
+#define HP_MSG_MAX_CODE %(max_code)d /* highest message code: handler tables are indexed by code */
 
 %(schema_enums)s
 typedef enum {
@@ -393,6 +394,7 @@ def _emit_h(s: Schema) -> str:
         "version": s.version,
         "msg_enum": msg_enum,
         "count": len(s.messages),
+        "max_code": max(m.code for m in s.messages),
         "schema_enums": "\n".join(parts),
         "key_count": len(s.keys),
     }

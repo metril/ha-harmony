@@ -6,6 +6,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "hub/bt_link.h"
 #include "hub/hp_errors.h"
 #include "hub/rf/rf_payload.h"
 #include "remote/page/page.h"
@@ -258,27 +259,32 @@ typedef struct {
     const char *msg;
     size_t len;
     const hp_session_t *skip;
+    bool bt_listeners_only; /* bt_remote_key: only sockets that sent bt_listen on */
 } bcast_t;
 
 static void bcast_one(hp_ws_conn_t *c, void *arg) {
     const hp_session_t *s = hp_ws_conn_user(c);
     const bcast_t *b = arg;
-    if (s && s->authed && s != b->skip) hp_ws_send(c, b->msg, b->len);
+    if (s && s->authed && s != b->skip && (!b->bt_listeners_only || s->bt_listen)) hp_ws_send(c, b->msg, b->len);
 }
 
-static void broadcast_except(hub_ctx_t *h, const char *type, cJSON *d, const hp_session_t *skip) {
-    char buf[1536]; /* activity_list: 16 names of up to 31 bytes + hash */
+static void broadcast_ex(hub_ctx_t *h, const char *type, cJSON *d, const hp_session_t *skip, bool bt_only) {
+    char buf[4096]; /* activity_list: 16 names of up to 31 bytes + hash; bt_state: up to 32 hosts at ~110 bytes */
     size_t n = 0;
     if (h->bcast_hook && d) h->bcast_hook(h->bcast_ctx, type, d);
     if (h->srv && hp_make_reply(0, type, d, buf, sizeof buf, &n) == 0) {
-        bcast_t b = {buf, n, skip};
+        bcast_t b = {buf, n, skip, bt_only};
         hp_ws_foreach(h->srv, bcast_one, &b);
     } else if (!h->srv) {
         cJSON_Delete(d); /* hp_make_reply not reached: we still own d */
     }
 }
 
-void hub_broadcast(hub_ctx_t *h, const char *type, cJSON *d) { broadcast_except(h, type, d, NULL); }
+static void broadcast_except(hub_ctx_t *h, const char *type, cJSON *d, const hp_session_t *skip) {
+    broadcast_ex(h, type, d, skip, false);
+}
+
+void hub_broadcast(hub_ctx_t *h, const char *type, cJSON *d) { broadcast_ex(h, type, d, NULL, false); }
 
 static cJSON *activities_json(const hub_ctx_t *h) {
     cJSON *a = cJSON_CreateArray();
@@ -802,6 +808,185 @@ static int on_set_hub_id(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
     return hp_make_reply(id, "hub_id_ack", o, reply, cap, len);
 }
 
+/* ------------------------------------------------------------ bluetooth (docs/proto/bluetooth.md) */
+
+static const char *const bt_status_name[] = {"off", "starting", "ready", "no_adapter", "disabled"};
+static const char *const bt_result_name[] = {NULL, "ok", "failed", "refused"};
+static const char *const bt_transport_name[] = {NULL, "classic", "le"};
+
+static cJSON *bt_state_json(void) {
+    static struct bt_link_state st; /* ~2.3 KB: event-loop thread only, not on the stack */
+    bt_link_state(&st);
+    cJSON *o = cJSON_CreateObject();
+    cJSON *hosts = cJSON_CreateArray();
+    if (!o || !hosts) {
+        cJSON_Delete(o);
+        cJSON_Delete(hosts);
+        return NULL;
+    }
+    cJSON_AddStringToObject(o, "state", bt_status_name[st.status]);
+    cJSON_AddBoolToObject(o, "discoverable", st.discoverable);
+    if (st.discoverable) cJSON_AddNumberToObject(o, "discoverable_secs", st.discoverable_secs);
+    cJSON_AddBoolToObject(o, "le", st.le);
+    if (st.pairing != BT_PAIR_NONE) {
+        cJSON *p = cJSON_AddObjectToObject(o, "pairing");
+        if (p) {
+            cJSON_AddStringToObject(p, "result", bt_result_name[st.pairing]);
+            cJSON_AddStringToObject(p, "addr", st.pairing_addr);
+            if (st.pairing_name[0]) cJSON_AddStringToObject(p, "name", st.pairing_name);
+            cJSON_AddStringToObject(p, "kind", st.pairing_kind == BT_KIND_REMOTE ? "remote" : "host");
+            if (st.pairing_transport != BT_TRANSPORT_ANY)
+                cJSON_AddStringToObject(p, "transport", bt_transport_name[st.pairing_transport]);
+        }
+    }
+    for (unsigned i = 0; i < st.n_hosts && i < BT_LINK_HOSTS_CAP; i++) {
+        cJSON *e = cJSON_CreateObject();
+        if (!e) break;
+        cJSON_AddNumberToObject(e, "slot", st.hosts[i].slot);
+        cJSON_AddStringToObject(e, "addr", st.hosts[i].addr);
+        if (st.hosts[i].name[0]) cJSON_AddStringToObject(e, "name", st.hosts[i].name);
+        cJSON_AddStringToObject(e, "transport",
+                                st.hosts[i].transport == BT_TRANSPORT_LE ? "le" : "classic");
+        cJSON_AddBoolToObject(e, "connected", st.hosts[i].connected);
+        cJSON_AddItemToArray(hosts, e);
+    }
+    cJSON_AddItemToObject(o, "hosts", hosts);
+    cJSON *remotes = cJSON_AddArrayToObject(o, "remotes");
+    for (unsigned i = 0; remotes && i < st.n_remotes && i < BT_LINK_REMOTES_CAP; i++) {
+        cJSON *e = cJSON_CreateObject();
+        if (!e) break;
+        cJSON_AddNumberToObject(e, "slot", st.remotes[i].slot);
+        cJSON_AddStringToObject(e, "addr", st.remotes[i].addr);
+        if (st.remotes[i].name[0]) cJSON_AddStringToObject(e, "name", st.remotes[i].name);
+        cJSON_AddBoolToObject(e, "connected", st.remotes[i].connected);
+        if (st.remotes[i].battery >= 0) cJSON_AddNumberToObject(e, "battery", st.remotes[i].battery);
+        cJSON_AddItemToArray(remotes, e);
+    }
+    return o;
+}
+
+/* The link's listener: any state change goes to every authenticated client. */
+static void on_bt_changed(void *vctx) {
+    cJSON *d = bt_state_json();
+    if (d) hub_broadcast(vctx, "bt_state", d);
+}
+
+/* A key from a bonded LE remote: only to sockets that opted in with bt_listen. */
+static void on_bt_remote_key(void *vctx, unsigned slot, unsigned page, unsigned usage, bool down) {
+    cJSON *d = cJSON_CreateObject();
+    if (!d) return;
+    cJSON_AddNumberToObject(d, "slot", slot);
+    cJSON_AddNumberToObject(d, "page", page);
+    cJSON_AddNumberToObject(d, "usage", usage);
+    cJSON_AddBoolToObject(d, "down", down);
+    broadcast_ex(vctx, "bt_remote_key", d, NULL, true);
+}
+
+static int bt_reply_state(uint32_t id, char *reply, size_t cap, size_t *len) {
+    cJSON *d = bt_state_json();
+    if (!d) return -HP_E_INVAL;
+    return hp_make_reply(id, "bt_state", d, reply, cap, len);
+}
+
+static int bt_err(uint32_t id, int rc, char *reply, size_t cap, size_t *len) {
+    switch (rc) {
+    case BT_LINK_E_NOT_READY: return reply_err(id, "bt_not_ready", "Bluetooth is not ready", reply, cap, len);
+    case BT_LINK_E_NO_SLOT: return reply_err(id, "no_slot", "no paired host in that slot", reply, cap, len);
+    case BT_LINK_E_NOT_CONNECTED: return reply_err(id, "not_connected", "that host is not connected", reply, cap, len);
+    default: return reply_err(id, "bt_busy", "Bluetooth is busy, try again", reply, cap, len);
+    }
+}
+
+#define BT_GATE(id, lim)                                                                  \
+    struct bt_link_limits lim;                                                            \
+    if (!bt_link_available()) return reply_err(id, "unsupported", "this hub has no Bluetooth", reply, cap, len); \
+    bt_link_limits(&lim)
+
+static int on_bt_pair(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap,
+                      size_t *len) {
+    (void)vctx;
+    (void)sess;
+    BT_GATE(id, lim);
+    const cJSON *on = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "on");
+    const cJSON *js = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "secs");
+    const cJSON *jt = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "transport");
+    const cJSON *jm = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "mode");
+    unsigned secs = 120;
+    enum bt_link_transport t = BT_TRANSPORT_ANY;
+    enum bt_link_pair_mode mode = BT_MODE_HOST;
+    if (js) {
+        if (js->valuedouble < 1 || js->valuedouble > 300) return reply_err(id, "bad_secs", "secs must be 1-300", reply, cap, len);
+        secs = (unsigned)js->valueint;
+    }
+    if (jt) {
+        if (!strcmp(jt->valuestring, "classic")) t = BT_TRANSPORT_CLASSIC;
+        else if (!strcmp(jt->valuestring, "le")) t = BT_TRANSPORT_LE;
+        else if (strcmp(jt->valuestring, "any")) return reply_err(id, "bad_transport", "transport must be any, classic or le", reply, cap, len);
+        if (t == BT_TRANSPORT_LE && !lim.le) return reply_err(id, "no_le", "this hub's adapter has no Bluetooth LE", reply, cap, len);
+    }
+    if (jm) {
+        if (!strcmp(jm->valuestring, "remote")) mode = BT_MODE_REMOTE;
+        else if (strcmp(jm->valuestring, "host")) return reply_err(id, "bad_mode", "mode must be host or remote", reply, cap, len);
+    }
+    if (mode == BT_MODE_REMOTE) {
+        if (t == BT_TRANSPORT_CLASSIC) return reply_err(id, "bad_transport", "a remote pairs over le", reply, cap, len);
+        if (!lim.remotes_max) return reply_err(id, "unsupported", "this hub does not support Bluetooth remotes", reply, cap, len);
+        if (!lim.le) return reply_err(id, "no_le", "this hub's adapter has no Bluetooth LE", reply, cap, len);
+    }
+    int rc = bt_link_pair(cJSON_IsTrue(on), secs, t, mode);
+    if (rc != BT_LINK_OK) return bt_err(id, rc, reply, cap, len);
+    return bt_reply_state(id, reply, cap, len);
+}
+
+static int on_bt_forget(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap,
+                        size_t *len) {
+    (void)vctx;
+    (void)sess;
+    BT_GATE(id, lim);
+    const cJSON *slot = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "slot");
+    const cJSON *jk = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "kind");
+    enum bt_link_kind kind = BT_KIND_HOST;
+    if (jk) {
+        if (!strcmp(jk->valuestring, "remote")) kind = BT_KIND_REMOTE;
+        else if (strcmp(jk->valuestring, "host")) return reply_err(id, "bad_kind", "kind must be host or remote", reply, cap, len);
+    }
+    if (slot->valueint >= (kind == BT_KIND_REMOTE ? lim.remotes_max : lim.hosts_max))
+        return reply_err(id, "no_slot", "no paired device in that slot", reply, cap, len);
+    int rc = bt_link_forget(kind, (unsigned)slot->valueint);
+    if (rc != BT_LINK_OK) return bt_err(id, rc, reply, cap, len);
+    return bt_reply_state(id, reply, cap, len);
+}
+
+static int on_bt_listen(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap,
+                        size_t *len) {
+    (void)vctx;
+    if (!bt_link_available()) return reply_err(id, "unsupported", "this hub has no Bluetooth", reply, cap, len);
+    sess->bt_listen = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive((cJSON *)d, "on"));
+    return reply_ok(id, "command_result", true, NULL, reply, cap, len);
+}
+
+static int on_bt_key(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap,
+                     size_t *len) {
+    (void)vctx;
+    (void)sess;
+    BT_GATE(id, lim);
+    const cJSON *slot = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "slot");
+    const cJSON *page = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "page");
+    const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "usage");
+    const cJSON *act = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "action");
+    enum bt_link_action a;
+    if (!strcmp(act->valuestring, "down")) a = BT_KEY_DOWN;
+    else if (!strcmp(act->valuestring, "up")) a = BT_KEY_UP;
+    else if (!strcmp(act->valuestring, "press")) a = BT_KEY_PRESS;
+    else return reply_err(id, "bad_action", "action must be down, up or press", reply, cap, len);
+    if (page->valueint != BT_PAGE_KEYBOARD && page->valueint != BT_PAGE_CONSUMER)
+        return reply_err(id, "bad_page", "page must be 7 or 12", reply, cap, len);
+    if (slot->valueint >= lim.hosts_max) return reply_err(id, "no_slot", "no paired host in that slot", reply, cap, len);
+    int rc = bt_link_key((unsigned)slot->valueint, (unsigned)page->valueint, (unsigned)usage->valueint, a);
+    if (rc != BT_LINK_OK) return bt_err(id, rc, reply, cap, len);
+    return reply_ok(id, "command_result", true, NULL, reply, cap, len);
+}
+
 static void on_hello_extra(void *vctx, cJSON *ack) {
     hub_ctx_t *h = vctx;
     if (h->ident.id[0]) {
@@ -809,6 +994,23 @@ static void on_hello_extra(void *vctx, cJSON *ack) {
         if (h->ident.hw[0]) cJSON_AddStringToObject(ack, "hw_id", h->ident.hw);
         cJSON_AddBoolToObject(ack, "rename", 1);
         if (h->ident.pinned) cJSON_AddBoolToObject(ack, "id_pinned", 1);
+    }
+    if (bt_link_available()) {
+        struct bt_link_limits lim;
+        bt_link_limits(&lim);
+        cJSON *bt = cJSON_AddObjectToObject(ack, "bt");
+        cJSON *pg = cJSON_CreateArray();
+        if (bt && pg) {
+            cJSON_AddNumberToObject(bt, "hosts_max", lim.hosts_max);
+            cJSON_AddNumberToObject(bt, "conn_max", lim.conn_max);
+            cJSON_AddNumberToObject(bt, "remotes_max", lim.remotes_max);
+            cJSON_AddItemToArray(pg, cJSON_CreateNumber(BT_PAGE_KEYBOARD));
+            cJSON_AddItemToArray(pg, cJSON_CreateNumber(BT_PAGE_CONSUMER));
+            cJSON_AddItemToObject(bt, "pages", pg);
+            cJSON_AddBoolToObject(bt, "le", lim.le);
+        } else {
+            cJSON_Delete(pg);
+        }
     }
     if (!h->ota.enabled) return;
     cJSON_AddNumberToObject(ack, "fw_build", h->ota.min_build);
@@ -826,6 +1028,12 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->handler[HP_MSG_COMMAND] = on_command;
     tbl->handler[HP_MSG_PAGE_PUSH] = on_page_push;
     tbl->handler[HP_MSG_SET_HUB_ID] = on_set_hub_id;
+    tbl->handler[HP_MSG_BT_PAIR] = on_bt_pair;
+    tbl->handler[HP_MSG_BT_FORGET] = on_bt_forget;
+    tbl->handler[HP_MSG_BT_KEY] = on_bt_key;
+    tbl->handler[HP_MSG_BT_LISTEN] = on_bt_listen;
+    bt_link_set_remote_key_cb(on_bt_remote_key, ctx);
+    bt_link_set_listener(on_bt_changed, ctx);
     tbl->handler[HP_MSG_OTA_BEGIN] = on_ota_begin;
     tbl->handler[HP_MSG_OTA_CHUNK] = on_ota_chunk;
     tbl->handler[HP_MSG_OTA_END] = on_ota_end;

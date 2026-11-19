@@ -163,6 +163,7 @@ int hp_dispatch(const char *json, size_t len, const hp_handler_tbl_t *tbl, void 
             goto out;
         }
         sess->authed = true;
+        sess->bt_listen = false;
         cJSON *ack = cJSON_CreateObject();
         if (!ack) {
             rc = -HP_E_INVAL;
