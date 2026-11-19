@@ -410,7 +410,9 @@ async def test_a_remote_that_holds_the_set_gets_no_pages_on_setup_or_reconnect(h
 
 async def test_a_remote_with_another_set_or_fewer_pages_is_pushed_to(hass, rig, clock):
     hub, c = await rig(info=lambda y: _held(y, gen=(_held(y)["gen"] + 1) % 256), pages=False)
+    await settle(hass, lambda: c.config_state == "accepted")  # the ack promotes the compiled set
     n = len(c.compiled.pages_v2)
+    assert n > 0
     await settle(hass, lambda: len(hub.pages()) >= n)  # another generation: the whole set
     assert len(hub.pages()) == n
     hub.got.clear()
