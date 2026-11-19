@@ -33,6 +33,9 @@
 #define OUT_CAP 1024
 #define RX_CAP (BT_IPC_HDR + BT_IPC_MAX_PAYLOAD)
 #define READS_PER_PASS 8
+#define UP_RESERVE 256       /* of OUT_CAP: only key UPs may use it (32 frames) */
+#define BT_DD_CAP 8          /* remembered dropped DOWNs */
+#define RKEYS_PER_PASS 32    /* helper RKEY frames handled per service pass; the rest stays buffered */
 #define KILL_GRACE_MS 2000
 #define NO_SLOT8 0xFF
 
@@ -83,6 +86,10 @@ static struct {
     uint8_t hstate, hwin, hle, hhosts_max, hconn_max, hremotes_max;
     bool have_state, last_err;
     /* requests */
+    uint8_t dd[BT_DD_CAP][4]; /* slot, page, usage: DOWNs dropped for want of room (their UP is dropped too) */
+    unsigned n_dd;
+    unsigned rk_pass;     /* RKEY frames handled in this pass */
+    bool backlog;         /* complete frames are still buffered: run again at once */
     bool pend_pair;       /* a pair request waiting for the helper to be ready */
     uint8_t pend_mode;
     uint16_t pend_secs;
@@ -284,6 +291,8 @@ static void clear_cache(void) {
     L.have_state = false;
     L.rx_n = 0;
     L.out_n = 0;
+    L.n_dd = 0;
+    L.backlog = false;
     L.st.pairing = BT_PAIR_NONE;
     L.st.pairing_addr[0] = L.st.pairing_name[0] = 0;
     L.st.pairing_transport = BT_TRANSPORT_ANY;
@@ -463,21 +472,25 @@ static void flush_out(void) {
 /* A control frame: queued (bounded) and written as far as the socket takes it. */
 static int send_ctl(uint8_t type, const uint8_t *p, size_t n) {
     if (L.fd < 0) return BT_LINK_E_NOT_READY;
-    if (L.out_n + BT_IPC_HDR + n > OUT_CAP) return BT_LINK_E_BUSY;
+    if (L.out_n + BT_IPC_HDR + n > OUT_CAP - UP_RESERVE) return BT_LINK_E_BUSY; /* the reserve is for key ups */
     L.out_n += bt_ipc_frame(L.out + L.out_n, type, p, n);
     flush_out();
     return BT_LINK_OK;
 }
 
-/* A key frame (or a press = two): written now or dropped. A partial write's tail is queued so the stream stays in step. */
-static int send_key(const uint8_t *frames, size_t n) {
+/* A DOWN (or a press = down+up as one unit) is written now or dropped; a partial write's tail is queued so the stream
+ * stays in step. A DOWN that was dropped is remembered so its UP is dropped too (never an orphan UP). */
+static int send_down(const uint8_t *frames, size_t n, const uint8_t key[4], bool remember) {
     if (L.fd < 0) return BT_LINK_E_NOT_READY;
     flush_out();
-    if (L.out_n) { L.key_drops++; return BT_LINK_E_BUSY; }
-    ssize_t w = send(L.fd, frames, n, MSG_NOSIGNAL | MSG_DONTWAIT);
+    ssize_t w = L.out_n ? -1 : send(L.fd, frames, n, MSG_NOSIGNAL | MSG_DONTWAIT);
     if (w < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) L.io_err = true;
+        if (!L.out_n && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) L.io_err = true;
         L.key_drops++;
+        if (remember) { /* oldest entry makes room */
+            if (L.n_dd == BT_DD_CAP) { memmove(L.dd, L.dd + 1, (BT_DD_CAP - 1) * sizeof L.dd[0]); L.n_dd--; }
+            memcpy(L.dd[L.n_dd++], key, 4);
+        }
         return BT_LINK_E_BUSY;
     }
     if ((size_t)w < n) {
@@ -487,9 +500,33 @@ static int send_key(const uint8_t *frames, size_t n) {
     return BT_LINK_OK;
 }
 
+/* A key UP is never dropped for want of room: it queues in the reserve of the control queue (unless its DOWN was dropped). */
+static int send_up(const uint8_t *frame, const uint8_t key[4]) {
+    if (L.fd < 0) return BT_LINK_E_NOT_READY;
+    for (unsigned i = 0; i < L.n_dd; i++)
+        if (!memcmp(L.dd[i], key, 4)) {
+            memmove(L.dd[i], L.dd[i + 1], (L.n_dd - i - 1) * sizeof L.dd[0]);
+            L.n_dd--;
+            return BT_LINK_OK;
+        }
+    if (L.out_n + BT_IPC_HDR + 5 > OUT_CAP) { L.key_drops++; return BT_LINK_E_BUSY; } /* only if 32 ups are already waiting */
+    memcpy(L.out + L.out_n, frame, BT_IPC_HDR + 5);
+    L.out_n += BT_IPC_HDR + 5;
+    flush_out();
+    return BT_LINK_OK;
+}
+
 /* ------------------------------------------------------------------ input */
 
 static bool bad(void) { return false; }
+
+/* Sends the pair request that waited for the helper; a full control queue leaves it pending (retried every pass). */
+static bool try_pend_pair(void) {
+    uint8_t f[4] = {1, (uint8_t)(L.pend_secs >> 8), (uint8_t)L.pend_secs, L.pend_mode};
+    if (send_ctl(BT_IPC_PAIR, f, sizeof f) != BT_LINK_OK) return false;
+    L.pend_pair = false;
+    return true;
+}
 
 static bool on_state(const uint8_t *p, size_t n) {
     if (n != 6 || p[0] > BT_ST_ERROR || p[1] > 2 || p[2] > 1 || p[5] > HH_BT_MAX_REMOTES) return bad();
@@ -504,13 +541,8 @@ static bool on_state(const uint8_t *p, size_t n) {
     L.st.status = p[0] == BT_ST_READY ? BT_READY : p[0] == BT_ST_STARTING ? BT_STARTING : BT_NO_ADAPTER;
     L.hwin = p[1];
     enum bt_link_window w = p[1] == 1 ? BT_WIN_HOST : p[1] == 2 ? BT_WIN_REMOTE : BT_WIN_NONE;
-    if (p[0] == BT_ST_READY && prev != BT_READY && L.pend_pair) {
-        uint8_t f[4] = {1, (uint8_t)(L.pend_secs >> 8), (uint8_t)L.pend_secs, L.pend_mode};
-        if (send_ctl(BT_IPC_PAIR, f, sizeof f) == BT_LINK_OK) {
-            w = L.pend_mode == BT_MODE_REMOTE ? BT_WIN_REMOTE : BT_WIN_HOST;
-        }
-        L.pend_pair = false;
-    }
+    (void)prev;
+    if (p[0] == BT_ST_READY && L.pend_pair && try_pend_pair()) w = L.pend_mode == BT_MODE_REMOTE ? BT_WIN_REMOTE : BT_WIN_HOST;
     if (w != BT_WIN_REMOTE) L.n_cand = 0;
     if (w == BT_WIN_NONE && L.window != BT_WIN_NONE) L.win_closed_at = now_of();
     L.window = w;
@@ -641,8 +673,35 @@ static bool on_frame(uint8_t type, const uint8_t *p, size_t n) {
 }
 
 /* Reads and parses what the socket holds (bounded per pass). Returns false when the helper must be killed. */
+/* Parses the buffered frames; stops after RKEYS_PER_PASS key frames (backlog set, the rest stays buffered). */
+static bool parse_buf(uint64_t now) {
+    size_t off = 0;
+    bool ok = true;
+    for (;;) {
+        uint8_t type;
+        const uint8_t *pl;
+        size_t len;
+        size_t used = bt_ipc_parse(L.rx + off, L.rx_n - off, &type, &pl, &len);
+        if (used == (size_t)-1) { L.bad_frames++; ok = false; break; }
+        if (used == 0) break;
+        if (type == BT_IPC_RKEY && L.rk_pass >= RKEYS_PER_PASS) { L.backlog = true; break; }
+        if (type == BT_IPC_RKEY) L.rk_pass++;
+        L.last_rx = now;
+        if (!on_frame(type, pl, len)) { L.bad_frames++; ok = false; break; }
+        off += used;
+    }
+    if (off) {
+        memmove(L.rx, L.rx + off, L.rx_n - off);
+        L.rx_n -= off;
+    }
+    return ok;
+}
+
 static bool read_in(uint64_t now) {
-    for (int r = 0; r < READS_PER_PASS; r++) {
+    L.rk_pass = 0;
+    L.backlog = false;
+    if (!parse_buf(now)) return false; /* what the last pass left */
+    for (int r = 0; r < READS_PER_PASS && !L.backlog; r++) {
         size_t space = sizeof L.rx - L.rx_n;
         ssize_t n = recv(L.fd, L.rx + L.rx_n, space, MSG_DONTWAIT);
         if (n < 0) {
@@ -652,22 +711,7 @@ static bool read_in(uint64_t now) {
         }
         if (n == 0) return false; /* EOF: the helper closed its end (the reaper handles the exit) */
         L.rx_n += (size_t)n;
-        size_t off = 0;
-        for (;;) {
-            uint8_t type;
-            const uint8_t *pl;
-            size_t len;
-            size_t used = bt_ipc_parse(L.rx + off, L.rx_n - off, &type, &pl, &len);
-            if (used == (size_t)-1) { L.bad_frames++; return false; }
-            if (used == 0) break;
-            L.last_rx = now;
-            if (!on_frame(type, pl, len)) { L.bad_frames++; return false; }
-            off += used;
-        }
-        if (off) {
-            memmove(L.rx, L.rx + off, L.rx_n - off);
-            L.rx_n -= off;
-        }
+        if (!parse_buf(now)) return false;
         if ((size_t)n < space) break;
     }
     return true;
@@ -820,7 +864,9 @@ int bt_link_key(unsigned slot, unsigned page, unsigned usage, enum bt_link_actio
         uint8_t p[5] = {L.vh[slot], (uint8_t)page, (uint8_t)(usage >> 8), (uint8_t)usage, down ? 1 : 0};
         n += bt_ipc_frame(f + n, BT_IPC_KEY, p, sizeof p);
     }
-    return send_key(f, n);
+    const uint8_t key[4] = {L.vh[slot], (uint8_t)page, (uint8_t)(usage >> 8), (uint8_t)usage};
+    if (action == BT_KEY_UP) return send_up(f, key);
+    return send_down(f, n, key, action == BT_KEY_DOWN);
 }
 
 void bt_link_connect(unsigned slot) {
@@ -866,7 +912,10 @@ int bt_link_service(void) {
         L.st.gen++;
         if (L.listener) L.listener(L.listener_ctx);
     }
+    if (running() && L.pend_pair && L.st.status == BT_READY && try_pend_pair()) L.rebuild = true;
     if (running()) {
+        if (L.backlog) WAKE(now); /* buffered frames wait for the next pass */
+        if (L.pend_pair) WAKE(now + 20);
         WAKE(L.next_ping);
         WAKE(L.last_rx + BT_SUP_SILENCE_MS);
         if (L.out_n) WAKE(now + 20);

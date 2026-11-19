@@ -361,15 +361,19 @@ static void test_flood(void) {
     setup("flood");
     usual_cfg();
     long worst = 0, t0 = mono_ms();
+    int per_pass_max = 0, wait = 5;
     while (ev_key_n < 15000 && mono_ms() - t0 < 20000) {
         int fd = bt_link_poll_fd();
-        if (fd >= 0) { struct pollfd p = {fd, POLLIN, 0}; poll(&p, 1, 5); }
+        if (fd >= 0 && wait != 0) { struct pollfd p = {fd, POLLIN, 0}; poll(&p, 1, 5); }
         long a = mono_ms();
-        bt_link_service();
+        int before = ev_rcb_n;
+        wait = bt_link_service(); /* 0 = frames still buffered: no waiting */
+        if (ev_rcb_n - before > per_pass_max) per_pass_max = ev_rcb_n - before;
         if (mono_ms() - a > worst) worst = mono_ms() - a;
     }
     CT_EQ(ev_key_n, 15000); /* every key of the configured remote arrived, none of the other */
     CT_CHECK(worst < 150);  /* no pass is long: the loop stays responsive under a flood */
+    CT_CHECK(per_pass_max > 0 && per_pass_max <= 32); /* at most 32 remote keys (so key_event broadcasts) per pass */
     CT_EQ(stats().deaths, 0);
     CT_EQ(st()->n_hosts, 2);
     bt_link_reset();
@@ -380,6 +384,7 @@ static void test_slow_reader(void) {
     usual_cfg();
     CT_CHECK(PUMP(ready(), 3000));
     long worst = 0, t0 = mono_ms();
+    CT_EQ(bt_link_key(3, BT_PAGE_KEYBOARD, 0x05, BT_KEY_DOWN), BT_LINK_OK); /* held before the socket fills */
     for (int i = 0; i < 100000; i++) {
         long a = mono_ms();
         int rc = bt_link_key(3, BT_PAGE_KEYBOARD, 0x28, BT_KEY_PRESS);
@@ -389,6 +394,13 @@ static void test_slow_reader(void) {
     CT_CHECK(mono_ms() - t0 < 5000);
     CT_CHECK(worst < 50);                  /* never waits for the helper */
     CT_CHECK(stats().key_drops > 0);       /* the socket filled: keys dropped and counted */
+    /* a DOWN is dropped when full, its UP then too (no orphan); the UP of a key that did go down is never dropped */
+    unsigned d0 = stats().key_drops;
+    CT_EQ(bt_link_key(3, BT_PAGE_KEYBOARD, 0x06, BT_KEY_DOWN), BT_LINK_E_BUSY);
+    CT_EQ(stats().key_drops, d0 + 1);
+    CT_EQ(bt_link_key(3, BT_PAGE_KEYBOARD, 0x06, BT_KEY_UP), BT_LINK_OK); /* swallowed with its DOWN */
+    CT_EQ(bt_link_key(3, BT_PAGE_KEYBOARD, 0x05, BT_KEY_UP), BT_LINK_OK); /* queued in the reserve, not dropped */
+    CT_EQ(stats().key_drops, d0 + 1);
     int busy = 0;
     for (int i = 0; i < 400; i++)
         if (bt_link_pair(true, 60, BT_TRANSPORT_ANY, BT_MODE_HOST) == BT_LINK_E_BUSY) busy++;

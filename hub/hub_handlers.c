@@ -32,7 +32,7 @@ static void hub_notify(void *vctx, hp_actsm_evt_t evt, int idx) {
         h->pending_dev[n++] = (uint8_t)idx;
         h->npending_dev = n;
     } else if (evt == HP_ACTSM_EVT_START) {
-        uint8_t hosts[8];
+        static uint8_t hosts[HH_BT_MAX_HOSTS]; /* event-loop thread only */
         int n = hp_map_activity_bt_hosts(&h->map, idx, hosts, (int)sizeof hosts);
         for (int i = 0; i < n; i++) bt_link_connect(hosts[i]); /* the host is connecting while the IR steps run */
     } else {

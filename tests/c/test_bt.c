@@ -476,6 +476,28 @@ static void test_window_and_configured(void) {
     CT_CHECK(seen_has("\"remotes\":[{\"slot\":1,\"addr\":\"11:22:33:44:55:66\",\"connected\":false,\"configured\":true}]"));
 }
 
+/* Starting an activity connects every bt host it uses (not just the first few). */
+static void test_activity_start_connects_all_hosts(void) {
+    setup();
+    hello();
+    static char msg[8192];
+    char *p = msg;
+    p += sprintf(p, "{\"v\":1,\"id\":2,\"t\":\"set_config\",\"d\":{\"config\":{\"format\":2,\"devices\":[");
+    for (int d = 0; d < 2; d++) { /* two devices, six hosts each: more bt hosts than a small buffer would hold */
+        p += sprintf(p, "%s{\"id\":\"d%d\",\"commands\":{", d ? "," : "", d);
+        for (int i = 0; i < 6; i++) p += sprintf(p, "%s\"k%d\":{\"type\":\"bt\",\"usage\":233,\"host\":%d}", i ? "," : "", i, d * 6 + i + 1);
+        p += sprintf(p, "}}");
+    }
+    p += sprintf(p, "],\"activities\":[{\"id\":\"all\",\"devices\":[{\"device\":\"d0\"},{\"device\":\"d1\"}]}]}}}");
+    send_msg(msg);
+    CT_CHECK(has("\"ok\":true"));
+    CT_EQ(g_bt_fake.cfg_calls, 1);
+    send_msg("{\"v\":1,\"id\":3,\"t\":\"command\",\"d\":{\"device\":\"hub\",\"command\":\"start_activity\",\"args\":{\"name\":\"all\"}}}");
+    CT_CHECK(has("\"ok\":true"));
+    CT_EQ(g_bt_fake.connect_calls, 12);
+    hp_map_free(&H.map);
+}
+
 static void test_unavailable(void) {
     setup();
     g_bt_fake.available = false;
@@ -503,6 +525,7 @@ int main(void) {
     CT_RUN(test_untrusted_link_data);
     CT_RUN(test_gen_and_coalescing_and_hello_state);
     CT_RUN(test_window_and_configured);
+    CT_RUN(test_activity_start_connects_all_hosts);
     CT_RUN(test_unavailable);
     return CT_DONE();
 }
