@@ -42,22 +42,27 @@
  * {"type":"activity","activity":"<id>"|"off"} (key maps only, not in steps/off).
  * Every IR action is run through the encoder at load time; a bad code is a load error.
  *
- * Fixed limits (exceeding any is a load error, -HP_E_TOOBIG, never truncation):
- *   HP_MAP_MAX_JSON       131072 bytes of config text
- *   HP_MAP_MAX_DEVICES    16
- *   HP_MAP_MAX_COMMANDS   256 commands across all devices
- *   HP_MAP_MAX_INPUTS     64 inputs across all devices
- *   HP_MAP_MAX_ACTIVITIES 16
- *   HP_MAP_MAX_KEYS       128 entries per key map (global and per activity)
- *   HP_MAP_MAX_STEPS      16 steps in each of "steps" and "off"
- *   HP_MAP_MAX_ACT_DEVS   8 devices referenced by one activity
- *   HP_MAP_MAX_PRONTO     520 words in one Pronto IR action; raw: 512 durations
- *   HP_MAP_POOL_WORDS     16384 words (Pronto words / raw durations) across the whole config
- *   HP_MAP_NAME_MAX       32 (31 bytes + NUL) for ids, names, commands, events
+ * Memory budget instead of count limits. Devices' commands and inputs, the IR word pool and the key
+ * maps are allocated per load, exactly as large as the config needs. The only size limit is ONE
+ * byte budget (hp_map_budget, default HP_MAP_BUDGET_BYTES) on what loading a config occupies at
+ * its peak: HP_MAP_EST_TEXT_COPIES copies of the text + the parse tree nodes + the tables (see
+ * hp_map_estimate). A config over it is rejected before anything is allocated, with "config
+ * needs ~N KiB of hub memory, the hub allows M KiB". Commands are found through a hash index
+ * built at load time (hp_map_find_cmd / hp_map_find_input), never by a linear scan.
+ *
+ * Per-item bounds that remain (a load error, -HP_E_TOOBIG, never truncation):
+ *   HP_MAP_MAX_DEVICES    255  devices: uint8 index in the activity plan, state file and device_state fan-out
+ *   HP_MAP_MAX_ACTIVITIES 16   activities: uint8 index on the wire (state_update.activity)
+ *   HP_MAP_MAX_KEYS       256  entries per key map: the key code space (codes 0..255) of a remote
+ *   HP_MAP_MAX_STEPS      16   steps in each of "steps" and "off" (activity plan size)
+ *   HP_MAP_MAX_ACT_DEVS   8    devices referenced by one activity (activity plan size)
+ *   HP_MAP_MAX_PRONTO     520  words in one Pronto IR action; raw: 512 durations (encoder)
+ *   HP_MAP_NAME_MAX       32   (31 bytes + NUL) for ids, names, commands, events
  *
  * hp_map_load is all-or-nothing: parsed into a scratch map and swapped in on success; on any
- * error the previous map (and current activity) is untouched and hp_map_last_error() describes
- * the first problem. Key lookup/apply performs no dynamic allocation (loading and caching do).
+ * error (including an allocation failure, -HP_E_IO) the previous map (and current activity) is
+ * untouched and hp_map_last_error() describes the first problem. Key lookup/apply performs no
+ * dynamic allocation (loading and caching do).
  * ---------------------------------------------------------------------
  */
 
@@ -70,16 +75,21 @@
 #include "proto/gen/harmony_proto.h"
 #include "vendor/cjson/cJSON.h"
 
-#define HP_MAP_MAX_JSON 131072
-#define HP_MAP_MAX_DEVICES 16
-#define HP_MAP_MAX_COMMANDS 256
-#define HP_MAP_MAX_INPUTS 64
+#define HP_MAP_BUDGET_BYTES (8u * 1024u * 1024u) /* hub default: ~20% of its free RAM, see docs/proto/config-format-2.md */
+#define HP_MAP_MAX_DEVICES 255
 #define HP_MAP_MAX_ACTIVITIES 16
-#define HP_MAP_MAX_KEYS 128
+#define HP_MAP_MAX_KEYS 256
 #define HP_MAP_MAX_STEPS 16
 #define HP_MAP_MAX_ACT_DEVS 8
 #define HP_MAP_MAX_PRONTO 520
-#define HP_MAP_POOL_WORDS 16384
+/* Estimate model (hp_map_estimate); the hub reports these in hello_ack.limits so clients compute
+ * the same number. *_BYTES include the hash index slot(s) of the entry. */
+#define HP_MAP_EST_TEXT_COPIES 3 /* the received text, the map's cache copy, the parse tree's strings */
+#define HP_MAP_NODE_BYTES 80     /* one parsed JSON value: cJSON node + malloc overhead + its strings' overhead */
+#define HP_MAP_DEV_BYTES 224
+#define HP_MAP_CMD_BYTES 120     /* one command or input */
+#define HP_MAP_KEY_BYTES 72
+#define HP_MAP_WORD_BYTES 2
 #define HP_MAP_NAME_MAX 32
 #define HP_MAP_ERR_MAX 96
 
@@ -96,7 +106,8 @@ typedef struct {
     uint8_t ir_kind;               /* HP_ACT_IR: hp_ir_kind_t */
     uint8_t proto;                 /* HP_IR_CODE_PROTO: hp_ir_proto_t */
     uint8_t target;                /* HP_ACT_ACTIVITY: activity index or HP_TARGET_OFF */
-    uint16_t pool_off, pool_n;     /* PRONTO: words; RAW: durations (slice of the map pool) */
+    uint32_t pool_off;             /* PRONTO/RAW: first word of the slice in the map pool */
+    uint16_t pool_n;               /* PRONTO: words; RAW: durations */
     uint32_t addr, cmd;            /* PROTO */
     uint32_t hz;                   /* RAW */
     uint16_t usage;                /* HP_ACT_BT */
@@ -127,15 +138,16 @@ typedef struct {
 
 typedef struct {
     uint8_t dev;
-    int16_t input; /* index into map.inputs, -1 = none */
+    int32_t input; /* index into map.inputs, -1 = none */
 } hp_actdev_t;
 
 typedef struct {
     char id[HP_MAP_NAME_MAX];
     char name[HP_MAP_NAME_MAX];
-    uint8_t nkeys, nsteps, noff, ndevs;
+    uint16_t nkeys;
+    uint8_t nsteps, noff, ndevs;
     hp_actdev_t devs[HP_MAP_MAX_ACT_DEVS];
-    hp_keybind_t keys[HP_MAP_MAX_KEYS];
+    hp_keybind_t *keys; /* nkeys entries, owned by the map */
     hp_action_t steps[HP_MAP_MAX_STEPS];
     hp_action_t off[HP_MAP_MAX_STEPS];
 } hp_activity_t;
@@ -152,15 +164,20 @@ typedef struct {
 
 typedef struct {
     int format;
-    uint8_t nkeys, nacts, ndevs;
-    uint16_t ncmds, ninputs;
-    hp_keybind_t keys[HP_MAP_MAX_KEYS];
-    hp_device_t devs[HP_MAP_MAX_DEVICES];
-    hp_devcmd_t cmds[HP_MAP_MAX_COMMANDS];
-    hp_devcmd_t inputs[HP_MAP_MAX_INPUTS];
+    uint8_t ndevs, nacts;
+    uint16_t nkeys;
+    uint32_t ncmds, ninputs;
+    hp_keybind_t *keys;    /* global key map: nkeys entries */
+    hp_device_t *devs;     /* ndevs entries */
+    hp_devcmd_t *cmds;     /* ncmds entries */
+    hp_devcmd_t *inputs;   /* ninputs entries */
     hp_activity_t acts[HP_MAP_MAX_ACTIVITIES];
-    uint16_t pool[HP_MAP_POOL_WORDS];
-    size_t pool_n;
+    uint16_t *pool;        /* Pronto words / raw durations of the whole config */
+    size_t pool_n, pool_cap;
+    uint32_t *idx_dev, *idx_cmd, *idx_in; /* open-addressing hash indexes (entry index + 1, 0 = empty) */
+    uint32_t mask_dev, mask_cmd, mask_in; /* slot count - 1 */
+    size_t budget;         /* byte budget of one load; 0 = HP_MAP_BUDGET_BYTES. Survives reloads */
+    size_t est_bytes;      /* hp_map_estimate of the loaded config (0 = none) */
     int current;      /* running activity index, -1 = none */
     char *src;        /* verbatim config text (for the cache); owned */
     size_t src_len;
@@ -171,7 +188,19 @@ typedef struct {
 } hp_map_t;
 
 void hp_map_init(hp_map_t *);
+/* Frees everything the map owns (tables, pool, indexes, text); the map is then empty but usable. */
 void hp_map_free(hp_map_t *);
+/* Sets the byte budget of one load (0 = HP_MAP_BUDGET_BYTES). */
+void hp_map_set_budget(hp_map_t *, size_t bytes);
+size_t hp_map_budget(const hp_map_t *);
+/* Peak-load estimate of the config text in bytes (0 on invalid JSON); fills the byte total in *est.
+ * Same formula the clients use (hello_ack.limits). -HP_E_INVAL / -HP_E_IO on failure. */
+int hp_map_estimate(const char *json, size_t len, size_t *est);
+/* Index of the command / input `name` of device `dev`, or -1. O(1). */
+int hp_map_find_cmd(const hp_map_t *, int dev, const char *name);
+int hp_map_find_input(const hp_map_t *, int dev, const char *name);
+/* Test hook: the n-th allocation of the next load fails (1 = the first); 0 = off. */
+void hp_map_test_fail_alloc(unsigned n);
 /* Attaches the IR output runtime (NULL = send every IR action once, no timers). */
 void hp_map_set_out(hp_map_t *, hp_irout_t *);
 void hp_map_set_actops(hp_map_t *, const hp_map_actops_t *);

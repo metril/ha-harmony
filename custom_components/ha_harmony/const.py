@@ -26,7 +26,7 @@ CONF_HOLD_EVENTS = "hold_events"  # option: also write an event for each hold re
 CONF_ADDON_SLUG = "addon_slug"
 CONF_ADDON_UUID = "addon_uuid"
 ADDON_SLUG = "ha_harmony_editor"
-BUNDLE_MAX_BYTES = 2 * 1024 * 1024  # a hub config is <= 128 KiB compiled; sources stay far below
+BUNDLE_MAX_BYTES = 4 * 1024 * 1024  # the source of a config as large as a hub takes (its memory budget), with headroom
 LINK_FETCH_TIMEOUT = 20.0  # seconds, whole request
 LINK_WAIT_TIMEOUT = 70.0  # the add-on holds a wait for 55 s
 FIRST_APPLY_WAIT = 5.0  # setup waits at most this long for the first config when nothing is cached

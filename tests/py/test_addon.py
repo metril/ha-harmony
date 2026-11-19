@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 from aiohttp import FormData
 
-from harmony_addon.app import create_app
+from harmony_addon import schemas
+from harmony_addon.app import MAX_BODY, create_app
 from harmony_addon.auth import IngressAuth, NoAuth
 from harmony_addon.options import Options
 from harmony_addon.store import HISTORY_MAX, Store, StoreError, atomic_write
@@ -332,11 +333,11 @@ async def test_s3_caps(client):
     assert (
         await client.put("/api/v1/config/draft", json={"config": deep}, headers=H)
     ).status == 400
-    wide = {"a": list(range(70_000))}
+    wide = {"a": list(range(schemas.MAX_NODES + 10))}
     assert (
         await client.put("/api/v1/config/draft", json={"config": wide}, headers=H)
     ).status == 400
-    big = json.dumps({"config": {"a": "x" * 1_100_000}})
+    big = json.dumps({"config": {"a": "x" * (MAX_BODY + 100_000)}})
     r = await client.put(
         "/api/v1/config/draft", data=big, headers={**H, "Content-Type": "application/json"}
     )
@@ -431,7 +432,7 @@ async def imp(client, text):
 
 
 async def test_import_enforces_bounds_like_put_draft(client):
-    r = await imp(client, "devices: []\nnone: [" + ",".join(["0"] * 70_000) + "]")
+    r = await imp(client, "devices: []\nnone: [" + ",".join(["0"] * (schemas.MAX_NODES + 10)) + "]")
     assert r.status == 400
     deep = "x: " + "[" * 30 + "]" * 30
     assert (await imp(client, deep)).status == 400

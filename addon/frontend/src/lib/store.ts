@@ -4,7 +4,7 @@ import { Api, ApiError, DraftQueue, type Meta, type Preview, type Usage } from '
 import { boundEditor } from './activity-edit';
 import { diffConfig, type DiffRow } from './diff';
 import { summarizeErrors } from './errors';
-import type { Config, ValidationError } from './model';
+import { applyUsageLimits, type Config, type ValidationError } from './model';
 
 export type SaveState = 'clean' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
 export interface Toast {
@@ -308,6 +308,7 @@ export class Store extends EventTarget {
       if (seq !== this.seq) return;
       this.errors = p.errors;
       this.usage = p.usage;
+      applyUsageLimits(p.usage);
       this.hash = p.hash;
       this.pages = p.pages;
       this.missingPages = p.missing_pages;

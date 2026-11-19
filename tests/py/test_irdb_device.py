@@ -12,6 +12,7 @@ from irdb_fake import FakeSession
 
 from custom_components.ha_harmony.harmony_core import compiler
 from custom_components.ha_harmony.harmony_core.config_model import parse_model
+from custom_components.ha_harmony.harmony_core.hub_limits import LEGACY
 from harmony_irdb import device as dev_mod
 from harmony_irdb.archive import ArchiveError, IrdbArchive, OfflineError
 from harmony_irdb.candidates import power_candidates
@@ -40,10 +41,11 @@ def build(slug, file, **kw):
     )
 
 
-def test_limits_match_the_compiler():
-    assert dev_mod.MAX_COMMANDS == compiler.LIMITS["MAX_COMMANDS"]
-    assert dev_mod.MAX_INPUTS == compiler.LIMITS["MAX_INPUTS"]
-    assert dev_mod.MAX_JSON == compiler.LIMITS["MAX_JSON"]
+def test_import_bounds_leave_room_for_any_hub():
+    # per-device sanity bounds, never tighter than what even an old hub takes in total
+    assert dev_mod.MAX_COMMANDS >= LEGACY.max_commands
+    assert dev_mod.MAX_INPUTS >= LEGACY.max_inputs
+    assert dev_mod.MAX_JSON >= LEGACY.max_json
 
 
 def test_sony_tv_block_validates_and_roundtrips():
@@ -136,11 +138,12 @@ def test_command_names_reserved_and_collisions_are_deterministic():
 
 def test_command_cap_and_size_cap(monkeypatch):
     d, cs, path = load("Sony", "KV-32V42.json")
+    cap = dev_mod.MAX_COMMANDS
     monkeypatch.setattr(dev_mod, "MAX_COMMANDS", 3)
     b = build_device(d, cs, mfr="S", model_file="f.json", codeset_path=path, imported_at="x")
     assert len(b.device["commands"]) == 3
-    assert any("commands limit" in why for _, why in b.skipped)
-    monkeypatch.setattr(dev_mod, "MAX_COMMANDS", 256)
+    assert any("limit of 3 commands" in why for _, why in b.skipped)
+    monkeypatch.setattr(dev_mod, "MAX_COMMANDS", cap)
     monkeypatch.setattr(dev_mod, "MAX_JSON", 300)
     b = build_device(d, cs, mfr="S", model_file="f.json", codeset_path=path, imported_at="x")
     assert any("size limit" in why for _, why in b.skipped)

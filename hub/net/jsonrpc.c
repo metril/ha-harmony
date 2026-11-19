@@ -181,6 +181,10 @@ int hp_dispatch(const char *json, size_t len, const hp_handler_tbl_t *tbl, void 
         }
         char hash[9];
         if (tbl->config_hash && tbl->config_hash(tbl->ctx, hash)) cJSON_AddStringToObject(ack, "config_hash", hash);
+        if (tbl->limits) {
+            cJSON *lim = tbl->limits(tbl->ctx);
+            if (lim) cJSON_AddItemToObject(ack, "limits", lim);
+        }
         rc = hp_make_reply(id, "hello_ack", ack, reply, reply_cap, reply_len);
         goto out;
     }

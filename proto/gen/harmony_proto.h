@@ -15,6 +15,7 @@ typedef enum {
     HP_MSG_PING = 4,
     HP_MSG_PONG = 5,
     HP_MSG_SET_CONFIG = 6,
+    HP_MSG_CONFIG_CHUNK = 20,
     HP_MSG_CONFIG_ACK = 7,
     HP_MSG_COMMAND = 8,
     HP_MSG_COMMAND_RESULT = 9,
@@ -30,7 +31,7 @@ typedef enum {
     HP_MSG_TILE_STATE = 19
 } hp_msg_type_t;
 
-#define HP_MSG_COUNT 19
+#define HP_MSG_COUNT 20
 
 typedef enum {
     HP_KEY_ACTION_PRESS = 0,

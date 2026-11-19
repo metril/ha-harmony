@@ -24,7 +24,7 @@ dialog, api client, tokens and constraints.
 - **Draft bar:** unchanged.
   - State dot + "Draft · N changes not applied" + "saved …", or "No changes since rev N".
   - "Valid" or "N errors · Show" chip.
-  - Meters: config KiB, IR pool, commands /256, widgets /128 (amber at 80%, red at 100%).
+  - Meters (amber at 80%, red at 100%): on a current hub one "Config size X of Y KiB on this hub" (its memory budget; no command/IR-pool counts); on old firmware config KiB, IR pool, commands /256. Pages /32 always.
   - Discard draft; Review & apply (disabled, with a reason, while there are errors).
 - **Phone:** the rail becomes a menu button; the draft bar becomes a top-bar chip plus Apply; palettes and inspectors become bottom sheets.
 - **First run** (no draft and nothing applied): Overview shows the bare remote with "Import YAML file" and "Add your first device".

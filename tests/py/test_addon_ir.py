@@ -250,7 +250,7 @@ async def test_parse_schema_and_caps(ir):
         assert r.status == 400, body
     many = "Filetype: IR signals file\nVersion: 1\n" + "".join(
         f"#\nname: S{i}\ntype: parsed\nprotocol: NEC\naddress: 04 00 00 00\ncommand: {i % 256:02X} 00 00 00\n"
-        for i in range(300)
+        for i in range(ir_routes.MAX_PARSED + 5)
     )
     st, body = await parse(ir, "flipper", many)
     assert st == 200 and len(body["actions"]) == ir_routes.MAX_PARSED and body["skipped"]
@@ -319,10 +319,15 @@ async def test_a_huge_codeset_is_refused_fast_dropped_from_cache_and_loop_stays_
 
 
 async def test_a_codeset_at_the_limit_builds_off_the_loop_and_stays_within_hub_limits(
-    aiohttp_client, tmp_path
+    aiohttp_client, tmp_path, monkeypatch
 ):
     import asyncio
     import time
+
+    from harmony_irdb import device as dev_mod
+
+    monkeypatch.setattr(dev_mod, "MAX_COMMANDS", 256)  # the per-device import bound, lowered to exercise it
+    monkeypatch.setattr(dev_mod, "MAX_JSON", 131072)
 
     arc = archive(tmp_path, FakeSession(_poisoned(n_small=1900, n_big=50)))
     c = await aiohttp_client(create_app(tmp_path / "d", auth=NoAuth(), irdb=arc))

@@ -13,26 +13,13 @@ from typing import Any
 from .config_model import Model
 from .ha_actions import HaCall, call_of
 from .harmony_proto import SOFT_KEY_BASE
+from .hub_limits import LEGACY, HubLimits, estimate_bytes
 from .keymap import effective
 from .keys import KEY_NAMES, UNKNOWN_KEY, key_code
 from .page_build import MAX_PAGES, MAX_SOFT_KEYS, CompileError, Tile, build_pages, encode_pages
 from .page_codec import MAX_BYTES, MAX_WIDGETS, Page, page_size
 
-# Must equal the HP_MAP_* defines in hub/engine/mapping.h (tests/py/test_compiler.py enforces it).
-LIMITS: dict[str, int] = {
-    "MAX_JSON": 131072,
-    "MAX_DEVICES": 16,
-    "MAX_COMMANDS": 256,
-    "MAX_INPUTS": 64,
-    "MAX_ACTIVITIES": 16,
-    "MAX_KEYS": 128,
-    "MAX_STEPS": 16,
-    "MAX_ACT_DEVS": 8,
-    "MAX_PRONTO": 520,
-    "POOL_WORDS": 16384,
-    "NAME_MAX": 32,
-}
-__all__ = ["MAX_SOFT_KEYS", "CompileError", "Tile"]
+__all__ = ["MAX_SOFT_KEYS", "CompileError", "Tile", "config_stats", "fit_error"]
 
 
 @dataclass(frozen=True)
@@ -150,29 +137,75 @@ def config_hash(hub_json: dict[str, Any]) -> str:
 Problem = tuple[list[Any], str]  # (path in the config, message)
 
 
-def _limit(what: str, n: int, key: str, fail: Callable[..., None]) -> None:
-    if n > LIMITS[key]:
-        fail(f"too many {what}: {n} (the hub allows at most {LIMITS[key]})")
+def _limit(what: str, n: int, cap: int | None, fail: Callable[..., None]) -> None:
+    if cap is not None and n > cap:
+        fail(f"too many {what}: {n} (the hub allows at most {cap})")
 
 
-def _pool_words(obj: Any) -> int:
+def _nodes(obj: Any) -> int:
+    """JSON values in `obj` (what the hub's parser allocates a node for; hub/engine/mapping.c count_nodes)."""
+    if isinstance(obj, dict):
+        return 1 + sum(_nodes(v) for v in obj.values())
+    if isinstance(obj, list):
+        return 1 + sum(_nodes(v) for v in obj)
+    return 1
+
+
+def config_stats(hub_json: dict[str, Any], max_pronto: int = 520) -> dict[str, int]:
+    """Counts the hub's memory estimate is made of, for the compact text of `hub_json`."""
+    devs = hub_json.get("devices", [])
+    acts = hub_json.get("activities", [])
+    return {
+        "text": len(compact_json(hub_json).encode()),
+        "nodes": _nodes(hub_json),
+        "devices": len(devs),
+        "commands": sum(len(d.get("commands", ())) for d in devs),
+        "inputs": sum(len(d.get("inputs", ())) for d in devs),
+        "keys": len(hub_json.get("keys", ())) + sum(len(a.get("keys", ())) for a in acts),
+        "words": _pool_words(hub_json, max_pronto),
+    }
+
+
+def fit_error(stats: dict[str, int], lim: HubLimits) -> str | None:
+    """Why a hub with limits `lim` cannot take a config of `stats`, or None. Count limits first (a
+    legacy hub), then the one byte budget: the message a hub itself would give."""
+    if lim.max_commands is not None and stats["commands"] > lim.max_commands:
+        return f"too many commands: {stats['commands']} (the hub allows at most {lim.max_commands})"
+    if lim.max_inputs is not None and stats["inputs"] > lim.max_inputs:
+        return f"too many inputs: {stats['inputs']} (the hub allows at most {lim.max_inputs})"
+    if lim.pool_words is not None and stats["words"] > lim.pool_words:
+        return (
+            f"IR data is {stats['words']} words in total (the hub's pool holds {lim.pool_words});"
+            " use protocol codes or fewer raw/pronto codes"
+        )
+    if lim.max_json is not None and stats["text"] > lim.max_json:
+        return f"compiled config is {stats['text']} bytes (the hub allows {lim.max_json})"
+    if not lim.legacy:
+        need = estimate_bytes(lim, **stats)
+        if need > lim.budget:
+            return (
+                f"config needs ~{-(-need // 1024)} KiB of hub memory, the hub allows"
+                f" {lim.budget // 1024} KiB"
+            )
+    return None
+
+
+def _pool_words(obj: Any, max_pronto: int = 520) -> int:
     """Pronto words / raw durations the hub stores for every IR action under `obj`."""
     total = 0
     if isinstance(obj, dict):
         for k, v in obj.items():
             if k == "pronto" and isinstance(v, str):
                 n = len(v.split())
-                if n > LIMITS["MAX_PRONTO"]:
-                    raise CompileError(
-                        f"pronto code of {n} words (the hub allows {LIMITS['MAX_PRONTO']})"
-                    )
+                if n > max_pronto:
+                    raise CompileError(f"pronto code of {n} words (the hub allows {max_pronto})")
                 total += n
             elif k == "raw" and isinstance(v, dict):
                 total += len(v.get("us", ()))
             else:
-                total += _pool_words(v)
+                total += _pool_words(v, max_pronto)
     elif isinstance(obj, list):
-        total = sum(_pool_words(v) for v in obj)
+        total = sum(_pool_words(v, max_pronto) for v in obj)
     return total
 
 
@@ -190,11 +223,16 @@ def _keymap(
     return out
 
 
-def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Compiled:
+def compile_config(
+    model: Model, *, collect: list[Problem] | None = None, limits: HubLimits = LEGACY
+) -> Compiled:
     """Model -> Compiled. Raises CompileError when the hub or the remote cannot take it.
 
     With `collect` (previews only) nothing is raised: every problem is appended as (path, msg),
-    pages that do not fit come back as b"", and the result is not fit to send to a hub."""
+    pages that do not fit come back as b"", and the result is not fit to send to a hub.
+
+    `limits` are the connected hub's (hello_ack.limits); the default is a hub with the fixed
+    limits of firmware <= 0.3.5."""
 
     def fail(msg: str, path: list[Any] | None = None) -> None:
         if collect is None:
@@ -231,10 +269,8 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
         if d["commands"]:
             dev["commands"] = d["commands"]
         devices.append(dev)
-    _limit("devices", len(devices), "MAX_DEVICES", fail)
+    _limit("devices", len(devices), limits.max_devices, fail)
     ir_models = [d for d in model["devices"] if d["id"] not in ha_devs]
-    _limit("commands", sum(len(d["commands"]) for d in ir_models), "MAX_COMMANDS", fail)
-    _limit("inputs", sum(len(d["inputs"]) for d in ir_models), "MAX_INPUTS", fail)
 
     activities: list[dict[str, Any]] = []
     act_keys: dict[int, dict[str, Any]] = {}
@@ -248,21 +284,21 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
             hub_steps = [x for x in a[sect] if ha_of(x) is None]  # HA steps run in the integration
             if hub_steps:
                 out[sect] = hub_steps
-                if len(hub_steps) > LIMITS["MAX_STEPS"]:
+                if len(hub_steps) > limits.max_steps:
                     fail(
                         f"activity {a['id']!r}: too many `{sect}`: {len(hub_steps)}"
-                        f" (the hub allows at most {LIMITS['MAX_STEPS']})",
+                        f" (the hub allows at most {limits.max_steps})",
                         [*where, sect],
                     )
-        if len(ir_act_devs) > LIMITS["MAX_ACT_DEVS"]:
+        if len(ir_act_devs) > limits.max_act_devs:
             fail(
                 f"activity {a['id']!r}: {len(ir_act_devs)} devices"
-                f" (the hub allows at most {LIMITS['MAX_ACT_DEVS']})",
+                f" (the hub allows at most {limits.max_act_devs})",
                 [*where, "devices"],
             )
         act_keys[ai] = _keymap(a["keys"], f"activity {a['id']!r}", names, fail)
         activities.append(out)
-    _limit("activities", len(activities), "MAX_ACTIVITIES", fail)
+    _limit("activities", len(activities), limits.max_activities, fail)
     if len({a["name"] for a in activities}) != len(activities):
         fail("activity names must be unique", ["activities"])
 
@@ -295,31 +331,27 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
                 hub_own[str(c)] = x
             elif str(c) in keys:  # an inherited hub action must not fire under the HA one
                 hub_own[str(c)] = {"type": "none"}
-        if len(hub_own) > LIMITS["MAX_KEYS"]:
+        if len(hub_own) > limits.max_keys:
             fail(f"activity {a['id']!r}: too many keys: {len(hub_own)}", ["activities", ai, "keys"])
         if hub_own:
             activities[ai]["keys"] = hub_own
-    if len(keys) > LIMITS["MAX_KEYS"]:
+    if len(keys) > limits.max_keys:
         fail(
             f"too many keys in the default map: {len(keys)} including page buttons"
-            f" (the hub allows at most {LIMITS['MAX_KEYS']})",
+            f" (the hub allows at most {limits.max_keys})",
             ["keys"],
         )
 
     hub: dict[str, Any] = {"format": 2, "devices": devices, "activities": activities, "keys": keys}
     try:
-        words = _pool_words(hub)
+        stats = config_stats(hub, limits.max_pronto)
     except CompileError as exc:
         fail(str(exc))
-        words = 0
-    if words > LIMITS["POOL_WORDS"]:
-        fail(
-            f"IR data is {words} words in total (the hub's pool holds {LIMITS['POOL_WORDS']});"
-            " use protocol codes or fewer raw/pronto codes"
-        )
-    size = len(compact_json(hub).encode())
-    if size > LIMITS["MAX_JSON"]:
-        fail(f"compiled config is {size} bytes (the hub allows {LIMITS['MAX_JSON']})")
+        stats = dict.fromkeys(("text", "devices", "commands", "inputs", "keys", "words"), 0) | {"nodes": 1}
+    if (why := fit_error(stats, limits)) is not None:
+        fail(why)
+    size, words = stats["text"], stats["words"]
+    need = estimate_bytes(limits, **stats)
 
     try:
         models, pages_v1, pages_v2 = encode_pages(
@@ -393,19 +425,22 @@ def compile_config(model: Model, *, collect: list[Problem] | None = None) -> Com
             )
     usage = {
         "json_bytes": size,
-        "json_max": LIMITS["MAX_JSON"],
+        "json_max": limits.max_json,  # None unless the hub has the fixed legacy limits
         "pool_words": words,
-        "pool_max": LIMITS["POOL_WORDS"],
+        "pool_max": limits.pool_words,
         "keys": len(keys),
-        "keys_max": LIMITS["MAX_KEYS"],
+        "keys_max": limits.max_keys,
         "devices": len(devices),
-        "devices_max": LIMITS["MAX_DEVICES"],
+        "devices_max": limits.max_devices,
         "activities": len(activities),
-        "activities_max": LIMITS["MAX_ACTIVITIES"],
+        "activities_max": limits.max_activities,
         "commands": sum(len(d["commands"]) for d in ir_models),
-        "commands_max": LIMITS["MAX_COMMANDS"],
+        "commands_max": limits.max_commands,
         "inputs": sum(len(d["inputs"]) for d in ir_models),
-        "inputs_max": LIMITS["MAX_INPUTS"],
+        "inputs_max": limits.max_inputs,
+        # a current hub: one byte budget for the whole config (None on a legacy hub)
+        "config_bytes": need if not limits.legacy else None,
+        "config_budget": limits.budget if not limits.legacy else None,
         "soft_keys": sum(1 for c in names if c >= SOFT_KEY_BASE),
         "soft_keys_max": MAX_SOFT_KEYS,
         "pages": max(wire_count, len(models)),

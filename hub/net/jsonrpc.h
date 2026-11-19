@@ -38,6 +38,8 @@ typedef struct {
     /* Optional: writes the loaded config's hash (hex, NUL-terminated, <= 8 chars) into out[9] and
      * returns true for hello_ack.config_hash; false/NULL omits the field. */
     bool (*config_hash)(void *ctx, char out[9]);
+    /* Optional: a new cJSON object (caller-owned, handed to hello_ack) for hello_ack.limits. */
+    cJSON *(*limits)(void *ctx);
     /* Indexed by hp_msg_type_t. hello is handled internally; ping has a
      * built-in pong when handler[HP_MSG_PING] is NULL. NULL otherwise =>
      * error/unknown_type. */

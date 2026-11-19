@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { IrCandidate, IrDeviceResult } from '../src/lib/api';
 import { addActivity, addActivityDevice, addControlPage, addStartButton, addStep, applyHandler, chainOrder, deleteActivity, handlerOf, matchZone, moveChain, moveStep, normName, removeStep, timeline } from '../src/lib/activity-edit';
 import { deviceIdFor, duplicateCommand, nameProblem, powerStatus, setPowerMode, sourceLabel, withPorts, withRepeats } from '../src/lib/device-edit';
@@ -7,7 +7,10 @@ import { boundEditor, editorBytes } from '../src/lib/activity-edit';
 import { capProblem } from '../src/lib/device-edit';
 import { byDomain } from '../src/lib/permissions';
 import { proposeFromEntity } from '../src/lib/ha-propose';
-import type { Config } from '../src/lib/model';
+import { LEGACY_LIMITS, LIMITS, applyUsageLimits, type Config } from '../src/lib/model';
+import { meters } from '../src/components/parts';
+import { render } from 'lit';
+import { USAGE } from './helpers';
 import { permissions, tileDefaultTap } from '../src/lib/permissions';
 import { changedKeys, changedPages } from '../src/lib/diff';
 import { deleteDevice, deleteItem, describeRef, findRefs, renameItem } from '../src/lib/refs';
@@ -374,6 +377,36 @@ describe('hub limits are refused before apply', () => {
     const c = many(256, 'commands');
     c.devices!.push({ id: 'h', kind: 'ha', commands: { a: { ha: { service: 'light.toggle', target: { entity_id: 'light.a' } } } } });
     expect(capProblem(c, 'command', 1, true)).toBeNull();
+  });
+});
+
+describe('the editor shows the connected hub\'s caps', () => {
+  const many = (n: number): Config => ({ devices: [{ id: 'd', commands: Object.fromEntries(Array.from({ length: n }, (_, i) => [`c${i}`, { proto: 'nec', addr: 1, cmd: i % 256 }])) }] });
+  afterEach(() => Object.assign(LIMITS, LEGACY_LIMITS));
+  const current = { ...USAGE, json_max: null, pool_max: null, commands_max: null, inputs_max: null, devices_max: 255, config_bytes: 3 * 1024 * 1024, config_budget: 8 * 1024 * 1024 };
+  it('a current hub has no command or input count limit, so nothing is refused for count', () => {
+    applyUsageLimits(current);
+    expect(LIMITS.commands).toBe(Infinity);
+    expect(capProblem(many(5000), 'command')).toBeNull();
+    expect(capProblem(many(5000), 'input', 300)).toBeNull();
+    expect(capProblem({ devices: Array.from({ length: 255 }, (_, i) => ({ id: `d${i}` })) }, 'device')).toContain('at most 255 devices');
+  });
+  it('old firmware keeps the fixed numbers (and so does a missing preview)', () => {
+    applyUsageLimits(null);
+    expect(capProblem(many(256), 'command')).toContain('at most 256 commands');
+    applyUsageLimits({ ...current, commands_max: 256, inputs_max: 64, json_max: 131072, devices_max: 16 });
+    expect(capProblem(many(256), 'command')).toContain('at most 256 commands');
+  });
+  it('one "Config size X of Y KiB on this hub" meter replaces the count meters on a current hub', () => {
+    const host = document.createElement('div');
+    render(meters({ usage: current, config: many(10) } as never), host);
+    expect(host.textContent).toContain('Config size');
+    expect(host.textContent).toContain('3072 of 8192 KiB on this hub');
+    expect(host.textContent).not.toContain('IR pool');
+    expect(host.textContent).not.toContain('Commands');
+    render(meters({ usage: USAGE, config: many(10) } as never), host);
+    expect(host.textContent).toContain('IR pool');
+    expect(host.textContent).toContain('62 / 256');
   });
 });
 

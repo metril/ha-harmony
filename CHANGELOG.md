@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Hub: no more 256-command (or 64-input, 16384-word, 128 KiB) limit. Those were array sizes of one statically sized map, not wire limits. Commands, inputs, the IR word pool and key maps are allocated per load, exactly as large as the config; the one size limit is a memory budget (8 MiB, about 20% of the Elite hub's free RAM) checked up front with `config needs ~N KiB of hub memory, the hub allows M KiB`. A failed load (bad config, over budget, out of memory) leaves the old map untouched; lookups use hash indexes. About 14,000 protocol-coded, 8,000 Pronto-string or 1,100 raw-array learned commands fit. Remaining per-item bounds: 255 devices, 16 activities, 256 keys per map, 16 steps, 8 devices per activity.
+- Hub: `hello_ack.limits` reports the budget and bounds; new `config_chunk` message sends configs over the 64 KiB frame size in pieces. The integration and add-on use the hub's reported limits and fall back to the old fixed ones for older firmware (no chunks). The editor shows "Config size X of Y KiB on this hub" for a current hub.
+- Add-on: request body cap 4 MiB, 250k JSON values per config, `ir/parse` 4096 actions / 1 MiB; the integration compiles a pulled bundle through the fast dict path (was ~0.5 ms per command).
 - Hub boot hook: bounded daemon respawn (`respawn_max`, default 3, 0 = off) with a heartbeat wedge cover, an `rf_debug` conf key and uptime-stamped logs; the boot-strike counter is never touched by a respawn.
 - Remote: opt-in suspend to RAM after idle (`HARMONY_SUSPEND=battery|always`) with an hourly timed wake (msp430 `wakeup`, 3600 s) so the battery guard still runs, resume re-link and sleep-gap accounting. Touch does not wake it; buttons and motion do. See `docs/runbooks/remote-suspend-soak.md`.
 - OTA: signed image container with Ed25519 verification (`ota_sign` tool, staged apply helper on the hub). Builds that bake in the public dev key need `-DHP_ALLOW_DEV_OTA_KEY=ON`.

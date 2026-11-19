@@ -9,8 +9,9 @@ from test_addon import CONFIG, H, clock, put_draft
 from harmony_addon import app as app_mod
 from harmony_addon.app import create_app
 from harmony_addon.auth import NoAuth
-from harmony_core.compiler import LIMITS, compile_config
+from harmony_core.compiler import compile_config
 from harmony_core.config_model import parse_data, validate_pages
+from harmony_core.hub_limits import LEGACY
 from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, Page, Widget, page_size
 
 TOKEN = "ab" * 32
@@ -94,7 +95,7 @@ async def test_preview_of_a_heavy_config_is_fast_and_memoised(c, monkeypatch):
     assert cold < 150, f"cold preview took {cold:.0f} ms"
     calls = []
     real = app_mod._preview
-    monkeypatch.setattr(app_mod, "_preview", lambda cfg: calls.append(1) or real(cfg))
+    monkeypatch.setattr(app_mod, "_preview", lambda cfg, limits: calls.append(1) or real(cfg, limits))
     t = time.process_time()
     st, again = await preview(c, cfg)
     warm = (time.process_time() - t) * 1000
@@ -136,8 +137,8 @@ async def test_page_and_total_usage_match_the_compiler(c):
     assert u["json_bytes"] == len(
         json.dumps(comp.hub_json, separators=(",", ":"), ensure_ascii=False)
     )
-    assert u["json_max"] == LIMITS["MAX_JSON"] and u["pool_max"] == LIMITS["POOL_WORDS"]
-    assert u["keys"] == len(comp.hub_json["keys"]) and u["keys_max"] == LIMITS["MAX_KEYS"]
+    assert u["json_max"] == LEGACY.max_json and u["pool_max"] == LEGACY.pool_words
+    assert u["keys"] == len(comp.hub_json["keys"]) and u["keys_max"] == LEGACY.max_keys
     assert u["soft_keys"] == 120 and u["commands"] == 240 and u["inputs"] == 24
     assert body["hash"] == comp.config_hash
 

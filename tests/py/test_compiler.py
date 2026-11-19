@@ -7,7 +7,6 @@ import pytest
 
 from custom_components.ha_harmony.const import KEY_CODES, SOFT_KEY_BASE
 from custom_components.ha_harmony.harmony_core.compiler import (
-    LIMITS,
     CompileError,
     compact_json,
     compile_config,
@@ -226,11 +225,7 @@ def test_bad_ir_file_refs_carry_file_line_and_path(tmp_path, ref, needle):
 
 
 # ------------------------------------------------------------------ limits
-def test_limits_match_mapping_h():
-    src = (ROOT / "hub/engine/mapping.h").read_text()
-    defs = {m[1]: int(m[2]) for m in re.finditer(r"#define HP_MAP_(\w+)\s+(\d+)", src)}
-    defs.pop("ERR_MAX")
-    assert defs == LIMITS, "python limits drifted from hub/engine/mapping.h"
+# the C header / Python / frontend mirrors of the limits are compared in tests/py/test_limits.py
 
 
 def devices_yaml(n, cmds=0):

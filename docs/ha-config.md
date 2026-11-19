@@ -129,9 +129,13 @@ pages:
   icon from X's name keywords; else an icon from the label's words; tile -> icon from the entity
   domain (light bulb, climate thermo, ...); `nav` -> chevron/home icon. A page over 251 bytes fails
   with `page 'x': N bytes over; shorten labels, use icon_only, or make it a list`.
-- **Hub limits** (`hub/engine/mapping.h`): 16 devices, 256 commands, 64 inputs, 16 activities,
-  128 keys per map, 16 steps per list, 8 devices per activity, 128 KiB of config. Over-limit configs
-  fail with a message and nothing is pushed.
+- **Hub limits** (`hub/engine/mapping.h`, reported by the hub in `hello_ack.limits`; see
+  `docs/proto/config-format-2.md` "Limits"): current firmware has one memory budget instead of command,
+  input and IR-pool counts (the editor shows "Config size X of Y KiB on this hub"), plus 255 devices,
+  16 activities, 256 keys per map, 16 steps per list, 8 devices per activity. Firmware <= 0.3.5 still
+  has 16 devices, 256 commands, 64 inputs, 128 keys per map and 128 KiB of config; the compiler
+  applies those to a hub that reports no limits. Over-limit configs fail with a message and nothing
+  is pushed.
 
 ## Home Assistant actions
 

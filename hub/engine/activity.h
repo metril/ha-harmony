@@ -43,7 +43,7 @@
 #define HP_ACT_GUARD_MS 50
 #define HP_ACT_PERSIST_MS 2000
 #define HP_ACT_STATE_VER 1
-#define HP_ACT_PLAN_MAX 72
+#define HP_ACT_PLAN_MAX (HP_MAP_MAX_DEVICES + 2 * HP_MAP_MAX_ACT_DEVS + 2 * HP_MAP_MAX_STEPS + 8)
 
 typedef enum { HP_ACTSM_EVT_DEVICE = 1, HP_ACTSM_EVT_ACTIVITY = 2 } hp_actsm_evt_t;
 /* DEVICE: idx = device index; ACTIVITY: idx = reported activity (-1 none). */
@@ -53,7 +53,7 @@ typedef enum { HP_STEP_PWR_OFF = 1, HP_STEP_PWR_ON, HP_STEP_INPUT, HP_STEP_EXTRA
 
 typedef struct {
     uint8_t kind, dev;
-    int16_t input;          /* HP_STEP_INPUT: index into map.inputs */
+    int32_t input;          /* HP_STEP_INPUT: index into map.inputs */
     const hp_action_t *act; /* EXTRA/OFFX action */
 } hp_actstep_t;
 
@@ -76,7 +76,7 @@ typedef struct {
     int reported; /* last completed activity, -1 none */
     char rep_key[HP_MAP_NAME_MAX]; /* its identity (id; name in format 1), to re-find it on reload */
     hp_actstep_t plan[HP_ACT_PLAN_MAX];
-    uint8_t nplan, pos;
+    uint16_t nplan, pos;
     bool running;
     int target;   /* activity being started, -1 = off */
     hp_sched_handle timer;

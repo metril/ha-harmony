@@ -453,15 +453,12 @@ async def test_config_hash_is_what_the_hub_acks(hass, hub_rf, write_yaml):
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
     assert coord.client.config_hash == coord.compiled.config_hash == await hub_hash(hub_rf.url)
-    real = coord.client.async_send
+    real = coord.client.async_set_config
 
-    async def fake(msg_type, data):
-        res = await real(msg_type, data)
-        if "config" in data:
-            res = {**res, "config_hash": "deadbeef"}
-        return res
+    async def fake(config):
+        return {**await real(config), "config_hash": "deadbeef"}
 
-    coord.client.async_send = fake
+    coord.client.async_set_config = fake
     coord.client.config_hash = None
     await coord.async_sync_config()
     assert coord.client.config_hash == "deadbeef"  # stored as reported, not assumed
@@ -646,11 +643,11 @@ async def test_nothing_applied_loads_with_hub_config_untouched(hass, hub_rf, wri
 
 
 async def test_oversize_config_is_a_clean_error(hass, hub_rf, write_yaml):
-    write_yaml("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(17)))
+    write_yaml("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(256)))  # the hub's device ceiling is 255
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
     assert entry.state is ConfigEntryState.LOADED
-    assert "too many devices: 17" in coord.last_error and coord.config_pushes == 0
+    assert "too many devices: 256" in coord.last_error and coord.config_pushes == 0
     issue = ir.async_get(hass).async_get_issue(const.DOMAIN, f"config_invalid_{HUB_ID}")
     assert issue and issue.translation_key == "config_invalid"
     await hass.config_entries.async_unload(entry.entry_id)

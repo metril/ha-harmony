@@ -176,6 +176,7 @@ def test_real_schema_has_phase2_messages():
         "hello", "hello_ack", "error", "ping", "pong", "set_config", "config_ack",
         "command", "command_result", "key_event", "state_update", "page_push", "battery",
         "device_state", "tile_update", "activity_list", "remote_attached", "remote_info", "tile_state",
+        "config_chunk",
     }  # fmt: skip
 
 

@@ -380,14 +380,8 @@ static const char *load_err(int rc) {
     }
 }
 
-static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply,
-                         size_t cap, size_t *len) {
-    hub_ctx_t *h = vctx;
-    const cJSON *cfg = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "config");
-    char *text = cJSON_PrintUnformatted(cfg);
-    if (!text) return reply_ok(id, "config_ack", false, "out of memory", reply, cap, len);
-    int rc = hp_map_load(&h->map, text, strlen(text));
-    free(text);
+/* After hp_map_load: the config_ack, and on success the notifications and the cache write. */
+static int finish_load(hub_ctx_t *h, hp_session_t *sess, uint32_t id, int rc, char *reply, size_t cap, size_t *len) {
     if (rc < 0) {
         const char *why = hp_map_last_error(&h->map);
         return reply_ok(id, "config_ack", false, *why ? why : load_err(rc), reply, cap, len);
@@ -404,7 +398,8 @@ static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
         h->pending_power = true;
     }
     const char *msg = NULL;
-    if (h->cache_path && hp_map_save_cache(&h->map, h->cache_path) < 0) msg = "applied; cache write failed";
+    if (h->cache_path && hp_map_save_cache(&h->map, h->cache_path) < 0)
+        msg = "applied; not saved (out of space on the hub?), the previously saved config is kept";
     cJSON *a = cJSON_CreateObject();
     if (!a) return -HP_E_INVAL;
     cJSON_AddBoolToObject(a, "ok", true);
@@ -412,6 +407,93 @@ static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
     char hash[9];
     if (hp_map_hash_hex(&h->map, hash)) cJSON_AddStringToObject(a, "config_hash", hash);
     return hp_make_reply(id, "config_ack", a, reply, cap, len);
+}
+
+static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply,
+                         size_t cap, size_t *len) {
+    hub_ctx_t *h = vctx;
+    const cJSON *cfg = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "config");
+    char *text = cJSON_PrintUnformatted(cfg);
+    if (!text) return reply_ok(id, "config_ack", false, "out of memory", reply, cap, len);
+    int rc = hp_map_load(&h->map, text, strlen(text));
+    free(text);
+    return finish_load(h, sess, id, rc, reply, cap, len);
+}
+
+static void chunk_drop(hub_ctx_t *h) {
+    free(h->chunk_buf);
+    h->chunk_buf = NULL;
+    h->chunk_total = h->chunk_got = 0;
+    h->chunk_next = 0;
+    h->chunk_owner = NULL;
+}
+
+static int chunk_nack(hub_ctx_t *h, uint32_t id, const char *msg, char *reply, size_t cap, size_t *len) {
+    chunk_drop(h);
+    return reply_ok(id, "config_ack", false, msg, reply, cap, len);
+}
+
+static int on_config_chunk(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap,
+                           size_t *len) {
+    hub_ctx_t *h = vctx;
+    const cJSON *sq = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "seq");
+    const cJSON *tt = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "total");
+    const cJSON *dt = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "data");
+    if (!cJSON_IsNumber(sq) || !cJSON_IsNumber(tt) || !cJSON_IsString(dt))
+        return chunk_nack(h, id, "bad config_chunk", reply, cap, len);
+    uint32_t seq = (uint32_t)sq->valuedouble, total = (uint32_t)tt->valuedouble;
+    size_t n = strlen(dt->valuestring);
+    if (n > HP_CFG_CHUNK_BYTES) return chunk_nack(h, id, "config_chunk too large", reply, cap, len);
+    if (seq == 0) {
+        chunk_drop(h);
+        if (total == 0) return chunk_nack(h, id, "empty config", reply, cap, len);
+        if ((size_t)total * HP_MAP_EST_TEXT_COPIES > hp_map_budget(&h->map)) {
+            char msg[HP_MAP_ERR_MAX];
+            snprintf(msg, sizeof msg, "config needs ~%zu KiB of hub memory, the hub allows %zu KiB",
+                     ((size_t)total * HP_MAP_EST_TEXT_COPIES + 1023) / 1024, hp_map_budget(&h->map) / 1024);
+            return chunk_nack(h, id, msg, reply, cap, len);
+        }
+        h->chunk_buf = malloc((size_t)total + 1);
+        if (!h->chunk_buf) return chunk_nack(h, id, "out of memory", reply, cap, len);
+        h->chunk_total = total;
+        h->chunk_owner = sess;
+    } else if (!h->chunk_buf || h->chunk_owner != sess || seq != h->chunk_next || total != h->chunk_total) {
+        return chunk_nack(h, id, "config_chunk out of order", reply, cap, len);
+    }
+    if (h->chunk_got + n > h->chunk_total) return chunk_nack(h, id, "config_chunk longer than its total", reply, cap, len);
+    memcpy(h->chunk_buf + h->chunk_got, dt->valuestring, n);
+    h->chunk_got += n;
+    h->chunk_next = seq + 1;
+    if (h->chunk_got < h->chunk_total) return reply_ok(id, "config_ack", true, NULL, reply, cap, len);
+    char *text = h->chunk_buf;
+    size_t tl = h->chunk_total;
+    h->chunk_buf = NULL;
+    chunk_drop(h);
+    int rc = hp_map_load(&h->map, text, tl);
+    free(text);
+    return finish_load(h, sess, id, rc, reply, cap, len);
+}
+
+static cJSON *on_limits(void *vctx) {
+    const hub_ctx_t *h = vctx;
+    cJSON *o = cJSON_CreateObject();
+    if (!o) return NULL;
+    cJSON_AddNumberToObject(o, "budget", (double)hp_map_budget(&h->map));
+    cJSON_AddNumberToObject(o, "chunk", HP_CFG_CHUNK_BYTES);
+    cJSON_AddNumberToObject(o, "text_copies", HP_MAP_EST_TEXT_COPIES);
+    cJSON_AddNumberToObject(o, "node_b", HP_MAP_NODE_BYTES);
+    cJSON_AddNumberToObject(o, "dev_b", HP_MAP_DEV_BYTES);
+    cJSON_AddNumberToObject(o, "cmd_b", HP_MAP_CMD_BYTES);
+    cJSON_AddNumberToObject(o, "key_b", HP_MAP_KEY_BYTES);
+    cJSON_AddNumberToObject(o, "word_b", HP_MAP_WORD_BYTES);
+    cJSON_AddNumberToObject(o, "max_devices", HP_MAP_MAX_DEVICES);
+    cJSON_AddNumberToObject(o, "max_activities", HP_MAP_MAX_ACTIVITIES);
+    cJSON_AddNumberToObject(o, "max_keys", HP_MAP_MAX_KEYS);
+    cJSON_AddNumberToObject(o, "max_steps", HP_MAP_MAX_STEPS);
+    cJSON_AddNumberToObject(o, "max_act_devs", HP_MAP_MAX_ACT_DEVS);
+    cJSON_AddNumberToObject(o, "max_pronto", HP_MAP_MAX_PRONTO);
+    cJSON_AddNumberToObject(o, "name_max", HP_MAP_NAME_MAX);
+    return o;
 }
 
 static int reply_err(uint32_t id, const char *code, const char *msg, char *reply, size_t cap, size_t *len);
@@ -436,6 +518,7 @@ static int cmd_ir_send(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply
     } else {
         r = reply_ok(id, "command_result", true, NULL, reply, cap, len);
     }
+    hp_map_free(sc);
     free(sc);
     return r;
 }
@@ -567,7 +650,9 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->ctx = ctx;
     tbl->activities = on_activities;
     tbl->config_hash = on_config_hash;
+    tbl->limits = on_limits;
     tbl->handler[HP_MSG_SET_CONFIG] = on_set_config;
+    tbl->handler[HP_MSG_CONFIG_CHUNK] = on_config_chunk;
     tbl->handler[HP_MSG_COMMAND] = on_command;
     tbl->handler[HP_MSG_PAGE_PUSH] = on_page_push;
 }

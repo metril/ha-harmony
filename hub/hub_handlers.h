@@ -8,7 +8,10 @@
  *                     the cache (if a path is set) is rewritten and
  *                     hello_ack.activities reflects the new config. On
  *                     failure ok=false + message and the old map is intact.
- *   command        -> command_result {ok, message?}. Vocabulary:
+ *   config_chunk   -> the same config as compact text in <= HP_CFG_CHUNK_BYTES pieces (configs over the
+ *                     64 KiB frame size); config_ack {ok:true} per chunk, the load result on the last.
+ *                     hello_ack.limits reports the memory budget and per-item bounds.
+ *   command       -> command_result {ok, message?}. Vocabulary:
  *                       device "hub", command "start_activity", args {"name": "<activity>"}
  *                       device "hub", command "power_off"        (current activity's "off" steps)
  *                     The command_result only says the request was accepted. For format-2 configs
@@ -96,11 +99,16 @@ typedef struct {
     uint8_t remote, page_fmt, caps, icons;
     uint8_t gen, pages; /* the v2 page set the remote holds: its generation and how many pages (0/0 none) */
 } hub_info_t;
+#define HP_CFG_CHUNK_BYTES 16384 /* config_chunk data bytes the hub accepts per chunk (hello_ack.limits.chunk) */
 #define HUB_CAP_TILE_STATE 1 /* caps bit 0 */
 #define HUB_CAP_PAGE_STORE 2 /* caps bit 1 */
 
 typedef struct {
     hp_map_t map;
+    char *chunk_buf;                /* config_chunk transfer being assembled (HP_CFG_CHUNK_BYTES per chunk) */
+    size_t chunk_total, chunk_got;
+    uint32_t chunk_next;
+    const hp_session_t *chunk_owner;
     hp_sinks_t sinks;
     hp_ws_server_t *srv;
     const char *cache_path; /* NULL = do not persist */
