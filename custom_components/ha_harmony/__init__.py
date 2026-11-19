@@ -37,6 +37,8 @@ from .const import (
 )
 from .coordinator import (
     ISSUE_INVALID,
+    ISSUE_OTA_DEV_KEY,
+    ISSUE_OTA_ROLLBACK,
     ISSUE_REJECTED,
     ISSUE_SCHEMA,
     ISSUE_YAML,
@@ -44,6 +46,7 @@ from .coordinator import (
 )
 from .errors import invalid
 from .harmony_core.config_model import validate_ir
+from .ota import parse_image, path_allowed, read_image
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -63,6 +66,9 @@ SERVICE_SCHEMAS: dict[str, vol.Schema] = {
     "reload_config": vol.Schema(_TARGET),
     "push_pages": vol.Schema(_TARGET),
     "send_ir": vol.Schema({**_TARGET, vol.Required("ir"): dict}),
+    "install_firmware": vol.Schema(
+        {**_TARGET, vol.Required("path"): cv.string, vol.Optional("allow_dev_key", default=False): cv.boolean}
+    ),
     "set_device_state": vol.Schema(
         {
             **_TARGET,
@@ -82,11 +88,25 @@ def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[HarmonyCoordin
         entries = [e for e in entries if wanted in (e.entry_id, e.unique_id)]
         if not entries:
             raise invalid("no_matching_hub", hub=wanted)
-    elif len(entries) > 1 and call.service in ("send_ir", "set_device_state"):
+    elif len(entries) > 1 and call.service in ("send_ir", "set_device_state", "install_firmware"):
         raise invalid("several_hubs")
     if not entries:
         raise invalid("no_loaded_hub")
     return [e.runtime_data for e in entries]
+
+
+async def _install_firmware(
+    hass: HomeAssistant, coord: HarmonyCoordinator, path: str, allow_dev_key: bool
+) -> None:
+    """A signed image under <config>/ha_harmony/firmware (or allowlist_external_dirs). Never sends an
+    unsigned file: the HOTA header is checked here for a friendly error, the hub's verify decides."""
+    real = await hass.async_add_executor_job(
+        path_allowed, hass.config.config_dir, hass.config.is_allowed_path, path
+    )
+    if real is None:
+        raise invalid("ota_path_not_allowed", path=path)
+    data = await hass.async_add_executor_job(read_image, real)
+    await coord.async_install_firmware(parse_image(data), allow_dev_key=allow_dev_key)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -96,6 +116,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 await coord.async_refresh_from_addon()
             elif call.service == "push_pages":
                 await coord.async_push_pages()
+            elif call.service == "install_firmware":
+                await _install_firmware(hass, coord, call.data["path"], call.data["allow_dev_key"])
             elif call.service == "send_ir":
                 try:  # no base dir: file references are refused (inline the codes)
                     action = validate_ir(call.data["ir"])
@@ -143,6 +165,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
 
     coordinator = HarmonyCoordinator(hass, entry, client)
     entry.runtime_data = coordinator
+    coordinator.note_ota_key()
 
     async def _stop(_: Event) -> None:
         await coordinator.async_shutdown()
@@ -216,6 +239,11 @@ async def async_remove_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> 
     await Store(hass, STORE_VERSION, f"{DOMAIN}.bundle.{hub}").async_remove()
     for key in (ISSUE_INVALID, ISSUE_REJECTED, ISSUE_SCHEMA, ISSUE_YAML):
         ir.async_delete_issue(hass, DOMAIN, f"{key}_{hub}")
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_OTA_DEV_KEY}_{hub}")
+    prefix = f"{ISSUE_OTA_ROLLBACK}_{hub}_"
+    for domain, issue_id in list(ir.async_get(hass).issues):
+        if domain == DOMAIN and issue_id.startswith(prefix):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> bool:

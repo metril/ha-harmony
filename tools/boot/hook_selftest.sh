@@ -127,7 +127,7 @@ echo "selftest in $T (hook $HOOK)"
 # 1. conf loop terminates, including a last line with no trailing newline
 mkroot 'port=8099\ntoken=lastline'
 run_hook
-if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "--token-file $R/data/ha-harmony/hub.conf --port 8099 --heartbeat $R/var/volatile/ha-harmony.hb" ]; then
+if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "--token-file $R/data/ha-harmony/hub.conf --port 8099 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy" ]; then
 	pass "conf without trailing newline"
 else
 	fail "conf without trailing newline (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
@@ -170,11 +170,21 @@ if [ "$nl" = 4 ]; then pass "read-based line count stops over the cap"; else fai
 # 5. optional argv pieces expand correctly (${var:+...})
 mkroot 'token=abc==\nhub_id=my-hub\nrf=spi\nrf_slot=2\nport=8100\nconfig_budget_kib=4096\n'
 run_hook
-want="--token-file $R/data/ha-harmony/hub.conf --port 8100 --hub-id my-hub --rf-spi --rf-slot 2 --config-budget 4096 --heartbeat $R/var/volatile/ha-harmony.hb"
+want="--token-file $R/data/ha-harmony/hub.conf --port 8100 --hub-id my-hub --rf-spi --rf-slot 2 --config-budget 4096 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy"
 if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ]; then
 	pass "argv quoting with rf, hub_id and '=' in token"
 else
 	fail "argv quoting (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
+fi
+
+# 5a. rf=spi alone: the radio is enabled and no slot flag is passed (the hub learns it)
+mkroot 'token=abc\nrf=spi\n'
+run_hook
+want="--token-file $R/data/ha-harmony/hub.conf --port 8099 --rf-spi --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy"
+if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ]; then
+	pass "rf=spi without rf_slot passes no --rf-slot"
+else
+	fail "rf without slot (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
 fi
 
 # 5b. the token never appears in the daemon argv
@@ -350,6 +360,160 @@ if wait_log "no pid recorded" && [ ! -e "$T/reboot.log" ]; then
 else
 	fail "no pid after respawn: not detected"
 fi
+
+# --- signed update: relaunch, probation, rollback once (hub/ota/hub_ota.h file protocol) ---------
+HD="$R/data/ha-harmony"
+# The applying build serves until $T/go, then does what hub_ota.c does and exits 42. Run again
+# after a rollback ($T/applied exists) it simply serves until $T/stop. Nothing here is timing based.
+ota_old() {
+	cat >"$HD/hub" <<EOF
+#!/bin/sh
+echo old >>"$T/runs_old"
+if [ -e "$T/applied" ]; then while [ ! -e "$T/stop" ]; do sleep $TICK; done; exit 0; fi
+while [ ! -e "$T/go" ]; do sleep $TICK; done
+: >"$T/applied"
+echo build=2 >"$HD/ota-pending"
+ln "$HD/hub" "$HD/hub.tmp" && mv "$HD/hub.tmp" "$HD/hub.prev"
+mv "$HD/hub.new" "$HD/hub"
+echo 2 >"$HD/ota-restart"
+exit 42
+EOF
+	chmod 755 "$HD/hub"
+}
+ota_new() { # $1 = good | bad
+	if [ "$1" = good ]; then
+		printf '#!/bin/sh\necho new >>"%s/runs_new"\nwhile [ ! -e "%s/stop" ]; do sleep %s; done\n' "$T" "$T" "$TICK" >"$HD/hub.new"
+	else
+		printf '#!/bin/sh\necho new >>"%s/runs_new"\nexit 1\n' "$T" >"$HD/hub.new"
+	fi
+	chmod 755 "$HD/hub.new"
+}
+cnt() { # lines in $T/$1
+	cn=0
+	[ -r "$T/$1" ] && while IFS= read -r l; do cn=$((cn + 1)); done <"$T/$1"
+	echo "$cn"
+}
+ota_clean() { rm -f "$T/runs_old" "$T/runs_new" "$T/applied" "$T/go" "$T/stop" "$T/reboot.log"; }
+yn() { [ -e "$1" ] && echo yes || echo no; }
+
+# 15. good update: the new build is launched without a strike or a budget, passes its window, hub.prev stays
+mkroot 'token=abc\nrespawn_max=0\n'
+ota_clean
+ota_old
+ota_new good
+run_hook
+wait_log "healthy"
+: >"$T/go"
+wait_log "updated build healthy"
+if [ "$(cnt runs_new)" = 1 ] && [ "$(cnt runs_old)" = 1 ] && [ ! -e "$HD/ota-pending" ] && [ -e "$HD/hub.prev" ] && [ ! -e "$HD/ota-rollback" ] && [ ! -e "$T/reboot.log" ]; then
+	pass "good update: relaunched into the new build, hub.prev kept, no rollback"
+else
+	fail "good update (new=$(cnt runs_new) old=$(cnt runs_old) pending=$(yn "$HD/ota-pending"))"
+fi
+: >"$T/stop"
+wait_log "watcher done"
+
+# 16. bad update: the new build dies in its window; hub.prev comes back once, the reason is recorded
+mkroot 'token=abc\nrespawn_max=0\n'
+ota_clean
+ota_old
+ota_new bad
+run_hook
+wait_log "healthy"
+: >"$T/go"
+wait_log "restored hub.prev"
+rb1=''
+rb2=''
+if [ -r "$HD/ota-rollback" ]; then
+	read -r rb1 <"$HD/ota-rollback"
+	while IFS= read -r l; do
+		case "$l" in reason=*) rb2="$l" ;; esac
+	done <"$HD/ota-rollback"
+fi
+if [ "$rb1" = build=2 ] && [ "$rb2" = reason=died_early ] && [ ! -e "$HD/hub.prev" ] && [ ! -e "$HD/ota-pending" ] && [ "$(cnt runs_new)" = 1 ]; then
+	pass "bad update: rolled back, reason recorded, hub.prev consumed"
+else
+	fail "bad update rollback (rb1=$rb1 rb2=$rb2 prev=$(yn "$HD/hub.prev") new=$(cnt runs_new))"
+fi
+# the previous build serves again, and the bad one is never relaunched
+w16=0
+while [ "$(cnt runs_old)" -lt 2 ] && [ "$w16" -lt 500 ]; do
+	w16=$((w16 + 1))
+	sleep "$TICK"
+done
+if [ "$(cnt runs_old)" = 2 ] && [ "$(cnt runs_new)" = 1 ]; then pass "rollback happens once: old serves again, new not retried"; else fail "rollback once (old=$(cnt runs_old) new=$(cnt runs_new))"; fi
+: >"$T/stop"
+wait_log "watcher done"
+
+# 17. boot after a fresh build that never got healthy (reboot / power cut): hub.prev restored, strikes wiped; a second boot does nothing more
+mkroot 'token=abc\nrespawn_max=0\n'
+ota_clean
+printf '#!/bin/sh\nexit 1\n' >"$HD/hub"
+printf '#!/bin/sh\necho old >>"%s/runs_old"\nwhile [ ! -e "%s/stop" ]; do sleep %s; done\n' "$T" "$T" "$TICK" >"$HD/hub.prev"
+chmod 755 "$HD/hub" "$HD/hub.prev"
+echo build=3 >"$HD/ota-pending"
+echo 2 >"$R/cache/ha-harmony-boot.n"
+run_hook
+wait_log "healthy"
+rb1=''
+[ -r "$HD/ota-rollback" ] && read -r rb1 <"$HD/ota-rollback"
+if [ "$DEMO" = 1 ] && [ "$rb1" = build=3 ] && [ ! -e "$HD/hub.prev" ] && [ ! -e "$HD/ota-pending" ] && [ "$(cnt runs_old)" = 1 ]; then
+	pass "boot with unproven fresh build: previous build restored and started"
+else
+	fail "boot rollback (DEMO=$DEMO rb1=$rb1 old=$(cnt runs_old))"
+fi
+: >"$T/stop"
+wait_log "watcher done"
+rm -f "$HD/ota-rollback" "$T/stop"
+run_hook
+wait_log "healthy"
+if [ ! -e "$HD/ota-rollback" ] && [ "$(cnt runs_old)" = 2 ]; then pass "second boot: no second rollback"; else fail "second boot (rollback=$(yn "$HD/ota-rollback") old=$(cnt runs_old))"; fi
+: >"$T/stop"
+wait_log "watcher done"
+
+# 18. power cut mid-apply: the binary is whole; a marker without a distinct hub.prev is only cleared
+mkroot 'token=abc\nrespawn_max=0\n'
+ota_clean
+printf '#!/bin/sh\necho old >>"%s/runs_old"\nwhile [ ! -e "%s/stop" ]; do sleep %s; done\n' "$T" "$T" "$TICK" >"$HD/hub"
+chmod 755 "$HD/hub"
+echo build=4 >"$HD/ota-pending"
+echo half >"$HD/hub.new"
+ln "$HD/hub" "$HD/hub.prev" # cut between the link and the rename: hub.prev is hub
+run_hook
+wait_log "healthy"
+if [ "$DEMO" = 1 ] && [ ! -e "$HD/ota-pending" ] && [ ! -e "$HD/ota-rollback" ] && [ "$(cnt runs_old)" = 1 ]; then
+	pass "power cut mid-apply: binary intact, marker cleared, nothing reported"
+else
+	fail "power cut mid-apply (DEMO=$DEMO runs=$(cnt runs_old))"
+fi
+: >"$T/stop"
+wait_log "watcher done"
+
+# 19. an update applied INSIDE the health window is a planned relaunch: no strike, no reboot, fresh window
+mkroot 'token=abc\nrespawn_max=0\n'
+ota_clean
+cat >"$HD/hub" <<EOF
+#!/bin/sh
+echo old >>"$T/runs_old"
+if [ -e "$T/applied" ]; then while [ ! -e "$T/stop" ]; do sleep $TICK; done; exit 0; fi
+: >"$T/applied"
+printf 'build=2\nprev=1\n' >"$HD/ota-pending"
+ln "$HD/hub" "$HD/hub.tmp" && mv "$HD/hub.tmp" "$HD/hub.prev"
+mv "$HD/hub.new" "$HD/hub"
+echo 2 >"$HD/ota-restart"
+exit 42
+EOF
+chmod 755 "$HD/hub"
+ota_new good
+run_hook
+wait_log "healthy after"
+if [ "$(cnt runs_new)" = 1 ] && [ ! -e "$T/reboot.log" ] && [ ! -e "$HD/ota-pending" ] && [ -e "$R/var/volatile/ha-harmony.healthy" ]; then
+	pass "update inside the health window: planned relaunch, no strike or reboot"
+else
+	fail "update inside the window (new=$(cnt runs_new) reboot=$(yn "$T/reboot.log") pending=$(yn "$HD/ota-pending"))"
+fi
+: >"$T/stop"
+wait_log "watcher done"
 
 sleep "${HAH_SELFTEST_FINAL:-3}" # let the 1 s watchers finish before the caller deletes the directory
 echo "selftest done: $fails failure(s)"

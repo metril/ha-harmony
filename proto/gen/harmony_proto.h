@@ -15,7 +15,7 @@ typedef enum {
     HP_MSG_PING = 4,
     HP_MSG_PONG = 5,
     HP_MSG_SET_CONFIG = 6,
-    HP_MSG_CONFIG_CHUNK = 20,
+    HP_MSG_CONFIG_CHUNK = 25,
     HP_MSG_CONFIG_ACK = 7,
     HP_MSG_COMMAND = 8,
     HP_MSG_COMMAND_RESULT = 9,
@@ -28,10 +28,20 @@ typedef enum {
     HP_MSG_ACTIVITY_LIST = 16,
     HP_MSG_REMOTE_ATTACHED = 17,
     HP_MSG_REMOTE_INFO = 18,
-    HP_MSG_TILE_STATE = 19
+    HP_MSG_TILE_STATE = 19,
+    HP_MSG_OTA_BEGIN = 20,
+    HP_MSG_OTA_CHUNK = 21,
+    HP_MSG_OTA_END = 22,
+    HP_MSG_OTA_ABORT = 23,
+    HP_MSG_OTA_STATUS = 24,
+    HP_MSG_OTA_OFFER = 30,
+    HP_MSG_OTA_FRAG = 31,
+    HP_MSG_OTA_FRAG_ACK = 32,
+    HP_MSG_OTA_COMMIT = 33,
+    HP_MSG_OTA_RESULT = 34
 } hp_msg_type_t;
 
-#define HP_MSG_COUNT 20
+#define HP_MSG_COUNT 30
 
 typedef enum {
     HP_KEY_ACTION_PRESS = 0,

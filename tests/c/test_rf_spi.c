@@ -11,6 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "cJSON.h"
 #include "ctest_assert.h"
 #include "hub/hp_errors.h"
 #include "hub/io/rf_spi.h"
@@ -167,13 +168,13 @@ static hp_rf_spi_ops_t fake_ops(fake_t *f) {
 
 static int open_fake(fake_t *f, uint8_t slot, hp_rf_transport **t) {
     hp_rf_spi_ops_t o = fake_ops(f);
-    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
+    hp_rf_spi_cfg_t cfg = {NULL, slot ? slot : 1, &o, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL, NULL}; /* 0 would learn: see the learn tests */
     return hp_rf_spi_open(&cfg, t);
 }
 
 static int open_remote(fake_t *f, uint8_t slot, uint8_t powermode, hp_rf_transport **t) {
     hp_rf_spi_ops_t o = fake_ops(f);
-    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, HP_RF_SPI_ROLE_REMOTE, powermode, false, NULL, NULL};
+    hp_rf_spi_cfg_t cfg = {NULL, slot ? slot : 1, &o, HP_RF_SPI_ROLE_REMOTE, powermode, false, NULL, NULL, NULL};
     return hp_rf_spi_open(&cfg, t);
 }
 
@@ -481,7 +482,7 @@ static void test_destroy_real_signal(void) {
     o.write = p_write;
     o.close = p_close;
     o.hal_alive = p_hal;
-    hp_rf_spi_cfg_t cfg = {NULL, 0, &o, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL};
+    hp_rf_spi_cfg_t cfg = {NULL, 0, &o, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL, NULL};
     hp_rf_transport *t = NULL;
     CT_EQ(hp_rf_spi_open(&cfg, &t), 0);
     ms_sleep(50); /* let the reader block in read() */
@@ -560,7 +561,7 @@ static void test_remote_wrap_and_cap(void) {
     uint8_t in[28];
     for (int i = 0; i < 28; i++) in[i] = (uint8_t)(0x50 + i);
     const struct { uint8_t slot, pm, want1; } cases[] = {
-        {0, 0x00, 0x00}, {1, 0x00, 0x01}, {0, 0x30, 0x30}, {5, 0x40, 0x45}, {0x12, 0x10, 0x12}, {0, 0x0F, 0x00}};
+        {1, 0x00, 0x01}, {3, 0x30, 0x33}, {5, 0x40, 0x45}, {0x12, 0x10, 0x12}, {15, 0x0F, 0x0F}};
     for (size_t k = 0; k < sizeof cases / sizeof cases[0]; k++) {
         fake_t f;
         fake_init(&f);
@@ -575,7 +576,7 @@ static void test_remote_wrap_and_cap(void) {
         CT_EQ(f.w[1][0], 0x20);
         CT_EQ(f.w[1][1], cases[k].want1);
         CT_EQ(f.w[1][2], 0x12);
-        CT_EQ(f.w[1][3], cases[k].slot); /* default slot 0 is the hub's pipe */
+        CT_EQ(f.w[1][3], cases[k].slot);
         CT_MEM_EQ(f.w[1] + 4, in, 28);
         CT_EQ(t->send(t->self, in, 3), 0); /* short: zero padded to 32 */
         CT_EQ(f.wlen[2], 32);
@@ -604,7 +605,7 @@ static void test_remote_wrap_and_cap(void) {
 static void test_role_classification(void) {
     uint8_t fr[64], hub30[30], rem32[32];
     data_report(hub30, 1, 0x40);
-    remote_report(rem32, 0, 0x70);
+    remote_report(rem32, 1, 0x70);
 
     /* remote role: 0x20 data in, 0x12 and malformed 0x20 dropped */
     fake_t f;
@@ -626,8 +627,8 @@ static void test_role_classification(void) {
     CT_CHECK(t->attached(t->self)); /* the first data frame attaches */
 
     /* link status in the remote role: this slot's loss, queued frames first, then NOENT once */
-    const uint8_t lost[7] = {0x10, 0x00, 0x41, 0x04, 0x40, 0x00, 0x00};
-    const uint8_t other[7] = {0x10, 0x01, 0x41, 0x04, 0x40, 0x00, 0x00};
+    const uint8_t lost[7] = {0x10, 0x01, 0x41, 0x04, 0x40, 0x00, 0x00};
+    const uint8_t other[7] = {0x10, 0x02, 0x41, 0x04, 0x40, 0x00, 0x00};
     feed(&f, other, sizeof other);
     ms_sleep(30);
     CT_CHECK(t->attached(t->self));
@@ -636,7 +637,7 @@ static void test_role_classification(void) {
     CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
     CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), -HP_E_NOENT);
     CT_CHECK(!t->attached(t->self));
-    const uint8_t up[7] = {0x10, 0x00, 0x41, 0x04, 0x01, 0x00, 0x00};
+    const uint8_t up[7] = {0x10, 0x01, 0x41, 0x04, 0x01, 0x00, 0x00};
     feed(&f, up, sizeof up);
     wait_attached(t, true);
     CT_EQ(t->recv(t->self, fr, sizeof fr, 20), 0);
@@ -662,7 +663,7 @@ static void test_remote_pairing_refused_and_brick_safety(void) {
     CT_EQ(open_remote(&f, 0, 0x30, &t), 0);
     t->claim(t->self);
     uint8_t rep[32];
-    remote_report(rep, 0, 9);
+    remote_report(rep, 1, 9);
     feed(&f, rep, 32);
     t->recv(t->self, fr, sizeof fr, 2000);
     t->send(t->self, in, 28);
@@ -724,7 +725,7 @@ static void test_two_endpoint_link(void) {
         th->claim(th->self);
         tr->claim(tr->self);
         const uint8_t hup[7] = {0x10, 0x01, 0x41, 0x04, 0x01, 0, 0}; /* remote is slot 1 on the hub */
-        const uint8_t rup[7] = {0x10, 0x00, 0x41, 0x04, 0x01, 0, 0}; /* hub is slot 0 on the remote */
+        const uint8_t rup[7] = {0x10, 0x01, 0x41, 0x04, 0x01, 0, 0}; /* hub is slot 1 on the remote */
         feed(&fh, hup, 7);
         feed(&fr, rup, 7);
         wait_attached(th, true);
@@ -801,7 +802,7 @@ static int cap_total(cap_t *c) {
 
 static int open_cfg(fake_t *f, hp_rf_spi_role_t role, uint8_t slot, bool debug, cap_t *c, hp_rf_transport **t) {
     hp_rf_spi_ops_t o = fake_ops(f);
-    hp_rf_spi_cfg_t cfg = {NULL, slot, &o, role, 0, debug, cap_log, c};
+    hp_rf_spi_cfg_t cfg = {NULL, slot ? slot : 1, &o, role, 0, debug, cap_log, c, NULL};
     return hp_rf_spi_open(&cfg, t);
 }
 
@@ -943,7 +944,7 @@ static void test_two_endpoint_every_size(void) {
     th->claim(th->self);
     tr->claim(tr->self);
     const uint8_t hup[7] = {0x10, 0x01, 0x41, 0x04, 0x01, 0, 0};
-    const uint8_t rup[7] = {0x10, 0x00, 0x41, 0x04, 0x01, 0, 0};
+    const uint8_t rup[7] = {0x10, 0x01, 0x41, 0x04, 0x01, 0, 0};
     feed(&fh, hup, 7);
     feed(&fr, rup, 7);
     wait_attached(th, true);
@@ -1030,6 +1031,279 @@ static void test_loss_is_ordered_with_frames(void) {
     hp_rf_spi_destroy(t);
 }
 
+/* ---- slot learning: no configured slot, the slot comes from the link-up report ---- */
+
+static int open_learn(fake_t *f, hp_rf_spi_role_t role, bool debug, cap_t *c, hp_rf_transport **t) {
+    hp_rf_spi_ops_t o = fake_ops(f);
+    hp_rf_spi_cfg_t cfg = {NULL, 0, &o, role, 0x30, debug, c ? cap_log : NULL, c, NULL};
+    return hp_rf_spi_open(&cfg, t);
+}
+
+/* Barrier without sleeping: the reader handles reports in order, so once the queue is empty and the
+ * reader is blocked in read() again, everything fed so far has been processed. */
+static void wait_idle(fake_t *f) {
+    for (int i = 0; i < 5000; i++) {
+        pthread_mutex_lock(&f->mu);
+        int idle = f->in_read && !f->rxn;
+        pthread_mutex_unlock(&f->mu);
+        if (idle) return;
+        ms_sleep(1);
+    }
+    CT_CHECK(0 && "reader never went idle");
+}
+
+static size_t unhex_bytes(const char *h, uint8_t *out, size_t cap) {
+    size_t n = 0;
+    for (; h[0] && h[1] && n < cap; h += 2) {
+        unsigned v;
+        sscanf(h, "%2x", &v);
+        out[n++] = (uint8_t)v;
+    }
+    return n;
+}
+
+static void test_slot_learning_vectors(void) {
+    FILE *fp = fopen(HP_LINK_VECTORS, "rb");
+    CT_CHECK(fp != NULL);
+    if (!fp) return;
+    char *txt = calloc(1, 1 << 16);
+    size_t got = fread(txt, 1, (1 << 16) - 1, fp);
+    (void)got;
+    fclose(fp);
+    cJSON *doc = cJSON_Parse(txt);
+    CT_CHECK(doc != NULL);
+    const cJSON *v;
+    int nvec = 0;
+    cJSON_ArrayForEach(v, cJSON_GetObjectItem(doc, "vectors")) {
+        const char *name = cJSON_GetObjectItem(v, "name")->valuestring;
+        hp_rf_spi_role_t role = !strcmp(cJSON_GetObjectItem(v, "role")->valuestring, "remote") ? HP_RF_SPI_ROLE_REMOTE : HP_RF_SPI_ROLE_HUB;
+        fake_t f;
+        fake_init(&f);
+        hp_rf_transport *t = NULL;
+        CT_EQ(open_learn(&f, role, false, NULL, &t), 0);
+        t->claim(t->self);
+        const cJSON *r;
+        cJSON_ArrayForEach(r, cJSON_GetObjectItem(v, "reports")) {
+            uint8_t b[16];
+            size_t n = unhex_bytes(r->valuestring, b, sizeof b);
+            feed(&f, b, n);
+            wait_idle(&f);
+        }
+        if (hp_rf_spi_slot(t) != cJSON_GetObjectItem(v, "slot")->valueint) fprintf(stderr, "vector '%s': slot %d\n", name, hp_rf_spi_slot(t));
+        CT_EQ(hp_rf_spi_slot(t), cJSON_GetObjectItem(v, "slot")->valueint);
+        if (t->attached(t->self) != (bool)cJSON_IsTrue(cJSON_GetObjectItem(v, "attached"))) fprintf(stderr, "vector '%s': attached\n", name);
+        CT_EQ(t->attached(t->self), (bool)cJSON_IsTrue(cJSON_GetObjectItem(v, "attached")));
+        hp_rf_spi_destroy(t);
+        nvec++;
+    }
+    CT_CHECK(nvec >= 10);
+    cJSON_Delete(doc);
+    free(txt);
+}
+
+static void test_unknown_slot_is_safe_and_then_learned(void) {
+    for (int remote = 0; remote < 2; remote++) {
+        hp_rf_spi_role_t role = remote ? HP_RF_SPI_ROLE_REMOTE : HP_RF_SPI_ROLE_HUB;
+        fake_t f;
+        cap_t c;
+        fake_init(&f);
+        cap_init(&c);
+        hp_rf_transport *t = NULL;
+        CT_EQ(open_learn(&f, role, true, &c, &t), 0);
+        t->claim(t->self);
+        uint8_t in[28], fr[32];
+        for (int i = 0; i < 28; i++) in[i] = (uint8_t)(0x60 + i);
+        CT_EQ(hp_rf_spi_slot(t), -1);
+        int w0 = nwrites(&f); /* the init command */
+        /* nothing is sent to a guessed slot (never slot 0) */
+        CT_EQ(t->send(t->self, in, 28), -HP_E_NOENT);
+        CT_EQ(nwrites(&f), w0);
+        CT_EQ(cap_count(&c, "send dropped, slot not learned yet"), 1);
+        /* data and TX status before the slot is known are dropped, not queued */
+        /* (slot 0 is not a slot a frame can teach: those stay unknown) */
+        uint8_t d30[30], d32[32], g30[30], g32[32], txs[32] = {0x20, 0x00, 0x42, 0x00};
+        data_report(d30, 0, 0x10);
+        remote_report(d32, 0, 0x10);
+        data_report(g30, 2, 0x10);
+        remote_report(g32, 1, 0x10);
+        feed(&f, remote ? d32 : d30, remote ? 32 : 30);
+        if (!remote) feed(&f, txs, 32);
+        wait_idle(&f);
+        CT_EQ(t->recv(t->self, fr, sizeof fr, 0), 0);
+        CT_CHECK(!t->attached(t->self));
+        uint8_t s0 = 0, st = 0;
+        if (!remote) CT_EQ(t->tx_status(t->self, &s0, &st), 0);
+        CT_EQ(cap_count(&c, "data dropped, slot not learned yet"), 1);
+
+        /* link-up (bench values) teaches the slot */
+        const uint8_t hub_up[7] = {0x10, 0x02, 0x41, 0x04, 0x87, 0x21, 0x40};
+        const uint8_t rem_up[7] = {0x10, 0x01, 0x41, 0x04, 0x07, 0x0B, 0x88};
+        uint8_t slot = remote ? 1 : 2;
+        feed(&f, remote ? rem_up : hub_up, 7);
+        wait_attached(t, true);
+        CT_EQ(hp_rf_spi_slot(t), slot);
+        CT_EQ(cap_count(&c, remote ? "link up (slot 1, status 0x07, wpid 880b)" : "link up (slot 2, status 0x87, wpid 4021)"), 1);
+        CT_EQ(t->send(t->self, in, 28), 0);
+        size_t n = remote ? 32 : 30;
+        CT_EQ(f.wlen[f.nw - 1], n);
+        CT_EQ(f.w[f.nw - 1][remote ? 3 : 1], slot);
+        CT_EQ(f.w[f.nw - 1][remote ? 1 : 0], remote ? (slot | 0x30) : 0x12);
+        /* data now flows (hub: only the learned slot's) */
+        if (!remote) {
+            uint8_t other[30];
+            data_report(other, 3, 0x20);
+            feed(&f, other, 30);
+        }
+        feed(&f, remote ? g32 : g30, remote ? 32 : 30);
+        CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
+        CT_MEM_EQ(fr, (remote ? g32 + 4 : g30 + 2), 28);
+
+        /* loss then a re-link on another slot: the next send goes to the new slot */
+        const uint8_t hub_lost[7] = {0x10, 0x02, 0x41, 0x04, 0x47, 0x21, 0x40};
+        const uint8_t rem_lost[7] = {0x10, 0x01, 0x41, 0x04, 0x47, 0x0B, 0x88};
+        const uint8_t hub_up3[7] = {0x10, 0x03, 0x41, 0x04, 0x87, 0x21, 0x40};
+        const uint8_t rem_up4[7] = {0x10, 0x04, 0x41, 0x04, 0x07, 0x0B, 0x88};
+        feed(&f, remote ? rem_lost : hub_lost, 7);
+        CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), -HP_E_NOENT);
+        feed(&f, remote ? rem_up4 : hub_up3, 7);
+        wait_attached(t, true);
+        CT_EQ(hp_rf_spi_slot(t), remote ? 4 : 3);
+        CT_EQ(t->send(t->self, in, 28), 0);
+        CT_EQ(f.w[f.nw - 1][remote ? 3 : 1], remote ? 4 : 3);
+        hp_rf_spi_destroy(t);
+    }
+}
+
+static void test_configured_slot_overrides_learning(void) {
+    fake_t f;
+    fake_init(&f);
+    hp_rf_transport *t = NULL;
+    CT_EQ(open_fake(&f, 2, &t), 0);
+    t->claim(t->self);
+    CT_EQ(hp_rf_spi_slot(t), 2); /* known from the start */
+    const uint8_t up3[7] = {0x10, 0x03, 0x41, 0x04, 0x87, 0x21, 0x40};
+    const uint8_t lost2[7] = {0x10, 0x02, 0x41, 0x04, 0x47, 0x21, 0x40};
+    const uint8_t up2[7] = {0x10, 0x02, 0x41, 0x04, 0x87, 0x21, 0x40};
+    feed(&f, up3, 7);
+    feed(&f, lost2, 7);
+    wait_idle(&f);
+    CT_CHECK(!t->attached(t->self)); /* slot 3's report is not ours, even while detached */
+    CT_EQ(hp_rf_spi_slot(t), 2);
+    feed(&f, up3, 7);
+    feed(&f, up2, 7);
+    wait_attached(t, true);
+    uint8_t in[28] = {1};
+    CT_EQ(t->send(t->self, in, 28), 0);
+    CT_EQ(f.w[f.nw - 1][1], 2);
+    hp_rf_spi_destroy(t);
+}
+
+/* A restart on an already-up link gets no link-up report: the first data frame (or, while unknown, a TX
+ * status) teaches the slot, and the learned slot is persisted as a provisional start value. */
+static void test_slot_from_frames_and_persistence(void) {
+    char dir[] = "/tmp/hp_slot_XXXXXX";
+    CT_CHECK(mkdtemp(dir) != NULL);
+    char path[128], tmp[140];
+    snprintf(path, sizeof path, "%s/rf_slot", dir);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    uint8_t fr[32], in[28] = {7};
+    for (int remote = 0; remote < 2; remote++) {
+        hp_rf_spi_role_t role = remote ? HP_RF_SPI_ROLE_REMOTE : HP_RF_SPI_ROLE_HUB;
+        unlink(path);
+        uint8_t d[32];
+        size_t dn = remote ? 32 : 30;
+        if (remote) remote_report(d, 1, 0x33);
+        else data_report(d, 2, 0x33);
+        uint8_t slot = remote ? 1 : 2;
+        fake_t f;
+        fake_init(&f);
+        hp_rf_transport *t = NULL;
+        hp_rf_spi_ops_t o = fake_ops(&f);
+        hp_rf_spi_cfg_t cfg = {NULL, 0, &o, role, 0, false, NULL, NULL, path};
+        CT_EQ(hp_rf_spi_open(&cfg, &t), 0);
+        t->claim(t->self);
+        feed(&f, d, dn); /* no link-up report at all */
+        CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
+        CT_MEM_EQ(fr, d + (remote ? 4 : 2), 28);
+        CT_EQ(hp_rf_spi_slot(t), slot);
+        CT_CHECK(t->attached(t->self));
+        CT_EQ(t->send(t->self, in, 28), 0);
+        CT_EQ(f.w[f.nw - 1][remote ? 3 : 1], slot);
+        hp_rf_spi_destroy(t);
+        FILE *fp = fopen(path, "r");
+        CT_CHECK(fp != NULL);
+        unsigned v = 0;
+        if (fp) {
+            CT_EQ(fscanf(fp, "%u", &v), 1);
+            fclose(fp);
+        }
+        CT_EQ(v, slot); /* persisted */
+
+        /* restart: the saved slot is provisional and already usable, before anything is heard */
+        fake_t g;
+        fake_init(&g);
+        o = fake_ops(&g);
+        CT_EQ(hp_rf_spi_open(&cfg, &t), 0);
+        t->claim(t->self);
+        CT_EQ(hp_rf_spi_slot(t), slot);
+        CT_EQ(t->send(t->self, in, 28), 0);
+        CT_EQ(g.w[g.nw - 1][remote ? 3 : 1], slot);
+        /* ... and a frame on another slot corrects it while detached (and is delivered) */
+        uint8_t d2[32], d3[32];
+        if (remote) remote_report(d2, 4, 0x44);
+        else data_report(d2, 5, 0x44);
+        feed(&g, d2, dn);
+        CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
+        CT_EQ(hp_rf_spi_slot(t), remote ? 4 : 5);
+        /* once attached it is not hijacked by another slot's frame */
+        if (remote) remote_report(d3, 6, 0x55);
+        else data_report(d3, 6, 0x55);
+        feed(&g, d3, dn);
+        wait_idle(&g);
+        CT_EQ(hp_rf_spi_slot(t), remote ? 4 : 5);
+        hp_rf_spi_destroy(t);
+    }
+    /* bad file contents are ignored; a configured slot never reads the file */
+    FILE *fp = fopen(path, "w");
+    CT_CHECK(fp != NULL);
+    if (fp) {
+        fputs("99\n", fp);
+        fclose(fp);
+    }
+    fake_t h;
+    fake_init(&h);
+    hp_rf_transport *t = NULL;
+    hp_rf_spi_ops_t o = fake_ops(&h);
+    hp_rf_spi_cfg_t cfg = {NULL, 0, &o, HP_RF_SPI_ROLE_HUB, 0, false, NULL, NULL, path};
+    CT_EQ(hp_rf_spi_open(&cfg, &t), 0);
+    CT_EQ(hp_rf_spi_slot(t), -1);
+    hp_rf_spi_destroy(t);
+    fake_t k;
+    fake_init(&k);
+    o = fake_ops(&k);
+    cfg.slot = 3;
+    CT_EQ(hp_rf_spi_open(&cfg, &t), 0);
+    CT_EQ(hp_rf_spi_slot(t), 3);
+    hp_rf_spi_destroy(t);
+    /* a TX status teaches the slot only while unknown */
+    fake_t u;
+    fake_init(&u);
+    o = fake_ops(&u);
+    cfg.slot = 0;
+    cfg.slot_file = NULL;
+    CT_EQ(hp_rf_spi_open(&cfg, &t), 0);
+    t->claim(t->self);
+    uint8_t txs[32] = {0x20, 0x02, 0x42, 0x00}, txs2[32] = {0x20, 0x03, 0x42, 0x00};
+    feed(&u, txs, 32);
+    feed(&u, txs2, 32);
+    wait_idle(&u);
+    CT_EQ(hp_rf_spi_slot(t), 2);
+    hp_rf_spi_destroy(t);
+    unlink(path);
+    unlink(tmp);
+    rmdir(dir);
+}
+
 int main(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
@@ -1055,6 +1329,10 @@ int main(void) {
     CT_RUN(test_hub_data_slot_filter_and_stamps);
     CT_RUN(test_link_transition_logs);
     CT_RUN(test_rf_debug_frames);
+    CT_RUN(test_slot_learning_vectors);
+    CT_RUN(test_unknown_slot_is_safe_and_then_learned);
+    CT_RUN(test_configured_slot_overrides_learning);
+    CT_RUN(test_slot_from_frames_and_persistence);
     (void)nwrites;
     return CT_DONE();
 }

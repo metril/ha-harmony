@@ -56,6 +56,9 @@
  *   set_config     -> after the config_ack, every OTHER authenticated client gets
  *                     activity_list {activities:[names], config_hash?}; if the running activity
  *                     changed by the reload, everyone gets a state_update.
+ *   ota_begin/chunk/end/abort -> signed hub firmware upload (docs/proto/ota-image.md): replies ota_status
+ *                     {state,offset,size,build?} or `error` ota_*; after a good ota_end the daemon exits
+ *                     HP_EXIT_OTA_RESTART. hub_send_state also pushes ota_status rolled_back after a hello.
  *   state_update   -> also sent over RF (best effort) whenever the activity
  *                     changes, if a remote is attached.
  *   from RF        -> hub_pump_rf: frames (cap 32) are reassembled; key_event
@@ -75,6 +78,7 @@
 #include "hub/rf/link.h"
 #include "hub/net/jsonrpc.h"
 #include "hub/net/ws.h"
+#include "hub/ota/hub_ota.h"
 
 /* 40 held messages: a full v2 config is up to 32 pages plus a few tile updates, all of which must survive a
  * remote that is away. 40 * sizeof(hub_pend_t) (~270 B) = ~10.8 KB of static hub memory, fixed, never grown. */
@@ -140,6 +144,7 @@ typedef struct {
     hub_info_t info[HUB_INFO_MAX]; /* remote_info per remote; dropped when the RF link is lost */
     void (*bcast_hook)(void *ctx, const char *type, const cJSON *d); /* tests: sees every broadcast, in order */
     void *bcast_ctx;
+    hp_ota_t ota;           /* signed firmware update (hub/ota/hub_ota.h); disabled until hp_ota_init gets a dir */
 } hub_ctx_t;
 
 /* Initialises the context with a CLOCK_MONOTONIC millisecond clock for the timers. */
@@ -158,6 +163,8 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx);
 void hub_send_state(hub_ctx_t *, hp_ws_conn_t *);
 /* The cached remote_info of `remote`, or NULL. */
 const hub_info_t *hub_remote_info(const hub_ctx_t *, uint8_t remote);
+/* A connection went away: an upload it owned stays resumable by a matching ota_begin. */
+void hub_session_closed(hub_ctx_t *, const hp_session_t *);
 /* Flushes the engine's queued activity_list / device_state / state_update broadcasts. */
 void hub_flush_pending(hub_ctx_t *);
 /* Clean shutdown: writes the state file if a change is still pending. */

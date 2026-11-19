@@ -25,6 +25,7 @@ add_hp_test(link_v2)
 add_hp_test(hub_rf_order)
 add_hp_test(store)
 add_hp_test(rf_spi)
+target_compile_definitions(test_rf_spi PRIVATE HP_LINK_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/rf/link_status.json")
 add_hp_test(mdns)
 add_hp_test(hwkeys)
 
@@ -98,3 +99,4 @@ endif()
 
 # Signed OTA images: SHA-512/Ed25519 vectors, verify rejections, hub staged apply (host fs only).
 add_hp_test(ota)
+add_hp_test(hub_ota)

@@ -21,7 +21,7 @@ class MsgType(IntEnum):
     PING = 4
     PONG = 5
     SET_CONFIG = 6
-    CONFIG_CHUNK = 20
+    CONFIG_CHUNK = 25
     CONFIG_ACK = 7
     COMMAND = 8
     COMMAND_RESULT = 9
@@ -35,6 +35,16 @@ class MsgType(IntEnum):
     REMOTE_ATTACHED = 17
     REMOTE_INFO = 18
     TILE_STATE = 19
+    OTA_BEGIN = 20
+    OTA_CHUNK = 21
+    OTA_END = 22
+    OTA_ABORT = 23
+    OTA_STATUS = 24
+    OTA_OFFER = 30
+    OTA_FRAG = 31
+    OTA_FRAG_ACK = 32
+    OTA_COMMIT = 33
+    OTA_RESULT = 34
 
 
 ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'hold': 2}}
@@ -42,12 +52,12 @@ ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'ho
 # name -> (code, transport, ((field, wire type, optional), ...))
 MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'hello': (1, 'ws', (('token', 'str', False), ('client', 'str', True), )),
-    'hello_ack': (2, 'ws', (('hub_id', 'str', False), ('fw_version', 'str', True), ('activities', 'json', True), ('config_hash', 'str', True), ('limits', 'json', True), )),
+    'hello_ack': (2, 'ws', (('hub_id', 'str', False), ('fw_version', 'str', True), ('activities', 'json', True), ('config_hash', 'str', True), ('limits', 'json', True), ('fw_build', 'u32', True), ('ota_key', 'str', True), )),
     'error': (3, 'ws', (('code', 'str', False), ('message', 'str', False), ('ref_id', 'u32', True), )),
     'ping': (4, 'ws', ()),
     'pong': (5, 'ws', ()),
     'set_config': (6, 'ws', (('config', 'json', False), )),
-    'config_chunk': (20, 'ws', (('seq', 'u32', False), ('total', 'u32', False), ('data', 'str', False), )),
+    'config_chunk': (25, 'ws', (('seq', 'u32', False), ('total', 'u32', False), ('data', 'str', False), )),
     'config_ack': (7, 'ws', (('ok', 'bool', False), ('message', 'str', True), ('config_hash', 'str', True), )),
     'command': (8, 'ws', (('device', 'str', False), ('command', 'str', False), ('args', 'json', True), )),
     'command_result': (9, 'ws', (('ok', 'bool', False), ('message', 'str', True), )),
@@ -61,6 +71,16 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'remote_attached': (17, 'ws', ()),
     'remote_info': (18, 'both', (('remote', 'u8', False), ('page_fmt', 'u8', False), ('caps', 'u8', False), ('icons', 'u8', False), ('gen', 'u8', False), ('pages', 'u8', False), )),
     'tile_state': (19, 'rf', (('remote', 'u8', False), ('page', 'u8', False), ('tile', 'u8', False), ('state', 'u8', False), ('text', 'str', False), )),
+    'ota_begin': (20, 'ws', (('target', 'u8', False), ('size', 'u32', False), ('build', 'u32', False), ('sha', 'str', False), )),
+    'ota_chunk': (21, 'ws', (('offset', 'u32', False), ('data', 'bytes', False), )),
+    'ota_end': (22, 'ws', ()),
+    'ota_abort': (23, 'ws', ()),
+    'ota_status': (24, 'ws', (('state', 'str', False), ('offset', 'u32', False), ('size', 'u32', False), ('build', 'u32', True), ('reason', 'str', True), )),
+    'ota_offer': (30, 'rf', (('size', 'u32', False), ('build', 'u32', False), )),
+    'ota_frag': (31, 'rf', (('offset', 'u32', False), ('data', 'bytes', False), )),
+    'ota_frag_ack': (32, 'rf', (('offset', 'u32', False), )),
+    'ota_commit': (33, 'rf', ()),
+    'ota_result': (34, 'rf', (('code', 'u8', False), ('build', 'u32', False), )),
 }
 
 _INT_RANGES = {

@@ -185,6 +185,7 @@ int hp_dispatch(const char *json, size_t len, const hp_handler_tbl_t *tbl, void 
             cJSON *lim = tbl->limits(tbl->ctx);
             if (lim) cJSON_AddItemToObject(ack, "limits", lim);
         }
+        if (tbl->hello_extra) tbl->hello_extra(tbl->ctx, ack);
         rc = hp_make_reply(id, "hello_ack", ack, reply, reply_cap, reply_len);
         goto out;
     }

@@ -125,12 +125,29 @@ export class HhStudio extends StoreElement implements StudioHost {
   private inited = false;
 
   private rerender = () => this.requestUpdate();
+  /** Pills the toolbar really has room for: starts at LAYER_PILLS and shrinks while a pill is squeezed, so the layout holds with any font. */
+  private pillCap = LAYER_PILLS;
+  private pillSig = '';
+  private pillRo?: ResizeObserver;
+  private resetPills = () => { this.pillCap = LAYER_PILLS; this.requestUpdate(); };
   protected override updated(): void {
     if (this.sheet) this.setAttribute('sheet', this.sheet);
     else this.removeAttribute('sheet');
+    const sig = (this.store.config.activities ?? []).map((a) => a.name ?? a.id).join('\u0001');
+    if (sig !== this.pillSig) { this.pillSig = sig; if (this.pillCap !== LAYER_PILLS) return this.resetPills(); }
+    const row = this.renderRoot.querySelector<HTMLElement>('.layers');
+    if (!row || this.pillCap <= 2) return;
+    const btns = [...row.querySelectorAll('button')];
+    if (row.scrollWidth > row.clientWidth + 1 || btns.some((b) => b.scrollWidth > b.clientWidth + 1)) {
+      this.pillCap = Math.max(2, Math.min(this.pillCap, btns.length) - 1);
+      this.requestUpdate();
+    }
   }
   override connectedCallback(): void {
     super.connectedCallback();
+    this.pillRo = new ResizeObserver(this.resetPills);
+    this.pillRo.observe(this);
+    void document.fonts?.ready.then(this.resetPills);
     this.state0.addEventListener('change', this.rerender);
     this.assigner.addEventListener('change', this.rerender);
     this.store.addEventListener('change', this.onStore);
@@ -148,6 +165,7 @@ export class HhStudio extends StoreElement implements StudioHost {
     this.assigner.removeEventListener('change', this.rerender);
     this.store.removeEventListener('change', this.onStore);
     window.removeEventListener('keydown', this.onKey);
+    this.pillRo?.disconnect();
     this.endPress();
     super.disconnectedCallback();
   }
@@ -495,13 +513,14 @@ export class HhStudio extends StoreElement implements StudioHost {
   private layers() {
     const acts = this.store.config.activities ?? [];
     const items: [string, string][] = [[DEFAULT_LAYER, 'Default'], ...acts.map((a) => [a.id, a.name ?? a.id] as [string, string])];
+    const cap = this.pillCap;
     // up to LAYER_PILLS pills; beyond that the rest sit in a menu (the selected layer always shows as a pill)
     let shown = items;
     let rest: [string, string][] = [];
-    if (items.length > LAYER_PILLS) {
-      const head = items.slice(0, LAYER_PILLS - 1);
+    if (items.length > cap) {
+      const head = items.slice(0, cap - 1);
       const cur = items.find(([id]) => id === this.st.layer);
-      shown = cur && !head.includes(cur) ? [...items.slice(0, LAYER_PILLS - 2), cur] : head;
+      shown = cur && !head.includes(cur) ? [...items.slice(0, cap - 2), cur] : head;
       rest = items.filter((it) => !shown.includes(it));
     }
     return html`<div class="lw"><div class="layers" role="tablist" aria-label="Layer" @keydown=${(e: KeyboardEvent) => this.layerKey(e, items)}>

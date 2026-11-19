@@ -177,7 +177,26 @@ def test_real_schema_has_phase2_messages():
         "command", "command_result", "key_event", "state_update", "page_push", "battery",
         "device_state", "tile_update", "activity_list", "remote_attached", "remote_info", "tile_state",
         "config_chunk",
+        "ota_begin", "ota_chunk", "ota_end", "ota_abort", "ota_status",
+        "ota_offer", "ota_frag", "ota_frag_ack", "ota_commit", "ota_result",
     }  # fmt: skip
+
+
+def test_ota_message_ids_are_stable_and_remote_ones_reserved():
+    msgs = {m.name: m for m in load_schema(REAL_SCHEMA).messages}
+    ids = {n: m.code for n, m in msgs.items() if n.startswith("ota_")}
+    assert ids == {
+        "ota_begin": 20, "ota_chunk": 21, "ota_end": 22, "ota_abort": 23, "ota_status": 24,
+        "ota_offer": 30, "ota_frag": 31, "ota_frag_ack": 32, "ota_commit": 33, "ota_result": 34,
+    }  # fmt: skip
+    assert all(msgs[n].transport == "rf" for n in ("ota_offer", "ota_frag", "ota_frag_ack", "ota_commit", "ota_result"))
+
+
+def test_real_schema_message_codes_are_unique():
+    codes = [m.code for m in load_schema(REAL_SCHEMA).messages]
+    assert len(codes) == len(set(codes))
+    msgs = {m.name: m for m in load_schema(REAL_SCHEMA).messages}
+    assert msgs["config_chunk"].code == 25
 
 
 def test_config_ack_hash_and_remote_attached_in_schema():

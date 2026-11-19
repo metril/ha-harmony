@@ -61,6 +61,7 @@ def built_binaries() -> Path:
                     "--target",
                     "hub",
                     "remote_sim",
+                    "ota_sign",
                 ]
             )
         finally:
@@ -156,6 +157,26 @@ def start_hub(built_binaries, tmp_path):
             proc.wait()
         err = err_path.read_text(errors="replace")
         assert "Sanitizer" not in err, err
+
+
+@pytest.fixture
+def sign_image(built_binaries, tmp_path):
+    """sign_image(payload: bytes, build, target="hub") -> bytes of a HOTA image signed with the dev key."""
+    n = 0
+
+    def _sign(payload: bytes, build: int, target: str = "hub") -> bytes:
+        nonlocal n
+        n += 1
+        src, out = tmp_path / f"payload{n}.bin", tmp_path / f"signed{n}.img"
+        src.write_bytes(payload)
+        subprocess.run(
+            [str(built_binaries / "ota_sign"), "sign", "--dev", "-t", target, "-b", str(build), str(src), str(out)],
+            check=True,
+            capture_output=True,
+        )
+        return out.read_bytes()
+
+    return _sign
 
 
 @pytest.fixture

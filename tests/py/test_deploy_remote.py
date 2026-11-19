@@ -597,6 +597,18 @@ def test_start_sh_runs_app_with_exact_slot_and_powermode(boot):
     assert boot.argv.read_text().strip() == "--slot 1 --powermode 0x30"
 
 
+def test_learn_slot_is_opt_in_and_passes_no_slot():
+    assert dr.start_argv() == "--slot 1 --powermode 0x30"  # default unchanged
+    assert dr.start_argv(None, "0x30") == "--powermode 0x30"
+    assert "--slot" not in dr.start_script(slot=None)
+    d, dev, lines = make()
+    assert dr.main(["install-hook", "--yes", "--learn-slot"], deployer=d) == 0
+    assert b"--slot" not in dev.files[dr.START_SH]
+    lines.clear()
+    d.status()
+    assert "start.sh app argv: --powermode 0x30" in "\n".join(lines)
+
+
 @pytest.mark.parametrize(("slot", "pm"), [(7, "0xAB"), (15, "0x00")])
 def test_start_script_argv_is_configurable(slot, pm):
     text = dr.start_script(slot=slot, powermode=pm)

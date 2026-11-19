@@ -49,7 +49,7 @@ int ra_cli_parse(int argc, char **argv, ra_cli_t *out) {
       if (!parse_uint(v, 0xFF, &x) || (x & 0x0F)) return -1;
       c.powermode = (uint8_t)x;
     } else if (n == 6 && !strncmp(a, "--slot", 6)) {
-      if (!parse_uint(v, 15, &x)) return -1;
+      if (!parse_uint(v, 15, &x) || x == 0) return -1; /* learning = omit the flag */
       c.slot = (uint8_t)x;
     } else {
       return -1;
@@ -64,7 +64,7 @@ void ra_cli_usage(FILE *f, const char *prog) {
           "usage: %s [--rf spi|none] [--powermode 0xN0] [--slot N] [--rf-debug] [--ui-debug]\n"
           "  --rf         spi = the radio (device default), none = no link (bench display tests)\n"
           "  --powermode  upper nibble OR'd into frame byte 1, 0x00..0xF0 (default 0x00, UNVALIDATED)\n"
-          "  --slot       the hub's slot on the remote, 0..15 (default 0, measured)\n"
+          "  --slot       override the hub's slot on the remote, 1..15 (default: learned from the radio)\n"
           "  --rf-debug   log every radio frame and link event to stderr\n"
           "  --ui-debug   one stderr line per screen refresh: flushes, pixels, render/flush time, why, touch-to-flush ms\n",
           prog);

@@ -109,3 +109,18 @@ def test_release_build_refuses_dev_key(tmp_path, tool):
     r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=Release", "-DHP_BUILD_TESTS=OFF", f"-DHP_OTA_PUBKEY_HEADER={gen}"],
                        capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr
+
+
+def test_sign_reads_the_build_id_from_a_hub_binary_and_needs_it_nowhere_else(tool, tmp_path):
+    fake = tmp_path / "hub.bin"
+    fake.write_bytes(b"\x7fELF....HPBUILDID=4242;....")
+    img = tmp_path / "h.img"
+    out = run(tool, "sign", "--dev", "-t", "hub", fake, img, home=tmp_path).stdout
+    assert "build 4242" in out
+    assert "build=4242" in run(tool, "verify", "--dev", "-t", "hub", img).stdout
+    run(tool, "sign", "--dev", "-t", "hub", "-b", 9, fake, img, home=tmp_path)  # explicit still wins
+    assert "build=9" in run(tool, "verify", "--dev", img).stdout
+    plain = tmp_path / "p.bin"
+    plain.write_bytes(b"no tag here")
+    assert "-b BUILD" in run(tool, "sign", "--dev", "-t", "hub", plain, img, home=tmp_path, ok=False).stderr
+    run(tool, "sign", "--dev", "-t", "remote", plain, img, home=tmp_path, ok=False)  # remote images need -b

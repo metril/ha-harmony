@@ -65,6 +65,18 @@ hah_dir="$hah_root/data/ha-harmony"
 hah_daemon="$hah_dir/hub"
 hah_conf="$hah_dir/hub.conf"
 hah_nowd="$hah_root/etc/nowatchdog"
+# Signed-update files (written by the daemon, hub/ota/hub_ota.h): hub.prev = the build before the last
+# update, ota-pending = "build=N" for a fresh build that has not reached the health mark, ota-restart =
+# the daemon exited to be relaunched into the new build (its exit status, 42, is not visible to us),
+# ota-rollback = what we leave behind after restoring hub.prev, for the daemon to report over ws.
+hah_prev="$hah_dir/hub.prev"
+hah_pending="$hah_dir/ota-pending"
+hah_restart="$hah_dir/ota-restart"
+hah_rbfile="$hah_dir/ota-rollback"
+hah_bfile="$hah_dir/ota-build"
+# Written at the health mark (tmpfs): the daemon refuses ota_begin until it exists, so an update never
+# lands inside the health window of the build that is still proving itself.
+hah_health="$hah_root/var/volatile/ha-harmony.healthy"
 
 # Numeric knobs (test overrides) are matched, never trusted: digits only, else the default.
 hah_num() {
@@ -112,6 +124,44 @@ hah_stamp() {
 	[ -n "$hah_wall" ] && hah_ts="$hah_ts $(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
 }
 
+# Restore hub.prev over the daemon ONCE for a fresh build that never reached the health mark ($1 is
+# the reason), and record why. The pending marker is consumed either way and the rename consumes
+# hub.prev, so this can never repeat for the same update. A missing or identical hub.prev (power cut
+# before the swap) only clears the marker. Pure file I/O: safe on the synchronous path.
+hah_rollback() {
+	hah_rbl=''
+	hah_rbp=''
+	{ read -r hah_rbl; read -r hah_rbp; } 2>/dev/null <"$hah_pending"
+	case "$hah_rbl" in
+	build=*[!0-9]* | build=) hah_rbl='build=0' ;;
+	build=[0-9]*) ;;
+	*) hah_rbl='build=0' ;;
+	esac
+	case "$hah_rbp" in
+	prev=*[!0-9]* | prev=) hah_rbp='' ;;
+	prev=[0-9]*) hah_rbp="${hah_rbp#prev=}" ;;
+	*) hah_rbp='' ;;
+	esac
+	rm -f "$hah_pending" 2>/dev/null
+	hah_rbnote="pending update marker cleared ($1): no previous build to restore"
+	# the daemon wrote the new build id to ota-build before the swap: put the previous one back whether or
+	# not the binary changed (a cut before the rename leaves the old binary running)
+	[ -n "$hah_rbp" ] && ( echo "$hah_rbp" >"$hah_bfile.tmp" ) 2>/dev/null && mv -f "$hah_bfile.tmp" "$hah_bfile" 2>/dev/null
+	if [ -e "$hah_prev" ] && mv -f "$hah_prev" "$hah_daemon" 2>/dev/null; then
+		if [ -e "$hah_prev" ]; then
+			# mv of a hard link onto its own twin (power cut between link and rename) "succeeds" doing
+			# nothing: hub.prev is the same file as the daemon, so just drop the extra name.
+			rm -f "$hah_prev" 2>/dev/null
+		else
+			hah_stamp
+			( echo "$hah_rbl"; echo "reason=$1"; echo "at=$hah_ts" ) >"$hah_rbfile.tmp" 2>/dev/null
+			mv -f "$hah_rbfile.tmp" "$hah_rbfile" 2>/dev/null
+			hah_rbnote="fresh build did not prove itself ($1, $hah_rbl): restored hub.prev"
+		fi
+	fi
+	hah_blog "$hah_rbnote"
+}
+
 hah_say() {
 	hah_stamp
 	echo "[$hah_ts] ha-harmony: $1" 2>/dev/null >>"$hah_log"
@@ -147,6 +197,7 @@ else
 	hah_reboot=1
 	hah_rmax=3
 	hah_rdebug=0
+	hah_otadev=0
 	hah_bad=''
 	hah_cap=''
 	# `hah_line=''` first: some shells leave the old value at EOF, which would loop forever.
@@ -235,6 +286,12 @@ else
 			*) hah_bad="rf_debug=$hah_v" ;;
 			esac
 			;;
+		ota_allow_dev)
+			case "$hah_v" in
+			0 | 1) hah_otadev="$hah_v" ;;
+			*) hah_bad="ota_allow_dev=$hah_v" ;;
+			esac
+			;;
 		esac
 	done <"$hah_conf"
 
@@ -246,6 +303,12 @@ else
 		# --- strike counter ---------------------------------------------------
 		# Only single digits are accepted from the file (no arithmetic on file content:
 		# `08` is an arithmetic error that exits the shell). Anything else counts as 0.
+		# A fresh signed build left its pending marker: the last boot never reached the health mark with
+		# it (crash, early-death reboot, power cut). Back to the previous build, clean strike slate.
+		if [ -e "$hah_pending" ]; then
+			hah_rollback boot_unclean
+			rm -f "$hah_counter" 2>/dev/null
+		fi
 		hah_n=$(cat "$hah_counter" 2>/dev/null)
 		case "$hah_n" in
 		0) hah_n=1 ;;
@@ -285,6 +348,7 @@ else
 				export DEMO_MODE
 
 				( : >"$hah_log" ) 2>/dev/null
+				[ -n "$hah_rbnote" ] && hah_say "$hah_rbnote" # the per-boot truncation above ate the sync-path line
 				hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099}, rf=${hah_rf:-none}, launch in ${hah_delay}s, reboot_on_early_death=$hah_reboot, respawn_max=$hah_rmax, rf_debug=$hah_rdebug)"
 
 				# Everything below runs in the background: the delay, the optional lua
@@ -303,6 +367,8 @@ else
 					[ -n "$hah_budget" ] && set -- "$@" --config-budget "$hah_budget"
 					[ "$hah_rmax" != 0 ] && set -- "$@" --heartbeat "$hah_hb"
 					[ "$hah_rdebug" = 1 ] && set -- "$@" --rf-debug
+					set -- "$@" --health-file "$hah_health"
+					[ "$hah_otadev" = 1 ] && set -- "$@" --ota-allow-dev
 
 					# Daemon output is prefixed with uptime, line by line.
 					hah_tsloop() {
@@ -335,6 +401,7 @@ else
 						hah_blog "stopped lua/luaworks/luadraws"
 					fi
 					: >"$hah_dlog" 2>/dev/null
+					rm -f "$hah_health" 2>/dev/null
 					hah_launch "$@"
 
 					# Health window: poll (no `timeout` applet). Alive at the end means
@@ -346,12 +413,38 @@ else
 						sleep "$hah_nap"
 						hah_t=$((hah_t + 1))
 						if ! kill -0 "$hah_pid" 2>/dev/null; then
+							if [ -e "$hah_restart" ]; then
+								# a planned relaunch into an applied update, not a death: no strike, and the
+								# new build gets a fresh health window
+								rm -f "$hah_restart" 2>/dev/null
+								hah_blog "daemon exited for a signed update inside the health window - launching the new build"
+								hah_launch "$@"
+								[ -n "$hah_pid" ] || {
+									hah_up=0
+									break
+								}
+								hah_t=0
+								continue
+							fi
+							if [ -e "$hah_pending" ]; then
+								# the updated build died inside the window: previous build, once
+								hah_blog "updated build died inside the health window"
+								hah_rollback died_early
+								hah_launch "$@"
+								[ -n "$hah_pid" ] || {
+									hah_up=0
+									break
+								}
+								hah_t=0
+								continue
+							fi
 							hah_up=0
 							break
 						fi
 					done
 					if [ "$hah_up" = 1 ]; then
-						rm -f "$hah_counter"
+						rm -f "$hah_counter" "$hah_pending" 2>/dev/null
+						: >"$hah_health" 2>/dev/null
 						hah_blog "healthy after ${hah_healthy}s - strikes cleared"
 						# Supervision (after the health mark only). hah_used is the respawn
 						# budget spent; it refills after hah_refill s of continuous uptime.
@@ -402,6 +495,44 @@ else
 									break
 								fi
 							done
+							if [ -e "$hah_restart" ]; then
+								# The daemon applied a signed update and exited (status 42) to be relaunched:
+								# no budget spent. The new build gets one health window; dying inside it
+								# restores hub.prev once and relaunches that instead.
+								rm -f "$hah_restart" 2>/dev/null
+								hah_blog "daemon exited for a signed update - launching the new build"
+								rm -f "$hah_health" 2>/dev/null # no further update until this build is proven
+								hah_launch "$@"
+								if [ -z "$hah_pid" ]; then
+									hah_blog "update relaunch: no pid recorded - not supervising any further (no respawn, no reboot)"
+									break
+								fi
+								hah_t=0
+								hah_ok=1
+								while [ "$hah_t" -lt "$hah_polls" ]; do
+									sleep "$hah_nap"
+									hah_t=$((hah_t + 1))
+									if ! kill -0 "$hah_pid" 2>/dev/null; then
+										hah_ok=0
+										break
+									fi
+								done
+								if [ "$hah_ok" = 1 ]; then
+									rm -f "$hah_pending" 2>/dev/null
+									: >"$hah_health" 2>/dev/null
+									hah_blog "updated build healthy after ${hah_healthy}s - previous build kept as hub.prev"
+								else
+									hah_blog "updated build died within ${hah_healthy}s"
+									hah_rollback died_early
+									hah_launch "$@"
+									: >"$hah_health" 2>/dev/null # the restored build is the proven one
+									if [ -z "$hah_pid" ]; then
+										hah_blog "rollback relaunch: no pid recorded - not supervising any further (no respawn, no reboot)"
+										break
+									fi
+								fi
+								continue
+							fi
 							if [ "$hah_rmax" = 0 ]; then
 								hah_blog "daemon died after health mark - no reboot, no respawn"
 								break
@@ -444,6 +575,6 @@ else
 fi
 
 unset hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
-unset hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
+unset hah_otadev hah_bfile hah_health hah_rbp hah_rbnote hah_prev hah_pending hah_restart hah_rbfile hah_rbl hah_t hah_ok hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
 unset hah_rf hah_slot hah_budget hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr
-unset -f hah_say hah_blog hah_stamp hah_num 2>/dev/null
+unset -f hah_say hah_blog hah_stamp hah_num hah_rollback 2>/dev/null

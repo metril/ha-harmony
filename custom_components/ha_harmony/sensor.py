@@ -17,6 +17,7 @@ from .coordinator import (
     LINK_STATES,
     TOPIC_CONFIG,
     TOPIC_LINK,
+    TOPIC_OTA,
     HarmonyCoordinator,
     topic_battery,
     topic_device,
@@ -36,6 +37,7 @@ async def async_setup_entry(
         ents: list[HarmonyEntity] = [HarmonyDeviceInput(c, d) for d in c.compiled.devices]
         for r in c.remotes:
             ents += [HarmonyRemoteBattery(c, r), HarmonyRemoteVoltage(c, r), HarmonyPageFormat(c, r)]
+        ents.append(HarmonyFirmwareUpdate(c))
         if c.has_addon_link:
             ents.append(HarmonyAddonLink(c))
         return ents
@@ -130,6 +132,34 @@ class HarmonyAddonLink(HarmonyEntity, SensorEntity):
             "applied_at": c.applied_at,
             "last_error": c.last_error,
             "config_state": c.config_state,  # accepted | pending | rejected (by the hub)
+        }
+
+
+class HarmonyFirmwareUpdate(HarmonyEntity, SensorEntity):
+    """Progress of a hub firmware update (`ha_harmony.install_firmware`) and whether the hub rolled one back."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "firmware_update"
+
+    def __init__(self, coordinator: HarmonyCoordinator) -> None:
+        super().__init__(coordinator, "firmware", topics=(TOPIC_OTA,))
+        self._attr_options = ["idle", "uploading", "applying", "restarting", "installed", "failed", "rolled_back"]
+
+    @property
+    def native_value(self) -> str:
+        return self.coordinator.ota_state
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        c = self.coordinator
+        return {
+            "progress": c.ota_progress,
+            "build": c.ota_build,
+            "error": c.ota_error,
+            "rollback_reason": c.ota_reason,
+            "fw_build": c.client.fw_build,
+            "ota_key": c.client.ota_key,  # "dev" = the hub trusts the public test key
         }
 
 
