@@ -32,12 +32,23 @@ static int utf8_valid(const uint8_t *s, size_t n) {
     return 1;
 }
 
-#define KIND_RESERVED 0x8C /* widget kind bits 2, 3, 7 */
+#define KIND_RESERVED 0x0C /* widget kind bits 2, 3 */
+#define HAS_COLOR 0x80
 #define HAS_STYLE 0x10
 #define HAS_ICON 0x20
 #define HAS_BIND 0x40
 #define STYLE_ICON_ONLY 0x20
 #define PF_BACK 4
+#define PF_THEME_SHIFT 3
+#define PF_THEME_MASK 0x38u
+
+/* One colour nibble: 0 none, 1..12 palette, 15 rgb (value filled by the caller); 13/14 invalid. */
+static int color_nibble(unsigned nib, hp_color_t *c) {
+    if (nib == 0) return 0;
+    if (nib <= HP_PAGE_PALETTE_MAX) { c->kind = HP_COLOR_PALETTE; c->value = (uint16_t)nib; return 0; }
+    if (nib == 15) { c->kind = HP_COLOR_RGB; return 0; }
+    return -1;
+}
 
 int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
     if (len > HP_PAGE_MAX_BYTES) return -HP_E_TOOBIG;
@@ -56,7 +67,7 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
     p.count = (uint8_t)count;
     if (v2) {
         unsigned pflags = d[7], tlen = d[10];
-        if ((pflags & 3) == 3 || (pflags & ~(3u | PF_BACK))) return -HP_E_INVAL;
+        if ((pflags & 3) == 3 || (pflags & ~(3u | PF_BACK | PF_THEME_MASK))) return -HP_E_INVAL;
         if (tlen > HP_PAGE_MAX_TITLE) return -HP_E_TOOBIG;
         if (len - off < tlen || !utf8_valid(d + off, tlen)) return -HP_E_INVAL;
         memcpy(p.title, d + off, tlen);
@@ -65,6 +76,7 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
         p.total = d[6];
         p.kind = (uint8_t)(pflags & 3);
         p.back = (pflags & PF_BACK) != 0;
+        p.theme = (uint8_t)((pflags & PF_THEME_MASK) >> PF_THEME_SHIFT);
         p.seq_idx = d[8] >> 4;
         p.seq_cnt = d[8] & 15;
         p.act = d[9];
@@ -82,7 +94,7 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
         w->h = d[off + 3] & 15;
         off += 4;
         if (v2) {
-            size_t need = 1u + !!(kind & HAS_STYLE) + !!(kind & HAS_ICON) + !!(kind & HAS_BIND);
+            size_t need = 1u + !!(kind & HAS_STYLE) + !!(kind & HAS_ICON) + !!(kind & HAS_BIND) + !!(kind & HAS_COLOR);
             if (len - off < need) return -HP_E_INVAL;
             if (kind & HAS_STYLE) {
                 unsigned s = d[off++];
@@ -98,6 +110,16 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
             if (kind & HAS_BIND) {
                 w->has_bind = 1;
                 w->bind = d[off++];
+            }
+            if (kind & HAS_COLOR) {
+                unsigned cb = d[off++], fn = cb & 15, on = cb >> 4;
+                if (!cb || color_nibble(fn, &w->color_fill) || color_nibble(on, &w->color_on)) return -HP_E_INVAL;
+                if (on && w->kind != HP_WIDGET_TILE) return -HP_E_INVAL;
+                /* the length byte is already counted in `need`; the RGB565 values come before it */
+                size_t rgb = 2u * ((fn == 15) + (on == 15));
+                if (len - off < rgb + 1) return -HP_E_INVAL;
+                if (fn == 15) { w->color_fill.value = (uint16_t)((d[off] << 8) | d[off + 1]); off += 2; }
+                if (on == 15) { w->color_on.value = (uint16_t)((d[off] << 8) | d[off + 1]); off += 2; }
             }
         }
         size_t ll = d[off++];

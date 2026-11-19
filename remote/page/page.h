@@ -31,12 +31,23 @@ typedef enum { HP_PAGE_KIND_NORMAL = 0, HP_PAGE_KIND_HOME, HP_PAGE_KIND_FAVORITE
 /* Tile states (tile_state.state). */
 typedef enum { HP_TILE_VALUE = 0, HP_TILE_OFF, HP_TILE_ON, HP_TILE_UNAVAILABLE } hp_tile_state_t;
 
+/* Widget colour (v2 HAS_COLOR): none = the role default, palette = theme palette index 1..12, rgb = RGB565. */
+typedef enum { HP_COLOR_NONE = 0, HP_COLOR_PALETTE, HP_COLOR_RGB } hp_color_kind_t;
+#define HP_PAGE_PALETTE_MAX 12
+#define HP_PAGE_THEME_CUSTOM 7 /* header theme id 7: a custom theme delivered separately; presets are 0..6 */
+typedef struct {
+    uint8_t kind;   /* hp_color_kind_t */
+    uint16_t value; /* palette index (1..12) or RGB565 */
+} hp_color_t;
+
 typedef struct {
     uint8_t kind, id, x, y, w, h;
     uint8_t role, shape, icon_only; /* v2; v1: default / card / 0 */
     uint8_t icon;                   /* 0 none, 1..159 stock, 160..254 custom */
     uint8_t has_bind, bind;         /* role nav: target page id; else the activity index that makes it "active" */
     uint8_t tstate;                 /* live tile state (hp_tile_state_t), not on the wire in the page */
+    hp_color_t color_fill;          /* v2: fill colour; none for v1 */
+    hp_color_t color_on;            /* v2, tiles only: fill when the tile is "on"; none otherwise */
     char label[HP_PAGE_MAX_LABEL + 1]; /* NUL-terminated */
     char text[HP_PAGE_MAX_TEXT + 1];   /* live tile text, NUL-terminated */
 } hp_widget_t;
@@ -48,6 +59,7 @@ typedef struct {
     uint8_t kind, back;         /* v2: hp_page_kind_t, BACK flag */
     uint8_t seq_idx, seq_cnt;   /* v2: paged group position; 0/0 = not paged */
     uint8_t act;                /* v2: 0, or activity index + 1 */
+    uint8_t theme;              /* v2: header theme preset id 0..7 (0 default, 7 custom); v1: 0 */
     char title[HP_PAGE_MAX_TITLE + 1]; /* v2 header title, "" = none */
     hp_widget_t widgets[HP_PAGE_MAX_WIDGETS];
 } hp_page_t;

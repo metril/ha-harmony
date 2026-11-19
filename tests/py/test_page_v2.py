@@ -34,6 +34,7 @@ def model_from_dict(d):
         seq["cnt"],
         d["act"],
         d["title"],
+        d["theme"],
     )
 
 
@@ -43,7 +44,7 @@ def test_v1_vectors_page_to_dict(v):
     assert v["dict"]["version"] == 1 and v["dict"]["total"] == 0
 
 
-@pytest.mark.parametrize("v", VECTORS["valid_v2"], ids=lambda v: v["name"])
+@pytest.mark.parametrize("v", VECTORS["valid_v2"] + VECTORS["valid_v2c"], ids=lambda v: v["name"])
 def test_v2_vectors(v):
     data = bytes.fromhex(v["hex"])
     page = decode_page(data)
