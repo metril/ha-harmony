@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
-from test_addon_e2e import DIST, PREFIX, TOKEN, H, api, browser  # noqa: F401
+from test_addon_e2e import DIST, PREFIX, TOKEN, WIDE_CSS, H, api, browser  # noqa: F401
 from test_addon_e2e_polish import LARGE, STORE, open_large
 
 from harmony_addon.app import create_app
@@ -234,8 +234,11 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
 
     # drag a search result onto a key of the remote: toggle on that entity
     await search(page, "living room lamp")
+    # the favourite row is already there while the debounced search is pending; measure once the results settle
+    await page.locator(f"{P} [role=status][aria-live]").get_by_text("match").wait_for()
     ent = page.locator(ROWS, has_text="Living room lamp").first
     await ent.wait_for()
+    await ent.scroll_into_view_if_needed()
     eb = await ent.bounding_box()
     kb = await page.locator("hh-remote [data-key=stop]").bounding_box()
     await page.mouse.move(eb["x"] + 20, eb["y"] + 15)
@@ -339,12 +342,32 @@ async def test_action_picker_and_add_device_wizard_use_the_same_navigator(browse
     await page.get_by_role("heading", name="Pick a Home Assistant entity").wait_for(state="detached")
 
 
-async def test_the_top_of_the_tab_is_compact_and_the_tab_icons_stay_put(browser, big):
-    page = await open_tab(browser, big)
+# every browser-side check below is about structure (one line, nothing cut or sideways), never a pixel constant tuned to one font
+SHADOW_ALL = """(sel) => { const out = []; const walk = (root) => { for (const el of root.querySelectorAll('*')) { if (el.shadowRoot) walk(el.shadowRoot); } out.push(...root.querySelectorAll(sel)); };
+  walk(document.querySelector('hh-app').shadowRoot); return out; }"""
+
+
+async def check_top_of_tab(page):
     box = lambda sel: page.locator(sel).first.bounding_box()
     search = await box(f"{P} input.q")
-    first = await box(f"{P} .gh")
-    assert first["y"] - search["y"] < 4 * 40, "the list starts too far below the search box"
+    head = await box(f"{P} .gh")
+    # the list starts within a few row heights of the search box: filters and group-by are one line each
+    assert head["y"] - search["y"] < 5 * head["height"], "the list starts too far below the search box"
+    tops = lambda sel: page.locator(sel).evaluate_all("els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().top)))]")
+    ys = await tops(f"{P} .fchips .fchip")
+    assert len(ys) == 1, f"the filter row wraps: {ys}"
+    centres = await page.locator(f"{P} .tools > *").evaluate_all(
+        "els => els.map(e => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); })"
+    )
+    assert max(centres) - min(centres) <= 3, f"the group-by row wraps: {centres}"
+    # nothing in the tab's own controls is wider than its box (a cut label shows as ellipsis, never a sideways scroll)
+    over = await page.locator(P).evaluate("(el) => { const b = el.shadowRoot.querySelector('.body'); return b.scrollWidth - b.clientWidth; }")
+    assert over <= 1, over
+
+
+async def test_the_top_of_the_tab_is_compact_and_the_tab_icons_stay_put(browser, big):
+    page = await open_tab(browser, big)
+    await check_top_of_tab(page)
     # collapsed, the 4 floors + "no floor" + the pinned list are all in view; open one floor and its areas join them
     await page.locator(P).get_by_role("button", name="Ground").click()
     await page.locator(f"{P} .gh.d1").first.wait_for()
@@ -368,3 +391,18 @@ async def test_the_top_of_the_tab_is_compact_and_the_tab_icons_stay_put(browser,
     await page.wait_for_function("e => getComputedStyle(e, '::after').opacity === '1'", arg=tab)
     assert await tab.evaluate("e => getComputedStyle(e, '::after').content") == '"Activities"'
     await shot(page, "15-tab-tooltip-1440")
+
+
+@pytest.mark.parametrize("size", [(1440, 900), (1280, 720), (1024, 700)])
+async def test_the_top_of_the_tab_survives_a_wide_fallback_font(browser, big, size):
+    page = await open_tab(browser, big, *size)
+    await page.add_style_tag(content=WIDE_CSS)
+    await page.evaluate("() => document.fonts.ready")
+    await shot(page, f"16-wide-font-{size[0]}")
+    await check_top_of_tab(page)
+    await page.locator(P).get_by_role("button", name="Ground").click()
+    await page.locator(f"{P} .gh.d1").first.wait_for()
+    cut = await page.locator(P).evaluate(
+        "(el) => [...el.shadowRoot.querySelectorAll('.tn')].filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.className || e.tagName)"
+    )
+    assert cut == [], cut

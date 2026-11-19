@@ -7,6 +7,7 @@ in CI) any of those missing is a failure, never a silent skip:
 Set HH_SHOTS=<dir> to also write light/dark screenshots at 1280 and 400 px.
 """
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -68,8 +69,39 @@ async def browser():
             if REQUIRED:
                 raise
             pytest.skip(f"cannot launch chromium: {exc}")
+        _stress(b)
         yield b
         await b.close()
+
+
+# HH_WIDE=1 swaps in a wide fallback font (what a runner or another OS may pick for system-ui) and
+# HH_CPU=<n> throttles the CPU n-fold, for every page a test opens: the CI-only failures show up here.
+WIDE_CSS = ':root{--font:"DejaVu Sans",Verdana,sans-serif!important} body,button,input,select{font-family:"DejaVu Sans",Verdana,sans-serif!important}'
+
+
+def _stress(b):
+    wide, cpu = os.environ.get("HH_WIDE"), float(os.environ.get("HH_CPU", "1"))
+    if not wide and cpu <= 1:
+        return
+    orig = b.new_context
+
+    async def new_context(*a, **kw):
+        ctx = await orig(*a, **kw)
+        if wide:
+            await ctx.add_init_script(
+                "document.addEventListener('DOMContentLoaded',()=>{const s=document.createElement('style');"
+                f"s.textContent={json.dumps(WIDE_CSS)};document.head.append(s)}});"
+            )
+        if cpu > 1:
+
+            async def throttle(page):
+                cdp = await ctx.new_cdp_session(page)
+                await cdp.send("Emulation.setCPUThrottlingRate", {"rate": cpu})
+
+            ctx.on("page", lambda p: asyncio.ensure_future(throttle(p)))
+        return ctx
+
+    b.new_context = new_context
 
 
 async def open_editor(browser, origin, problems=None, **kw):

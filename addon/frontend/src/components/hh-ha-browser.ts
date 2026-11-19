@@ -45,26 +45,34 @@ export class HhHaBrowser extends LitElement {
     shared,
     chipStyles,
     css`
-      :host { display: grid; gap: 8px; min-width: 0; }
+      :host { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; container-type: inline-size; }
       .search { position: relative; }
       input[type="search"] { height: 34px; width: 100%; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 32px 0 10px; }
       input[type="search"]::-webkit-search-cancel-button { display: none; }
       .clr { position: absolute; right: 2px; top: 2px; width: 30px; height: 30px; border: 0; border-radius: var(--r1); background: transparent; color: var(--tx2); font-size: 18px; line-height: 1; cursor: pointer; }
       .clr:hover { background: var(--sf2); }
-      .tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-      .tools label { display: flex; align-items: center; gap: 6px; color: var(--tx2); font-size: 12px; font-weight: 600; }
+      .tools { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; height: 30px; }
+      .tools label { display: flex; align-items: center; gap: 6px; color: var(--tx2); font-size: 12px; font-weight: 600; min-width: 0; white-space: nowrap; }
+      .tools select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+      .tools .btn, .tools .fchip { flex: none; }
+      input[type="search"]::placeholder { text-overflow: ellipsis; }
       select { height: 28px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 6px; font-size: 12px; }
       .tools .sp { flex: 1; }
       .tools .btn { padding: 0 6px; }
       .tools .btn.icon { width: 30px; padding: 0; }
       .fchip.menu { font-size: 16px; line-height: 1; padding: 0 9px; }
-      .fchips { display: flex; flex-wrap: wrap; gap: 4px; }
+      .fchips { display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; }
+      .fchips .fchip { flex: 0 1 auto; min-width: 0; }
+      .fchip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .fchip .car { flex: none; }
+      .fchip .s { display: none; }
+      @container (max-width: 300px) { .fchips .fchip:not(.menu) { flex: 1 1 0; justify-content: center; padding: 0 4px; gap: 3px; } .fchip .car { display: none; } .fchip .l.x { display: none; } .fchip .s { display: inline; } }
       .fchip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 7px; border-radius: 13px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
       .fchip:hover { background: var(--sf2); }
       .fchip small { color: var(--tx3); font-weight: 500; font-size: 11px; }
       .fchip[aria-pressed="true"], .fchip[aria-expanded="true"] { background: var(--accs); border-color: var(--acc); color: var(--tx); }
       .fchip .car { width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-1px) rotate(45deg); }
-      .pop { border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf); padding: 8px; display: grid; gap: 6px; }
+      .pop { border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf); padding: 8px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
       .pop input[type="search"] { height: 30px; padding-right: 10px; }
       .opts { display: grid; max-height: 200px; overflow: auto; }
       .opt { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 4px; font-size: 12.5px; cursor: pointer; border-radius: var(--r1); }
@@ -89,7 +97,7 @@ export class HhHaBrowser extends LitElement {
       .gh.sub { min-height: 30px; font-size: 12px; border-style: dashed; }
       .chev { flex: none; width: 7px; height: 7px; border-right: 2px solid var(--tx2); border-bottom: 2px solid var(--tx2); transform: rotate(-45deg); transition: transform 100ms; margin: 0 2px; }
       .gh[aria-expanded="true"] .chev { transform: rotate(45deg); }
-      .rows { display: grid; gap: 4px; padding: 4px 0 6px 12px; }
+      .rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 4px 0 6px 12px; }
       .row { display: flex; gap: 4px; align-items: stretch; content-visibility: auto; contain-intrinsic-size: auto 44px; }
       .ent.chip2 { height: 44px; border-radius: var(--r1); flex: 1; min-width: 0; padding: 0 8px; }
       .ent .sic { width: 18px; height: 18px; color: var(--tx2); }
@@ -106,9 +114,9 @@ export class HhHaBrowser extends LitElement {
       .star[aria-pressed="true"] { color: var(--acc); }
       .more { width: 100%; height: 30px; border: 1px dashed var(--line); border-radius: var(--r1); background: transparent; cursor: pointer; color: var(--tx2); }
       .more:hover { background: var(--sf2); }
-      .err { display: grid; gap: 8px; }
-      .list { display: grid; gap: 6px; }
-      .skel { display: grid; gap: 6px; }
+      .err { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+      .list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+      .skel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
       .skel i { display: block; height: 36px; border-radius: var(--r2); background: linear-gradient(90deg, var(--sf2), var(--sf3), var(--sf2)); background-size: 200% 100%; animation: sh 1.2s linear infinite; }
       @keyframes sh { to { background-position: -200% 0; } }
       @media (prefers-reduced-motion: reduce) { .skel i { animation: none; } .chev { transition: none; } }
@@ -400,8 +408,9 @@ export class HhHaBrowser extends LitElement {
     const has: Record<string, GroupBy | ''> = { types: '', areas: 'area', labels: 'label', integrations: 'integration' };
     const n = this.f[dim].size;
     const g = has[dim] as GroupBy | '';
+    const short = label === 'Integration' ? 'Integ.' : '';
     if (g && !this.bys.includes(g) && !n) return nothing; // no data to filter by
-    return html`<button class="fchip" aria-expanded=${this.pop === dim} aria-haspopup="true" @click=${() => { this.pop = this.pop === dim ? null : dim; this.popQ = ''; }}>${label}${n ? html` <small>${n}</small>` : nothing}<i class="car" aria-hidden="true"></i></button>`;
+    return html`<button class="fchip" aria-expanded=${this.pop === dim} aria-haspopup="true" aria-label=${n ? `${label} ${n}` : label} title=${label} @click=${() => { this.pop = this.pop === dim ? null : dim; this.popQ = ''; }}><span class="l${short ? ' x' : ''}">${label}</span>${short ? html`<span class="s">${short}</span>` : nothing}${n ? html`<small>${n}</small>` : nothing}<i class="car" aria-hidden="true"></i></button>`;
   }
   private menu() {
     return html`<button class="fchip menu" aria-label="Options" title="Options" aria-expanded=${this.pop === 'menu'} aria-haspopup="true" @click=${() => (this.pop = this.pop === 'menu' ? null : 'menu')}>⋯</button>`;
