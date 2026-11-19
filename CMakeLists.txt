@@ -192,8 +192,17 @@ endif()
 message(STATUS "firmware build id ${HP_BUILD_ID}")
 set_source_files_properties(hub/ota/hub_ota.c PROPERTIES COMPILE_DEFINITIONS HP_BUILD_ID=${HP_BUILD_ID})
 
+# Bluetooth HID helper (`hub bt-helper`): BTstack Classic HID device and, with HH_BT_LE, LE HID peripheral + LE remotes.
+option(HH_BT "Build the Bluetooth HID helper into the hub binary" ON)
+option(HH_BT_LE "Bluetooth helper: LE peripheral (HID over GATT) and LE remotes (HOGP host), besides Classic" ON)
 add_executable(hub hub/main.c)
 target_link_libraries(hub PRIVATE hp_hub)
+if(HH_BT)
+  include(hub/bt/bt.cmake)  # include(), not add_subdirectory: a hub/ build dir would collide with the hub executable
+  target_link_libraries(hub PRIVATE hp_bt)
+  target_compile_definitions(hub PRIVATE HH_BT=1)
+  target_link_options(hub PRIVATE -Wl,--gc-sections)  # BTstack and the helper are built with -ffunction-sections
+endif()
 
 # Bench-only IR emitter experiment (not shipped in the hub binary).
 add_executable(ir_bench tools/ir_bench.c)

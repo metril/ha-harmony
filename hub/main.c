@@ -24,6 +24,9 @@
 #include "hub/net/jsonrpc.h"
 #include "hub/net/mdns_srv.h"
 #include "hub/net/ws.h"
+#ifdef HH_BT
+#include "hub/bt/bt_main.h"
+#endif
 
 #define REPLY_CAP HP_WS_MAX_FRAME /* a reply that fits is always sendable */
 
@@ -190,6 +193,9 @@ static size_t config_budget_bytes(size_t want_kib) {
 }
 
 int main(int argc, char **argv) {
+#ifdef HH_BT
+    if (argc >= 2 && !strcmp(argv[1], "bt-helper")) return bt_helper_main(argc - 2, argv + 2);
+#endif
     bool sim = false, rf_spi = false;
     bool rf_debug = false;
     long rf_slot = 0; /* 0 = learn it from the radio's link-up report */
