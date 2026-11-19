@@ -219,6 +219,12 @@ static void ms_sleep(int ms) {
   nanosleep(&ts, NULL);
 }
 
+/* Both radios' reader threads learn their slot from the link-up reports (real time). Wait for that without
+ * driving the app: its first uplink must not be sent before the slot is known. */
+static void wait_slots(void) {
+  for (int i = 0; i < 3000 && (hp_rf_spi_slot(rf.tp) != 1 || hp_rf_spi_slot(hub_tp) != 2); i++) ms_sleep(1);
+}
+
 static void settle(int rounds) {
   for (int i = 0; i < rounds; i++) {
     fh.now = fr.now = fk.now;
@@ -273,7 +279,7 @@ static int setup_ex(int hal, int soc_missing) {
   hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL, NULL};
   int orc = rf_link_open(&rf, &rc);
   if (orc == 0) { /* both radios have learned their slot from the link-up reports before anything is driven */
-    for (int i = 0; i < 3000 && (hp_rf_spi_slot(rf.tp) != 1 || hp_rf_spi_slot(hub_tp) != 2); i++) ms_sleep(1);
+    wait_slots();
     CT_EQ(hp_rf_spi_slot(rf.tp), 1);
     CT_EQ(hp_rf_spi_slot(hub_tp), 2);
   }
@@ -627,7 +633,9 @@ static void test_remote_info_reports_a_store_it_already_holds(void) {
   hp_rf_spi_ops_t ro = fake_ops(&fr);
   hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL, NULL};
   CT_EQ(rf_link_open(&rf, &rc), 0);
-  WAIT_FOR(hp_rf_spi_slot(rf.tp) == 1 && hp_rf_spi_slot(hub_tp) == 2);
+  wait_slots(); /* before anything is driven: a send before the slot is learned is refused and retried only 5 s later on the (frozen) fake clock */
+  CT_EQ(hp_rf_spi_slot(rf.tp), 1);
+  CT_EQ(hp_rf_spi_slot(hub_tp), 2);
   WAIT_FOR(nhinfo >= 1);
   CT_EQ(hinfo[0].gen, 0x3C);
   CT_EQ(hinfo[0].pages, 1);

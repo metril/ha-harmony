@@ -699,19 +699,26 @@ def test_bad_reboot_switch_value_is_stock(root: Path) -> None:
 
 
 def test_daemon_log_is_capped_without_corrupting_the_append_stream(root: Path) -> None:
+    vlog = root / "var" / "volatile" / "ha-harmony.log"
+    # The daemon keeps appending after its 60 lines; the capper (a poll of the supervisor loop, at a
+    # speed this test does not control) truncates the log in place at some point. Poll for the capped
+    # state, checking at every sample that the truncation left no hole under the daemon's O_APPEND fd.
     install_daemon(
         root,
         'i=0; while [ $i -lt 60 ]; do echo "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; i=$((i+1)); done;'
-        " sleep 0.3; echo AFTER-TRUNCATE; sleep 30",
+        " n=0; while [ $n -lt 1000 ]; do echo AFTER-TRUNCATE; sleep 0.05; n=$((n+1)); done",
     )
     install_conf(root)
     source_hook(root, healthy=1, extra_env={"HAH_LOG_MAX_LINES": "10"})
-    vlog = root / "var" / "volatile" / "ha-harmony.log"
-    _wait_text(vlog, "AFTER-TRUNCATE")
-    data = vlog.read_bytes()
-    assert b"AFTER-TRUNCATE" in data
-    assert b"\0" not in data, "truncation must not leave a hole under the daemon's O_APPEND fd"
-    assert len(data) < 500, "log was not capped"
+    deadline = time.monotonic() + 30
+    data = b""
+    while time.monotonic() < deadline:
+        data = vlog.read_bytes() if vlog.exists() else b""
+        assert b"\0" not in data, "truncation must not leave a hole under the daemon's O_APPEND fd"
+        if b"AFTER-TRUNCATE" in data and len(data) < 500:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"log was not capped ({len(data)} bytes, AFTER-TRUNCATE seen: {b'AFTER-TRUNCATE' in data})")
 
 
 # --- review round 2: conf-loop hang guards, watchdog guard ---------------------------
