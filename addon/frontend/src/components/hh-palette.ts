@@ -119,7 +119,7 @@ export class HhPalette extends LitElement {
       const cards = GROUPS.map((grp) => {
         const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
-          ? html`<h2>${pretty(grp)}</h2><div class="chips" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
+          ? html`<h2>${pretty(grp)}</h2><div class="cells" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
               ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(commandIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
             </div>`
           : nothing;
@@ -131,7 +131,7 @@ export class HhPalette extends LitElement {
     const used = this.usedKeys();
     const acts = (this.cfg().activities ?? []).filter((a) => this.match(a.name ?? '', a.id));
     return html`
-      <div class="chips">
+      <div class="cells">
         ${acts.map((a) => this.chip(a.name ?? a.id, { kind: 'activity', id: a.id }, used.has(`activity:${a.id}`), stockIconSvg(stockIconByName('play')?.id ?? 26, 'sic')))}
         ${this.match('all off', 'power off') ? this.chip('All off', { kind: 'alloff' }, used.has('activity:off'), stockIconSvg(stockIconByName('power')?.id ?? 7, 'sic')) : nothing}
       </div>
@@ -151,7 +151,7 @@ export class HhPalette extends LitElement {
     const typedSource: Source | null = HA_ENTITY_ID.test(this.typed) ? { kind: 'entity', entity_id: this.typed } : null;
     const typed = html`<div class="typed">
       <input type="text" aria-label="Entity id" placeholder="light.living_room" .value=${this.typed} @input=${(e: Event) => (this.typed = (e.target as HTMLInputElement).value.trim())} />
-      ${typedSource ? html`<div class="chips">${this.chip(this.typed, typedSource, false)}</div>` : html`<span class="hint">Type an entity id to get a chip you can drag.</span>`}
+      ${typedSource ? html`<div class="cells">${this.chip(this.typed, typedSource, false)}</div>` : html`<span class="hint">Type an entity id to get a chip you can drag.</span>`}
     </div>`;
     const used = new Map(permissions(this.cfg()).entities.map((e) => [e.id, e.services]));
     const cur = this.assigner.source;

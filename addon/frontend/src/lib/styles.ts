@@ -21,6 +21,9 @@ export const shared = css`
   .btn.pri[aria-disabled="true"]:hover { background: var(--acc); filter: none; }
   .sic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   .chip { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 8px; border-radius: 12px; font-size: 12px; font-weight: 600; background: var(--sf2); color: var(--tx2); white-space: nowrap; }
+  /* a list of pills as a grid: equal cells and heights, the label truncated with an ellipsis (give each a title) */
+  .cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.25rem, 1fr)); gap: 6px; }
+  .cells > * { box-sizing: border-box; height: 30px; min-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; justify-content: flex-start; }
   .chip.ok { background: var(--oks); color: var(--ok); }
   .chip.bad { background: var(--bads); color: var(--bad); }
   .chip.acc { background: var(--accs); color: var(--tx); }
@@ -53,7 +56,6 @@ export const shared = css`
 
 /** The chip look of the palette (Devices tab commands, Home Assistant entity rows). */
 export const chipStyles = css`
-  .chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.25rem, 1fr)); gap: 6px; }
   .chip2 { display: flex; align-items: center; gap: 6px; box-sizing: border-box; height: 30px; min-width: 0; width: 100%; padding: 0 10px; border-radius: 15px; text-align: left; border: 1px solid var(--line); background: var(--sf2); color: var(--tx); font-size: 12.5px; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   .chip2:hover { background: var(--sf3); }
   .chip2 > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
