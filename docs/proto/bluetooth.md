@@ -7,7 +7,7 @@ gets the normal `unauthorized` `error`. Compatibility rules: [compat.md](compat.
 
 | Code | Type | Direction | Fields |
 |---|---|---|---|
-| 35 | `bt_pair` | client -> hub | `on: bool`, `secs: u16?` (default 120, 1..300), `transport: "any"\|"classic"\|"le"?` (default any), `mode: "host"\|"remote"?` (default host) |
+| 35 | `bt_pair` | client -> hub | `on: bool`, `secs: u16?` (default 120, 1..300), `transport: "any"\|"classic"\|"le"?` (default any), `mode: "host"\|"remote"?` (default host), `addr: str?` (`AA:BB:CC:DD:EE:FF`, either case; see "Picking a remote") |
 | 36 | `bt_state` | hub -> client | see below; also the reply to `bt_pair` / `bt_forget` (same id), and pushed (id 0) on any change |
 | 37 | `bt_forget` | client -> hub | `slot: u8`, `kind: "host"\|"remote"?` (default host) |
 | 38 | `bt_key` | client -> hub | `slot: u8`, `page: 7\|12`, `usage: u16`, `action: "down"\|"up"\|"press"` (test-fire at a host) |
@@ -25,7 +25,7 @@ send, LE supported). Values come from the link, never constants. Absent: no `bt_
 
 ## bt_state
 
-`{state, discoverable, discoverable_secs?, le?, gen?, pairing?, hosts, remotes?}`
+`{state, discoverable, discoverable_secs?, le?, gen?, pairing?, hosts, remotes?, candidates?}`
 
 - `state`: `off` | `starting` | `ready` | `no_adapter` | `disabled`.
 - `discoverable_secs`: seconds left while discoverable.
@@ -33,11 +33,24 @@ send, LE supported). Values come from the link, never constants. Absent: no `bt_
 - `hosts`: `[{slot, addr, name?, transport: "classic"|"le", connected}]`.
 - `remotes`: `[{slot, addr, name?, connected, battery?}]` (`battery` percent, omitted when unknown).
 
+- `candidates`: `[{addr, name?, rssi}]`, at most 16, `rssi` dBm (int8). Present (non-empty) only while a remote-mode
+  window is open and LE remotes have been seen; absent otherwise. Same `addr` / `name` validation as hosts. Membership
+  changes (a device appears or drops out) push a `bt_state`; RSSI-only changes do not, so `rssi` can be stale.
+
 Valid slots are `0 .. hosts_max-1` (hosts) and `0 .. remotes_max-1` (remotes).
+
+## Picking a remote
+
+The hub never bonds the first advertiser. `bt_pair {on: true, mode: "remote"}` without `addr` opens the window and
+scans: it only fills `candidates`. The client shows them and sends `bt_pair {on: true, mode: "remote", addr}` for the
+chosen one; the reply is the usual snapshot and the outcome arrives as a `bt_state` push with `pairing`
+(`kind: "remote"`). `addr` is matched case-insensitively against the current candidates. Errors: `no_candidate` (not
+in the current list, e.g. it went away), `bad_addr` (malformed, or `addr` with `mode: host` or `on: false`).
+Old clients that send no `addr` and ignore `candidates` keep working but get no bond.
 
 ## Errors
 
-`unsupported` (no Bluetooth, or `mode: remote` without remote support), `bad_secs`, `bad_transport`, `bad_mode`,
+`bad_addr`, `no_candidate`, `unsupported` (no Bluetooth, or `mode: remote` without remote support), `bad_secs`, `bad_transport`, `bad_mode`,
 `bad_kind`, `bad_page`, `bad_action`, `no_le`, `no_slot` (out of range or nothing paired there), `not_connected`,
 `bt_not_ready`, `bt_busy`. Wrong types, missing fields and out-of-range numbers (for example `slot` > 255) are the
 codec's ordinary `error`.

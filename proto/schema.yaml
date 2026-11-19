@@ -280,6 +280,7 @@ messages:
       - {name: secs, type: u16, optional: true}
       - {name: transport, type: str, optional: true}  # any (default) | classic | le
       - {name: mode, type: str, optional: true}       # host (default: be discoverable to a phone/TV) | remote (scan for and bond an advertising LE remote; transport any|le)
+      - {name: addr, type: str, optional: true}       # mode remote, on: AA:BB:CC:DD:EE:FF of a listed bt_state candidate to bond; absent = open the window and scan only
 
   # state: off | starting | ready | no_adapter | disabled. pairing = the last pairing outcome
   # {result: ok|failed|refused, addr, name?, transport?, kind?: host|remote}. hosts = [{slot, addr, name?, transport: classic|le, connected}].
@@ -295,6 +296,7 @@ messages:
       - {name: pairing, type: json, optional: true}
       - {name: hosts, type: json}
       - {name: remotes, type: json, optional: true}  # bonded LE remotes (input): [{slot, addr, name?, connected, battery?}]
+      - {name: candidates, type: json, optional: true}  # LE remotes seen while a remote-mode window is open (max 16): [{addr, name?, rssi}]
 
   - name: bt_forget
     code: 37

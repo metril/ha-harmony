@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #include "hub/bt_link.h"
@@ -929,6 +930,18 @@ static cJSON *bt_state_json(void) {
         if (st.remotes[i].battery >= 0) cJSON_AddNumberToObject(e, "battery", st.remotes[i].battery);
         cJSON_AddItemToArray(remotes, e);
     }
+    cJSON *cands = st.n_candidates ? cJSON_AddArrayToObject(o, "candidates") : NULL;
+    for (unsigned i = 0; cands && i < st.n_candidates && i < BT_LINK_CANDIDATES_CAP; i++) {
+        st.candidates[i].addr[BT_LINK_ADDR_MAX - 1] = 0;
+        st.candidates[i].name[BT_LINK_NAME_MAX - 1] = 0;
+        if (!bt_addr_ok(st.candidates[i].addr)) continue;
+        cJSON *e = cJSON_CreateObject();
+        if (!e) break;
+        cJSON_AddStringToObject(e, "addr", st.candidates[i].addr);
+        if (bt_name_ok(st.candidates[i].name)) cJSON_AddStringToObject(e, "name", st.candidates[i].name);
+        cJSON_AddNumberToObject(e, "rssi", st.candidates[i].rssi);
+        cJSON_AddItemToArray(cands, e);
+    }
     return o;
 }
 
@@ -996,6 +1009,25 @@ static int on_bt_pair(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *
         if (t == BT_TRANSPORT_CLASSIC) return reply_err(id, "bad_transport", "a remote pairs over le", reply, cap, len);
         if (!lim.remotes_max) return reply_err(id, "unsupported", "this hub does not support Bluetooth remotes", reply, cap, len);
         if (!lim.le) return reply_err(id, "no_le", "this hub's adapter has no Bluetooth LE", reply, cap, len);
+    }
+    const cJSON *ja = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "addr");
+    if (ja) { /* a pick: only "remote, on" takes an address, and it must be a listed candidate */
+        if (mode != BT_MODE_REMOTE || !cJSON_IsTrue(on) || !bt_addr_ok(ja->valuestring))
+            return reply_err(id, "bad_addr", "addr must be AA:BB:CC:DD:EE:FF with mode remote and on", reply, cap, len);
+        static struct bt_link_state st; /* event-loop thread only */
+        bt_link_state(&st);
+        const char *pick = NULL;
+        for (unsigned i = 0; i < st.n_candidates && i < BT_LINK_CANDIDATES_CAP; i++) {
+            st.candidates[i].addr[BT_LINK_ADDR_MAX - 1] = 0;
+            if (bt_addr_ok(st.candidates[i].addr) && !strcasecmp(st.candidates[i].addr, ja->valuestring)) {
+                pick = st.candidates[i].addr;
+                break;
+            }
+        }
+        if (!pick) return reply_err(id, "no_candidate", "that device is not in the candidate list", reply, cap, len);
+        int prc = bt_link_pair_remote(pick);
+        if (prc != BT_LINK_OK) return bt_err(id, prc, reply, cap, len);
+        return bt_reply_state(id, reply, cap, len);
     }
     int rc = bt_link_pair(cJSON_IsTrue(on), secs, t, mode);
     if (rc != BT_LINK_OK) return bt_err(id, rc, reply, cap, len);

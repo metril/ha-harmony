@@ -11,6 +11,10 @@ int bt_link_pair(bool on, unsigned secs, enum bt_link_transport transport, enum 
     (void)mode;
     return BT_LINK_E_NOT_READY;
 }
+int bt_link_pair_remote(const char *addr) {
+    (void)addr;
+    return BT_LINK_E_NOT_READY;
+}
 int bt_link_forget(enum bt_link_kind kind, unsigned slot) {
     (void)kind;
     (void)slot;

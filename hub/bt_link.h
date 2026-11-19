@@ -15,7 +15,8 @@
 
 #define BT_LINK_HOSTS_CAP 255 /* storage bound of struct bt_link_state; the real limit is bt_link_limits().hosts_max */
 #define BT_LINK_REMOTES_CAP 32/* storage bound; the real limit is bt_link_limits().remotes_max */
-#define BT_LINK_ADDR_MAX 18  /* "AA:BB:CC:DD:EE:FF" + NUL */
+#define BT_LINK_CANDIDATES_CAP 16 /* storage and wire bound of the candidate list */
+#define BT_LINK_ADDR_MAX 18 /* "AA:BB:CC:DD:EE:FF" + NUL */
 #define BT_LINK_NAME_MAX 49  /* UTF-8, at most 48 bytes + NUL; "" = no name */
 
 #define BT_PAGE_KEYBOARD 7
@@ -51,6 +52,13 @@ struct bt_link_remote {
     int8_t battery; /* percent 0..100, -1 = unknown */
 };
 
+/* An LE remote seen advertising while a remote-mode pairing window is open. */
+struct bt_link_candidate {
+    char addr[BT_LINK_ADDR_MAX];
+    char name[BT_LINK_NAME_MAX]; /* "" = unknown */
+    int8_t rssi;                 /* dBm */
+};
+
 struct bt_link_state {
     uint32_t gen; /* bumped by the link on every change (never by the discoverable_secs countdown) */
     enum bt_link_status status;
@@ -66,6 +74,8 @@ struct bt_link_state {
     struct bt_link_host hosts[BT_LINK_HOSTS_CAP];
     uint8_t n_remotes;
     struct bt_link_remote remotes[BT_LINK_REMOTES_CAP];
+    uint8_t n_candidates;         /* only while a remote-mode window is open, else 0 */
+    struct bt_link_candidate candidates[BT_LINK_CANDIDATES_CAP];
 };
 
 /* Contract details (the implementation, not the hub, owns these):
@@ -78,6 +88,10 @@ struct bt_link_state {
  *    moment, not the outcome. The outcome arrives as a later bt_state push.
  *  - The listener fires once per real change (it only sets a flag in the hub; one bt_state per event-loop pass).
  *    It must NOT fire for the discoverable_secs countdown: clients count down locally from the last value.
+ *  - Candidates: while a remote-mode window is open the link scans and keeps up to BT_LINK_CANDIDATES_CAP advertising
+ *    LE remotes (strongest first or first seen: its choice); the list is cleared when the window closes or the helper
+ *    dies. The listener fires when the list's MEMBERSHIP changes (a device appears or drops out), NOT for an
+ *    RSSI-only change; the hub reports whatever the cached snapshot holds.
  *  - A caller wakes the event loop itself when it changes state from another thread (the hub only polls its flag
  *    in hub_flush_pending). */
 /* true when this build has Bluetooth (hello_ack carries `bt`, the bt_* requests are served). */
@@ -86,6 +100,10 @@ bool bt_link_available(void);
  * mode BT_MODE_HOST: become discoverable to a host; BT_MODE_REMOTE: scan for and bond an advertising LE remote
  * (transport is then ANY or LE; only offered when limits.remotes_max > 0 and limits.le). */
 int bt_link_pair(bool on, unsigned secs, enum bt_link_transport transport, enum bt_link_pair_mode mode);
+/* Bond the LE remote `addr` (AA:BB:CC:DD:EE:FF, exactly as listed in state.candidates; the hub has already checked it is
+ * a current candidate). Non-blocking: BT_LINK_OK = queued; the outcome arrives as a later state push with `pairing`
+ * (kind remote). Errors: BT_LINK_E_NOT_READY, BT_LINK_E_BUSY. */
+int bt_link_pair_remote(const char *addr);
 /* Remove the host (or bonded remote) in `slot`, disconnecting it; slot < hosts_max / remotes_max, already validated. */
 int bt_link_forget(enum bt_link_kind kind, unsigned slot);
 /* Send one HID usage (page 7 or 12, usage 0..0xFFFF and slot < hosts_max, already validated) to the host in `slot`. */

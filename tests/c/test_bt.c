@@ -296,6 +296,71 @@ static void test_remote_key_push(void) {
     CT_CHECK(has("unsupported") && !S.bt_listen);
 }
 
+static void add_cand(const char *addr, const char *name, int rssi) {
+    struct bt_link_candidate *c = &g_bt_fake.state.candidates[g_bt_fake.state.n_candidates++];
+    snprintf(c->addr, sizeof c->addr, "%s", addr);
+    snprintf(c->name, sizeof c->name, "%s", name);
+    c->rssi = (int8_t)rssi;
+}
+
+static void test_candidates(void) {
+    setup();
+    hello();
+    /* none while no window is open */
+    send_msg("{\"v\":1,\"id\":2,\"t\":\"bt_pair\",\"d\":{\"on\":false}}");
+    CT_CHECK(!has("candidates"));
+    /* emitted, validated; bad addr / bad utf-8 name handled like hosts */
+    add_cand("AA:BB:CC:DD:EE:01", "Remote A", -50);
+    add_cand("aa:bb:cc:dd:ee:02", "bad\xff", -127);
+    add_cand("nope", "x", -1);
+    send_msg("{\"v\":1,\"id\":3,\"t\":\"bt_pair\",\"d\":{\"on\":true,\"mode\":\"remote\"}}"); /* no addr: scan only */
+    CT_CHECK(has("\"candidates\":[{\"addr\":\"AA:BB:CC:DD:EE:01\",\"name\":\"Remote A\",\"rssi\":-50},"
+                 "{\"addr\":\"aa:bb:cc:dd:ee:02\",\"rssi\":-127}]"));
+    CT_EQ(g_bt_fake.pair_remote_calls, 0);
+    CT_CHECK(g_bt_fake.last_mode == BT_MODE_REMOTE);
+    /* pick: either case, the link gets the listed spelling */
+    send_msg("{\"v\":1,\"id\":4,\"t\":\"bt_pair\",\"d\":{\"on\":true,\"mode\":\"remote\",\"addr\":\"AA:bb:CC:dd:EE:02\"}}");
+    CT_CHECK(has("\"t\":\"bt_state\"") && g_bt_fake.pair_remote_calls == 1 && !strcmp(g_bt_fake.last_pick, "aa:bb:cc:dd:ee:02"));
+    /* not a candidate */
+    send_msg("{\"v\":1,\"id\":5,\"t\":\"bt_pair\",\"d\":{\"on\":true,\"mode\":\"remote\",\"addr\":\"11:22:33:44:55:66\"}}");
+    CT_CHECK(has("no_candidate") && g_bt_fake.pair_remote_calls == 1);
+    /* the invalid list entry is not pickable either */
+    send_msg("{\"v\":1,\"id\":6,\"t\":\"bt_pair\",\"d\":{\"on\":true,\"mode\":\"remote\",\"addr\":\"nope\"}}");
+    CT_CHECK(has("bad_addr"));
+    /* malformed */
+    const char *bad[] = {"AA:BB:CC:DD:EE", "AA-BB-CC-DD-EE-01", "AA:BB:CC:DD:EE:0G", "AA:BB:CC:DD:EE:011", ""};
+    for (unsigned i = 0; i < sizeof bad / sizeof *bad; i++) {
+        char m[200];
+        snprintf(m, sizeof m, "{\"v\":1,\"id\":7,\"t\":\"bt_pair\",\"d\":{\"on\":true,\"mode\":\"remote\",\"addr\":\"%s\"}}", bad[i]);
+        send_msg(m);
+        CT_CHECK(has("bad_addr"));
+    }
+    /* addr with host mode (explicit or default), or with on:false */
+    send_msg("{\"v\":1,\"id\":8,\"t\":\"bt_pair\",\"d\":{\"on\":true,\"mode\":\"host\",\"addr\":\"AA:BB:CC:DD:EE:01\"}}");
+    CT_CHECK(has("bad_addr"));
+    send_msg("{\"v\":1,\"id\":9,\"t\":\"bt_pair\",\"d\":{\"on\":true,\"addr\":\"AA:BB:CC:DD:EE:01\"}}");
+    CT_CHECK(has("bad_addr"));
+    send_msg("{\"v\":1,\"id\":10,\"t\":\"bt_pair\",\"d\":{\"on\":false,\"mode\":\"remote\",\"addr\":\"AA:BB:CC:DD:EE:01\"}}");
+    CT_CHECK(has("bad_addr") && g_bt_fake.pair_remote_calls == 1);
+    /* link errors map like other pairing errors */
+    g_bt_fake.next_rc = BT_LINK_E_BUSY;
+    send_msg("{\"v\":1,\"id\":11,\"t\":\"bt_pair\",\"d\":{\"on\":true,\"mode\":\"remote\",\"addr\":\"AA:BB:CC:DD:EE:01\"}}");
+    CT_CHECK(has("bt_busy"));
+    g_bt_fake.next_rc = 0;
+    /* old client: no addr behaves as before; membership change reaches the push */
+    add_cand("AA:BB:CC:DD:EE:03", "", -70);
+    notify();
+    CT_CHECK(seen_n == 1 && strstr(seen_json, "AA:BB:CC:DD:EE:03") && strstr(seen_json, "\"rssi\":-70"));
+    /* 16 at most on the wire; the list is cleared when the link clears it */
+    g_bt_fake.state.n_candidates = 0;
+    for (unsigned i = 0; i < 16; i++) add_cand("AA:BB:CC:DD:EE:10", "n", -1);
+    send_msg("{\"v\":1,\"id\":12,\"t\":\"bt_pair\",\"d\":{\"on\":false}}");
+    CT_CHECK(has("candidates"));
+    g_bt_fake.state.n_candidates = 0;
+    send_msg("{\"v\":1,\"id\":13,\"t\":\"bt_pair\",\"d\":{\"on\":false}}");
+    CT_CHECK(!has("candidates"));
+}
+
 static void test_max_hosts_fit_one_frame(void) {
     setup();
     hello();
@@ -312,8 +377,9 @@ static void test_max_hosts_fit_one_frame(void) {
         memcpy(r->name, worst, sizeof worst);
         r->battery = 100;
     }
+    for (unsigned i = 0; i < 16; i++) add_cand("AA:BB:CC:DD:EE:FF", worst, -40);
     send_msg("{\"v\":1,\"id\":2,\"t\":\"bt_pair\",\"d\":{\"on\":false}}");
-    CT_CHECK(has("\"t\":\"bt_state\"") && has("\"slot\":254"));
+    CT_CHECK(has("\"t\":\"bt_state\"") && has("\"slot\":254") && has("\"candidates\""));
     CT_CHECK(strlen(reply) < 65536);
     send_msg("{\"v\":1,\"id\":3,\"t\":\"bt_forget\",\"d\":{\"slot\":254}}"); /* valid: hosts_max is 255 */
     CT_CHECK(has("\"t\":\"bt_state\""));
@@ -410,6 +476,7 @@ int main(void) {
     CT_RUN(test_state_json_and_broadcast);
     CT_RUN(test_remotes);
     CT_RUN(test_remote_key_push);
+    CT_RUN(test_candidates);
     CT_RUN(test_max_hosts_fit_one_frame);
     CT_RUN(test_untrusted_link_data);
     CT_RUN(test_gen_and_coalescing_and_hello_state);

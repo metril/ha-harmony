@@ -9,7 +9,9 @@ struct bt_fake {
     struct bt_link_limits limits;
     struct bt_link_state state;
     int next_rc;  /* returned by pair/forget/key while non-zero */
-    int pair_calls, forget_calls, key_calls;
+    int pair_remote_calls;
+    char last_pick[BT_LINK_ADDR_MAX];
+    int pair_calls,forget_calls, key_calls;
     bool last_on;
     enum bt_link_pair_mode last_mode;
     enum bt_link_kind last_kind;

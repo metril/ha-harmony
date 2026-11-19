@@ -50,6 +50,13 @@ def test_old_and_new_peers_ignore_unknown_fields():
     assert decode_ws(old)[1].keys() == {"state", "discoverable", "hosts"}
     # an old client's bt_pair / bt_forget (no mode, kind, transport) is still valid
     assert decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": {"on": True, "future": 1}})[1] == {"on": True}
+    # candidates / addr: an old hub's bt_state has neither, an old client's bt_pair has no addr; unknown fields inside
+    # a candidate pass through (json field)
+    cand = {"state": "ready", "discoverable": False, "hosts": [], "candidates": [{"addr": "AA:BB:CC:DD:EE:01", "rssi": -50, "x": 1}]}
+    assert decode_ws({"v": 1, "id": 0, "t": "bt_state", "d": cand})[1] == cand
+    pick = {"on": True, "mode": "remote", "addr": "AA:BB:CC:DD:EE:01"}
+    assert decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": pick})[1] == pick
+    assert "addr" not in decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": {"on": True, "mode": "remote"}})[1]
     # senders stay strict
     with pytest.raises(ProtoError):
         encode_ws(MsgType.BT_FORGET, {"slot": 1, "extra": 1})

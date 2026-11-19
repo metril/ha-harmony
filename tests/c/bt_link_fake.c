@@ -1,5 +1,6 @@
 #include "bt_link_fake.h"
 
+#include <stdio.h>
 #include <string.h>
 
 struct bt_fake g_bt_fake;
@@ -40,6 +41,12 @@ int bt_link_pair(bool on, unsigned secs, enum bt_link_transport transport, enum 
     g_bt_fake.state.discoverable = on;
     g_bt_fake.state.discoverable_secs = on ? (uint16_t)secs : 0;
     return BT_LINK_OK;
+}
+
+int bt_link_pair_remote(const char *addr) {
+    g_bt_fake.pair_remote_calls++;
+    snprintf(g_bt_fake.last_pick, sizeof g_bt_fake.last_pick, "%s", addr);
+    return g_bt_fake.next_rc ? g_bt_fake.next_rc : BT_LINK_OK;
 }
 
 int bt_link_forget(enum bt_link_kind kind, unsigned slot) {
