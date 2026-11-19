@@ -6,7 +6,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -70,12 +72,9 @@ static void test_big_loads(void) {
     hp_map_free(&m);
     free(cfg);
 
-    /* 50,000 commands: over the hub's default budget, within a larger device's */
+    /* 50,000 commands: the tables are ~6 MB, within the default budget (no parse tree to pay for) */
     cfg = gen(200, 50000, 0, &n);
     hp_map_init(&m);
-    CT_EQ(hp_map_load(&m, cfg, n), -HP_E_TOOBIG);
-    CT_CHECK(strstr(hp_map_last_error(&m), "KiB of hub memory") != NULL);
-    hp_map_set_budget(&m, 64u * 1024 * 1024);
     t0 = cpu_s();
     CT_EQ(hp_map_load(&m, cfg, n), 0);
     CT_CHECK(cpu_s() - t0 < 15.0);
@@ -86,6 +85,14 @@ static void test_big_loads(void) {
         CT_CHECK(hp_map_find_cmd(&m, i / 250, name) == i);
     }
     CT_CHECK(cpu_s() - t0 < 2.0); /* hashed: nothing linear per lookup */
+    hp_map_free(&m);
+    free(cfg);
+
+    /* 200,000 commands: over the budget, rejected before the tables are allocated */
+    cfg = gen(800, 200000, 0, &n);
+    hp_map_init(&m);
+    CT_EQ(hp_map_load(&m, cfg, n), -HP_E_TOOBIG);
+    CT_CHECK(strstr(hp_map_last_error(&m), "KiB of hub memory") != NULL);
     hp_map_free(&m);
     free(cfg);
 }
@@ -145,8 +152,8 @@ static void test_estimate_golden(void) {
     size_t est = 0;
     CT_EQ(hp_map_estimate(SMALL, strlen(SMALL), &est), 0);
     CT_EQ(strlen(SMALL), 135);
-    CT_EQ(est, 3 * 135 + 18 * HP_MAP_NODE_BYTES + HP_MAP_DEV_BYTES + 2 * HP_MAP_CMD_BYTES + 4 * HP_MAP_WORD_BYTES);
-    CT_EQ(est, 3 * 135 + 18 * 80 + 224 + 240 + 8);
+    CT_EQ(est, HP_MAP_SLACK_BYTES + HP_MAP_DEV_BYTES + 2 * HP_MAP_CMD_BYTES + 4 * HP_MAP_WORD_BYTES);
+    CT_EQ(est, 1573336);
     CT_EQ(hp_map_estimate("{", 1, &est), -HP_E_INVAL);
 }
 
@@ -264,10 +271,7 @@ static void test_chunked_config(void) {
     CT_EQ(send_chunk(&s, 2, (uint32_t)n, cfg + 1000, 1000), HP_DISPATCH_OK);
     CT_CHECK(strstr(rep, "\"ok\":false") && strstr(rep, "out of order"));
     CT_EQ(H.map.ncmds, 3000);
-    CT_CHECK(H.chunk_buf == NULL);
-    /* a total over the budget is refused on the first chunk */
-    CT_EQ(send_chunk(&s, 0, 100u * 1024 * 1024, cfg, 10), HP_DISPATCH_OK);
-    CT_CHECK(strstr(rep, "\"ok\":false") && strstr(rep, "KiB"));
+    CT_CHECK(H.xfer == NULL);
     /* hello_ack carries the limits */
     memset(rep, 0, sizeof rep);
     hp_session_t anon = {0};
@@ -275,7 +279,85 @@ static void test_chunked_config(void) {
     CT_EQ(hp_dispatch(hello, strlen(hello), &tbl, &anon, rep, sizeof rep, &rl), HP_DISPATCH_OK);
     CT_CHECK(strstr(rep, "\"limits\"") && strstr(rep, "\"budget\":8388608") && strstr(rep, "\"max_devices\":255"));
     hub_shutdown(&H);
+    hp_map_free(&H.map);
     free(cfg);
+}
+
+static bool push(hp_session_t *s, const char *cfg, size_t n) { /* config_chunk transfer; true = loaded */
+    uint32_t seq = 0;
+    for (size_t off = 0; off < n; off += 7000, seq++) {
+        size_t dl = n - off < 7000 ? n - off : 7000;
+        send_chunk(s, seq, (uint32_t)n, cfg + off, dl);
+        if (!strstr(rep, "\"ok\":true")) return false;
+    }
+    return true;
+}
+
+static size_t file_size(const char *p) {
+    struct stat st;
+    return stat(p, &st) == 0 ? (size_t)st.st_size : 0;
+}
+
+/* The received text becomes the cache file; a config that does not load, is over budget, or cannot be
+ * written (full flash: simulated by a file size limit) leaves the previous map AND cache file untouched. */
+static void test_cache_is_all_or_nothing(void) {
+    char path[] = "/tmp/hp_budget_cache_XXXXXX";
+    int fd = mkstemp(path);
+    CT_CHECK(fd >= 0);
+    close(fd);
+    unlink(path);
+    char tmp[64];
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    hub_ctx_init(&H);
+    hub_install(&tbl, &H);
+    H.cache_path = path;
+    hp_session_t s = {.authed = true};
+    size_t n, n2;
+    char *good = gen(4, 3000, 0, &n), *other = gen(4, 2000, 0, &n2);
+    CT_CHECK(push(&s, good, n));
+    size_t sz = file_size(path);
+    CT_CHECK(sz > n);
+    char hash[9], h2[9];
+    hp_map_hash_hex(&H.map, hash);
+    CT_CHECK(access(tmp, F_OK) != 0); /* the temp file is gone */
+    /* it is a valid cache: a fresh map loads it by streaming */
+    hp_map_t boot;
+    hp_map_init(&boot);
+    CT_EQ(hp_map_load_cache(&boot, path), 0);
+    CT_EQ(boot.ncmds, 3000);
+    hp_map_free(&boot);
+
+    const char *bad = "{\"format\":2,\"devices\":[{\"id\":\"a\",\"commands\":{\"x\":{\"proto\":\"nope\"}}}]}";
+    CT_CHECK(!push(&s, bad, strlen(bad)));
+    CT_CHECK(strstr(rep, "protocol"));
+    size_t keep = hp_map_budget(&H.map);
+    hp_map_set_budget(&H.map, 1600u * 1024); /* below slack + 2000 commands */
+    CT_CHECK(!push(&s, other, n2));
+    CT_CHECK(strstr(rep, "KiB of hub memory"));
+    hp_map_set_budget(&H.map, keep);
+    /* a full flash: writes fail partway */
+    struct rlimit old, lim = {4000, 0};
+    getrlimit(RLIMIT_FSIZE, &old);
+    lim.rlim_max = old.rlim_max;
+    signal(SIGXFSZ, SIG_IGN);
+    setrlimit(RLIMIT_FSIZE, &lim);
+    CT_CHECK(!push(&s, other, n2));
+    setrlimit(RLIMIT_FSIZE, &old);
+    CT_CHECK(strstr(rep, "flash") || strstr(rep, "space"));
+    CT_EQ(H.map.ncmds, 3000);
+    hp_map_hash_hex(&H.map, h2);
+    CT_CHECK(!strcmp(hash, h2));
+    CT_EQ(file_size(path), sz);
+    CT_CHECK(access(tmp, F_OK) != 0);
+    /* and a good one afterwards replaces both */
+    CT_CHECK(push(&s, other, n2));
+    CT_EQ(H.map.ncmds, 2000);
+    CT_CHECK(file_size(path) != sz);
+    hub_shutdown(&H);
+    hp_map_free(&H.map);
+    unlink(path);
+    free(good);
+    free(other);
 }
 
 int main(int argc, char **argv) {
@@ -283,9 +365,9 @@ int main(int argc, char **argv) {
     if (argc > 2 && !strcmp(argv[1], "peak")) { /* child of test_peak_memory */
         size_t grown = 0, est = 0, text = 0;
         int rc = peak_child(argc > 3 ? (size_t)atol(argv[3]) : 5000, (size_t)atoi(argv[2]), &grown, &est, &text);
-        /* The estimate models the 32-bit hub; a 64-bit host's pointers (cJSON nodes) are twice as wide. The received
-         * text is already resident before the load, so it is not part of the growth. */
-        size_t limit = (est - text) * (sizeof(void *) == 8 ? 3 : 2) / 2;
+        /* tables + slack; the text (a caller's buffer here) was resident before the load and no tree of it is built */
+        size_t limit = est;
+        (void)text;
         fprintf(stderr, "peak: load rc=%d grew %zu B, estimate %zu B (limit %zu)\n", rc, grown, est, limit);
         return rc == 0 && grown <= limit ? 0 : 1;
     }
@@ -295,5 +377,6 @@ int main(int argc, char **argv) {
     CT_RUN(test_failed_load_keeps_old_map);
     CT_RUN(test_parse_tree_alloc_failure);
     CT_RUN(test_chunked_config);
+    CT_RUN(test_cache_is_all_or_nothing);
     return CT_DONE();
 }

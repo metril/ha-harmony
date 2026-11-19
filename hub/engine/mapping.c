@@ -3,6 +3,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <libgen.h>
+#include <sys/statvfs.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -73,6 +75,7 @@ void hp_map_free(hp_map_t *m) {
     m->src = NULL;
     m->src_len = 0;
     m->est_bytes = 0;
+    m->loaded = false;
 }
 
 void hp_map_set_budget(hp_map_t *m, size_t bytes) { m->budget = bytes; }
@@ -83,8 +86,10 @@ void hp_map_set_out(hp_map_t *m, hp_irout_t *out) { m->out = out; }
 void hp_map_set_actops(hp_map_t *m, const hp_map_actops_t *ops) { m->actops = ops ? *ops : (hp_map_actops_t){0}; }
 const char *hp_map_last_error(const hp_map_t *m) { return m->err; }
 
-uint32_t hp_map_crc32(const uint8_t *p, size_t n) {
-    uint32_t c = 0xFFFFFFFFu;
+uint32_t hp_map_crc32(const uint8_t *p, size_t n) { return hp_map_crc32_update(0, p, n); }
+
+uint32_t hp_map_crc32_update(uint32_t crc, const uint8_t *p, size_t n) {
+    uint32_t c = ~crc;
     for (size_t i = 0; i < n; i++) {
         c ^= p[i];
         for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (uint32_t)-(int32_t)(c & 1));
@@ -94,7 +99,7 @@ uint32_t hp_map_crc32(const uint8_t *p, size_t n) {
 
 bool hp_map_hash_hex(const hp_map_t *m, char out[9]) {
     out[0] = '\0';
-    if (!m->src) return false;
+    if (!m->loaded) return false;
     snprintf(out, 9, "%08x", (unsigned)m->hash);
     return true;
 }
@@ -429,74 +434,58 @@ static int parse_steps(hp_map_t *m, const cJSON *j, hp_action_t *out, uint8_t *n
     return 0;
 }
 
-/* Adds the entries of a {"name": <ir>} object to tbl (commands or inputs; `idx` is their hash index,
- * both sized at load for every entry of the config). */
-static int parse_irmap(hp_map_t *m, const cJSON *j, int dev, hp_devcmd_t *tbl, uint32_t *n, uint32_t *idx,
-                       uint32_t mask, const char *what) {
-    if (!j) return 0;
-    if (!cJSON_IsObject(j)) return fail(m, INVAL, "%s must be an object", what);
-    for (const cJSON *it = j->child; it; it = it->next) {
-        hp_devcmd_t *e = &tbl[*n];
-        memset(e, 0, sizeof *e);
-        e->dev = (uint8_t)dev;
-        int r = it->string ? parse_name(m, &(cJSON){.type = cJSON_String, .valuestring = it->string}, e->name, what)
-                           : INVAL;
-        if (r < 0) return r;
-        if (find_named_i(tbl, idx, mask, dev, e->name) >= 0) return fail(m, INVAL, "duplicate %s '%s'", what, e->name);
-        if ((r = parse_ir_v2(m, it, &e->act)) < 0) return r;
-        idx_put(idx, mask, hname((uint32_t)dev, e->name), *n);
-        (*n)++;
-    }
+/* Adds one {"name": <ir>} entry to tbl (commands or inputs; `idx` is their hash index, both sized
+ * at load for every entry of the config). */
+static int add_irmap_entry(hp_map_t *m, const char *name, const cJSON *val, int dev, hp_devcmd_t *tbl, uint32_t *n,
+                           uint32_t *idx, uint32_t mask, const char *what) {
+    hp_devcmd_t *e = &tbl[*n];
+    memset(e, 0, sizeof *e);
+    e->dev = (uint8_t)dev;
+    int r = parse_name(m, &(cJSON){.type = cJSON_String, .valuestring = (char *)name}, e->name, what);
+    if (r < 0) return r;
+    if (find_named_i(tbl, idx, mask, dev, e->name) >= 0) return fail(m, INVAL, "duplicate %s '%s'", what, e->name);
+    if ((r = parse_ir_v2(m, val, &e->act)) < 0) return r;
+    idx_put(idx, mask, hname((uint32_t)dev, e->name), *n);
+    (*n)++;
     return 0;
 }
 
-static int parse_devices(hp_map_t *m, const cJSON *j) {
-    if (!j) return 0;
-    if (!cJSON_IsArray(j)) return fail(m, INVAL, "devices must be an array");
-    for (const cJSON *d = j->child; d; d = d->next) {
-        if (m->ndevs >= HP_MAP_MAX_DEVICES) return fail(m, TOOBIG, "more than %d devices", HP_MAP_MAX_DEVICES);
-        if (!cJSON_IsObject(d)) return fail(m, INVAL, "device must be an object");
-        hp_device_t *dev = &m->devs[m->ndevs];
-        int r = parse_name(m, cJSON_GetObjectItemCaseSensitive(d, "id"), dev->id, "device id");
-        if (r < 0) return r;
-        if (find_dev_i(m, dev->id) >= 0) return fail(m, INVAL, "duplicate device id '%s'", dev->id);
-        const cJSON *nm = cJSON_GetObjectItemCaseSensitive(d, "name");
-        if (nm) {
-            if ((r = parse_name(m, nm, dev->name, "device name")) < 0) return r;
-        } else {
-            memcpy(dev->name, dev->id, sizeof dev->name);
-        }
-        const cJSON *st = cJSON_GetObjectItemCaseSensitive(d, "settle_ms");
-        if (st) {
-            if (!int_in(st, 0, 60000)) return fail(m, INVAL, "settle_ms must be 0..60000");
-            dev->settle_ms = (uint16_t)st->valuedouble;
-        }
-        const cJSON *pw = cJSON_GetObjectItemCaseSensitive(d, "power");
-        if (pw) {
-            const cJSON *tg = cJSON_IsObject(pw) ? cJSON_GetObjectItemCaseSensitive(pw, "toggle") : NULL;
-            const cJSON *on = cJSON_IsObject(pw) ? cJSON_GetObjectItemCaseSensitive(pw, "on") : NULL;
-            const cJSON *off = cJSON_IsObject(pw) ? cJSON_GetObjectItemCaseSensitive(pw, "off") : NULL;
-            if (tg && !on && !off) {
-                dev->pwr = HP_PWR_TOGGLE;
-                if ((r = parse_ir_v2(m, tg, &dev->pwr_on)) < 0) return r;
-            } else if (!tg && on && off) {
-                dev->pwr = HP_PWR_ONOFF;
-                if ((r = parse_ir_v2(m, on, &dev->pwr_on)) < 0) return r;
-                if ((r = parse_ir_v2(m, off, &dev->pwr_off)) < 0) return r;
-            } else {
-                return fail(m, INVAL, "device '%s' power needs toggle, or both on and off", dev->id);
-            }
-        }
-        int idx = m->ndevs;
-        idx_put(m->idx_dev, m->mask_dev, hname(0, dev->id), (uint32_t)idx);
-        m->ndevs++; /* visible to the lookups below */
-        if ((r = parse_irmap(m, cJSON_GetObjectItemCaseSensitive(d, "inputs"), idx, m->inputs, &m->ninputs,
-                             m->idx_in, m->mask_in, "inputs")) < 0)
-            return r;
-        if ((r = parse_irmap(m, cJSON_GetObjectItemCaseSensitive(d, "commands"), idx, m->cmds, &m->ncmds,
-                             m->idx_cmd, m->mask_cmd, "commands")) < 0)
-            return r;
+/* The device object `d` WITHOUT its commands/inputs (those are streamed): id, name, settle_ms, power. */
+static int parse_device_head(hp_map_t *m, const cJSON *d) {
+    if (m->ndevs >= HP_MAP_MAX_DEVICES) return fail(m, TOOBIG, "more than %d devices", HP_MAP_MAX_DEVICES);
+    hp_device_t *dev = &m->devs[m->ndevs];
+    int r = parse_name(m, cJSON_GetObjectItemCaseSensitive(d, "id"), dev->id, "device id");
+    if (r < 0) return r;
+    if (find_dev_i(m, dev->id) >= 0) return fail(m, INVAL, "duplicate device id '%s'", dev->id);
+    const cJSON *nm = cJSON_GetObjectItemCaseSensitive(d, "name");
+    if (nm) {
+        if ((r = parse_name(m, nm, dev->name, "device name")) < 0) return r;
+    } else {
+        memcpy(dev->name, dev->id, sizeof dev->name);
     }
+    const cJSON *st = cJSON_GetObjectItemCaseSensitive(d, "settle_ms");
+    if (st) {
+        if (!int_in(st, 0, 60000)) return fail(m, INVAL, "settle_ms must be 0..60000");
+        dev->settle_ms = (uint16_t)st->valuedouble;
+    }
+    const cJSON *pw = cJSON_GetObjectItemCaseSensitive(d, "power");
+    if (pw) {
+        const cJSON *tg = cJSON_IsObject(pw) ? cJSON_GetObjectItemCaseSensitive(pw, "toggle") : NULL;
+        const cJSON *on = cJSON_IsObject(pw) ? cJSON_GetObjectItemCaseSensitive(pw, "on") : NULL;
+        const cJSON *off = cJSON_IsObject(pw) ? cJSON_GetObjectItemCaseSensitive(pw, "off") : NULL;
+        if (tg && !on && !off) {
+            dev->pwr = HP_PWR_TOGGLE;
+            if ((r = parse_ir_v2(m, tg, &dev->pwr_on)) < 0) return r;
+        } else if (!tg && on && off) {
+            dev->pwr = HP_PWR_ONOFF;
+            if ((r = parse_ir_v2(m, on, &dev->pwr_on)) < 0) return r;
+            if ((r = parse_ir_v2(m, off, &dev->pwr_off)) < 0) return r;
+        } else {
+            return fail(m, INVAL, "device '%s' power needs toggle, or both on and off", dev->id);
+        }
+    }
+    idx_put(m->idx_dev, m->mask_dev, hname(0, dev->id), m->ndevs);
+    m->ndevs++; /* visible to the lookups that follow */
     return 0;
 }
 
@@ -563,7 +552,6 @@ static int parse_config(hp_map_t *m, const cJSON *root) {
         m->format = (int)fmt->valuedouble;
     }
     int r;
-    if (m->format == 2 && (r = parse_devices(m, cJSON_GetObjectItemCaseSensitive(root, "devices"))) < 0) return r;
     const cJSON *acts = cJSON_GetObjectItemCaseSensitive(root, "activities");
     if (acts && !cJSON_IsArray(acts)) return fail(m, INVAL, "activities must be an array");
     if (acts && (r = scan_activities(m, acts)) < 0) return r;
@@ -579,55 +567,6 @@ static int parse_config(hp_map_t *m, const cJSON *root) {
             return r;
     }
     return 0;
-}
-
-/* ---- sizing: what a config needs, before anything is allocated */
-
-typedef struct {
-    size_t ndevs, ncmds, ninputs, keys, pool;
-} dims_t;
-
-/* Number of parsed JSON values (what cJSON allocates a node for), counted without parsing: the root,
- * every object member (its ':') and every array element. Nesting beyond 64 levels is counted
- * pessimistically (every ',' counts), cJSON refuses such documents anyway. */
-static size_t count_nodes(const char *s, size_t n) {
-    size_t nodes = 1;
-    uint64_t obj = 0; /* bit d: the container at depth d is an object */
-    unsigned depth = 0;
-    bool in_str = false;
-    for (size_t i = 0; i < n; i++) {
-        char c = s[i];
-        if (in_str) {
-            if (c == '\\') i++;
-            else if (c == '"') in_str = false;
-            continue;
-        }
-        switch (c) {
-        case '"': in_str = true; break;
-        case '{':
-            if (depth < 64) obj |= (uint64_t)1 << depth;
-            depth++;
-            break;
-        case '[': {
-            if (depth < 64) obj &= ~((uint64_t)1 << depth);
-            depth++;
-            size_t j = i + 1;
-            while (j < n && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r')) j++;
-            if (j < n && s[j] != ']') nodes++; /* first element */
-            break;
-        }
-        case '}':
-        case ']':
-            if (depth) depth--;
-            break;
-        case ':': nodes++; break;
-        case ',':
-            if (depth == 0 || depth > 64 || !(obj & ((uint64_t)1 << (depth - 1)))) nodes++; /* next array element */
-            break;
-        default: break;
-        }
-    }
-    return nodes;
 }
 
 static size_t pronto_tokens(const char *s) {
@@ -660,50 +599,290 @@ static size_t pool_words(const cJSON *j) {
     return n;
 }
 
-static void count_dims(const cJSON *root, dims_t *d) {
-    memset(d, 0, sizeof *d);
-    if (!cJSON_IsObject(root)) return;
-    const cJSON *devs = cJSON_GetObjectItemCaseSensitive(root, "devices");
-    if (cJSON_IsArray(devs)) {
-        for (const cJSON *dv = devs->child; dv; dv = dv->next) {
-            d->ndevs++;
-            if (!cJSON_IsObject(dv)) continue;
-            const cJSON *cm = cJSON_GetObjectItemCaseSensitive(dv, "commands");
-            const cJSON *in = cJSON_GetObjectItemCaseSensitive(dv, "inputs");
-            if (cJSON_IsObject(cm)) d->ncmds += (size_t)cJSON_GetArraySize(cm);
-            if (cJSON_IsObject(in)) d->ninputs += (size_t)cJSON_GetArraySize(in);
+/* ---- streaming load. The config text is never held whole in RAM and never parsed into one tree:
+ * a reader walks it (a FILE: the cache file being received, or fmemopen over a caller's text),
+ * parses ONE small value at a time with cJSON (a command, a device's header, `keys`, one
+ * activity) and frees it. Peak memory is the final tables plus the one value in hand.
+ * Pass 1 counts what the tables need (and checks the byte budget); pass 2 fills them. */
+
+typedef struct {
+    size_t ndevs, ncmds, ninputs, keys, pool;
+} dims_t;
+
+#define VAL_CMD_MAX (64u * 1024)      /* one command / device header */
+#define VAL_SECTION_MAX (128u * 1024) /* `keys`, one activity, `format`: parsed as a tree, sized in the slack */
+#define GETC(f) getc_unlocked(f)
+
+typedef struct {
+    hp_map_t *w;   /* the map being built (errors go here) */
+    FILE *f;
+    int pass;      /* 1 count, 2 fill */
+    bool fmt2;
+    dims_t d;
+    cJSON *rest;   /* format, activities, keys (small): collected in pass 1 */
+    cJSON *dev;    /* the device header being read */
+    long dev_off[2], dev_end; /* [0] inputs, [1] commands: offset of the `{`, -1 if absent; end of the device */
+    char *vb;      /* the one value in hand */
+    size_t vn, vcap, vmax;
+} sctx_t;
+
+static int vb_put(sctx_t *s, int c) {
+    if (s->vn + 1 >= s->vmax) return -1;
+    if (s->vn + 1 >= s->vcap) {
+        size_t nc = s->vcap ? s->vcap * 2 : 1024;
+        char *np = alloc_fails() ? NULL : realloc(s->vb, nc);
+        if (!np) return -2;
+        s->vb = np;
+        s->vcap = nc;
+    }
+    s->vb[s->vn++] = (char)c;
+    return 0;
+}
+
+static int rd_ws(FILE *f) {
+    int c;
+    while ((c = GETC(f)) == ' ' || c == '\t' || c == '\n' || c == '\r') {}
+    return c;
+}
+
+/* Reads the JSON value whose first character `c` was just consumed. Keeps its text in s->vb when
+ * `keep`, else skips it. */
+static int rd_value(sctx_t *s, int c, bool keep, size_t vmax) {
+    FILE *f = s->f;
+    int depth = 0, r;
+    bool in_str = false;
+    s->vn = 0;
+    s->vmax = vmax;
+#define PUT(ch) do { if (keep && (r = vb_put(s, (ch))) < 0) return r == -1 ? TOOBIG : oom(s->w); } while (0)
+    for (;; c = GETC(f)) {
+        if (c == EOF) return fail(s->w, INVAL, "config ends inside a value");
+        PUT(c);
+        if (in_str) {
+            if (c == '\\') {
+                if ((c = GETC(f)) == EOF) return fail(s->w, INVAL, "config ends inside a value");
+                PUT(c);
+            } else if (c == '"') {
+                in_str = false;
+                if (depth == 0) break;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_str = true;
+        } else if (c == '{' || c == '[') {
+            depth++;
+        } else if (c == '}' || c == ']') {
+            if (--depth <= 0) break;
+        } else if (depth == 0) { /* number / true / false / null */
+            for (;;) {
+                int n = GETC(f);
+                if (n == EOF) break;
+                if (n == ',' || n == '}' || n == ']' || n == ' ' || n == '\n' || n == '\t' || n == '\r') {
+                    ungetc(n, f);
+                    break;
+                }
+                PUT(n);
+            }
+            break;
         }
     }
-    const cJSON *keys = cJSON_GetObjectItemCaseSensitive(root, "keys");
+#undef PUT
+    if (keep) s->vb[s->vn] = '\0';
+    return 0;
+}
+
+static int too_big_value(sctx_t *s, int r, const char *what) {
+    return r == TOOBIG ? fail(s->w, TOOBIG, "%s larger than %u KiB", what, (unsigned)(s->vmax / 1024)) : r;
+}
+
+/* The value in hand as a cJSON tree (caller frees); NULL with the error recorded. */
+static cJSON *vb_tree(sctx_t *s) {
+    cJSON *t = cJSON_ParseWithLength(s->vb, s->vn);
+    if (!t) fail(s->w, INVAL, "config is not valid JSON");
+    return t;
+}
+
+/* A member key (after its opening quote was consumed as `c`) into key[cap], decoded. */
+static int rd_key(sctx_t *s, int c, char *key, size_t cap) {
+    int r = rd_value(s, c, true, 4096);
+    if (r < 0) return too_big_value(s, r, "a key");
+    if (!memchr(s->vb, '\\', s->vn)) { /* the common case: no escapes */
+        size_t n = s->vn >= 2 ? s->vn - 2 : 0;
+        if (n >= cap) n = cap - 1;
+        memcpy(key, s->vb + 1, n);
+        key[n] = '\0';
+        return 0;
+    }
+    cJSON *t = vb_tree(s);
+    if (!t) return INVAL;
+    snprintf(key, cap, "%s", cJSON_IsString(t) ? t->valuestring : "");
+    cJSON_Delete(t);
+    return 0;
+}
+
+typedef int (*member_fn)(sctx_t *s, const char *key, int c);
+
+/* Walks the object whose `{` was consumed; cb consumes each member's value (first char `c`). */
+static int rd_members(sctx_t *s, member_fn cb) {
+    char key[256];
+    int c = rd_ws(s->f);
+    if (c == '}') return 0;
+    for (;;) {
+        if (c != '"') return fail(s->w, INVAL, "config is not valid JSON");
+        int r = rd_key(s, c, key, sizeof key);
+        if (r < 0) return r;
+        if (rd_ws(s->f) != ':') return fail(s->w, INVAL, "config is not valid JSON");
+        c = rd_ws(s->f);
+        if (c == EOF) return fail(s->w, INVAL, "config ends inside a value");
+        if ((r = cb(s, key, c)) < 0) return r;
+        c = rd_ws(s->f);
+        if (c == ',') {
+            c = rd_ws(s->f);
+            continue;
+        }
+        if (c == '}') return 0;
+        return fail(s->w, INVAL, "config is not valid JSON");
+    }
+}
+
+/* ---- one device's commands / inputs, streamed member by member */
+
+static int cur_dev, cur_which; /* set around rd_members of a bulk object (single-threaded load) */
+
+static int bulk_member(sctx_t *s, const char *key, int c) {
+    hp_map_t *m = s->w;
+    int r = rd_value(s, c, true, VAL_CMD_MAX);
+    if (r < 0) return too_big_value(s, r, "a command");
+    cJSON *val = vb_tree(s);
+    if (!val) return INVAL;
+    if (s->pass == 1) {
+        if (cur_which == 0) s->d.ninputs++;
+        else s->d.ncmds++;
+        s->d.pool += pool_words(val);
+        cJSON_Delete(val);
+        return 0;
+    }
+    if (cur_which == 0) r = add_irmap_entry(m, key, val, cur_dev, m->inputs, &m->ninputs, m->idx_in, m->mask_in, "inputs");
+    else r = add_irmap_entry(m, key, val, cur_dev, m->cmds, &m->ncmds, m->idx_cmd, m->mask_cmd, "commands");
+    cJSON_Delete(val);
+    return r;
+}
+
+static int do_bulk(sctx_t *s, int which, int dev) {
+    if (s->dev_off[which] < 0) return 0;
+    if (fseeko(s->f, s->dev_off[which], SEEK_SET) < 0) return fail(s->w, -HP_E_IO, "cannot read the config");
+    int c = GETC(s->f); /* the `{` recorded before */
+    if (c != '{') return fail(s->w, INVAL, "%s must be an object", which ? "commands" : "inputs");
+    cur_which = which;
+    cur_dev = dev;
+    return rd_members(s, bulk_member);
+}
+
+static int dev_member(sctx_t *s, const char *key, int c) {
+    int which = !strcmp(key, "inputs") ? 0 : !strcmp(key, "commands") ? 1 : -1;
+    if (which >= 0) {
+        if (c != '{') return fail(s->w, INVAL, "%s must be an object", key);
+        s->dev_off[which] = (long)ftello(s->f) - 1;
+        return rd_value(s, c, false, 0);
+    }
+    int r = rd_value(s, c, true, VAL_CMD_MAX);
+    if (r < 0) return too_big_value(s, r, "a device field");
+    cJSON *v = vb_tree(s);
+    if (!v) return INVAL;
+    if (!s->dev || !cJSON_AddItemToObject(s->dev, key, v)) {
+        cJSON_Delete(v);
+        return oom(s->w);
+    }
+    return 0;
+}
+
+static int do_device(sctx_t *s) { /* the `{` was consumed */
+    s->dev_off[0] = s->dev_off[1] = -1;
+    s->dev = cJSON_CreateObject();
+    if (!s->dev) return oom(s->w);
+    int r = rd_members(s, dev_member);
+    if (r == 0) {
+        long end = (long)ftello(s->f);
+        int dev = 0;
+        if (s->pass == 1) {
+            s->d.ndevs++;
+        } else if (s->fmt2) {
+            r = parse_device_head(s->w, s->dev);
+            dev = s->w->ndevs - 1;
+        }
+        if (r == 0 && (s->pass == 1 || s->fmt2)) {
+            if ((r = do_bulk(s, 0, dev)) == 0) r = do_bulk(s, 1, dev);
+        }
+        if (r == 0 && fseeko(s->f, end, SEEK_SET) < 0) r = fail(s->w, -HP_E_IO, "cannot read the config");
+    }
+    cJSON_Delete(s->dev);
+    s->dev = NULL;
+    return r;
+}
+
+static int top_member(sctx_t *s, const char *key, int c) {
+    if (!strcmp(key, "devices")) {
+        if (c != '[') return fail(s->w, INVAL, "devices must be an array");
+        c = rd_ws(s->f);
+        if (c == ']') return 0;
+        for (;;) {
+            if (c != '{') return fail(s->w, INVAL, "device must be an object");
+            int r = do_device(s);
+            if (r < 0) return r;
+            c = rd_ws(s->f);
+            if (c == ',') {
+                c = rd_ws(s->f);
+                continue;
+            }
+            if (c == ']') return 0;
+            return fail(s->w, INVAL, "config is not valid JSON");
+        }
+    }
+    bool want = s->pass == 1 && (!strcmp(key, "format") || !strcmp(key, "activities") || !strcmp(key, "keys"));
+    int r = rd_value(s, c, want, VAL_SECTION_MAX);
+    if (r < 0) return too_big_value(s, r, key);
+    if (!want) return 0;
+    cJSON *v = vb_tree(s);
+    if (!v) return INVAL;
+    if (!cJSON_AddItemToObject(s->rest, key, v)) {
+        cJSON_Delete(v);
+        return oom(s->w);
+    }
+    return 0;
+}
+
+static int stream_pass(sctx_t *s, size_t len, off_t base) {
+    if (fseeko(s->f, base, SEEK_SET) < 0) return fail(s->w, -HP_E_IO, "cannot read the config");
+    int c = rd_ws(s->f);
+    if (c != '{') return fail(s->w, INVAL, "config must be an object");
+    int r = rd_members(s, top_member);
+    if (r < 0) return r;
+    while ((size_t)(ftello(s->f) - base) < len) { /* nothing but whitespace after the object */
+        c = GETC(s->f);
+        if (c == EOF) break;
+        if (c != ' ' && c != '\n' && c != '\t' && c != '\r') return fail(s->w, INVAL, "config is not valid JSON");
+    }
+    return 0;
+}
+
+/* ---- sizing */
+
+static void count_rest(const cJSON *rest, dims_t *d) {
+    const cJSON *keys = cJSON_GetObjectItemCaseSensitive(rest, "keys");
     if (cJSON_IsObject(keys)) d->keys += (size_t)cJSON_GetArraySize(keys);
-    const cJSON *acts = cJSON_GetObjectItemCaseSensitive(root, "activities");
+    const cJSON *acts = cJSON_GetObjectItemCaseSensitive(rest, "activities");
     if (cJSON_IsArray(acts)) {
         for (const cJSON *a = acts->child; a; a = a->next) {
             const cJSON *k = cJSON_IsObject(a) ? cJSON_GetObjectItemCaseSensitive(a, "keys") : NULL;
             if (cJSON_IsObject(k)) d->keys += (size_t)cJSON_GetArraySize(k);
         }
     }
-    d->pool = pool_words(root);
+    d->pool += pool_words(rest);
 }
 
-static size_t est_pre(size_t len, size_t nodes) {
-    return HP_MAP_EST_TEXT_COPIES * len + nodes * HP_MAP_NODE_BYTES;
-}
-
-static size_t est_full(size_t len, size_t nodes, const dims_t *d) {
-    return est_pre(len, nodes) + d->ndevs * HP_MAP_DEV_BYTES + (d->ncmds + d->ninputs) * HP_MAP_CMD_BYTES +
+static size_t est_full(const dims_t *d) {
+    return HP_MAP_SLACK_BYTES + d->ndevs * HP_MAP_DEV_BYTES + (d->ncmds + d->ninputs) * HP_MAP_CMD_BYTES +
            d->keys * HP_MAP_KEY_BYTES + d->pool * HP_MAP_WORD_BYTES;
-}
-
-int hp_map_estimate(const char *json, size_t len, size_t *est) {
-    if (!json || !est) return INVAL;
-    cJSON *root = cJSON_ParseWithLength(json, len);
-    if (!root) return INVAL;
-    dims_t d;
-    count_dims(root, &d);
-    *est = est_full(len, count_nodes(json, len), &d);
-    cJSON_Delete(root);
-    return 0;
 }
 
 /* One allocation per table, each exactly as large as this config needs. */
@@ -722,47 +901,104 @@ static int alloc_tables(hp_map_t *m, const dims_t *d) {
     return 0;
 }
 
-int hp_map_load(hp_map_t *m, const char *json, size_t len) {
-    if (!m || !json) return INVAL;
+static uint32_t crc_of_file(FILE *f, size_t len, off_t base) {
+    uint8_t buf[4096];
+    uint32_t crc = 0;
+    if (fseeko(f, base, SEEK_SET) < 0) return 0;
+    while (len) {
+        size_t n = fread(buf, 1, len < sizeof buf ? len : sizeof buf, f);
+        if (n == 0) break;
+        crc = hp_map_crc32_update(crc, buf, n);
+        len -= n;
+    }
+    return crc;
+}
+
+/* est_only: just report the estimate (no tables, no pass 2). */
+static int prepare_impl(hp_map_t *m, FILE *f, size_t len, hp_map_t **out, size_t *est_out) {
     m->err[0] = '\0';
-    size_t nodes = count_nodes(json, len);
-    if (est_pre(len, nodes) > bud(m)) return over_budget(m, est_pre(len, nodes));
-    cJSON *root = cJSON_ParseWithLength(json, len);
-    if (!root) return fail(m, INVAL, "config is not valid JSON");
-    hp_map_t *scratch = calloc(1, sizeof *scratch);
-    char *src = alloc_fails() ? NULL : malloc(len + 1);
-    int r = INVAL;
-    if (!scratch || !src) {
-        r = -HP_E_IO;
+    off_t base = ftello(f);
+    hp_map_t *w = calloc(1, sizeof *w);
+    sctx_t s = {.w = w, .f = f};
+    int r = -HP_E_IO;
+    if (!w) {
         fail(m, r, "out of memory");
+        return r;
+    }
+    w->current = -1;
+    w->budget = m->budget;
+    s.rest = cJSON_CreateObject();
+    if (!s.rest) {
+        r = oom(w);
         goto out;
     }
-    scratch->current = -1;
-    scratch->budget = m->budget;
-    dims_t d;
-    count_dims(root, &d);
-    size_t est = est_full(len, nodes, &d);
+    s.pass = 1;
+    if ((r = stream_pass(&s, len, base)) < 0) goto out;
+    count_rest(s.rest, &s.d);
+    {
+        const cJSON *fmt = cJSON_GetObjectItemCaseSensitive(s.rest, "format");
+        w->format = 1;
+        if (fmt) {
+            if (!int_in(fmt, 1, 2)) {
+                r = fail(w, INVAL, "unsupported config format");
+                goto out;
+            }
+            w->format = (int)fmt->valuedouble;
+        }
+        s.fmt2 = w->format == 2;
+    }
+    size_t est = est_full(&s.d);
+    if (est_out) *est_out = est;
     if (est > bud(m)) {
-        r = over_budget(scratch, est);
-        memcpy(m->err, scratch->err, sizeof m->err);
+        r = over_budget(w, est);
         goto out;
     }
-    r = alloc_tables(scratch, &d);
-    if (r == 0) r = parse_config(scratch, root);
-    if (r < 0) {
-        memcpy(m->err, scratch->err, sizeof m->err);
+    if (!out) {
+        r = 0;
         goto out;
     }
-    if (scratch->pool_n < scratch->pool_cap) { /* the estimate is an upper bound: give the slack back */
-        uint16_t *np = scratch->pool_n ? realloc(scratch->pool, scratch->pool_n * sizeof *np) : NULL;
-        if (np || !scratch->pool_n) {
-            if (!scratch->pool_n) free(scratch->pool);
-            scratch->pool = np;
-            scratch->pool_cap = scratch->pool_n;
+    if ((r = alloc_tables(w, &s.d)) < 0) goto out;
+    s.pass = 2;
+    if ((r = stream_pass(&s, len, base)) < 0) goto out;
+    if ((r = parse_config(w, s.rest)) < 0) goto out;
+    if (w->pool_n < w->pool_cap) { /* the count is an upper bound: give the slack back */
+        uint16_t *np = w->pool_n ? realloc(w->pool, w->pool_n * sizeof *np) : NULL;
+        if (np || !w->pool_n) {
+            if (!w->pool_n) free(w->pool);
+            w->pool = np;
+            w->pool_cap = w->pool_n;
         }
     }
-    memcpy(src, json, len);
-    src[len] = '\0';
+    w->est_bytes = est;
+    w->src_len = len;
+    w->hash = crc_of_file(f, len, base);
+    r = 0;
+out:
+    free(s.vb);
+    cJSON_Delete(s.rest);
+    if (r < 0 || !out) {
+        memcpy(m->err, w->err, sizeof m->err);
+        release_tables(w);
+        free(w);
+    } else {
+        *out = w;
+    }
+    return r;
+}
+
+int hp_map_prepare(hp_map_t *m, FILE *f, size_t len, hp_map_t **out) {
+    if (!m || !f || !out || len == 0) return INVAL;
+    return prepare_impl(m, f, len, out, NULL);
+}
+
+void hp_map_discard(hp_map_t *scratch) {
+    if (!scratch) return;
+    release_tables(scratch);
+    free(scratch);
+}
+
+/* Swaps the prepared map in. `src` (owned, may be NULL) is the config text kept for hp_map_save_cache. */
+void hp_map_commit(hp_map_t *m, hp_map_t *scratch, char *src) {
     /* keep the running activity if it survives the reload: format 2 identity is the activity id
      * (a rename keeps it), format 1 has only names */
     if (m->current >= 0 && (size_t)m->current < m->nacts) {
@@ -780,22 +1016,46 @@ int hp_map_load(hp_map_t *m, const char *json, size_t len) {
     m->out = outrt;
     m->actops = ops;
     m->budget = budget;
-    m->est_bytes = est;
     m->src = src;
-    m->src_len = len;
-    m->hash = hp_map_crc32((const uint8_t *)src, len);
-    src = NULL;
+    m->loaded = true;
     free(scratch);
-    scratch = NULL;
-    r = 0;
-out:
-    free(src);
-    if (scratch) {
-        release_tables(scratch);
-        free(scratch);
-    }
-    cJSON_Delete(root);
+}
+
+int hp_map_estimate(const char *json, size_t len, size_t *est) {
+    if (!json || !est || !len) return INVAL;
+    FILE *f = fmemopen((void *)(uintptr_t)json, len, "r");
+    if (!f) return -HP_E_IO;
+    hp_map_t tmp;
+    hp_map_init(&tmp);
+    tmp.budget = SIZE_MAX; /* just the number */
+    int r = prepare_impl(&tmp, f, len, NULL, est);
+    fclose(f);
     return r;
+}
+
+int hp_map_load(hp_map_t *m, const char *json, size_t len) {
+    if (!m || !json) return INVAL;
+    m->err[0] = '\0';
+    if (len == 0) return fail(m, INVAL, "config is not valid JSON");
+    FILE *f = fmemopen((void *)(uintptr_t)json, len, "r");
+    char *src = alloc_fails() ? NULL : malloc(len + 1);
+    if (!f || !src) {
+        if (f) fclose(f);
+        free(src);
+        return fail(m, -HP_E_IO, "out of memory");
+    }
+    hp_map_t *scratch = NULL;
+    int r = prepare_impl(m, f, len, &scratch, NULL);
+    fclose(f);
+    if (r < 0) {
+        free(src);
+        return r;
+    }
+    memcpy(src, json, len);
+    src[len] = '\0';
+    hp_map_commit(m, scratch, src);
+    m->src_len = len;
+    return 0;
 }
 
 /* ------------------------------------------------------- lookup / apply */
@@ -990,38 +1250,133 @@ int hp_map_save_cache(const hp_map_t *m, const char *path) {
     return rc;
 }
 
+/* Loads the cache file by streaming it: the text is never held in RAM. */
 int hp_map_load_cache(hp_map_t *m, const char *path) {
     if (!m || !path) return -HP_E_INVAL;
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) return errno == ENOENT ? -HP_E_NOENT : -HP_E_IO;
-    struct stat st;
-    if (fstat(fd, &st) < 0) {
-        close(fd);
-        return -HP_E_IO;
-    }
-    if (st.st_size < CACHE_HDR + 4 || (size_t)st.st_size > CACHE_HDR + bud(m) + 4) {
-        close(fd);
-        return -HP_E_INVAL;
-    }
-    size_t total = (size_t)st.st_size, got = 0;
-    uint8_t *buf = malloc(total);
-    if (!buf) {
-        close(fd);
-        return -HP_E_IO;
-    }
-    while (got < total) {
-        ssize_t r = read(fd, buf + got, total - got);
-        if (r < 0 && errno == EINTR) continue;
-        if (r <= 0) break;
-        got += (size_t)r;
-    }
-    close(fd);
+    FILE *f = fopen(path, "rb");
+    if (!f) return errno == ENOENT ? -HP_E_NOENT : -HP_E_IO;
+    uint8_t hdr[CACHE_HDR];
+    long size = (fseek(f, 0, SEEK_END) == 0) ? ftell(f) : -1;
     int rc = -HP_E_INVAL;
-    if (got == total && !memcmp(buf, "HPMC", 4) && buf[4] == CACHE_VER) {
-        size_t len = get32(buf + 5);
-        if (len == total - CACHE_HDR - 4 && get32(buf + CACHE_HDR + len) == hp_map_crc32(buf, CACHE_HDR + len))
-            rc = hp_map_load(m, (const char *)buf + CACHE_HDR, len);
+    if (size >= CACHE_HDR + 4 && fseek(f, 0, SEEK_SET) == 0 && fread(hdr, 1, sizeof hdr, f) == sizeof hdr &&
+        !memcmp(hdr, "HPMC", 4) && hdr[4] == CACHE_VER) {
+        size_t len = get32(hdr + 5);
+        if (len == (size_t)size - CACHE_HDR - 4) {
+            uint8_t tail[4];
+            uint32_t crc = crc_of_file(f, len + CACHE_HDR, 0);
+            if (fseek(f, (long)(CACHE_HDR + len), SEEK_SET) == 0 && fread(tail, 1, 4, f) == 4 && get32(tail) == crc) {
+                hp_map_t *scratch = NULL;
+                fseek(f, CACHE_HDR, SEEK_SET);
+                rc = len ? prepare_impl(m, f, len, &scratch, NULL) : -HP_E_INVAL;
+                if (rc == 0) hp_map_commit(m, scratch, NULL);
+            }
+        }
     }
-    free(buf);
+    fclose(f);
     return rc;
+}
+
+/* ---- the cache file as it is received: header, text appended chunk by chunk, crc trailer. Built beside the
+ * live cache and renamed over it only after the config it holds has loaded. */
+
+struct hp_cachew {
+    FILE *f;
+    char *tmp, *path; /* tmp NULL: anonymous (no cache path) */
+    size_t total, got;
+    uint32_t crc;
+};
+
+size_t hp_cache_free_bytes(const char *path) {
+    if (!path) return SIZE_MAX;
+    char *dir = strdup(path);
+    if (!dir) return SIZE_MAX;
+    char *sl = strrchr(dir, '/');
+    if (sl) *sl = '\0';
+    else strcpy(dir, ".");
+    struct statvfs sv;
+    size_t r = SIZE_MAX;
+    if (statvfs(dir, &sv) == 0 && sv.f_bavail != (fsblkcnt_t)-1) r = (size_t)sv.f_bavail * (size_t)sv.f_frsize;
+    free(dir);
+    return r;
+}
+
+int hp_cachew_open(hp_cachew_t **out, const char *path, size_t total) {
+    hp_cachew_t *w = calloc(1, sizeof *w);
+    if (!w) return -HP_E_IO;
+    w->total = total;
+    if (path) {
+        size_t need = total + CACHE_HDR + 4 + 4096; /* jffs2 compresses, but never count on it */
+        if (hp_cache_free_bytes(path) < need) {
+            free(w);
+            return -HP_E_TOOBIG;
+        }
+        w->path = strdup(path);
+        w->tmp = malloc(strlen(path) + 8);
+        if (!w->path || !w->tmp) goto fail;
+        sprintf(w->tmp, "%s.new", path);
+        w->f = fopen(w->tmp, "w+b");
+    } else {
+        w->f = tmpfile();
+    }
+    if (!w->f) goto fail;
+    uint8_t hdr[CACHE_HDR];
+    memcpy(hdr, "HPMC", 4);
+    hdr[4] = CACHE_VER;
+    put32(hdr + 5, (uint32_t)total);
+    w->crc = hp_map_crc32_update(0, hdr, sizeof hdr);
+    if (fwrite(hdr, 1, sizeof hdr, w->f) != sizeof hdr) goto fail;
+    *out = w;
+    return 0;
+fail:
+    hp_cachew_abort(w);
+    return -HP_E_IO;
+}
+
+int hp_cachew_append(hp_cachew_t *w, const void *p, size_t n) {
+    if (w->got + n > w->total) return -HP_E_INVAL;
+    if (fwrite(p, 1, n, w->f) != n) return -HP_E_IO; /* ENOSPC shows here or at the flush */
+    w->crc = hp_map_crc32_update(w->crc, p, n);
+    w->got += n;
+    return 0;
+}
+
+int hp_cachew_finish(hp_cachew_t *w, FILE **text) {
+    if (w->got != w->total) return -HP_E_INVAL;
+    uint8_t tail[4];
+    put32(tail, w->crc);
+    if (fwrite(tail, 1, 4, w->f) != 4 || fflush(w->f) != 0 || (w->tmp && fsync(fileno(w->f)) != 0)) return -HP_E_IO;
+    if (fseek(w->f, CACHE_HDR, SEEK_SET) != 0) return -HP_E_IO;
+    *text = w->f;
+    return 0;
+}
+
+int hp_cachew_publish(hp_cachew_t *w) {
+    int rc = 0;
+    if (w->tmp) {
+        fclose(w->f);
+        w->f = NULL;
+        if (rename(w->tmp, w->path) != 0) {
+            unlink(w->tmp);
+            rc = -HP_E_IO;
+        } else {
+            char *dup = strdup(w->path); /* best effort: persist the rename */
+            int dfd = dup ? open(dirname(dup), O_RDONLY) : -1;
+            if (dfd >= 0) {
+                (void)fsync(dfd);
+                close(dfd);
+            }
+            free(dup);
+        }
+    }
+    hp_cachew_abort(w);
+    return rc;
+}
+
+void hp_cachew_abort(hp_cachew_t *w) {
+    if (!w) return;
+    if (w->f) fclose(w->f);
+    if (w->tmp && w->f) unlink(w->tmp);
+    free(w->tmp);
+    free(w->path);
+    free(w);
 }

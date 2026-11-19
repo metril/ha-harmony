@@ -51,6 +51,8 @@ from .const import (
     CMD_SET_DEVICE_STATE,
     CMD_START_ACTIVITY,
     CMD_TILE_UPDATE,
+    COMMAND_BUTTON_LIMIT,
+    CONF_ALL_COMMAND_BUTTONS,
     DEFAULT_REMOTE_IDS,
     DOMAIN,
     HUB_DEVICE,
@@ -333,14 +335,28 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}", f"{h}_pagefmt_{r}"}
         for dev in self.compiled.devices.values():
             ids |= {f"{h}_dev_{dev.id}_power", f"{h}_dev_{dev.id}_input"}
-            ids |= {f"{h}_cmd_{dev.id}:{c}" for c in self.device_commands(dev.id)}
+            ids |= {f"{h}_cmd_{dev.id}:{c}" for c in self.button_commands(dev.id)}
         return ids
 
     def device_commands(self, device: str) -> list[str]:
-        """Commands exposed as buttons: the configured commands plus power_on/power_off."""
+        """Every command the device answers to: the configured ones plus power_on/power_off. All of
+        them stay reachable through `remote.send_command` whatever buttons exist."""
         dev = self.compiled.devices[device]
         extra = ["power_on", "power_off"] if dev.power else []
         return [*dev.commands, *extra]
+
+    def button_commands(self, device: str) -> list[str]:
+        """Commands that get a button entity. Up to COMMAND_BUTTON_LIMIT per device (or with the
+        `all_command_buttons` option) all of them; beyond it only those that already have a registry
+        entry, so buttons an install already uses keep working and stay as they are."""
+        cmds = self.device_commands(device)
+        if len(cmds) <= COMMAND_BUTTON_LIMIT or self.config_entry.options.get(CONF_ALL_COMMAND_BUTTONS):
+            return cmds
+        reg = er.async_get(self.hass)
+        h = self.hub_id
+        return [
+            c for c in cmds if reg.async_get_entity_id("button", DOMAIN, f"{h}_cmd_{device}:{c}")
+        ]
 
     # ------------------------------------------------------------ config lifecycle
     def _set_issue(self, key: str, message: str) -> None:

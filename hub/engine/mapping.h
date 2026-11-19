@@ -43,11 +43,11 @@
  * Every IR action is run through the encoder at load time; a bad code is a load error.
  *
  * Memory budget instead of count limits. Devices' commands and inputs, the IR word pool and the key
- * maps are allocated per load, exactly as large as the config needs. The only size limit is ONE
- * byte budget (hp_map_budget, default HP_MAP_BUDGET_BYTES) on what loading a config occupies at
- * its peak: HP_MAP_EST_TEXT_COPIES copies of the text + the parse tree nodes + the tables (see
- * hp_map_estimate). A config over it is rejected before anything is allocated, with "config
- * needs ~N KiB of hub memory, the hub allows M KiB". Commands are found through a hash index
+ * maps are allocated per load, exactly as large as the config needs. The text is streamed (one command
+ * at a time is parsed and freed), so the only size limit is ONE byte budget (hp_map_budget, default
+ * HP_MAP_BUDGET_BYTES) on the new map's tables plus HP_MAP_SLACK_BYTES (see hp_map_estimate); the old
+ * map stays until the swap, so a load can need up to twice that. A config over it is rejected
+ * before anything is allocated, with "config needs ~N KiB of hub memory, the hub allows M KiB". Commands are found through a hash index
  * built at load time (hp_map_find_cmd / hp_map_find_input), never by a linear scan.
  *
  * Per-item bounds that remain (a load error, -HP_E_TOOBIG, never truncation):
@@ -67,6 +67,7 @@
  */
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -84,8 +85,8 @@
 #define HP_MAP_MAX_PRONTO 520
 /* Estimate model (hp_map_estimate); the hub reports these in hello_ack.limits so clients compute
  * the same number. *_BYTES include the hash index slot(s) of the entry. */
-#define HP_MAP_EST_TEXT_COPIES 3 /* the received text, the map's cache copy, the parse tree's strings */
-#define HP_MAP_NODE_BYTES 80     /* one parsed JSON value: cJSON node + malloc overhead + its strings' overhead */
+#define HP_MAP_SLACK_BYTES (1536u * 1024u) /* fixed part of a load: the scratch map, the one value in hand (<= 128 KiB, parsed
+                                            * as a tree), the sections `keys`/`activities`, allocator overhead */
 #define HP_MAP_DEV_BYTES 224
 #define HP_MAP_CMD_BYTES 120     /* one command or input */
 #define HP_MAP_KEY_BYTES 72
@@ -178,6 +179,7 @@ typedef struct {
     uint32_t mask_dev, mask_cmd, mask_in; /* slot count - 1 */
     size_t budget;         /* byte budget of one load; 0 = HP_MAP_BUDGET_BYTES. Survives reloads */
     size_t est_bytes;      /* hp_map_estimate of the loaded config (0 = none) */
+    bool loaded;           /* a config is loaded (src may be NULL: configs loaded from a file are not kept in RAM) */
     int current;      /* running activity index, -1 = none */
     char *src;        /* verbatim config text (for the cache); owned */
     size_t src_len;
@@ -199,6 +201,27 @@ int hp_map_estimate(const char *json, size_t len, size_t *est);
 /* Index of the command / input `name` of device `dev`, or -1. O(1). */
 int hp_map_find_cmd(const hp_map_t *, int dev, const char *name);
 int hp_map_find_input(const hp_map_t *, int dev, const char *name);
+/* Two-phase load from a FILE positioned at the start of `len` bytes of config text (a cache file being
+ * received, or any seekable stream): hp_map_prepare builds the new map beside the old one (the text is
+ * streamed: never held whole in RAM, never parsed into one tree) and leaves `m` untouched; hp_map_commit
+ * swaps it in (`src`: owned copy of the text for hp_map_save_cache, or NULL), hp_map_discard drops it. */
+int hp_map_prepare(hp_map_t *m, FILE *f, size_t len, hp_map_t **out);
+void hp_map_commit(hp_map_t *m, hp_map_t *prepared, char *src);
+void hp_map_discard(hp_map_t *prepared);
+uint32_t hp_map_crc32_update(uint32_t crc, const uint8_t *p, size_t n); /* crc of a previous run (0 to start) */
+
+/* The cache file as it is received: header, text appended piece by piece, crc trailer. Built beside the
+ * live cache file and renamed over it (hp_cachew_publish) only after the config it holds has loaded, so a
+ * failure, including a full flash, leaves the previous cache untouched. path NULL: an anonymous temp file.
+ * hp_cachew_open returns -HP_E_TOOBIG when the filesystem has not total + 4 KiB free (hp_cache_free_bytes). */
+typedef struct hp_cachew hp_cachew_t;
+int hp_cachew_open(hp_cachew_t **out, const char *path, size_t total);
+int hp_cachew_append(hp_cachew_t *, const void *p, size_t n);
+int hp_cachew_finish(hp_cachew_t *, FILE **text); /* *text: positioned at the text, for hp_map_prepare */
+int hp_cachew_publish(hp_cachew_t *);             /* rename over the live cache and free */
+void hp_cachew_abort(hp_cachew_t *);              /* delete the temp file and free */
+size_t hp_cache_free_bytes(const char *path);     /* SIZE_MAX when unknown */
+
 /* Test hook: the n-th allocation of the next load fails (1 = the first); 0 = off. */
 void hp_map_test_fail_alloc(unsigned n);
 /* Attaches the IR output runtime (NULL = send every IR action once, no timers). */

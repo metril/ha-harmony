@@ -31,8 +31,7 @@ HEADER_FIELDS = {
     "MAX_PRONTO": "max_pronto",
     "NAME_MAX": "name_max",
     "BUDGET_BYTES": "budget",
-    "EST_TEXT_COPIES": "text_copies",
-    "NODE_BYTES": "node_b",
+    "SLACK_BYTES": "slack_b",
     "DEV_BYTES": "dev_b",
     "CMD_BYTES": "cmd_b",
     "KEY_BYTES": "key_b",
@@ -67,7 +66,7 @@ def test_hello_limits_keys_match_what_the_hub_sends():
     src = (ROOT / "hub/hub_handlers.c").read_text()
     body = src[src.index("static cJSON *on_limits") :]
     sent = set(re.findall(r'cJSON_AddNumberToObject\(o, "(\w+)"', body[: body.index("return o;")]))
-    assert sent == set(CURRENT.to_wire())
+    assert sent == set(CURRENT.to_wire())  # incl. flash_free (a runtime value: 0 in the model)
 
 
 def test_frontend_legacy_constants_match():
@@ -95,9 +94,9 @@ def _c_golden() -> str:
 def test_estimate_equals_the_c_golden():
     cfg = json.loads(_c_golden())
     stats = config_stats(cfg)
-    assert stats == {"text": 135, "nodes": 18, "devices": 1, "commands": 2, "inputs": 0, "keys": 0, "words": 4}
+    assert stats == {"text": 135, "devices": 1, "commands": 2, "inputs": 0, "keys": 0, "words": 4}
     assert compact_json(cfg) == _c_golden()
-    assert estimate_bytes(CURRENT, **stats) == 2317  # tests/c/test_budget.c asserts the same number
+    assert estimate_bytes(CURRENT, **stats) == 1573336  # tests/c/test_budget.c asserts the same number
 
 
 def test_pool_words_and_keys_are_counted_like_the_hub():
@@ -119,7 +118,7 @@ def test_from_hello_roundtrips_and_distrusts_junk():
     assert HubLimits.from_hello("x") is LEGACY
     bad = CURRENT.to_wire() | {"budget": 5}  # below any real hub
     assert HubLimits.from_hello(bad) is LEGACY
-    bad = CURRENT.to_wire() | {"node_b": True}
+    bad = CURRENT.to_wire() | {"dev_b": True}
     assert HubLimits.from_hello(bad) is LEGACY
     missing = {k: v for k, v in CURRENT.to_wire().items() if k != "chunk"}
     assert HubLimits.from_hello(missing) is LEGACY
@@ -147,11 +146,11 @@ def test_legacy_hub_rejects_257_commands_current_accepts_thousands():
 
 
 def test_the_one_budget_and_its_message():
-    lim = CURRENT.with_budget(64 * 1024)
-    with pytest.raises(CompileError, match=r"config needs ~\d+ KiB of hub memory, the hub allows 64 KiB"):
-        compile_config(_cmds(2000), limits=lim)
+    lim = CURRENT.with_budget(2 * 1024 * 1024)
+    with pytest.raises(CompileError, match=r"config needs ~\d+ KiB of hub memory, the hub allows 2048 KiB"):
+        compile_config(_cmds(5000), limits=lim)
     c = compile_config(_cmds(20), limits=lim)
-    assert c.usage["config_bytes"] <= 64 * 1024
+    assert c.usage["config_bytes"] <= 2 * 1024 * 1024
 
 
 def test_per_item_bounds_remain_with_hub_values():
@@ -161,6 +160,17 @@ def test_per_item_bounds_remain_with_hub_values():
     tight = HubLimits.from_hello({**CURRENT.to_wire(), "max_devices": 3})
     with pytest.raises(CompileError, match="too many devices: 4 .the hub allows at most 3"):
         compile_config(parse_model("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(4))), limits=tight)
+
+
+def test_flash_is_checked_with_a_precise_message():
+    c = compile_config(_cmds(1000), limits=CURRENT)
+    stats = config_stats(c.hub_json)
+    tight = HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 20 * 1024})
+    assert tight.flash_free == 20 * 1024
+    assert "KiB of flash, the hub has 20 KiB free" in fit_error(stats, tight)
+    assert fit_error(stats, HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 4 * 1024 * 1024})) is None
+    # optional on the wire: an add-on stores the limits without it
+    assert HubLimits.from_hello({k: v for k, v in CURRENT.to_wire().items() if k != "flash_free"}) == CURRENT
 
 
 def test_fit_error_checks_a_compiled_config_against_another_hub():
@@ -174,5 +184,5 @@ def test_fit_error_checks_a_compiled_config_against_another_hub():
 def test_estimate_tracks_the_text_it_is_made_of():
     a = config_stats(compile_config(_cmds(100), limits=CURRENT).hub_json)
     b = config_stats(compile_config(_cmds(200), limits=CURRENT).hub_json)
-    assert b["commands"] == 2 * a["commands"] and b["text"] > a["text"] and b["nodes"] > a["nodes"]
+    assert b["commands"] == 2 * a["commands"] and b["text"] > a["text"]
     assert estimate_bytes(CURRENT, **b) > estimate_bytes(CURRENT, **a)

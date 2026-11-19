@@ -6,10 +6,12 @@ import json
 import zlib
 
 import pytest
-from conftest import HUB_ID
+from conftest import HUB_ID, make_entry
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.helpers import entity_registry as er
 from test_ha_config import BASE, hub_hash, setup
 
+from custom_components.ha_harmony.const import COMMAND_BUTTON_LIMIT, CONF_ALL_COMMAND_BUTTONS
 from custom_components.ha_harmony.harmony_core.hub_limits import CURRENT
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
@@ -78,6 +80,9 @@ def _fake_hub_handler(limits, log):
             if limits is not None:
                 d["limits"] = limits
             await ws.send_json({**reply, "t": "hello_ack", "d": d})
+        elif t == "command":
+            log.append(env)
+            await ws.send_json({**reply, "t": "command_result", "d": {"ok": True}})
         elif t in ("set_config", "config_chunk"):
             log.append(env)
             d = env["d"]
@@ -89,7 +94,7 @@ def _fake_hub_handler(limits, log):
                 text = "".join(c["data"] for c in chunks)
                 h = f"{zlib.crc32(text.encode()):08x}"
             else:
-                h = "00000000"
+                h = f"{zlib.crc32(json.dumps(d['config'], separators=(',', ':'), ensure_ascii=False).encode()):08x}"
             await ws.send_json({**reply, "t": "config_ack", "d": {"ok": True, "config_hash": h}})
 
     return handler
@@ -154,4 +159,74 @@ async def test_non_ascii_names_split_on_character_boundaries(hass, fake_hub, wri
     chunks = [e["d"] for e in log if e["t"] == "config_chunk"]
     text = "".join(c["data"] for c in chunks)
     assert chunks and "Télé ✓ 7" in text and len(text.encode()) == chunks[0]["total"]
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+# ------------------------------------------------------------------ command buttons at scale
+def _buttons(hass, entry):
+    reg = er.async_get(hass)
+    return [e for e in er.async_entries_for_config_entry(reg, entry.entry_id) if e.domain == "button"]
+
+
+async def _fake(hass, fake_hub, write_yaml, cfg):
+    hub = await fake_hub(_fake_hub_handler(CURRENT.to_wire(), []))
+    write_yaml(cfg)
+    entry = await setup(hass, hub)
+    await _compiled(hass, entry)
+    return entry
+
+
+async def _compiled(hass, entry):
+    for _ in range(50):  # the bundle is pulled and compiled after setup returns
+        await hass.async_block_till_done()
+        if "d0" in entry.runtime_data.compiled.devices:
+            break
+        await asyncio.sleep(0.2)
+
+
+async def test_command_buttons_are_created_disabled(hass, fake_hub, write_yaml):
+    entry = await _fake(hass, fake_hub, write_yaml, many(10, per=10))
+    buttons = _buttons(hass, entry)
+    assert len(buttons) == 10
+    assert all(b.disabled_by is er.RegistryEntryDisabler.INTEGRATION for b in buttons)
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_a_device_over_the_limit_gets_no_buttons_but_stays_reachable(hass, fake_hub, write_yaml):
+    log = []
+    hub = await fake_hub(_fake_hub_handler(CURRENT.to_wire(), log))
+    write_yaml(many(COMMAND_BUTTON_LIMIT + 50, per=COMMAND_BUTTON_LIMIT + 50))
+    entry = await setup(hass, hub)
+    await _compiled(hass, entry)
+    coord = entry.runtime_data
+    assert not _buttons(hass, entry)
+    assert len(coord.device_commands("d0")) == COMMAND_BUTTON_LIMIT + 50  # all still addressable by name
+    await coord.async_device_command("d0", f"c{COMMAND_BUTTON_LIMIT + 49}")  # the send-command path
+    assert any(e["t"] == "command" and f"c{COMMAND_BUTTON_LIMIT + 49}" in json.dumps(e["d"]) for e in log)
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_the_option_creates_them_and_existing_enabled_buttons_survive_turning_it_off(
+    hass, fake_hub, write_yaml, monkeypatch
+):
+    monkeypatch.setattr("custom_components.ha_harmony.button.ENABLED_BY_DEFAULT", True)
+    hub = await fake_hub(_fake_hub_handler(CURRENT.to_wire(), []))
+    write_yaml(many(COMMAND_BUTTON_LIMIT + 20, per=COMMAND_BUTTON_LIMIT + 20))
+    entry = make_entry("127.0.0.1", hub.port, addon=hass.data["fake_addon"])
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(entry, options={CONF_ALL_COMMAND_BUTTONS: True})
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await entry.runtime_data.first_sync
+    await hass.async_block_till_done()
+    ids = {b.entity_id for b in _buttons(hass, entry)}
+    assert len(ids) == COMMAND_BUTTON_LIMIT + 20 and all(hass.states.get(i) for i in ids)
+    # turn the option off and reload: nothing is removed, nothing is disabled
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass.config_entries.async_update_entry(entry, options={CONF_ALL_COMMAND_BUTTONS: False})
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await entry.runtime_data.first_sync
+    await hass.async_block_till_done()
+    after = _buttons(hass, entry)
+    assert {b.entity_id for b in after} == ids and not any(b.disabled_by for b in after)
+    assert all(hass.states.get(i) for i in ids)
     await hass.config_entries.async_unload(entry.entry_id)

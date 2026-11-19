@@ -13,7 +13,7 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
 3. `md5sum <build>/hub`, then:
    `tools/install_boot_hook.py install --yes --token-file F --rf-slot 2 --expect-md5 <md5>`
    Refuses if `/data/ha-harmony/hub` on the device differs from that md5. Keys written to `hub.conf`:
-   (the hook launches `hub --token-file /data/ha-harmony/hub.conf --port P ...`, so the token is never on argv.) `token`, `port`, `hub_id`, `rf=spi`, `rf_slot=N`, `stop_lua=0|1` (default on: the boot subshell runs `killall lua luaworks luadraws`
+   (the hook launches `hub --token-file /data/ha-harmony/hub.conf --port P ...`, so the token is never on argv.) `token`, `port`, `hub_id`, `rf=spi`, `rf_slot=N`, `config_budget_kib=N` (memory budget of one config load, default 8192, hard-capped by the daemon at 20% of the memory free at its start; reported in `hello_ack.limits`), `stop_lua=0|1` (default on: the boot subshell runs `killall lua luaworks luadraws`
    before starting the daemon; `--keep-lua` writes `stop_lua=0`), `reboot_on_early_death=0|1` (default 1;
    `--no-reboot-on-early-death` writes 0). `install` clears the strike counter before arming. If the rcS.local
    replace is not a provable atomic rename it only warns (rcS sources rcS.local under `[ -x ]`, so a missing file

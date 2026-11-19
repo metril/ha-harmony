@@ -86,6 +86,12 @@ class _Source:
 
 
 @pytest.fixture
+def enabled_buttons(monkeypatch):
+    """Command buttons are created disabled; tests that press them create them enabled."""
+    monkeypatch.setattr("custom_components.ha_harmony.button.ENABLED_BY_DEFAULT", True)
+
+
+@pytest.fixture
 def write_yaml(hass, fake_addon):
     """write_yaml(text) applies `text` in the fake add-on (served to the integration as a bundle);
     the returned object's write_text() applies a new one. Entries made by `setup` link to it."""
@@ -490,7 +496,7 @@ async def test_battery_entities(hass, hub_rf, write_yaml):
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_device_commands_buttons_and_send_command(hass, hub_rf, write_yaml):
+async def test_device_commands_buttons_and_send_command(hass, hub_rf, write_yaml, enabled_buttons):
     write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     await hass.services.async_call(
@@ -516,7 +522,7 @@ async def test_device_commands_buttons_and_send_command(hass, hub_rf, write_yaml
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_toggle_device_power_buttons_keep_direction(hass, hub_rf, write_yaml):
+async def test_toggle_device_power_buttons_keep_direction(hass, hub_rf, write_yaml, enabled_buttons):
     write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     press = hass.services.async_call
@@ -609,7 +615,7 @@ async def test_reload_service_rejects_bad_yaml_and_keeps_previous(hass, hub_rf, 
 
 
 # ------------------------------------------------------------------ failure modes
-async def test_bad_bundle_at_startup_keeps_the_cached_config(hass, hub_rf, write_yaml):
+async def test_bad_bundle_at_startup_keeps_the_cached_config(hass, hub_rf, write_yaml, enabled_buttons):
     path = write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     assert uids(hass, entry) == BASE_UIDS

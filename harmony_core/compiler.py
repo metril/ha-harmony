@@ -142,22 +142,12 @@ def _limit(what: str, n: int, cap: int | None, fail: Callable[..., None]) -> Non
         fail(f"too many {what}: {n} (the hub allows at most {cap})")
 
 
-def _nodes(obj: Any) -> int:
-    """JSON values in `obj` (what the hub's parser allocates a node for; hub/engine/mapping.c count_nodes)."""
-    if isinstance(obj, dict):
-        return 1 + sum(_nodes(v) for v in obj.values())
-    if isinstance(obj, list):
-        return 1 + sum(_nodes(v) for v in obj)
-    return 1
-
-
 def config_stats(hub_json: dict[str, Any], max_pronto: int = 520) -> dict[str, int]:
     """Counts the hub's memory estimate is made of, for the compact text of `hub_json`."""
     devs = hub_json.get("devices", [])
     acts = hub_json.get("activities", [])
     return {
         "text": len(compact_json(hub_json).encode()),
-        "nodes": _nodes(hub_json),
         "devices": len(devs),
         "commands": sum(len(d.get("commands", ())) for d in devs),
         "inputs": sum(len(d.get("inputs", ())) for d in devs),
@@ -180,6 +170,11 @@ def fit_error(stats: dict[str, int], lim: HubLimits) -> str | None:
         )
     if lim.max_json is not None and stats["text"] > lim.max_json:
         return f"compiled config is {stats['text']} bytes (the hub allows {lim.max_json})"
+    if lim.flash_free and stats["text"] + 4096 + 13 > lim.flash_free:
+        return (
+            f"config needs ~{-(-(stats['text'] + 4096) // 1024)} KiB of flash,"
+            f" the hub has {lim.flash_free // 1024} KiB free"
+        )
     if not lim.legacy:
         need = estimate_bytes(lim, **stats)
         if need > lim.budget:
@@ -347,7 +342,7 @@ def compile_config(
         stats = config_stats(hub, limits.max_pronto)
     except CompileError as exc:
         fail(str(exc))
-        stats = dict.fromkeys(("text", "devices", "commands", "inputs", "keys", "words"), 0) | {"nodes": 1}
+        stats = dict.fromkeys(("text", "devices", "commands", "inputs", "keys", "words"), 0)
     if (why := fit_error(stats, limits)) is not None:
         fail(why)
     size, words = stats["text"], stats["words"]

@@ -150,6 +150,23 @@ static void heartbeat_touch(const char *path) {
     else unlink(tmp);
 }
 
+/* The config memory budget: the asked KiB (hub.conf config_budget_kib), hard-capped at 20% of the memory free
+ * now. A load builds the new map beside the old one, so its peak is up to twice the budget: at most 40% of
+ * MemFree at daemon start (re-evaluated at every start; reported in hello_ack.limits). */
+static size_t config_budget_bytes(size_t want_kib) {
+    FILE *f = fopen("/proc/meminfo", "r");
+    char line[128];
+    size_t free_kib = 0;
+    while (f && fgets(line, sizeof line, f))
+        if (!strncmp(line, "MemFree:", 8)) free_kib = (size_t)strtoul(line + 8, NULL, 10);
+    if (f) fclose(f);
+    size_t cap = free_kib ? free_kib / 5 : want_kib;
+    if (cap < 256) cap = 256;
+    size_t kib = want_kib < cap ? want_kib : cap;
+    if (kib < want_kib) fprintf(stderr, "hub: config budget capped at %zu KiB (20%% of the %zu KiB free)\n", kib, free_kib);
+    return kib * 1024;
+}
+
 int main(int argc, char **argv) {
     bool sim = false, rf_spi = false;
     bool rf_debug = false;
@@ -162,6 +179,7 @@ int main(int argc, char **argv) {
     const char *hub_id = NULL, *fw_version = NULL;
     const char *hb_path = NULL;
     long hb_secs = 5;
+    long budget_kib = HP_MAP_BUDGET_BYTES / 1024; /* --config-budget */
     long ir_ports = HP_HW_DEFAULT_IR_PORTS;
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
     int mdns = -1; /* -1 = default: on for the real daemon, off under --sim */
@@ -186,6 +204,7 @@ int main(int argc, char **argv) {
                 return 2;
             }
         }
+        else if (!strcmp(argv[i], "--config-budget") && i + 1 < argc) { if (hp_parse_num(argv[++i], 256, 1048576, &budget_kib)) return bad_num("--config-budget", argv[i]); }
         else if (!strcmp(argv[i], "--heartbeat") && i + 1 < argc) hb_path = argv[++i];
         else if (!strcmp(argv[i], "--heartbeat-secs") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 60, &hb_secs)) return bad_num("--heartbeat-secs", argv[i]); }
         else if (!strcmp(argv[i], "--hub-id") && i + 1 < argc) hub_id = argv[++i];
@@ -201,7 +220,7 @@ int main(int argc, char **argv) {
         else {
             fprintf(stderr, "usage: hub [--sim] [--port N] (--token T | --token-file PATH) [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
                             "[--hub-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] "
-                            "[--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
+                            "[--config-budget KiB] [--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P]\n");
             return 2;
         }
@@ -233,6 +252,7 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &sa, NULL);
 
     hub_ctx_init(&g_hub);
+    hp_map_set_budget(&g_hub.map, config_budget_bytes((size_t)budget_kib));
     if (sim) {
         hp_sim_init(&g_sim, stdout);
         g_hub.sinks = hp_sim_sinks(&g_sim);

@@ -64,6 +64,8 @@ void hub_run_timers(hub_ctx_t *c) {
 }
 
 void hub_shutdown(hub_ctx_t *c) {
+    hp_cachew_abort(c->xfer);
+    c->xfer = NULL;
     if (hp_actsm_flush_state(&c->act) < 0) fprintf(stderr, "hub: final state write failed\n");
 }
 
@@ -380,12 +382,8 @@ static const char *load_err(int rc) {
     }
 }
 
-/* After hp_map_load: the config_ack, and on success the notifications and the cache write. */
-static int finish_load(hub_ctx_t *h, hp_session_t *sess, uint32_t id, int rc, char *reply, size_t cap, size_t *len) {
-    if (rc < 0) {
-        const char *why = hp_map_last_error(&h->map);
-        return reply_ok(id, "config_ack", false, *why ? why : load_err(rc), reply, cap, len);
-    }
+/* The config_ack of a finished load, and on success the notifications. */
+static int ack_loaded(hub_ctx_t *h, hp_session_t *sess, uint32_t id, char *reply, size_t cap, size_t *len) {
     h->pending_list = true;
     h->list_skip = sess;
     hp_actsm_reloaded(&h->act); /* cancels a transition, re-keys device state, queues device_state/state_update */
@@ -397,16 +395,74 @@ static int finish_load(hub_ctx_t *h, hp_session_t *sess, uint32_t id, int rc, ch
         h->pending_activity = cur;
         h->pending_power = true;
     }
-    const char *msg = NULL;
-    if (h->cache_path && hp_map_save_cache(&h->map, h->cache_path) < 0)
-        msg = "applied; not saved (out of space on the hub?), the previously saved config is kept";
     cJSON *a = cJSON_CreateObject();
     if (!a) return -HP_E_INVAL;
     cJSON_AddBoolToObject(a, "ok", true);
-    if (msg) cJSON_AddStringToObject(a, "message", msg);
     char hash[9];
     if (hp_map_hash_hex(&h->map, hash)) cJSON_AddStringToObject(a, "config_hash", hash);
     return hp_make_reply(id, "config_ack", a, reply, cap, len);
+}
+
+static void xfer_drop(hub_ctx_t *h) {
+    hp_cachew_abort(h->xfer);
+    h->xfer = NULL;
+    h->chunk_total = h->chunk_got = 0;
+    h->chunk_next = 0;
+    h->chunk_owner = NULL;
+}
+
+static int xfer_nack(hub_ctx_t *h, uint32_t id, const char *msg, char *reply, size_t cap, size_t *len) {
+    xfer_drop(h);
+    return reply_ok(id, "config_ack", false, msg, reply, cap, len);
+}
+
+/* Starts receiving `total` bytes of config text into a new cache file (beside the live one). */
+static int xfer_begin(hub_ctx_t *h, hp_session_t *sess, size_t total, char *msg, size_t msgcap) {
+    xfer_drop(h);
+    if (total == 0) {
+        snprintf(msg, msgcap, "empty config");
+        return -HP_E_INVAL;
+    }
+    int rc = hp_cachew_open(&h->xfer, h->cache_path, total);
+    if (rc == -HP_E_TOOBIG) {
+        size_t fr = hp_cache_free_bytes(h->cache_path);
+        snprintf(msg, msgcap, "config needs ~%zu KiB of flash, the hub has %zu KiB free", (total + 4096 + 1023) / 1024, fr / 1024);
+        return rc;
+    }
+    if (rc < 0) {
+        snprintf(msg, msgcap, "out of memory or flash");
+        return rc;
+    }
+    h->chunk_total = total;
+    h->chunk_owner = sess;
+    return 0;
+}
+
+/* All the text is in: load it from the file, publish the file as the cache, swap the map in. Any failure
+ * (bad config, over budget, out of memory, flash) leaves the previous map AND cache untouched. */
+static int xfer_finish(hub_ctx_t *h, hp_session_t *sess, uint32_t id, char *reply, size_t cap, size_t *len) {
+    FILE *tf = NULL;
+    hp_map_t *fresh = NULL;
+    size_t total = h->chunk_total;
+    int rc = hp_cachew_finish(h->xfer, &tf);
+    const char *msg = NULL;
+    if (rc < 0) {
+        msg = "could not write the config on the hub (out of flash space?); the previous config is kept";
+    } else if ((rc = hp_map_prepare(&h->map, tf, total, &fresh)) < 0) {
+        const char *why = hp_map_last_error(&h->map);
+        msg = *why ? why : load_err(rc);
+    } else if (hp_cachew_publish(h->xfer) < 0) {
+        h->xfer = NULL; /* publish frees it either way */
+        hp_map_discard(fresh);
+        msg = "could not save the config on the hub (out of flash space?); the previous config is kept";
+        rc = -HP_E_IO;
+    } else {
+        h->xfer = NULL;
+        hp_map_commit(&h->map, fresh, NULL);
+        xfer_drop(h);
+        return ack_loaded(h, sess, id, reply, cap, len);
+    }
+    return xfer_nack(h, id, msg, reply, cap, len);
 }
 
 static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply,
@@ -415,22 +471,16 @@ static int on_set_config(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
     const cJSON *cfg = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "config");
     char *text = cJSON_PrintUnformatted(cfg);
     if (!text) return reply_ok(id, "config_ack", false, "out of memory", reply, cap, len);
-    int rc = hp_map_load(&h->map, text, strlen(text));
+    size_t n = strlen(text);
+    char msg[HP_MAP_ERR_MAX];
+    int rc = xfer_begin(h, sess, n, msg, sizeof msg);
+    if (rc == 0 && hp_cachew_append(h->xfer, text, n) < 0) {
+        snprintf(msg, sizeof msg, "could not write the config on the hub (out of flash space?)");
+        rc = -HP_E_IO;
+    }
     free(text);
-    return finish_load(h, sess, id, rc, reply, cap, len);
-}
-
-static void chunk_drop(hub_ctx_t *h) {
-    free(h->chunk_buf);
-    h->chunk_buf = NULL;
-    h->chunk_total = h->chunk_got = 0;
-    h->chunk_next = 0;
-    h->chunk_owner = NULL;
-}
-
-static int chunk_nack(hub_ctx_t *h, uint32_t id, const char *msg, char *reply, size_t cap, size_t *len) {
-    chunk_drop(h);
-    return reply_ok(id, "config_ack", false, msg, reply, cap, len);
+    if (rc < 0) return xfer_nack(h, id, msg, reply, cap, len);
+    return xfer_finish(h, sess, id, reply, cap, len);
 }
 
 static int on_config_chunk(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap,
@@ -440,38 +490,23 @@ static int on_config_chunk(void *vctx, hp_session_t *sess, uint32_t id, const cJ
     const cJSON *tt = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "total");
     const cJSON *dt = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "data");
     if (!cJSON_IsNumber(sq) || !cJSON_IsNumber(tt) || !cJSON_IsString(dt))
-        return chunk_nack(h, id, "bad config_chunk", reply, cap, len);
+        return xfer_nack(h, id, "bad config_chunk", reply, cap, len);
     uint32_t seq = (uint32_t)sq->valuedouble, total = (uint32_t)tt->valuedouble;
     size_t n = strlen(dt->valuestring);
-    if (n > HP_CFG_CHUNK_BYTES) return chunk_nack(h, id, "config_chunk too large", reply, cap, len);
+    if (n > HP_CFG_CHUNK_BYTES) return xfer_nack(h, id, "config_chunk too large", reply, cap, len);
     if (seq == 0) {
-        chunk_drop(h);
-        if (total == 0) return chunk_nack(h, id, "empty config", reply, cap, len);
-        if ((size_t)total * HP_MAP_EST_TEXT_COPIES > hp_map_budget(&h->map)) {
-            char msg[HP_MAP_ERR_MAX];
-            snprintf(msg, sizeof msg, "config needs ~%zu KiB of hub memory, the hub allows %zu KiB",
-                     ((size_t)total * HP_MAP_EST_TEXT_COPIES + 1023) / 1024, hp_map_budget(&h->map) / 1024);
-            return chunk_nack(h, id, msg, reply, cap, len);
-        }
-        h->chunk_buf = malloc((size_t)total + 1);
-        if (!h->chunk_buf) return chunk_nack(h, id, "out of memory", reply, cap, len);
-        h->chunk_total = total;
-        h->chunk_owner = sess;
-    } else if (!h->chunk_buf || h->chunk_owner != sess || seq != h->chunk_next || total != h->chunk_total) {
-        return chunk_nack(h, id, "config_chunk out of order", reply, cap, len);
+        char msg[HP_MAP_ERR_MAX];
+        if (xfer_begin(h, sess, total, msg, sizeof msg) < 0) return xfer_nack(h, id, msg, reply, cap, len);
+    } else if (!h->xfer || h->chunk_owner != sess || seq != h->chunk_next || total != h->chunk_total) {
+        return xfer_nack(h, id, "config_chunk out of order", reply, cap, len);
     }
-    if (h->chunk_got + n > h->chunk_total) return chunk_nack(h, id, "config_chunk longer than its total", reply, cap, len);
-    memcpy(h->chunk_buf + h->chunk_got, dt->valuestring, n);
+    if (h->chunk_got + n > h->chunk_total) return xfer_nack(h, id, "config_chunk longer than its total", reply, cap, len);
+    if (hp_cachew_append(h->xfer, dt->valuestring, n) < 0)
+        return xfer_nack(h, id, "could not write the config on the hub (out of flash space?); the previous config is kept", reply, cap, len);
     h->chunk_got += n;
     h->chunk_next = seq + 1;
     if (h->chunk_got < h->chunk_total) return reply_ok(id, "config_ack", true, NULL, reply, cap, len);
-    char *text = h->chunk_buf;
-    size_t tl = h->chunk_total;
-    h->chunk_buf = NULL;
-    chunk_drop(h);
-    int rc = hp_map_load(&h->map, text, tl);
-    free(text);
-    return finish_load(h, sess, id, rc, reply, cap, len);
+    return xfer_finish(h, sess, id, reply, cap, len);
 }
 
 static cJSON *on_limits(void *vctx) {
@@ -480,8 +515,9 @@ static cJSON *on_limits(void *vctx) {
     if (!o) return NULL;
     cJSON_AddNumberToObject(o, "budget", (double)hp_map_budget(&h->map));
     cJSON_AddNumberToObject(o, "chunk", HP_CFG_CHUNK_BYTES);
-    cJSON_AddNumberToObject(o, "text_copies", HP_MAP_EST_TEXT_COPIES);
-    cJSON_AddNumberToObject(o, "node_b", HP_MAP_NODE_BYTES);
+    cJSON_AddNumberToObject(o, "slack_b", HP_MAP_SLACK_BYTES);
+    size_t fl = hp_cache_free_bytes(h->cache_path); /* what the cached config may take on flash now (0 = unknown) */
+    cJSON_AddNumberToObject(o, "flash_free", fl == SIZE_MAX ? 0 : (double)fl);
     cJSON_AddNumberToObject(o, "dev_b", HP_MAP_DEV_BYTES);
     cJSON_AddNumberToObject(o, "cmd_b", HP_MAP_CMD_BYTES);
     cJSON_AddNumberToObject(o, "key_b", HP_MAP_KEY_BYTES);

@@ -21,8 +21,8 @@ LIMITS_HEADER = (
 _BOUNDS = (  # key of hello_ack.limits -> sane range (a hub reporting anything else is ignored)
     ("budget", 64 * 1024, 1 << 30),
     ("chunk", 256, 60000),
-    ("text_copies", 1, 16),
-    ("node_b", 16, 1024),
+    ("slack_b", 0, 1 << 30),
+    ("flash_free", 0, 1 << 40),
     ("dev_b", 16, 8192),
     ("cmd_b", 16, 8192),
     ("key_b", 8, 1024),
@@ -48,10 +48,10 @@ class HubLimits:
     max_act_devs: int
     max_pronto: int
     name_max: int  # bytes + NUL
-    budget: int = 0  # bytes one config may need at its peak (0 = legacy hub)
+    budget: int = 0  # bytes one config's tables may need (0 = legacy hub); a load builds beside the old map
     chunk: int = 0  # config_chunk data bytes the hub takes (0 = no chunked transfer)
-    text_copies: int = 3
-    node_b: int = 80
+    slack_b: int = 1536 * 1024  # fixed part of a load (scratch map, the value in hand, sections)
+    flash_free: int = 0  # bytes free for the cached config when the hub said hello (0 = unknown)
     dev_b: int = 224
     cmd_b: int = 120  # one command or input
     key_b: int = 72
@@ -73,7 +73,7 @@ class HubLimits:
             return LEGACY
         vals: dict[str, int] = {}
         for key, lo, hi in _BOUNDS:
-            v = raw.get(key)
+            v = raw.get(key, 0 if key == "flash_free" else None)  # flash_free is optional
             if type(v) is not int or not lo <= v <= hi:
                 return LEGACY
             vals[key] = v
@@ -121,18 +121,16 @@ CURRENT = HubLimits(
 def estimate_bytes(
     lim: HubLimits,
     *,
-    text: int,
-    nodes: int,
     devices: int,
     commands: int,
     inputs: int,
     keys: int,
     words: int,
+    **_ignored: int,
 ) -> int:
     """What the hub needs to load a config (hub/engine/mapping.c est_full); a budget compares to this."""
     return (
-        lim.text_copies * text
-        + nodes * lim.node_b
+        lim.slack_b
         + devices * lim.dev_b
         + (commands + inputs) * lim.cmd_b
         + keys * lim.key_b

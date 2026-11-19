@@ -229,12 +229,14 @@
     "step": {
       "init": {
         "title": "Harmony options",
-        "description": "Key events from the remotes.",
+        "description": "Key events from the remotes, and command buttons.",
         "data": {
-          "hold_events": "Also fire an event for each hold repeat"
+          "hold_events": "Also fire an event for each hold repeat",
+          "all_command_buttons": "Create command buttons for devices with more than 200 commands"
         },
         "data_description": {
-          "hold_events": "Off by default: a press and a release are recorded, a held key is not (it would write a database row every 0.4 s). Home Assistant key actions with repeat are not affected."
+          "hold_events": "Off by default: a press and a release are recorded, a held key is not (it would write a database row every 0.4 s). Home Assistant key actions with repeat are not affected.",
+          "all_command_buttons": "Off by default: command buttons are created disabled, and not at all for devices with more than 200 commands (use remote.send_command with the device and command name). Buttons that already exist are kept either way."
         }
       }
     }

@@ -142,6 +142,7 @@ else
 	hah_id=''
 	hah_rf=''
 	hah_slot=''
+	hah_budget=''
 	hah_stoplua=1
 	hah_reboot=1
 	hah_rmax=3
@@ -202,6 +203,12 @@ else
 			case "$hah_v" in
 			'' | *[!0-9]* | ???*) hah_bad="rf_slot=$hah_v" ;;
 			*) hah_slot="$hah_v" ;;
+			esac
+			;;
+		config_budget_kib)
+			case "$hah_v" in
+			'' | *[!0-9]* | ???????*) hah_bad="config_budget_kib=$hah_v" ;;
+			*) hah_budget="$hah_v" ;;
 			esac
 			;;
 		stop_lua)
@@ -293,6 +300,7 @@ else
 						set -- "$@" --rf-spi
 						[ -n "$hah_slot" ] && set -- "$@" --rf-slot "$hah_slot"
 					fi
+					[ -n "$hah_budget" ] && set -- "$@" --config-budget "$hah_budget"
 					[ "$hah_rmax" != 0 ] && set -- "$@" --heartbeat "$hah_hb"
 					[ "$hah_rdebug" = 1 ] && set -- "$@" --rf-debug
 
@@ -437,5 +445,5 @@ fi
 
 unset hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
 unset hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
-unset hah_rf hah_slot hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr
+unset hah_rf hah_slot hah_budget hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr
 unset -f hah_say hah_blog hah_stamp hah_num 2>/dev/null

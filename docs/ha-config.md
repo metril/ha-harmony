@@ -137,6 +137,13 @@ pages:
   applies those to a hub that reports no limits. Over-limit configs fail with a message and nothing
   is pushed.
 
+- **Command buttons** (behaviour change): each device command used to become a button entity. New command
+  buttons are now created **disabled** (enable the ones you use), and a device with more than 200 commands
+  gets none unless the integration option "Create command buttons for devices with more than 200 commands"
+  (`all_command_buttons`) is set. Existing buttons are kept exactly as they are (enabled stays enabled). Every
+  command stays reachable through `remote.send_command` with the device and the command name, whatever
+  entities exist.
+
 ## Home Assistant actions
 
 `{ha: {service: "domain.service", target: {entity_id: <id or [ids]>}, data: {...}, repeat: false}}` is an

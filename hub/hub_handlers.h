@@ -105,7 +105,7 @@ typedef struct {
 
 typedef struct {
     hp_map_t map;
-    char *chunk_buf;                /* config_chunk transfer being assembled (HP_CFG_CHUNK_BYTES per chunk) */
+    hp_cachew_t *xfer;              /* config text being received (config_chunk / set_config), streamed into a new cache file */
     size_t chunk_total, chunk_got;
     uint32_t chunk_next;
     const hp_session_t *chunk_owner;
