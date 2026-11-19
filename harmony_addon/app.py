@@ -36,6 +36,7 @@ from harmony_core.config_model import (
 from harmony_core.hub_limits import LEGACY, LIMITS_HEADER, HubLimits
 from harmony_core.keymap import resolve_keymaps
 from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, page_to_dict
+from harmony_core.theme_build import theme_warnings
 from harmony_irdb.archive import IrdbArchive
 
 from . import __version__, ir_routes, schemas
@@ -319,8 +320,14 @@ async def validate(request: web.Request) -> web.Response:
     q = query(request, schemas.VALIDATE_QUERY)
     body = await read_body(request, schemas.OPT_CONFIG)
     state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    _, errors = _check(_pick_config(state, body.get("config")), all_errors=q["all"] == "1")
-    return jresp({"ok": not errors, "errors": errors})
+    model, errors = _check(_pick_config(state, body.get("config")), all_errors=q["all"] == "1")
+    if model is not None:  # warnings never fail validation: they carry severity "warning"
+        errors = [*errors, *_warnings(theme_warnings(model))]
+    return jresp({"ok": not any(e.get("severity") != "warning" for e in errors), "errors": errors})
+
+
+def _warnings(ws: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{"path": w["path"], "msg": w["msg"][:300], "line": None, "severity": "warning"} for w in ws]
 
 
 def _compile(config: dict[str, Any], limits: HubLimits = LEGACY):
@@ -398,10 +405,12 @@ def _preview(config: dict[str, Any], limits: HubLimits = LEGACY) -> dict[str, An
     raw_pages = config.get("pages") if isinstance(config.get("pages"), list) else []
     _, errors = _check(config)
     problems: list[tuple[list[Any], str]] = []
+    warnings: list[dict[str, Any]] = []
     if not errors:
         model = parse_data(config)
         compiled, blanked = _compile_tolerant(model, problems, limits)
         errors = [{"path": p, "msg": m[:300], "line": None} for p, m in problems]
+        warnings = _warnings(compiled.warnings)
         total_ok = not problems
     else:  # compile what can be compiled: valid pages only, by shape (references unchecked)
         shaped = validate_pages(config)
@@ -453,7 +462,7 @@ def _preview(config: dict[str, Any], limits: HubLimits = LEGACY) -> dict[str, An
     return {
         "ok": not errors,
         "hash": compiled.config_hash if total_ok else None,
-        "errors": errors,
+        "errors": [*errors, *warnings],  # warnings carry severity "warning" and never fail `ok`
         "missing_pages": [{"index": p["index"], "id": p["id"]} for p in pages if not p["ok"]],
         "pages": pages,
         "usage": usage,

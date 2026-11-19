@@ -187,11 +187,17 @@ class HarmonyPageFormat(HarmonyEntity, SensorEntity):
         link = self.coordinator.links.get(self._remote)
         info = link.info if link else None
         if info is None:
-            return {"pages_sent_as": "v1", "caps": [], "icons": None}
-        names = {const.CAP_TILE_STATE: "tile_state", const.CAP_PAGING: "paging"}
+            return {"pages_sent_as": "v1", "caps": [], "icons": None, "theme_notices": []}
+        names = {
+            const.CAP_TILE_STATE: "tile_state",
+            const.CAP_PAGING: "paging",
+            const.CAP_THEME_COLOR: "theme_color",
+            const.CAP_THEME_CUSTOM: "theme_custom",
+        }
         return {
             "pages_sent_as": f"v{link.page_fmt}",
             "page_fmt": info.page_fmt,
             "caps": [n for bit, n in names.items() if info.caps & bit],
             "icons": info.icons,
+            "theme_notices": [n["msg"] for n in self.coordinator.theme_notices(self._remote)],
         }

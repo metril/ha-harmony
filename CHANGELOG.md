@@ -7,6 +7,7 @@
 - Page format v2 learns widget colours (palette index or RGB565, plus a tile "on" colour) and a theme preset id in the page header; the Python and C codecs, vectors and fuzz tests cover them. Pages without colours encode to the same bytes as before. Not sent to remotes yet: older remotes reject such pages, so a capability gate comes first.
 
 - Remote: the UI theme is now a runtime value (built-in presets or a 99-byte wire theme) applied in place with a full repaint, no allocation and no widget re-creation; no colour literals remain outside the theme tables. Default look is pixel-identical. Bench aid: `HARMONY_THEME=<preset key>` (default, midnight, daylight, high_contrast) at remote start.
+- Config and compiler learn colours and themes: widgets take `color` (palette name or `#RRGGBB`) and tiles `on_color`; `theme:` picks a preset or one of your `themes:` (with `extends`). Located errors for unknown colours/themes/tokens, warnings for contrast, a byte-cost breakdown when a page is over budget, the theme in the page generation so an edit re-sends pages, and per-remote degrading by `caps` bit 2 (colours) / bit 3 (custom) with notices. Sending a custom theme to a remote is not wired yet. See `docs/ha-config.md` "Colours and themes".
 
 ## 0.3.10 (2026-11-18)
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from harmony_core.theme_math import PALETTE_NAMES, TOKEN_NAMES
+from .theme_math import PALETTE_NAMES, TOKEN_NAMES
 
 CUSTOM_ID = 7  # reserved for a custom theme; presets are 0..6
 __all__ = ["CUSTOM_ID", "PALETTE_NAMES", "TOKEN_NAMES"]
