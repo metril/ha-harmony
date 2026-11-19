@@ -123,14 +123,31 @@ describe('screens render with a realistic config', () => {
     expect(dv.shadowRoot!.querySelector('a.add')!.getAttribute('href')).toBe('#/devices/new');
   });
 
-  it('history: current rev, newest earlier rev revertable', async () => {
-    const { app } = await boot({ hash: '#/history' });
+  it('history: current rev has a badge, earlier revs have exactly Compare and Restore', async () => {
+    const { app } = await boot({ hash: '#/history', statuses: [status({ applied_rev: 'a', acked_rev: 'a', result: 'ok' })] });
     const h = app.shadowRoot!.querySelector('hh-history')!;
     await settle(h as HTMLElement);
     expect(text(h)).toContain('Rev 3');
-    expect(text(h)).toContain('Revert to rev 2');
-    const restore = [...h.shadowRoot!.querySelectorAll('button')].find((b) => b.textContent?.includes('Restore as draft'))!;
-    expect(restore.getAttribute('aria-disabled')).toBeNull();
+    await vi.waitFor(() => expect(text(h)).toContain('Acknowledged by Home Assistant'));
+    expect(text(h)).not.toContain('Revert');
+    const rows = [...h.shadowRoot!.querySelectorAll('li')];
+    expect(rows[0]!.querySelectorAll('button').length).toBe(0);
+    expect(rows[0]!.textContent).toContain('Current');
+    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent!.trim())).toEqual(['Compare', 'Restore']);
+    expect(rows[1]!.querySelector('time')!.getAttribute('title')).toBeTruthy();
+  });
+
+  it('header shows the hub and whether Home Assistant polls for it', async () => {
+    const { app } = await boot({ statuses: [status({ hub_last_seen: 100, now: 120, linked_hubs: [{ id: 'h', last_seen: 100 }] })] });
+    const hub = app.shadowRoot!.querySelector('header .hub')!;
+    expect(hub.textContent).toContain('Hub:');
+    expect(hub.textContent).toContain('h');
+    await vi.waitFor(() => expect(hub.textContent).toContain('Linked, polling'));
+  });
+
+  it('header hub state: not linked at all', async () => {
+    const { app } = await boot({ statuses: [status({ now: 120, linked_hubs: [] })] });
+    await vi.waitFor(() => expect(app.shadowRoot!.querySelector('header .hub')!.textContent).toContain('No Home Assistant linked'));
   });
 
   it('history: Compare loads the old version and lists what differs from the current one', async () => {
@@ -373,5 +390,16 @@ describe('import dialog', () => {
     await settle(dlg);
     (dlg.shadowRoot!.querySelector('hh-dialog button.pri') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(dlg)).toContain('flipper:tv.ir'));
+  });
+});
+
+import { ago, summarize } from '../src/views/hh-history';
+describe('history helpers', () => {
+  it('ago is relative and summarize is one line', () => {
+    expect(ago(1000, 1030)).toBe('just now');
+    expect(ago(1000, 1000 + 300)).toBe('5 min ago');
+    expect(ago(1000, 1000 + 90000)).toBe('yesterday');
+    expect(summarize([])).toBe('No changes to the config');
+    expect(summarize([{ kind: 'changed', area: 'Device', label: 'TV' }, { kind: 'added', area: 'Page', label: 'P' }])).toBe('Device TV changed, +1 more');
   });
 });
