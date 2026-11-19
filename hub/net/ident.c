@@ -10,16 +10,37 @@
 #include "hub/hp_errors.h"
 #include "hub/net/ws.h"
 
-bool hp_ident_id_valid(const char *id) {
+static bool id_chars_ok(const char *id, bool dots) {
     if (!id) return false;
     size_t n = strlen(id);
     if (n == 0 || n > HP_ID_MAX || !strcmp(id, "default")) return false;
     for (size_t i = 0; i < n; i++) {
         char c = id[i];
-        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'))
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (dots && c == '.') || c == '_' || c == '-'))
             return false;
     }
     return true;
+}
+
+bool hp_ident_id_valid(const char *id) { return id_chars_ok(id, false); }
+bool hp_ident_id_existing_ok(const char *id) { return id_chars_ok(id, true); }
+
+void hp_ident_mdns_label(const char *id, char out[HP_ID_MAX + 1]) {
+    size_t i = 0;
+    for (; id[i] && i < HP_ID_MAX; i++) out[i] = id[i] == '.' ? '-' : id[i];
+    out[i] = 0;
+}
+
+/* The hostname-derived default made safe: bad characters become '-', cut to one label; never empty or "default". */
+static void derive_default(const char *def, char out[HP_ID_MAX + 1]) {
+    size_t n = 0;
+    for (; def && def[n] && n < HP_ID_MAX; n++) {
+        char c = def[n];
+        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+        out[n] = ok ? c : '-';
+    }
+    out[n] = 0;
+    if (n == 0 || !strcmp(out, "default")) snprintf(out, HP_ID_MAX + 1, "ha-harmony-hub");
 }
 
 bool hp_ident_name_valid(const char *name) {
@@ -60,13 +81,20 @@ int hp_ident_init(hp_ident_t *t, const char *dir, const char *flag_id, const cha
     if (hw && strlen(hw) <= HP_HW_MAX) snprintf(t->hw, sizeof t->hw, "%s", hw);
     char p[300], buf[160];
     if (flag_id && *flag_id) {
-        if (!hp_ident_id_valid(flag_id)) return -HP_E_INVAL;
-        snprintf(t->id, sizeof t->id, "%s", flag_id);
-        t->pinned = true;
-    } else {
-        if (path_of(t, "hub_id", p, sizeof p) && read_line(p, buf, sizeof buf) && hp_ident_id_valid(buf)) memcpy(t->id, buf, strlen(buf) + 1);
+        if (hp_ident_id_existing_ok(flag_id)) {
+            snprintf(t->id, sizeof t->id, "%s", flag_id);
+            t->pinned = true;
+        } else {
+            snprintf(t->warn, sizeof t->warn, "hub_id in hub.conf is not usable (1-63 of A-Z a-z 0-9 _ -, not \"default\"): ignored, treated as not pinned");
+        }
+    }
+    if (!t->id[0]) {
+        if (path_of(t, "hub_id", p, sizeof p) && read_line(p, buf, sizeof buf) && hp_ident_id_existing_ok(buf)) memcpy(t->id, buf, strlen(buf) + 1);
         else if (def && hp_ident_id_valid(def)) snprintf(t->id, sizeof t->id, "%s", def);
-        else return -HP_E_INVAL;
+        else {
+            derive_default(def, t->id);
+            if (!t->warn[0]) snprintf(t->warn, sizeof t->warn, "the hostname-derived id is not a valid id: using %s", t->id);
+        }
     }
     if (path_of(t, "hub_name", p, sizeof p) && read_line(p, buf, sizeof buf) && hp_ident_name_valid(buf)) memcpy(t->name, buf, strlen(buf) + 1);
     return 0;

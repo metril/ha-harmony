@@ -242,7 +242,14 @@ else
 		hub_id)
 			case "$hah_v" in
 			'' | *[!A-Za-z0-9._-]*) hah_bad="hub_id (outside [A-Za-z0-9._-])" ;;
-			*) hah_id="$hah_v" ;;
+			default) hah_bad="hub_id (default is reserved)" ;;
+			*)
+				if [ "${#hah_v}" -gt 63 ]; then
+					hah_bad="hub_id (over 63 chars)"
+				else
+					hah_id="$hah_v"
+				fi
+				;;
 			esac
 			;;
 		rf)

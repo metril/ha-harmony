@@ -70,6 +70,7 @@ async def test_name_only_and_clearing(start_hub, ident_dir):
     [
         ({"id": "default"}, "bad_id"),
         ({"id": "has space"}, "bad_id"),
+        ({"id": "a.b"}, "bad_id"),
         ({"id": "-leading"}, "bad_id"),
         ({"id": "x" * 64}, "bad_id"),
         ({"id": "ok", "name": "n" * 49}, "bad_name"),

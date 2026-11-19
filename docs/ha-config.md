@@ -272,59 +272,33 @@ to be up.
 
 ## Naming your hub
 
-The hub's id (`ha-harmony-<hostname>` out of the box, where the hostname is Logitech's stock codename) is the
-config entry's unique id, part of every entity's unique id and device identifier, the key of the cached config in
-`.storage`, and the key the Harmony Editor add-on stores your config under. A **display name** is separate: free text
-(up to 48 bytes) shown as the hub's device name and entry title in Home Assistant, as the editor's header and in its
-hub switcher (the id stays as secondary text).
+The hub id (`ha-harmony-<hostname>` by default) keys the config entry, every entity and device identifier, the cached
+config and the add-on's store. The **display name** is free text (up to 48 bytes) shown as the device name, entry
+title and editor header (the id stays as secondary text).
 
-**Rename from Home Assistant** (hub firmware with `set_hub_id`, this integration, and the add-on if you use it):
-*Settings > Devices & services > Harmony > ⋮ > Reconfigure*. Besides host, port and token the form has **Hub ID**
-(letters, digits, `.` `_` `-`, 1 to 63 characters, starting with a letter or digit, not `default`) and **Name**. On
-submit Home Assistant
+**Rename:** *Settings > Devices & services > Harmony > ⋮ > Reconfigure*, fields **Hub ID** (letters, digits, `_` `-`,
+1 to 63 characters, starting with a letter or digit, not `default`) and **Name**; needs hub firmware with
+`set_hub_id`, and an up-to-date add-on if you use one (an old add-on cannot move its store: the rename is refused).
+Home Assistant sends the id to the hub (stored on the hub, announced by mDNS at once), moves everything keyed by the old
+id (entry, devices, entity *unique* ids, cache, add-on store) and reloads. Entity ids do not change, so history,
+dashboards and automations keep working (entity ids derived from the old id keep their names).
 
-1. sends the new id and name to the hub, which stores them in its own state directory and uses them at once (hello,
-   mDNS announcement under the new name);
-2. moves everything keyed by the old id: the config entry (unique id and title), the hub's and its sub-devices'
-   device identifiers (the same devices, so areas and names stay), every entity's *unique id* through the entity
-   registry helper, the cached config in `.storage`, and, if the add-on is linked, the add-on's store (draft,
-   applied versions, history) to the new id;
-3. reloads the integration under the new id.
+**All or nothing.** If a step fails (hub refuses, id taken, add-on already holds a config under the new id, ...) it is
+all undone, the hub goes back to its old id and the form says why. If even that undo cannot reach the hub, Home
+Assistant follows the hub's new id by its hardware id at the next start.
 
-**Entity ids do not change.** Only unique ids move, so entity ids, history, customisations, dashboards,
-automations and scripts keep working. Nothing is renamed automatically (entity ids derived from the old id, such as
-`select.harmony_hub_<old_id>_activity`, keep their names; rename them yourself in the entity settings if you want).
+**Same hub, new id.** mDNS carries `hw=<hardware id>` (MAC derived), so discovery and setup recognise a renamed hub and
+the entry follows an id changed on the device (a different hardware id on the same address is refused). If the add-on
+then holds configs under both ids, both are kept and a repair issue says what to do. A hub with no readable MAC has no
+hardware id: it cannot be renamed from Home Assistant.
 
-**It is all or nothing.** If any step fails (the hub refuses, an entity unique id is taken, the add-on already holds
-a config under the new id, ...) every step already done is undone and the hub is set back to its old id and name, the
-form shows the reason, and nothing has changed. If the hub cannot even be reached for that last undo, it answers under
-the new id and Home Assistant follows it by the hub's stable hardware id the next time the entry loads.
+**Pinning (advanced).** `hub_id=<id>` in `/data/ha-harmony/hub.conf` (or `tools/install_boot_hook.py --hub-id`) pins the
+id; Home Assistant then refuses to rename it (`id_pinned`), the name still works. An unusable pin (`default`, over 63
+characters) is refused by the boot hook; the daemon never exits over an id. Precedence: pin, then the id saved by Home
+Assistant (`/data/ha-harmony/hub_id`), then the hostname default. Delete `hub_id` and `hub_name` there to reset. Older
+dotted ids keep working (announced on mDNS with `-` for the dot); new ids cannot contain a dot.
 
-**Same hub, new id.** Discovery recognises a renamed hub: its mDNS announcement carries `hw=<hardware id>` (MAC
-derived) and the entry remembers it, so a renamed hub is never offered as a new device. If the id changes on the
-device (see below), the entry follows at its next start: the hardware id matches, so entities, devices, cache and
-add-on store move to the new id exactly as above. A different hub on the same address (other hardware id) is still
-refused.
-
-**Old firmware** (no `set_hub_id`): the form shows the hub id and name read-only with an explanation and offers no
-rename. Update the hub first.
-
-**Pinning the id on the device (advanced).** `hub_id=<id>` in `/data/ha-harmony/hub.conf` (or
-`tools/install_boot_hook.py --hub-id`) pins the id: the daemon gets `--hub-id` and never changes it. Order of
-precedence: the pin from hub.conf, then the id saved by Home Assistant (`/data/ha-harmony/hub_id`, written by the
-daemon, never hub.conf), then the hostname-derived default. A pinned hub refuses renaming from Home Assistant with
-`id_pinned` (the form tells you to remove the line from hub.conf, over SSH, first); the name can still be set. Delete
-`hub_id` (and `hub_name`) in `/data/ha-harmony` to go back to the default.
-
-**Two hubs.** Every hub has its own id, name, hardware id, entry and add-on store; renaming one never touches the
-other. A new id must not be used by another hub's entry (refused: *Another hub in Home Assistant already uses that
-id*). The add-on pairs a rename to the right store by the hub's hardware id (and the previous id), so one hub's
-rename cannot move the other's config, and it never overwrites a store that already exists under the new id (the
-rename is refused and undone).
-
-**Limitations.** A hub whose MAC cannot be read has no hardware id, so only the explicit Reconfigure rename is
-followed, not an id changed on the device. An id containing a dot works but the hub keeps its old mDNS name (a DNS
-label cannot contain one), so discovery shows the old id until it is restarted without the dot.
+Old firmware (no `set_hub_id`): the form shows id and name read-only. More: `docs/proto/hub-identity.md`.
 
 ## Operation
 The config is pushed on connect only if the hub's `config_hash` differs from the compiled one. Services:

@@ -21,16 +21,22 @@ typedef struct {
     char name[HP_NAME_MAX + 1];
     char hw[HP_HW_MAX + 1];   /* "" = unknown */
     bool pinned;              /* the id came from --hub-id */
+    char warn[160];           /* "" or why a configured/derived id was replaced (log it) */
 } hp_ident_t;
 
-/* [A-Za-z0-9._-], 1..63 chars, not "default" (the add-on's placeholder id). hp_ident_set additionally wants
- * the first character to be a letter or digit. */
+/* NEW ids: [A-Za-z0-9_-], 1..63 chars, not "default" (the add-on's placeholder id); hp_ident_set additionally
+ * wants a letter or digit first. No '.': it is not valid in an mDNS label. */
 bool hp_ident_id_valid(const char *id);
+/* Ids already in use may still contain '.' (older hub.conf / saved files): accepted as they are. */
+bool hp_ident_id_existing_ok(const char *id);
+/* The mDNS label for an id: '.' becomes '-'. */
+void hp_ident_mdns_label(const char *id, char out[HP_ID_MAX + 1]);
 /* UTF-8, <= 48 bytes, no control characters; "" is valid (no name). */
 bool hp_ident_name_valid(const char *name);
 
 /* flag_id: --hub-id (NULL = none), def: the default id, hw: the hardware id or NULL, dir: state dir or NULL.
- * An unusable file is ignored (the next source wins). 0, or -HP_E_INVAL when no valid id results. */
+ * An unusable flag/file is ignored (the next source wins; a bad flag id means not pinned); an unusable default is
+ * sanitised (bad chars -> '-', cut to 63, never "default"). Never fails: always 0, with `warn` set when it fell back. */
 int hp_ident_init(hp_ident_t *, const char *dir, const char *flag_id, const char *def, const char *hw);
 
 /* Result codes of hp_ident_set. */

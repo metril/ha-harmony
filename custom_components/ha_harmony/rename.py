@@ -10,6 +10,7 @@ keep working.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -52,8 +53,16 @@ from .coordinator import (
 
 _LOGGER = logging.getLogger(__name__)
 
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}")  # no dot: not valid in the mDNS label
 Undo = Callable[[], Awaitable[None]]
+
+
+ISSUE_ADDON_STORE = "addon_store_exists"  # + _<hub>: the add-on holds a config under the new id AND the old one
+
+
+def entry_lock(hass: HomeAssistant, entry: ConfigEntry) -> asyncio.Lock:
+    """One lock per entry: a rename and the setup-follow migration never run at the same time."""
+    return hass.data.setdefault(f"{DOMAIN}_rename_locks", {}).setdefault(entry.entry_id, asyncio.Lock())
 
 
 class RenameError(Exception):
@@ -65,8 +74,15 @@ class RenameError(Exception):
         self.detail = detail
 
 
+class AddonStoreExists(RenameError):
+    """The add-on already holds a store under the new id (it never overwrites one)."""
+
+    def __init__(self) -> None:
+        super().__init__("addon_store_exists")
+
+
 def valid_hub_id(hub_id: str) -> bool:
-    """The hub's rule: [A-Za-z0-9._-], 1-63 characters, starting with a letter or digit (the add-on keys files by
+    """The rule for a NEW id: [A-Za-z0-9_-], 1-63 characters (an id already in use may still contain a dot), starting with a letter or digit (the add-on keys files by
     it), and not the add-on's placeholder `default`."""
     return _ID_RE.fullmatch(hub_id) is not None and hub_id != "default"
 
@@ -186,11 +202,12 @@ def _addon_client(hass: HomeAssistant, data: dict[str, Any]) -> AddonClient | No
 
 
 async def _addon_move(
-    hass: HomeAssistant, data: dict[str, Any], src: str, dst: str, hw_id: str | None
+    hass: HomeAssistant, data: dict[str, Any], src: str, dst: str, hw_id: str | None, following: bool = False
 ) -> Undo:
     """Ask the add-on to move the hub's store to `dst` now (it would also do it on the next poll, from
     the same headers). An unreachable add-on is not a failure (the poll carries the old id until it has
-    seen it); an add-on that answers `exists` refuses to overwrite a store already under `dst`."""
+    seen it); an add-on that answers `exists` refuses to overwrite a store already under `dst`, and one that
+    does not answer the adopt header at all is too old to move the store (the rename is refused)."""
     client = _addon_client(hass, data)
     if client is None:
         return _noop
@@ -201,8 +218,12 @@ async def _addon_move(
         pass  # answered: the poll was seen
     except AddonError:
         return _noop
+    if client.last_adopt is None:  # answered without the adopt header: an add-on that ignores the rename headers
+        if following:
+            return _noop
+        raise RenameError("addon_too_old")
     if client.last_adopt == "exists":
-        raise RenameError("addon_store_exists")
+        raise AddonStoreExists
     if client.last_adopt != "moved":
         return _noop
 
@@ -232,6 +253,7 @@ def clear_hub_issues(hass: HomeAssistant, hub: str) -> None:
     for key in (ISSUE_INVALID, ISSUE_REJECTED, ISSUE_SCHEMA, ISSUE_YAML):
         ir.async_delete_issue(hass, DOMAIN, f"{key}_{hub}")
     ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_OTA_DEV_KEY}_{hub}")
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_ADDON_STORE}_{hub}")
     prefix = f"{ISSUE_OTA_ROLLBACK}_{hub}_"
     for domain, issue_id in list(ir.async_get(hass).issues):
         if domain == DOMAIN and issue_id.startswith(prefix):
@@ -247,11 +269,15 @@ async def async_migrate_entry(
     data_updates: dict[str, Any] | None = None,
     *,
     hw_id: str | None = None,
+    following: bool = False,
 ) -> None:
     """Move everything of `entry` from its current hub id to `new_id` (Home Assistant's side only; the hub
     already answers to `new_id`). The entry must not be running. Raises RenameError after undoing every
-    step already done."""
+    step already done. With `following` (the hub already renamed itself, nothing to roll back to) an add-on store
+    under both ids is kept as it is and reported as a repair issue, and an add-on too old to move the store is
+    left to move it later; neither fails."""
     old = entry.unique_id or ""
+    conflict = False
     data = {**entry.data, **(data_updates or {}), CONF_HUB_NAME: name}
     if new_id != old:
         data[CONF_PREV_ID] = old
@@ -263,7 +289,12 @@ async def async_migrate_entry(
             undos.append(await _move_entities(hass, entry, old, new_id))
         undos.append(await _update_entry(hass, entry, new_id, default_title(new_id, name), data))
         if new_id != old:
-            undos.append(await _addon_move(hass, data, old, new_id, hw_id or data.get(CONF_HW_ID)))
+            try:
+                undos.append(await _addon_move(hass, data, old, new_id, hw_id or data.get(CONF_HW_ID), following))
+            except AddonStoreExists:
+                if not following:
+                    raise
+                conflict = True
     except Exception as exc:
         for undo in reversed(undos):
             try:
@@ -275,6 +306,17 @@ async def async_migrate_entry(
         raise RenameError("migration_failed", str(exc)) from exc
     if new_id != old:
         await _finish(hass, old, new_id)
+    if conflict:
+        _LOGGER.warning("The add-on has configs under both %s and %s; left as they are", old, new_id)
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            f"{ISSUE_ADDON_STORE}_{new_id}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_ADDON_STORE,
+            translation_placeholders={"old": old, "new": new_id},
+        )
 
 
 async def async_rename_hub(
@@ -288,19 +330,37 @@ async def async_rename_hub(
     """Rename the hub itself and then Home Assistant's side of it, as one operation. `client` is a connected
     client of the hub as the entry knows it. On any failure the hub is set back to its old id and name and
     everything here is as it was (RenameError); on success the entry is reloaded under the new id."""
+    async with entry_lock(hass, entry):
+        await _rename_locked(hass, entry, client, new_id, name, data_updates)
+
+
+async def _rename_locked(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    client: HarmonyHubClient,
+    new_id: str,
+    name: str,
+    data_updates: dict[str, Any] | None,
+) -> None:
     old, old_name = entry.unique_id or "", entry.data.get(CONF_HUB_NAME, "")
-    if not valid_hub_id(new_id):
+    if new_id != old and not valid_hub_id(new_id):  # an id already in use keeps working as it is
         raise RenameError("invalid_hub_id")
     if not valid_hub_name(name):
         raise RenameError("invalid_hub_name")
     if not client.can_rename:
         raise RenameError("rename_unsupported")
+    if not client.hw_id:  # without it a crash after the hub renamed could not be followed
+        raise RenameError("no_hw_id")
     if new_id != old and hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, new_id):
         raise RenameError("id_in_use")
     if new_id == old and name == old_name:
         return
-    was_loaded = entry.state is ConfigEntryState.LOADED
-    if was_loaded:  # its coordinator must not prune or recreate entities while the registries move
+    if entry.state is ConfigEntryState.SETUP_IN_PROGRESS:
+        raise RenameError("rename_failed", "the integration is starting; try again in a moment")
+    if entry.data.get(CONF_HW_ID) != client.hw_id:  # BEFORE the hub renames: always recoverable at next setup
+        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_HW_ID: client.hw_id})
+    unloaded = entry.state.recoverable  # LOADED, SETUP_RETRY, SETUP_ERROR: its coordinator or retry must not run
+    if unloaded:  # ... while the registries move
         await hass.config_entries.async_unload(entry.entry_id)
     hub_touched = False
     try:
@@ -318,13 +378,13 @@ async def async_rename_hub(
     except RenameError:
         if hub_touched:
             await _hub_back(hass, entry, client, old, old_name, data_updates)
-        if was_loaded:
+        if unloaded:
             hass.config_entries.async_schedule_reload(entry.entry_id)
         raise
     except Exception as exc:  # a bug must not leave the hub renamed on its own
         if hub_touched:
             await _hub_back(hass, entry, client, old, old_name, data_updates)
-        if was_loaded:
+        if unloaded:
             hass.config_entries.async_schedule_reload(entry.entry_id)
         raise RenameError("migration_failed", str(exc)) from exc
     hass.config_entries.async_schedule_reload(entry.entry_id)

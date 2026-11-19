@@ -504,3 +504,117 @@ async def test_rename_then_apply_a_config_end_to_end(hass, hub, fake_addon):
         while (fake_addon.app[ACKS_KEY].get(NEW) or {}).get("result") != "ok":
             await asyncio.sleep(0.05)
             await hass.async_block_till_done()
+
+
+# -- review fixes ---------------------------------------------------------------------------------------
+async def test_dotted_new_ids_are_refused(hass, hub, fake_addon):
+    entry = await set_up(hass, hub, fake_addon)
+    res = await reconfigure(hass, entry, "living.room")
+    assert res["errors"] == {"base": "invalid_hub_id"} and (await hub_says(hub))["hub_id"] == HUB_ID
+
+
+async def test_old_addon_refuses_the_rename(hass, hub, fake_addon, monkeypatch):
+    from custom_components.ha_harmony import addon_link
+
+    entry = await set_up(hass, hub, fake_addon)
+    before = snapshot(hass, entry)
+    monkeypatch.setattr(addon_link, "ADOPT_HEADER", "X-Not-Answered")  # an add-on that ignores the headers
+    res = await reconfigure(hass, entry)
+    assert res["errors"] == {"base": "addon_too_old"}
+    await settle(hass, entry)
+    assert snapshot(hass, entry) == before and (await hub_says(hub))["hub_id"] == HUB_ID
+    assert fake_addon.store.hubs() == [HUB_ID]
+
+
+async def test_previous_id_is_kept_until_the_addon_answers_the_adopt_header(
+    hass, hub, fake_addon, monkeypatch
+):
+    from custom_components.ha_harmony import addon_link
+
+    entry = await set_up(hass, hub, fake_addon)
+    await hass.config_entries.async_unload(entry.entry_id)
+    await raw_rename(hub, "from-hub-conf")
+    monkeypatch.setattr(addon_link, "ADOPT_HEADER", "X-Not-Answered")
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    async with asyncio.timeout(30):  # under load the first poll can be late
+        while entry.runtime_data.link_state != "ok":
+            await asyncio.sleep(0.05)
+    await asyncio.sleep(0.3)  # another poll with the previous id
+    assert entry.unique_id == "from-hub-conf" and entry.data[const.CONF_PREV_ID] == HUB_ID
+    assert entry.runtime_data._link.identity["prev"] == HUB_ID
+
+
+async def test_a_hub_reporting_no_hardware_id_is_not_renamed(hass, start_hub, tmp_path, fake_addon):
+    d = tmp_path / "ident"
+    d.mkdir()
+    hub_ = start_hub("--ident-dir", str(d))  # --sim reads no MAC
+    fake_addon.apply_yaml(YAML)
+    entry = make_entry("127.0.0.1", hub_.port, addon=fake_addon)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    res = await reconfigure(hass, entry)
+    assert res["errors"] == {"base": "no_hw_id"} and (await hub_says(hub_))["hub_id"] == HUB_ID
+
+
+async def test_hardware_id_is_stored_before_the_hub_is_renamed(hass, hub, fake_addon, monkeypatch):
+    from custom_components.ha_harmony.api import HarmonyHubClient
+
+    entry = await set_up(hass, hub, fake_addon)
+    hass.config_entries.async_update_entry(
+        entry, data={k: v for k, v in entry.data.items() if k != const.CONF_HW_ID}
+    )
+    seen = []
+    real = HarmonyHubClient.async_set_identity
+
+    async def spy(self, *a, **k):
+        seen.append(entry.data.get(const.CONF_HW_ID))
+        return await real(self, *a, **k)
+
+    monkeypatch.setattr(HarmonyHubClient, "async_set_identity", spy)
+    res = await reconfigure(hass, entry)
+    assert res["reason"] == "reconfigure_successful" and seen[0] == HW
+
+
+async def test_an_entry_waiting_to_retry_is_unloaded_and_serialised(hass, hub, fake_addon, monkeypatch):
+    entry = await set_up(hass, hub, fake_addon)
+    unloads = []
+    real = hass.config_entries.async_unload
+
+    async def spy(entry_id, *a, **k):
+        unloads.append(entry_id)
+        return await real(entry_id, *a, **k)
+
+    monkeypatch.setattr(hass.config_entries, "async_unload", spy)
+    entry.mock_state(hass, ConfigEntryState.SETUP_RETRY)
+    async with rename.entry_lock(hass, entry):  # setup-follow / another rename in progress
+        task = asyncio.create_task(reconfigure_name_only(hass, entry, hub, "Den"))
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+        assert unloads == [] and (await hub_says(hub)).get("name") is None  # waits for the lock
+    await task
+    assert unloads[:1] == [entry.entry_id] and (await hub_says(hub))["name"] == "Den"
+
+
+async def test_setup_follow_keeps_going_when_the_addon_holds_both_ids(hass, hub, fake_addon):
+    from homeassistant.helpers import issue_registry as ir
+
+    entry = await set_up(hass, hub, fake_addon)
+    await hass.config_entries.async_unload(entry.entry_id)
+    fake_addon.apply_yaml(YAML, "from-hub-conf")
+    await raw_rename(hub, "from-hub-conf")
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED and entry.unique_id == "from-hub-conf"
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, "addon_store_exists_from-hub-conf")
+    assert issue is not None and issue.translation_placeholders == {"old": HUB_ID, "new": "from-hub-conf"}
+    assert sorted(fake_addon.store.hubs()) == sorted([HUB_ID, "from-hub-conf"])  # nothing overwritten
+
+
+async def test_reconfigure_accepts_the_hubs_current_id_when_the_hardware_id_matches(hass, hub, fake_addon):
+    entry = await set_up(hass, hub, fake_addon)
+    await raw_rename(hub, "from-hub-conf")  # renamed on the device while HA still knows the old id
+    res = await reconfigure(hass, entry, HUB_ID, "")
+    assert res["type"] is FlowResultType.ABORT and res["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+    assert entry.unique_id == "from-hub-conf"  # setup followed it

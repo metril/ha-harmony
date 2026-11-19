@@ -44,7 +44,14 @@ from .coordinator import (
 from .errors import invalid
 from .harmony_core.config_model import validate_ir
 from .ota import parse_image, path_allowed, read_image
-from .rename import RenameError, async_migrate_entry, clear_hub_issues, default_title, identity_data
+from .rename import (
+    RenameError,
+    async_migrate_entry,
+    clear_hub_issues,
+    default_title,
+    entry_lock,
+    identity_data,
+)
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -159,17 +166,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
 
     if client.hub_id != entry.unique_id:
         # the same hub (its stable hardware id matches) renamed on the device, e.g. hub_id in hub.conf: follow it
-        hw = entry.data.get(CONF_HW_ID)
-        taken = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, client.hub_id or "")
-        if not (hw and client.hw_id == hw and client.hub_id and taken is None):
-            await client.async_close()
-            raise ConfigEntryError("Host now answers as a different hub; re-add the integration")
-        try:
-            await async_migrate_entry(hass, entry, client.hub_id, client.hub_name, hw_id=hw)
-        except RenameError as exc:
-            await client.async_close()
-            raise ConfigEntryError(f"Could not follow the hub's new id {client.hub_id}: {exc}") from exc
-        _LOGGER.info("The hub is now called %s; moved its entities, devices and cache", client.hub_id)
+        async with entry_lock(hass, entry):  # never alongside a rename started from Reconfigure
+            if client.hub_id != entry.unique_id:
+                hw = entry.data.get(CONF_HW_ID)
+                taken = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, client.hub_id or "")
+                if not (hw and client.hw_id == hw and client.hub_id and taken is None):
+                    await client.async_close()
+                    raise ConfigEntryError("Host now answers as a different hub; re-add the integration")
+                try:
+                    # the hub already has its new id: an add-on store under both ids is a repair issue, not a failure
+                    await async_migrate_entry(
+                        hass, entry, client.hub_id, client.hub_name, hw_id=hw, following=True
+                    )
+                except RenameError as exc:
+                    await client.async_close()
+                    raise ConfigEntryError(f"Could not follow the hub's new id {client.hub_id}: {exc}") from exc
+                _LOGGER.info("The hub is now called %s; moved its entities, devices and cache", client.hub_id)
     _sync_identity(hass, entry, client)
 
     coordinator = HarmonyCoordinator(hass, entry, client)

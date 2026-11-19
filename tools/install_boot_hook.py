@@ -79,7 +79,7 @@ class InstallError(RuntimeError):
 
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9._~+/=-]{1,256}")  # keep in step with rcS.harmony
-HUB_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,63}")
+HUB_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,63}")  # new pins: no dot (not an mDNS label), not "default"
 
 
 def md5_bytes(b: bytes) -> str:
@@ -237,8 +237,8 @@ class HookInstaller:
     ) -> int:
         if not TOKEN_RE.fullmatch(token or ""):
             raise InstallError("token must match [A-Za-z0-9._~+/=-]{1,256} (no whitespace or CR/LF)")
-        if hub_id is not None and not HUB_ID_RE.fullmatch(hub_id):
-            raise InstallError("hub id must match [A-Za-z0-9._-]{1,63}")
+        if hub_id is not None and (not HUB_ID_RE.fullmatch(hub_id) or hub_id == "default"):
+            raise InstallError("hub id must match [A-Za-z0-9_-]{1,63} and not be \"default\"")
         if not 1 <= port <= 65535:
             raise InstallError("port must be 1..65535")
         if expect_md5 is None or not re.fullmatch(r"[0-9a-f]{32}", expect_md5):

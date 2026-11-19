@@ -14,7 +14,7 @@ the table below.
   `Origin`/`Sec-Fetch-Site`; otherwise `403 csrf`. Bearer POSTs need only the JSON content type.
 - Bodies and query strings are schema-validated, unknown keys and repeated query params are
   `400 bad_request`. Request bodies are at most 1 MiB. `hub` defaults to `default` and must match
-  `[A-Za-z0-9][A-Za-z0-9._-]{0,62}`.
+  `[A-Za-z0-9][A-Za-z0-9._-]{0,62}` (the dot is accepted for ids already in use; new ids have none).
 - Errors always look like `{"error": {"code": "...", "msg": "...", ...extra}}`. Responses to `/api/`
   carry `Cache-Control: no-store`.
 - Validation entries are `{path: [..], msg: str, line: null}`; at most 100 are returned.

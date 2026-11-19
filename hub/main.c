@@ -60,7 +60,12 @@ static hp_mdns_srv_t g_mdns; /* fd < 0 until started */
 /* set_hub_id changed the id: the mDNS record moves to the new name (goodbye for the old one first). */
 static void on_ident_changed(void *ctx, const hp_ident_t *id) {
     (void)ctx;
-    if (g_mdns.sched && hp_mdns_srv_rename(&g_mdns, id->id) < 0) fprintf(stderr, "hub: mdns keeps the old name (%s is not a DNS label)\n", id->id);
+    char lab[HP_ID_MAX + 1];
+    hp_ident_mdns_label(id->id, lab);
+    if (g_mdns.sched) {
+        if (hp_mdns_srv_rename(&g_mdns, lab) < 0) fprintf(stderr, "hub: mdns keeps the old name (%s is not a DNS label)\n", id->id);
+        else snprintf(g_mdns.svc.hub_id, sizeof g_mdns.svc.hub_id, "%s", id->id); /* TXT hub_id= is the real id */
+    }
     fprintf(stderr, "hub: id is now %s\n", id->id);
 }
 
@@ -368,10 +373,8 @@ int main(int argc, char **argv) {
         hp_ident_hw_read(NULL, hw_buf);
         hw_id = hw_buf;
     }
-    if (hp_ident_init(&g_hub.ident, ident_dir, hub_id, sim ? "sim-hub" : real_id, hw_id) < 0) {
-        fprintf(stderr, "hub: invalid --hub-id (1-63 characters of A-Z a-z 0-9 . _ -)\n");
-        return 2;
-    }
+    (void)hp_ident_init(&g_hub.ident, ident_dir, hub_id, sim ? "sim-hub" : real_id, hw_id); /* never fails */
+    if (g_hub.ident.warn[0]) fprintf(stderr, "hub: %s\n", g_hub.ident.warn);
     g_hub.ident_changed = on_ident_changed;
     g_tbl.hub_id = g_hub.ident.id;
     g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : "ha-harmony-hub";
@@ -387,8 +390,11 @@ int main(int argc, char **argv) {
     if (mdns < 0) mdns = !sim;
     if (mdns) {
         mo.hw = g_hub.ident.hw[0] ? g_hub.ident.hw : NULL;
-        if (hp_mdns_srv_start(&g_mdns, &g_hub.sched, &mo, g_tbl.hub_id, hp_ws_port(srv), HP_PROTO_VERSION) < 0)
+        char lab[HP_ID_MAX + 1];
+        hp_ident_mdns_label(g_tbl.hub_id, lab);
+        if (hp_mdns_srv_start(&g_mdns, &g_hub.sched, &mo, lab, hp_ws_port(srv), HP_PROTO_VERSION) < 0)
             fprintf(stderr, "hub: mdns disabled (%s)\n", g_mdns.err);
+        else snprintf(g_mdns.svc.hub_id, sizeof g_mdns.svc.hub_id, "%s", g_tbl.hub_id); /* TXT hub_id= is the real id */
     }
     hp_ws_set_extra_fds(srv, rf_fds, rf);
     hp_ws_set_timeouts(srv, (int)auth_ms, (int)idle_ms);

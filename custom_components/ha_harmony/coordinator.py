@@ -501,7 +501,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return out
 
     def _prev_id_seen(self) -> None:
-        """The add-on answered a poll that carried the previous id: it has moved (or refused) the store."""
+        """The add-on answered a poll that carried the previous id: it has moved (or refused) the store. An add-on
+        that ignores the rename headers (no adopt answer) has seen nothing: the previous id stays."""
+        if self._link is None or self._link.last_adopt is None:
+            return
         data = self.config_entry.data
         if data.get(const.CONF_PREV_ID):
             self.hass.config_entries.async_update_entry(

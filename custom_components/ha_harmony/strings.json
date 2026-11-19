@@ -46,12 +46,14 @@
       "cannot_connect": "Could not connect to the hub.",
       "unsupported_version": "The hub speaks an incompatible protocol version. Update the hub firmware or this integration so both use the same version.",
       "unknown": "Unexpected error.",
-      "invalid_hub_id": "The hub id may only contain letters, digits, dot, underscore and dash (1-63 characters) and cannot be \"default\".",
+      "invalid_hub_id": "The hub id may only contain letters, digits, underscore and dash (1-63 characters) and cannot be \"default\".",
       "invalid_hub_name": "The name is too long (48 bytes at most) or contains control characters.",
       "id_in_use": "Another hub in Home Assistant already uses that id.",
       "id_pinned": "The hub id is pinned by hub_id in hub.conf on the device. Remove it there to rename the hub from Home Assistant. {detail}",
       "rename_unsupported": "This hub's firmware cannot be renamed from Home Assistant. Update the hub firmware first.",
       "rename_failed": "The hub did not accept the new id or name; nothing was changed. {detail}",
+      "addon_too_old": "The Harmony Editor add-on is too old to move its stored config to a new hub id. Update the add-on first. Nothing was changed.",
+      "no_hw_id": "The hub did not report a hardware id, so a rename could not be recovered if it were interrupted. Update the hub firmware first. Nothing was changed.",
       "addon_store_exists": "The Harmony Editor add-on already has a configuration stored under that id. Nothing was changed; pick another id.",
       "migration_failed": "Renaming failed part-way and was undone; the hub keeps its old id. {detail}"
     },
@@ -72,6 +74,10 @@
     }
   },
   "issues": {
+    "addon_store_exists": {
+      "title": "The add-on has configs under two ids for one hub",
+      "description": "The hub was renamed from {old} to {new} on the device, but the Harmony Editor add-on already holds a different config under {new}, so the config under {old} was not moved. Both are kept. In the add-on, export what you need from {old}, delete the one you do not want, then reload the integration; or set hub_id back to {old} in hub.conf."
+    },
     "config_invalid": {
       "title": "Harmony config from the add-on was rejected",
       "description": "The add-on's applied config for hub {hub} failed validation here and the previous config stays active: {error}"

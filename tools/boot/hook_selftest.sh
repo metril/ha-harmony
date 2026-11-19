@@ -220,6 +220,21 @@ else
 	fail "bad value (DEMO=$DEMO)"
 fi
 
+# 6a. a hub_id the daemon cannot use ("default", over 63 chars): refused with a log line, stock, no strike; 63 chars arm
+id64=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+for bad in default "$id64"; do
+	mkroot "token=abc\nhub_id=$bad\n"
+	run_hook
+	if [ "$DEMO" = unset ] && [ ! -e "$R/cache/ha-harmony-boot.n" ] && grep -q 'bad config value (hub_id' "$(CLOG)" 2>/dev/null; then
+		pass "bad hub_id (${#bad} chars): refused, logged, no strike"
+	else
+		fail "bad hub_id ${#bad} (DEMO=$DEMO)"
+	fi
+done
+mkroot "token=abc\nhub_id=${id64%a}\n"
+run_hook
+if [ "$DEMO" = 1 ]; then pass "63-char hub_id arms"; else fail "63-char hub_id (DEMO=$DEMO)"; fi
+
 # 6b. token over 256 chars: stock, no strike; exactly 256 arms
 long=x
 i=0

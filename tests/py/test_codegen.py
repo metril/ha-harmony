@@ -196,6 +196,7 @@ def test_real_schema_message_codes_are_unique():
     assert len(codes) == len(set(codes))
     msgs = {m.name: m for m in load_schema(REAL_SCHEMA).messages}
     assert msgs["config_chunk"].code == 25
+    assert (msgs["set_hub_id"].code, msgs["hub_id_ack"].code) == (26, 27)
 
 
 def test_config_ack_hash_and_remote_attached_in_schema():

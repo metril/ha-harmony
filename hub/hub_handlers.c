@@ -789,7 +789,7 @@ static int on_set_hub_id(void *vctx, hp_session_t *sess, uint32_t id, const cJSO
     int rc = hp_ident_set(&h->ident, jid->valuestring, jn ? jn->valuestring : NULL);
     switch (rc) {
     case HP_IDENT_OK: break;
-    case HP_IDENT_BAD_ID: return reply_err(id, "bad_id", "hub id must be 1-63 characters of A-Z a-z 0-9 . _ - and not \"default\"", reply, cap, len);
+    case HP_IDENT_BAD_ID: return reply_err(id, "bad_id", "hub id must be 1-63 characters of A-Z a-z 0-9 _ - and not \"default\"", reply, cap, len);
     case HP_IDENT_BAD_NAME: return reply_err(id, "bad_name", "name must be valid UTF-8 without control characters, at most 48 bytes", reply, cap, len);
     case HP_IDENT_PINNED: return reply_err(id, "id_pinned", "the hub id is pinned by hub_id in hub.conf on the device; remove it there to rename from Home Assistant", reply, cap, len);
     default: return reply_err(id, "io", "could not save the hub identity", reply, cap, len);

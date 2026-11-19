@@ -216,7 +216,10 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 try:
                     if client.hub_id != entry.unique_id:
-                        return self.async_abort(reason="wrong_hub")
+                        if not (client.hw_id and client.hw_id == entry.data.get(CONF_HW_ID)):
+                            return self.async_abort(reason="wrong_hub")
+                        # the same hub under another id (renamed on the device): save the connection, setup follows it
+                        return self.async_update_reload_and_abort(entry, data_updates=conn)
                     if new_id == entry.unique_id and name == stored_name:
                         return self.async_update_reload_and_abort(entry, data_updates=conn)
                     try:

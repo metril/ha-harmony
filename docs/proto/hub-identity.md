@@ -13,7 +13,7 @@ Additive to protocol version 1 (see [compat](compat.md)); an older peer ignores 
 is how a rollback or a name-only change looks). `name` absent keeps the stored name, `""` clears it. The hub validates
 before it touches anything:
 
-- id: `[A-Za-z0-9._-]`, 1 to 63 characters, first character a letter or digit, not `default`;
+- id: `[A-Za-z0-9_-]`, 1 to 63 characters, first character a letter or digit, not `default` (no dot: it is not valid in an mDNS label; ids with a dot that were already pinned in hub.conf keep working and are announced with `-` for the dot);
 - name: valid UTF-8, at most 48 bytes, no control characters (below 0x20, 0x7f).
 
 It saves the values atomically (temp file, fsync, rename, directory fsync) and only then applies them: the next

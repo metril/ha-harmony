@@ -48,7 +48,12 @@ static bool slurp(const char *dir, const char *file, char *out, size_t cap) {
 
 static void test_validation(void) {
     CT_CHECK(hp_ident_id_valid("living-room"));
-    CT_CHECK(hp_ident_id_valid("A.b_c-9"));
+    CT_CHECK(hp_ident_id_valid("A_b-c9"));
+    CT_CHECK(!hp_ident_id_valid("a.b")); /* new ids: no dot (not an mDNS label) */
+    CT_CHECK(hp_ident_id_existing_ok("A.b_c-9") && !hp_ident_id_existing_ok("default"));
+    char lab[HP_ID_MAX + 1];
+    hp_ident_mdns_label("a.b.c", lab);
+    CT_CHECK(!strcmp(lab, "a-b-c"));
     CT_CHECK(hp_ident_id_valid("a"));
     char l63[64], l64[65];
     memset(l63, 'a', 63);
@@ -128,9 +133,29 @@ static void test_precedence_and_persistence(void) {
     put(d2, "hub_id", "with-newline\n");
     CT_EQ(hp_ident_init(&t, d2, NULL, "ha-harmony-host", NULL), 0);
     CT_CHECK(!strcmp(t.id, "with-newline"));
-    /* an invalid flag or no source at all is an error */
-    CT_CHECK(hp_ident_init(&t, d2, "bad id", "x", NULL) < 0);
-    CT_CHECK(hp_ident_init(&t, NULL, NULL, NULL, NULL) < 0);
+    /* the daemon never fails on the id: a bad pinned id is ignored (unpinned, default used), a bad default sanitised */
+    CT_EQ(hp_ident_init(&t, d2, "default", "x", NULL), 0);
+    CT_CHECK(!t.pinned && !strcmp(t.id, "with-newline") && t.warn[0]);
+    CT_EQ(hp_ident_init(&t, NULL, "bad id", "x", NULL), 0);
+    CT_CHECK(!t.pinned && !strcmp(t.id, "x") && t.warn[0]);
+    char l64[80];
+    memset(l64, 'b', 64);
+    l64[64] = 0;
+    CT_EQ(hp_ident_init(&t, NULL, l64, "x", NULL), 0);
+    CT_CHECK(!t.pinned && !strcmp(t.id, "x") && t.warn[0]);
+    CT_EQ(hp_ident_init(&t, NULL, "dotted.id", "x", NULL), 0); /* existing dotted pinned ids keep working */
+    CT_CHECK(t.pinned && !strcmp(t.id, "dotted.id") && !t.warn[0]);
+    char host[120] = "ha-harmony-";
+    memset(host + 11, 'h', 70);
+    host[81] = 0;
+    CT_EQ(hp_ident_init(&t, NULL, NULL, host, NULL), 0); /* overlong derived id: truncated to a valid id */
+    CT_CHECK(strlen(t.id) == 63 && hp_ident_id_valid(t.id) && t.warn[0]);
+    CT_EQ(hp_ident_init(&t, NULL, NULL, "my.host", NULL), 0);
+    CT_CHECK(!strcmp(t.id, "my-host") && hp_ident_id_valid(t.id));
+    CT_EQ(hp_ident_init(&t, NULL, NULL, "default", NULL), 0);
+    CT_CHECK(hp_ident_id_valid(t.id) && strcmp(t.id, "default"));
+    CT_EQ(hp_ident_init(&t, NULL, NULL, NULL, NULL), 0);
+    CT_CHECK(hp_ident_id_valid(t.id));
     /* no directory: the change lives in memory */
     CT_EQ(hp_ident_init(&t, NULL, NULL, "mem", NULL), 0);
     CT_EQ(hp_ident_set(&t, "mem2", "N"), HP_IDENT_OK);
