@@ -31,6 +31,10 @@ static void hub_notify(void *vctx, hp_actsm_evt_t evt, int idx) {
             if (h->pending_dev[i] != idx) h->pending_dev[n++] = h->pending_dev[i];
         h->pending_dev[n++] = (uint8_t)idx;
         h->npending_dev = n;
+    } else if (evt == HP_ACTSM_EVT_START) {
+        uint8_t hosts[8];
+        int n = hp_map_activity_bt_hosts(&h->map, idx, hosts, (int)sizeof hosts);
+        for (int i = 0; i < n; i++) bt_link_connect(hosts[i]); /* the host is connecting while the IR steps run */
     } else {
         h->pending_state = true;
         h->pending_activity = idx < 0 ? 0 : idx;
@@ -54,6 +58,38 @@ void hub_set_clock(hub_ctx_t *c, hp_clock_fn fn, void *ctx) {
 }
 
 static void xfer_drop(hub_ctx_t *h);
+static void emit_key(void *vctx, uint8_t remote, uint8_t key, hp_key_action_t action);
+
+/* The loaded config's bt tables go to the link (it runs the helper while there are any, binds hosts by address). */
+void hub_bt_config_sync(hub_ctx_t *h) {
+    static struct bt_link_cfg_entry hosts[HH_BT_MAX_HOSTS], remotes[HH_BT_MAX_REMOTES]; /* event-loop thread only */
+    unsigned nh = 0, nr = 0;
+    for (unsigned i = 0; i < h->map.nbt_hosts && nh < HH_BT_MAX_HOSTS; i++) {
+        hosts[nh].slot = h->map.bt_hosts[i].slot;
+        snprintf(hosts[nh].addr, sizeof hosts[nh].addr, "%s", h->map.bt_hosts[i].has_addr ? h->map.bt_hosts[i].addr : "");
+        nh++;
+    }
+    for (unsigned i = 0; i < h->map.nbt_remotes && nr < HH_BT_MAX_REMOTES; i++) {
+        remotes[nr].slot = h->map.bt_remotes[i].slot;
+        snprintf(remotes[nr].addr, sizeof remotes[nr].addr, "%s", h->map.bt_remotes[i].has_addr ? h->map.bt_remotes[i].addr : "");
+        nr++;
+    }
+    bt_link_set_config(hosts, nh, remotes, nr);
+}
+
+/* What the link needs from the engine: a configured remote's keys, its loss, and the held host key on a helper death. */
+static void eng_remote_key(void *vctx, unsigned slot, unsigned page, unsigned usage, bool down) {
+    hub_ctx_t *h = vctx;
+    (void)hp_map_bt_remote_key(&h->map, &h->sinks, (uint8_t)slot, (uint8_t)page, (uint16_t)usage, down, emit_key, h);
+}
+static void eng_remote_lost(void *vctx, unsigned slot) {
+    hub_ctx_t *h = vctx;
+    (void)hp_map_bt_remote_lost(&h->map, &h->sinks, (uint8_t)slot, emit_key, h);
+}
+static void eng_release_held(void *vctx) {
+    hub_ctx_t *h = vctx;
+    (void)hp_map_bt_release(&h->map, &h->sinks);
+}
 
 int hub_next_timeout_ms(const hub_ctx_t *c) {
     int t = hp_sched_next_timeout_ms(&c->sched);
@@ -483,6 +519,7 @@ static const char *load_err(int rc) {
 static int ack_loaded(hub_ctx_t *h, hp_session_t *sess, uint32_t id, char *reply, size_t cap, size_t *len) {
     h->pending_list = true;
     h->list_skip = sess;
+    hub_bt_config_sync(h);
     hp_actsm_reloaded(&h->act); /* cancels a transition, re-keys device state, queues device_state/state_update */
     /* A running activity is re-reported (to the sender too): a rename keeps its index, so clients
      * that map index -> name would otherwise never learn the new name. */
@@ -926,7 +963,7 @@ static size_t json_len(const char *s) {
 }
 
 #define BT_STATE_BUDGET 40000 /* of the 64 KiB frame: hosts + remotes beyond it lose their (optional) names */
-#define BT_ENTRY_FIXED 112    /* (addr is validated to 17 chars, so this is a true bound) */ /* slot, addr, transport, connected and punctuation of one entry, upper bound */
+#define BT_ENTRY_FIXED 135    /* (addr is validated to 17 chars, so this is a true bound) */ /* slot, addr, transport, connected and punctuation of one entry, upper bound */
 
 static cJSON *bt_state_json(void) {
     static struct bt_link_state st; /* ~20 KB: event-loop thread only, not on the stack */
@@ -953,6 +990,8 @@ static cJSON *bt_state_json(void) {
     cJSON_AddNumberToObject(o, "gen", st.gen);
     cJSON_AddBoolToObject(o, "discoverable", st.discoverable);
     if (st.discoverable) cJSON_AddNumberToObject(o, "discoverable_secs", st.discoverable_secs);
+    if (st.window == BT_WIN_HOST || st.window == BT_WIN_REMOTE)
+        cJSON_AddStringToObject(o, "window", st.window == BT_WIN_REMOTE ? "remote" : "host");
     cJSON_AddBoolToObject(o, "le", st.le);
     if ((unsigned)st.pairing > BT_PAIR_NONE && (unsigned)st.pairing < BT_NELEM(bt_result_name) && bt_addr_ok(st.pairing_addr)) {
         cJSON *p = cJSON_AddObjectToObject(o, "pairing");
@@ -979,6 +1018,7 @@ static cJSON *bt_state_json(void) {
         cJSON_AddStringToObject(e, "transport",
                                 st.hosts[i].transport == BT_TRANSPORT_LE ? "le" : "classic");
         cJSON_AddBoolToObject(e, "connected", st.hosts[i].connected);
+        cJSON_AddBoolToObject(e, "configured", st.hosts[i].configured);
         cJSON_AddItemToArray(hosts, e);
     }
     cJSON_AddItemToObject(o, "hosts", hosts);
@@ -995,6 +1035,7 @@ static cJSON *bt_state_json(void) {
             used += json_len(st.remotes[i].name) + 10;
         }
         cJSON_AddBoolToObject(e, "connected", st.remotes[i].connected);
+        cJSON_AddBoolToObject(e, "configured", st.remotes[i].configured);
         if (st.remotes[i].battery >= 0) cJSON_AddNumberToObject(e, "battery", st.remotes[i].battery);
         cJSON_AddItemToArray(remotes, e);
     }
@@ -1199,6 +1240,9 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->handler[HP_MSG_BT_KEY] = on_bt_key;
     tbl->handler[HP_MSG_BT_LISTEN] = on_bt_listen;
     bt_link_set_remote_key_cb(on_bt_remote_key, ctx);
+    static struct bt_link_engine eng; /* one hub context per process */
+    eng = (struct bt_link_engine){ctx, eng_remote_key, eng_remote_lost, eng_release_held};
+    bt_link_set_engine(&eng);
     bt_link_set_listener(on_bt_changed, ctx);
     tbl->handler[HP_MSG_OTA_BEGIN] = on_ota_begin;
     tbl->handler[HP_MSG_OTA_CHUNK] = on_ota_chunk;

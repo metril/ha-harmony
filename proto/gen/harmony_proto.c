@@ -196,6 +196,7 @@ static const hp_field_desc_t hp_fields_bt_state[] = {
     {"hosts", HP_T_JSON, false, NULL},
     {"remotes", HP_T_JSON, true, NULL},
     {"candidates", HP_T_JSON, true, NULL},
+    {"window", HP_T_STR, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_bt_forget[] = {
@@ -256,7 +257,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"ota_commit", HP_MSG_OTA_COMMIT, HP_TRANSPORT_RF, 0, NULL},
     {"ota_result", HP_MSG_OTA_RESULT, HP_TRANSPORT_RF, 2, hp_fields_ota_result},
     {"bt_pair", HP_MSG_BT_PAIR, HP_TRANSPORT_WS, 5, hp_fields_bt_pair},
-    {"bt_state", HP_MSG_BT_STATE, HP_TRANSPORT_WS, 9, hp_fields_bt_state},
+    {"bt_state", HP_MSG_BT_STATE, HP_TRANSPORT_WS, 10, hp_fields_bt_state},
     {"bt_forget", HP_MSG_BT_FORGET, HP_TRANSPORT_WS, 2, hp_fields_bt_forget},
     {"bt_key", HP_MSG_BT_KEY, HP_TRANSPORT_WS, 4, hp_fields_bt_key},
     {"bt_remote_key", HP_MSG_BT_REMOTE_KEY, HP_TRANSPORT_WS, 4, hp_fields_bt_remote_key},

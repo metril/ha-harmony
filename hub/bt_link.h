@@ -27,6 +27,7 @@ enum bt_link_pair_result { BT_PAIR_NONE, BT_PAIR_OK, BT_PAIR_FAILED, BT_PAIR_REF
 enum bt_link_action { BT_KEY_DOWN, BT_KEY_UP, BT_KEY_PRESS };
 enum bt_link_pair_mode { BT_MODE_HOST, BT_MODE_REMOTE }; /* host: be discoverable; remote: scan for and bond an LE remote */
 enum bt_link_kind { BT_KIND_HOST, BT_KIND_REMOTE };
+enum bt_link_window { BT_WIN_NONE, BT_WIN_HOST, BT_WIN_REMOTE }; /* the pairing window that is open (or requested, helper not up yet) */
 enum bt_link_transport { BT_TRANSPORT_ANY, BT_TRANSPORT_CLASSIC, BT_TRANSPORT_LE }; /* ANY: unknown (pairing) or "either" (request) */
 
 /* Return codes of bt_link_pair / forget / key. */
@@ -42,6 +43,7 @@ struct bt_link_host {
     char name[BT_LINK_NAME_MAX]; /* "" = unknown */
     enum bt_link_transport transport; /* CLASSIC or LE */
     bool connected;
+    bool configured; /* a config bt_hosts entry carries this address (slot is then the config slot); false = bonded in the helper only */
 };
 
 struct bt_link_remote {
@@ -50,6 +52,7 @@ struct bt_link_remote {
     char name[BT_LINK_NAME_MAX];
     bool connected;
     int8_t battery; /* percent 0..100, -1 = unknown */
+    bool configured; /* as bt_link_host */
 };
 
 /* An LE remote seen advertising while a remote-mode pairing window is open. */
@@ -63,6 +66,7 @@ struct bt_link_state {
     uint32_t gen; /* bumped by the link on every change (never by the discoverable_secs countdown) */
     enum bt_link_status status;
     bool discoverable;
+    enum bt_link_window window;       /* BT_WIN_NONE = no pairing window */
     uint16_t discoverable_secs;       /* seconds left while discoverable, else 0 */
     bool le;                          /* the adapter can do Bluetooth LE */
     enum bt_link_pair_result pairing; /* last pairing outcome; BT_PAIR_NONE = nothing to report */
@@ -124,5 +128,32 @@ void bt_link_set_listener(void (*cb)(void *ctx), void *ctx);
 /* One key-from-a-bonded-remote callback (same thread rules as the listener); NULL clears it. The hub only
  * forwards it to clients that opted in with bt_listen; internal key handling is the link's own business. */
 void bt_link_set_remote_key_cb(void (*cb)(void *ctx, unsigned slot, unsigned page, unsigned usage, bool down), void *ctx);
+
+/* ---- Supervisor side (hub main loop and hub_handlers.c only; the stub and the test fake implement them as no-ops) ----
+ * Slots: the config's bt_hosts / bt_remotes slot N is bound to the helper's bonded entry with the SAME ADDRESS (the helper's
+ * slot table is its own). Hosts and remotes in the state carry the CONFIG slot when configured, else a free number that no
+ * config entry uses; bt_link_key / forget / connect take those reported slots. A config host whose address is not bonded has
+ * no entry: bt_link_key returns BT_LINK_E_NO_SLOT. */
+struct bt_link_cfg_entry {
+    uint8_t slot;
+    char addr[BT_LINK_ADDR_MAX]; /* "" = the entry has no address (never bound) */
+};
+/* The loaded config's bt tables (call after every load; copies). The helper runs while any entry exists or a window is open. */
+void bt_link_set_config(const struct bt_link_cfg_entry *hosts, unsigned n_hosts, const struct bt_link_cfg_entry *remotes,
+                        unsigned n_remotes);
+/* Where a configured remote's keys go; slots are config slots. All three run from bt_link_service. */
+struct bt_link_engine {
+    void *ctx;
+    void (*remote_key)(void *ctx, unsigned slot, unsigned page, unsigned usage, bool down);
+    void (*remote_lost)(void *ctx, unsigned slot); /* a connected configured remote disconnected (or the helper died) */
+    void (*release_held)(void *ctx);               /* the helper died: nothing typed into a host stays down */
+};
+void bt_link_set_engine(const struct bt_link_engine *e);
+/* An activity that uses the host in config slot `slot` started: connect it now. Best effort, non-blocking. */
+void bt_link_connect(unsigned slot);
+/* The helper's socket for the poll loop (-1 when no helper runs) and the periodic work: read, parse, ping, reap, respawn,
+ * flush output, fire the listener. Returns the ms until it next wants to run (-1 = nothing scheduled). Never blocks. */
+int bt_link_poll_fd(void);
+int bt_link_service(void);
 
 #endif

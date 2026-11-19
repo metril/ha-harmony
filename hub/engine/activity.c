@@ -343,6 +343,7 @@ static int begin(hp_actsm_t *e, int target) {
 int hp_actsm_start_idx(hp_actsm_t *e, int idx) {
     hp_map_t *m = e->map;
     if (idx < 0 || idx >= m->nacts) return -HP_E_INVAL;
+    emit(e, HP_ACTSM_EVT_START, idx);
     if (m->format != 2) {
         int rc = hp_activity_set(m, m->acts[idx].name, e->sinks);
         if (rc < 0) return rc;

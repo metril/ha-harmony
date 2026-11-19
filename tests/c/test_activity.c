@@ -314,6 +314,64 @@ static void test_key_driven_and_busy_keys(void) {
     CT_EQ(hp_actsm_reported(&sm), -1);
 }
 
+/* A Bluetooth key a physical press holds down must be let go when the activity changes or powers off. */
+static int bt_n, bt_downs;
+static int rec_bt(void *self, uint8_t host, uint8_t page, uint16_t usage, bool down) {
+    (void)self; (void)host; (void)page; (void)usage;
+    bt_n++;
+    bt_downs += down;
+    return 0;
+}
+static hp_bt_sink btsink = {NULL, rec_bt};
+
+static const char *BTACT =
+    "{\"format\":2,\"devices\":[{\"id\":\"tv\",\"power\":{\"on\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":1},"
+    "\"off\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":2}}},"
+    "{\"id\":\"shield\",\"commands\":{\"Home\":{\"type\":\"bt\",\"page\":12,\"usage\":547,\"host\":3}}},"
+    "{\"id\":\"box\",\"commands\":{\"Vol\":{\"type\":\"bt\",\"usage\":233,\"host\":7}}}],"
+    "\"activities\":[{\"id\":\"w\",\"devices\":[{\"device\":\"tv\"},{\"device\":\"shield\"}]},"
+    "{\"id\":\"x\",\"devices\":[{\"device\":\"tv\"},{\"device\":\"box\"}]}],"
+    "\"keys\":{\"1\":{\"type\":\"activity\",\"activity\":\"w\"},\"2\":{\"type\":\"activity\",\"activity\":\"x\"},"
+    "\"3\":{\"type\":\"activity\",\"activity\":\"off\"},\"6\":{\"type\":\"bt\",\"usage\":233,\"host\":3}}}";
+
+static void test_bt_key_released_on_switch_and_off(void) {
+    sinks.bt = &btsink;
+    for (int path = 0; path < 2; path++) { /* 0: switch activity, 1: power off */
+        setup_cfg(BTACT);
+        bt_n = bt_downs = 0;
+        CT_EQ(hp_actsm_start(&sm, "w"), 0);
+        settle_all();
+        CT_EQ(hp_key_handle(&map, &sinks, 1, 6, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* a remote key held down */
+        CT_EQ(bt_n, 1);
+        CT_EQ(bt_downs, 1);
+        CT_CHECK(map.bt_held.active);
+        if (path == 0) CT_EQ(hp_actsm_start(&sm, "x"), 1);
+        else CT_EQ(hp_actsm_off(&sm), 0);
+        CT_EQ(bt_n, 2); /* the key up went out before the transition */
+        CT_EQ(bt_downs, 1);
+        CT_CHECK(!map.bt_held.active);
+        settle_all();
+        CT_EQ(bt_n, 2); /* and only once */
+    }
+    sinks.bt = NULL;
+}
+
+static void test_start_event_and_activity_bt_hosts(void) {
+    setup_cfg(BTACT);
+    uint8_t hosts[4];
+    CT_EQ(hp_map_activity_bt_hosts(&map, 0, hosts, 4), 1); /* w uses the shield (host 3) */
+    CT_EQ(hosts[0], 3);
+    CT_EQ(hp_map_activity_bt_hosts(&map, 1, hosts, 4), 1); /* x uses the box (host 7) */
+    CT_EQ(hosts[0], 7);
+    CT_EQ(hp_map_activity_bt_hosts(&map, 5, hosts, 4), 0);
+    CT_EQ(hp_actsm_start(&sm, "x"), 1);
+    CT_EQ(count_ev(HP_ACTSM_EVT_START), 1);
+    CT_EQ(evs[0].kind, HP_ACTSM_EVT_START); /* before anything is sent: the host connects while the IR steps run */
+    CT_EQ(evs[0].idx, 1);
+    CT_EQ(hp_actsm_start(&sm, "nope"), -HP_E_INVAL);
+    CT_EQ(count_ev(HP_ACTSM_EVT_START), 1);
+}
+
 static void test_format1_unchanged(void) {
     setup_cfg("{\"activities\":[{\"name\":\"TV\",\"steps\":[{\"type\":\"ir\",\"port_mask\":255,\"pronto\":[0,109,1,0,10,20]}],"
               "\"off\":[{\"type\":\"ir\",\"port_mask\":255,\"pronto\":[0,109,1,0,30,40]}]}]}");
@@ -714,6 +772,8 @@ int main(void) {
     CT_RUN(test_set_device_during_transition_skips_redundant);
     CT_RUN(test_set_device_errors);
     CT_RUN(test_key_driven_and_busy_keys);
+    CT_RUN(test_bt_key_released_on_switch_and_off);
+    CT_RUN(test_start_event_and_activity_bt_hosts);
     CT_RUN(test_format1_unchanged);
     CT_RUN(test_reload_keeps_state_by_id);
     CT_RUN(test_state_roundtrip);

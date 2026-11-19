@@ -175,6 +175,8 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx);
 void hub_send_state(hub_ctx_t *, hp_ws_conn_t *);
 /* The bt_state frame (id 0) hub_send_state sends after hello; -HP_E_NOENT when this build has no Bluetooth. */
 int hub_bt_state_frame(char *buf, size_t cap, size_t *len);
+/* Hands the loaded config's bt_hosts / bt_remotes to the Bluetooth link (after every load; main.c also after the cache load). */
+void hub_bt_config_sync(hub_ctx_t *);
 /* The cached remote_info of `remote`, or NULL. */
 const hub_info_t *hub_remote_info(const hub_ctx_t *, uint8_t remote);
 /* A connection went away: an upload it owned stays resumable by a matching ota_begin. */

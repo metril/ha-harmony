@@ -147,6 +147,16 @@ if(CMAKE_CROSSCOMPILING AND HP_TARGET STREQUAL "remote")
   return()
 endif()
 
+# Bluetooth HID helper (`hub bt-helper`): BTstack Classic HID device and, with HH_BT_LE, LE HID peripheral + LE remotes.
+option(HH_BT "Build the Bluetooth HID helper into the hub binary" ON)
+option(HH_BT_LE "Bluetooth helper: LE peripheral (HID over GATT) and LE remotes (HOGP host), besides Classic" ON)
+# The supervisor (bt_link.c) when the helper is built in, else the "no Bluetooth" stub.
+if(HH_BT)
+  set(_hp_bt_link hub/bt_link.c)
+else()
+  set(_hp_bt_link hub/bt_link_stub.c)
+endif()
+
 # Hub code library; later tasks append sources here.
 add_library(hp_hub STATIC
   hub/net/ws.c
@@ -163,7 +173,7 @@ add_library(hp_hub STATIC
   hub/io/hw_sinks.c
   hub/io/rf_pair.c
   hub/ir/encode.c
-  hub/bt_link_stub.c
+  ${_hp_bt_link}
   hub/hub_handlers.c
   hub/ota/hub_ota.c
 )
@@ -192,11 +202,11 @@ endif()
 message(STATUS "firmware build id ${HP_BUILD_ID}")
 set_source_files_properties(hub/ota/hub_ota.c PROPERTIES COMPILE_DEFINITIONS HP_BUILD_ID=${HP_BUILD_ID})
 
-# Bluetooth HID helper (`hub bt-helper`): BTstack Classic HID device and, with HH_BT_LE, LE HID peripheral + LE remotes.
-option(HH_BT "Build the Bluetooth HID helper into the hub binary" ON)
-option(HH_BT_LE "Bluetooth helper: LE peripheral (HID over GATT) and LE remotes (HOGP host), besides Classic" ON)
 add_executable(hub hub/main.c)
 target_link_libraries(hub PRIVATE hp_hub)
+if(HH_BT AND HH_BT_LE)
+  target_compile_definitions(hp_hub PRIVATE HH_BT_LE=1)  # bt_link.c reports LE in its default limits
+endif()
 if(HH_BT)
   include(hub/bt/bt.cmake)  # include(), not add_subdirectory: a hub/ build dir would collide with the hub executable
   target_link_libraries(hub PRIVATE hp_bt)

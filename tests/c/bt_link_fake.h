@@ -18,6 +18,10 @@ struct bt_fake {
     unsigned last_secs, last_slot, last_page, last_usage;
     enum bt_link_transport last_transport;
     enum bt_link_action last_action;
+    int cfg_calls, connect_calls;
+    unsigned cfg_hosts, cfg_remotes, last_connect;
+    struct bt_link_cfg_entry cfg_host[8], cfg_remote[8];
+    const struct bt_link_engine *engine;
     void (*listener)(void *);
     void *listener_ctx;
     void (*rkey)(void *, unsigned, unsigned, unsigned, bool);

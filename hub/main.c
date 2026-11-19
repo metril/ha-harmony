@@ -17,6 +17,7 @@
 #include "hub/hub_handlers.h"
 #include "hub/io/hw_sinks.h"
 #include "hub/io/rf_pair.h"
+#include "hub/bt_link.h"
 #include "hub/io/rf_spi.h"
 #include "hub/io/sim_sinks.h"
 #include "hub/parse_num.h"
@@ -26,6 +27,7 @@
 #include "hub/net/ws.h"
 #ifdef HH_BT
 #include "hub/bt/bt_main.h"
+#include "hub/bt_link_sup.h"
 #endif
 
 #define REPLY_CAP HP_WS_MAX_FRAME /* a reply that fits is always sendable */
@@ -72,13 +74,15 @@ static void on_ident_changed(void *ctx, const hp_ident_t *id) {
     fprintf(stderr, "hub: id is now %s\n", id->id);
 }
 
-/* The ws poll's (max 4) extra wake-only fds: RF pair socket(s) + mDNS. */
-static int rf_fds(void *arg, int out[4]) {
+/* The ws poll's (max 8) extra wake-only fds: RF pair socket(s) + mDNS. */
+static int rf_fds(void *arg, int out[8]) {
     int n = arg ? hp_rf_pair_fds(arg, out) : 0;
     if (n < 0) n = 0;
     int spi = hp_rf_spi_wake_fd(g_hub.sinks.rf); /* the real radio's reader thread wakes the poll */
-    if (spi >= 0 && n < 4) out[n++] = spi;
-    if (n < 4 && g_mdns.fd >= 0) out[n++] = g_mdns.fd;
+    if (spi >= 0 && n < 8) out[n++] = spi;
+    if (n < 8 && g_mdns.fd >= 0) out[n++] = g_mdns.fd;
+    int bfd = bt_link_poll_fd(); /* the Bluetooth helper's socket (-1 when none runs) */
+    if (n < 8 && bfd >= 0) out[n++] = bfd;
     return n;
 }
 
@@ -212,6 +216,7 @@ int main(int argc, char **argv) {
     long budget_kib = HP_MAP_BUDGET_BYTES / 1024; /* --config-budget */
     long ir_ports = HP_HW_DEFAULT_IR_PORTS;
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
+    const char *bt_helper = NULL, *bt_dir = NULL; /* --bt-helper (tests: the fake helper), --bt-dir (default: next to the state file) */
     int mdns = -1; /* -1 = default: on for the real daemon, off under --sim */
     hp_mdns_opts_t mo = {HP_MDNS_PORT, NULL, NULL, NULL, NULL};
     g_mdns.fd = -1;
@@ -246,6 +251,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--hw-id") && i + 1 < argc) hw_id = argv[++i];
         else if (!strcmp(argv[i], "--fw-version") && i + 1 < argc) fw_version = argv[++i];
         else if (!strcmp(argv[i], "--ir-ports") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 255, &ir_ports)) return bad_num("--ir-ports", argv[i]); }
+        else if (!strcmp(argv[i], "--bt-helper") && i + 1 < argc) bt_helper = argv[++i];
+        else if (!strcmp(argv[i], "--bt-dir") && i + 1 < argc) bt_dir = argv[++i];
         else if (!strcmp(argv[i], "--mdns")) mdns = 1;
         else if (!strcmp(argv[i], "--no-mdns")) mdns = 0;
         else if (!strcmp(argv[i], "--mdns-port") && i + 1 < argc) { long mp; if (hp_parse_num(argv[++i], 0, 65535, &mp)) return bad_num("--mdns-port", argv[i]); mo.port = (uint16_t)mp; }
@@ -257,7 +264,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "usage: hub [--sim] [--port N] (--token T | --token-file PATH) [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
                             "[--ota-dir DIR [--ota-target FILE] [--ota-allow-dev] [--health-file FILE]] [--hub-id ID] [--ident-dir DIR] [--hw-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] "
                             "[--config-budget KiB] [--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
-                            "[--mdns-addr A] [--mdns-dest A:P]\n");
+                            "[--mdns-addr A] [--mdns-dest A:P] [--bt-helper EXE] [--bt-dir DIR]\n");
             return 2;
         }
     }
@@ -351,6 +358,29 @@ int main(int argc, char **argv) {
         else if (cr < 0 && cr != -HP_E_NOENT) fprintf(stderr, "hub: ignoring unusable cache %s (%d)\n", cache, cr);
     }
     hp_actsm_reloaded(&g_hub.act); /* device tracking for the cached config */
+    hub_bt_config_sync(&g_hub);    /* the helper starts when the cached config has Bluetooth hosts or remotes */
+#ifdef HH_BT
+    bool bt_run = !sim || bt_helper; /* --sim never launches the real helper */
+    {
+        static char bt_state_dir[256];
+        struct bt_link_hooks hk = {0};
+        hk.helper_exe = bt_helper;
+        hk.argv0 = argv[0];
+        hk.skip_bluetoothd = sim;
+        hk.unavailable = !bt_run; /* a sim hub with no fake helper has no Bluetooth: hello_ack without `bt`, bt_* refused */
+        hk.data_dir = bt_dir;
+        if (!bt_dir && state) {
+            const char *sl = strrchr(state, '/');
+            int dl = sl ? (int)(sl - state) : 0;
+            if (sl && dl > 0 && dl < (int)sizeof bt_state_dir) {
+                snprintf(bt_state_dir, sizeof bt_state_dir, "%.*s", dl, state);
+                hk.data_dir = bt_state_dir;
+            }
+        }
+        bt_link_configure(&hk);
+    }
+    int bt_wait = -1;
+#endif
     if (state) {
         hp_actsm_set_state_path(&g_hub.act, state);
         int sr = hp_actsm_load_state(&g_hub.act);
@@ -420,7 +450,16 @@ int main(int argc, char **argv) {
         }
         int wait = hub_next_timeout_ms(&g_hub); /* timers never sleep: they shorten the poll */
         if (wait < 0 || wait > 200) wait = 200;
+#ifdef HH_BT
+        if (bt_wait >= 0 && bt_wait < wait) wait = bt_wait;
+#endif
         hp_ws_poll(srv, wait);
+#ifdef HH_BT
+        if (bt_run) { /* the helper's socket, supervision, then the broadcasts its changes queued */
+            bt_wait = bt_link_service();
+            hub_flush_pending(&g_hub);
+        }
+#endif
         hub_pump_rf(&g_hub);
         hp_mdns_srv_service(&g_mdns);
         if (!sim) hp_hw_service(&g_hw);

@@ -54,6 +54,11 @@ def test_old_and_new_peers_ignore_unknown_fields():
     # a candidate pass through (json field)
     cand = {"state": "ready", "discoverable": False, "hosts": [], "candidates": [{"addr": "AA:BB:CC:DD:EE:01", "rssi": -50, "x": 1}]}
     assert decode_ws({"v": 1, "id": 0, "t": "bt_state", "d": cand})[1] == cand
+    # window / configured: an old hub sends neither; entries are json, so a client keeps what it does not know
+    win = {"state": "ready", "discoverable": False, "window": "remote",
+           "hosts": [{"slot": 1, "addr": "AA:BB:CC:DD:EE:05", "configured": False}]}  # fmt: skip
+    assert decode_ws({"v": 1, "id": 0, "t": "bt_state", "d": win})[1] == win
+    assert "window" not in decode_ws(old)[1]
     pick = {"on": True, "mode": "remote", "addr": "AA:BB:CC:DD:EE:01"}
     assert decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": pick})[1] == pick
     assert "addr" not in decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": {"on": True, "mode": "remote"}})[1]

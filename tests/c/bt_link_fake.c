@@ -98,3 +98,20 @@ void bt_link_set_remote_key_cb(void (*cb)(void *ctx, unsigned slot, unsigned pag
 void bt_fake_remote_key(unsigned slot, unsigned page, unsigned usage, bool down) {
     if (g_bt_fake.rkey) g_bt_fake.rkey(g_bt_fake.rkey_ctx, slot, page, usage, down);
 }
+
+/* supervisor side: recorded, never acted on */
+void bt_link_set_config(const struct bt_link_cfg_entry *hosts, unsigned n_hosts, const struct bt_link_cfg_entry *remotes,
+                        unsigned n_remotes) {
+    g_bt_fake.cfg_calls++;
+    g_bt_fake.cfg_hosts = n_hosts;
+    g_bt_fake.cfg_remotes = n_remotes;
+    for (unsigned i = 0; i < n_hosts && i < 8; i++) g_bt_fake.cfg_host[i] = hosts[i];
+    for (unsigned i = 0; i < n_remotes && i < 8; i++) g_bt_fake.cfg_remote[i] = remotes[i];
+}
+void bt_link_set_engine(const struct bt_link_engine *e) { g_bt_fake.engine = e; }
+void bt_link_connect(unsigned slot) {
+    g_bt_fake.connect_calls++;
+    g_bt_fake.last_connect = slot;
+}
+int bt_link_poll_fd(void) { return -1; }
+int bt_link_service(void) { return -1; }

@@ -367,6 +367,10 @@ const hp_bt_remote_t *hp_map_bt_remote(const hp_map_t *, uint8_t slot);
 int hp_map_bt_remote_key(hp_map_t *, const hp_sinks_t *, uint8_t slot, uint8_t page, uint16_t usage, bool down,
                          hp_key_emit_fn emit, void *ctx);
 
+/* The distinct bt host slots the actions of activity `idx` use (its devices' power/input/command actions, its key binds
+ * and steps), at most `cap`; returns how many. Used to connect them when the activity starts. */
+int hp_map_activity_bt_hosts(const hp_map_t *, int idx, uint8_t *out, int cap);
+
 /* Sends the key up of the bt key a physical press holds down (cap timer cancelled), if any. Called on
  * an activity switch, power-off, reload and free. */
 int hp_map_bt_release(hp_map_t *, const hp_sinks_t *);

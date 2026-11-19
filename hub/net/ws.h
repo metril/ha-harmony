@@ -51,7 +51,7 @@ void hp_ws_conn_set_authed(hp_ws_conn_t *);
 void hp_ws_foreach(hp_ws_server_t *, void (*fn)(hp_ws_conn_t *, void *), void *arg);
 /* Optional: fn(arg, out) fills up to 4 extra fds polled for readability each
  * hp_ws_poll; they only wake the poll (the owner services them). */
-void hp_ws_set_extra_fds(hp_ws_server_t *, int (*fn)(void *arg, int out[4]), void *arg);
+void hp_ws_set_extra_fds(hp_ws_server_t *, int (*fn)(void *arg, int out[8]), void *arg);
 /* Per-connection opaque pointer (owner frees it in on_close). */
 void hp_ws_conn_set_user(hp_ws_conn_t *, void *);
 void *hp_ws_conn_user(const hp_ws_conn_t *);

@@ -28,12 +28,23 @@ add_hp_test(rf_spi)
 target_compile_definitions(test_rf_spi PRIVATE HP_LINK_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/rf/link_status.json")
 add_hp_test(mdns)
 add_hp_test(ident)
-add_hp_test(bt_stub)
+# test_bt_stub builds the stub itself: hp_hub carries the real supervisor (hub/bt_link.c) when HH_BT is on.
+add_executable(test_bt_stub test_bt_stub.c ${CMAKE_SOURCE_DIR}/hub/bt_link_stub.c)
+target_link_libraries(test_bt_stub PRIVATE hp_hub)
+add_test(NAME bt_stub COMMAND test_bt_stub)
 # test_bt links the fake bt_link instead of hub/bt_link_stub.c (the fake defines every symbol, so the archive member is not pulled).
 add_executable(test_bt test_bt.c bt_link_fake.c)
 target_link_libraries(test_bt PRIVATE hp_hub)
 add_test(NAME bt COMMAND test_bt)
 add_hp_test(hwkeys)
+if(HH_BT)
+  # The supervisor against a fake helper process (real sockets and children, virtual clock).
+  add_executable(bt_fake_helper bt_fake_helper.c)
+  target_include_directories(bt_fake_helper PRIVATE ${CMAKE_SOURCE_DIR})
+  add_executable(test_bt_link test_bt_link.c)
+  target_link_libraries(test_bt_link PRIVATE hp_hub)
+  add_test(NAME bt_link COMMAND test_bt_link $<TARGET_FILE:bt_fake_helper>)
+endif()
 
 # RF object codec: golden vectors shared with the remote build (argv[1] = frames.json).
 add_executable(test_framing test_framing.c)

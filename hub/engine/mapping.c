@@ -1418,6 +1418,31 @@ static int bt_release_held(hp_map_t *m, const hp_sinks_t *s) {
     return bt_release_stored(m); /* through the sinks the key was pressed with */
 }
 
+static void bt_host_add(const hp_action_t *a, uint8_t *out, int cap, int *n) {
+    if (a->type != HP_ACT_BT) return;
+    for (int i = 0; i < *n; i++)
+        if (out[i] == a->host) return;
+    if (*n < cap) out[(*n)++] = a->host;
+}
+
+int hp_map_activity_bt_hosts(const hp_map_t *m, int idx, uint8_t *out, int cap) {
+    int n = 0;
+    if (!m || idx < 0 || idx >= m->nacts) return 0;
+    const hp_activity_t *a = &m->acts[idx];
+    for (uint8_t i = 0; i < a->ndevs; i++) {
+        uint8_t d = a->devs[i].dev;
+        bt_host_add(&m->devs[d].pwr_on, out, cap, &n);
+        bt_host_add(&m->devs[d].pwr_off, out, cap, &n);
+        for (uint32_t k = 0; k < m->ninputs; k++)
+            if (m->inputs[k].dev == d) bt_host_add(&m->inputs[k].act, out, cap, &n);
+        for (uint32_t k = 0; k < m->ncmds; k++)
+            if (m->cmds[k].dev == d) bt_host_add(&m->cmds[k].act, out, cap, &n);
+    }
+    for (uint16_t k = 0; k < a->nkeys; k++) bt_host_add(&a->keys[k].act, out, cap, &n);
+    for (uint8_t k = 0; k < a->nsteps; k++) bt_host_add(&a->steps[k], out, cap, &n);
+    return n;
+}
+
 int hp_map_bt_release(hp_map_t *m, const hp_sinks_t *s) {
     if (!m || !s) return -HP_E_INVAL;
     return bt_release_held(m, s);

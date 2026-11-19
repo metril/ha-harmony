@@ -193,7 +193,7 @@ static void test_state_json_and_broadcast(void) {
     CT_EQ(seen_n, 1);
     CT_CHECK(!strcmp(seen_type, "bt_state"));
     CT_CHECK(strstr(seen_json, "\"pairing\":{\"result\":\"ok\",\"addr\":\"AA:BB:CC:DD:EE:03\",\"name\":\"Phone\",\"kind\":\"host\",\"transport\":\"le\"}"));
-    CT_CHECK(strstr(seen_json, "\"hosts\":[{\"slot\":2,\"addr\":\"AA:BB:CC:DD:EE:03\",\"name\":\"Phone\",\"transport\":\"le\",\"connected\":true}]"));
+    CT_CHECK(strstr(seen_json, "\"hosts\":[{\"slot\":2,\"addr\":\"AA:BB:CC:DD:EE:03\",\"name\":\"Phone\",\"transport\":\"le\",\"connected\":true,\"configured\":false}]"));
     g_bt_fake.state.pairing = BT_PAIR_REFUSED;
     g_bt_fake.state.pairing_name[0] = 0;
     g_bt_fake.state.pairing_transport = BT_TRANSPORT_ANY;
@@ -257,8 +257,8 @@ static void test_remotes(void) {
     snprintf(g_bt_fake.state.pairing_addr, BT_LINK_ADDR_MAX, "11:22:33:44:55:66");
     notify();
     CT_CHECK(strstr(seen_json, "\"kind\":\"remote\""));
-    CT_CHECK(strstr(seen_json, "\"remotes\":[{\"slot\":1,\"addr\":\"11:22:33:44:55:66\",\"name\":\"Clicker\",\"connected\":true,\"battery\":80},"
-                               "{\"slot\":3,\"addr\":\"11:22:33:44:55:77\",\"connected\":false}]"));
+    CT_CHECK(strstr(seen_json, "\"remotes\":[{\"slot\":1,\"addr\":\"11:22:33:44:55:66\",\"name\":\"Clicker\",\"connected\":true,\"configured\":false,\"battery\":80},"
+                               "{\"slot\":3,\"addr\":\"11:22:33:44:55:77\",\"connected\":false,\"configured\":false}]"));
 
     /* forget kind: remote slots are bounded by remotes_max, not hosts_max */
     send_msg("{\"v\":1,\"id\":9,\"t\":\"bt_forget\",\"d\":{\"slot\":3,\"kind\":\"remote\"}}");
@@ -454,6 +454,28 @@ static void test_gen_and_coalescing_and_hello_state(void) {
     CT_CHECK(hub_bt_state_frame(frame, sizeof frame, &n) != 0);
 }
 
+static bool seen_has(const char *needle) { return strstr(seen_json, needle) != NULL; }
+static void test_window_and_configured(void) {
+    setup();
+    hello();
+    g_bt_fake.state.window = BT_WIN_REMOTE;
+    notify();
+    CT_CHECK(seen_has("\"window\":\"remote\""));
+    g_bt_fake.state.window = BT_WIN_HOST;
+    notify();
+    CT_CHECK(seen_has("\"window\":\"host\""));
+    g_bt_fake.state.window = BT_WIN_NONE;
+    notify();
+    CT_CHECK(!seen_has("\"window\""));
+    add_host(2, "AA:BB:CC:DD:EE:03", "", BT_TRANSPORT_LE, false);
+    g_bt_fake.state.hosts[0].configured = true;
+    g_bt_fake.state.n_remotes = 1;
+    g_bt_fake.state.remotes[0] = (struct bt_link_remote){.slot = 1, .addr = "11:22:33:44:55:66", .battery = -1, .configured = true};
+    notify();
+    CT_CHECK(seen_has("\"transport\":\"le\",\"connected\":false,\"configured\":true}"));
+    CT_CHECK(seen_has("\"remotes\":[{\"slot\":1,\"addr\":\"11:22:33:44:55:66\",\"connected\":false,\"configured\":true}]"));
+}
+
 static void test_unavailable(void) {
     setup();
     g_bt_fake.available = false;
@@ -480,6 +502,7 @@ int main(void) {
     CT_RUN(test_max_hosts_fit_one_frame);
     CT_RUN(test_untrusted_link_data);
     CT_RUN(test_gen_and_coalescing_and_hello_state);
+    CT_RUN(test_window_and_configured);
     CT_RUN(test_unavailable);
     return CT_DONE();
 }

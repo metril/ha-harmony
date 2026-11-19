@@ -25,19 +25,39 @@ send, LE supported). Values come from the link, never constants. Absent: no `bt_
 
 ## bt_state
 
-`{state, discoverable, discoverable_secs?, le?, gen?, pairing?, hosts, remotes?, candidates?}`
+`{state, discoverable, discoverable_secs?, le?, gen?, pairing?, hosts, remotes?, candidates?, window?}`
 
 - `state`: `off` | `starting` | `ready` | `no_adapter` | `disabled`.
 - `discoverable_secs`: seconds left while discoverable.
 - `pairing`: the last pairing outcome `{result: "ok"|"failed"|"refused", addr, name?, transport?, kind?: "host"|"remote"}`.
-- `hosts`: `[{slot, addr, name?, transport: "classic"|"le", connected}]`.
-- `remotes`: `[{slot, addr, name?, connected, battery?}]` (`battery` percent, omitted when unknown).
+- `hosts`: `[{slot, addr, name?, transport: "classic"|"le", connected, configured?}]`.
+- `remotes`: `[{slot, addr, name?, connected, battery?, configured?}]` (`battery` percent, omitted when unknown).
+- `configured` (optional, additive): `true` when a `bt_hosts` / `bt_remotes` entry of the loaded config carries this address,
+  and `slot` is then that entry's config slot; `false` for a peer that is bonded in the hub but not in the config (an editor
+  can offer "add to config"). `slot` of an unconfigured entry is a free number that no config entry uses (so `bt_key` /
+  `bt_forget` by that slot still work), and may change when the config or the bonds change. A client that does not know
+  `configured` can ignore it.
+- `window` (optional): `"host"` or `"remote"` while a pairing window is open (or requested while the helper is still
+  starting); absent = no window. This tells "window open, nothing seen yet" (`window: "remote"`, no `candidates`) from "no
+  window".
 
 - `candidates`: `[{addr, name?, rssi}]`, at most 16, `rssi` dBm (int8). Present (non-empty) only while a remote-mode
   window is open and LE remotes have been seen; absent otherwise. Same `addr` / `name` validation as hosts. Membership
   changes (a device appears or drops out) push a `bt_state`; RSSI-only changes do not, so `rssi` can be stale.
 
-Valid slots are `0 .. hosts_max-1` (hosts) and `0 .. remotes_max-1` (remotes).
+Valid slots are `0 .. hosts_max-1` (hosts) and `0 .. remotes_max-1` (remotes). A host that the config lists by address but
+that is not bonded has no entry in `hosts`; `bt_key` / `bt_forget` for its slot answer `no_slot`.
+
+## Supervision (hub/bt_link.c)
+
+The hub runs the Bluetooth helper as a child process (`hub bt-helper`, `hub/bt/bt_ipc.h`) only while it is needed: the loaded
+config has `bt_hosts` or `bt_remotes`, or a pairing window is open (or closed less than 60 s ago, so a fresh bond stays
+visible). Before the first start of a boot the stock `bluetoothd` is stopped if it is running (nothing is changed on disk, so
+the stock firmware gets it back at the next boot). The hub pings every 5 s and kills a helper that has been silent for 15 s,
+or that sends a malformed frame; it restarts it after 5, 30, then 120 s, at most 5 times a boot, after which `state` is
+`disabled` until the hub restarts. A helper death is not a boot failure: `state` leaves `ready`, `hosts` / `remotes` /
+`candidates` / `pairing` / `window` are cleared, `gen` changes, a key held down for a host is released and every connected
+remote is reported lost to the key mapping; IR and RF are unaffected. Config bt slots are bound to the helper's bonds by address.
 
 ## Picking a remote
 

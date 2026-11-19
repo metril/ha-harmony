@@ -40,3 +40,14 @@ void bt_link_set_remote_key_cb(void (*cb)(void *ctx, unsigned slot, unsigned pag
     (void)cb;
     (void)ctx;
 }
+void bt_link_set_config(const struct bt_link_cfg_entry *hosts, unsigned n_hosts, const struct bt_link_cfg_entry *remotes,
+                        unsigned n_remotes) {
+    (void)hosts;
+    (void)n_hosts;
+    (void)remotes;
+    (void)n_remotes;
+}
+void bt_link_set_engine(const struct bt_link_engine *e) { (void)e; }
+void bt_link_connect(unsigned slot) { (void)slot; }
+int bt_link_poll_fd(void) { return -1; }
+int bt_link_service(void) { return -1; }

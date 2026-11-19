@@ -293,7 +293,8 @@ messages:
       - {name: addr, type: str, optional: true}       # mode remote, on: AA:BB:CC:DD:EE:FF of a listed bt_state candidate to bond; absent = open the window and scan only
 
   # state: off | starting | ready | no_adapter | disabled. pairing = the last pairing outcome
-  # {result: ok|failed|refused, addr, name?, transport?, kind?: host|remote}. hosts = [{slot, addr, name?, transport: classic|le, connected}].
+  # {result: ok|failed|refused, addr, name?, transport?, kind?: host|remote}. hosts = [{slot, addr, name?, transport: classic|le, connected, configured?}]
+  # (configured: a config bt_hosts entry carries this address, `slot` is then the config slot; false/absent = bonded in the hub only).
   - name: bt_state
     code: 36
     transport: ws
@@ -307,6 +308,7 @@ messages:
       - {name: hosts, type: json}
       - {name: remotes, type: json, optional: true}  # bonded LE remotes (input): [{slot, addr, name?, connected, battery?}]
       - {name: candidates, type: json, optional: true}  # LE remotes seen while a remote-mode window is open (max 16): [{addr, name?, rssi}]
+      - {name: window, type: str, optional: true}  # host | remote while a pairing window is open (or requested and the helper is starting); absent = no window
 
   - name: bt_forget
     code: 37
