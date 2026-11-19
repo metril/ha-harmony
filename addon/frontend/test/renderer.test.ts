@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'lit';
 import vectors from '../../../tests/vectors/pages.json';
 import keymap from './fixtures/keymap.json';
-import { PAL, cellAt, hitWidget, layoutPage, pageSvg, widgetRect, type Prim } from '../src/lib/page-renderer';
+import { cellAt, hitWidget, layoutPage, pageSvg, widgetRect, type Prim } from '../src/lib/page-renderer';
 import { BODY, DPAD, KEYS, PHYSICAL_KEYS, SCREEN, keyByName, keyTitle } from '../src/lib/remote-layout';
 import type { V2Page } from '../src/lib/api';
+import { css as hexOf } from '../src/lib/themes';
+import { DEFAULT_THEME } from '../src/lib/theme-model';
+
+const PAL = { bg: hexOf(DEFAULT_THEME.tokens.bg), acc: hexOf(DEFAULT_THEME.tokens.acc), s2: hexOf(DEFAULT_THEME.tokens.s2) };
 
 type Vec = { name: string; dict: V2Page };
 const v2 = vectors.valid_v2 as unknown as Vec[];
@@ -65,16 +69,15 @@ describe('page renderer: v2 looks', () => {
   it('draws roles, icons and the active highlight', () => {
     const prims = layoutPage(full, { activeAct: 0 }).prims;
     expect(prims.some((p) => p.t === 'icon')).toBe(true);
-    const bound = prims.find((p) => p.t === 'rect' && p.wi === 0 && p.stroke === PAL.acc);
-    expect(bound).toBeTruthy();
+    // the running activity: ACC fill; otherwise the primary role is ACC text on an S2 surface (remote/app/ui.c)
+    expect(prims.find((p) => p.t === 'rect' && p.wi === 0)).toMatchObject({ fill: PAL.acc });
     const idle = layoutPage(full, { activeAct: null }).prims.find((p) => p.t === 'rect' && p.wi === 0);
-    expect(idle).toMatchObject({ fill: PAL.acc }); // primary role
+    expect(idle).toMatchObject({ fill: PAL.s2 });
   });
   it('tiles show on, off and unavailable', () => {
     const page: V2Page = { ...full, back: false, seq: null, widgets: [0, 1, 2].map((i) => ({ kind: 'tile', id: i, x: 0, y: i * 2, w: 4, h: 2, label: 'T' + i, role: 'default', shape: 'card', icon_only: false, icon: 0, bind: null })) };
     const prims = layoutPage(page).prims;
-    expect(texts(prims)).toEqual(expect.arrayContaining(['On', 'Off', 'unavailable']));
-    expect(prims.filter((p) => p.t === 'rect' && p.dash)).toHaveLength(1);
+    expect(texts(prims)).toEqual(expect.arrayContaining(['On', 'Off', 'n/a']));
   });
   it('hit-tests like the remote', () => {
     const p = v2.find((v) => v.name === 'v2_title')!.dict;

@@ -2,6 +2,7 @@ import { css, html, nothing } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import '../components/hh-chain-mini';
 import '../components/hh-mini-remote';
+import { activeTheme } from '../lib/theme-model';
 import { StoreElement } from '../components/base';
 import '../components/hh-page-diff';
 import { changedKeys, changedPages, type KeyChange } from '../lib/diff';
@@ -138,7 +139,7 @@ export class HhOverview extends StoreElement {
       <div class="top">
         <section class="card rem" aria-label="Your remote">
           <h2>Your remote</h2>
-          <hh-mini-remote .page=${homePage} label="Your remote showing the ${s.config.pages?.[home]?.title ?? 'home'} page"></hh-mini-remote>
+          <hh-mini-remote .page=${homePage} .theme=${activeTheme(s.config).theme} label="Your remote showing the ${s.config.pages?.[home]?.title ?? 'home'} page"></hh-mini-remote>
           <a class="btn sm" href=${hashFor('remote')}>Open in the studio</a>
         </section>
           <div class="stack">

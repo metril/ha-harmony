@@ -40,6 +40,8 @@ export class Store extends EventTarget {
   saveState: SaveState = 'clean';
   savedAt: number | null = null;
   errors: ValidationError[] = [];
+  /** non-blocking warnings of the last check (the add-on sends them among `errors`, marked `severity: warning`) */
+  warnings: ValidationError[] = [];
   usage: Usage | null = null;
   hash: string | null = null;
   /** per-page preview results from the last check (error tolerant: good pages decode even when others fail) */
@@ -306,7 +308,8 @@ export class Store extends EventTarget {
       // a live check (right after an edit) sends the in-memory config so the canvas does not wait for the save
       const p = await this.api.preview(this.hub, live || !this.hasDraft ? clone(this.config) : undefined);
       if (seq !== this.seq) return;
-      this.errors = p.errors;
+      this.errors = p.errors.filter((e) => e.severity !== 'warning');
+      this.warnings = p.errors.filter((e) => e.severity === 'warning');
       this.usage = p.usage;
       applyUsageLimits(p.usage);
       this.hash = p.hash;

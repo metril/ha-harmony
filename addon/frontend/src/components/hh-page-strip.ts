@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing, svg } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { pageGroup } from '../lib/page-renderer';
+import { activeTheme } from '../lib/theme-model';
 import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
@@ -140,6 +141,7 @@ export class HhPageStrip extends LitElement {
     const st = this.host.state;
     const cfg = st.store.config;
     const pages = cfg.pages ?? [];
+    const theme = activeTheme(cfg).theme;
     return html`
       <div class="strip">
         <div class="items" role="list" aria-label="Pages (Alt+Left and Alt+Right reorder)">
@@ -158,7 +160,7 @@ export class HhPageStrip extends LitElement {
           return html`<div class=${classMap({ pg: true, drop: this.dropAt === i && this.dragFrom !== i && this.dragFrom + 1 !== i, dragging: this.dragFrom === i })} role="listitem" tabindex="0" aria-current=${st.page === i} aria-label="${name}, page ${i + 1} of ${pages.length}${p.kind ? `, ${p.kind} page` : ''}${screens > 1 ? `, ${screens} screens` : ''}, ${bytes} of ${limit} bytes${bad ? ', has an error' : ''}"
             @pointerdown=${(e: PointerEvent) => this.down(e, i)} @keydown=${(e: KeyboardEvent) => this.key(e, i, pages.length)}>
             <span class=${classMap({ tw: true, multi: screens > 1 })}>
-              <svg class="thumb" viewBox="0 0 240 320" aria-hidden="true">${v2 ? pageGroup(v2, { noStatus: true }) : svg`<rect width="240" height="320" fill="#101820"></rect>`}</svg>
+              <svg class="thumb" viewBox="0 0 240 320" aria-hidden="true">${v2 ? pageGroup(v2, { noStatus: true, theme }) : svg`<rect width="240" height="320" fill="#101820"></rect>`}</svg>
               ${p.kind ? html`<span class="kd" aria-hidden="true">${p.kind === 'home' ? 'Home' : 'Fav'}</span>` : nothing}
               <span class="seq" aria-hidden="true">${st.page === i ? `${Math.min(st.wire, screens - 1) + 1}/${screens}` : `×${screens}`}</span>
             </span>

@@ -55,6 +55,10 @@ export interface Widget {
   icon_only?: boolean;
   /** `next`, `prev`, `home` or a page id: a navigation button */
   nav?: string;
+  /** palette name or `#RRGGBB` */
+  color?: string;
+  /** tiles: the colour while on */
+  on_color?: string;
   [k: string]: unknown;
 }
 export interface Page {
@@ -75,12 +79,17 @@ export interface Config {
   keys?: Record<string, unknown>;
   pages?: Page[];
   editor?: Record<string, unknown>;
+  /** the active theme: a preset key or one of `themes` (absent = default) */
+  theme?: string;
+  themes?: Record<string, { extends?: string; tokens?: Record<string, string>; palette?: Record<string, { fill: string }> }>;
   [k: string]: unknown;
 }
 export interface ValidationError {
   path: (string | number)[];
   msg: string;
   line?: number | null;
+  /** non-blocking notes (theme contrast, weak-ink colours) carry `warning`; real errors have no severity */
+  severity?: 'warning';
 }
 
 /** The fixed limits of a hub on firmware <= 0.3.5 (harmony_core.hub_limits.LEGACY; tests/py/test_limits.py keeps them equal). */

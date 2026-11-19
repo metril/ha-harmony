@@ -330,3 +330,12 @@ def test_serialised_wire_matches_theme_math():
     at = active_theme(m)
     assert c.theme_wire == serialise_theme(dict(at.tokens), list(at.fills))
     assert dict(at.tokens)["acc"] != PRESETS["midnight"].tokens["acc"]
+
+
+def test_token_key_casing_vector_shared_with_the_editor():
+    from harmony_core.theme_math import resolve_theme
+
+    vec = json.loads((Path(__file__).parents[1] / "vectors" / "theme_casing.json").read_text())
+    model = parse_data({"themes": vec["themes"], "theme": "t"})
+    tokens, _ = resolve_theme("t", model["themes"], PRESETS)
+    assert {k: tokens[k] for k in vec["expect"]} == vec["expect"]

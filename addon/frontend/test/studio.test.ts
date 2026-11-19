@@ -1,3 +1,4 @@
+import '../src/components/hh-colour-field'; // lazy in the app; loaded up front here (happy-dom cannot upgrade late)
 import { beforeEach, describe, expect, it } from 'vitest';
 import '../src/components/hh-app';
 import keymap from './fixtures/keymap.json';

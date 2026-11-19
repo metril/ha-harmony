@@ -1,5 +1,5 @@
 // Draws a page-format-v2 model (harmony_core.page_codec.page_to_dict, the shared contract with the C
-// remote) the way the remote does: direction-B palette, 32 px top bar, cards/rows/pills/monograms,
+// remote) the way the remote does: the config's theme (themes.ts, colour rules of theme-model.ts = remote/app/ui.c), 32 px top bar, cards/rows/pills/monograms,
 // roles, stock icons, tiles with state, active-activity highlight, paged "idx/cnt", back chevron.
 // Geometry mirrors remote/app/ui.c (cells use ceil edges, 8 px margins, 8 px gaps).
 // `layoutPage` returns plain primitives (snapshot-tested against tests/vectors/pages.json);
@@ -7,6 +7,8 @@
 import { svg, type TemplateResult } from 'lit';
 import { iconInner } from './icon-shapes';
 import type { V2Page, V2Widget } from './api';
+import { THEMES, css as hex } from './themes';
+import { DEFAULT_THEME, labelColor, presetTheme, widgetColors, type RenderTheme, type TileState } from './theme-model';
 
 export const SCREEN_W = 240;
 export const SCREEN_H = 320;
@@ -14,20 +16,11 @@ export const BAR_H = 32;
 const MARGIN = 8;
 const GAP = 8;
 
-export const PAL = {
-  bg: '#101820',
-  s1: '#182430',
-  s2: '#202c38',
-  s3: '#304050',
-  tx: '#f8fcf8',
-  tx2: '#a8b4c0',
-  tx3: '#687888',
-  acc: '#20c8b0',
-  onacc: '#081c18',
-  accDim: '#123a36',
-  warm: '#f8c040',
-  bad: '#f85848',
-} as const;
+/** The preset a page's theme id names (7, the config's own theme, needs `opts.theme`). */
+const themeOfPage = (p: V2Page): RenderTheme => {
+  const t = THEMES.find((x) => x.id === (p.theme ?? 0));
+  return t ? presetTheme(t.key) : DEFAULT_THEME;
+};
 
 export type Prim =
   | { t: 'rect'; x: number; y: number; w: number; h: number; r: number; fill: string; stroke?: string; sw?: number; dash?: boolean; wi?: number }
@@ -37,8 +30,10 @@ export type Prim =
   | { t: 'path'; d: string; stroke: string; fill?: string; sw: number; wi?: number };
 
 export interface TileSample {
-  state: 'on' | 'off' | 'unavailable';
+  state: TileState;
   text: string;
+  /** link lost: the remote greys every tile that is not on */
+  stale?: boolean;
 }
 export interface RenderOpts {
   /** activity index that is running; widgets bound to it show the active highlight */
@@ -47,6 +42,8 @@ export interface RenderOpts {
   tiles?: Record<number, TileSample>;
   /** hide the top bar status icons (thumbnails) */
   noStatus?: boolean;
+  /** the config's active theme (`activeTheme(config).theme`); default: the preset the page names */
+  theme?: RenderTheme;
 }
 export interface Scene {
   w: number;
@@ -124,29 +121,30 @@ export function sampleTile(p: V2Page, w: V2Widget, opts: RenderOpts): TileSample
   ][n % 3] as TileSample;
 }
 
-function barPrims(p: V2Page, o: RenderOpts, out: Prim[]): void {
+function barPrims(p: V2Page, o: RenderOpts, T: RenderTheme, out: Prim[]): void {
+  const k = T.tokens;
   const tIdx = titleIndex(p);
   const title = p.version === 1 ? (tIdx >= 0 ? (p.widgets[tIdx] as V2Widget).label : '') || 'Harmony' : p.title || 'Harmony';
   let tx = 12;
   if (p.back) {
-    out.push({ t: 'path', d: 'M16 10l-6 6 6 6', stroke: PAL.tx2, sw: 2 });
+    out.push({ t: 'path', d: 'M16 10l-6 6 6 6', stroke: hex(k.tx2), sw: 2 });
     tx = 26;
   }
   const paged = p.seq ? `${p.seq.idx}/${p.seq.cnt}` : '';
   const room = (o.noStatus ? 228 : paged ? 126 : 140) - tx;
-  out.push({ t: 'text', x: tx, y: 22, s: fit(title, room, 16), size: 16, fill: PAL.tx, anchor: 'start', weight: 500 });
-  if (paged) out.push({ t: 'text', x: o.noStatus ? 228 : 146, y: 21, s: paged, size: 12, fill: PAL.tx2, anchor: 'end', weight: 600 });
+  out.push({ t: 'text', x: tx, y: 22, s: fit(title, room, 16), size: 16, fill: hex(k.tx), anchor: 'start', weight: 500 });
+  if (paged) out.push({ t: 'text', x: o.noStatus ? 228 : 146, y: 21, s: paged, size: 12, fill: hex(k.tx2), anchor: 'end', weight: 600 });
   if (!o.noStatus) {
-    out.push({ t: 'path', d: 'M152 21v-3M157 21v-6M162 21v-9M167 21v-12', stroke: PAL.acc, sw: 2.2 });
-    out.push({ t: 'text', x: 198, y: 21, s: '72%', size: 12, fill: PAL.tx2, anchor: 'end' });
-    out.push({ t: 'rect', x: 202, y: 10, w: 24, h: 12, r: 2.5, fill: 'none', stroke: PAL.tx2, sw: 1.2 });
-    out.push({ t: 'rect', x: 204.5, y: 12.5, w: 14, h: 7, r: 1, fill: PAL.acc });
-    out.push({ t: 'rect', x: 226.5, y: 13.5, w: 2, h: 5, r: 1, fill: PAL.tx2 });
+    out.push({ t: 'path', d: 'M152 21v-3M157 21v-6M162 21v-9M167 21v-12', stroke: hex(k.acc), sw: 2.2 });
+    out.push({ t: 'text', x: 198, y: 21, s: '72%', size: 12, fill: hex(k.tx2), anchor: 'end' });
+    out.push({ t: 'rect', x: 202, y: 10, w: 24, h: 12, r: 2.5, fill: 'none', stroke: hex(k.tx2), sw: 1.2 });
+    out.push({ t: 'rect', x: 204.5, y: 12.5, w: 14, h: 7, r: 1, fill: hex(k.acc) });
+    out.push({ t: 'rect', x: 226.5, y: 13.5, w: 2, h: 5, r: 1, fill: hex(k.tx2) });
   }
-  out.push({ t: 'rect', x: 0, y: BAR_H - 1, w: SCREEN_W, h: 1, r: 0, fill: PAL.s2 });
+  out.push({ t: 'rect', x: 0, y: BAR_H - 1, w: SCREEN_W, h: 1, r: 0, fill: hex(k.s2) });
 }
 
-function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, out: Prim[]): void {
+function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: RenderTheme, out: Prim[]): void {
   const r = widgetRect(p, w);
   const x = r.x1;
   const y = r.y1;
@@ -154,71 +152,51 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, out: Pri
   const bh = r.y2 - r.y1 + 1;
   if (w.kind === 'label') {
     if (p.version === 1 && wi === titleIndex(p)) return;
-    out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 4.5, s: fit(w.label, bw - 4, 13), size: 13, fill: PAL.tx2, anchor: 'middle', weight: 600, wi });
+    const col = labelColor(w.color, T) ?? T.tokens.tx2;
+    out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 4.5, s: fit(w.label, bw - 4, 13), size: 13, fill: hex(col), anchor: 'middle', weight: 600, wi });
     return;
   }
   const active = w.bind !== null && w.role !== 'nav' && o.activeAct != null && w.bind === o.activeAct;
-  const danger = w.role === 'danger' || (p.version === 1 && w.kind === 'button' && /^power off$/i.test(w.label));
-  let fill: string = w.kind === 'tile' ? PAL.s1 : PAL.s2;
-  let stroke: string | undefined;
-  let text: string = PAL.tx;
-  if (w.role === 'primary') {
-    fill = PAL.acc;
-    text = PAL.onacc;
-  } else if (w.role === 'secondary') {
-    fill = PAL.s1;
-    stroke = PAL.s3;
-    text = PAL.tx2;
-  } else if (w.role === 'nav') {
-    fill = PAL.s1;
-    text = PAL.tx2;
-  }
-  if (danger) {
-    fill = PAL.s1;
-    stroke = PAL.bad;
-    text = PAL.bad;
-  }
-  if (active) {
-    fill = PAL.accDim;
-    stroke = PAL.acc;
-    text = PAL.acc;
-  }
-  const radius = w.shape === 'pill' ? Math.min(bh / 2, 24) : w.shape === 'monogram' ? 0 : w.shape === 'row' ? 10 : 14;
   const tile = w.kind === 'tile' ? sampleTile(p, w, o) : null;
-  if (tile?.state === 'unavailable') {
-    stroke = PAL.s3;
-    text = PAL.tx3;
-  }
+  const c = widgetColors(w, { active: !!active && w.kind === 'button', ...(tile ? { state: tile.state, stale: !!tile.stale } : {}) }, T);
+  const ink = hex(c.ink);
+  const icon = hex(c.icon);
+  const cap = hex(c.cap);
+  const k = T.tokens;
+  // a 3 px active border, else a 1 px outline when the fill is too close to the ground; both drawn inside the box
+  const sw = c.border !== undefined ? 3 : c.outline ? 1 : 0;
+  const stroke = c.border !== undefined ? hex(c.border) : c.outline ? hex(k.tx3) : undefined;
+  const radius = w.shape === 'pill' ? Math.min(bh / 2, 24) : w.shape === 'monogram' ? 0 : w.shape === 'row' ? 10 : 14;
   if (w.shape === 'monogram') {
     const d = Math.min(bw, bh) - 4;
     const cx = x + bw / 2;
     const cy = y + (bh >= 64 && !w.icon_only && w.label ? d / 2 + 2 : bh / 2);
-    out.push({ t: 'circle', x: cx, y: cy, r: d / 2 - (bh >= 64 && w.label ? 8 : 0), fill, stroke, sw: stroke ? 1.5 : undefined, wi });
     const rad = d / 2 - (bh >= 64 && w.label ? 8 : 0);
-    if (w.icon) out.push({ t: 'icon', id: w.icon, x: cx - rad * 0.5, y: cy - rad * 0.5, size: rad, color: text, wi });
-    else out.push({ t: 'text', x: cx, y: cy + rad * 0.34, s: (Array.from(w.label)[0] ?? '?').toUpperCase(), size: Math.max(12, rad * 0.95), fill: text, anchor: 'middle', weight: 600, wi });
-    if (bh >= 64 && w.label && !w.icon_only) out.push({ t: 'text', x: cx, y: y + bh - 4, s: fit(w.label, bw, 12), size: 12, fill: PAL.tx2, anchor: 'middle', wi });
+    out.push({ t: 'circle', x: cx, y: cy, r: rad - sw / 2, fill: hex(c.fill), stroke, sw: sw || undefined, wi });
+    if (w.icon) out.push({ t: 'icon', id: w.icon, x: cx - rad * 0.5, y: cy - rad * 0.5, size: rad, color: icon, wi });
+    else out.push({ t: 'text', x: cx, y: cy + rad * 0.34, s: (Array.from(w.label)[0] ?? '?').toUpperCase(), size: Math.max(12, rad * 0.95), fill: ink, anchor: 'middle', weight: 600, wi });
+    if (bh >= 64 && w.label && !w.icon_only) out.push({ t: 'text', x: cx, y: y + bh - 4, s: fit(w.label, bw, 12), size: 12, fill: cap, anchor: 'middle', wi });
     return;
   }
-  out.push({ t: 'rect', x, y, w: bw, h: bh, r: radius, fill, stroke, sw: stroke ? (active ? 2 : 1.5) : undefined, dash: tile?.state === 'unavailable', wi });
+  out.push({ t: 'rect', x: x + sw / 2, y: y + sw / 2, w: bw - sw, h: bh - sw, r: Math.max(0, radius - sw / 2), fill: hex(c.fill), stroke, sw: sw || undefined, wi });
   const size = bh < 30 || bw < 56 ? 12 : bw >= 100 ? 16 : 14;
   const hasIcon = w.icon > 0;
   if (tile) {
-    const val = tile.state === 'unavailable' ? 'unavailable' : tile.text;
-    const vcol = tile.state === 'on' ? PAL.warm : tile.state === 'unavailable' ? PAL.tx3 : PAL.tx;
-    if (w.icon_only && hasIcon) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: vcol, wi });
+    const val = tile.text;
+    if (w.icon_only && hasIcon) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: icon, wi });
     else if (bh >= 52) {
-      if (hasIcon) out.push({ t: 'icon', id: w.icon, x: x + 8, y: y + 8, size: 16, color: vcol, wi });
-      if (!w.icon_only) out.push({ t: 'text', x: x + (hasIcon ? 28 : 10), y: y + 20, s: fit(w.label, bw - (hasIcon ? 36 : 18), 12), size: 12, fill: PAL.tx2, anchor: 'start', wi });
-      out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 18, s: fit(val, bw - 12, 22), size: 22, fill: vcol, anchor: 'middle', weight: 600, wi });
-    } else out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 5, s: fit(`${w.label}  ${val}`, bw - 8, size), size, fill: vcol, anchor: 'middle', wi });
-    if (tile.state === 'on') out.push({ t: 'circle', x: x + bw - 10, y: y + 10, r: 3, fill: PAL.warm, wi });
+      if (hasIcon) out.push({ t: 'icon', id: w.icon, x: x + 8, y: y + 8, size: 16, color: icon, wi });
+      if (!w.icon_only) out.push({ t: 'text', x: x + (hasIcon ? 28 : 10), y: y + 20, s: fit(w.label, bw - (hasIcon ? 36 : 18), 12), size: 12, fill: cap, anchor: 'start', wi });
+      out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 18, s: fit(val, bw - 12, 22), size: 22, fill: ink, anchor: 'middle', weight: 600, wi });
+    } else out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 5, s: fit(`${w.label}  ${val}`, bw - 8, size), size, fill: ink, anchor: 'middle', wi });
     return;
   }
+  const legacyDanger = p.version === 1 && w.kind === 'button' && /^power off$/i.test(w.label);
+  const text = legacyDanger ? hex(k.bad) : ink;
   const label = w.icon_only ? '' : w.label;
-  if (hasIcon && !label) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: text, wi });
+  if (hasIcon && !label) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: icon, wi });
   else if (hasIcon && w.shape === 'card' && bh >= 56) {
-    out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 11, y: y + bh / 2 - 22, size: 22, color: text, wi });
+    out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 11, y: y + bh / 2 - 22, size: 22, color: icon, wi });
     out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 22, s: fit(label, bw - 8, size), size, fill: text, anchor: 'middle', weight: 500, wi });
   } else if (hasIcon) {
     const left = w.shape === 'row' || w.shape === 'pill';
@@ -227,7 +205,7 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, out: Pri
     const s = fit(label, room, size);
     const tw = Math.min(room, s.length * size * 0.54);
     const gx = left ? x + 12 : x + bw / 2 - (isz + 8 + tw) / 2;
-    out.push({ t: 'icon', id: w.icon, x: gx, y: y + bh / 2 - isz / 2, size: isz, color: text, wi });
+    out.push({ t: 'icon', id: w.icon, x: gx, y: y + bh / 2 - isz / 2, size: isz, color: icon, wi });
     out.push({ t: 'text', x: gx + isz + 8, y: y + bh / 2 + size * 0.35, s, size, fill: text, anchor: 'start', weight: 500, wi });
   } else if (label) {
     const left = w.shape === 'row';
@@ -236,9 +214,10 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, out: Pri
 }
 
 export function layoutPage(p: V2Page, opts: RenderOpts = {}): Scene {
-  const prims: Prim[] = [{ t: 'rect', x: 0, y: 0, w: SCREEN_W, h: SCREEN_H, r: 0, fill: PAL.bg }];
-  barPrims(p, opts, prims);
-  p.widgets.forEach((w, i) => widgetPrims(p, w, i, opts, prims));
+  const T = opts.theme ?? themeOfPage(p);
+  const prims: Prim[] = [{ t: 'rect', x: 0, y: 0, w: SCREEN_W, h: SCREEN_H, r: 0, fill: hex(T.tokens.bg) }];
+  barPrims(p, opts, T, prims);
+  p.widgets.forEach((w, i) => widgetPrims(p, w, i, opts, T, prims));
   return { w: SCREEN_W, h: SCREEN_H, prims };
 }
 

@@ -105,6 +105,7 @@ ROUTES = [
     "remote",
     "activities",
     "activities/watch_tv",
+    "themes",
     "devices",
     "devices/tv",
     "devices/shield",

@@ -58,6 +58,10 @@ export interface V2Widget {
   icon_only: boolean;
   icon: number;
   bind: number | null;
+  /** palette name or `#RRGGBB`; null = the role's colour */
+  color?: string | null;
+  /** tiles: the colour while on */
+  on_color?: string | null;
 }
 export interface V2Page {
   version: 1 | 2;
@@ -71,6 +75,8 @@ export interface V2Page {
   seq: { idx: number; cnt: number } | null;
   act: number;
   title: string;
+  /** theme preset id (7 = the config's own theme) */
+  theme?: number;
   widgets: V2Widget[];
 }
 /** One wire page of a config page; a long `list:` page compiles to several ("2/3"). */
@@ -120,6 +126,8 @@ export interface ApplyStatus {
   linked_hubs?: { id: string; last_seen: number; name?: string }[];
   /** add-on clock, unix seconds */
   now?: number;
+  /** what the linked remote's firmware cannot show (colours / custom themes), when the integration reports it */
+  theme_notices?: string[];
 }
 export interface HubsResponse {
   hubs: HubInfo[];

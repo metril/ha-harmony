@@ -4,6 +4,7 @@ import type { PreviewPage } from '../lib/api';
 import { changedPages, changedWidgetIndexes } from '../lib/diff';
 import type { Page } from '../lib/model';
 import { pageSvg, widgetRect, type Rect } from '../lib/page-renderer';
+import { activeTheme, type RenderTheme } from '../lib/theme-model';
 import { shared } from '../lib/styles';
 import { wireMap } from '../lib/studio-model';
 import { StoreElement } from './base';
@@ -50,24 +51,30 @@ export class HhPageDiff extends StoreElement {
       return w ? [widgetRect(v2, w)] : [];
     });
   }
-  private thumb(label: string, pp: PreviewPage | undefined | null, marks: Rect[]) {
-    return pp?.page ? html`<figure>${pageSvg(pp.page, {}, this.scale, `${label} page`, marks)}<figcaption>${label}</figcaption></figure>` : html`<figure class="none"><span class="muted">${label}: none</span></figure>`;
+  private thumb(label: string, pp: PreviewPage | undefined | null, marks: Rect[], theme: RenderTheme) {
+    return pp?.page ? html`<figure>${pageSvg(pp.page, { theme }, this.scale, `${label} page`, marks)}<figcaption>${label}</figcaption></figure>` : html`<figure class="none"><span class="muted">${label}: none</span></figure>`;
   }
 
   protected override render() {
     const s = this.store;
     const applied = s.appliedConfig;
     const pages = s.hasDraft ? changedPages(applied, s.config) : [];
+    const before = applied ? activeTheme(applied).theme : null;
+    const after = activeTheme(s.config).theme;
+    // a theme change recolours every page: show the first few that are not listed already
+    const themed = s.hasDraft && !!before && JSON.stringify([before.tokens, before.swatches]) !== JSON.stringify([after.tokens, after.swatches]);
+    if (themed)
+      for (const pg of (s.config.pages ?? []).slice(0, 3)) if (!pages.some((x) => x.id === pg.id) && (applied?.pages ?? []).some((x) => x.id === pg.id)) pages.push({ id: pg.id, title: pg.title ?? pg.id, kind: 'changed', widgets: [] });
     if (!pages.length) return nothing;
-    return html`<p class="legend"><i></i> outlined: widgets that changed</p>
+    return html`<p class="legend"><i></i> outlined: widgets that changed${themed ? '. Pages are drawn in the draft theme on the right.' : ''}</p>
       <div class="pages">${pages.map((p) => {
         const ai = (applied?.pages ?? []).findIndex((x) => x.id === p.id);
         const bi = (s.config.pages ?? []).findIndex((x) => x.id === p.id);
         const ch = changedWidgetIndexes(applied?.pages?.[ai] as unknown as Record<string, unknown> | undefined, s.config.pages?.[bi] as unknown as Record<string, unknown> | undefined);
         return html`<div class="pg"><b class="vh">${p.title}</b>
-          ${this.thumb('Before', ai >= 0 ? this.beforePages?.[ai] : null, this.marks(applied?.pages?.[ai], ai >= 0 ? this.beforePages?.[ai] : null, p.kind === 'changed' ? ch.before : []))}
-          ${this.thumb('After', bi >= 0 ? s.pages[bi] : null, this.marks(s.config.pages?.[bi], bi >= 0 ? s.pages[bi] : null, p.kind === 'changed' ? ch.after : []))}
-          <div><b>${p.title}</b> <span class="chip ${p.kind === 'added' ? 'ok' : p.kind === 'removed' ? 'bad' : 'ir'}">${KIND_LABEL[p.kind]}</span>${p.widgets.length ? html`<div class="muted">Widgets: ${p.widgets.slice(0, 6).join(', ')}${p.widgets.length > 6 ? ` and ${p.widgets.length - 6} more` : ''}</div>` : nothing}</div></div>`;
+          ${this.thumb('Before', ai >= 0 ? this.beforePages?.[ai] : null, this.marks(applied?.pages?.[ai], ai >= 0 ? this.beforePages?.[ai] : null, p.kind === 'changed' ? ch.before : []), before ?? after)}
+          ${this.thumb('After', bi >= 0 ? s.pages[bi] : null, this.marks(s.config.pages?.[bi], bi >= 0 ? s.pages[bi] : null, p.kind === 'changed' ? ch.after : []), after)}
+          <div><b>${p.title}</b> <span class="chip ${p.kind === 'added' ? 'ok' : p.kind === 'removed' ? 'bad' : 'ir'}">${KIND_LABEL[p.kind]}</span>${!p.widgets.length && p.kind === 'changed' && themed ? html`<div class="muted">Theme changed</div>` : nothing}${p.widgets.length ? html`<div class="muted">Widgets: ${p.widgets.slice(0, 6).join(', ')}${p.widgets.length > 6 ? ` and ${p.widgets.length - 6} more` : ''}</div>` : nothing}</div></div>`;
       })}</div>`;
   }
 }

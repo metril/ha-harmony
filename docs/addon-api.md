@@ -75,6 +75,7 @@ editor disables the Home Assistant action picker (with a reason) when `ha_action
   `all=0` returns only the first error. After a valid parse, `errors` may also hold non-blocking warnings
   `{path, msg, line:null, severity:"warning"}` (theme contrast, weak-ink free colours); they never make `ok` false, and
   errors carry no `severity` key. `config/preview` adds the same warnings to its `errors` (its `ok` ignores them).
+  The editor keeps them apart from errors (a "N warnings" chip; they never block Apply).
 - `POST config/apply?hub=` body `{}` -> `{ok:true, ...meta}`; `409 no_draft`; `422 {ok:false, errors}`.
   Apply is strict; the preview's tolerance does not apply to it.
 - `POST config/revert?hub=` body `{target: "applied"|"previous"}` -> `{ok, ...meta}`; `409 store`
@@ -153,6 +154,9 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
   integration without re-importing. With several linked ids it only offers it (`adopt` above).
 - `POST hubs/adopt` body `{from?: "default", to}` -> `{ok:true, hub}`; `409 not_linked` (no integration
   polls for `to`), `409 hub_exists` (`to` already has a store), `404 nothing_to_adopt`.
+  Optional `theme_notices: [string]` (not sent by this add-on yet): what the linked remote's firmware cannot show of the
+  config's colours or theme (the compiler's `theme_notices`). The editor shows one non-blocking notice in the Themes view
+  and the apply dialog when it is non-empty.
 
 ### Home Assistant (read only)
 
