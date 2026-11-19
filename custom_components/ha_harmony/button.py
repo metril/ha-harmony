@@ -1,4 +1,6 @@
-"""One button per configured device command (plus power_on/power_off)."""
+"""A button per device command (plus power_on/power_off): disabled by default, and none (for new commands)
+on a device with more than COMMAND_BUTTON_LIMIT commands unless the `all_command_buttons` option is set.
+Every command stays reachable through `remote.send_command` (device + command name) either way."""
 
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ from .base_entity import HarmonyEntity
 from .coordinator import HarmonyCoordinator
 from .entity_sync import setup_dynamic
 
+ENABLED_BY_DEFAULT = False  # new command buttons are created disabled (tests flip this)
 PARALLEL_UPDATES = 0  # push-based: commands go through the hub client, which pipelines them
 
 
@@ -25,7 +28,7 @@ async def async_setup_entry(
         lambda c: [
             HarmonyCommandButton(c, dev, cmd)
             for dev in c.compiled.devices
-            for cmd in c.device_commands(dev)
+            for cmd in c.button_commands(dev)
         ],
     )
 
@@ -37,6 +40,7 @@ class HarmonyCommandButton(HarmonyEntity, ButtonEntity):
         )  # ids never contain ":"
         self._device, self._command = device, command
         self._attr_translation_key = "command"
+        self._attr_entity_registry_enabled_default = ENABLED_BY_DEFAULT  # new ones only: an existing registry entry keeps its state
         self._attr_name = command.replace("_", " ").capitalize()
 
     async def async_press(self) -> None:

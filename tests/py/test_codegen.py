@@ -175,6 +175,7 @@ def test_real_schema_has_phase2_messages():
         "hello", "hello_ack", "error", "ping", "pong", "set_config", "config_ack",
         "command", "command_result", "key_event", "state_update", "page_push", "battery",
         "device_state", "tile_update", "activity_list", "remote_attached", "remote_info", "tile_state",
+        "config_chunk",
         "ota_begin", "ota_chunk", "ota_end", "ota_abort", "ota_status",
         "ota_offer", "ota_frag", "ota_frag_ack", "ota_commit", "ota_result",
     }  # fmt: skip
@@ -188,6 +189,13 @@ def test_ota_message_ids_are_stable_and_remote_ones_reserved():
         "ota_offer": 30, "ota_frag": 31, "ota_frag_ack": 32, "ota_commit": 33, "ota_result": 34,
     }  # fmt: skip
     assert all(msgs[n].transport == "rf" for n in ("ota_offer", "ota_frag", "ota_frag_ack", "ota_commit", "ota_result"))
+
+
+def test_real_schema_message_codes_are_unique():
+    codes = [m.code for m in load_schema(REAL_SCHEMA).messages]
+    assert len(codes) == len(set(codes))
+    msgs = {m.name: m for m in load_schema(REAL_SCHEMA).messages}
+    assert msgs["config_chunk"].code == 25
 
 
 def test_config_ack_hash_and_remote_attached_in_schema():
@@ -392,3 +400,46 @@ def test_v036_decoder_accepts_main_hello_ack(tmp_path):
     assert ns["decode_ws"](env)[1] == {"hub_id": "h", "fw_version": "0.3.7"}
     with pytest.raises(ns["ProtoError"]):
         ns["decode_ws"]({**env, "d": {"fw_build": 366}})  # required field still enforced
+
+
+def _v038_schema(tmp_path):
+    """The real schema as 0.3.8 had it: no hello_ack.limits, no config_chunk."""
+    import re as _re
+
+    text = REAL_SCHEMA.read_text()
+    text = _re.sub(r"^ *- \{name: limits,.*\n", "", text, flags=_re.MULTILINE)
+    text = _re.sub(r"^  - name: config_chunk\n(?:    .*\n|      .*\n)+", "", text, flags=_re.MULTILINE)
+    p = tmp_path / "v038.yaml"
+    p.write_text(text)
+    return p
+
+
+LIMITS_HELLO = {
+    "hub_id": "h", "fw_version": "0.3.9", "fw_build": 400, "ota_key": "release",
+    "limits": {"budget": 8192, "flash_free": 4096, "chunk": 49152},
+}
+
+
+def test_v038_integration_decodes_hello_ack_with_limits(tmp_path):
+    """A 0.3.8 integration (no limits, no config_chunk in its schema) against this hub."""
+    out = tmp_path / "out"
+    generate(_v038_schema(tmp_path), out)
+    ns = load_gen_py(out)
+    assert "CONFIG_CHUNK" not in ns["MsgType"].__members__
+    got = ns["decode_ws"]({"v": 1, "id": 1, "t": "hello_ack", "d": LIMITS_HELLO})[1]
+    assert got["hub_id"] == "h" and "limits" not in got and got["fw_build"] == 400
+
+
+def test_this_integration_decodes_v038_hello_ack_and_falls_back():
+    """This integration against a 0.3.8 hub: hello_ack without limits -> the fixed legacy limits."""
+    from harmony_core.hub_limits import CURRENT, LEGACY, HubLimits
+
+    ns = _real_py()
+    env = {"v": 1, "id": 1, "t": "hello_ack",
+           "d": {"hub_id": "h", "fw_version": "0.3.8", "fw_build": 366, "ota_key": "dev"}}
+    data = ns["decode_ws"](env)[1]
+    assert "limits" not in data
+    lim = HubLimits.from_hello(data.get("limits"))
+    assert lim == LEGACY and lim.legacy
+    wire = {k: v for k, v in CURRENT.to_wire().items() if k != "flash_free"}  # flash_free optional
+    assert HubLimits.from_hello(wire) == CURRENT

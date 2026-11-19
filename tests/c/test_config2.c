@@ -111,7 +111,7 @@ static void test_each_ir_form_encodes(void) {
     uint32_t raw[HP_IR_MAX_DUR];
     hp_ir_code_t c;
     hp_ir_signal_t sig;
-    for (int i = 0; i < m.ncmds; i++) {
+    for (uint32_t i = 0; i < m.ncmds; i++) {
         CT_EQ(hp_map_ir_code(&m, &m.cmds[i].act, raw, &c), 0);
         CT_EQ(hp_ir_encode(&c, 0, &sig), 0);
     }
@@ -206,13 +206,15 @@ static void test_limits(void) {
         for (int i = 0; i < 52; i++) ADD("%s\"c%d\":{\"proto\":\"nec\",\"addr\":1,\"cmd\":%d}", i ? "," : "", i, i);
         ADD("}}");
     }
-    ADD("]}"); /* 260 commands > 256 */
-    CT_EQ(hp_map_load(&m, big, n), -HP_E_TOOBIG);
+    ADD("]}"); /* 260 commands: no count limit, only the memory budget */
+    CT_EQ(hp_map_load(&m, big, n), 0);
+    CT_EQ(m.ncmds, 260);
 
     BEGIN("{\"format\":2,\"devices\":[{\"id\":\"d\",\"inputs\":{");
-    for (int i = 0; i <= HP_MAP_MAX_INPUTS; i++) ADD("%s\"i%d\":{\"proto\":\"nec\",\"addr\":1,\"cmd\":1}", i ? "," : "", i);
+    for (int i = 0; i < 300; i++) ADD("%s\"i%d\":{\"proto\":\"nec\",\"addr\":1,\"cmd\":1}", i ? "," : "", i);
     ADD("}}]}");
-    CT_EQ(hp_map_load(&m, big, n), -HP_E_TOOBIG);
+    CT_EQ(hp_map_load(&m, big, n), 0); /* 300 inputs: no count limit */
+    CT_EQ(m.ninputs, 300);
 
     BEGIN("{\"format\":2,\"keys\":{");
     for (int i = 0; i <= HP_MAP_MAX_KEYS; i++) ADD("%s\"%d\":{\"type\":\"none\"}", i ? "," : "", i);
@@ -234,7 +236,7 @@ static void test_limits(void) {
     ADD("\"}}}");
     CT_EQ(hp_map_load(&m, big, n), -HP_E_TOOBIG);
 
-    /* the shared IR pool: 40 x 512 raw durations = 20480 > 16384 */
+    /* the shared IR pool has no word limit: 40 x 512 raw durations = 20480 words load */
     BEGIN("{\"format\":2,\"devices\":[{\"id\":\"d\",\"commands\":{");
     for (int c = 0; c < 40; c++) {
         ADD("%s\"c%d\":{\"raw\":{\"hz\":38000,\"us\":[1", c ? "," : "", c);
@@ -242,9 +244,14 @@ static void test_limits(void) {
         ADD("]}}");
     }
     ADD("}}]}");
+    CT_EQ(hp_map_load(&m, big, n), 0);
+    CT_EQ(m.pool_n, 20480);
+    /* the one byte budget: a precise error, the previous map stays */
+    hp_map_set_budget(&m, 4096);
     CT_EQ(hp_map_load(&m, big, n), -HP_E_TOOBIG);
-    CT_CHECK(strstr(hp_map_last_error(&m), "pool") != NULL);
-    CT_EQ(hp_map_load(&m, big, HP_MAP_MAX_JSON + 1), -HP_E_TOOBIG);
+    CT_CHECK(strstr(hp_map_last_error(&m), "KiB") != NULL);
+    CT_CHECK(strstr(hp_map_last_error(&m), "allows 4 KiB") != NULL);
+    CT_EQ(m.pool_n, 20480);
     hp_map_free(&m);
 }
 

@@ -7,7 +7,7 @@ import voluptuous as vol
 from .ha_client import ACTION_DOMAINS, ENTITY_DOMAINS
 from .store import HUB_ID
 
-MAX_NODES = 60_000  # JSON values in one config document
+MAX_NODES = 250_000  # JSON values in one config document (a hub takes ~13k protocol-coded commands, ~4 values each)
 MAX_DEPTH = 16
 MAX_KEYS_TOP = 16
 MAX_STR = 100_000

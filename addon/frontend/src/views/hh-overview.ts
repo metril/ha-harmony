@@ -143,7 +143,7 @@ export class HhOverview extends StoreElement {
         </section>
           <div class="stack">
             <div class="stats">
-              ${this.stat('Devices', c.devices, LIMITS.devices)} ${this.stat('Activities', c.activities, 16)}
+              ${this.stat('Devices', c.devices, LIMITS.devices)} ${this.stat('Activities', c.activities, LIMITS.activities)}
               ${this.stat('Page widgets', c.widgets, LIMITS.widgets)} ${this.stat('Inputs', c.inputs, LIMITS.inputs)}
             </div>
             <section class="card" aria-labelledby="ha">
@@ -170,6 +170,6 @@ export class HhOverview extends StoreElement {
   }
 
   private stat(label: string, n: number, max: number) {
-    return html`<div class="card stat"><div class="v">${n}<span class="muted"> / ${max}</span></div><div class="l">${label}</div></div>`;
+    return html`<div class="card stat"><div class="v">${n}${Number.isFinite(max) ? html`<span class="muted"> / ${max}</span>` : nothing}</div><div class="l">${label}</div></div>`;
   }
 }

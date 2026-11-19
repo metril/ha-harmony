@@ -96,7 +96,7 @@ HOSTILE = {
             ]
         }
     ),
-    "too_many_devices": envelope(config={"devices": [{"id": f"d{i}"} for i in range(40)]}),
+    "too_many_devices": envelope(config={"devices": [{"id": f"d{i}"} for i in range(300)]}),
 }
 
 

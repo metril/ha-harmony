@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import random
 import time
@@ -19,8 +20,12 @@ from .harmony_core.harmony_proto import (
     decode_ws_full,
     encode_ws,
 )
+from .harmony_core.hub_limits import HubLimits
 
 _LOGGER = logging.getLogger(__name__)
+
+SET_CONFIG_SINGLE_MAX = 40000  # bytes of compact config text sent as one set_config frame (the hub's frame cap is 64 KiB)
+CHUNK_FALLBACK = 12000  # config_chunk text bytes per chunk (the hub takes up to its `chunk`; JSON escaping can double it)
 
 PushCallback = Callable[[MsgType, dict[str, Any]], None]
 # connected, error. error is set when the client gave up for good (auth/version).
@@ -94,6 +99,7 @@ class HarmonyHubClient:
         self.fw_build: int | None = None  # installed firmware build id (absent: hub without OTA)
         self.ota_key: str | None = None  # "dev" | "release" | None
         self.config_hash: str | None = None  # hub's CRC-32 hex of its loaded config text
+        self.limits: HubLimits | None = None  # hello_ack.limits (LEGACY for a hub that sends none); None before the first hello
 
     @property
     def connected(self) -> bool:
@@ -135,6 +141,33 @@ class HarmonyHubClient:
         """Send a request and return the reply's `d` (error replies raise)."""
         return await self._request(msg_type, data)
 
+    async def async_set_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Push a compiled config; returns the final config_ack `d`. A big config travels as
+        config_chunk messages when the hub supports them (its hello_ack.limits.chunk)."""
+        text = json.dumps(config, separators=(",", ":"), ensure_ascii=False)
+        raw = text.encode()
+        lim = self.limits
+        if len(raw) <= SET_CONFIG_SINGLE_MAX or lim is None or not lim.chunk:
+            return await self._request(MsgType.SET_CONFIG, {"config": config})
+        step = min(CHUNK_FALLBACK, lim.chunk)
+        # a load can take seconds on the hub's CPU: allow time in proportion to the text
+        load_timeout = self._req_timeout + len(raw) / 20000
+        seq, start, ack = 0, 0, {"ok": False}
+        while start < len(text):
+            end = min(len(text), start + step)  # characters; bytes may be more with non-ASCII
+            while len(text[start:end].encode()) > step:
+                end -= max(1, (len(text[start:end].encode()) - step) // 4)
+            last = end >= len(text)
+            ack = await self._request(
+                MsgType.CONFIG_CHUNK,
+                {"seq": seq, "total": len(raw), "data": text[start:end]},
+                load_timeout if last else None,
+            )
+            if not ack.get("ok") or last:
+                return ack
+            seq, start = seq + 1, end
+        return ack
+
     # ------------------------------------------------------------ internals
     async def _open(self) -> aiohttp.ClientWebSocketResponse:
         try:
@@ -171,6 +204,7 @@ class HarmonyHubClient:
             self.fw_build = d.get("fw_build")
             self.ota_key = d.get("ota_key")
             self.config_hash = d.get("config_hash")
+            self.limits = HubLimits.from_hello(d.get("limits"))
             acts = d.get("activities")
             self.activities = (
                 [a for a in acts if isinstance(a, str)] if isinstance(acts, list) else []
@@ -308,7 +342,9 @@ class HarmonyHubClient:
                 await ws.close()
                 return
 
-    async def _request(self, msg_type: MsgType, data: dict[str, Any]) -> dict[str, Any]:
+    async def _request(
+        self, msg_type: MsgType, data: dict[str, Any], timeout: float | None = None
+    ) -> dict[str, Any]:
         ws = self._ws
         if ws is None or ws.closed:
             raise HarmonyConnectionError("not connected")
@@ -319,7 +355,7 @@ class HarmonyHubClient:
         self._pending[msg_id] = fut
         try:
             await ws.send_json(envelope)
-            return await asyncio.wait_for(fut, self._req_timeout)
+            return await asyncio.wait_for(fut, timeout or self._req_timeout)
         except (aiohttp.ClientError, OSError) as exc:
             raise HarmonyConnectionError(str(exc)) from exc
         except TimeoutError as exc:

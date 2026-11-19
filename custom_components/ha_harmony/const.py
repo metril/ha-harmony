@@ -23,10 +23,12 @@ CONF_ADDON_HOST = "addon_host"
 CONF_ADDON_PORT = "addon_port"
 CONF_ADDON_TOKEN = "addon_token"
 CONF_HOLD_EVENTS = "hold_events"  # option: also write an event for each hold repeat
+CONF_ALL_COMMAND_BUTTONS = "all_command_buttons"  # option: command buttons even for devices over the limit
+COMMAND_BUTTON_LIMIT = 200  # a device with more commands gets no (new) command buttons unless the option is set
 CONF_ADDON_SLUG = "addon_slug"
 CONF_ADDON_UUID = "addon_uuid"
 ADDON_SLUG = "ha_harmony_editor"
-BUNDLE_MAX_BYTES = 2 * 1024 * 1024  # a hub config is <= 128 KiB compiled; sources stay far below
+BUNDLE_MAX_BYTES = 4 * 1024 * 1024  # the source of a config as large as a hub takes (its memory budget), with headroom
 LINK_FETCH_TIMEOUT = 20.0  # seconds, whole request
 LINK_WAIT_TIMEOUT = 70.0  # the add-on holds a wait for 55 s
 FIRST_APPLY_WAIT = 5.0  # setup waits at most this long for the first config when nothing is cached

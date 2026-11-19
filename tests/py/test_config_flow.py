@@ -170,5 +170,7 @@ async def test_options_flow_toggles_hold_events(hass):
     entry.add_to_hass(hass)
     res = await hass.config_entries.options.async_init(entry.entry_id)
     assert res["type"] is FlowResultType.FORM
-    res = await hass.config_entries.options.async_configure(res["flow_id"], {"hold_events": True})
-    assert res["type"] is FlowResultType.CREATE_ENTRY and entry.options == {"hold_events": True}
+    res = await hass.config_entries.options.async_configure(res["flow_id"], {"hold_events": True, "all_command_buttons": False}
+    )
+    assert res["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options == {"hold_events": True, "all_command_buttons": False}

@@ -98,7 +98,10 @@ when the draft has errors elsewhere:
           widgets|null, widget_limit}],
  usage: {json_bytes, json_max, pool_words, pool_max, keys, keys_max, devices, devices_max,
          activities, activities_max, commands, commands_max, inputs, inputs_max,
-         soft_keys, soft_keys_max} | null}
+         config_bytes, config_budget, soft_keys, soft_keys_max} | null}
+ # the *_max of json, pool, commands and inputs are null on a current hub (no such limit): it has one
+ # memory budget, config_bytes of config_budget. They come from the limits the hub's integration
+ # reported (header `X-Hub-Limits` on its bundle polls); a hub that never did gets the old numbers.
 ```
 
 `pages` has one entry per **config** page. `page` is the page-format-v2 model of its first wire page
@@ -169,8 +172,8 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
   the archive file of `models[i]` (what `ir/device?model=` takes), so the wizard can open a likely model
   without searching by name; `truncated` is true when the
   per-request budget (16 MiB of codeset text) ran out before every codeset was looked at.
-- `POST ir/parse` body `{kind: "pronto"|"flipper"|"smartir", text (<= 256 KiB)}` ->
-  `{ok, actions: [{name, action, form}], skipped: [{name, reason}]}` (at most 256 actions);
+- `POST ir/parse` body `{kind: "pronto"|"flipper"|"smartir", text (<= 1 MiB)}` ->
+  `{ok, actions: [{name, action, form}], skipped: [{name, reason}]}` (at most 4096 actions);
   bad input -> `422 bad_ir` with `error.errors: [{path, msg}]`.
 - Errors: `404 unknown_brand`, `400 bad_request` (unsafe names), `504 archive_offline | archive_timeout`,
   `502 archive_error`, `502 archive_too_large` (a codeset with more than 2000 commands; its cache
@@ -224,7 +227,7 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
   known brand; `model` is the `file` from `/models`, ending in `.json`. Archive failures: 504
   `archive_offline` or `archive_timeout`, 502 `archive_error`, 404 `unknown_brand`. An offline archive
   with a cache still answers.
-- `POST /ir/parse` returns `{ok,actions:[{name,action,form}],skipped}` (at most 256 actions). Bad input
+- `POST /ir/parse` returns `{ok,actions:[{name,action,form}],skipped}` (at most 4096 actions). Bad input
   gives 422 `bad_ir` with `error.errors:[{path,msg}]`; a Flipper file with an unsupported protocol
   fails whole with 422.
 - `POST /ir/test` takes `{hub,ir,port_mask?}` and returns `{ok,action}`. Invalid IR is 422 `invalid_ir`

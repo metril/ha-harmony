@@ -19,9 +19,10 @@ export interface PutResponse extends Meta {
 }
 export interface Usage {
   json_bytes: number;
-  json_max: number;
+  /** null: the hub has no fixed text limit (a current hub: see config_budget) */
+  json_max: number | null;
   pool_words: number;
-  pool_max: number;
+  pool_max: number | null;
   keys: number;
   keys_max: number;
   devices: number;
@@ -29,9 +30,12 @@ export interface Usage {
   activities: number;
   activities_max: number;
   commands: number;
-  commands_max: number;
+  commands_max: number | null;
   inputs: number;
-  inputs_max: number;
+  inputs_max: number | null;
+  /** a current hub: what loading this config needs of its memory, and the budget it allows (bytes); null on old firmware */
+  config_bytes: number | null;
+  config_budget: number | null;
   soft_keys: number;
   soft_keys_max: number;
   /** wire pages (a long list page counts each of its pages) and the remote's cap */

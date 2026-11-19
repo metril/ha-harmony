@@ -11,10 +11,11 @@ import yaml
 
 from .convert import Converted, convert_command
 
-# Must equal compiler.LIMITS (tests/py/test_irdb_device.py enforces it).
-MAX_COMMANDS = 256
-MAX_INPUTS = 64
-MAX_JSON = 131072
+# Sanity bounds of ONE imported device, not hub limits: the compiler checks a whole config against
+# the connected hub's own limits (hello_ack.limits), whatever firmware it runs.
+MAX_COMMANDS = 4096
+MAX_INPUTS = 256
+MAX_JSON = 1024 * 1024
 MAX_NAME_CHARS = 200  # archive command names are short; anything longer is junk
 MAX_PRONTO_CHARS = 8192  # the hub takes at most 520 words (about 2.6 kB of text)
 
@@ -153,14 +154,14 @@ def build_device(
             built.skipped.append((raw, res.reason))
             continue
         if len(commands) >= MAX_COMMANDS:
-            built.skipped.append((raw, f"over the hub's {MAX_COMMANDS} commands limit"))
+            built.skipped.append((raw, f"over the import limit of {MAX_COMMANDS} commands per device"))
             continue
         n = command_name(raw, used)
         # running size of json.dumps(commands): braces + each `"name":action,`
         add = len(json.dumps(n)) + len(json.dumps(res.action, separators=(",", ":"))) + 2
         if size + add > MAX_JSON:
             used.discard(n)
-            built.skipped.append((raw, "over the hub's config size limit"))
+            built.skipped.append((raw, "over the import size limit for one device"))
             continue
         size += add
         commands[n] = res.action

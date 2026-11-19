@@ -51,6 +51,8 @@ from .const import (
     CMD_SET_DEVICE_STATE,
     CMD_START_ACTIVITY,
     CMD_TILE_UPDATE,
+    COMMAND_BUTTON_LIMIT,
+    CONF_ALL_COMMAND_BUTTONS,
     DEFAULT_REMOTE_IDS,
     DOMAIN,
     HUB_DEVICE,
@@ -59,7 +61,7 @@ from .const import (
     UNKNOWN_KEY,
 )
 from .errors import ha_error, invalid
-from .harmony_core.compiler import Compiled, HaStep, compile_config
+from .harmony_core.compiler import Compiled, HaStep, compile_config, config_stats, fit_error
 from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
@@ -346,14 +348,28 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}", f"{h}_pagefmt_{r}"}
         for dev in self.compiled.devices.values():
             ids |= {f"{h}_dev_{dev.id}_power", f"{h}_dev_{dev.id}_input"}
-            ids |= {f"{h}_cmd_{dev.id}:{c}" for c in self.device_commands(dev.id)}
+            ids |= {f"{h}_cmd_{dev.id}:{c}" for c in self.button_commands(dev.id)}
         return ids
 
     def device_commands(self, device: str) -> list[str]:
-        """Commands exposed as buttons: the configured commands plus power_on/power_off."""
+        """Every command the device answers to: the configured ones plus power_on/power_off. All of
+        them stay reachable through `remote.send_command` whatever buttons exist."""
         dev = self.compiled.devices[device]
         extra = ["power_on", "power_off"] if dev.power else []
         return [*dev.commands, *extra]
+
+    def button_commands(self, device: str) -> list[str]:
+        """Commands that get a button entity. Up to COMMAND_BUTTON_LIMIT per device (or with the
+        `all_command_buttons` option) all of them; beyond it only those that already have a registry
+        entry, so buttons an install already uses keep working and stay as they are."""
+        cmds = self.device_commands(device)
+        if len(cmds) <= COMMAND_BUTTON_LIMIT or self.config_entry.options.get(CONF_ALL_COMMAND_BUTTONS):
+            return cmds
+        reg = er.async_get(self.hass)
+        h = self.hub_id
+        return [
+            c for c in cmds if reg.async_get_entity_id("button", DOMAIN, f"{h}_cmd_{device}:{c}")
+        ]
 
     # ------------------------------------------------------------ config lifecycle
     def _set_issue(self, key: str, message: str) -> None:
@@ -392,7 +408,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return False
         try:
             compiled = await self.hass.async_add_executor_job(
-                compile_source, data.get("config"), self.hub_id
+                compile_source, data.get("config"), self.hub_id, self.client.limits
             )
         except BundleRejected as exc:
             _LOGGER.warning("The cached add-on config is unusable and ignored: %s", exc)
@@ -410,7 +426,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         async with self._apply_lock:
             t0 = time.monotonic()
             try:
-                bundle = await self.hass.async_add_executor_job(parse_bundle, raw, self.hub_id)
+                bundle = await self.hass.async_add_executor_job(parse_bundle, raw, self.hub_id, self.client.limits)
                 self.timings["compile_ms"] = round((time.monotonic() - t0) * 1000, 1)
             except BundleRejected as exc:
                 self._reject(exc)
@@ -464,6 +480,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
 
     def async_start_link(self, client: AddonClient) -> None:
         self._link = client
+        client.limits_provider = lambda: self.client.limits
         self.link_state = "connecting"
         self.config_entry.async_create_background_task(
             self.hass, self._link_loop(client), f"{DOMAIN} add-on link {self.hub_id}"
@@ -635,8 +652,17 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return True
         self.config_pushes += 1
         t0 = time.monotonic()
+        too_big = None
+        if self.client.limits is not None:  # compiled before the hub reported its limits? check now, not at the hub
+            too_big = await self.hass.async_add_executor_job(
+                lambda: fit_error(config_stats(compiled.hub_json, self.client.limits.max_pronto), self.client.limits)
+            )
         try:
-            ack = await self.client.async_send(MsgType.SET_CONFIG, {"config": compiled.hub_json})
+            if too_big:
+                hint = " (this hub runs older firmware; updating it raises the limit)" if self.client.limits.legacy else ""
+                ack = {"ok": False, "message": too_big + hint}
+            else:
+                ack = await self.client.async_set_config(compiled.hub_json)
         except HarmonyCommandError as exc:
             ack = {"ok": False, "message": exc.message}
         self.timings["set_config_ms"] = round((time.monotonic() - t0) * 1000, 1)

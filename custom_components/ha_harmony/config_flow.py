@@ -28,6 +28,7 @@ from .const import (
     CONF_ADDON_SLUG,
     CONF_ADDON_TOKEN,
     CONF_ADDON_UUID,
+    CONF_ALL_COMMAND_BUTTONS,
     CONF_HOLD_EVENTS,
     CONF_TOKEN,
     DEFAULT_PORT,
@@ -61,10 +62,17 @@ class HarmonyOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             return self.async_create_entry(data=user_input)
-        current = self.config_entry.options.get(CONF_HOLD_EVENTS, False)
+        opts = self.config_entry.options
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({vol.Required(CONF_HOLD_EVENTS, default=current): bool}),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_HOLD_EVENTS, default=opts.get(CONF_HOLD_EVENTS, False)): bool,
+                    vol.Required(
+                        CONF_ALL_COMMAND_BUTTONS, default=opts.get(CONF_ALL_COMMAND_BUTTONS, False)
+                    ): bool,
+                }
+            ),
         )
 
 

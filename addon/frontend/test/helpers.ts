@@ -61,7 +61,7 @@ export const META = { applied: { rev: 3, at: 1_700_000_000, hash: 'abcdef0123456
 export const USAGE = {
   json_bytes: 9000, json_max: 131072, pool_words: 900, pool_max: 1000, keys: 1, keys_max: 35,
   devices: 2, devices_max: 16, activities: 1, activities_max: 16, commands: 62, commands_max: 256,
-  inputs: 5, inputs_max: 64, soft_keys: 0, soft_keys_max: 64, pages: 3, page_limit: 32,
+  inputs: 5, inputs_max: 64, config_bytes: null, config_budget: null, soft_keys: 0, soft_keys_max: 64, pages: 3, page_limit: 32,
 };
 export const previewOk = (over: object = {}) => ({ ok: true, hash: 'cafebabe', errors: [], missing_pages: [], pages: [], usage: USAGE, ...over });
 export const previewBad = (errors: unknown[]) => ({ ok: false, hash: null, errors, missing_pages: [], pages: [], usage: null });

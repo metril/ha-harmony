@@ -6,6 +6,9 @@ import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+
+from harmony_core.hub_limits import LEGACY, HubLimits
 
 from .store import HUB_ID, atomic_write
 
@@ -20,6 +23,7 @@ class LinkedHubs:
         self._path = Path(data_dir) / "linked_hubs.json"
         self._clock = clock
         self._seen: dict[str, int] = {}
+        self._limits: dict[str, dict[str, int]] = {}  # hub -> the limits its integration reported (wire form; {} = legacy)
         self._persisted = 0
         try:
             raw = json.loads(self._path.read_bytes())
@@ -28,6 +32,9 @@ class LinkedHubs:
             for k, v in raw["hubs"].items():
                 if HUB_ID.fullmatch(k) and type(v) is int and len(self._seen) < MAX_LINKED:
                     self._seen[k] = v
+            for k, v in raw.get("limits", {}).items():
+                if k in self._seen and isinstance(v, dict):
+                    self._limits[k] = v if HubLimits.from_hello(v) is not LEGACY else {}
         except OSError, ValueError, KeyError, AttributeError, TypeError:
             pass  # absent or damaged: it is rebuilt from the next polls
 
@@ -41,6 +48,21 @@ class LinkedHubs:
 
     def last_seen(self, hub: str) -> int | None:
         return self._seen.get(hub)
+
+    def limits(self, hub: str) -> HubLimits:
+        """The connected hub's config limits as its integration last reported them; LEGACY (the
+        fixed limits of old firmware) when it never did."""
+        return HubLimits.from_hello(self._limits.get(hub))
+
+    def set_limits(self, hub: str, wire: Any) -> None:
+        """Record what an integration reported for `hub` (a hello_ack.limits object; {} = old firmware)."""
+        if hub not in self._seen or not isinstance(wire, dict):
+            return
+        lim = HubLimits.from_hello(wire)
+        clean = {} if lim.legacy else {k: v for k, v in lim.to_wire().items() if k != "flash_free"}  # free flash moves: only the integration checks it, at push time
+        if self._limits.get(hub) != clean:
+            self._limits[hub] = clean
+            self._persist(int(self._clock()))
 
     def seen(self, hub: str) -> bool:
         """Record an authenticated bundle request for `hub`; True when the id is new."""
@@ -57,7 +79,7 @@ class LinkedHubs:
 
     def _persist(self, now: int) -> None:
         try:
-            atomic_write(self._path, json.dumps({"v": VERSION, "hubs": self._seen}).encode())
+            atomic_write(self._path, json.dumps({"v": VERSION, "hubs": self._seen, "limits": self._limits}).encode())
             self._persisted = now
         except OSError:
             log.warning("could not save the linked hub ids")

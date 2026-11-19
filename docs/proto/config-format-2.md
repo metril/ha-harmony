@@ -56,11 +56,75 @@ Raw: even, non-zero count of durations, each 1..65535 us; `hz` 1000..1000000.
 - Added: `format`, `devices`, activity `id` and `devices` list.
 - Narrowed: key range 0..65535 -> 0..255 (the wire `key` is u8).
 - Activity index (`state_update.activity`) remains array order.
-- Limits: see `hub/engine/mapping.h` (`HP_MAP_MAX_*`): 16 devices, 256 commands and 64 inputs in total,
-  16 activities, 128 keys per map, 16 steps per list, 8 devices per activity, 128 KiB config text.
+- Limits: see "Limits" below.
 - Engine details: `{"type":"activity","activity":"<id>"|"off"}` is accepted in key maps only (not in
   `steps`/`off`); activity `name` defaults to `id`, `"off"` is not a valid id; `power` is either `toggle`
   or both `on` and `off`; for toggle devices `power_on`/`power_off` both resolve to the toggle code.
   Every IR action is encoded at load time, so an out-of-range code fails `set_config`.
 - Activity execution (device power/input tracking, transitions, `device_state`, `set_device_state`,
   the `--state` file and key HOLD timing) is specified in `docs/proto/activity-state.md`.
+
+## Limits
+
+Firmware <= 0.3.5 had fixed totals: 16 devices, 256 commands, 64 inputs, 16384 IR pool words,
+128 keys per map, 128 KiB of config text. They were array sizes of one statically sized map
+(`HP_MAP_MAX_COMMANDS 256` was a memory-sizing constant, never a wire limit). Current firmware has
+no count limit for commands, inputs, the IR word pool or the key maps: every table is allocated for
+the config being loaded, and the only size limit is ONE memory budget.
+
+- **Streaming load.** The config text is never held whole in RAM and never parsed into one tree: the
+  reader walks it (the cache file being received) and parses ONE value at a time with cJSON (a command, a
+  device's header, `keys`, one activity), then frees it. Pass 1 counts what the tables need, pass 2 fills
+  them. So memory is the final tables plus the value in hand; a raw `us` array costs its 2 bytes per
+  duration, not a parsed tree. A single command may be at most 64 KiB of text, `keys` / one activity /
+  `format` at most 128 KiB.
+- **Budget** (`HP_MAP_BUDGET_BYTES`, 8 MiB; `hub.conf` `config_budget_kib`, hard-capped by the daemon at 20%
+  of the reclaimable memory at its start, MemFree + Buffers + Cached, minimum 256 KiB (a lower value is
+  clamped; `hub.conf` values below 256 are ignored with a log line), and reported in `hello_ack.limits.budget`). It bounds the new map:
+  `slack_b + devices * dev_b + (commands + inputs) * cmd_b + keys * key_b + pool_words * word_b`
+  (`hp_map_estimate`; `harmony_core.hub_limits.estimate_bytes` is the same formula and
+  `tests/c/test_budget.c` / `tests/py/test_limits.py` assert the same golden number). Checked before
+  anything is allocated; over it: `-HP_E_TOOBIG`, `config needs ~N KiB of hub memory, the hub allows M KiB`.
+  A load builds the new map beside the old one, so its peak is up to twice the budget: at most 40% of the
+  free RAM at start (the Elite hub had 39.5 MB free with the daemon at ~1 MB RSS). The budget gates new
+  pushes only: the cache the hub already accepted is loaded at boot without it, so a restart with less free
+  memory (or a lowered `config_budget_kib`) never turns an accepted config into "no config". The retained
+  top-level `format` / `activities` / `keys` sections are counted (16 bytes per text byte) and a duplicate
+  top-level member is a load error.
+- **All-or-nothing, memory and flash.** The received text is written to `cache.json.new` as it arrives, the
+  config is loaded from that file, and only then is the file renamed over `cache.json` and the new map
+  swapped in. Any failure (bad config, over budget, out of memory, a full flash, a lost connection) deletes
+  the temp file and leaves the previous map, its hash, the running activity AND the previous cache untouched.
+  The hub refuses a transfer that cannot fit before writing (`config needs ~N KiB of flash, the hub has M KiB
+  free`, from `statvfs` of the cache directory minus a fixed reserve of 2 x the hub binary size + 256 KiB for
+  OTA staging (`hub.prev`, the new image) and `state.json`; `hello_ack.limits.flash_free` reports the same
+  net value so clients refuse first). A leftover `cache.json.new` is deleted at startup and before the
+  check; a transfer is dropped when its connection closes or after 60 s without a chunk. A total above the
+  memory budget is refused before anything else. The cache is read back the same streaming way at boot.
+- **Lookups**: commands, inputs and devices are found through hash indexes built at load time
+  (`hp_map_find_cmd`); nothing on the key path is linear in the number of commands.
+- **Per-item bounds that remain**: 255 devices (uint8 index in the activity plan, the state file and
+  `device_state` fan-out; the plan powers every other device off on each activity start), 16
+  activities (uint8 on the wire in `state_update.activity`), 256 entries per key map (the key code space), 16
+  steps per list and 8 devices per activity (activity plan size), 520 Pronto words / 512 raw durations
+  per IR action (encoder), 31-byte names. The remote's page format has its own limits; commands never
+  enter pages.
+- **Reporting**: `hello_ack.limits` carries the budget, the estimate constants (`slack_b`, `dev_b`,
+  `cmd_b`, `key_b`, `word_b`), `flash_free`, `chunk` and the per-item bounds. A hub that sends none is
+  firmware <= 0.3.5: clients (`harmony_core.hub_limits.LEGACY`) apply the old fixed totals and do
+  not use `config_chunk`. The add-on learns the connected hub's limits from the integration
+  (`X-Hub-Limits` header on its polls) so the editor shows that hub's real caps.
+- **Transport**: a WebSocket frame is capped at 64 KiB, so a config over ~40 KB is sent as
+  `config_chunk {seq, total, data}` messages (<= `chunk` bytes of the compact text each, in order, each
+  answered by a `config_ack`; the last carries the load result). The text is appended to the new cache file
+  (header, text, crc32 trailer: the same file format as before); the hash is the CRC-32 of the text the
+  client computed. An out-of-order or over-long chunk, or a new `seq 0`, drops the transfer.
+- **Ceilings** (8 MiB budget, 32-bit hub, `tests/c/test_budget.c` + `harmony_core` estimate): about 56,000
+  protocol-coded commands, 34,000 learned Pronto strings (~40 words) or 26,000 raw `us` arrays (70 durations)
+  fit in RAM. Flash binds first for learned codes: the cache is stored as text, `/data` is a 5 MiB jffs2
+  partition shared with the daemon, `remote_sim`, `rf_probe`, dropbear (about 2.4 MB) and a `hub.prev`, so
+  realistically 1.5 to 2 MiB of config text fit uncompressed (the check does not count on jffs2 compression,
+  which gets 10:1 on repetitive configs): about 35,000 protocol codes, 8,000 Pronto strings or 4,000 raw arrays.
+  The refusal is exact: it uses the filesystem's free space at the time.
+- **Sizes** (32-bit hub): `sizeof(hp_devcmd_t)` 104, `hp_device_t` 208, `hp_keybind_t` 72, the `hp_map_t` struct
+  37 KB (was 250 KB, statically sized).

@@ -26,7 +26,7 @@ export const RULES: Record<string, RuleUi> = {
   'alias is another device id': I('Problems list on the device page (aliases only come from imports)'),
   'duplicate device id': P('ids are unique-suffixed'),
   'max 16 devices': P('Add device refuses at 16'),
-  'max 256 commands': P('Add command, Duplicate and the wizard refuse past 256 (capProblem) and say why; same for 64 inputs'),
+  'max 256 commands': P('Add command, Duplicate and the wizard refuse past the connected hub\'s command limit (capProblem; 256 / 64 inputs on old firmware, none on current ones, which have one memory budget) and say why'),
   'HA device takes only ha actions': P('HA device commands use the Home Assistant action picker'),
   'HA device power needs on and off': I('Problems list on the device page'),
   'HA device entity pattern': I('Problems list on the device page'),

@@ -2,6 +2,7 @@
 #include "hub/engine/activity.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "hub/engine/atomic_file.h"
@@ -44,7 +45,7 @@ static int resolve_reported(const hp_actsm_t *e) {
 /* ------------------------------------------------------------ persistence */
 
 #define STATE_HDR 9 /* magic(4) ver(1) hash(4) */
-#define STATE_MAX 1280
+#define STATE_MAX (STATE_HDR + 1 + HP_MAP_NAME_MAX + 1 + HP_MAP_MAX_DEVICES * (3 + 2 * HP_MAP_NAME_MAX) + 4)
 
 static void put32(uint8_t *p, uint32_t v) {
     p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v;
@@ -63,7 +64,8 @@ static size_t put_str(uint8_t *p, const char *s) {
 static void persist_tick(void *arg, uint32_t now);
 
 static int write_state(hp_actsm_t *e) {
-    uint8_t buf[STATE_MAX];
+    uint8_t *buf = malloc(STATE_MAX); /* ~17 KiB at the device ceiling: not for the stack */
+    if (!buf) return -HP_E_IO;
     size_t n = 0;
     memcpy(buf, "HPST", 4);
     buf[4] = HP_ACT_STATE_VER;
@@ -81,6 +83,7 @@ static int write_state(hp_actsm_t *e) {
     hp_sched_cancel(e->sched, e->persist_h);
     e->persist_h = 0;
     int rc = hp_atomic_write(e->state_path, buf, n);
+    free(buf);
     e->last_write = now_of(e);
     e->wrote = true;
     if (rc < 0) {
@@ -121,21 +124,30 @@ int hp_actsm_flush_state(hp_actsm_t *e) {
     return write_state(e);
 }
 
-static int input_index(const hp_map_t *m, int dev, const char *name) {
-    for (int i = 0; i < m->ninputs; i++)
-        if (m->inputs[i].dev == dev && !strcmp(m->inputs[i].name, name)) return i;
-    return -1;
-}
+static int input_index(const hp_map_t *m, int dev, const char *name) { return hp_map_find_input(m, dev, name); }
+
+static int load_state_buf(hp_actsm_t *e, const uint8_t *buf, ssize_t got, hp_devstate_t *st);
 
 int hp_actsm_load_state(hp_actsm_t *e) {
     if (!e->state_path) return -HP_E_INVAL;
     int fd = open(e->state_path, O_RDONLY);
     if (fd < 0) return -HP_E_NOENT;
-    uint8_t buf[STATE_MAX + 1];
-    ssize_t got = 0, r;
-    while ((r = read(fd, buf + got, sizeof buf - (size_t)got)) > 0) got += r;
+    uint8_t *buf = malloc(STATE_MAX + 1); /* ~17 KiB each at the device ceiling: not for the stack */
+    hp_devstate_t *st = malloc(HP_MAP_MAX_DEVICES * sizeof *st);
+    ssize_t got = 0, r = 0;
+    int rc = -HP_E_IO;
+    if (buf && st) {
+        while ((r = read(fd, buf + got, STATE_MAX + 1 - (size_t)got)) > 0) got += r;
+        rc = r < 0 ? -HP_E_INVAL : load_state_buf(e, buf, got, st);
+    }
     close(fd);
-    if (r < 0 || got < STATE_HDR + 2 + 4 || (size_t)got > STATE_MAX) return -HP_E_INVAL;
+    free(buf);
+    free(st);
+    return rc;
+}
+
+static int load_state_buf(hp_actsm_t *e, const uint8_t *buf, ssize_t got, hp_devstate_t *st) {
+    if (got < STATE_HDR + 2 + 4 || (size_t)got > STATE_MAX) return -HP_E_INVAL;
     size_t n = (size_t)got - 4;
     if (memcmp(buf, "HPST", 4) || buf[4] != HP_ACT_STATE_VER || get32(buf + n) != hp_map_crc32(buf, n) ||
         get32(buf + 5) != e->map->hash)
@@ -148,7 +160,6 @@ int hp_actsm_load_state(hp_actsm_t *e) {
     act[buf[p]] = 0;
     p += 1 + buf[p];
     unsigned nd = buf[p++];
-    hp_devstate_t st[HP_MAP_MAX_DEVICES];
     if (nd > HP_MAP_MAX_DEVICES) return -HP_E_INVAL;
     for (unsigned i = 0; i < nd; i++) {
         memset(&st[i], 0, sizeof st[i]);
@@ -191,7 +202,7 @@ static void cancel_plan(hp_actsm_t *e) {
 
 static void add(hp_actsm_t *e, hp_stepkind_t k, int dev, int input, const hp_action_t *act) {
     if (e->nplan >= HP_ACT_PLAN_MAX) return; /* sized for the worst case; unreachable */
-    e->plan[e->nplan++] = (hp_actstep_t){(uint8_t)k, (uint8_t)dev, (int16_t)input, act};
+    e->plan[e->nplan++] = (hp_actstep_t){(uint8_t)k, (uint8_t)dev, (int32_t)input, act};
 }
 
 /* Ms until the (selected) devices have settled, 0 = none pending. */
@@ -432,9 +443,9 @@ int hp_actsm_device_command(hp_actsm_t *e, const char *device, const char *comma
         power = 1;
         input = m->inputs[ii].name;
     } else {
-        for (uint16_t i = 0; i < m->ncmds; i++)
-            if (m->cmds[i].dev == d && !strcmp(m->cmds[i].name, command)) act = &m->cmds[i].act;
-        if (!act) return -HP_E_INVAL;
+        int ci = hp_map_find_cmd(m, d, command);
+        if (ci < 0) return -HP_E_INVAL;
+        act = &m->cmds[ci].act;
     }
     int rc = hp_map_apply_deferrable(m, act, e->sinks);
     if (rc < 0) return rc;
@@ -457,9 +468,9 @@ int hp_actsm_device_command(hp_actsm_t *e, const char *device, const char *comma
 void hp_actsm_reloaded(hp_actsm_t *e) {
     hp_map_t *m = e->map;
     cancel_plan(e);
-    hp_devstate_t old[HP_MAP_MAX_DEVICES];
-    memcpy(old, e->dev, sizeof old);
-    uint8_t nold = e->ndev;
+    hp_devstate_t *old = malloc(sizeof e->dev); /* up to 255 devices (~18 KiB): not for the stack */
+    uint8_t nold = old ? e->ndev : 0;           /* no memory: the tracked state restarts, as for new devices */
+    if (old) memcpy(old, e->dev, sizeof e->dev);
     bool changed = e->map->hash != e->saved_hash;
     memset(e->dev, 0, sizeof e->dev);
     e->ndev = m->format == 2 ? m->ndevs : 0;
@@ -478,6 +489,7 @@ void hp_actsm_reloaded(hp_actsm_t *e) {
         changed = changed || push[i];
     }
     changed = changed || nold != e->ndev;
+    free(old);
     /* The last COMPLETED activity survives (re-resolved by identity); a transition cut short by
      * this reload is never reported: map->current already holds its unfinished target. */
     int prev = e->reported;

@@ -168,9 +168,9 @@ done <"$T/sz" 2>/dev/null
 if [ "$nl" = 4 ]; then pass "read-based line count stops over the cap"; else fail "line count (got '$nl'; raw ls: $(ls -ln "$T/sz" 2>&1))"; fi
 
 # 5. optional argv pieces expand correctly (${var:+...})
-mkroot 'token=abc==\nhub_id=my-hub\nrf=spi\nrf_slot=2\nport=8100\n'
+mkroot 'token=abc==\nhub_id=my-hub\nrf=spi\nrf_slot=2\nport=8100\nconfig_budget_kib=4096\n'
 run_hook
-want="--token-file $R/data/ha-harmony/hub.conf --port 8100 --hub-id my-hub --rf-spi --rf-slot 2 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy"
+want="--token-file $R/data/ha-harmony/hub.conf --port 8100 --hub-id my-hub --rf-spi --rf-slot 2 --config-budget 4096 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy"
 if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ]; then
 	pass "argv quoting with rf, hub_id and '=' in token"
 else
@@ -189,6 +189,27 @@ fi
 
 # 5b. the token never appears in the daemon argv
 if ! grep -q 'abc==' "$T/argv" 2>/dev/null; then pass "token absent from daemon argv"; else fail "token leaked into argv"; fi
+
+# 5c. a junk config_budget_kib is a bad value like any other
+mkroot 'token=abc\nconfig_budget_kib=8M\n'
+run_hook
+if [ "$DEMO" = unset ]; then pass "bad config_budget_kib: stock"; else fail "bad config_budget_kib (DEMO=$DEMO)"; fi
+
+# 5d. config_budget_kib below the daemon's 256 floor is ignored with a log line, the daemon still starts
+mkroot 'token=abc\nconfig_budget_kib=100\n'
+run_hook
+want="--token-file $R/data/ha-harmony/hub.conf --port 8099 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy"
+if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ] && grep -q 'config_budget_kib=100 is below 256 - ignored' "$(CLOG)" 2>/dev/null; then
+	pass "config_budget_kib below 256: ignored, logged, daemon starts without --config-budget"
+else
+	fail "config_budget_kib=100 (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
+fi
+mkroot 'token=abc\nconfig_budget_kib=256\n'
+run_hook
+case "$(cat "$T/argv" 2>/dev/null)" in
+*"--config-budget 256 "*) pass "config_budget_kib=256 passed through" ;;
+*) fail "config_budget_kib=256 (argv=$(cat "$T/argv" 2>/dev/null))" ;;
+esac
 
 # 6. junk config leaves stock alone, no strike
 mkroot 'token=abc\nrf_slot=2x\n'

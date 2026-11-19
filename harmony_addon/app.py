@@ -33,6 +33,7 @@ from harmony_core.config_model import (
     validate_ir,
     validate_pages,
 )
+from harmony_core.hub_limits import LEGACY, LIMITS_HEADER, HubLimits
 from harmony_core.keymap import resolve_keymaps
 from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, page_to_dict
 from harmony_irdb.archive import IrdbArchive
@@ -57,7 +58,7 @@ from .web_util import CLOCK_KEY, error, jresp, query, read_body
 
 log = logging.getLogger(__name__)
 
-MAX_BODY = 1024 * 1024
+MAX_BODY = 4 * 1024 * 1024  # a config as large as a hub takes (its memory budget) with headroom
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 JSON_TYPES = {"application/json"}
 YAML_TYPES = {"text/yaml", "application/yaml"}
@@ -142,8 +143,16 @@ def make_auth_mw(auth: Auth):
             # only a poll names its hub in the query (an ack carries it in the body): no fallback
             hub = request.query.get("hub")
             polling = request.method == "GET" and request.path in (BUNDLE_PREFIX, BUNDLE_PREFIX + "/wait")
-            if polling and hub and request.app[LINKED_KEY].seen(hub):
-                _auto_adopt(request.app)
+            if polling and hub:
+                linked = request.app[LINKED_KEY]
+                if linked.seen(hub):
+                    _auto_adopt(request.app)
+                raw_limits = request.headers.get(LIMITS_HEADER)
+                if raw_limits is not None and len(raw_limits) <= 2000:  # the hub's own limits, as its integration knows them
+                    try:
+                        linked.set_limits(hub, json.loads(raw_limits))
+                    except ValueError:
+                        pass
         if request.method in MUTATING:
             if bundle:  # bearer-authenticated machine client: no ambient credential, so no CSRF
                 if request.content_type not in JSON_TYPES:
@@ -314,12 +323,12 @@ async def validate(request: web.Request) -> web.Response:
     return jresp({"ok": not errors, "errors": errors})
 
 
-def _compile(config: dict[str, Any]):
+def _compile(config: dict[str, Any], limits: HubLimits = LEGACY):
     model, errors = _check(config)
     if errors:
         return None, None, errors
     try:
-        return model, compile_config(model), []
+        return model, compile_config(model, limits=limits), []
     except CompileError as exc:
         return None, None, [{"path": [], "msg": str(exc)[:300], "line": None}]
 
@@ -344,7 +353,7 @@ def _blank(page: dict[str, Any], i: int) -> dict[str, Any]:
 
 
 def _compile_tolerant(
-    model: dict[str, Any], problems: list[tuple[list[Any], str]]
+    model: dict[str, Any], problems: list[tuple[list[Any], str]], limits: HubLimits = LEGACY
 ) -> tuple[Any, set[int]]:
     """Compile in collect mode; pages that fail to build are blanked and the rest recompiled, so
     one bad page never hides the others. Every problem found lands in `problems` (deduplicated)."""
@@ -353,7 +362,7 @@ def _compile_tolerant(
     seen: set[tuple[str, str]] = set()
     for _ in range(len(pages) + 1):
         trial: list[tuple[list[Any], str]] = []
-        compiled = compile_config({**model, "pages": pages}, collect=trial)
+        compiled = compile_config({**model, "pages": pages}, collect=trial, limits=limits)
         for path, msg in trial:
             if (json.dumps(path), msg) not in seen:
                 seen.add((json.dumps(path), msg))
@@ -383,7 +392,7 @@ def _wire_entry(m: Any, u: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _preview(config: dict[str, Any]) -> dict[str, Any]:
+def _preview(config: dict[str, Any], limits: HubLimits = LEGACY) -> dict[str, Any]:
     """Blocking (CPU). Always answers: pages that compile are returned even when the draft has
     errors elsewhere; apply stays strict because it uses `_compile`, not this."""
     raw_pages = config.get("pages") if isinstance(config.get("pages"), list) else []
@@ -391,7 +400,7 @@ def _preview(config: dict[str, Any]) -> dict[str, Any]:
     problems: list[tuple[list[Any], str]] = []
     if not errors:
         model = parse_data(config)
-        compiled, blanked = _compile_tolerant(model, problems)
+        compiled, blanked = _compile_tolerant(model, problems, limits)
         errors = [{"path": p, "msg": m[:300], "line": None} for p, m in problems]
         total_ok = not problems
     else:  # compile what can be compiled: valid pages only, by shape (references unchecked)
@@ -409,7 +418,7 @@ def _preview(config: dict[str, Any]) -> dict[str, Any]:
                 for i, (m, _) in enumerate(shaped)
             ],
         }
-        compiled, blanked = _compile_tolerant(partial, problems)
+        compiled, blanked = _compile_tolerant(partial, problems, limits)
         for path, msg in problems:
             if path[:1] == ["pages"]:
                 errors.append({"path": path, "msg": msg[:300], "line": None})
@@ -457,13 +466,14 @@ async def preview(request: web.Request) -> web.Response:
     state = _store_call(request.app[STORE_KEY].load, q["hub"])
     config = _pick_config(state, body.get("config"))
     # editor metadata cannot change a preview: leave it out of the memo key
+    limits = request.app[LINKED_KEY].limits(q["hub"])
     key = hashlib.sha256(
-        json.dumps(_public(config), sort_keys=True, separators=(",", ":")).encode()
+        json.dumps([_public(config), limits.to_wire()], sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     memo: dict[str, dict[str, Any]] = request.app[MEMO_KEY]
     out = memo.pop(key, None)
     if out is None:
-        out = await asyncio.get_running_loop().run_in_executor(None, _preview, _public(config))
+        out = await asyncio.get_running_loop().run_in_executor(None, _preview, _public(config), limits)
     memo[key] = out  # most recently used last
     while len(memo) > PREVIEW_MEMO_MAX:
         memo.pop(next(iter(memo)))
@@ -493,7 +503,7 @@ async def apply(request: web.Request) -> web.Response:
     store = request.app[STORE_KEY]
     state = _store_call(store.load, q["hub"])
     config = _pick_config(state, None)
-    _, compiled, errors = _compile(config)
+    _, compiled, errors = _compile(config, request.app[LINKED_KEY].limits(q["hub"]))
     if errors:
         return jresp({"ok": False, "errors": errors}, 422)
     now = int(request.app[CLOCK_KEY]())

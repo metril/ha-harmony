@@ -87,6 +87,12 @@ class _Source:
 
 
 @pytest.fixture
+def enabled_buttons(monkeypatch):
+    """Command buttons are created disabled; tests that press them create them enabled."""
+    monkeypatch.setattr("custom_components.ha_harmony.button.ENABLED_BY_DEFAULT", True)
+
+
+@pytest.fixture
 def write_yaml(hass, fake_addon):
     """write_yaml(text) applies `text` in the fake add-on (served to the integration as a bundle);
     the returned object's write_text() applies a new one. Entries made by `setup` link to it."""
@@ -419,15 +425,26 @@ async def test_page_tap_runs_button_action(hass, hub_rf, write_yaml, built_binar
 
 async def test_tile_update_follows_bound_entity(hass, hub_rf, write_yaml, built_binaries):
     write_yaml(BASE)
-    r = start_remote(built_binaries, hub_rf.rf, "--dump-layout", "--settle-ms", "800")
+    # settle = quiet time after the last frame; generous so a stalled loop cannot end the dump early
+    r = start_remote(built_binaries, hub_rf.rf, "--dump-layout", "--settle-ms", "2500",
+                     "--timeout-ms", "20000")
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
-    base = coord.tile_updates
+    sent: list[str] = []  # the tile texts actually sent, in order (the attach push sends "--" first)
+    real = coord.client.async_send
+
+    async def spy(msg_type, data, *a, **kw):
+        if data.get("command") == const.CMD_TILE_UPDATE:
+            sent.append(data["args"]["text"])
+        return await real(msg_type, data, *a, **kw)
+
+    coord.client.async_send = spy
     hass.states.async_set("sensor.temp", "21.5", {"unit_of_measurement": "°C"})
-    await until(hass, lambda: coord.tile_updates > base)
+    await until(hass, lambda: "21.5 °C" in sent, timeout=15)
     hass.states.async_set("sensor.temp", "22.0", {"unit_of_measurement": "°C"})
     hass.states.async_set("sensor.temp", "22.5", {"unit_of_measurement": "°C"})  # debounced
-    await until(hass, lambda: coord.tile_updates == base + 2)
+    await until(hass, lambda: "22.5 °C" in sent, timeout=15)
+    assert "22.0 °C" not in sent, sent  # the burst coalesced into its latest value
     code, out = await asyncio.to_thread(r.result)
     tile = json.loads(out)["widgets"][2]
     assert code == 0 and tile["kind"] == "tile" and tile["text"] == "22.5 °C"
@@ -454,15 +471,12 @@ async def test_config_hash_is_what_the_hub_acks(hass, hub_rf, write_yaml):
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
     assert coord.client.config_hash == coord.compiled.config_hash == await hub_hash(hub_rf.url)
-    real = coord.client.async_send
+    real = coord.client.async_set_config
 
-    async def fake(msg_type, data):
-        res = await real(msg_type, data)
-        if "config" in data:
-            res = {**res, "config_hash": "deadbeef"}
-        return res
+    async def fake(config):
+        return {**await real(config), "config_hash": "deadbeef"}
 
-    coord.client.async_send = fake
+    coord.client.async_set_config = fake
     coord.client.config_hash = None
     await coord.async_sync_config()
     assert coord.client.config_hash == "deadbeef"  # stored as reported, not assumed
@@ -494,7 +508,7 @@ async def test_battery_entities(hass, hub_rf, write_yaml):
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_device_commands_buttons_and_send_command(hass, hub_rf, write_yaml):
+async def test_device_commands_buttons_and_send_command(hass, hub_rf, write_yaml, enabled_buttons):
     write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     await hass.services.async_call(
@@ -520,7 +534,7 @@ async def test_device_commands_buttons_and_send_command(hass, hub_rf, write_yaml
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_toggle_device_power_buttons_keep_direction(hass, hub_rf, write_yaml):
+async def test_toggle_device_power_buttons_keep_direction(hass, hub_rf, write_yaml, enabled_buttons):
     write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     press = hass.services.async_call
@@ -613,7 +627,7 @@ async def test_reload_service_rejects_bad_yaml_and_keeps_previous(hass, hub_rf, 
 
 
 # ------------------------------------------------------------------ failure modes
-async def test_bad_bundle_at_startup_keeps_the_cached_config(hass, hub_rf, write_yaml):
+async def test_bad_bundle_at_startup_keeps_the_cached_config(hass, hub_rf, write_yaml, enabled_buttons):
     path = write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     assert uids(hass, entry) == BASE_UIDS
@@ -647,11 +661,11 @@ async def test_nothing_applied_loads_with_hub_config_untouched(hass, hub_rf, wri
 
 
 async def test_oversize_config_is_a_clean_error(hass, hub_rf, write_yaml):
-    write_yaml("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(17)))
+    write_yaml("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(256)))  # the hub's device ceiling is 255
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
     assert entry.state is ConfigEntryState.LOADED
-    assert "too many devices: 17" in coord.last_error and coord.config_pushes == 0
+    assert "too many devices: 256" in coord.last_error and coord.config_pushes == 0
     issue = ir.async_get(hass).async_get_issue(const.DOMAIN, f"config_invalid_{HUB_ID}")
     assert issue and issue.translation_key == "config_invalid"
     await hass.config_entries.async_unload(entry.entry_id)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,7 +18,8 @@ from homeassistant.exceptions import HomeAssistantError
 from . import const
 from .harmony_core import BUNDLE_SCHEMA
 from .harmony_core.compiler import Compiled, CompileError, compile_config
-from .harmony_core.config_model import ConfigError, parse_model
+from .harmony_core.config_model import ConfigError, parse_data
+from .harmony_core.hub_limits import CURRENT, LIMITS_HEADER, HubLimits
 
 ENVELOPE_KEYS = frozenset({"schema", "core_version", "hub_id", "applied_at", "rev", "config"})
 _REV = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -56,21 +58,22 @@ class Bundle:
     compiled: Compiled
 
 
-def compile_source(source: Any, hub_id: str) -> Compiled:
-    """Validate (no file refs) and compile a source config. Raises BundleRejected."""
+def compile_source(source: Any, hub_id: str, limits: HubLimits | None = None) -> Compiled:
+    """Validate (no file refs) and compile a source config against the hub's limits (the newest
+    firmware's until the hub has reported them). Raises BundleRejected."""
     if not isinstance(source, dict):
         raise BundleRejected("config is not an object")
     try:
-        text = json.dumps(source, allow_nan=False)
-        model = parse_model(text, f"bundle[{hub_id}]", None)
-        return compile_config(model)
+        json.dumps(source, allow_nan=False)  # JSON data only (the add-on's own checks use the same dict path)
+        model = parse_data(source)  # not the YAML pass: ~50x faster, which matters for thousands of commands
+        return compile_config(model, limits=limits or CURRENT)
     except (ConfigError, CompileError) as exc:
         raise BundleRejected(str(exc)[:300]) from None
     except ValueError, TypeError, RecursionError:
         raise BundleRejected("config is not valid JSON data") from None
 
 
-def parse_bundle(raw: bytes, hub_id: str) -> Bundle:
+def parse_bundle(raw: bytes, hub_id: str, limits: HubLimits | None = None) -> Bundle:
     """Pure: bytes from the add-on -> validated Bundle, or BundleRejected. Blocking (CPU)."""
     if len(raw) > const.BUNDLE_MAX_BYTES:
         raise BundleRejected("bundle is too large")
@@ -98,7 +101,7 @@ def parse_bundle(raw: bytes, hub_id: str) -> Bundle:
     if data["hub_id"] != hub_id:
         raise BundleRejected("bundle is for a different hub", rev=rev)
     try:
-        compiled = compile_source(data["config"], hub_id)
+        compiled = compile_source(data["config"], hub_id, limits)
     except BundleRejected as exc:
         raise BundleRejected(str(exc), rev=rev) from None
     return Bundle(rev, applied_at, data["config"], compiled)
@@ -109,6 +112,15 @@ class AddonClient:
         self._session = session
         self._base = f"http://{host}:{port}/api/v1/bundle"
         self._headers = {"Authorization": f"Bearer {token}"}
+        # the connected hub's limits, sent with every poll so the editor shows ITS caps (an add-on
+        # that does not know the header ignores it)
+        self.limits_provider: Callable[[], HubLimits | None] | None = None
+
+    def _poll_headers(self) -> dict[str, str]:
+        lim = self.limits_provider() if self.limits_provider else None
+        if lim is None:
+            return self._headers
+        return {**self._headers, LIMITS_HEADER: json.dumps(lim.to_wire(), separators=(",", ":"))}
 
     async def _get(self, path: str, params: dict[str, str], wait: float) -> bytes | None:
         timeout = aiohttp.ClientTimeout(total=wait, sock_connect=5, sock_read=wait)
@@ -116,7 +128,7 @@ class AddonClient:
             async with self._session.get(
                 self._base + path,
                 params=params,
-                headers=self._headers,
+                headers=self._poll_headers(),
                 timeout=timeout,
                 allow_redirects=False,
             ) as resp:

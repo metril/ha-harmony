@@ -22,6 +22,10 @@ messages:
       - {name: fw_version, type: str, optional: true}
       - {name: activities, type: json, optional: true}
       - {name: config_hash, type: str, optional: true}
+      # The hub's config limits (see docs/proto/config-format-2.md "Limits"): {budget, chunk, dev_b,
+      # cmd_b, key_b, word_b, max_devices, max_activities, max_keys, max_steps, max_act_devs,
+      # max_pronto, name_max}. Absent = an older hub with the fixed limits and no config_chunk.
+      - {name: limits, type: json, optional: true}
       - {name: fw_build, type: u32, optional: true}   # installed firmware build id (OTA floor)
       - {name: ota_key, type: str, optional: true}    # "dev" (public test key built in) | "release"; absent = no OTA
 
@@ -41,6 +45,18 @@ messages:
     transport: ws
     fields:
       - {name: config, type: json}
+
+  # set_config for configs too large for one frame: the compact config text in order, `seq` from 0,
+  # `total` = byte length of the whole text (same on every chunk). Each chunk is answered with a
+  # config_ack ({ok:true} until the last, which carries the load result like set_config's);
+  # a chunk out of order or a failed load drops the transfer (config_ack ok:false).
+  - name: config_chunk
+    code: 25
+    transport: ws
+    fields:
+      - {name: seq, type: u32}
+      - {name: total, type: u32}
+      - {name: data, type: str}
 
   - name: config_ack
     code: 7

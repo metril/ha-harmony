@@ -15,18 +15,24 @@ export function meter(label: string, text: string, value: number, max: number): 
   </div>`;
 }
 
-/** The three draft meters, fed by the preview's `usage`: config KiB, IR pool %, commands. */
+/** The draft meters, fed by the preview's `usage`. A current hub has one: "Config size X of Y KiB on this hub" (its memory
+ * budget); old firmware has fixed limits: config KiB, IR pool %, commands. Pages are the remote's. */
 export function meters(store: Store): TemplateResult {
   const u = store.usage;
   const cmds = u?.commands ?? counts(store.config).commands;
   const cmax = u?.commands_max ?? LIMITS.commands;
+  if (u && u.config_budget != null && u.config_bytes != null)
+    return html`
+      ${meter('Config size', `${Math.ceil(u.config_bytes / 1024)} of ${Math.floor(u.config_budget / 1024)} KiB on this hub`, u.config_bytes, u.config_budget)}
+      ${meter('Pages', `${u.pages} / ${u.page_limit}`, u.pages, u.page_limit)}
+    `;
   return html`
-    ${u
+    ${u && u.json_max != null
       ? meter('Config', `${(u.json_bytes / 1024).toFixed(1)} / ${(u.json_max / 1024).toFixed(0)} KiB`, u.json_bytes, u.json_max)
       : nothing}
-    ${u ? meter('IR pool', `${Math.round((u.pool_words / u.pool_max) * 100)}%`, u.pool_words, u.pool_max) : nothing}
+    ${u && u.pool_max != null ? meter('IR pool', `${Math.round((u.pool_words / u.pool_max) * 100)}%`, u.pool_words, u.pool_max) : nothing}
     ${u ? meter('Pages', `${u.pages} / ${u.page_limit}`, u.pages, u.page_limit) : nothing}
-    ${meter('Commands', `${cmds} / ${cmax}`, cmds, cmax)}
+    ${Number.isFinite(cmax) ? meter('Commands', `${cmds} / ${cmax}`, cmds, cmax) : nothing}
   `;
 }
 

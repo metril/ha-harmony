@@ -22,6 +22,7 @@ static const hp_field_desc_t hp_fields_hello_ack[] = {
     {"fw_version", HP_T_STR, true, NULL},
     {"activities", HP_T_JSON, true, NULL},
     {"config_hash", HP_T_STR, true, NULL},
+    {"limits", HP_T_JSON, true, NULL},
     {"fw_build", HP_T_U32, true, NULL},
     {"ota_key", HP_T_STR, true, NULL},
 };
@@ -34,6 +35,12 @@ static const hp_field_desc_t hp_fields_error[] = {
 
 static const hp_field_desc_t hp_fields_set_config[] = {
     {"config", HP_T_JSON, false, NULL},
+};
+
+static const hp_field_desc_t hp_fields_config_chunk[] = {
+    {"seq", HP_T_U32, false, NULL},
+    {"total", HP_T_U32, false, NULL},
+    {"data", HP_T_STR, false, NULL},
 };
 
 static const hp_field_desc_t hp_fields_config_ack[] = {
@@ -152,11 +159,12 @@ static const hp_field_desc_t hp_fields_ota_result[] = {
 
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
-    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 6, hp_fields_hello_ack},
+    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 7, hp_fields_hello_ack},
     {"error", HP_MSG_ERROR, HP_TRANSPORT_WS, 3, hp_fields_error},
     {"ping", HP_MSG_PING, HP_TRANSPORT_WS, 0, NULL},
     {"pong", HP_MSG_PONG, HP_TRANSPORT_WS, 0, NULL},
     {"set_config", HP_MSG_SET_CONFIG, HP_TRANSPORT_WS, 1, hp_fields_set_config},
+    {"config_chunk", HP_MSG_CONFIG_CHUNK, HP_TRANSPORT_WS, 3, hp_fields_config_chunk},
     {"config_ack", HP_MSG_CONFIG_ACK, HP_TRANSPORT_WS, 3, hp_fields_config_ack},
     {"command", HP_MSG_COMMAND, HP_TRANSPORT_WS, 3, hp_fields_command},
     {"command_result", HP_MSG_COMMAND_RESULT, HP_TRANSPORT_WS, 2, hp_fields_command_result},
