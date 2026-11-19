@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { KeymapRow, V2Page } from '../lib/api';
 import type { Assigner, Spot } from '../lib/assigner';
 import { cellAt, pageGroup, widgetRect } from '../lib/page-renderer';
-import { BODY, GLASS, KEYS, SCREEN, VIEW, keyPath, keyTitle, type KeyGeom } from '../lib/remote-layout';
+import { BODY, DPAD, GLASS, KEYS, PRINTED, SCREEN, VIEW, keyPath, keyTitle, type KeyGeom } from '../lib/remote-layout';
 import type { StudioHost } from '../lib/studio-state';
 import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
@@ -41,13 +41,20 @@ export class HhRemote extends LitElement {
     .hint { fill: #55616c; font: 600 8px system-ui, sans-serif; letter-spacing: 1px; text-transform: uppercase; }
     .key { cursor: pointer; outline: none; }
     .cap { fill: url(#keyg); stroke: #11161a; stroke-width: 1; transition: fill 140ms ease-out; }
+    .c-red .cap { fill: #b8423a; } .c-green .cap { fill: #3e8e52; } .c-yellow .cap { fill: #bc9727; } .c-blue .cap { fill: #3b69b8; } .c-power_off_activity .cap { fill: #7a2b27; }
     .key.colour .cap { stroke: rgba(0, 0, 0, 0.5); }
     .glow { fill: none; stroke: none; pointer-events: none; transition: fill 140ms ease-out, stroke 140ms ease-out; }
     .lab { fill: #aab5bf; font: 700 11px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
-    .key.colour .lab { display: none; }
+    .lab.sm { font-size: 9px; letter-spacing: 0.4px; }
+    .pr { fill: #8794a0; font: 600 9px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
+    .ring { fill: #12161a; stroke: rgba(255, 255, 255, 0.06); stroke-width: 1; pointer-events: none; }
+    .gl { fill: #9aa6b1; pointer-events: none; }
+    .gs { fill: none; stroke: #9aa6b1; stroke-width: 1.8; pointer-events: none; }
+    .key.colour:not(.c-power_off_activity) .lab { display: none; }
     .key:hover .cap { fill: url(#keyh); }
     .key.ov .glow { fill: rgba(32, 200, 176, 0.28); stroke: #20c8b0; stroke-width: 1.6; }
     .key.none .glow { fill: rgba(5, 8, 11, 0.55); }
+    .key.colour.none .glow { fill: rgba(5, 8, 11, 0.2); }
     .key.ex .glow { fill: rgba(5, 8, 11, 0.4); stroke: #687888; stroke-width: 1; stroke-dasharray: 3 2; }
     .key.bad .glow { stroke: #f85848; stroke-width: 2; }
     .dot { fill: #8d99a5; pointer-events: none; }
@@ -312,6 +319,13 @@ export class HhRemote extends LitElement {
       case 'down': return tri(`M${cx} ${cy + 6}l7 -9h-14z`);
       case 'left': return tri(`M${cx - 6} ${cy}l9 -7v14z`);
       case 'right': return tri(`M${cx + 6} ${cy}l-9 -7v14z`);
+      case 'prev_channel': return svg`<path class="gs" d="M${cx + 9} ${cy + 5}h-12a6 6 0 0 0 0 -12h8M${cx - 1} ${cy - 11}l-4 4l4 4" stroke-linecap="round" stroke-linejoin="round"></path>`;
+      case 'play': return svg`<path class="gl" d="M${cx - 4} ${cy - 6}l11 6l-11 6z"></path>`;
+      case 'pause': return svg`<path class="gl" d="M${cx - 5} ${cy - 6}h3.5v12h-3.5zM${cx + 1.5} ${cy - 6}h3.5v12h-3.5z"></path>`;
+      case 'stop': return svg`<rect class="gl" x=${cx - 5} y=${cy - 5} width="10" height="10" rx="1.5"></rect>`;
+      case 'record': return svg`<circle class="gs" cx=${cx} cy=${cy} r="5"></circle>`;
+      case 'rewind': return svg`<path class="gl" d="M${cx} ${cy - 6}l-9 6l9 6zM${cx + 9} ${cy - 6}l-9 6l9 6zM${cx - 11} ${cy - 6}h2.5v12h-2.5z"></path>`;
+      case 'fast_forward': return svg`<path class="gl" d="M${cx} ${cy - 6}l9 6l-9 6zM${cx - 9} ${cy - 6}l9 6l-9 6zM${cx + 8.5} ${cy - 6}h2.5v12h-2.5z"></path>`;
       default: return nothing;
     }
   }
@@ -319,7 +333,7 @@ export class HhRemote extends LitElement {
     const a = this.assigner.phase;
     const cur = this.assigner.cursor;
     const tgt = this.canTarget('key');
-    const cls = ['key', g.color ? 'colour' : '', ...this.keyState(row)];
+    const cls = ['key', g.color ? 'colour' : '', g.color ? `c-${g.name}` : '', ...this.keyState(row)];
     const sel = this.st.sel?.kind === 'key' && this.st.sel.name === g.name;
     if (sel) cls.push('sel');
     if (errs.has(g.name)) cls.push('bad');
@@ -333,10 +347,10 @@ export class HhRemote extends LitElement {
         @click=${() => this.host.activateKey(g.name)}
         @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.host.activateKey(g.name); } }}>
       <title>${label}</title>
-      <path class="cap" d=${path} fill=${g.color ?? ''}></path>
+      <path class="cap" d=${path}></path>
       <path class="glow" d=${path}></path>
       ${this.keyGlyph(g)}
-      ${g.shape.startsWith('wedge') ? nothing : svg`<text class="lab" x=${g.x + g.w / 2} y=${g.y + g.h / 2 + 3.4}>${g.label}</text>`}
+      ${g.shape.startsWith('wedge') || !g.label ? nothing : svg`<text class=${g.label.length > 5 ? 'lab sm' : 'lab'} x=${g.x + g.w / 2} y=${g.y + g.h / 2 + 3.4}>${g.label}</text>`}
       ${inh ? svg`<circle class="dot" cx=${g.x + g.w - 8} cy=${g.y + 8} r="2.6"></circle>` : nothing}
     </g>`;
   }
@@ -422,7 +436,7 @@ export class HhRemote extends LitElement {
     }
     const screenMode = st.mode === 'screen';
     const pad = st.xray && !screenMode ? XRAY_PAD : 0;
-    const vb = screenMode ? { x: 14, y: 36, w: 272, h: 358 } : { x: -pad, y: 0, w: VIEW.w + pad * 2, h: VIEW.h };
+    const vb = screenMode ? { x: GLASS.x - 6, y: GLASS.y - 6, w: GLASS.w + 12, h: GLASS.h + 12 } : { x: -pad, y: 0, w: VIEW.w + pad * 2, h: VIEW.h };
     // pixels per viewBox unit: Screen mode uses an integer scale that fits; the whole remote uses its zoom
     const fitScale = this.avail > 0 ? Math.max(1, Math.floor(this.avail / vb.w)) : 1;
     const z = screenMode ? Math.min(st.scale, fitScale) : st.zoom === '2' ? 2 : st.zoom === '1' ? 1 : 0;
@@ -431,8 +445,6 @@ export class HhRemote extends LitElement {
     const frame = this.assigner.phase.name !== 'idle' && this.canTarget('screen');
     const frameOver = (this.assigner.cursor ?? (this.assigner.phase.name === 'dragging' ? this.assigner.phase.over : null))?.kind;
     void frameOver;
-    const stripKeys = KEYS.filter((k) => k.group === 'strip');
-    const hardKeys = KEYS.filter((k) => k.group !== 'strip');
     return html`<svg class="remote" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width=${dims.width ?? nothing} height=${dims.height ?? nothing} role="group" aria-label="Harmony Elite remote, ${st.layerName(st.layer)} layer" preserveAspectRatio="xMidYMid meet"
       @pointermove=${this.onMove} @pointerup=${this.onUp} @pointercancel=${this.onUp}>
       <defs>
@@ -449,8 +461,9 @@ export class HhRemote extends LitElement {
         ${this.screenOverlay()}
       </svg>
       <rect class=${frame ? 'screen-frame tgt' : 'screen-frame'} x=${SCREEN.x - 2} y=${SCREEN.y - 2} width=${SCREEN.w + 4} height=${SCREEN.h + 4} rx="4"></rect>
-      ${stripKeys.map((g) => this.keyEl(g, byKey.get(g.name), errKeys))}
-      ${hardKeys.map((g) => this.keyEl(g, byKey.get(g.name), errKeys))}
+      <circle class="ring" cx=${DPAD.x} cy=${DPAD.y} r=${DPAD.r + 3}></circle>
+      ${KEYS.map((g) => this.keyEl(g, byKey.get(g.name), errKeys))}
+      ${PRINTED.map((p) => svg`<text class="pr" x=${p.x} y=${p.y}>${p.text}</text>`)}
     </svg>`;
   }
 }

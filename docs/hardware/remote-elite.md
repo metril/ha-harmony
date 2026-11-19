@@ -68,7 +68,7 @@ emits nothing. So the strip arrives as keys on `event2`, not as coordinates.
 | power | 116 PowerOffActivity |
 | strip (`event2`) | 102 Home, 364 Favorites |
 
-There are **no numeric keys** and no Back key (it is Exit). Codes run to 412, so the integration's
+There are **no numeric keys**. The Back (return) key beside Mute is 412 PrevChannel; Exit is a separate key. Codes run to 412, so the integration's
 logical key ids must be a mapping, not the evdev code.
 
 **IRQ counters are zero until something is pressed** — a quiet `/proc/interrupts` is not a dead

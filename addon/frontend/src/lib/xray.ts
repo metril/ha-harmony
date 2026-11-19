@@ -1,5 +1,5 @@
 // X-ray mode: every key labelled with its action, labels in two columns beside the remote with leader lines.
-import { keyByName } from './remote-layout';
+import { VIEW, keyByName } from './remote-layout';
 
 export interface XrayLabel {
   key: string;
@@ -17,7 +17,7 @@ const MIN_GAP = 22;
 
 /** Place one label per key that has text. Keys left of the centre label on the left, the others on the right;
  *  labels are pushed apart vertically so none overlap. */
-export function xrayLabels(items: { key: string; text: string }[], centre = 150): XrayLabel[] {
+export function xrayLabels(items: { key: string; text: string }[], centre = VIEW.w / 2): XrayLabel[] {
   const out: XrayLabel[] = [];
   const sides = new Map<string, 'left' | 'right'>();
   let mid = 0;
@@ -40,7 +40,7 @@ export function xrayLabels(items: { key: string; text: string }[], centre = 150)
       const y = Math.max(v.cy, prev + MIN_GAP);
       prev = y;
       const edge = side === 'left' ? v.g.x : v.g.x + v.g.w;
-      out.push({ key: v.it.key, side, x: side === 'left' ? -14 : 314, y, x1: edge, y1: v.cy, text: v.it.text });
+      out.push({ key: v.it.key, side, x: side === 'left' ? -14 : VIEW.w + 14, y, x1: edge, y1: v.cy, text: v.it.text });
     }
   }
   return out;
