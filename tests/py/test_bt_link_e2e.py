@@ -122,7 +122,7 @@ async def test_config_binds_slots_by_address_and_death_is_reported(bt_hub, tmp_p
             await asyncio.sleep(0.02)
         assert "KEY 0 7 40 1" in log.read_text()
         # the helper dies: state leaves ready, the lists are cleared, the hub carries on
-        pid = int(subprocess.check_output(["pgrep", "-P", str(bt_hub.proc.pid)]).split()[0])
+        pid = int(subprocess.check_output(["pgrep", "-P", str(bt_hub.proc.pid)]).split()[0])  # noqa: ASYNC221
         os.kill(pid, signal.SIGKILL)
         gone = await until(ws, bt_state(lambda d: d["state"] != "ready"))
         assert gone["d"]["state"] == "off" and gone["d"]["hosts"] == [] and not gone["d"].get("remotes")

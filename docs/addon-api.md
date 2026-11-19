@@ -47,7 +47,16 @@ the table below.
 | GET | `/api/v1/ir/device` | ingress | A converted device block |
 | GET | `/api/v1/ir/candidates` | ingress | Power code candidates |
 | POST | `/api/v1/ir/parse` | ingress | Parse pasted Pronto / Flipper / SmartIR |
+| GET | `/api/v1/bt/status` | ingress | Bluetooth: the hub's latest `bt_state` and limits, or why there is none |
+| POST | `/api/v1/bt/pair` | ingress | Bluetooth: open a pairing window (host or remote) |
+| POST | `/api/v1/bt/pair/stop` | ingress | Bluetooth: close the pairing window |
+| POST | `/api/v1/bt/pick` | ingress | Bluetooth: bond a scanned remote by address |
+| POST | `/api/v1/bt/forget` | ingress | Bluetooth: remove a bond |
+| POST | `/api/v1/bt/key` | ingress | Bluetooth: test-fire a key at a paired host |
+| POST | `/api/v1/bt/listen` | ingress | Bluetooth: start or stop receiving remote keys |
+| GET | `/api/v1/bt/events` | ingress | Bluetooth: recent remote keys (bounded ring, polled) |
 | GET | `/api/v1/bundle` | bearer | The applied config for the integration |
+| POST | `/api/v1/bundle/bt` | bearer | The integration's Bluetooth relay round trip |
 | GET | `/api/v1/bundle/wait` | bearer | Long poll for a newer bundle |
 | POST | `/api/v1/bundle/ack` | bearer | The integration reports what it did |
 
@@ -227,6 +236,46 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
   leaves `remotes` and `theme_notices` empty.
 - Failed bearer attempts are rate limited (`429`); a valid token never is. `401 unauthorized` for
   every other miss.
+
+### Bluetooth relay
+
+The hub's Bluetooth pairing and key learning (protocol: `docs/proto/bluetooth.md`; user guide: `docs/bluetooth.md`) reach the
+editor through the integration: the add-on never talks to the hub. Editor requests are queued per hub; the integration
+collects them with its next `POST bundle/bt` (about every 5 s, every 1 s while a pairing window or key listen is active or the
+editor asked in the last 10 s), runs them against the hub and reports the outcome with the new `bt_state` in its next
+exchange. Every queue is bounded (16 commands, 8 per exchange, 32 results, a 64-key ring, 32 hubs); the integration
+validates every command again against the hub's limits.
+
+- `GET bt/status?hub=` -> `{hub, status: "ok"|"unsupported"|"offline"|"unknown", state, limits, listening, age_s}`.
+  `unknown`: the integration has never reported (not linked, or an integration without Bluetooth support);
+  `offline`: the hub is disconnected or the last report is over 30 s old; `unsupported`: the hub has no Bluetooth.
+  `state` is the hub's `bt_state` as last reported, cleaned (`{state, discoverable, discoverable_secs?, le?, gen?, window?,
+  pairing?: {result, addr?, name?, transport?, kind?}, hosts: [{slot, addr, name?, transport, connected, configured?}],
+  remotes: [{slot, addr, name?, connected, battery?, configured?}], candidates?: [{addr, name?, rssi}]}`, addresses upper-case);
+  it is `null` when none is known. `limits` is `hello_ack.bt`: `{hosts_max, conn_max, remotes_max, le_bonds_max, pages, le}`.
+  The editor polls this (1 s while its Bluetooth view is open); polling it keeps the integration on its fast poll.
+- Commands, each `{hub?, ...}`, answered `200 {ok: true, state}` once the integration has run it against the hub (up to 10 s;
+  `state` is the snapshot reported with the outcome, the pairing result itself arrives later in `bt/status`):
+  - `POST bt/pair` `{mode?: "host"|"remote" (host), transport?: "any"|"classic"|"le" (any), secs?: 1..300 (120)}`.
+    Remote mode scans: found devices appear as `state.candidates`; nothing is bonded until `bt/pick`.
+  - `POST bt/pair/stop` `{}`.
+  - `POST bt/pick` `{addr}` bonds one candidate (`AA:BB:CC:DD:EE:FF`, either case).
+  - `POST bt/forget` `{slot: 0..254, kind?: "host"|"remote" (host)}` (a slot of the latest `state`).
+  - `POST bt/key` `{slot: 0..254, page: 7|12, usage: 0..65535, action: "down"|"up"|"press"}` test-fires a key at a paired host.
+  - Errors: `400 bad_request` (schema), `422 invalid_bt` (`error.bt_code`, e.g. a slot beyond the hub's limits, `no_le`), `409
+    bt_unknown | hub_offline | bt_unsupported`, `429 bt_busy` (too many waiting), `502 hub_refused` (`error.hub_code` is the hub's
+    code: `no_candidate`, `no_slot`, `bt_not_ready`, `bt_busy`, ...; `msg` a sentence), `504 hub_timeout` (the integration did
+    not answer in 10 s; the command is dropped, never delivered late).
+- `POST bt/listen` `{hub?, on: bool}` -> `{ok, listening}`: a 30 s lease. While it holds, the integration opts in to the hub's
+  remote keys and forwards them; the lease is renewed by `GET bt/events` and `listen on`, and lapses when the editor stops
+  asking (or on `on: false`). Nothing is listened to otherwise.
+- `GET bt/events?hub=&after=<seq>` -> `{events: [{seq, slot, page, usage, down, t}], last, listening, dropped}`. A ring of the last
+  64 keys (`seq` counts from 1 for the process); poll with `after = last`. `dropped` is true when the ring overwrote keys the
+  caller had not read.
+- `POST bundle/bt` (bearer, integration only) body `{hub, supported: bool, online: bool, state?, limits?, results: [{id, ok, code?,
+  msg?}] (<= 32), events: [{slot, page, usage, down}] (<= 64)}` -> `{commands: [{id, op: "pair"|"pair_stop"|"pick"|"forget"|"key",
+  ...fields}] (<= 8), listen: bool, fast: bool}`. `404 not_linked` for a hub id nothing polls for. A command is delivered once;
+  its `id` (`[A-Za-z0-9_-]{1,16}`) comes back in `results`. `fast` asks the integration to exchange every second.
 
 ## Decisions
 

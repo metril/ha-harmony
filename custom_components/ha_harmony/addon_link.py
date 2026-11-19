@@ -224,3 +224,36 @@ class AddonClient:
                     raise AddonUnreachable(f"the add-on answered HTTP {resp.status}")
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None
+
+    async def bt_exchange(self, body: dict[str, Any]) -> dict[str, Any]:
+        """The Bluetooth relay round trip (docs/addon-api.md): report, collect the editor's queued commands. The answer
+        is untrusted: size-capped here, and every command in it is validated by the caller. Raises AddonError."""
+        timeout = aiohttp.ClientTimeout(total=10, sock_connect=5)
+        try:
+            async with self._session.post(
+                self._base + "/bt",
+                json=body,
+                headers=self._headers,
+                timeout=timeout,
+                allow_redirects=False,
+            ) as resp:
+                if resp.status in (401, 403):
+                    raise AddonAuthError("the add-on refused the token")
+                if resp.status in (404, 405):  # an add-on without the relay (older), or no poll recorded yet
+                    raise AddonUnreachable("the add-on has no Bluetooth relay")
+                if resp.status != 200:
+                    raise AddonUnreachable(f"the add-on answered HTTP {resp.status}")
+                if (resp.content_length or 0) > const.BT_RELAY_MAX_BYTES:
+                    raise AddonUnreachable("the add-on's Bluetooth answer is too large")
+                raw = await resp.content.read(const.BT_RELAY_MAX_BYTES + 1)
+                if len(raw) > const.BT_RELAY_MAX_BYTES:
+                    raise AddonUnreachable("the add-on's Bluetooth answer is too large")
+        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
+            raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None
+        try:
+            data = json.loads(raw)
+        except ValueError, RecursionError:
+            raise AddonUnreachable("the add-on's Bluetooth answer is not JSON") from None
+        if not isinstance(data, dict):
+            raise AddonUnreachable("the add-on's Bluetooth answer is not an object")
+        return data

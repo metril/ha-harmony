@@ -104,6 +104,7 @@ class HarmonyHubClient:
         self.ota_key: str | None = None  # "dev" | "release" | None
         self.config_hash: str | None = None  # hub's CRC-32 hex of its loaded config text
         self.bt: dict[str, Any] | None = None  # hello_ack.bt; None = a hub without Bluetooth
+        self.bt_state: dict[str, Any] | None = None  # the last bt_state push of this connection (a coordinator made later still sees it)
         self.limits: HubLimits | None = None  # hello_ack.limits (LEGACY for a hub that sends none); None before the first hello
 
     @property
@@ -226,6 +227,7 @@ class HarmonyHubClient:
             self.config_hash = d.get("config_hash")
             self.limits = HubLimits.from_hello(d.get("limits"))
             self.bt = d["bt"] if isinstance(d.get("bt"), dict) else None
+            self.bt_state = None
             acts = d.get("activities")
             self.activities = (
                 [a for a in acts if isinstance(a, str)] if isinstance(acts, list) else []
@@ -347,6 +349,8 @@ class HarmonyHubClient:
             else:
                 fut.set_result(data)
             return
+        if mtype is MsgType.BT_STATE:
+            self.bt_state = data
         for cb in list(self._subs):
             try:
                 cb(mtype, data)

@@ -15,6 +15,7 @@ from . import HarmonyConfigEntry, const
 from .base_entity import HarmonyEntity
 from .coordinator import (
     LINK_STATES,
+    TOPIC_BT,
     TOPIC_CONFIG,
     TOPIC_LINK,
     TOPIC_OTA,
@@ -40,6 +41,8 @@ async def async_setup_entry(
         ents.append(HarmonyFirmwareUpdate(c))
         if c.has_addon_link:
             ents.append(HarmonyAddonLink(c))
+        if c.btm.supported:
+            ents.append(HarmonyBluetooth(c))
         return ents
 
     setup_dynamic(entry, async_add_entities, build)
@@ -132,6 +135,33 @@ class HarmonyAddonLink(HarmonyEntity, SensorEntity):
             "applied_at": c.applied_at,
             "last_error": c.last_error,
             "config_state": c.config_state,  # accepted | pending | rejected (by the hub)
+        }
+
+
+class HarmonyBluetooth(HarmonyEntity, SensorEntity):
+    """The state of the hub's Bluetooth helper. Only on a hub that reports Bluetooth support."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "bluetooth"
+
+    def __init__(self, coordinator: HarmonyCoordinator) -> None:
+        super().__init__(coordinator, "bt", topics=(TOPIC_BT,))
+        self._attr_options = ["off", "starting", "ready", "no_adapter", "disabled"]
+
+    @property
+    def native_value(self) -> str | None:
+        st = self.coordinator.btm.state
+        return st["state"] if st else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        st = self.coordinator.btm.state or {}
+        return {
+            "le": st.get("le"),
+            "limits": self.coordinator.btm.limits,
+            "window": st.get("window"),  # "host" | "remote" while a pairing window is open
+            "discoverable": st.get("discoverable"),
         }
 
 

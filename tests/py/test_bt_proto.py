@@ -8,7 +8,14 @@ import aiohttp
 import pytest
 from conftest import TOKEN
 
-from harmony_core.harmony_proto import MESSAGES, MsgType, ProtoError, decode_ws, decode_ws_full, encode_ws
+from harmony_core.harmony_proto import (
+    MESSAGES,
+    MsgType,
+    ProtoError,
+    decode_ws,
+    decode_ws_full,
+    encode_ws,
+)
 
 VEC = json.loads((Path(__file__).parents[1] / "vectors" / "bt_messages.json").read_text())
 NEW = ("bt_pair", "bt_state", "bt_forget", "bt_key", "bt_remote_key", "bt_listen")

@@ -178,6 +178,74 @@
           "description": "Install on a hub that trusts the public dev test key (anyone can sign images for it). Leave off for a real hub."
         }
       }
+    },
+    "bt_pair": {
+      "name": "Bluetooth: start pairing",
+      "description": "Open the hub's pairing window. Mode host: a phone or TV pairs with the hub (the hub types to it). Mode remote: scan for Bluetooth LE remotes; give an address from the scan to bond that one. The result shows in the Bluetooth sensor.",
+      "fields": {
+        "config_entry": {
+          "name": "Config entry",
+          "description": "Hub (entry id or hub id). Optional when only one hub is set up."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "host: the hub appears as a keyboard to a phone or TV. remote: the hub takes input from a Bluetooth remote."
+        },
+        "transport": {
+          "name": "Transport",
+          "description": "any, classic or le (Bluetooth LE)."
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long the pairing window stays open (1 to 300)."
+        },
+        "address": {
+          "name": "Address",
+          "description": "Remote mode only: bond this scanned remote (AA:BB:CC:DD:EE:FF). Leave empty to open the window and scan."
+        }
+      }
+    },
+    "bt_stop_pairing": {
+      "name": "Bluetooth: stop pairing",
+      "description": "Close the pairing window.",
+      "fields": {
+        "config_entry": {
+          "name": "Config entry",
+          "description": "Hub (entry id or hub id). Optional when only one hub is set up."
+        }
+      }
+    },
+    "bt_forget": {
+      "name": "Bluetooth: forget a device",
+      "description": "Remove the bond with a paired device or remote, by its Bluetooth address.",
+      "fields": {
+        "config_entry": {
+          "name": "Config entry",
+          "description": "Hub (entry id or hub id). Optional when only one hub is set up."
+        },
+        "address": {
+          "name": "Address",
+          "description": "Bluetooth address (AA:BB:CC:DD:EE:FF) of a bond the hub holds."
+        }
+      }
+    },
+    "bt_listen": {
+      "name": "Bluetooth: listen for remote keys",
+      "description": "Fire ha_harmony_bt_remote_key events for keys pressed on bonded Bluetooth remotes, for a limited time. Off otherwise.",
+      "fields": {
+        "config_entry": {
+          "name": "Config entry",
+          "description": "Hub (entry id or hub id). Optional when only one hub is set up."
+        },
+        "on": {
+          "name": "On",
+          "description": "Start (true) or stop (false) listening."
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long to listen (1 to 300)."
+        }
+      }
     }
   },
   "entity": {
@@ -199,6 +267,16 @@
       },
       "page_format": {
         "name": "Page format"
+      },
+      "bluetooth": {
+        "name": "Bluetooth",
+        "state": {
+          "off": "Off",
+          "starting": "Starting",
+          "ready": "Ready",
+          "no_adapter": "No adapter",
+          "disabled": "Disabled"
+        }
       },
       "firmware_update": {
         "name": "Firmware update",
@@ -261,6 +339,21 @@
     },
     "not_linked": {
       "message": "This hub is not linked to the Harmony Editor add-on."
+    },
+    "bt_unsupported": {
+      "message": "This hub has no Bluetooth (its firmware or build does not support it)."
+    },
+    "bt_failed": {
+      "message": "Bluetooth: {error}."
+    },
+    "bt_invalid": {
+      "message": "Bluetooth: {error}."
+    },
+    "bt_unknown_address": {
+      "message": "The hub holds no Bluetooth bond with {address}."
+    },
+    "bt_ambiguous_address": {
+      "message": "{address} is bonded both as a device and as a remote; use the editor to forget the right one."
     },
     "config_rejected": {
       "message": "The hub rejected the config: {error}"
