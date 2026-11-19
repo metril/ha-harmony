@@ -59,7 +59,7 @@ beforeEach(() => {
 describe('screens render with a realistic config', () => {
   it('overview: stats, activities, permissions, nothing to apply', async () => {
     const { app } = await boot();
-    const ov = app.shadowRoot!.querySelector('hh-overview')!;
+    const ov = await lazyEl(app, 'hh-overview');
     await settle(ov as HTMLElement);
     const t = text(ov);
     expect(t).toContain('2 / 16Devices');
@@ -73,7 +73,7 @@ describe('screens render with a realistic config', () => {
 
   it('first-run shows the empty state with Import and Add your first device', async () => {
     const { app } = await boot({ applied: false });
-    const ov = app.shadowRoot!.querySelector('hh-overview')!;
+    const ov = await lazyEl(app, 'hh-overview');
     await settle(ov as HTMLElement);
     expect(text(ov)).toContain('Import YAML file');
     expect(ov.shadowRoot!.querySelector('a.btn.pri')?.getAttribute('href')).toBe('#/devices/new');
@@ -92,7 +92,7 @@ describe('screens render with a realistic config', () => {
 
   it('devices: keypad of 60+ commands, each with its own Send IR; the list view has every row', async () => {
     const { app, calls } = await boot({ hash: '#/devices/tv' });
-    const dv = app.shadowRoot!.querySelector('hh-devices')!;
+    const dv = await lazyEl(app, 'hh-devices');
     await settle(dv as HTMLElement);
     expect(dv.shadowRoot!.querySelectorAll('.key .k').length).toBeGreaterThan(60);
     const send = dv.shadowRoot!.querySelector('hh-send-ir')! as HTMLElement & { updateComplete: Promise<unknown> };
@@ -111,7 +111,7 @@ describe('screens render with a realistic config', () => {
 
   it('devices gallery: a card per device with power status, counts and source, plus Add device', async () => {
     const { app } = await boot({ hash: '#/devices' });
-    const dv = app.shadowRoot!.querySelector('hh-devices')!;
+    const dv = await lazyEl(app, 'hh-devices');
     await settle(dv as HTMLElement);
     expect(dv.shadowRoot!.querySelectorAll('.dcard').length).toBe(2);
     const t = text(dv);
@@ -125,7 +125,7 @@ describe('screens render with a realistic config', () => {
 
   it('history: current rev has a badge, earlier revs have exactly Compare and Restore', async () => {
     const { app } = await boot({ hash: '#/history', statuses: [status({ applied_rev: 'a', acked_rev: 'a', result: 'ok' })] });
-    const h = app.shadowRoot!.querySelector('hh-history')!;
+    const h = await lazyEl(app, 'hh-history');
     await settle(h as HTMLElement);
     expect(text(h)).toContain('Rev 3');
     await vi.waitFor(() => expect(text(h)).toContain('Acknowledged by Home Assistant'));
@@ -152,7 +152,7 @@ describe('screens render with a realistic config', () => {
 
   it('history: Compare loads the old version and lists what differs from the current one', async () => {
     const { app, calls } = await boot({ hash: '#/history' });
-    const h = app.shadowRoot!.querySelector('hh-history')!;
+    const h = await lazyEl(app, 'hh-history');
     await settle(h as HTMLElement);
     ([...h.shadowRoot!.querySelectorAll('button')].find((b) => b.textContent?.includes('Compare')) as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(h)).toContain('Watch TV'));

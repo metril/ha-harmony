@@ -6,13 +6,23 @@
 - Hub: `hello_ack.limits` reports the budget and bounds; new `config_chunk` message sends configs over the 64 KiB frame size in pieces. The integration and add-on use the hub's reported limits and fall back to the old fixed ones for older firmware (no chunks). The editor shows "Config size X of Y KiB on this hub" for a current hub.
 - Integration (behaviour change): command buttons are created disabled, and a device with more than 200 commands gets none unless the new option `all_command_buttons` is set. Existing buttons keep working and stay enabled; every command stays reachable with `remote.send_command`. See `docs/ha-config.md`.
 - Add-on: request body cap 4 MiB, 250k JSON values per config, `ir/parse` 4096 actions / 1 MiB; the integration compiles a pulled bundle through the fast dict path (was ~0.5 ms per command).
+
+## 0.3.8 (2026-11-18)
+
+- Editor: assigned keys are outlined in teal instead of filled (filled only for the selected key); the D-pad is one plain rounded diamond and Vol, Ch/Pg and the +/- key are plain keys, their halves showing only on hover, focus, selection or when assigned.
+- Editor: the Elite drawing is now shaped like the real remote: a rounded-diamond D-pad with OK, single tall Vol and Ch/Pg keys with two hit areas, notched Exit/Menu/Mute/Back, one play/pause key, one DVR/Guide/Info bar, outlined ACTIVITIES/DEVICES, ringed colour keys, a single +/- key and printed icons, with a dome top and a matte grip.
+- Editor: the Elite drawing's proportions now follow the photo (taller body, Off lower and inset, screen centred, keys and the D-pad ring placed from one table of body fractions, empty rounded grip at the bottom).
+- CI: the mips qemu test build no longer fails on a `-Werror=maybe-uninitialized` in `test_hub_ota.c` (gcc 13); the boot-hook selftest for an update applied inside the health window no longer races the (tiny) test window. Tests only, no firmware change.
+
+## 0.3.7 (2026-11-18)
+
+- Fix: integration 0.3.6 and older refuse to connect to hub firmware that reports extra handshake fields; receivers now ignore unknown fields (hub and integration alike; unknown message types from a newer peer are ignored too; what each side sends is still strictly validated).
 - Fix: the studio's layer pills are no longer squeezed to a few pixels at narrow widths or with wider fallback fonts; the pill row measures its room and moves the rest into the "More" menu.
 - Hub and remote can learn their RF slot from the radio (link-up report, or the first data frame when the link was already up; the learned slot is saved in `rf_slot` next to the hub state file / in `/data/app` and used as a provisional start slot). Opt-in until the bench gate passes: `install_boot_hook.py install --learn-slot`, `deploy_remote.py install-hook --learn-slot`; `--rf-slot` / `--slot` still pass a fixed slot by default and override learning. Nothing is sent to a guessed slot before it is known. The remote's `--slot 0` is now rejected (omit the flag to learn).
 - Hub OTA: signed firmware upload over the hub websocket (`ota_begin`/`ota_chunk`/`ota_end`/`ota_abort`/`ota_status`; resumable by offset, 4 KiB chunks, one upload at a time, ENOSPC-safe), verified and applied with `ota_apply_staged`, then the daemon exits with status 42 and the boot hook relaunches the new build. A freshly applied build that dies inside its health window, or never reaches the health mark before a reboot, is rolled back once to `hub.prev` and reported (`ota-rollback`) as a repair issue in Home Assistant. New service `ha_harmony.install_firmware` and a diagnostic "Firmware update" sensor. A hub with the public dev key accepts updates only with `ota_allow_dev=1` (hub.conf) and the service's `allow_dev_key`; updates are refused until the boot health mark and the downgrade floor includes the running build (`-DHP_BUILD_ID`). Message ids 30-34 are reserved for the remote's RF transport. See `docs/runbooks/ota-update.md`.
 
 ## 0.3.6 (2026-11-18)
 
-- Editor: the Elite drawing's proportions now follow the photo (taller body, Off lower and inset, screen centred, keys and the D-pad ring placed from one table of body fractions, empty rounded grip at the bottom).
 - Editor: History page simplified (Compare and Restore actions per entry) and the hub indicator sits in the header.
 - Fix: the "upload your YAML in the add-on" repair clears itself once the hub accepts a config applied in the add-on, is not raised again while an add-on config is cached (a log line says the file is safe to delete), and can be dismissed. The file is never touched.
 - Hub boot hook: bounded daemon respawn (`respawn_max`, default 3, 0 = off) with a heartbeat wedge cover, an `rf_debug` conf key and uptime-stamped logs; the boot-strike counter is never touched by a respawn.

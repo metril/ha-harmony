@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { KeymapRow, V2Page } from '../lib/api';
 import type { Assigner, Spot } from '../lib/assigner';
 import { cellAt, pageGroup, widgetRect } from '../lib/page-renderer';
-import { DPAD, bodyPath, GLASS, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, keyPath, keyTitle, type KeyGeom } from '../lib/remote-layout';
+import { BODY, DPAD, GLASS, GRIP_Y, JOINED, PLATED, PLATES, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, bodyPath, gripPath, keyPath, keyTitle, tintPath, type KeyGeom } from '../lib/remote-layout';
 import type { StudioHost } from '../lib/studio-state';
 import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
@@ -35,25 +35,40 @@ export class HhRemote extends LitElement {
     svg.remote { display: block; margin: 0 auto; max-width: none; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     /* Fit: as large as the canvas allows (it fills the studio's height), but never past 1.25x */
     :host([fit]) svg.remote { width: 100%; height: 100%; max-height: 1125px; }
-    .body { fill: url(#bodyg); stroke: #0a0d10; stroke-width: 2; }
-    .rim { fill: none; stroke: rgba(255, 255, 255, 0.07); stroke-width: 1.5; }
-    .glass { fill: #05080b; stroke: #1b2229; stroke-width: 2; }
+    .body { fill: url(#bodyg); stroke: #000; stroke-width: 2; }
+    .grip { fill: #272a2e; pointer-events: none; }
+    .seam { stroke: rgba(255, 255, 255, 0.1); stroke-width: 1.2; pointer-events: none; }
+    .glass { fill: none; stroke: none; }
     .hint { fill: #55616c; font: 600 8px system-ui, sans-serif; letter-spacing: 1px; text-transform: uppercase; }
     .key { cursor: pointer; outline: none; }
-    .cap { fill: url(#keyg); stroke: #11161a; stroke-width: 1; transition: fill 140ms ease-out; }
-    .c-red .cap { fill: #b8423a; } .c-green .cap { fill: #3e8e52; } .c-yellow .cap { fill: #bc9727; } .c-blue .cap { fill: #3b69b8; } .c-power_off_activity .cap { fill: #7a2b27; }
-    .key.colour .cap { stroke: rgba(0, 0, 0, 0.5); }
+    .cap { fill: url(#keyg); stroke: #15181b; stroke-width: 1; transition: fill 140ms ease-out; }
+    .g-colour .cap { fill: #2c3135; }
+    .tint { fill: none; stroke-width: 1.8; pointer-events: none; }
+    .g-strip .cap { fill: #030405; stroke: #e8edf0; stroke-width: 1.3; }
+    .g-strip:hover .cap { fill: #151a1e; }
     .glow { fill: none; stroke: none; pointer-events: none; transition: fill 140ms ease-out, stroke 140ms ease-out; }
-    .lab { fill: #aab5bf; font: 700 11px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
+    .lab { fill: #f1f4f6; font: 700 11px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
     .lab.sm { font-size: 9px; letter-spacing: 0.4px; }
-    .pr { fill: #8794a0; font: 600 9px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
-    .ring { fill: #12161a; stroke: rgba(255, 255, 255, 0.06); stroke-width: 1; pointer-events: none; }
-    .gl { fill: #9aa6b1; pointer-events: none; }
-    .gs { fill: none; stroke: #9aa6b1; stroke-width: 1.8; pointer-events: none; }
-    .key.colour:not(.c-power_off_activity) .lab { display: none; }
+    .g-strip .lab { font-size: 9px; letter-spacing: 0.5px; fill: #fff; }
+    .g-home .lab { font-size: 15px; }
+    .pr { fill: #d3dae0; font: 700 11px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
+    .prl { stroke: #d3dae0; stroke-width: 1.2; pointer-events: none; }
+    .gl { fill: #eef1f3; pointer-events: none; }
+    .gs { fill: none; stroke: #eef1f3; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+    .gs.rec { stroke: #f0665a; }
+    .mk, .dir { opacity: 0; }
+    .key:hover .mk, .key:focus-visible .mk, .key.sel .mk, .key.ov .mk { opacity: 1; }
+    .key:hover .dir, .key:focus-visible .dir, .key.sel .dir, .key.ov .dir { opacity: 0.9; }
+    /* joined keys: one flat plate, no seam at rest; the half under the pointer or assigned shows itself */
+    .jn .cap { fill: #4d5257; stroke: #4d5257; stroke-width: 0.7; }
+    .plate { fill: #4d5257; stroke: #4d5257; stroke-width: 0.7; pointer-events: none; }
+    .jp .cap { fill: transparent; stroke: none; }
+    .key.jp:hover .cap { fill: rgba(255, 255, 255, 0.13); }
+    .key.jn:hover .cap { fill: #61676d; stroke: #61676d; }
+    .key.colour .lab { display: none; }
     .key:hover .cap { fill: url(#keyh); }
-    .key.ov .glow { fill: rgba(32, 200, 176, 0.28); stroke: #20c8b0; stroke-width: 1.6; }
-    .key.none .glow { fill: rgba(5, 8, 11, 0.55); }
+    .key.ov .glow { fill: none; stroke: #3ee8cf; stroke-width: 1.8; }
+    .key.none .glow { fill: rgba(5, 8, 11, 0.18); }
     .key.colour.none .glow { fill: rgba(5, 8, 11, 0.2); }
     .key.ex .glow { fill: rgba(5, 8, 11, 0.4); stroke: #687888; stroke-width: 1; stroke-dasharray: 3 2; }
     .key.bad .glow { stroke: #f85848; stroke-width: 2; }
@@ -61,7 +76,7 @@ export class HhRemote extends LitElement {
     .key.tgt .glow { fill: rgba(32, 200, 176, 0.1); stroke: #20c8b0; stroke-width: 1.4; stroke-dasharray: 4 3; animation: pulse 1.2s ease-in-out infinite; }
     .key.over .glow { fill: rgba(32, 200, 176, 0.38); stroke: #5fe3cf; stroke-width: 2; stroke-dasharray: none; animation: none; }
     .key.invalid .glow { stroke: #f85848; fill: rgba(248, 88, 72, 0.18); animation: none; }
-    .key.sel .glow { stroke: #fff; stroke-width: 2.2; stroke-dasharray: none; filter: drop-shadow(0 0 4px #20c8b0); }
+    .key.sel .glow { fill: rgba(32, 200, 176, 0.5); stroke: #fff; stroke-width: 2.2; stroke-dasharray: none; filter: drop-shadow(0 0 4px #20c8b0); }
     .key:focus-visible .glow { stroke: #5fe3cf; stroke-width: 2.4; stroke-dasharray: none; filter: drop-shadow(0 0 3px #5fe3cf); }
     @keyframes pulse { 50% { stroke-opacity: 0.35; } }
     .screen-frame { fill: none; stroke: transparent; stroke-width: 3; pointer-events: none; }
@@ -313,23 +328,29 @@ export class HhRemote extends LitElement {
   private keyGlyph(g: KeyGeom): TemplateResult | typeof nothing {
     const cx = g.x + g.w / 2;
     const cy = g.y + g.h / 2;
-    const tri = (d: string) => svg`<path d=${d} fill="#9aa6b1" pointer-events="none"></path>`;
+    const arrow = (dx: number, dy: number, d: string) => svg`<path class="gl dir" d=${d} transform="translate(${DPAD.x + dx * DPAD.r} ${DPAD.y + dy * DPAD.r})"></path>`;
+    const sign = (x: number, y: number, plus: boolean) => svg`<path class="gs mk" d=${`M${x - 3.5} ${y}h7${plus ? `M${x} ${y - 3.5}v7` : ''}`}></path>`;
     switch (g.name) {
-      case 'up': return tri(`M${cx} ${cy - 6}l7 9h-14z`);
-      case 'down': return tri(`M${cx} ${cy + 6}l7 -9h-14z`);
-      case 'left': return tri(`M${cx - 6} ${cy}l9 -7v14z`);
-      case 'right': return tri(`M${cx + 6} ${cy}l-9 -7v14z`);
-      case 'prev_channel': return svg`<path class="gs" d="M${cx - 9} ${cy - 3}l5 -5m-5 5l5 5m-5 -5h12a6 6 0 0 1 0 12h-6" stroke-linecap="round" stroke-linejoin="round"></path>`;
+      case 'up': return arrow(0, -0.6, 'M0 -6l7 9h-14z');
+      case 'down': return arrow(0, 0.6, 'M0 6l7 -9h-14z');
+      case 'left': return arrow(-0.6, 0, 'M-6 0l9 -7v14z');
+      case 'right': return arrow(0.6, 0, 'M6 0l-9 -7v14z');
+      case 'volume_up': return sign(g.x + 16, g.y + 13, true);
+      case 'volume_down': return sign(g.x + 16, g.y + g.h - 13, false);
+      case 'channel_up': return sign(g.x + g.w - 16, g.y + 13, true);
+      case 'channel_down': return sign(g.x + g.w - 16, g.y + g.h - 13, false);
+      case 'volume_mute': return svg`<path class="gs" d=${`M${cx - 7} ${cy - 2}h3l4 -4v12l-4 -4h-3zM${cx - 9} ${cy - 8}l16 16`}></path>`;
+      case 'prev_channel': return svg`<path class="gs" d=${`M${cx - 9} ${cy - 3}l5 -5m-5 5l5 5m-5 -5h13a6 6 0 0 1 0 12h-7`}></path>`;
       case PHYSICAL_KEYS.lightUpper:
-      case PHYSICAL_KEYS.lightLower: return svg`<path class="gs" d="M${cx - 4.5} ${cy + 2.5}a6 6 0 1 1 9 0c-1 1 -1.5 2 -1.5 3.5h-6c0 -1.5 -.5 -2.500 -1.500 -3.500zM${cx - 2.500} ${cy + 8.500}h5" stroke-linecap="round" stroke-linejoin="round"></path>`;
+      case PHYSICAL_KEYS.lightLower: return svg`<path class="gs" d=${`M${cx - 3.5} ${cy - 9}h7l3.5 10h-14zM${cx - 3} ${cy + 3}l1.5 6h3l1.5 -6`}></path>`;
       case PHYSICAL_KEYS.socketUpper:
-      case PHYSICAL_KEYS.socketLower: return svg`<rect class="gs" x=${cx - 7} y=${cy - 7} width="14" height="14" rx="4"></rect><path class="gs" d="M${cx - 2.500} ${cy - 2.500}v2.500M${cx + 2.500} ${cy - 2.500}v2.500M${cx - 2} ${cy + 3}h4" stroke-linecap="round"></path>`;
-      case 'play': return svg`<path class="gl" d="M${cx - 4} ${cy - 6}l11 6l-11 6z"></path>`;
-      case 'pause': return svg`<path class="gl" d="M${cx - 5} ${cy - 6}h3.5v12h-3.5zM${cx + 1.5} ${cy - 6}h3.5v12h-3.5z"></path>`;
-      case 'stop': return svg`<rect class="gl" x=${cx - 5} y=${cy - 5} width="10" height="10" rx="1.5"></rect>`;
-      case 'record': return svg`<circle class="gs" cx=${cx} cy=${cy} r="5"></circle>`;
-      case 'rewind': return svg`<path class="gl" d="M${cx} ${cy - 6}l-9 6l9 6zM${cx + 9} ${cy - 6}l-9 6l9 6zM${cx - 11} ${cy - 6}h2.5v12h-2.5z"></path>`;
-      case 'fast_forward': return svg`<path class="gl" d="M${cx} ${cy - 6}l9 6l-9 6zM${cx - 9} ${cy - 6}l9 6l-9 6zM${cx + 8.5} ${cy - 6}h2.5v12h-2.5z"></path>`;
+      case PHYSICAL_KEYS.socketLower: return svg`<circle class="gs" cx=${cx} cy=${cy} r="9"></circle><path class="gs" d=${`M${cx - 3} ${cy - 4}v3M${cx + 3} ${cy - 4}v3M${cx - 2.5} ${cy + 3}h5`}></path>`;
+      case 'play': return svg`<path class="gs" d=${`M${cx - 4} ${cy - 6.5}l10 6.5l-10 6.5z`}></path>`;
+      case 'pause': return svg`<path class="gs" d=${`M${cx - 3.5} ${cy - 5}v10M${cx + 3.5} ${cy - 5}v10`}></path>`;
+      case 'stop': return svg`<rect class="gs" x=${cx - 5} y=${cy - 5} width="10" height="10"></rect>`;
+      case 'record': return svg`<circle class="gs rec" cx=${cx} cy=${cy} r="5"></circle>`;
+      case 'rewind': return svg`<path class="gs" d=${`M${cx - 12} ${cy - 5}v10M${cx - 2} ${cy - 5}l-8 5l8 5zM${cx + 10} ${cy - 6}l-9 6l9 6z`}></path>`;
+      case 'fast_forward': return svg`<path class="gs" d=${`M${cx + 12} ${cy - 5}v10M${cx + 2} ${cy - 5}l8 5l-8 5zM${cx - 10} ${cy - 6}l9 6l-9 6z`}></path>`;
       default: return nothing;
     }
   }
@@ -337,7 +358,7 @@ export class HhRemote extends LitElement {
     const a = this.assigner.phase;
     const cur = this.assigner.cursor;
     const tgt = this.canTarget('key');
-    const cls = ['key', g.color ? 'colour' : '', g.color ? `c-${g.name}` : '', ...this.keyState(row)];
+    const cls = ['key', `g-${g.group}`, JOINED.has(g.name) ? 'jn' : '', PLATED.has(g.name) ? 'jp' : '', g.color ? 'colour' : '', ...this.keyState(row)];
     const sel = this.st.sel?.kind === 'key' && this.st.sel.name === g.name;
     if (sel) cls.push('sel');
     if (errs.has(g.name)) cls.push('bad');
@@ -352,9 +373,10 @@ export class HhRemote extends LitElement {
         @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.host.activateKey(g.name); } }}>
       <title>${label}</title>
       <path class="cap" d=${path}></path>
+      ${g.color ? svg`<path class="tint" d=${tintPath(g)} stroke=${g.color}></path>` : nothing}
       <path class="glow" d=${path}></path>
       ${this.keyGlyph(g)}
-      ${g.shape.startsWith('wedge') || !g.label ? nothing : svg`<text class=${g.label.length > 5 ? 'lab sm' : 'lab'} x=${g.x + g.w / 2} y=${g.y + g.h / 2 + 3.4}>${g.label}</text>`}
+      ${!g.label ? nothing : svg`<text class=${g.label.length > 5 || g.group === 'power' ? 'lab sm' : 'lab'} x=${g.x + g.w / 2} y=${g.y + g.h / 2 + (g.group === 'home' ? 5.2 : 3.4)}>${g.label}</text>`}
       ${inh ? svg`<circle class="dot" cx=${g.x + g.w - 8} cy=${g.y + 8} r="2.6"></circle>` : nothing}
     </g>`;
   }
@@ -452,22 +474,23 @@ export class HhRemote extends LitElement {
     return html`<svg class="remote" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width=${dims.width ?? nothing} height=${dims.height ?? nothing} role="group" aria-label="Harmony Elite remote, ${st.layerName(st.layer)} layer" preserveAspectRatio="xMidYMid meet"
       @pointermove=${this.onMove} @pointerup=${this.onUp} @pointercancel=${this.onUp}>
       <defs>
-        <linearGradient id="bodyg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b3137"></stop><stop offset="0.4" stop-color="#1b2024"></stop><stop offset="1" stop-color="#15191d"></stop></linearGradient>
-        <linearGradient id="keyg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3c444b"></stop><stop offset="1" stop-color="#252b30"></stop></linearGradient>
-        <linearGradient id="keyh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#48515a"></stop><stop offset="1" stop-color="#2d343a"></stop></linearGradient>
+        <linearGradient id="bodyg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#23282c"></stop><stop offset="0.35" stop-color="#101315"></stop><stop offset="1" stop-color="#090b0c"></stop></linearGradient>
+        <linearGradient id="keyg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b626a"></stop><stop offset="1" stop-color="#454b52"></stop></linearGradient>
+        <linearGradient id="keyh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6c747c"></stop><stop offset="1" stop-color="#555c64"></stop></linearGradient>
       </defs>
       ${st.xray && !screenMode ? this.xray(rows) : nothing}
       <path class="body" d=${bodyPath()}></path>
-      <path class="rim" d=${bodyPath(3)}></path>
+      <path class="grip" d=${gripPath()}></path>
+      <path class="seam" d=${`M${BODY.x + 1} ${GRIP_Y}h${BODY.w - 2}`}></path>
       <rect class="glass" x=${GLASS.x} y=${GLASS.y} width=${GLASS.w} height=${GLASS.h} rx=${GLASS.r}></rect>
       <svg class="scr" x=${SCREEN.x} y=${SCREEN.y} width=${SCREEN.w} height=${SCREEN.h} viewBox="0 0 240 320" @pointerdown=${(e: PointerEvent) => this.onScreenDown(e)}>
         ${v2 ? pageGroup(v2, { activeAct: activityIndex(this.store.config, st.layer) }) : svg`<rect width="240" height="320" fill="#101820"></rect><text x="120" y="164" font-size="13" fill="#687888" text-anchor="middle">${this.store.pages.length || !this.store.loaded ? 'No preview for this page' : 'Add a page to see the screen'}</text>`}
         ${this.screenOverlay()}
       </svg>
       <rect class=${frame ? 'screen-frame tgt' : 'screen-frame'} x=${SCREEN.x - 2} y=${SCREEN.y - 2} width=${SCREEN.w + 4} height=${SCREEN.h + 4} rx="4"></rect>
-      <circle class="ring" cx=${DPAD.x} cy=${DPAD.y} r=${DPAD.r + 3}></circle>
+      ${PLATES.map((d) => svg`<path class="plate" d=${d}></path>`)}
       ${KEYS.map((g) => this.keyEl(g, byKey.get(g.name), errKeys))}
-      ${PRINTED.map((p) => svg`<text class="pr" x=${p.x} y=${p.y}>${p.text}</text>`)}
+      ${PRINTED.map((p) => svg`<text class="pr" x=${p.x} y=${p.y}>${p.text}</text>${p.sub ? svg`<path class="prl" d=${`M${p.x - 8} ${p.y + 4}h16`}></path><text class="pr" x=${p.x} y=${p.y + 15}>${p.sub}</text>` : nothing}`)}
     </svg>`;
   }
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.8 (2026-11-18)
+
+- The editor's drawing of the Elite now looks like the real remote: dome top and matte grip, a rounded-diamond D-pad with OK, single Vol and Ch/Pg keys, notched Exit/Menu/Mute/Back, one play/pause key, one DVR/Guide/Info bar, outlined ACTIVITIES/DEVICES, ringed colour keys, one +/- key and printed icons. Key positions were measured on the device and a photo.
+- Assigned keys are outlined in teal instead of filled; the D-pad, Vol, Ch/Pg and +/- keys show their halves only on hover, focus, selection or when assigned.
+
+## 0.3.7 (2026-11-18)
+
+- Fix: the integration's protocol decoder ignores unknown fields from a newer hub (0.3.6 could not connect to the current hub firmware).
+- Studio layer pills fit narrow widths; opt-in RF slot learning; hub signed OTA firmware updates.
+
 ## 0.3.6 (2026-11-18)
 
 - Editor: the Elite drawing follows the photo proportions.

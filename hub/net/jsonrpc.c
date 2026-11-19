@@ -78,12 +78,7 @@ static bool field_ok(const hp_field_desc_t *f, const cJSON *v) {
 /* Returns NULL when valid, else a static description. */
 static const char *validate_d(const hp_msg_desc_t *md, const cJSON *d) {
     if (d && !cJSON_IsObject(d)) return "d must be an object";
-    for (const cJSON *it = d ? d->child : NULL; it; it = it->next) {
-        bool known = false;
-        for (size_t i = 0; i < md->field_count && !known; i++)
-            known = it->string && strcmp(it->string, md->fields[i].name) == 0;
-        if (!known) return "unknown field";
-    }
+    /* Fields we do not know are ignored: a newer peer may add optional fields. */
     for (size_t i = 0; i < md->field_count; i++) {
         const cJSON *v = d ? cJSON_GetObjectItemCaseSensitive((cJSON *)d, md->fields[i].name) : NULL;
         if (!v) {

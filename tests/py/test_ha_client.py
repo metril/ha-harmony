@@ -221,6 +221,32 @@ async def test_battery_push_reaches_subscribers(fake_hub):
         await session.close()
 
 
+async def test_newer_hub_extra_fields_and_unknown_type_keep_connection(fake_hub):
+    async def handler(ws, env):
+        if env["t"] == "hello":
+            ack = _ack(env)
+            ack["d"].update({"fw_build": 366, "ota_key": "dev", "future_field": {"x": 1}})
+            await ws.send_json(ack)
+            await ws.send_json({"v": 1, "id": 0, "t": "from_the_future", "d": {"a": 1}})
+            body = {"remote": 1, "percent": 77, "millivolts": 3800, "extra": True}
+            await ws.send_json({"v": 1, "id": 0, "t": "battery", "d": body})
+
+    hub = await fake_hub(handler)
+    c, session = await _client(hub)
+    got = []
+    c.async_subscribe(lambda t, d: got.append((t, d)))
+    await c.async_connect()
+    try:
+        async with asyncio.timeout(5):
+            while not got:
+                await asyncio.sleep(0.02)
+        assert got == [(MsgType.BATTERY, {"remote": 1, "percent": 77, "millivolts": 3800})]
+        assert hub.connections == 1 and c.connected and c.hub_id == "h"
+    finally:
+        await c.async_close()
+        await session.close()
+
+
 async def test_error_envelope_with_unhashable_id_is_ignored():
     c = HarmonyHubClient("127.0.0.1", 1, TOKEN, None)
     c._dispatch({"v": 1, "id": [1], "t": "error", "d": {"code": "x", "message": "y"}})

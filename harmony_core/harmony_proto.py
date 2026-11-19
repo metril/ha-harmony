@@ -176,15 +176,16 @@ def _validate(name: str, data: Any, incoming: bool = False) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ProtoError(f"{name}: 'd' must be an object")
     known = {f[0] for f in fields}
-    for extra in data.keys() - known:
-        raise ProtoError(f"{name}: unknown field {extra!r}")
+    if not incoming:  # strict on what we send; receivers ignore fields a newer peer added
+        for extra in data.keys() - known:
+            raise ProtoError(f"{name}: unknown field {extra!r}")
     for fname, ftype, optional in fields:
         if fname not in data:
             if not optional:
                 raise ProtoError(f"{name}: missing field {fname!r}")
             continue
         _check(name, fname, ftype, data[fname], incoming)
-    return data
+    return {k: v for k, v in data.items() if k in known} if incoming else data
 
 
 def encode_ws(msg_type: MsgType, data: dict[str, Any], msg_id: int = 0) -> dict[str, Any]:

@@ -100,8 +100,8 @@ describe('remote layout', () => {
       expect(k.y + k.h).toBeLessThan(BODY.y + BODY.h);
     }
     const hit = (a: (typeof KEYS)[number], b: (typeof KEYS)[number]) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-    // wedges overlap their neighbours' bounding boxes by design; compare the rest
-    const plain = KEYS.filter((k) => !k.shape.startsWith('wedge') && k.shape !== 'circle');
+    // the D-pad cluster's outlines interlock, so their bounding boxes overlap by design; compare the rest
+    const plain = KEYS.filter((k) => k.shape !== 'path' && k.shape !== 'circle');
     plain.forEach((a, i) => plain.slice(i + 1).forEach((b) => expect(hit(a, b), `${a.name}/${b.name}`).toBe(false)));
     expect(keyByName.get('select')!.shape).toBe('circle');
   });

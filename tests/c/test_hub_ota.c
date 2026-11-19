@@ -45,6 +45,7 @@ static long file_len(const char *p) {
 
 static char *slurp(const char *p, size_t *n) {
     FILE *f = fopen(p, "rb");
+    *n = 0;
     if (!f) return NULL;
     char *b = malloc(65536);
     *n = fread(b, 1, 65536, f);
