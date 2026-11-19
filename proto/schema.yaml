@@ -37,7 +37,7 @@ messages:
       - {name: rename, type: bool, optional: true}
       - {name: id_pinned, type: bool, optional: true}
       # Bluetooth HID (docs/proto/bluetooth.md): present only when the hub build has Bluetooth:
-      # {hosts_max, conn_max, remotes_max, pages: [7, 12], le} (paired-host limit, simultaneous-connection limit, HID usage pages, LE supported). Absent = no bt_* messages.
+      # {hosts_max, conn_max, remotes_max, le_bonds_max, pages: [7, 12], le} (paired-host limit, simultaneous-connection limit, HID usage pages, LE supported). Absent = no bt_* messages.
       - {name: bt, type: json, optional: true}
 
   - name: error

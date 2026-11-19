@@ -18,8 +18,8 @@ Codes 30..34 stay reserved for the remote's RF OTA.
 
 ## hello_ack.bt
 
-Present only when the hub build has Bluetooth: `{hosts_max, conn_max, remotes_max, pages: [7, 12], le: bool}`
-(paired-host limit, simultaneous connections, bonded-remote limit (0 = no remote input), HID usage pages the hub can
+Present only when the hub build has Bluetooth: `{hosts_max, conn_max, remotes_max, le_bonds_max, pages: [7, 12], le: bool}`
+(paired-host limit (up to 255), simultaneous connections, bonded-remote limit (up to 32; 0 = no remote input), LE bond limit, HID usage pages the hub can
 send, LE supported). Values come from the link, never constants. Absent: no `bt_*` messages are served
 (requests answer `error` `unsupported`).
 
@@ -47,3 +47,9 @@ codec's ordinary `error`.
 `bt_remote_key` is only for the editor's "press a key on the remote to learn it": a client sends `bt_listen {on: true}`
 and receives a push per key until it opts out or says `hello` again. Normal key handling happens inside the hub and does
 not depend on it.
+
+## Frame size
+
+Slots are one byte, so `bt_state` can list up to 255 hosts and 32 remotes. The hub keeps it inside one 64 KiB frame:
+every entry's fixed part is always sent, but the optional `name` is dropped from the entries that would push the message
+past a 40,000-byte budget (worst-case escaped names included). Clients must treat `name` as optional.

@@ -269,7 +269,7 @@ static void bcast_one(hp_ws_conn_t *c, void *arg) {
 }
 
 static void broadcast_ex(hub_ctx_t *h, const char *type, cJSON *d, const hp_session_t *skip, bool bt_only) {
-    char buf[4096]; /* activity_list: 16 names of up to 31 bytes + hash; bt_state: up to 32 hosts at ~110 bytes */
+    static char buf[HP_WS_MAX_FRAME]; /* one frame; event-loop thread only. bt_state with 255 hosts needs ~30 KB */
     size_t n = 0;
     if (h->bcast_hook && d) h->bcast_hook(h->bcast_ctx, type, d);
     if (h->srv && hp_make_reply(0, type, d, buf, sizeof buf, &n) == 0) {
@@ -814,8 +814,19 @@ static const char *const bt_status_name[] = {"off", "starting", "ready", "no_ada
 static const char *const bt_result_name[] = {NULL, "ok", "failed", "refused"};
 static const char *const bt_transport_name[] = {NULL, "classic", "le"};
 
+/* Bytes a string takes inside JSON quotes (cJSON escapes quote, backslash and control bytes). */
+static size_t json_len(const char *s) {
+    size_t n = 0;
+    for (; *s; s++) n += (unsigned char)*s < 0x20 ? 6 : (*s == '"' || *s == '\\') ? 2 : 1;
+    return n;
+}
+
+#define BT_STATE_BUDGET 40000 /* of the 64 KiB frame: hosts + remotes beyond it lose their (optional) names */
+#define BT_ENTRY_FIXED 112    /* slot, addr, transport, connected and punctuation of one entry, upper bound */
+
 static cJSON *bt_state_json(void) {
-    static struct bt_link_state st; /* ~2.3 KB: event-loop thread only, not on the stack */
+    static struct bt_link_state st; /* ~20 KB: event-loop thread only, not on the stack */
+    size_t used = 0;
     bt_link_state(&st);
     cJSON *o = cJSON_CreateObject();
     cJSON *hosts = cJSON_CreateArray();
@@ -844,7 +855,11 @@ static cJSON *bt_state_json(void) {
         if (!e) break;
         cJSON_AddNumberToObject(e, "slot", st.hosts[i].slot);
         cJSON_AddStringToObject(e, "addr", st.hosts[i].addr);
-        if (st.hosts[i].name[0]) cJSON_AddStringToObject(e, "name", st.hosts[i].name);
+        used += BT_ENTRY_FIXED;
+        if (st.hosts[i].name[0] && used + json_len(st.hosts[i].name) + 10 <= BT_STATE_BUDGET) {
+            cJSON_AddStringToObject(e, "name", st.hosts[i].name);
+            used += json_len(st.hosts[i].name) + 10;
+        }
         cJSON_AddStringToObject(e, "transport",
                                 st.hosts[i].transport == BT_TRANSPORT_LE ? "le" : "classic");
         cJSON_AddBoolToObject(e, "connected", st.hosts[i].connected);
@@ -857,7 +872,11 @@ static cJSON *bt_state_json(void) {
         if (!e) break;
         cJSON_AddNumberToObject(e, "slot", st.remotes[i].slot);
         cJSON_AddStringToObject(e, "addr", st.remotes[i].addr);
-        if (st.remotes[i].name[0]) cJSON_AddStringToObject(e, "name", st.remotes[i].name);
+        used += BT_ENTRY_FIXED;
+        if (st.remotes[i].name[0] && used + json_len(st.remotes[i].name) + 10 <= BT_STATE_BUDGET) {
+            cJSON_AddStringToObject(e, "name", st.remotes[i].name);
+            used += json_len(st.remotes[i].name) + 10;
+        }
         cJSON_AddBoolToObject(e, "connected", st.remotes[i].connected);
         if (st.remotes[i].battery >= 0) cJSON_AddNumberToObject(e, "battery", st.remotes[i].battery);
         cJSON_AddItemToArray(remotes, e);
@@ -1004,6 +1023,7 @@ static void on_hello_extra(void *vctx, cJSON *ack) {
             cJSON_AddNumberToObject(bt, "hosts_max", lim.hosts_max);
             cJSON_AddNumberToObject(bt, "conn_max", lim.conn_max);
             cJSON_AddNumberToObject(bt, "remotes_max", lim.remotes_max);
+            cJSON_AddNumberToObject(bt, "le_bonds_max", lim.le_bonds_max);
             cJSON_AddItemToArray(pg, cJSON_CreateNumber(BT_PAGE_KEYBOARD));
             cJSON_AddItemToArray(pg, cJSON_CreateNumber(BT_PAGE_CONSUMER));
             cJSON_AddItemToObject(bt, "pages", pg);

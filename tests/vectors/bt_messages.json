@@ -18,7 +18,7 @@
                   {"slot": 3, "addr": "11:22:33:44:55:77", "connected": false}]}}},
     {"env": {"v": 1, "id": 0, "t": "bt_remote_key", "d": {"slot": 1, "page": 12, "usage": 233, "down": true}}},
     {"env": {"v": 1, "id": 10, "t": "bt_listen", "d": {"on": true}}},
-    {"env": {"v": 1, "id": 1, "t": "hello_ack", "d": {"hub_id": "h", "bt": {"hosts_max": 16, "conn_max": 3, "remotes_max": 4, "pages": [7, 12], "le": true}}}},
+    {"env": {"v": 1, "id": 1, "t": "hello_ack", "d": {"hub_id": "h", "bt": {"hosts_max": 16, "conn_max": 3, "remotes_max": 4, "le_bonds_max": 20, "pages": [7, 12], "le": true}}}},
     {"env": {"v": 1, "id": 1, "t": "hello_ack", "d": {"hub_id": "h"}}}
   ],
   "invalid": [

@@ -11,9 +11,9 @@
 static hub_ctx_t H;
 static hp_handler_tbl_t T;
 static hp_session_t S;
-static char reply[8192];
+static char reply[65536];
 static char seen_type[32];
-static char seen_json[4096];
+static char seen_json[65536];
 static int seen_n;
 
 static void hook(void *ctx, const char *type, const cJSON *d) {
@@ -73,7 +73,7 @@ static void test_unauthenticated(void) {
 static void test_hello_ack(void) {
     setup();
     hello();
-    CT_CHECK(has("\"bt\":{\"hosts_max\":16,\"conn_max\":3,\"remotes_max\":4,\"pages\":[7,12],\"le\":true}"));
+    CT_CHECK(has("\"bt\":{\"hosts_max\":16,\"conn_max\":3,\"remotes_max\":4,\"le_bonds_max\":20,\"pages\":[7,12],\"le\":true}"));
     setup();
     g_bt_fake.limits.hosts_max = 4;
     g_bt_fake.limits.conn_max = 1;
@@ -291,6 +291,35 @@ static void test_remote_key_push(void) {
     CT_CHECK(has("unsupported") && !S.bt_listen);
 }
 
+static void test_max_hosts_fit_one_frame(void) {
+    setup();
+    hello();
+    g_bt_fake.limits.hosts_max = 255;
+    g_bt_fake.limits.remotes_max = 32;
+    char worst[BT_LINK_NAME_MAX]; /* 48 bytes that each escape to 6 */
+    memset(worst, 0x01, 48);
+    worst[48] = 0;
+    for (unsigned i = 0; i < 255; i++) add_host(i, "AA:BB:CC:DD:EE:FF", worst, BT_TRANSPORT_LE, true);
+    for (unsigned i = 0; i < 32; i++) {
+        struct bt_link_remote *r = &g_bt_fake.state.remotes[g_bt_fake.state.n_remotes++];
+        r->slot = (uint8_t)i;
+        snprintf(r->addr, sizeof r->addr, "11:22:33:44:55:66");
+        memcpy(r->name, worst, sizeof worst);
+        r->battery = 100;
+    }
+    send_msg("{\"v\":1,\"id\":2,\"t\":\"bt_pair\",\"d\":{\"on\":false}}");
+    CT_CHECK(has("\"t\":\"bt_state\"") && has("\"slot\":254"));
+    CT_CHECK(strlen(reply) < 65536);
+    send_msg("{\"v\":1,\"id\":3,\"t\":\"bt_forget\",\"d\":{\"slot\":254}}"); /* valid: hosts_max is 255 */
+    CT_CHECK(has("\"t\":\"bt_state\""));
+    send_msg("{\"v\":1,\"id\":4,\"t\":\"bt_forget\",\"d\":{\"slot\":255}}");
+    CT_CHECK(has("no_slot"));
+    send_msg("{\"v\":1,\"id\":5,\"t\":\"bt_forget\",\"d\":{\"slot\":31,\"kind\":\"remote\"}}");
+    CT_CHECK(has("\"t\":\"bt_state\""));
+    bt_fake_notify(); /* the broadcast path takes the same size */
+    CT_CHECK(seen_n == 1 && strlen(seen_json) > 0);
+}
+
 static void test_unavailable(void) {
     setup();
     g_bt_fake.available = false;
@@ -313,6 +342,7 @@ int main(void) {
     CT_RUN(test_state_json_and_broadcast);
     CT_RUN(test_remotes);
     CT_RUN(test_remote_key_push);
+    CT_RUN(test_max_hosts_fit_one_frame);
     CT_RUN(test_unavailable);
     return CT_DONE();
 }

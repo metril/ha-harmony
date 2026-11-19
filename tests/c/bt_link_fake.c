@@ -18,6 +18,7 @@ void bt_fake_reset(void) {
     g_bt_fake.limits.hosts_max = 16;
     g_bt_fake.limits.conn_max = 3;
     g_bt_fake.limits.remotes_max = 4;
+    g_bt_fake.limits.le_bonds_max = 20;
     g_bt_fake.limits.le = true;
     g_bt_fake.state.status = BT_READY;
     g_bt_fake.state.le = true;

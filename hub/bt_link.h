@@ -13,8 +13,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define BT_LINK_HOSTS_CAP 32 /* storage bound of struct bt_link_state; the real limit is bt_link_limits().hosts_max */
-#define BT_LINK_REMOTES_CAP 8 /* storage bound; the real limit is bt_link_limits().remotes_max */
+#define BT_LINK_HOSTS_CAP 255 /* storage bound of struct bt_link_state; the real limit is bt_link_limits().hosts_max */
+#define BT_LINK_REMOTES_CAP 32/* storage bound; the real limit is bt_link_limits().remotes_max */
 #define BT_LINK_ADDR_MAX 18  /* "AA:BB:CC:DD:EE:FF" + NUL */
 #define BT_LINK_NAME_MAX 49  /* UTF-8, at most 48 bytes + NUL; "" = no name */
 
@@ -81,6 +81,7 @@ int bt_link_key(unsigned slot, unsigned page, unsigned usage, enum bt_link_actio
 struct bt_link_limits {
     uint8_t hosts_max; /* paired hosts kept */
     uint8_t conn_max;  /* simultaneous connections */
+    uint16_t le_bonds_max; /* LE bonds the adapter/helper can store in all (hosts + remotes) */
     uint8_t remotes_max; /* bonded LE remotes kept (0 = no remote/input support), <= BT_LINK_REMOTES_CAP */
     bool le;           /* Bluetooth LE supported */
 };
