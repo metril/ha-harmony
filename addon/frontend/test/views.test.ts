@@ -123,18 +123,39 @@ describe('screens render with a realistic config', () => {
     expect(dv.shadowRoot!.querySelector('a.add')!.getAttribute('href')).toBe('#/devices/new');
   });
 
-  it('history: current rev has a badge, earlier revs have exactly Compare and Restore', async () => {
+  it('history: one status chip on the newest rev, earlier revs have exactly Compare and Restore', async () => {
     const { app } = await boot({ hash: '#/history', statuses: [status({ applied_rev: 'a', acked_rev: 'a', result: 'ok' })] });
     const h = await lazyEl(app, 'hh-history');
     await settle(h as HTMLElement);
     expect(text(h)).toContain('Rev 3');
-    await vi.waitFor(() => expect(text(h)).toContain('Acknowledged by Home Assistant'));
-    expect(text(h)).not.toContain('Revert');
+    await vi.waitFor(() => expect(text(h)).toContain('On the remote'));
+    for (const old of ['Applied', 'Acknowledged', 'Current']) expect(text(h)).not.toContain(old);
     const rows = [...h.shadowRoot!.querySelectorAll('li')];
     expect(rows[0]!.querySelectorAll('button').length).toBe(0);
-    expect(rows[0]!.textContent).toContain('Current');
+    expect(rows[0]!.querySelectorAll('.chip').length).toBe(1);
+    expect(rows[0]!.querySelector('.acts')!.getAttribute('role')).toBe('status');
+    expect(rows[1]!.querySelectorAll('.chip').length).toBe(0);
     expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent!.trim())).toEqual(['Compare', 'Restore']);
     expect(rows[1]!.querySelector('time')!.getAttribute('title')).toBeTruthy();
+  });
+
+  it('history: sending, not sent, and rejected with a reason behind See why', async () => {
+    const live = { linked_hubs: [{ id: 'h', last_seen: 990 }], now: 1000 };
+    const a = await boot({ hash: '#/history', statuses: [status(live)] });
+    const h1 = await lazyEl(a.app, 'hh-history');
+    await vi.waitFor(() => expect(text(h1)).toContain('Sending…'));
+    document.body.replaceChildren();
+    const b = await boot({ hash: '#/history', statuses: [status({ linked_hubs: [], now: 1000 })] });
+    const h2 = await lazyEl(b.app, 'hh-history');
+    await vi.waitFor(() => expect(text(h2)).toContain('Not sent'));
+    document.body.replaceChildren();
+    const c = await boot({ hash: '#/history', statuses: [status({ ...live, acked_rev: 'aaaa1111', result: 'error', detail: 'bad key map' })] });
+    const h3 = await lazyEl(c.app, 'hh-history');
+    await vi.waitFor(() => expect(text(h3)).toContain('Rejected by hub'));
+    expect(text(h3)).not.toContain('bad key map');
+    const why = [...h3.shadowRoot!.querySelectorAll('button')].find((x) => x.textContent!.trim() === 'See why') as HTMLButtonElement;
+    why.click();
+    await vi.waitFor(() => expect(h3.shadowRoot!.querySelector('#why')?.textContent).toContain('bad key map'));
   });
 
   it('header shows the hub and whether Home Assistant polls for it', async () => {
@@ -286,10 +307,10 @@ describe('apply dialog', () => {
     expect(text(dlg)).toContain('Renamed TV');
     const apply = [...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement;
     apply.click();
-    await vi.waitFor(() => expect(dlg.shadowRoot!.querySelector('hh-dialog')?.getAttribute('heading')).toBe('Applied as rev 4'));
+    await vi.waitFor(() => expect(dlg.shadowRoot!.querySelector('hh-dialog')?.getAttribute('heading')).toBe('Rev 4 saved'));
     expect(text(dlg)).toContain('Saved as rev 4');
     expect(store.api).toBeDefined();
-    expect(text(dlg)).toContain('Waiting for Home Assistant (pending)');
+    expect(text(dlg)).toContain('Sending to the remote (pending)');
     expect(store.hasDraft).toBe(false);
   });
 
@@ -305,9 +326,9 @@ describe('apply dialog', () => {
     dlg.open = true;
     await settle(dlg);
     ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(text(dlg)).toContain('Waiting for Home Assistant (pending)'));
+    await vi.waitFor(() => expect(text(dlg)).toContain('Sending to the remote (pending)'));
     await vi.waitFor(() => expect(text(dlg)).not.toContain('(pending)'));
-    expect(text(dlg)).toContain('Remote pages updated');
+    expect(text(dlg)).toContain('On the remote');
     expect(text(dlg)).toContain('Done');
   });
 
@@ -342,7 +363,7 @@ describe('apply dialog', () => {
   it('the app shows applied vs acked after navigation, and the link problem', async () => {
     const st = status({ linked_hubs: [{ id: 'h', last_seen: 990 }], now: 1000 });
     const { app } = await boot({ statuses: [st] });
-    await vi.waitFor(() => expect(app.shadowRoot!.querySelector('#link-pending')?.textContent).toContain('aaaa1111'));
+    await vi.waitFor(() => expect(app.shadowRoot!.querySelector('#link-pending')?.textContent).toContain('Rev 3 is being sent to the remote'));
     expect(app.shadowRoot!.querySelector('#link-problem')).toBeNull();
     document.body.replaceChildren();
     const stale = await boot({ statuses: [status({ linked_hubs: [{ id: 'h', last_seen: 100 }], now: 1000 })] });

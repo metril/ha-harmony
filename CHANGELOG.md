@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Editor: History shows one status on the newest revision (On the remote, Sending..., Not sent, or Rejected by hub with a See why reason) instead of three badges; older revisions show only Compare and Restore. One shared status chip now draws the Valid chip and the History status, and the apply dialog, the pending banner (no more raw hash) and the toasts use the same wording: saved, sending, on the remote, rejected.
 - Editor: the "Config size" meter's bar now uses the same net figures as its label (the hub's fixed load overhead left out), so 18 KiB of 6.5 MiB no longer draws about 19% full.
 
 ## 0.3.9 (2026-11-18)

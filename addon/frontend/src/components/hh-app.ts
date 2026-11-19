@@ -210,7 +210,7 @@ export class HhApp extends StoreElement {
     if (problem) out.push(html`<div class="banner ir" role="status" id="link-problem">${problem}</div>`);
     const l = this.link;
     if (!problem && l && l.applied_rev !== null && l.acked_rev !== l.applied_rev)
-      out.push(html`<div class="banner" role="status" id="link-pending">Applied ${l.applied_rev.slice(0, 8)}; Home Assistant has not confirmed it yet${l.acked_rev ? ` (last confirmed ${l.acked_rev.slice(0, 8)})` : ''}.</div>`);
+      out.push(html`<div class="banner" role="status" id="link-pending">${this.store.applied ? `Rev ${this.store.applied.rev}` : 'The new config'} is being sent to the remote…</div>`);
     return out;
   }
 

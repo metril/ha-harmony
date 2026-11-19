@@ -5,7 +5,7 @@ import { icon } from '../lib/icons';
 import { shared } from '../lib/styles';
 import { ApiError } from '../lib/api';
 import { StoreElement, confirmAction } from './base';
-import { ago, meters } from './parts';
+import { ago, meters, statusChip } from './parts';
 
 /** Sticky draft bar: state, validation chip, meters, Discard draft, Review & apply. */
 @customElement('hh-draft-bar')
@@ -109,7 +109,7 @@ export class HhDraftBar extends StoreElement {
       </div>
       ${errs
         ? html`<button class="chip bad chipbtn" @click=${() => this.showFirst()} aria-label="${errs} errors. Show the first one">${icon('alert')} ${errs} error${errs === 1 ? '' : 's'} · Show</button>`
-        : html`<span class="chip ok">${icon('check')} Valid</span>`}
+        : statusChip('ok', 'Valid', { check: true })}
       <div class="meters long">${meters(s)}</div>
       <div class="usage">
         <button class="btn sm" aria-expanded=${this.usageOpen} aria-controls="usage-pop" @click=${() => (this.usageOpen = !this.usageOpen)}>Usage</button>
