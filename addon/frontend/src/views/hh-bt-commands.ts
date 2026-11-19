@@ -13,9 +13,9 @@ export class HhBtCommands extends LitElement {
     shared,
     css`
       :host { display: grid; gap: 12px; min-width: 0; }
-      .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
       input[type="search"], input[type="text"] { height: 36px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; min-width: 0; }
-      .bar input[type="search"] { flex: 1; min-width: 160px; }
+      .tools input[type="search"] { flex: 1; min-width: 160px; }
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; max-height: 340px; overflow: auto; padding: 2px; }
       .chk { display: flex; gap: 8px; align-items: center; min-height: 40px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf); cursor: pointer; min-width: 0; }
       .chk:has(input:checked) { border-color: var(--acc); background: var(--accs); }
@@ -75,7 +75,7 @@ export class HhBtCommands extends LitElement {
     const list = searchBuiltins(c.builtins, this.q);
     const count = Object.keys(this.value).length;
     return html`
-      <div class="bar">
+      <div class="tools">
         <input type="search" aria-label="Search commands" placeholder="Search commands" .value=${this.q} @input=${(e: Event) => (this.q = (e.target as HTMLInputElement).value)} />
         <button class="btn sm" @click=${() => this.emit(this.defaults())}>Default set</button>
         <button class="btn sm" ?disabled=${!count} @click=${() => this.emit({})}>Clear</button>

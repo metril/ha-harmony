@@ -60,6 +60,11 @@ export const btCss = css`
   .sig i.on { background: var(--acc); }
   .form { display: grid; gap: 14px; width: 100%; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .pad { padding: 14px 16px; }
+  .narrow { max-width: 520px; }
+  label.f.narrow { max-width: 320px; }
+  .big { font-size: 18px; color: var(--tx); }
+  .bare { border: 0; padding: 0; margin: 0; }
   .side { display: grid; gap: 12px; align-content: start; }
   .twocol { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
   @media (max-width: 860px) { .twocol { grid-template-columns: minmax(0, 1fr); } h1 { font-size: 22px; } .peer { grid-template-columns: minmax(0, 1fr); } .acts { justify-content: flex-start; } .cand { grid-template-columns: minmax(0, 1fr) auto; } .cand .btn { grid-column: 1 / -1; } .timer { font-size: 38px; } }

@@ -26,6 +26,7 @@ export class HhBtKeys extends LitElement {
       .pulse { width: 12px; height: 12px; border-radius: 50%; background: var(--acc); display: inline-block; animation: hh-pulse 1.4s ease-in-out infinite; }
       @keyframes hh-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
       @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
       .unm { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
       input[type="text"] { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; width: 150px; max-width: 100%; }
       input[aria-invalid="true"] { border-color: var(--bad); }
@@ -41,7 +42,7 @@ export class HhBtKeys extends LitElement {
   @property({ attribute: false }) codes: BtCodes | null = null;
   @property({ attribute: false }) value: Record<string, string> = {};
   /** the remote's slot in the hub, to ignore keys of other remotes while learning (null: accept any) */
-  @property({ type: Number }) slot: number | null = null;
+  @property({ type: Number }) peer: number | null = null;
   @property({ attribute: false }) api!: Api;
   @property() hub = 'default';
   @state() private learning = false;
@@ -50,7 +51,7 @@ export class HhBtKeys extends LitElement {
   @state() private assign = '';
   @state() private err = '';
   @state() private edits: Record<string, string> = {};
-  private after = 0;
+  private seq = 0;
   private timer?: ReturnType<typeof setTimeout>;
 
   override disconnectedCallback(): void {
@@ -66,7 +67,7 @@ export class HhBtKeys extends LitElement {
     this.err = '';
     try {
       await this.api.btListen(this.hub, true);
-      this.after = (await this.api.btEvents(this.hub, 0)).last; // skip what is already in the ring
+      this.seq = (await this.api.btEvents(this.hub, 0)).last; // skip what is already in the ring
       this.learning = true;
       this.pressed = null;
       this.timer = setTimeout(() => void this.poll(), 600);
@@ -87,10 +88,10 @@ export class HhBtKeys extends LitElement {
   private async poll() {
     if (!this.learning) return;
     try {
-      const r = await this.api.btEvents(this.hub, this.after);
-      this.after = r.last;
+      const r = await this.api.btEvents(this.hub, this.seq);
+      this.seq = r.last;
       for (const ev of r.events) {
-        if (!ev.down || (this.slot !== null && ev.slot !== this.slot)) continue;
+        if (!ev.down || (this.peer !== null && ev.slot !== this.peer)) continue;
         this.pressed = { page: ev.page, usage: ev.usage };
         this.assign = '';
         if (!this.seen.some((s) => s.page === ev.page && s.usage === ev.usage)) this.seen = [...this.seen, { page: ev.page, usage: ev.usage }].slice(-12);
@@ -143,7 +144,7 @@ export class HhBtKeys extends LitElement {
       <section class="card learn" aria-label="Learn a button">
         <h3>Press a button on the remote</h3>
         <p>${this.learning ? 'Listening. Press any button on the remote; it appears here.' : 'Not sure which usage a button sends? Start listening, press it, then choose its key.'}</p>
-        <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <div class="row">
           ${this.learning ? html`<button class="btn" @click=${() => void this.stopLearn()}>Stop listening</button><span class="pulse" aria-hidden="true"></span>` : html`<button class="btn pri" @click=${() => void this.startLearn()}>Learn a button</button>`}
         </div>
         <div role="status" aria-live="polite">

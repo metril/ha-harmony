@@ -400,7 +400,7 @@ export class HhDevices extends StoreElement {
     return html`
       <div class="dbar">
         <a class="back" href=${hashFor('devices')}>← All devices</a><span class="sp"></span>
-        ${ha ? nothing : html`<div class="seg" role="group" aria-label="View"><button aria-pressed=${this.view === 'keypad'} @click=${() => (this.view = 'keypad')}>Keypad</button><button aria-pressed=${this.view === 'list'} @click=${() => (this.view = 'list')}>List view</button></div>`}
+        ${ha || bt ? nothing : html`<div class="seg" role="group" aria-label="View"><button aria-pressed=${this.view === 'keypad'} @click=${() => (this.view = 'keypad')}>Keypad</button><button aria-pressed=${this.view === 'list'} @click=${() => (this.view = 'list')}>List view</button></div>`}
         <button class="btn danger" @click=${() => void this.removeDev(d)}>Delete device</button>
       </div>
       ${problemList(problemsFor(this.store.errors, 'devices', idx), (p) => p.open && this.openProblem(d, p))}

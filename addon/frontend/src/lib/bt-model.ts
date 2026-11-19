@@ -47,6 +47,23 @@ export function btError(e: unknown): string {
   return API_CODES[e.code] ?? (e.isNetwork ? (API_CODES['network'] as string) : `The add-on could not do that (${e.status}). Try again.`);
 }
 
+/** One command id per user action. `id()` hands out the same one until `settle` says the action is over: a timeout or a lost
+ *  connection keeps it (the retry joins the first request instead of running the command again), anything else drops it. */
+export class CmdId {
+  private cur: string | null = null;
+  id(): string {
+    if (!this.cur) {
+      const a = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      this.cur = Array.from({ length: 12 }, () => a[Math.floor(Math.random() * a.length)]).join('');
+    }
+    return this.cur;
+  }
+  /** Call with the error (or nothing on success). */
+  settle(e?: unknown): void {
+    if (!(e instanceof ApiError) || !(e.isNetwork || e.code === 'hub_timeout')) this.cur = null;
+  }
+}
+
 // ------------------------------------------------------------------ hub state
 export const LINK_CHIP: Record<string, { tone: Tone; label: string; help: string }> = {
   off: { tone: '', label: 'Off', help: 'Bluetooth is idle. It starts by itself when you pair something or the config uses it.' },
@@ -182,15 +199,14 @@ export function addRemote(cfg: Config, r: BtRemoteCfg): Config {
 }
 export function patchRemote(cfg: Config, index: number, patch: Partial<BtRemoteCfg>): Config {
   const list = remotesOf(cfg).map((r, i) => (i === index ? { ...r, ...patch } : r));
-  const empty = list[index]?.keys && !Object.keys(list[index]?.keys ?? {}).length;
-  if (empty) delete (list[index] as BtRemoteCfg).keys;
+  const cur = list[index];
+  if (cur?.keys && !Object.keys(cur.keys).length) list[index] = { name: cur.name, ...(cur.address ? { address: cur.address } : {}) };
   return { ...cfg, ['bt_remotes']: list };
 }
 export function removeRemote(cfg: Config, index: number): Config {
   const list = remotesOf(cfg).filter((_, i) => i !== index);
-  const next = { ...cfg, ['bt_remotes']: list };
-  if (!list.length) delete next['bt_remotes'];
-  return next;
+  const rest: Config = Object.fromEntries(Object.entries(cfg).filter(([k]) => k !== 'bt_remotes'));
+  return list.length ? { ...rest, bt_remotes: list } : rest;
 }
 
 // ------------------------------------------------------------------ remote key table

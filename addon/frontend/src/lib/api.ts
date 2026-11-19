@@ -438,13 +438,15 @@ export class Api {
   // Bluetooth relay (docs/addon-api.md "Bluetooth relay"). Commands answer once the integration has run them on the hub.
   btStatus = (hub: string) => this.request<BtStatus>('GET', 'api/v1/bt/status', { query: { hub } });
   btCodes = () => this.request<BtCodes>('GET', 'api/v1/bt/codes');
-  btPair = (hub: string, mode: 'host' | 'remote', transport: 'any' | 'classic' | 'le' = 'any', secs = 120) =>
-    this.request<{ ok: true; state: BtState | null }>('POST', 'api/v1/bt/pair', { body: { hub, mode, transport, secs } });
-  btPairStop = (hub: string) => this.request<{ ok: true }>('POST', 'api/v1/bt/pair/stop', { body: { hub } });
-  btPick = (hub: string, addr: string) => this.request<{ ok: true }>('POST', 'api/v1/bt/pick', { body: { hub, addr } });
-  btForget = (hub: string, slot: number, kind: 'host' | 'remote') => this.request<{ ok: true }>('POST', 'api/v1/bt/forget', { body: { hub, slot, kind } });
-  btKey = (hub: string, slot: number, page: number, usage: number, action: 'down' | 'up' | 'press' = 'press') =>
-    this.request<{ ok: true }>('POST', 'api/v1/bt/key', { body: { hub, slot, page, usage, action } });
+  // `cmdId` is one id per user action: re-send the same one when retrying after a timeout so the command never runs twice.
+  btPair = (hub: string, mode: 'host' | 'remote', transport: 'any' | 'classic' | 'le' = 'any', secs = 120, cmdId?: string) =>
+    this.request<{ ok: true; state: BtState | null }>('POST', 'api/v1/bt/pair', { body: { hub, mode, transport, secs, ...(cmdId ? { cmd_id: cmdId } : {}) } });
+  btPairStop = (hub: string, cmdId?: string) => this.request<{ ok: true }>('POST', 'api/v1/bt/pair/stop', { body: { hub, ...(cmdId ? { cmd_id: cmdId } : {}) } });
+  btPick = (hub: string, addr: string, cmdId?: string) => this.request<{ ok: true }>('POST', 'api/v1/bt/pick', { body: { hub, addr, ...(cmdId ? { cmd_id: cmdId } : {}) } });
+  btForget = (hub: string, slot: number, kind: 'host' | 'remote', cmdId?: string) =>
+    this.request<{ ok: true }>('POST', 'api/v1/bt/forget', { body: { hub, slot, kind, ...(cmdId ? { cmd_id: cmdId } : {}) } });
+  btKey = (hub: string, slot: number, page: number, usage: number, action: 'down' | 'up' | 'press' = 'press', cmdId?: string) =>
+    this.request<{ ok: true }>('POST', 'api/v1/bt/key', { body: { hub, slot, page, usage, action, ...(cmdId ? { cmd_id: cmdId } : {}) } });
   btListen = (hub: string, on: boolean) => this.request<{ ok: true; listening: boolean }>('POST', 'api/v1/bt/listen', { body: { hub, on } });
   btEvents = (hub: string, after: number) => this.request<BtEvents>('GET', 'api/v1/bt/events', { query: { hub, after: String(after) } });
   /** Fire one inline code through Home Assistant. 429 carries retry_after_ms. */

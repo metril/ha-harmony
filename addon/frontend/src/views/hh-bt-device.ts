@@ -16,7 +16,7 @@ const ADDR = /^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/;
  *  No IR parts (no power, inputs or ports). Edits go straight into the draft. */
 @customElement('hh-bt-device')
 export class HhBtDevice extends BtElement {
-  static override styles = [shared, btCss, css`:host { max-width: none; } .card { padding: 14px 16px; display: grid; gap: 12px; align-content: start; }`];
+  static override styles = [shared, btCss, css`:host { max-width: none; } .card { padding: 14px 16px; display: grid; gap: 12px; align-content: start; } a { color: var(--acc); font-weight: 600; font-size: 13px; }`];
   @property({ attribute: false }) device!: Device;
   @state() private addr: string | null = null;
 
@@ -51,7 +51,7 @@ export class HhBtDevice extends BtElement {
             ${(['auto', 'classic', 'le'] as const).map((t) => html`<option value=${t} ?selected=${(d.transport ?? 'auto') === t}>${{ auto: 'Automatic', classic: 'Classic Bluetooth', le: 'Bluetooth LE' }[t]}</option>`)}</select></label>
       </section>
       <section class="card" aria-label="Test a command"><h2>Test</h2>
-        <hh-bt-test .api=${this.store.api} hub=${this.hub} .slot=${live?.slot ?? null} .codes=${this.codes} .commands=${this.cmdMap()} label=${d.name ?? d.id} ?disabled=${!live}></hh-bt-test>
+        <hh-bt-test .api=${this.store.api} hub=${this.hub} .peer=${live?.slot ?? null} .codes=${this.codes} .commands=${this.cmdMap()} label=${d.name ?? d.id} ?disabled=${!live}></hh-bt-test>
         <span class="hint">${live ? 'Presses the command once on the paired device.' : 'Available once the device is paired with the hub.'}</span>
       </section>
       <section class="card" aria-label="Commands"><h2>Commands</h2>

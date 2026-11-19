@@ -5,7 +5,7 @@ import './hh-bt-test';
 import { confirmAction } from '../components/base';
 import { statusChip } from '../components/parts';
 import type { BtHost, BtRemote } from '../lib/api';
-import { LINK_CHIP, btDevices, btError, clock, limitText, nextCountdown, remotesOf, sameAddr, secsLeft, type Countdown } from '../lib/bt-model';
+import { CmdId, LINK_CHIP, btDevices, btError, clock, limitText, nextCountdown, remotesOf, sameAddr, secsLeft, type Countdown } from '../lib/bt-model';
 import { commandNames } from '../lib/bt';
 import { hashFor } from '../lib/router';
 import { icon } from '../lib/icons';
@@ -18,6 +18,7 @@ export class HhBtPanel extends BtElement {
   @state() private busy = '';
   @state() private notes: Record<string, string> = {};
   private countdown: Countdown | null = null;
+  private cForget = new CmdId();
 
   protected override onStatus(): void {
     this.countdown = nextCountdown(this.countdown, this.bt, Date.now());
@@ -32,10 +33,12 @@ export class HhBtPanel extends BtElement {
     if (!yes) return;
     this.busy = e.addr;
     try {
-      await this.store.api.btForget(this.hub, e.slot, kind);
+      await this.store.api.btForget(this.hub, e.slot, kind, this.cForget.id());
+      this.cForget.settle();
       this.store.toast(`Forgot ${label}.`);
       this.notes = { ...this.notes, [e.addr]: '' };
     } catch (err) {
+      this.cForget.settle(err);
       this.notes = { ...this.notes, [e.addr]: btError(err) };
     } finally {
       this.busy = '';
@@ -64,7 +67,7 @@ export class HhBtPanel extends BtElement {
           ${cfg ? html`<a class="chip acc" href=${hashFor('devices', cfg.id)} aria-label="Open ${label} in Devices">In your config</a>` : statusChip('ir', 'Not in your config')}
           <span class="mono">${h.addr}</span></div></div>
       <div class="acts">
-        <hh-bt-test .api=${this.store.api} hub=${this.hub} .slot=${h.slot} .codes=${this.codes} .commands=${cmds} label=${label}></hh-bt-test>
+        <hh-bt-test .api=${this.store.api} hub=${this.hub} .peer=${h.slot} .codes=${this.codes} .commands=${cmds} label=${label}></hh-bt-test>
         ${cfg ? nothing : html`<a class="btn sm pri" href=${hashFor('bluetooth', 'host', h.addr)}>Add to config</a>`}
         <button class="btn sm danger" ?disabled=${this.busy === h.addr} aria-label="Forget ${label}" @click=${() => void this.forget('host', h, label)}>Forget</button>
       </div>

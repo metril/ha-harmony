@@ -10,7 +10,7 @@ export class BtPoll extends EventTarget {
   constructor(
     private api: Api,
     private hub: string,
-    private every = 1000,
+    private every = 2000,
   ) {
     super();
   }

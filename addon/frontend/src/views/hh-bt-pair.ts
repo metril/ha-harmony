@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { signal, BtElement, btCss } from './bt-base';
 import './hh-bt-commands';
 import './hh-bt-keys';
-import { LINK_CHIP, addHostDevice, addRemote, clock, outcome, remotesOf, secsLeft, nextCountdown, sameAddr, type Countdown } from '../lib/bt-model';
+import { CmdId, LINK_CHIP, addHostDevice, addRemote, clock, outcome, remotesOf, secsLeft, nextCountdown, sameAddr, type Countdown } from '../lib/bt-model';
 import { announce, derive, observe, startRun, type Phase, type Run } from '../lib/bt-wizard';
 import { byteCounter, trimBytes } from '../lib/codes';
 import { capProblem } from '../lib/device-edit';
@@ -31,6 +31,9 @@ export class HhBtPair extends BtElement {
   @state() private commands: Record<string, string> = {};
   @state() private keys: Record<string, string> = {};
   @state() private picking = '';
+  private cStart = new CmdId();
+  private cStop = new CmdId();
+  private cPick = new CmdId();
   private countdown: Countdown | null = null;
   private focusKey = '';
   private defaultsApplied = false;
@@ -82,12 +85,14 @@ export class HhBtPair extends BtElement {
     this.err = '';
     this.busy = true;
     try {
-      const r = await this.store.api.btPair(this.hub, this.mode, this.mode === 'host' ? this.transport : 'le', 120);
+      const r = await this.store.api.btPair(this.hub, this.mode, this.mode === 'host' ? this.transport : 'le', 120, this.cStart.id());
+      this.cStart.settle();
       this.run = startRun(this.mode, r.state ?? this.bt, Date.now());
       this.countdown = null;
       this.step = 'pair';
       void this.poll.refresh();
     } catch (e) {
+      this.cStart.settle(e);
       this.err = btError(e);
     } finally {
       this.busy = false;
@@ -95,8 +100,10 @@ export class HhBtPair extends BtElement {
   }
   private async stop() {
     try {
-      await this.store.api.btPairStop(this.hub);
+      await this.store.api.btPairStop(this.hub, this.cStop.id());
+      this.cStop.settle();
     } catch (e) {
+      this.cStop.settle(e);
       this.err = btError(e);
     }
     this.run = null;
@@ -108,9 +115,11 @@ export class HhBtPair extends BtElement {
     this.picking = addr;
     this.err = '';
     try {
-      await this.store.api.btPick(this.hub, addr);
+      await this.store.api.btPick(this.hub, addr, this.cPick.id());
+      this.cPick.settle();
       this.run = { ...this.run, picked: addr };
     } catch (e) {
+      this.cPick.settle(e);
       this.err = btError(e);
     } finally {
       this.picking = '';
@@ -163,10 +172,10 @@ export class HhBtPair extends BtElement {
       ${s === 'starting' || s === 'off' ? html`<p class="hint">${LINK_CHIP[s]?.help}</p>` : nothing}
       <div class="stage">
         ${host && le
-          ? html`<fieldset class="opts" style="border:0;padding:0;margin:0"><legend class="vh">Connection type</legend>
+          ? html`<fieldset class="opts bare"><legend class="vh">Connection type</legend>
               ${(['any', 'classic', 'le'] as const).map((t) => html`<label class="opt"><input type="radio" name="tr" .checked=${this.transport === t} @change=${() => (this.transport = t)} /><b>${{ any: 'Any (recommended)', classic: 'Classic Bluetooth', le: 'Bluetooth LE' }[t]}</b><small>${{ any: 'Let the device choose. Works with almost everything.', classic: 'For older TVs, boxes and speakers.', le: 'For phones and newer devices that look for low-energy keyboards.' }[t]}</small></label>`)}</fieldset>`
           : nothing}
-        ${host ? nothing : html`<p class="hint" style="max-width:520px">Put the remote in pairing mode first (usually hold its Home and Back buttons, or a pairing button, until the light blinks). Bluetooth LE remotes only.</p>`}
+        ${host ? nothing : html`<p class="hint narrow">Put the remote in pairing mode first (usually hold its Home and Back buttons, or a pairing button, until the light blinks). Bluetooth LE remotes only.</p>`}
         <button class="btn pri" ?disabled=${!!block || this.busy} @click=${() => void this.start()}>${this.busy ? 'Opening…' : host ? 'Start pairing' : 'Scan for remotes'}</button>
         ${this.err ? html`<div class="banner bad" role="alert"><span>${this.err}</span></div>` : nothing}
       </div>`;
@@ -192,11 +201,11 @@ export class HhBtPair extends BtElement {
       body = html`<span class="pulse" aria-hidden="true"></span><p class="lead">Pairing with ${this.bt?.candidates?.find((c) => c.addr === ph.addr)?.name ?? ph.addr}…</p>${timer}${stopBtn}`;
     } else if (ph.t === 'waiting') {
       body = html`${timer}
-        <p class="lead" style="font-size:18px;color:var(--tx)">On your TV box, open Bluetooth settings and pair with “Harmony …”.</p>
+        <p class="lead big">On your TV box, open Bluetooth settings and pair with “Harmony …”.</p>
         <ol class="steps-help"><li>Open <b>Bluetooth settings</b> on the device and let it search.</li><li>Choose the entry whose name starts with <b>Harmony</b>.</li><li>Accept the pairing request on the device, and here if it asks.</li></ol>
         <p class="hint">Not listed? Remove an old "Harmony" entry from the device's Bluetooth list first, and stay within a few metres of the hub.</p>
         ${stopBtn}`;
-    } else body = html`<span class="pulse" aria-hidden="true"></span><p class="lead">Opening the pairing window…</p>`;
+    } else body = html`<span class="pulse" aria-hidden="true"></span><p class="lead">Opening the pairing window…</p><p class="hint">Home Assistant relays this to the hub, which can take a few seconds.</p>`;
     return html`<h1 id="step-title" tabindex="-1">${host ? 'Pair the device' : 'Pair the remote'}</h1>
       <div class="stage">${body}${this.err ? html`<div class="banner bad" role="alert"><span>${this.err}</span></div>` : nothing}</div>`;
   }
@@ -215,10 +224,10 @@ export class HhBtPair extends BtElement {
         <div class="form">
           ${host
             ? html`<hh-bt-commands .codes=${this.codes} .value=${this.commands} @change=${(e: CustomEvent<Record<string, string>>) => (this.commands = e.detail)}></hh-bt-commands>`
-            : html`<hh-bt-keys .codes=${this.codes} .value=${this.keys} .slot=${slot} .api=${this.store.api} hub=${this.hub} @change=${(e: CustomEvent<Record<string, string>>) => (this.keys = e.detail)}></hh-bt-keys>`}
+            : html`<hh-bt-keys .codes=${this.codes} .value=${this.keys} .peer=${slot} .api=${this.store.api} hub=${this.hub} @change=${(e: CustomEvent<Record<string, string>>) => (this.keys = e.detail)}></hh-bt-keys>`}
           ${this.codesErr ? html`<div class="banner bad" role="alert"><span>${this.codesErr}</span><span class="sp"></span><button class="btn sm" @click=${() => void this.loadCodes()}>Retry</button></div>` : nothing}
         </div>
-        <aside class="side card" aria-label="Summary" style="padding:14px 16px">
+        <aside class="side card pad" aria-label="Summary">
           <label class="f">${host ? 'Device name' : 'Remote name'}<input type="text" aria-label="Name" aria-invalid=${prob ? 'true' : 'false'} .value=${this.name} @input=${(e: Event) => (this.name = trimBytes((e.target as HTMLInputElement).value))} /></label>
           <span class="hint">${bytes.used}/31 B</span>
           ${prob ? html`<span class="err" role="alert">${prob}</span>` : nothing}
