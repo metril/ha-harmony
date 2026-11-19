@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { KeymapRow, V2Page } from '../lib/api';
 import type { Assigner, Spot } from '../lib/assigner';
 import { cellAt, pageGroup, widgetRect } from '../lib/page-renderer';
-import { BODY, DPAD, GLASS, GRIP_Y, JOINED, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, bodyPath, gripPath, keyPath, keyTitle, tintPath, type KeyGeom } from '../lib/remote-layout';
+import { BODY, DPAD, GLASS, GRIP_Y, JOINED, PLATED, PLATES, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, bodyPath, gripPath, keyPath, keyTitle, tintPath, type KeyGeom } from '../lib/remote-layout';
 import type { StudioHost } from '../lib/studio-state';
 import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
@@ -51,7 +51,7 @@ export class HhRemote extends LitElement {
     .lab.sm { font-size: 9px; letter-spacing: 0.4px; }
     .g-strip .lab { font-size: 9px; letter-spacing: 0.5px; fill: #fff; }
     .g-home .lab { font-size: 15px; }
-    .pr { fill: #d3dae0; font: 600 9.5px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
+    .pr { fill: #d3dae0; font: 700 11px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
     .prl { stroke: #d3dae0; stroke-width: 1.2; pointer-events: none; }
     .gl { fill: #eef1f3; pointer-events: none; }
     .gs { fill: none; stroke: #eef1f3; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
@@ -61,10 +61,13 @@ export class HhRemote extends LitElement {
     .key:hover .dir, .key:focus-visible .dir, .key.sel .dir, .key.ov .dir { opacity: 0.9; }
     /* joined keys: one flat plate, no seam at rest; the half under the pointer or assigned shows itself */
     .jn .cap { fill: #4d5257; stroke: #4d5257; stroke-width: 0.7; }
-    .jn:hover .cap { fill: #61676d; stroke: #61676d; }
+    .plate { fill: #4d5257; stroke: #4d5257; stroke-width: 0.7; pointer-events: none; }
+    .jp .cap { fill: transparent; stroke: none; }
+    .key.jp:hover .cap { fill: rgba(255, 255, 255, 0.13); }
+    .key.jn:hover .cap { fill: #61676d; stroke: #61676d; }
     .key.colour .lab { display: none; }
     .key:hover .cap { fill: url(#keyh); }
-    .key.ov .glow { fill: none; stroke: #20c8b0; stroke-width: 1.8; }
+    .key.ov .glow { fill: none; stroke: #3ee8cf; stroke-width: 1.8; }
     .key.none .glow { fill: rgba(5, 8, 11, 0.18); }
     .key.colour.none .glow { fill: rgba(5, 8, 11, 0.2); }
     .key.ex .glow { fill: rgba(5, 8, 11, 0.4); stroke: #687888; stroke-width: 1; stroke-dasharray: 3 2; }
@@ -355,7 +358,7 @@ export class HhRemote extends LitElement {
     const a = this.assigner.phase;
     const cur = this.assigner.cursor;
     const tgt = this.canTarget('key');
-    const cls = ['key', `g-${g.group}`, JOINED.has(g.name) ? 'jn' : '', g.color ? 'colour' : '', ...this.keyState(row)];
+    const cls = ['key', `g-${g.group}`, JOINED.has(g.name) ? 'jn' : '', PLATED.has(g.name) ? 'jp' : '', g.color ? 'colour' : '', ...this.keyState(row)];
     const sel = this.st.sel?.kind === 'key' && this.st.sel.name === g.name;
     if (sel) cls.push('sel');
     if (errs.has(g.name)) cls.push('bad');
@@ -485,8 +488,9 @@ export class HhRemote extends LitElement {
         ${this.screenOverlay()}
       </svg>
       <rect class=${frame ? 'screen-frame tgt' : 'screen-frame'} x=${SCREEN.x - 2} y=${SCREEN.y - 2} width=${SCREEN.w + 4} height=${SCREEN.h + 4} rx="4"></rect>
+      ${PLATES.map((d) => svg`<path class="plate" d=${d}></path>`)}
       ${KEYS.map((g) => this.keyEl(g, byKey.get(g.name), errKeys))}
-      ${PRINTED.map((p) => svg`<text class="pr" x=${p.x} y=${p.y}>${p.text}</text>${p.sub ? svg`<path class="prl" d=${`M${p.x - 7} ${p.y + 4}h14`}></path><text class="pr" x=${p.x} y=${p.y + 14}>${p.sub}</text>` : nothing}`)}
+      ${PRINTED.map((p) => svg`<text class="pr" x=${p.x} y=${p.y}>${p.text}</text>${p.sub ? svg`<path class="prl" d=${`M${p.x - 8} ${p.y + 4}h16`}></path><text class="pr" x=${p.x} y=${p.y + 15}>${p.sub}</text>` : nothing}`)}
     </svg>`;
   }
 }

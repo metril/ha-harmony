@@ -2,7 +2,7 @@ import { LitElement, css, nothing, svg } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import type { V2Page } from '../lib/api';
 import { pageGroup } from '../lib/page-renderer';
-import { GLASS, JOINED, KEYS, MINI_VIEW, SCREEN, bodyPath, gripPath, keyPath, tintPath } from '../lib/remote-layout';
+import { GLASS, JOINED, PLATED, PLATES, KEYS, MINI_VIEW, SCREEN, bodyPath, gripPath, keyPath, tintPath } from '../lib/remote-layout';
 
 /** A small, read-only Elite drawing: optional screen page, and keys marked on / changed / missing / dim. */
 @customElement('hh-mini-remote')
@@ -18,7 +18,9 @@ export class HhMiniRemote extends LitElement {
     .g-strip .cap { fill: #030405; stroke: #e8edf0; stroke-width: 2; }
     .tint { fill: none; stroke-width: 3; }
     .jn .cap { fill: #565d65; stroke: #565d65; stroke-width: 0.7; }
-    .on .cap { stroke: #20c8b0; stroke-width: 3; }
+    .plate { fill: #565d65; stroke: #565d65; stroke-width: 0.7; }
+    .jp .cap { fill: transparent; stroke: none; }
+    .on .cap { stroke: #3ee8cf; stroke-width: 3; }
     .chg .cap { stroke: #f8c040; stroke-width: 3; }
     .miss .cap { fill: #1b2024; stroke: #f8c040; stroke-width: 2; stroke-dasharray: 5 3; }
     .dim .cap { opacity: 0.35; }
@@ -37,7 +39,8 @@ export class HhMiniRemote extends LitElement {
         ${this.page ? pageGroup(this.page, {}) : svg`<rect width="240" height="320" fill="#101820"></rect>`}
       </svg>
       <path class="grip" d=${gripPath()}></path>
-      ${KEYS.map((g) => svg`<g class="${this.marks[g.name] ?? ''} g-${g.group} ${JOINED.has(g.name) ? 'jn' : ''}"><path class="cap" d=${keyPath(g)}></path>${g.color ? svg`<path class="tint" d=${tintPath(g)} stroke=${g.color}></path>` : nothing}</g>`)}
+      ${PLATES.map((d) => svg`<path class="plate" d=${d}></path>`)}
+      ${KEYS.map((g) => svg`<g class="${this.marks[g.name] ?? ''} g-${g.group} ${JOINED.has(g.name) ? 'jn' : ''} ${PLATED.has(g.name) ? 'jp' : ''}"><path class="cap" d=${keyPath(g)}></path>${g.color ? svg`<path class="tint" d=${tintPath(g)} stroke=${g.color}></path>` : nothing}</g>`)}
     </svg>`;
   }
 }

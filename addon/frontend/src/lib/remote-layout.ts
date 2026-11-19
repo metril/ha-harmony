@@ -209,6 +209,10 @@ const LAYOUT: readonly (Row | string)[] = [
 ];
 /** Keys that are one visual plate with separate hit areas (no seam drawn at rest): the D-pad, Vol, Ch/Pg and the home +/- key. */
 export const JOINED: ReadonlySet<string> = new Set(['up', 'down', 'left', 'right', 'volume_up', 'volume_down', 'channel_up', 'channel_down', 'home_control_plus', 'home_control_minus']);
+/** The resting outline of Vol and Ch/Pg: one continuous plate each (their halves are invisible hit areas at rest). */
+export const PLATES: readonly string[] = [[[62, 152], [215, 152], [152, 308], [215, 465], [62, 465]] as Pt[], flip([[62, 152], [215, 152], [152, 308], [215, 465], [62, 465]])].map((c) => roundedPoly(c.map(([x, y]) => cp(x, y)), 5));
+/** Keys whose halves are invisible at rest and drawn over a PLATE */
+export const PLATED: ReadonlySet<string> = new Set(['volume_up', 'volume_down', 'channel_up', 'channel_down']);
 export const KEYS: readonly KeyGeom[] = LAYOUT.map((r) => (typeof r === 'string' ? (SPECIAL[r] as KeyGeom) : geom(r)));
 
 export const keyByName = new Map(KEYS.map((g) => [g.name, g]));
