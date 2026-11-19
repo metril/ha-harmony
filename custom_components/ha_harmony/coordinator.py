@@ -577,6 +577,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.compiled = compiled
         self._accepted = True
         self._rejected = False
+        self._clear_issue(ISSUE_YAML)  # the add-on config is live: a leftover YAML file is harmless
         self._notify(TOPIC_LINK)
         if changed:
             self._cfg_gen += 1

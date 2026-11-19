@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix: the "upload your YAML in the add-on" repair clears itself once the hub accepts a config applied in the add-on, is not raised again while an add-on config is cached (a log line says the file is safe to delete), and can be dismissed. The file is never touched.
 - Hub boot hook: bounded daemon respawn (`respawn_max`, default 3, 0 = off) with a heartbeat wedge cover, an `rf_debug` conf key and uptime-stamped logs; the boot-strike counter is never touched by a respawn.
 - Remote: opt-in suspend to RAM after idle (`HARMONY_SUSPEND=battery|always`) with an hourly timed wake (msp430 `wakeup`, 3600 s) so the battery guard still runs, resume re-link and sleep-gap accounting. Touch does not wake it; buttons and motion do. See `docs/runbooks/remote-suspend-soak.md`.
 - OTA: signed image container with Ed25519 verification (`ota_sign` tool, staged apply helper on the hub). Builds that bake in the public dev key need `-DHP_ALLOW_DEV_OTA_KEY=ON`.
