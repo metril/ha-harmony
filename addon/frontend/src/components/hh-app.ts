@@ -8,13 +8,8 @@ import { shared } from '../lib/styles';
 import { ApiError, type ApplyStatus, type HubsResponse } from '../lib/api';
 import { linkInfo, linkProblem, pickHub, rememberHub } from '../lib/hubs';
 import { StoreElement, type ConfirmRequest } from './base';
-import './hh-apply-dialog';
 import './hh-dialog';
 import './hh-draft-bar';
-import './hh-import-dialog';
-import '../views/hh-devices';
-import '../views/hh-history';
-import '../views/hh-overview';
 import '../views/hh-studio';
 
 interface RailItem {
@@ -115,8 +110,11 @@ export class HhApp extends StoreElement {
       this.railOpen = false;
       this.requestUpdate();
     });
-    this.addEventListener('hh-review', () => (this.applyOpen = true));
-    this.addEventListener('hh-import', () => (this.importOpen = true));
+    this.addEventListener('hh-review', () => {
+      void import('./hh-apply-dialog');
+      this.applyOpen = true;
+    });
+    this.addEventListener('hh-import', () => this.openImport());
     this.addEventListener('hh-close', () => {
       this.applyOpen = false;
       this.importOpen = false;
@@ -234,28 +232,34 @@ export class HhApp extends StoreElement {
     return names[this.router.route.section] ?? 'Harmony Editor';
   }
 
+  /** Dialogs load their module on first use; the tag is already in the DOM and upgrades when it arrives. */
+  private openImport(): void {
+    void import('./hh-import-dialog');
+    this.importOpen = true;
+  }
+
   private view() {
     const { section, parts } = this.router.route;
     switch (section) {
       case 'remote':
         return html`<hh-studio></hh-studio>`;
       case 'overview':
-        return html`<hh-overview></hh-overview>`;
+        return this.lazy('overview', () => import('../views/hh-overview'), html`<hh-overview></hh-overview>`);
       case 'devices':
         if (parts[0] === 'new') return this.lazy('add-device', () => import('../views/hh-add-device'), html`<hh-add-device></hh-add-device>`);
-        return html`<hh-devices .selected=${parts[0] ?? ''}></hh-devices>`;
+        return this.lazy('devices', () => import('../views/hh-devices'), html`<hh-devices .selected=${parts[0] ?? ''}></hh-devices>`);
       case 'ir':
         return this.lazy('add-device', () => import('../views/hh-add-device'), html`<hh-add-device></hh-add-device>`);
       case 'activities':
         return this.lazy('activities', () => import('../views/hh-activities'), html`<hh-activities .selected=${parts[0] ?? ''}></hh-activities>`);
       case 'history':
-        return html`<hh-history></hh-history>`;
+        return this.lazy('history', () => import('../views/hh-history'), html`<hh-history></hh-history>`);
       default:
         return nothing;
     }
   }
   private loaded = new Set<string>();
-  /** Routes that are rarely open (wizard, activities) load as separate chunks; the tag renders once its module has run. */
+  /** Routes other than the landing studio load as separate chunks; the tag renders once its module has run. */
   private lazy(name: string, load: () => Promise<unknown>, tpl: TemplateResult) {
     if (this.loaded.has(name)) return tpl;
     void load().then(() => {
@@ -276,7 +280,7 @@ export class HhApp extends StoreElement {
         <span class="brand">${icon('hub')} Harmony Editor</span>
         ${this.hubIndicator()}
         <span class="sp"></span>
-        <button class="btn ghost hdr-btn" aria-label="Import YAML" @click=${() => (this.importOpen = true)}>${icon('upload')}<span>Import YAML</span></button>
+        <button class="btn ghost hdr-btn" aria-label="Import YAML" @click=${() => this.openImport()}>${icon('upload')}<span>Import YAML</span></button>
         <a class="btn ghost hdr-btn" aria-label="Export YAML" aria-disabled=${s.isFirstRun ? 'true' : 'false'} href=${s.isFirstRun ? '#/overview' : s.api.exportUrl(s.hub)} download="harmony-${s.hub}.yaml">${icon('download')}<span>Export YAML</span></a>
       </header>
       <div class=${classMap({ layout: true, slim: this.slim })}>
