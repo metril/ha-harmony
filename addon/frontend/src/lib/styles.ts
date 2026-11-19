@@ -42,6 +42,7 @@ export const shared = css`
   .problems li span { overflow-wrap: anywhere; min-width: 0; flex: 1 1 200px; }
   .meter { display: grid; gap: 3px; min-width: 110px; font-size: 11px; color: var(--tx3); }
   .meter b { color: var(--tx2); font-weight: 600; }
+  .meter em.over { display: block; color: var(--bad); font-style: normal; font-weight: 600; }
   .bar { height: 6px; border-radius: 3px; background: var(--sf3); overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--acc); border-radius: 3px; }
   .bar i.warn { background: var(--ir); }

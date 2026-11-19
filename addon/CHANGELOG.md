@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.9 (2026-11-18)
+
+- The editor shows one "Config size X of Y KiB on this hub" meter using the hub's own limits (current firmware has no fixed 256-command limit; old firmware keeps its count meters). Over budget it says what to remove; a full hub flash is reported plainly.
+- Integration (behaviour change): command buttons are now created disabled, and a device with more than 200 commands gets none unless the new option "Create command buttons for devices with more than 200 commands" is on. Existing buttons stay enabled; every command remains available through `remote.send_command`.
+- Hub firmware (in the repo, needs a firmware update): per-load command, input and IR tables with one memory budget, chunked config transfer, boot refusal of an oversized cached config.
+
 ## 0.3.8 (2026-11-18)
 
 - The editor's drawing of the Elite now looks like the real remote: dome top and matte grip, a rounded-diamond D-pad with OK, single Vol and Ch/Pg keys, notched Exit/Menu/Mute/Back, one play/pause key, one DVR/Guide/Info bar, outlined ACTIVITIES/DEVICES, ringed colour keys, one +/- key and printed icons. Key positions were measured on the device and a photo.

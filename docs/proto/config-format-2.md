@@ -98,7 +98,9 @@ the config being loaded, and the only size limit is ONE memory budget.
   The hub refuses a transfer that cannot fit before writing (`config needs ~N KiB of flash, the hub has M KiB
   free`, from `statvfs` of the cache directory minus a fixed reserve of 2 x the hub binary size + 256 KiB for
   OTA staging (`hub.prev`, the new image) and `state.json`; `hello_ack.limits.flash_free` reports the same
-  net value so clients refuse first). A leftover `cache.json.new` is deleted at startup and before the
+  net value so clients refuse first; when nothing is left it is 0 with `flash_low: true`, which clients report
+  as "the hub's flash is full", while a bare 0 means unknown). At boot a cache whose declared length is above
+  4 x the memory budget is refused unparsed (logged; the hub boots with no config). A leftover `cache.json.new` is deleted at startup and before the
   check; a transfer is dropped when its connection closes or after 60 s without a chunk. A total above the
   memory budget is refused before anything else. The cache is read back the same streaming way at boot.
 - **Lookups**: commands, inputs and devices are found through hash indexes built at load time

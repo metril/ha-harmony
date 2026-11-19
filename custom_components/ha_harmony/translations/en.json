@@ -298,7 +298,7 @@
         },
         "data_description": {
           "hold_events": "Off by default: a press and a release are recorded, a held key is not (it would write a database row every 0.4 s). Home Assistant key actions with repeat are not affected.",
-          "all_command_buttons": "Off by default: command buttons are created disabled, and not at all for devices with more than 200 commands (use remote.send_command with the device and command name). Buttons that already exist are kept either way."
+          "all_command_buttons": "Off by default. New command buttons are always created disabled (enable the ones you want in the entity list). A device with more than 200 commands gets no buttons unless this is on. Existing buttons are kept either way. Every command can always be sent with the remote.send_command action (device and command name)."
         }
       }
     }

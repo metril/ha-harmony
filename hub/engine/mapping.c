@@ -1280,7 +1280,12 @@ int hp_map_load_cache(hp_map_t *m, const char *path) {
     if (size >= CACHE_HDR + 4 && fseek(f, 0, SEEK_SET) == 0 && fread(hdr, 1, sizeof hdr, f) == sizeof hdr &&
         !memcmp(hdr, "HPMC", 4) && hdr[4] == CACHE_VER) {
         size_t len = get32(hdr + 5);
-        if (len == (size_t)size - CACHE_HDR - 4) {
+        size_t cap = hp_map_budget(m);
+        if (len == (size_t)size - CACHE_HDR - 4 && cap <= SIZE_MAX / 4 && len > cap * 4) {
+            /* a cache this much larger than the budget (text alone, before any table) is refused unparsed;
+             * the daemon then boots with no config rather than risk running out of memory in the parse */
+            rc = -HP_E_TOOBIG;
+        } else if (len == (size_t)size - CACHE_HDR - 4) {
             uint8_t tail[4];
             uint32_t crc = crc_of_file(f, len + CACHE_HDR, 0);
             if (fseek(f, (long)(CACHE_HDR + len), SEEK_SET) == 0 && fread(tail, 1, 4, f) == 4 && get32(tail) == crc) {

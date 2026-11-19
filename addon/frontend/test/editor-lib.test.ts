@@ -404,6 +404,9 @@ describe('the editor shows the connected hub\'s caps', () => {
     expect(host.textContent).toContain('3072 of 8192 KiB on this hub');
     expect(host.textContent).not.toContain('IR pool');
     expect(host.textContent).not.toContain('Commands');
+    expect(host.textContent).not.toContain('remove commands');
+    render(meters({ usage: { ...current, config_bytes: 9000 * 1024 }, config: many(10) } as never), host);
+    expect(host.textContent).toContain('over, remove commands');
     render(meters({ usage: USAGE, config: many(10) } as never), host);
     expect(host.textContent).toContain('IR pool');
     expect(host.textContent).toContain('62 / 256');

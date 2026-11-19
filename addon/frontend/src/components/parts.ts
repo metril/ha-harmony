@@ -5,12 +5,13 @@ import type { Store } from '../lib/store';
 import { LIMITS, counts } from '../lib/model';
 import type { Problem } from '../lib/problems';
 
-export function meter(label: string, text: string, value: number, max: number): TemplateResult {
+export function meter(label: string, text: string, value: number, max: number, hint?: string, tip?: string): TemplateResult {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   const ratio = max > 0 ? value / max : 0;
   const level = ratio >= 1 ? 'full' : ratio >= 0.8 ? 'warn' : '';
-  return html`<div class="meter" role="group" aria-label="${label}: ${text}">
-    <span><b>${label}</b> ${text}</span>
+  const over = level === 'full' && hint ? ` ${hint}` : '';
+  return html`<div class="meter" role="group" aria-label="${label}: ${text}${over}" title=${tip ?? ''}>
+    <span><b>${label}</b> ${text}${over ? html` <em class="over">${hint}</em>` : nothing}</span>
     <div class="bar"><i class=${classMap({ warn: level === 'warn', full: level === 'full' })} style=${setStyle({ width: `${pct}%` })}></i></div>
   </div>`;
 }
@@ -23,7 +24,7 @@ export function meters(store: Store): TemplateResult {
   const cmax = u?.commands_max ?? LIMITS.commands;
   if (u && u.config_budget != null && u.config_bytes != null)
     return html`
-      ${meter('Config size', `${Math.ceil(u.config_bytes / 1024)} of ${Math.floor(u.config_budget / 1024)} KiB on this hub`, u.config_bytes, u.config_budget)}
+      ${meter('Config size', `${Math.ceil(u.config_bytes / 1024)} of ${Math.floor(u.config_budget / 1024)} KiB on this hub`, u.config_bytes, u.config_budget, 'over, remove commands', 'The hub reserves a fixed part of this budget to load any config, so even a tiny config shows a large size.')}
       ${meter('Pages', `${u.pages} / ${u.page_limit}`, u.pages, u.page_limit)}
     `;
   return html`

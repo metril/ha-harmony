@@ -393,6 +393,36 @@ static void test_boot_cache_ignores_budget(void) {
     free(cfg);
 }
 
+static void test_boot_cache_refused_far_over_budget(void) {
+    char path[] = "/tmp/hp_budget_big_XXXXXX";
+    int fd = mkstemp(path);
+    CT_CHECK(fd >= 0);
+    close(fd);
+    unlink(path);
+    hub_ctx_init(&H);
+    hub_install(&tbl, &H);
+    H.cache_path = path;
+    hp_session_t s = {.authed = true};
+    size_t n;
+    char *cfg = gen(4, 3000, 0, &n);
+    CT_CHECK(push(&s, cfg, n));
+    hub_shutdown(&H);
+    hp_map_free(&H.map);
+    hp_map_t boot;
+    hp_map_init(&boot);
+    hp_map_set_budget(&boot, 256u * 1024);
+    CT_CHECK(n < 4u * 256 * 1024); /* within 4x: loads (see test_boot_cache_ignores_budget) */
+    CT_EQ(hp_map_load_cache(&boot, path), 0);
+    hp_map_free(&boot);
+    hp_map_init(&boot);
+    hp_map_set_budget(&boot, n / 4 - 1); /* the text is now above 4x the budget: refused, nothing parsed */
+    CT_EQ(hp_map_load_cache(&boot, path), -HP_E_TOOBIG);
+    CT_EQ(boot.ncmds, 0);
+    hp_map_free(&boot);
+    unlink(path);
+    free(cfg);
+}
+
 static void test_stale_new_file_removed(void) {
     char path[] = "/tmp/hp_budget_stale_XXXXXX";
     int fd = mkstemp(path);
@@ -456,7 +486,21 @@ static void test_flash_reserve_and_overflow(void) {
     hp_cache_set_reserve(SIZE_MAX);
     CT_EQ(send_chunk(&s, 0, 100, "{", 1), HP_DISPATCH_OK);
     CT_CHECK(strstr(rep, "of flash"));
+    { /* nothing left is reported as such, not as "unknown" (a bare flash_free 0) */
+        hp_session_t anon = {0};
+        const char *hello = "{\"v\":1,\"id\":1,\"t\":\"hello\",\"d\":{\"token\":\"t\"}}";
+        memset(rep, 0, sizeof rep);
+        CT_EQ(hp_dispatch(hello, strlen(hello), &tbl, &anon, rep, sizeof rep, &rl), HP_DISPATCH_OK);
+        CT_CHECK(strstr(rep, "\"flash_free\":0") && strstr(rep, "\"flash_low\":true"));
+    }
     hp_cache_set_reserve(0);
+    memset(rep, 0, sizeof rep);
+    {
+        hp_session_t anon = {0};
+        const char *hello = "{\"v\":1,\"id\":1,\"t\":\"hello\",\"d\":{\"token\":\"t\"}}";
+        CT_EQ(hp_dispatch(hello, strlen(hello), &tbl, &anon, rep, sizeof rep, &rl), HP_DISPATCH_OK);
+        CT_CHECK(!strstr(rep, "flash_low"));
+    }
     hub_shutdown(&H);
     hp_map_free(&H.map);
 }
@@ -549,6 +593,7 @@ int main(int argc, char **argv) {
     CT_RUN(test_chunked_config);
     CT_RUN(test_cache_is_all_or_nothing);
     CT_RUN(test_boot_cache_ignores_budget);
+    CT_RUN(test_boot_cache_refused_far_over_budget);
     CT_RUN(test_stale_new_file_removed);
     CT_RUN(test_flash_reserve_and_overflow);
     CT_RUN(test_duplicate_top_level_sections);

@@ -549,6 +549,7 @@ static cJSON *on_limits(void *vctx) {
     cJSON_AddNumberToObject(o, "slack_b", HP_MAP_SLACK_BYTES);
     size_t fl = hp_cache_free_bytes(h->cache_path); /* what the cached config may take on flash now (0 = unknown) */
     cJSON_AddNumberToObject(o, "flash_free", fl == SIZE_MAX ? 0 : (double)fl);
+    if (fl == 0) cJSON_AddBoolToObject(o, "flash_low", 1); /* 0 alone means "unknown"; with this flag, "none left" */
     cJSON_AddNumberToObject(o, "dev_b", HP_MAP_DEV_BYTES);
     cJSON_AddNumberToObject(o, "cmd_b", HP_MAP_CMD_BYTES);
     cJSON_AddNumberToObject(o, "key_b", HP_MAP_KEY_BYTES);

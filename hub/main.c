@@ -324,7 +324,10 @@ int main(int argc, char **argv) {
     }
     if (cache) {
         int cr = hp_map_load_cache(&g_hub.map, cache);
-        if (cr < 0 && cr != -HP_E_NOENT) fprintf(stderr, "hub: ignoring unusable cache %s (%d)\n", cache, cr);
+        if (cr == -HP_E_TOOBIG)
+            fprintf(stderr, "hub: cached config %s is over 4x the memory budget (%zu KiB); booting with no config\n", cache,
+                    hp_map_budget(&g_hub.map) / 1024);
+        else if (cr < 0 && cr != -HP_E_NOENT) fprintf(stderr, "hub: ignoring unusable cache %s (%d)\n", cache, cr);
     }
     hp_actsm_reloaded(&g_hub.act); /* device tracking for the cached config */
     if (state) {

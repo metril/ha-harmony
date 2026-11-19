@@ -170,6 +170,8 @@ def fit_error(stats: dict[str, int], lim: HubLimits) -> str | None:
         )
     if lim.max_json is not None and stats["text"] > lim.max_json:
         return f"compiled config is {stats['text']} bytes (the hub allows {lim.max_json})"
+    if lim.flash_low:
+        return "the hub's flash is full: there is no room for a config. Free space on the hub first"
     if lim.flash_free and stats["text"] + 4096 + 13 > lim.flash_free:
         return (
             f"config needs ~{-(-(stats['text'] + 4096) // 1024)} KiB of flash,"

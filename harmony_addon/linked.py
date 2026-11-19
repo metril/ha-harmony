@@ -59,7 +59,7 @@ class LinkedHubs:
         if hub not in self._seen or not isinstance(wire, dict):
             return
         lim = HubLimits.from_hello(wire)
-        clean = {} if lim.legacy else {k: v for k, v in lim.to_wire().items() if k != "flash_free"}  # free flash moves: only the integration checks it, at push time
+        clean = {} if lim.legacy else {k: v for k, v in lim.to_wire().items() if k != "flash_free"}  # free flash moves: only the integration checks it, at push time; "none left" (flash_low) is passed on so the editor can say so
         if self._limits.get(hub) != clean:
             self._limits[hub] = clean
             self._persist(int(self._clock()))

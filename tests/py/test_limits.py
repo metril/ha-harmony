@@ -169,6 +169,13 @@ def test_flash_is_checked_with_a_precise_message():
     assert tight.flash_free == 20 * 1024
     assert "KiB of flash, the hub has 20 KiB free" in fit_error(stats, tight)
     assert fit_error(stats, HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 4 * 1024 * 1024})) is None
+    # none left is not "unknown": flash_free 0 + flash_low says "full", 0 alone still means unknown
+    full = HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 0, "flash_low": True})
+    assert full.flash_low and "flash is full" in fit_error(stats, full)
+    assert full.to_wire()["flash_low"] is True and "flash_low" not in CURRENT.to_wire()
+    unknown = HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 0})
+    assert not unknown.flash_low and fit_error(stats, unknown) is None
+    assert not HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 5, "flash_low": True}).flash_low
     # optional on the wire: an add-on stores the limits without it
     assert HubLimits.from_hello({k: v for k, v in CURRENT.to_wire().items() if k != "flash_free"}) == CURRENT
 
