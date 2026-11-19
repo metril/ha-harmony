@@ -223,7 +223,7 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     await page.locator(P).get_by_role("button", name="Used in this config").click()
     used = page.locator(ROWS, has_text="Living room lamp")
     await used.first.wait_for()
-    assert "toggle" in (await used.first.inner_text())  # says which service the config calls
+    assert "toggle" in (await used.first.text_content())  # says which service the config calls
     await shot(page, "06-used-1440")
 
     # favourite the lamp: it appears under Favourites
