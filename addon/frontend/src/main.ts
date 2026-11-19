@@ -1,6 +1,6 @@
 import './app.css';
 import { Api } from './lib/api';
-import { pickHub } from './lib/hubs';
+import { pickHub, rememberedHub } from './lib/hubs';
 import { Store, setStore } from './lib/store';
 import './components/hh-app';
 
@@ -9,7 +9,7 @@ async function boot(): Promise<void> {
   // ?hub= wins; else the hub id Home Assistant polls for; never `default` once a linked hub exists.
   let hub = 'default';
   try {
-    hub = pickHub(location.search, await api.hubs()).hub;
+    hub = pickHub(location.search, await api.hubs(), rememberedHub()).hub;
   } catch {
     hub = pickHub(location.search, null).hub;
   }

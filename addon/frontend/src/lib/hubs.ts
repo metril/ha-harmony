@@ -4,15 +4,31 @@ import type { ApplyStatus, HubsResponse } from './api';
 export interface HubChoice {
   hub: string;
   /** why this id: an explicit ?hub=, the one linked hub, the newest of several, a stored one, or the local `default` */
-  reason: 'explicit' | 'linked' | 'newest-linked' | 'stored' | 'default';
+  reason: 'explicit' | 'linked' | 'newest-linked' | 'remembered' | 'stored' | 'default';
   /** every id worth offering in a switcher (linked ones first) */
   choices: string[];
   /** true when at least one integration has polled the add-on */
   anyLinked: boolean;
 }
 
+const KEY = 'hh-hub';
+export function rememberedHub(): string | null {
+  try {
+    return localStorage.getItem(KEY);
+  } catch {
+    return null;
+  }
+}
+export function rememberHub(hub: string): void {
+  try {
+    localStorage.setItem(KEY, hub);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 /** Explicit ?hub= wins; else the linked hub id (the newest when several); else a stored one; else `default`. */
-export function pickHub(search: string, resp: HubsResponse | null): HubChoice {
+export function pickHub(search: string, resp: HubsResponse | null, remembered: string | null = null): HubChoice {
   const explicit = new URLSearchParams(search).get('hub');
   const valid = explicit !== null && /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/.test(explicit);
   const linked = (resp?.linked ?? []).map((l) => l.id).filter((id) => id !== 'default' || (resp?.linked.length ?? 0) === 1);
@@ -20,8 +36,8 @@ export function pickHub(search: string, resp: HubsResponse | null): HubChoice {
   const choices = [...new Set([...linked, ...stored])];
   const anyLinked = (resp?.linked.length ?? 0) > 0;
   if (valid) return { hub: explicit, reason: 'explicit', choices, anyLinked };
-  const first = linked[0]; // newest first
-  if (first !== undefined) return { hub: first, reason: linked.length === 1 ? 'linked' : 'newest-linked', choices, anyLinked };
+  const first = remembered !== null && linked.includes(remembered) ? remembered : linked[0]; // else newest first
+  if (first !== undefined) return { hub: first, reason: linked.length === 1 ? 'linked' : first === linked[0] ? 'newest-linked' : 'remembered', choices, anyLinked };
   if (stored.length && !stored.includes('default')) return { hub: stored[0] as string, reason: 'stored', choices, anyLinked };
   return { hub: 'default', reason: 'default', choices, anyLinked };
 }

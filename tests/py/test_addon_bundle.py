@@ -118,9 +118,9 @@ async def test_wait_on_hub_with_nothing_applied_wakes_on_first_apply(client):
 
 async def test_concurrent_waiters_all_wake_and_hubs_are_independent(client):
     await apply(client)
-    rev = (await (await client.get("/api/v1/bundle", headers=BEARER)).json())["rev"]
+    rev = (await (await client.get("/api/v1/bundle?hub=default", headers=BEARER)).json())["rev"]
     ws = [
-        asyncio.create_task(client.get(f"/api/v1/bundle/wait?rev={rev}", headers=BEARER))
+        asyncio.create_task(client.get(f"/api/v1/bundle/wait?hub=default&rev={rev}", headers=BEARER))
         for _ in range(5)
     ]
     other = asyncio.create_task(client.get("/api/v1/bundle/wait?hub=other", headers=BEARER))

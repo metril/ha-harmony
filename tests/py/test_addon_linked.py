@@ -158,3 +158,19 @@ async def test_no_automatic_move_while_something_polls_for_default(c):
     await poll(c, "hub-a")
     assert [h["id"] for h in (await hubs(c))["hubs"]] == ["default"]
     assert (await hubs(c))["adopt"] == {"from": "default", "to": ["hub-a"]}
+
+
+async def test_ack_and_other_requests_do_not_record_a_hub(c):
+    await apply(c, "living-room-hub")
+    r = await poll(c, "living-room-hub")
+    rev = (await r.json())["rev"]
+    body = {"hub": "living-room-hub", "rev": rev, "result": "ok"}
+    assert (await c.post("/api/v1/bundle/ack", json=body, headers=BEARER)).status == 200
+    assert (await c.get("/api/v1/bundle", headers=BEARER)).status == 404  # no hub param: not a poll
+    assert [e["id"] for e in (await hubs(c))["linked"]] == ["living-room-hub"]
+
+
+async def test_old_linked_file_version_is_ignored(aiohttp_client, tmp_path):
+    (tmp_path / "linked_hubs.json").write_text('{"v": 1, "hubs": {"default": 5}}')
+    c = await aiohttp_client(make(tmp_path))
+    assert (await hubs(c))["linked"] == []

@@ -124,6 +124,10 @@ describe('hub selection', () => {
     const c = pickHub('', resp(['b', 'a'], ['default']));
     expect([c.hub, c.reason, c.choices]).toEqual(['b', 'newest-linked', ['b', 'a', 'default']]);
   });
+  it('several linked hubs: the remembered one wins when still linked', () => {
+    expect(pickHub('', resp(['b', 'a']), 'a').hub).toBe('a');
+    expect(pickHub('', resp(['b', 'a']), 'gone').hub).toBe('b');
+  });
   it('nothing linked: a stored hub, else default, and anyLinked is false', () => {
     expect(pickHub('', resp([], ['sim'])).hub).toBe('sim');
     const c = pickHub('', resp([], ['default']));

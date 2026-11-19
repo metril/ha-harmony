@@ -11,6 +11,7 @@ from .store import HUB_ID, atomic_write
 
 log = logging.getLogger(__name__)
 MAX_LINKED = 32
+VERSION = 2
 PERSIST_EVERY = 60  # seconds between rewrites for a hub that is already known
 
 
@@ -22,6 +23,8 @@ class LinkedHubs:
         self._persisted = 0
         try:
             raw = json.loads(self._path.read_bytes())
+            if raw["v"] != VERSION:  # v1 could hold a `default` that only an ack had put there
+                raise ValueError("old file")
             for k, v in raw["hubs"].items():
                 if HUB_ID.fullmatch(k) and type(v) is int and len(self._seen) < MAX_LINKED:
                     self._seen[k] = v
@@ -54,7 +57,7 @@ class LinkedHubs:
 
     def _persist(self, now: int) -> None:
         try:
-            atomic_write(self._path, json.dumps({"v": 1, "hubs": self._seen}).encode())
+            atomic_write(self._path, json.dumps({"v": VERSION, "hubs": self._seen}).encode())
             self._persisted = now
         except OSError:
             log.warning("could not save the linked hub ids")

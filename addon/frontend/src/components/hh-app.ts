@@ -6,7 +6,7 @@ import { counts } from '../lib/model';
 import { Router, hashFor } from '../lib/router';
 import { shared } from '../lib/styles';
 import { ApiError, type ApplyStatus, type HubsResponse } from '../lib/api';
-import { linkInfo, linkProblem, pickHub } from '../lib/hubs';
+import { linkInfo, linkProblem, pickHub, rememberHub } from '../lib/hubs';
 import { StoreElement, type ConfirmRequest } from './base';
 import './hh-apply-dialog';
 import './hh-dialog';
@@ -135,6 +135,7 @@ export class HhApp extends StoreElement {
   }
 
   private goHub(hub: string) {
+    rememberHub(hub);
     const u = new URL(location.href);
     u.searchParams.set('hub', hub);
     location.href = u.toString();

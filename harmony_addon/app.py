@@ -139,8 +139,10 @@ def make_auth_mw(auth: Auth):
         bundle = request.path == BUNDLE_PREFIX or request.path.startswith(BUNDLE_PREFIX + "/")
         if bundle:  # authenticated (auth.check passed): remember that the integration is linked
             request.app[SEEN_KEY]["last_seen"] = int(request.app[CLOCK_KEY]())
-            hub = request.query.get("hub", "default")  # the schema default
-            if hub and request.app[LINKED_KEY].seen(hub):
+            # only a poll names its hub in the query (an ack carries it in the body): no fallback
+            hub = request.query.get("hub")
+            polling = request.method == "GET" and request.path in (BUNDLE_PREFIX, BUNDLE_PREFIX + "/wait")
+            if polling and hub and request.app[LINKED_KEY].seen(hub):
                 _auto_adopt(request.app)
         if request.method in MUTATING:
             if bundle:  # bearer-authenticated machine client: no ambient credential, so no CSRF
