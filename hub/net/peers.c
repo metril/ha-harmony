@@ -21,7 +21,7 @@ bool hp_peers_usable(uint32_t a) {
     return b0 == 10 || (b0 == 172 && b1 >= 16 && b1 <= 31) || (b0 == 192 && b1 == 168) || (b0 == 169 && b1 == 254);
 }
 
-bool hp_peers_note(hp_peers_t *p, uint32_t a) {
+bool hp_peers_note(hp_peers_t *p, uint32_t a, int64_t now_ms) {
     if (!hp_peers_usable(a)) return false;
     int i = 0;
     while (i < p->n && p->addr[i] != a) i++;
@@ -30,9 +30,14 @@ bool hp_peers_note(hp_peers_t *p, uint32_t a) {
         if (p->n < HP_PEERS_MAX) p->n++;
         i = p->n - 1; /* full: the oldest is overwritten */
     }
+    bool moved = i > 0;
     memmove(&p->addr[1], &p->addr[0], (size_t)i * sizeof p->addr[0]);
     p->addr[0] = a;
-    return added;
+    if (added || (moved && (p->saved_ms == 0 || now_ms - p->saved_ms >= HP_PEERS_REORDER_SAVE_MS))) {
+        p->saved_ms = now_ms ? now_ms : 1;
+        return true;
+    }
+    return false;
 }
 
 int hp_peers_load(hp_peers_t *p) {

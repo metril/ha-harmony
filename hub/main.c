@@ -80,7 +80,10 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     if (sess->authed) hp_ws_conn_set_authed(c);
     if (!was_authed && sess->authed) {
         hub_send_state(&g_hub, c); /* live state right after hello_ack */
-        if (hp_peers_note(&g_peers, hp_ws_conn_peer(c)) && hp_peers_save(&g_peers) < 0)
+        struct timespec nt;
+        clock_gettime(CLOCK_MONOTONIC, &nt);
+        if (hp_peers_note(&g_peers, hp_ws_conn_peer(c), (int64_t)nt.tv_sec * 1000 + nt.tv_nsec / 1000000) &&
+            hp_peers_save(&g_peers) < 0)
             fprintf(stderr, "hub: cannot save the peer list\n");
     }
     if (r == HP_DISPATCH_CLOSE) hp_ws_conn_close(c, 1008);
