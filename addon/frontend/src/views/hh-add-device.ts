@@ -452,7 +452,7 @@ export class HhAddDevice extends StoreElement {
   private entity() {
     return html`<h1>Pick a Home Assistant entity</h1><p class="lead">We propose commands from what the entity's services can do. We cannot read its source list or remote presets, so those are left for you to fill in.</p>
       <hh-ha-browser mode="select" scope="wizard" label="media players, remotes, switches, lights and fans" .entities=${this.ha.entities} .loaded=${this.ha.haLoaded} .loading=${this.ha.haLoading} .reason=${this.ha.haReason}
-        .registries=${this.ha.haRegistries} .areas=${this.ha.haAreas} .domains=${PROPOSAL_DOMAINS}
+        .registries=${this.ha.haRegistries} .lookups=${this.ha.haLookups} .truncated=${this.ha.haTruncated} .domains=${PROPOSAL_DOMAINS}
         @hh-ha-pick=${(e: CustomEvent<{ entity_id: string; name?: string }>) => this.useEntity(e.detail)} @hh-ha-retry=${() => void this.ha.loadHa(true)}></hh-ha-browser>`;
   }
   private useEntity(e: { entity_id: string; name?: string }) {

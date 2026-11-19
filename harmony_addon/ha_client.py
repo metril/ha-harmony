@@ -8,6 +8,8 @@ answer 503, so the UI falls back to typed entity ids.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -22,7 +24,7 @@ log = logging.getLogger(__name__)
 
 CORE_API_URL = "http://supervisor/core/api"
 MAX_BODY = 8 * 1024 * 1024  # a large install's /api/states is a few MB
-MAX_ENTITIES = 5000
+MAX_ENTITIES = 20000  # ~130 B a row compact: a 20,000-entity install is ~2.6 MB, past that the answer says `truncated`
 MAX_STR = 200
 CACHE_SECONDS = 5.0
 TIMEOUT_SECONDS = 20  # a few-MB /states on a busy install
@@ -98,6 +100,30 @@ def _text(v: Any) -> str | None:
     return v[:MAX_STR] if isinstance(v, str) and v else None
 
 
+def _ids(v: Any) -> list[str]:
+    """A registry field that should be a list of ids: anything else is an empty list."""
+    return [x[:MAX_STR] for x in v if isinstance(x, str) and x][:16] if isinstance(v, list) else []
+
+
+def _dict_rows(v: Any) -> list[dict[str, Any]]:
+    return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else []
+
+
+MEMO_MAX = 64
+
+
+def _haystack(row: dict[str, Any], reg: dict[str, Any] | None) -> str:
+    """The lower-cased text a `q` word must be found in: names (never ids of areas and devices)."""
+    parts = [row["name"], row["entity_id"], row.get("platform", "")]
+    if reg is not None:
+        if a := row.get("area_id"):
+            parts.append(reg["areas"][a][0])
+        if d := row.get("device_id"):
+            parts.append(reg["devices"][d][0])
+        parts += [reg["labels"][lid] for lid in row.get("label_ids", [])]
+    return " ".join(parts).casefold()
+
+
 class Catalog:
     """Entities (with area/device from the registries when readable) and services, filtered to the allow-listed domains and cached for a few seconds."""
 
@@ -111,6 +137,9 @@ class Catalog:
         self._reg_cache: tuple[float, dict[str, Any] | None] | None = None
         self._cache: dict[str, tuple[float, Any]] = {}
         self._failing: dict[str, str] = {}  # path -> last logged reason
+        self._inflight: dict[str, asyncio.Future[Any]] = {}
+        self._memo_src: tuple[Any, Any] | None = None
+        self._memo: dict[tuple[Any, ...], tuple[str, str]] = {}
 
     def _failed(self, path: str, reason: str) -> None:
         """One WARNING on the first failure and on a change of cause, never one per poll."""
@@ -118,6 +147,21 @@ class Catalog:
             self._failing[path] = reason
             what = "registries" if path == "registry" else path
             log.warning("Home Assistant %s cannot be read: %s", what, reason)
+
+    async def _once(self, key: str, make: Callable[[], Any]) -> Any:
+        """Concurrent callers of one resource share a single in-flight fetch."""
+        fut = self._inflight.get(key)
+        if fut is None:
+            fut = asyncio.ensure_future(make())
+            self._inflight[key] = fut
+
+            def done(f: asyncio.Future[Any]) -> None:
+                self._inflight.pop(key, None)
+                if not f.cancelled():
+                    f.exception()  # retrieved: the callers that wait see it, nobody else logs it
+
+            fut.add_done_callback(done)
+        return await asyncio.shield(fut)
 
     async def _get(self, path: str) -> Any:
         try:
@@ -132,10 +176,14 @@ class Catalog:
     async def _fetch(self, path: str) -> Any:
         if self._api is None:
             raise HaUnavailable("no_access")
-        now = self._clock()
         hit = self._cache.get(path)
-        if hit and now - hit[0] < CACHE_SECONDS:
+        if hit and self._clock() - hit[0] < CACHE_SECONDS:
             return hit[1]
+        return await self._once(path, lambda: self._load(path))
+
+    async def _load(self, path: str) -> Any:
+        assert self._api is not None
+        now = self._clock()
         data = await self._api.get(path)
         if not isinstance(data, list):
             raise HaUnavailable("unexpected_shape")
@@ -143,7 +191,7 @@ class Catalog:
         return data
 
     async def _registries(self) -> dict[str, Any] | None:
-        """Area, device and entity registries merged into lookups, cached ~60 s.
+        """Area, device, entity, floor and label registries merged into lookups, cached ~60 s.
 
         None when they cannot be read (no WebSocket access, refused, too slow): the catalog then
         carries no areas, devices or flags. A failed refresh keeps serving the last good copy and is
@@ -151,40 +199,56 @@ class Catalog:
         """
         if self._registry is None:
             return None
-        now = self._clock()
         hit = self._reg_cache
-        if hit and now - hit[0] < (REGISTRY_SECONDS if hit[1] is not None else FAILED_RETRY_SECONDS):
+        if hit and self._clock() - hit[0] < (REGISTRY_SECONDS if hit[1] is not None else FAILED_RETRY_SECONDS):
             return hit[1]
+        return await self._once("registry", self._load_registries)
+
+    async def _load_registries(self) -> dict[str, Any] | None:
+        assert self._registry is not None
+        now = self._clock()
+        old = self._reg_cache[1] if self._reg_cache else None
         try:
             raw = await self._registry.lists()
         except RegistryUnavailable as exc:
             self._failed("registry", exc.reason)
-            old = hit[1] if hit else None
             self._reg_cache = (now, old)
             return old
         if self._failing.pop("registry", None) is not None:
             log.info("Home Assistant registries can be read again")
         floors = {
-            f.get("floor_id"): _text(f.get("name")) for f in raw.get("config/floor_registry/list", [])
+            fid: _text(f.get("name"))
+            for f in _dict_rows(raw.get("config/floor_registry/list"))
+            if (fid := _text(f.get("floor_id")))
         }
-        areas = {
-            a.get("area_id"): (_text(a.get("name")), floors.get(a.get("floor_id")))
-            for a in raw.get("config/area_registry/list", [])
-        }
+        areas = {}
+        for a in _dict_rows(raw.get("config/area_registry/list")):
+            if aid := _text(a.get("area_id")):
+                fid = _text(a.get("floor_id"))
+                areas[aid] = (_text(a.get("name")) or aid, fid if fid in floors else None, floors.get(fid))
         labels = {
-            lb.get("label_id"): _text(lb.get("name")) for lb in raw.get("config/label_registry/list", [])
+            lid: _text(lb.get("name")) or lid
+            for lb in _dict_rows(raw.get("config/label_registry/list"))
+            if (lid := _text(lb.get("label_id")))
         }
         devices = {}
-        for d in raw.get("config/device_registry/list", []):
-            devices[d.get("id")] = (
-                _text(d.get("name_by_user")) or _text(d.get("name")),
-                d.get("area_id"),
-                d.get("labels"),
-            )
-        entities = {e.get("entity_id"): e for e in raw.get("config/entity_registry/list", [])}
+        for d in _dict_rows(raw.get("config/device_registry/list")):
+            if did := _text(d.get("id")):
+                devices[did] = (
+                    _text(d.get("name_by_user")) or _text(d.get("name")),
+                    _text(d.get("area_id")),
+                    _ids(d.get("labels")),
+                )
+        entities = {
+            eid: e for e in _dict_rows(raw.get("config/entity_registry/list")) if (eid := _text(e.get("entity_id")))
+        }
         data = {"areas": areas, "devices": devices, "entities": entities, "labels": labels}
         self._reg_cache = (now, data)
         return data
+
+    async def _sources(self) -> tuple[list[Any], dict[str, Any] | None]:
+        states = await self._get("/states")
+        return states, await self._registries()
 
     async def catalog(
         self,
@@ -192,18 +256,53 @@ class Catalog:
         q: str | None = None,
         area: str | None = None,
         diagnostic: bool = False,
+        state: bool = False,
     ) -> dict[str, Any]:
-        """Entities in a compact shape plus the areas they use.
+        """Entities in a compact shape, with the areas, devices and labels they refer to by id.
 
         Disabled and hidden entities are left out; so are diagnostic and config ones unless
-        `diagnostic`. `registries` says whether area/device/platform data could be read.
+        `diagnostic`. `registries` says whether area/device/integration/label data could be read.
+        Above MAX_ENTITIES the first ones (domain, name order) are returned with `truncated`.
         """
-        states = await self._get("/states")
-        reg = await self._registries()
+        states, reg = await self._sources()
+        return self._build(states, reg, domain, q, area, diagnostic, state)
+
+    async def catalog_body(
+        self,
+        domain: str | None = None,
+        q: str | None = None,
+        area: str | None = None,
+        diagnostic: bool = False,
+        state: bool = False,
+    ) -> tuple[str, str]:
+        """The serialised catalog and its ETag, memoised per query until the sources change."""
+        states, reg = await self._sources()
+        if self._memo_src is None or self._memo_src[0] is not states or self._memo_src[1] is not reg:
+            self._memo_src, self._memo = (states, reg), {}
+        key = (domain, q, area, diagnostic, state)
+        hit = self._memo.get(key)
+        if hit is None:
+            text = json.dumps(
+                self._build(states, reg, domain, q, area, diagnostic, state), separators=(",", ":")
+            )
+            hit = (text, '"' + hashlib.sha256(text.encode()).hexdigest()[:16] + '"')
+            if len(self._memo) >= MEMO_MAX:
+                self._memo.clear()
+            self._memo[key] = hit
+        return hit
+
+    @staticmethod
+    def _build(
+        states: list[Any],
+        reg: dict[str, Any] | None,
+        domain: str | None,
+        q: str | None,
+        area: str | None,
+        diagnostic: bool,
+        state: bool,
+    ) -> dict[str, Any]:
         words = (q or "").casefold().split()
-        want_area = (area or "").casefold()
         out: list[dict[str, Any]] = []
-        used: dict[str, str | None] = {}
         for st in states:
             if not isinstance(st, dict):
                 continue
@@ -219,13 +318,10 @@ class Catalog:
                 "name": _text(attrs.get("friendly_name")) or eid,
                 "domain": dom,
             }
-            for key, val in (
-                ("state", _text(st.get("state"))),
-                ("device_class", _text(attrs.get("device_class"))),
-            ):
-                if val is not None:
-                    row[key] = val
-            floor = None
+            if state and (val := _text(st.get("state"))):
+                row["state"] = val
+            if val := _text(attrs.get("device_class")):
+                row["device_class"] = val
             if reg is not None and (ent := reg["entities"].get(eid)):
                 if ent.get("disabled_by") or ent.get("hidden_by"):
                     continue
@@ -233,44 +329,51 @@ class Catalog:
                     if not diagnostic:
                         continue
                     row["diag"] = True
-                dev_name, dev_area, dev_labels = reg["devices"].get(
-                    ent.get("device_id"), (None, None, None)
+                dev_id = _text(ent.get("device_id"))
+                _, dev_area, dev_labels = reg["devices"].get(dev_id, (None, None, []))
+                area_id = _text(ent.get("area_id")) or dev_area
+                if area_id in reg["areas"]:
+                    row["area_id"] = area_id
+                if dev_id in reg["devices"] and reg["devices"][dev_id][0]:
+                    row["device_id"] = dev_id
+                if plat := _text(ent.get("platform")):
+                    row["platform"] = plat
+                lids = sorted(
+                    {i for i in [*_ids(ent.get("labels")), *dev_labels] if i in reg["labels"]}
                 )
-                area_name, floor = reg["areas"].get(ent.get("area_id") or dev_area, (None, None))
-                for key, val in (
-                    ("area", area_name),
-                    ("device", dev_name),
-                    ("platform", _text(ent.get("platform"))),
-                ):
-                    if val:
-                        row[key] = val
-                names = {
-                    reg["labels"].get(i)
-                    for i in [*(ent.get("labels") or []), *(dev_labels or [])]
-                    if isinstance(i, str)
-                } - {None}
-                if names:
-                    row["labels"] = sorted(names, key=str.casefold)[:16]
-            if want_area and want_area != str(row.get("area", "")).casefold():
+                if lids:
+                    row["label_ids"] = lids
+            if area and area != row.get("area_id"):
                 continue
             if words:
-                hay = (
-                    " ".join(str(row.get(k, "")) for k in ("name", "entity_id", "area", "device", "platform"))
-                    + " "
-                    + " ".join(row.get("labels", []))
-                ).casefold()
+                hay = _haystack(row, reg)
                 if not all(w in hay for w in words):
                     continue
-            if "area" in row:
-                used[row["area"]] = floor
             out.append(row)
-            if len(out) >= MAX_ENTITIES:
-                break
         out.sort(key=lambda r: (r["domain"], r["name"].casefold()))
-        areas = [
-            {"name": n, **({"floor": f} if f else {})} for n, f in sorted(used.items(), key=lambda kv: kv[0].casefold())
-        ]
-        return {"entities": out, "areas": areas, "registries": reg is not None}
+        total = len(out)
+        out = out[:MAX_ENTITIES]
+        areas, devices, labels = {}, {}, {}
+        if reg is not None:
+            for r in out:
+                if (a := r.get("area_id")) and a not in areas:
+                    name, fid, floor = reg["areas"][a]
+                    areas[a] = {"id": a, "name": name, **({"floor_id": fid, "floor": floor} if fid else {})}
+                if (d := r.get("device_id")) and d not in devices:
+                    devices[d] = {"id": d, "name": reg["devices"][d][0]}
+                for lid in r.get("label_ids", []):
+                    labels.setdefault(lid, {"id": lid, "name": reg["labels"][lid]})
+        body: dict[str, Any] = {
+            "entities": out,
+            "areas": sorted(areas.values(), key=lambda a: a["name"].casefold()),
+            "devices": sorted(devices.values(), key=lambda d: d["name"].casefold()),
+            "labels": sorted(labels.values(), key=lambda lb: lb["name"].casefold()),
+            "registries": reg is not None,
+            "total": total,
+        }
+        if total > len(out):
+            body["truncated"] = True
+        return body
 
     async def entities(self, domain: str | None, q: str | None) -> list[dict[str, Any]]:
         return (await self.catalog(domain, q))["entities"]

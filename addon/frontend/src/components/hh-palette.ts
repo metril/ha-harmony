@@ -21,12 +21,16 @@ export class HhPalette extends LitElement {
     css`
       :host { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--sf); }
       .head { padding: 10px 12px 8px; display: grid; gap: 8px; border-bottom: 1px solid var(--line); }
-      .tabs { display: flex; gap: 2px; background: var(--sf2); border-radius: var(--r1); padding: 2px; }
-      .tabs button { display: flex; align-items: center; justify-content: center; gap: 6px; flex: 0 0 40px; height: 32px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--tx2); font-size: 12px; white-space: nowrap; font-weight: 600; cursor: pointer; }
+      .tabs { display: flex; align-items: center; gap: 2px; background: var(--sf2); border-radius: var(--r1); padding: 2px; }
+      .tabs button { position: relative; display: flex; align-items: center; justify-content: center; flex: 0 0 36px; height: 32px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--tx2); cursor: pointer; }
       .tabs button:hover { background: var(--sf3); }
-      .tabs button[aria-selected="true"] { flex: 1 1 auto; padding: 0 10px; background: var(--sf); color: var(--tx); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+      .tabs button[aria-selected="true"] { background: var(--sf); color: var(--tx); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
       .tabs button .sic { width: 17px; height: 17px; }
-      .tabs button:not([aria-selected="true"]) .tl { display: none; }
+      .tabs button::after { content: attr(aria-label); position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; padding: 3px 8px; border-radius: var(--r1); background: var(--tx); color: var(--bg); font-size: 11.5px; font-weight: 600; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 80ms; }
+      .tabs button:hover::after, .tabs button:focus-visible::after { opacity: 1; }
+      .tabs .tn { flex: 1; min-width: 0; padding: 0 6px; font-size: 12px; font-weight: 650; color: var(--tx); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      details.typed-d { margin: 10px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding-top: 4px; }
+      .typed-d summary { min-height: 32px; padding: 0 2px; font-weight: 600; font-size: 12px; color: var(--tx2); border-radius: var(--r1); }
       input[type="search"], .typed input { height: 34px; width: 100%; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; }
       .body { overflow: auto; padding: 8px 12px 16px; flex: 1; min-height: 0; }
       details { border: 1px solid var(--line); border-radius: var(--r2); margin: 8px 0; background: var(--sf); }
@@ -61,7 +65,16 @@ export class HhPalette extends LitElement {
     this.bound = now;
     now.forEach((t) => t.addEventListener('change', this.rerender));
   }
+  override connectedCallback(): void {
+    super.connectedCallback();
+    window.addEventListener('focus', this.onFocus);
+  }
+  /** back in the window after a while: refresh the entity list (a 304 when nothing changed) */
+  private onFocus = () => {
+    if (this.host?.state.tab === 'ha') this.host.state.refreshHa(60000);
+  };
   override disconnectedCallback(): void {
+    window.removeEventListener('focus', this.onFocus);
     this.bound.forEach((t) => t.removeEventListener('change', this.rerender));
     this.bound = [];
     super.disconnectedCallback();
@@ -155,9 +168,10 @@ export class HhPalette extends LitElement {
     </div>`;
     const used = new Map(permissions(this.cfg()).entities.map((e) => [e.id, e.services]));
     const cur = this.assigner.source;
-    return html`<hh-ha-browser .entities=${st.entities} .loaded=${st.haLoaded} .loading=${st.haLoading} .reason=${st.haReason} .registries=${st.haRegistries} .areas=${st.haAreas}
+    return html`<hh-ha-browser .entities=${st.entities} .loaded=${st.haLoaded} .loading=${st.haLoading} .reason=${st.haReason} .registries=${st.haRegistries} .lookups=${st.haLookups} .truncated=${st.haTruncated}
       .domains=${HA_DOMAINS} .used=${used} .pressed=${cur?.kind === 'entity' ? cur.entity_id : ''} .diag=${st.haDiag}
-      @hh-ha-retry=${() => void st.loadHa(true)} @hh-ha-diag=${(e: CustomEvent<boolean>) => st.setHaDiag(e.detail)}></hh-ha-browser>${typed}`;
+      @hh-ha-retry=${() => void st.loadHa(true)} @hh-ha-refresh=${() => void st.loadHa(true)} @hh-ha-diag=${(e: CustomEvent<boolean>) => st.setHaDiag(e.detail)}></hh-ha-browser>
+      <details class="typed-d" ?open=${st.haLoaded && st.entities === null}><summary>Use an entity id</summary>${typed}</details>`;
   }
   private widgets() {
     const prims: [Source, string, string, string][] = [
@@ -180,7 +194,8 @@ export class HhPalette extends LitElement {
     return html`
       <div class="head">
         <div class="tabs" role="tablist" aria-label="Palette">
-          ${TABS.map(([id, label, ic]) => html`<button role="tab" id=${`pt-${id}`} aria-selected=${st.tab === id} aria-label=${label} title=${label} aria-controls="pbody" @click=${() => { st.set({ tab: id }); if (id === 'ha' && st.haLoaded) void st.loadHa(true); }}>${stockIconSvg(stockIconByName(ic)?.id ?? 13)}<span class="tl">${label}</span></button>`)}
+          ${TABS.map(([id, label, ic]) => html`<button role="tab" id=${`pt-${id}`} aria-selected=${st.tab === id} aria-label=${label} aria-controls="pbody" @click=${() => { st.set({ tab: id }); if (id === 'ha' && st.haLoaded) void st.loadHa(true); }}>${stockIconSvg(stockIconByName(ic)?.id ?? 13)}</button>`)}
+          <span class="tn" aria-hidden="true">${TABS.find(([id]) => id === st.tab)?.[1]}</span>
         </div>
         ${st.tab === 'ha' ? nothing : html`<input type="search" aria-label="Search the palette" placeholder="Search commands, activities, widgets" .value=${st.query} @input=${(e: Event) => this.search((e.target as HTMLInputElement).value)} />`}
       </div>

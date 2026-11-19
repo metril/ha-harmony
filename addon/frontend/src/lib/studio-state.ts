@@ -1,6 +1,7 @@
 // UI state of the remote studio (what is selected, which layer, zoom...) plus the data the studio
 // fetches around the draft: key map per layer, add-on capabilities, Home Assistant entities/services.
-import { ApiError, haCatalogOrReason, haServicesOrNull, type HaCatalog, type HaEntity, type HaService, type Keymap, type KeymapRow, type PreviewPage } from './api';
+import { ApiError, haCatalogOrReason, haServicesOrNull, type HaEntity, type HaService, type Keymap, type KeymapRow, type PreviewPage } from './api';
+import { enrich, noLookups, type Lookups } from './ha-nav';
 import type { Store } from './store';
 import { DEFAULT_LAYER, keyActionLabel, pageIndexForLayer, type Layer } from './studio-model';
 
@@ -49,7 +50,13 @@ export class StudioState extends EventTarget {
   haLoading = false;
   /** why the entities could not be read (the 503's `reason`), when `entities` is null */
   haReason = '';
-  haAreas: HaCatalog['areas'] = [];
+  haLookups: Lookups = noLookups;
+  /** the number of matching entities when the add-on cut the list at its cap, else 0 */
+  haTruncated = 0;
+  haAgain = false;
+  haAt = 0;
+  /** also ask for each entity's state (only the Overview shows it; it makes the answer change with every state) */
+  haWithState = false;
   haRegistries = false;
   /** list diagnostic and config entities too (asked of the add-on, which leaves them out by default) */
   haDiag = false;
@@ -169,14 +176,22 @@ export class StudioState extends EventTarget {
   }
   /** Entities and services for the Home Assistant tab and the action picker. null = Home Assistant cannot be read (typed ids fall back). */
   async loadHa(force = false): Promise<void> {
-    if (this.haLoading || (this.haLoaded && !force)) return;
+    if (this.haLoading) {
+      if (force) this.haAgain = true; // a request that arrives mid-load (Retry, the diagnostic toggle) is not lost
+      return;
+    }
+    if (this.haLoaded && !force) return;
     this.haLoading = true;
+    this.haAgain = false;
+    this.emit();
     try {
-      const [e, s] = await Promise.all([haCatalogOrReason(this.store.api, this.haDiag), haServicesOrNull(this.store.api)]);
+      const [e, s] = await Promise.all([haCatalogOrReason(this.store.api, this.haDiag, this.haWithState), haServicesOrNull(this.store.api)]);
       if ('catalog' in e) {
-        this.entities = e.catalog.entities;
-        this.haAreas = e.catalog.areas ?? [];
+        const r = enrich(e.catalog);
+        this.entities = r.entities;
+        this.haLookups = r.lookups;
         this.haRegistries = e.catalog.registries === true;
+        this.haTruncated = e.catalog.truncated ? (e.catalog.total ?? r.entities.length) : 0;
         this.haReason = '';
       } else {
         this.entities = null;
@@ -190,7 +205,13 @@ export class StudioState extends EventTarget {
     }
     this.haLoaded = true;
     this.haLoading = false;
+    this.haAt = Date.now();
     this.emit();
+    if (this.haAgain) void this.loadHa(true);
+  }
+  /** Reload when the list is older than `ms` (the tab was opened or the window focused again; a 304 makes it cheap). */
+  refreshHa(ms = 60000): void {
+    if (this.haLoaded && Date.now() - this.haAt > ms) void this.loadHa(true);
   }
   setHaDiag(on: boolean): void {
     if (on === this.haDiag) return;

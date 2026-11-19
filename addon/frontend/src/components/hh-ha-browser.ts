@@ -1,4 +1,4 @@
-import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
+import { LitElement, css, html, nothing, svg, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 import type { HaEntity } from '../lib/api';
@@ -6,8 +6,8 @@ import { stockIconSvg } from '../lib/icon-shapes';
 import { stockIconByName } from '../lib/stock-icons';
 import { chipStyles, shared } from '../lib/styles';
 import {
-  GROUP_BY, NO_AREA, NO_INTEGRATION, NO_LABEL, TYPE_CHIPS, availableGroupBys, domainOf, emptyFilters, facet, filterCount, filterEntities, groupEntities, groupIds, highlight,
-  pushRecent, queryWords, readList, readText, reasonText, toggled, typeLabel, typeOf, writeList, writeText, type Dim, type Filters, type Group, type GroupBy,
+  GROUP_BY, NONE, NO_AREA, NO_INTEGRATION, NO_LABEL, TYPE_CHIPS, availableGroupBys, domainOf, emptyFilters, facet, filterCount, filterEntities, groupEntities, groupIds, highlight,
+  pushRecent, queryWords, readList, readText, reasonText, toggled, typeLabel, typeOf, writeList, noLookups, type Lookups, writeText, type Dim, type Filters, type Group, type GroupBy,
 } from '../lib/ha-nav';
 import type { Source } from '../lib/studio-model';
 
@@ -19,7 +19,8 @@ const ICON: Record<string, string> = {
   light: 'bulb', switch: 'switch', scene: 'scene', script: 'play', media_player: 'tv', climate: 'thermo', cover: 'blinds', fan: 'fan', input: 'plus', sensor: 'info', lock: 'lock',
 };
 const GROUP_ICON: Record<string, string> = { floor: 'home', area: 'home', device: 'app', integration: 'settings', label: 'star' };
-const DIMS: { dim: Exclude<Dim, 'types'>; label: string }[] = [
+const DIMS: { dim: Dim; label: string }[] = [
+  { dim: 'types', label: 'Type' },
   { dim: 'areas', label: 'Area' },
   { dim: 'labels', label: 'Label' },
   { dim: 'integrations', label: 'Integration' },
@@ -55,8 +56,10 @@ export class HhHaBrowser extends LitElement {
       select { height: 28px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 6px; font-size: 12px; }
       .tools .sp { flex: 1; }
       .tools .btn { padding: 0 6px; }
+      .tools .btn.icon { width: 30px; padding: 0; }
+      .fchip.menu { font-size: 16px; line-height: 1; padding: 0 9px; }
       .fchips { display: flex; flex-wrap: wrap; gap: 4px; }
-      .fchip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 13px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+      .fchip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 7px; border-radius: 13px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
       .fchip:hover { background: var(--sf2); }
       .fchip small { color: var(--tx3); font-weight: 500; font-size: 11px; }
       .fchip[aria-pressed="true"], .fchip[aria-expanded="true"] { background: var(--accs); border-color: var(--acc); color: var(--tx); }
@@ -96,8 +99,8 @@ export class HhHaBrowser extends LitElement {
       .ent .t b { font-weight: 550; font-size: 13px; }
       .ent .t i { font-style: normal; font-size: 11px; color: var(--tx3); }
       .ent[aria-pressed="true"] .t i { color: inherit; }
-      mark { background: var(--accs); color: inherit; border-radius: 2px; box-shadow: inset 0 -2px 0 var(--acc); }
-      .ent[aria-pressed="true"] mark { background: transparent; box-shadow: none; text-decoration: underline; }
+      mark { background: var(--accs); color: inherit; border-radius: 3px; padding: 0 1px; margin: 0 -1px; }
+      .ent[aria-pressed="true"] mark { background: rgba(255, 255, 255, 0.28); }
       .star { flex: none; width: 34px; border: 1px solid transparent; border-radius: var(--r1); background: transparent; color: var(--tx3); font-size: 16px; cursor: pointer; }
       .star:hover { background: var(--sf2); color: var(--tx); }
       .star[aria-pressed="true"] { color: var(--acc); }
@@ -121,7 +124,9 @@ export class HhHaBrowser extends LitElement {
   @property({ type: Boolean }) loading = false;
   @property() reason = '';
   @property({ type: Boolean }) registries = false;
-  @property({ attribute: false }) areas: { name: string; floor?: string }[] = [];
+  @property({ attribute: false }) lookups: Lookups = noLookups;
+  /** the number of matching entities when the add-on cut its list at the cap (else 0) */
+  @property({ type: Number }) truncated = 0;
   /** only these domains are listed (the add-device step lists a few) */
   @property({ attribute: false }) domains: readonly string[] | null = null;
   /** entity id -> services the draft already calls on it */
@@ -141,7 +146,7 @@ export class HhHaBrowser extends LitElement {
   @state() private open = new Set<string>();
   @state() private searchClosed = new Set<string>();
   @state() private limits = new Map<string, number>();
-  @state() private pop: Dim | null = null;
+  @state() private pop: Dim | 'menu' | null = null;
   @state() private popQ = '';
   @state() private favs: string[] = readList('fav');
   @state() private recent: string[] = readList('recent');
@@ -149,10 +154,9 @@ export class HhHaBrowser extends LitElement {
 
   private base: HaEntity[] = [];
   private byId = new Map<string, HaEntity>();
-  private floorOf = new Map<string, string>();
   private bys: GroupBy[] = ['type'];
   private qTimer?: ReturnType<typeof setTimeout>;
-  private memo: { key: string; list: HaEntity[]; groups: Group[] } | null = null;
+  private memo: { key: string; list: HaEntity[]; groups: Group[]; facets: Map<Dim, Map<string, number>> } | null = null;
   private memoSrc: unknown;
 
   override connectedCallback(): void {
@@ -184,12 +188,11 @@ export class HhHaBrowser extends LitElement {
   };
 
   protected override willUpdate(ch: Map<string, unknown>): void {
-    if (ch.has('entities') || ch.has('domains') || ch.has('areas') || ch.has('registries')) {
+    if (ch.has('entities') || ch.has('domains') || ch.has('lookups') || ch.has('registries')) {
       const all = this.entities ?? [];
       const dom = this.domains;
       this.base = dom ? all.filter((e) => dom.includes(domainOf(e))) : all;
       this.byId = new Map(all.map((e) => [e.entity_id, e]));
-      this.floorOf = new Map(this.areas.filter((a) => a.floor).map((a) => [a.name, a.floor as string]));
       this.bys = availableGroupBys(this.base, this.registries);
       this.memo = null;
     }
@@ -201,15 +204,22 @@ export class HhHaBrowser extends LitElement {
   }
 
   // -------------------------------------------------------------- derived view
-  private view(): { list: HaEntity[]; groups: Group[] } {
+  private view(): { list: HaEntity[]; groups: Group[]; facets: Map<Dim, Map<string, number>> } {
     const f = this.f;
     const key = [f.q, [...f.types], [...f.areas], [...f.labels], [...f.integrations], this.by].join('|');
     if (!this.memo || this.memo.key !== key || this.memoSrc !== this.base) {
       const list = filterEntities(this.base, f);
-      this.memo = { key, list, groups: groupEntities(list, this.by as GroupBy, { floorOf: this.floorOf }) };
+      this.memo = { key, list, facets: new Map(), groups: groupEntities(list, this.by as GroupBy, this.lookups) };
       this.memoSrc = this.base;
     }
     return this.memo;
+  }
+  /** facet counts for the open filter list, computed once per search and filter state */
+  private facetOf(dim: Dim): Map<string, number> {
+    const m = this.view().facets;
+    let c = m.get(dim);
+    if (!c) m.set(dim, (c = facet(this.base, this.f, dim)));
+    return c;
   }
   private get searching(): boolean {
     return this.f.q.trim() !== '';
@@ -340,11 +350,11 @@ export class HhHaBrowser extends LitElement {
   private rowsOf(id: string, title: string, items: readonly HaEntity[], budget: { n: number }, words: readonly string[], extra?: (e: HaEntity) => string) {
     const lim = this.limits.get(id) ?? ROWS_PER_GROUP;
     const take = Math.min(items.length, lim > ROWS_PER_GROUP ? lim : Math.min(lim, Math.max(0, budget.n)));
-    budget.n -= take;
+    budget.n -= Math.min(take, ROWS_PER_GROUP); // rows added with "Show more" are on top of the budget, so later groups do not move
     const rest = items.length - take;
     return html`<div class="rows" role="group" aria-label=${title}>
       ${repeat(items.slice(0, take), (e) => e.entity_id, (e) => this.row(e, words, extra?.(e) ?? ''))}
-      ${rest > 0 ? html`<button class="more" data-nav @click=${() => (this.limits = new Map(this.limits).set(id, Math.max(take, lim) + MORE_STEP))}>Show ${Math.min(rest, MORE_STEP).toLocaleString('en')} more (${rest.toLocaleString('en')} not shown)</button>` : nothing}
+      ${rest > 0 ? html`<button class="more" data-nav @click=${() => (this.limits = new Map(this.limits).set(id, take + MORE_STEP))}>Show ${Math.min(rest, MORE_STEP).toLocaleString('en')} more (${rest.toLocaleString('en')} not shown)</button>` : nothing}
     </div>`;
   }
   private header(id: string, title: string, count: number, open: boolean, ic: TemplateResult | typeof nothing, words: readonly string[], sub = '', depth = 0, onToggle?: () => void) {
@@ -386,26 +396,45 @@ export class HhHaBrowser extends LitElement {
       </div>`;
     });
   }
-  private dropdown(dim: Exclude<Dim, 'types'>, label: string) {
-    const has: Record<string, GroupBy> = { areas: 'area', labels: 'label', integrations: 'integration' };
+  private dropdown(dim: Dim, label: string) {
+    const has: Record<string, GroupBy | ''> = { types: '', areas: 'area', labels: 'label', integrations: 'integration' };
     const n = this.f[dim].size;
-    if (!this.bys.includes(has[dim] as GroupBy) && !n) return nothing; // no area, label or integration data to filter by
+    const g = has[dim] as GroupBy | '';
+    if (g && !this.bys.includes(g) && !n) return nothing; // no data to filter by
     return html`<button class="fchip" aria-expanded=${this.pop === dim} aria-haspopup="true" @click=${() => { this.pop = this.pop === dim ? null : dim; this.popQ = ''; }}>${label}${n ? html` <small>${n}</small>` : nothing}<i class="car" aria-hidden="true"></i></button>`;
+  }
+  private menu() {
+    return html`<button class="fchip menu" aria-label="Options" title="Options" aria-expanded=${this.pop === 'menu'} aria-haspopup="true" @click=${() => (this.pop = this.pop === 'menu' ? null : 'menu')}>⋯</button>`;
+  }
+  /** the display name of a filter key (ids are keys, names are for people) */
+  private nameOf(dim: Dim, k: string): string {
+    if (dim === 'types') return typeLabel(k);
+    if (k === NONE) return dim === 'areas' ? NO_AREA : dim === 'labels' ? NO_LABEL : NO_INTEGRATION;
+    return dim === 'areas' ? (this.lookups.areas.get(k)?.label ?? k) : dim === 'labels' ? (this.lookups.labels.get(k) ?? k) : k;
   }
   private popPanel() {
     const dim = this.pop;
-    if (!dim || dim === 'types') return nothing;
-    const none = dim === 'areas' ? NO_AREA : dim === 'labels' ? NO_LABEL : NO_INTEGRATION;
-    const counts = facet(this.base, this.f, dim);
+    if (!dim) return nothing;
+    if (dim === 'menu')
+      return html`<div class="pop" role="group" aria-label="Options">
+        ${this.registries && this.mode === 'drag' ? html`<label class="chk"><input type="checkbox" .checked=${this.diag} @change=${(e: Event) => this.dispatchEvent(new CustomEvent('hh-ha-diag', { detail: (e.target as HTMLInputElement).checked, bubbles: true, composed: true }))} /> Show diagnostic and config entities</label>` : nothing}
+        <button class="btn sm" @click=${() => this.dispatchEvent(new CustomEvent('hh-ha-refresh', { bubbles: true, composed: true }))}>Refresh the list</button>
+      </div>`;
+    const none = dim === 'types' ? '' : NONE;
+    const counts = this.facetOf(dim);
     const sel = this.f[dim];
     const words = queryWords(this.popQ);
-    const names = [...new Set([...counts.keys(), ...sel])].sort((a, b) => (a === none ? 1 : b === none ? -1 : Number(sel.has(b)) - Number(sel.has(a)) || a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })));
-    const shown = names.filter((n) => !words.length || words.every((w) => n.toLowerCase().includes(w)));
+    const name = (k: string) => this.nameOf(dim, k);
+    const order = (k: string) => TYPE_CHIPS.findIndex((t) => t.id === k);
+    const names = [...new Set([...counts.keys(), ...sel])].sort((a, b) =>
+      dim === 'types' ? order(a) - order(b) : a === none ? 1 : b === none ? -1 : Number(sel.has(b)) - Number(sel.has(a)) || name(a).localeCompare(name(b), undefined, { sensitivity: 'base', numeric: true }),
+    );
+    const shown = names.filter((n) => !words.length || words.every((w) => name(n).toLowerCase().includes(w)));
     const label = DIMS.find((d) => d.dim === dim)?.label ?? '';
     return html`<div class="pop" role="group" aria-label=${`${label} filter`}>
       ${names.length > 8 ? html`<input type="search" aria-label=${`Search ${label.toLowerCase()}s`} placeholder=${`Search ${label.toLowerCase()}s`} .value=${this.popQ} @input=${(e: Event) => (this.popQ = (e.target as HTMLInputElement).value)} />` : nothing}
       <div class="opts">
-        ${shown.slice(0, POP_MAX).map((n) => html`<label class="opt"><input type="checkbox" .checked=${sel.has(n)} @change=${() => this.flip(dim, n)} /><span>${n}</span><small>${counts.get(n) ?? 0}</small></label>`)}
+        ${shown.slice(0, POP_MAX).map((n) => html`<label class="opt"><input type="checkbox" .checked=${sel.has(n)} @change=${() => this.flip(dim, n)} />${dim === 'types' ? icon(ICON[n] ?? 'home') : nothing}<span>${name(n)}</span><small>${(counts.get(n) ?? 0).toLocaleString('en')}</small></label>`)}
         ${shown.length > POP_MAX ? html`<span class="more">${shown.length - POP_MAX} more: type to narrow</span>` : nothing}
         ${shown.length ? nothing : html`<span class="more">Nothing matches</span>`}
       </div>
@@ -415,10 +444,10 @@ export class HhHaBrowser extends LitElement {
     const out: TemplateResult[] = [];
     const add = (dim: Dim, k: string, text: string) =>
       out.push(html`<button class="pill" aria-label=${`Remove filter ${text}`} @click=${() => this.flip(dim, k)}><span>${text}</span><b aria-hidden="true">×</b></button>`);
-    this.f.types.forEach((k) => add('types', k, typeLabel(k)));
-    this.f.areas.forEach((k) => add('areas', k, `Area: ${k}`));
-    this.f.labels.forEach((k) => add('labels', k, `Label: ${k}`));
-    this.f.integrations.forEach((k) => add('integrations', k, `Integration: ${k}`));
+    this.f.types.forEach((k) => add('types', k, this.nameOf('types', k)));
+    this.f.areas.forEach((k) => add('areas', k, `Area: ${this.nameOf('areas', k)}`));
+    this.f.labels.forEach((k) => add('labels', k, `Label: ${this.nameOf('labels', k)}`));
+    this.f.integrations.forEach((k) => add('integrations', k, `Integration: ${this.nameOf('integrations', k)}`));
     return out;
   }
 
@@ -431,7 +460,6 @@ export class HhHaBrowser extends LitElement {
     const words = queryWords(this.f.q);
     const nf = filterCount(this.f);
     const total = this.base.length;
-    const counts = facet(this.base, this.f, 'types');
     const budget = { n: ROW_BUDGET };
     const anyOpen = this.searching ? groups.length > 0 && this.searchClosed.size < groupIds(groups).length : this.open.size > 0;
     const pinned = this.pinned(words, budget);
@@ -443,14 +471,11 @@ export class HhHaBrowser extends LitElement {
           @keydown=${(e: KeyboardEvent) => { if (e.key === 'Escape' && this.draft) { e.stopPropagation(); this.draft = ''; this.setQ('', true); } }} />
         ${this.draft ? html`<button class="clr" aria-label="Clear search" @click=${() => { this.draft = ''; this.setQ('', true); this.shadowRoot?.querySelector<HTMLInputElement>('input.q')?.focus(); }}>×</button>` : nothing}
       </div>
-      <div class="fchips" role="group" aria-label="Filter by type">
-        ${TYPE_CHIPS.filter((t) => counts.get(t.id) || this.f.types.has(t.id)).map((t) => html`<button class="fchip" aria-pressed=${this.f.types.has(t.id)} @click=${() => this.flip('types', t.id)}>${t.label} <small>${(counts.get(t.id) ?? 0).toLocaleString('en')}</small></button>`)}
-      </div>
-      <div class="fchips" role="group" aria-label="More filters">
+      <div class="fchips" role="group" aria-label="Filters">
         ${DIMS.map((d) => this.dropdown(d.dim, d.label))}
       </div>
-      ${this.popPanel()}
-      ${nf ? html`<div class="pills"><span class="count">${nf} ${nf === 1 ? 'filter' : 'filters'}</span>${this.pills()}<button class="btn ghost sm" @click=${() => this.clearFilters()}>Clear filters</button></div>` : nothing}
+      ${this.pop === 'menu' ? nothing : this.popPanel()}
+      ${nf ? html`<div class="pills"><span class="count">${nf} ${nf === 1 ? 'filter' : 'filters'}</span>${this.pills()}<button class="btn ghost sm" @click=${() => this.clearFilters()}>Clear</button></div>` : nothing}
       <div class="tools">
         <label>Group by
           <select aria-label="Group by" .value=${this.by} @change=${(e: Event) => this.setBy((e.target as HTMLSelectElement).value as GroupBy)}>
@@ -458,10 +483,14 @@ export class HhHaBrowser extends LitElement {
           </select>
         </label>
         <span class="sp"></span>
-        <button class="btn ghost sm" @click=${() => this.setAll(!anyOpen)}>${anyOpen ? 'Collapse all' : 'Expand all'}</button>
+        <button class="btn ghost sm icon" aria-label=${anyOpen ? 'Collapse all' : 'Expand all'} title=${anyOpen ? 'Collapse all' : 'Expand all'} @click=${() => this.setAll(!anyOpen)}>
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${anyOpen ? svg`<path d="M6 15l6-6 6 6M6 21l6-6 6 6" transform="translate(0 -6)"/>` : svg`<path d="M6 9l6 6 6-6M6 3l6 6 6-6" transform="translate(0 6)"/>`}</svg>
+        </button>
+        ${this.menu()}
       </div>
-      ${this.registries && this.mode === 'drag' ? html`<label class="chk"><input type="checkbox" .checked=${this.diag} @change=${(e: Event) => this.dispatchEvent(new CustomEvent('hh-ha-diag', { detail: (e.target as HTMLInputElement).checked, bubbles: true, composed: true }))} /> Show diagnostic and config entities</label>` : nothing}
+      ${this.pop === 'menu' ? this.popPanel() : nothing}
       ${this.registries ? nothing : html`<p class="note" role="note">Areas, devices, labels and integrations could not be read from Home Assistant, so entities are grouped by type only.</p>`}
+      ${this.truncated ? html`<p class="note" role="note">Showing the first ${list.length.toLocaleString('en')} of ${this.truncated.toLocaleString('en')} entities. Narrow it with the search or the filters.</p>` : nothing}
       <div class="sum" role="status" aria-live="polite">${summary}${this.searching ? ` match “${this.f.q.trim()}”` : nf ? ' match the filters' : ''}</div>
       <div class="list" @keydown=${this.nav}>
         ${pinned}

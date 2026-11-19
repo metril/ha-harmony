@@ -722,15 +722,14 @@ def _ha_unavailable(reason: str | None = None) -> web.HTTPException:
 async def ha_entities(request: web.Request) -> web.Response:
     q = query(request, schemas.HA_ENTITIES_QUERY)
     try:
-        body = await request.app[CATALOG_KEY].catalog(
-            q.get("domain"), q["q"], q.get("area"), q["diagnostic"] == "1"
+        text, etag = await request.app[CATALOG_KEY].catalog_body(
+            q.get("domain"), q["q"], q.get("area"), q["diagnostic"] == "1", q["state"] == "1"
         )
     except HaUnavailable as exc:
         raise _ha_unavailable(exc.reason) from None
-    text = json.dumps(body, separators=(",", ":"))
-    etag = '"' + hashlib.sha256(text.encode()).hexdigest()[:16] + '"'
     headers = {"ETag": etag, "Cache-Control": "no-cache"}
-    if request.headers.get("If-None-Match") == etag:
+    sent = [t.strip().removeprefix("W/").strip('"') for t in request.headers.get("If-None-Match", "").split(",")]
+    if etag.strip('"') in sent or "*" in sent:
         return web.Response(status=304, headers=headers)
     return web.Response(text=text, content_type="application/json", headers=headers)
 

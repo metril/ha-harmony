@@ -159,20 +159,30 @@ export interface HaEntity {
   domain?: string;
   state?: string;
   device_class?: string;
-  /** from the registries (absent when Home Assistant's registries cannot be read) */
-  area?: string;
-  device?: string;
+  /** the registry ids the add-on sends (absent when Home Assistant's registries cannot be read) */
+  area_id?: string;
+  device_id?: string;
   /** the integration that provides it */
   platform?: string;
-  labels?: string[];
+  label_ids?: string[];
   /** a diagnostic or config entity (only listed when asked for) */
   diag?: boolean;
+  /** filled in by the client from the catalog's lookups, for display and search only */
+  area?: string;
+  device?: string;
+  labels?: string[];
+  floor_id?: string;
 }
 export interface HaCatalog {
   entities: HaEntity[];
-  areas: { name: string; floor?: string }[];
+  areas: { id: string; name: string; floor_id?: string; floor?: string }[];
+  devices?: { id: string; name: string }[];
+  labels?: { id: string; name: string }[];
   /** false: only the REST data (type grouping), no areas, devices or integrations */
   registries: boolean;
+  /** entities that matched before the cap, and whether the list was cut at it */
+  total?: number;
+  truncated?: boolean;
 }
 export interface HaService {
   domain: string;
@@ -380,8 +390,8 @@ export class Api {
   exportUrl = (hub: string, source?: 'draft' | 'applied') => this.href('api/v1/config/export_yaml', { hub, source });
   applyStatus = (hub: string) => this.request<ApplyStatus>('GET', 'api/v1/config/status', { query: { hub } });
   /** 503 ha_unavailable means Home Assistant cannot be read; callers fall back to typed ids. */
-  haEntities = (domain?: string, diagnostic = false) =>
-    this.request<HaCatalog>('GET', 'api/v1/ha/entities', { query: { domain, diagnostic: diagnostic ? '1' : undefined } });
+  haEntities = (domain?: string, diagnostic = false, state = false) =>
+    this.request<HaCatalog>('GET', 'api/v1/ha/entities', { query: { domain, diagnostic: diagnostic ? '1' : undefined, state: state ? '1' : undefined } });
   haServices = (domain?: string) =>
     this.request<{ services: HaService[] }>('GET', 'api/v1/ha/services', { query: { domain } });
   irBrands = (q = '') => this.request<{ brands: IrBrand[] }>('GET', 'api/v1/ir/brands', { query: { q: q || undefined } });
@@ -409,9 +419,9 @@ export async function haEntitiesOrNull(api: Api, domain?: string): Promise<HaEnt
   }
 }
 /** The catalog, or why it cannot be read (the 503's `reason`; '' when there is none, e.g. no add-on). */
-export async function haCatalogOrReason(api: Api, diagnostic = false): Promise<{ catalog: HaCatalog } | { reason: string }> {
+export async function haCatalogOrReason(api: Api, diagnostic = false, state = false): Promise<{ catalog: HaCatalog } | { reason: string }> {
   try {
-    return { catalog: await api.haEntities(undefined, diagnostic) };
+    return { catalog: await api.haEntities(undefined, diagnostic, state) };
   } catch (e) {
     if (e instanceof ApiError && [0, 404, 503].includes(e.status)) return { reason: typeof e.extra['reason'] === 'string' ? e.extra['reason'] : e.status === 0 ? 'NetworkError' : '' };
     throw e;

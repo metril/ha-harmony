@@ -101,6 +101,7 @@ HA_ENTITIES_QUERY = vol.Schema(
         vol.Optional("q", default=""): _Q,
         vol.Optional("area"): _Q,
         vol.Optional("diagnostic", default="0"): vol.In(["0", "1"]),
+        vol.Optional("state", default="0"): vol.In(["0", "1"]),
     },
     extra=vol.PREVENT_EXTRA,
 )

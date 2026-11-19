@@ -160,19 +160,29 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
 
 ### Home Assistant (read only)
 
-- `GET ha/entities?domain=&q=&area=&diagnostic=0|1` -> `{entities: [{entity_id, name, domain, state?,
-  device_class?, area?, device?, platform?, labels?: [str], diag?: true}], areas: [{name, floor?}],
-  registries: bool}`, sorted by domain then name. `area` is the entity's own area, else its device's;
-  `device` is the device's name (the user's name wins); `platform` is the integration; `areas` lists
-  the areas that appear, with their floor. Disabled and hidden entities are always left out, and so
-  are `diagnostic` and `config` entities unless `diagnostic=1` (they then carry `diag: true`).
-  `domain` must be on the allow-list; `q` (at most 64 characters, words are ANDed over name, entity id,
-  area, device, integration and labels) and `area` (exact name, any case) filter on the server. The
-  editor fetches the whole list once (about 150 bytes per entity: 3,000 entities are ~450 KB) and
-  filters in the browser; the answer carries an `ETag` and `Cache-Control: no-cache`, and a request
-  with a matching `If-None-Match` gets an empty `304`. `registries` is false when the registries could
-  not be read (see below): the rows then carry no area, device, integration or labels and nothing is
-  excluded by flag, so the editor can only group by type. That is not an error.
+- `GET ha/entities?domain=&q=&area=&diagnostic=0|1&state=0|1` -> `{entities: [{entity_id, name, domain,
+  device_class?, area_id?, device_id?, platform?, label_ids?: [str], diag?: true, state?}],
+  areas: [{id, name, floor_id?, floor?}], devices: [{id, name}], labels: [{id, name}], registries: bool,
+  total: int, truncated?: true}`, sorted by domain then name. Rows refer to areas, devices and labels by
+  **id**; the lists carry the names (ids are the keys, names are for display, so two areas called "Hall"
+  on different floors stay apart). `area_id` is the entity's own area, else its device's; `device_id` is
+  set when the device has a name (the user's name wins); `platform` is the integration domain; the
+  lists hold only what the rows use. Disabled and hidden entities are always left out, and so are
+  `diagnostic` and `config` entities unless `diagnostic=1` (they then carry `diag: true`). `state` is
+  left out unless `state=1` (only the Overview shows it), so the answer, and its ETag, do not change
+  with every state change. `domain` must be on the allow-list; `q` (at most 64 characters, words are
+  ANDed over name, entity id, area, device and label names and the integration) and `area` (an area id)
+  filter on the server.
+  The editor fetches the whole list once and filters in the browser. A row is about 130 bytes: 3,000
+  entities are ~450 KB, and the answer is cut at 20,000 entities (~2.6 MB), sorted first, so the cut
+  keeps the first by domain and name, with `truncated: true` and `total` the number that matched (the
+  editor then says so and `q`, `domain` and `area` narrow it). The answer carries an `ETag` and
+  `Cache-Control: no-cache`; a request whose `If-None-Match` matches (a `W/` prefix and quotes are
+  ignored, `*` matches) gets an empty `304`. The serialised answer is memoised per query until Home
+  Assistant's states or the registries are read again, and concurrent requests share one read.
+  `registries` is false when the registries could not be read (see below): the rows then carry no
+  area, device, integration or labels and nothing is excluded by flag, so the editor can only group by
+  type. That is not an error. Wrong-typed registry fields are ignored, never an error.
 - `GET ha/services?domain=` -> `{services: [{domain, service, name, fields: [str]}]}`.
 - Both: `503 ha_unavailable` when Home Assistant cannot be read (no token, network, bad answer);
   `error.reason` is a short cause (`no_access`, `status_503`, `too_large`, `not_json`, `TimeoutError`, ...).
@@ -254,7 +264,7 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
   plus a `Retry-After` header.
 - Draft rev is an integer counter. It appears as top-level `rev` in GET config and in the PUT, apply,
   revert and import responses; `If-Match` takes `3`, `"3"` or `W/"3"`. `rev` is separate from `applied.rev`.
-- `GET /ha/entities` returns `{entities:[{entity_id,name,domain,state?,device_class?,area?,device?,platform?,labels?,diag?}],areas,registries}` and
+- `GET /ha/entities` returns `{entities:[{entity_id,name,domain,device_class?,area_id?,device_id?,platform?,label_ids?,diag?,state?}],areas,devices,labels,registries,total}` and
   `GET /ha/services` returns `{services:[{domain,service,name,fields:[...]}]}`. Both reject repeated
   query params.
 - Validation: `errors:[{path:[...],msg,line:null}]` (up to 100). `POST validate?all=0` gives the first

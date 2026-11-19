@@ -163,7 +163,7 @@ export class HhActionPicker extends LitElement {
       </label>
       ${st.entities ? html`<button class="btn sm" aria-expanded=${this.browse} @click=${() => { this.browse = !this.browse; void import('./hh-ha-browser'); }}>${this.browse ? 'Hide' : 'Browse'} Home Assistant entities</button>` : nothing}
       ${this.browse
-        ? html`<hh-ha-browser mode="select" scope="picker" .entities=${st.entities} .loaded=${st.haLoaded} .loading=${st.haLoading} .reason=${st.haReason} .registries=${st.haRegistries} .areas=${st.haAreas} .domains=${domains}
+        ? html`<hh-ha-browser mode="select" scope="picker" .entities=${st.entities} .loaded=${st.haLoaded} .loading=${st.haLoading} .reason=${st.haReason} .registries=${st.haRegistries} .lookups=${st.haLookups} .truncated=${st.haTruncated} .domains=${domains}
             @hh-ha-pick=${(e: CustomEvent<{ entity_id: string }>) => { this.entity = e.detail.entity_id; this.browse = false; }}
             @hh-ha-retry=${() => void st.loadHa(true)}></hh-ha-browser>`
         : nothing}

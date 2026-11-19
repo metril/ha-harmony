@@ -73,6 +73,7 @@ export class HhOverview extends StoreElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.ha.addEventListener('change', this.onHa);
+    this.ha.haWithState = true;
     void this.ha.loadHa();
   }
   override disconnectedCallback(): void {

@@ -68,16 +68,18 @@ collapsed until you open them: group by **Area** (under its floor, when you use 
 **Device**, **Integration** or **Label** (options without data are hidden). Type the name, entity id,
 area, device, integration or label in the search box (press `/` to jump to it; several words must all
 match); matching groups open by themselves and clearing the search brings your collapsed groups back.
-The type chips (Lights, Switches, Scenes ...) and the Area, Label and Integration lists narrow the
-list together, with counts; "n filters" shows what is on and **Clear filters** resets it. Disabled and
-hidden entities, and diagnostic and config ones unless you tick **Show diagnostic and config
-entities**, are not listed. Star an entity to keep it under **Favourites**; **Used in this config**
+The Type, Area, Label and Integration lists (with counts) narrow the list together; "n filters"
+and removable pills show what is on and **Clear** resets it. Disabled and hidden entities, and
+diagnostic and config ones unless you tick **Show diagnostic and config entities** in the **⋯**
+menu, are not listed. The same menu has **Refresh the list**; the tab also refreshes when you
+open it or come back to the window after a minute. Star an entity to keep it under **Favourites**; **Used in this config**
 lists what the draft already calls, with the services, and **Recently used** the last eight you
 picked up (the stars and recents stay in this browser). Drag a row onto a key or the screen, or
 select it and then choose the target, as with any other chip. The action picker's "Home Assistant
 action" and the add-device wizard's "Home Assistant entity" step open the same list. Use the arrow
 keys to move through headers and rows, Right and Left to open and close a group.
 
+The "Use an entity id" row at the bottom takes an id you type, for an entity the list does not show.
 If the registries (areas, devices, labels) cannot be read the tab says so and groups by type only; if
 Home Assistant itself cannot be read it says why and offers **Retry**.
 

@@ -149,22 +149,22 @@ async def test_merge_exclusions_and_diagnostic_toggle(aiohttp_server):
         "entity_id": "light.lamp",
         "name": "Living room lamp",
         "domain": "light",
-        "state": "on",
-        "area": "Living room",  # from the device
-        "device": "Reading lamp",  # name_by_user wins
+        "area_id": "lr",  # from the device
+        "device_id": "d1",
         "platform": "hue",
     }
-    assert rows["switch.plug"]["area"] == "Living room"  # the entity's own area beats its device's
-    assert "area" not in rows["scene.movie"] and "platform" not in rows["scene.movie"]
-    assert body["registries"] is True
-    assert body["areas"] == [{"name": "Living room", "floor": "Ground"}]
+    assert rows["switch.plug"]["area_id"] == "lr"  # the entity's own area beats its device's
+    assert "area_id" not in rows["scene.movie"] and "platform" not in rows["scene.movie"]
+    assert body["registries"] is True and body["total"] == 3
+    assert body["areas"] == [{"id": "lr", "name": "Living room", "floor_id": "f1", "floor": "Ground"}]
+    assert {d["id"]: d["name"] for d in body["devices"]} == {"d1": "Reading lamp", "d2": "Plug"}  # name_by_user wins
     full = await cat.catalog(diagnostic=True)
     ids = {r["entity_id"] for r in full["entities"]}
     assert ids == {"light.lamp", "switch.plug", "scene.movie", "sensor.rssi", "switch.cfg"}
     assert next(r for r in full["entities"] if r["entity_id"] == "sensor.rssi")["diag"] is True
 
 
-async def test_labels_come_from_the_entity_and_its_device_by_name():
+async def test_labels_come_from_the_entity_and_its_device_by_id():
     lists = {
         **LISTS,
         "config/label_registry/list": [
@@ -175,15 +175,17 @@ async def test_labels_come_from_the_entity_and_its_device_by_name():
         "config/entity_registry/list": [{**ENTITIES[0], "labels": ["tv", "gone"]}, *ENTITIES[1:]],
     }
     cat = Catalog(FakeApi(), lambda: 0.0, FakeRegistry(lists))
-    rows = {r["entity_id"]: r for r in (await cat.catalog())["entities"]}
-    assert rows["light.lamp"]["labels"] == ["Cozy", "Telly"]
-    assert "labels" not in rows["switch.plug"]
+    body = await cat.catalog()
+    rows = {r["entity_id"]: r for r in body["entities"]}
+    assert rows["light.lamp"]["label_ids"] == ["cozy", "tv"]  # "gone" is not a label
+    assert "label_ids" not in rows["switch.plug"]
+    assert body["labels"] == [{"id": "cozy", "name": "Cozy"}, {"id": "tv", "name": "Telly"}]
     assert [r["entity_id"] for r in (await cat.catalog(q="telly hue"))["entities"]] == ["light.lamp"]
 
 
 async def test_area_q_and_domain_filters(aiohttp_server):
     cat = Catalog(FakeApi(), lambda: 0.0, await serve(aiohttp_server, FakeCore()))
-    assert [r["entity_id"] for r in (await cat.catalog(area="living ROOM"))["entities"]] == [
+    assert [r["entity_id"] for r in (await cat.catalog(area="lr"))["entities"]] == [
         "light.lamp",
         "switch.plug",
     ]
@@ -202,7 +204,7 @@ async def test_fallback_to_rest_only_when_the_registries_fail(aiohttp_server, co
     body = await Catalog(FakeApi(), lambda: 0.0, reg).catalog()
     assert body["registries"] is False and body["areas"] == []
     assert len(body["entities"]) == 7  # nothing excluded without registry data
-    assert all(set(r) <= {"entity_id", "name", "domain", "state", "device_class"} for r in body["entities"])
+    assert all(set(r) <= {"entity_id", "name", "domain", "device_class"} for r in body["entities"])
 
 
 async def test_no_registry_configured_is_rest_only():
@@ -213,7 +215,7 @@ async def test_no_registry_configured_is_rest_only():
 async def test_floors_are_optional(aiohttp_server):
     core = FakeCore(fail=("config/floor_registry/list",))
     body = await Catalog(FakeApi(), lambda: 0.0, await serve(aiohttp_server, core)).catalog()
-    assert body["registries"] is True and body["areas"] == [{"name": "Living room"}]
+    assert body["registries"] is True and body["areas"] == [{"id": "lr", "name": "Living room"}]
 
 
 async def test_registries_are_cached_for_a_minute_and_a_failed_refresh_keeps_the_last_copy(aiohttp_server):
@@ -282,11 +284,97 @@ async def test_large_catalog_is_compact_and_etagged(aiohttp_client, aiohttp_serv
     raw = await r.read()
     body = json.loads(raw)
     assert len(body["entities"]) == 3000 and len(body["areas"]) == n_area
-    assert len(raw) < 500_000  # ~165 B per entity, not a multi-MB answer
+    assert all("state" not in r for r in body["entities"])  # a state change must not change the ETag
+    assert len(raw) < 500_000  # ~150 B per entity, not a multi-MB answer
     etag = r.headers["ETag"]
     r2 = await c.get("/api/v1/ha/entities", headers={"If-None-Match": etag})
     assert r2.status == 304 and await r2.read() == b""
-    r3 = await c.get("/api/v1/ha/entities?domain=scene&area=Area 3")
+    r3 = await c.get("/api/v1/ha/entities?domain=scene&area=a3")
     assert r3.status == 200 and r3.headers["ETag"] != etag
     assert (await c.get("/api/v1/ha/entities?diagnostic=2")).status == 400
     assert (await c.post("/api/v1/ha/entities", json={}, headers=H)).status == 405
+
+
+async def test_etag_accepts_weak_and_quoted_validators(aiohttp_client, tmp_path):
+    c = await aiohttp_client(create_app(tmp_path, auth=NoAuth(), ha_api=FakeApi(), clock=lambda: 0.0))
+    etag = (await c.get("/api/v1/ha/entities")).headers["ETag"]
+    for sent in (etag, "W/" + etag, f'"zzz", W/{etag}', "*"):
+        assert (await c.get("/api/v1/ha/entities", headers={"If-None-Match": sent})).status == 304
+    assert (await c.get("/api/v1/ha/entities", headers={"If-None-Match": '"nope"'})).status == 200
+
+
+async def test_etag_ignores_state_changes_but_state_is_on_request():
+    api = FakeApi([dict(s) for s in STATES])
+    t = [0.0]
+    cat = Catalog(api, lambda: t[0])
+    one = await cat.catalog_body()
+    api.states[0]["state"] = "off"
+    t[0] += ha_client.CACHE_SECONDS + 1
+    assert await cat.catalog_body() == one
+    assert '"state"' not in one[0]
+    with_state = await cat.catalog_body(state=True)
+    assert '"state":"off"' in with_state[0] and with_state[1] != one[1]
+
+
+async def test_the_body_is_memoised_until_the_sources_change():
+    api = FakeApi()
+    t = [0.0]
+    cat = Catalog(api, lambda: t[0])
+    a = await cat.catalog_body(q="plug")
+    assert await cat.catalog_body(q="plug") is a  # not rebuilt, not re-serialised
+    t[0] += ha_client.CACHE_SECONDS + 1
+    api.states = list(api.states)  # a new answer from Home Assistant
+    assert await cat.catalog_body(q="plug") is not a
+    assert api.calls == ["/states", "/states"]
+
+
+async def test_concurrent_cache_misses_share_one_fetch(aiohttp_server):
+    import asyncio
+
+    core = FakeCore()
+    reg = await serve(aiohttp_server, core)
+
+    class Slow(FakeApi):
+        async def get(self, path):
+            await asyncio.sleep(0.05)
+            return await super().get(path)
+
+    api = Slow()
+    cat = Catalog(api, lambda: 0.0, reg)
+    bodies = await asyncio.gather(*(cat.catalog() for _ in range(8)))
+    assert api.calls == ["/states"] and core.connections == 1
+    assert all(b["total"] == 3 for b in bodies)
+
+
+async def test_wrong_typed_registry_fields_do_not_break_the_catalog():
+    lists = {
+        "config/area_registry/list": [{"area_id": "lr", "name": ["x"], "floor_id": 5}, "junk", {"area_id": []}],
+        "config/floor_registry/list": "nope",
+        "config/label_registry/list": [{"label_id": "a", "name": None}],
+        "config/device_registry/list": [{"id": "d1", "name": 3, "area_id": ["x"], "labels": "oops"}, 7],
+        "config/entity_registry/list": [
+            {"entity_id": "light.lamp", "device_id": ["d1"], "area_id": {}, "labels": "cozy", "platform": 4},
+            {"entity_id": "switch.plug", "device_id": "d1", "labels": ["a", 3, None], "entity_category": []},
+            None,
+        ],
+    }
+    body = await Catalog(FakeApi(), lambda: 0.0, FakeRegistry(lists)).catalog()
+    assert body["registries"] is True and body["total"] == 7
+    rows = {r["entity_id"]: r for r in body["entities"]}
+    assert "area_id" not in rows["light.lamp"] and rows["switch.plug"]["label_ids"] == ["a"]
+
+
+async def test_same_named_areas_stay_apart_because_they_are_keyed_by_id():
+    lists = {
+        **LISTS,
+        "config/area_registry/list": [
+            {"area_id": "lr", "name": "Hall", "floor_id": "f1"},
+            {"area_id": "kt", "name": "Hall", "floor_id": "f2"},
+        ],
+        "config/floor_registry/list": [{"floor_id": "f1", "name": "Up"}, {"floor_id": "f2", "name": "Down"}],
+        "config/entity_registry/list": [ENTITIES[0], {**ENTITIES[1], "area_id": None}],
+    }
+    body = await Catalog(FakeApi(), lambda: 0.0, FakeRegistry(lists)).catalog()
+    assert {(a["id"], a["floor"]) for a in body["areas"]} == {("lr", "Up"), ("kt", "Down")}
+    only = await Catalog(FakeApi(), lambda: 0.0, FakeRegistry(lists)).catalog(area="kt")
+    assert [r["entity_id"] for r in only["entities"]] == ["switch.plug"]  # via its device, in the other Hall

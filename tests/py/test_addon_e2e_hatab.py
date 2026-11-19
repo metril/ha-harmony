@@ -142,8 +142,9 @@ async def search(page, text):
 async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     page = await open_tab(browser, big)
     # the tab says Home Assistant (never "Home") and its label is not cut
-    tab = page.get_by_role("tab", name="Home Assistant", exact=True)
-    assert await tab.evaluate("b => b.scrollWidth <= b.clientWidth + 1")
+    name = page.locator("hh-palette .tabs .tn")
+    assert (await name.text_content()) == "Home Assistant"
+    assert await name.evaluate("e => e.scrollWidth <= e.clientWidth")
     assert await page.get_by_role("tab", name="Home", exact=True).count() == 0
     # collapsed: floors as headers, no rows; excluded entities are not counted (3,000 shown)
     assert await page.locator(ROWS).count() == 0
@@ -167,10 +168,11 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     assert await page.locator(ROWS).count() == 0  # the previous (collapsed) state is back
 
     # type chips with counts, an "n filters" state, clear
-    await page.locator(P).get_by_role("button", name="Lights").click()
+    await page.locator(P).get_by_role("button", name="Type", exact=True).click()
+    await page.locator(f"{P} .opt", has_text="Lights").get_by_role("checkbox").check()
     await page.locator(P).get_by_text("1 filter", exact=True).wait_for()
     await shot(page, "03-filter-chip-1440")
-    await page.locator(P).get_by_role("button", name="Clear filters").click()
+    await page.locator(P).get_by_role("button", name="Clear", exact=True).click()
     assert await page.locator(f"{P} .pills").count() == 0
 
     # area dropdown filter (searchable) + removable pill
@@ -186,8 +188,7 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     sel = page.locator(P).get_by_role("combobox", name="Group by")
     assert await sel.locator("option").all_text_contents() == ["Area", "Type", "Device", "Integration", "Label"]
     await sel.select_option("type")
-    await page.wait_for_timeout(400)
-    await page.locator(P).get_by_role("button", name="Lights").first.wait_for()
+    await page.locator(f"{P} .gh", has_text="Lights").first.wait_for()
     assert await page.locator(ROWS).count() == 0
     await shot(page, "05-by-type-1440")
     await sel.select_option("label")
@@ -258,7 +259,7 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
 async def test_the_dom_stays_bounded_and_typing_stays_fast(browser, big):
     page = await open_tab(browser, big)
     await page.locator(P).get_by_role("button", name="Expand all").click()
-    await page.wait_for_timeout(300)
+    await page.locator(f"{P} .more").first.wait_for()
     n = await page.locator(ROWS).count()
     assert 20 < n <= 300, n  # 3,000 entities never become 3,000 rows
     assert await page.locator(f"{P} .more").count() >= 1
@@ -309,7 +310,7 @@ async def test_without_registries_it_groups_by_type_and_says_so(aiohttp_server, 
     note = page.locator(P).get_by_role("note")
     await note.get_by_text("grouped by type only").wait_for()
     assert await page.locator(P).get_by_role("combobox", name="Group by").locator("option").all_text_contents() == ["Type"]
-    await page.locator(P).get_by_role("button", name="Lights").first.wait_for()
+    await page.locator(f"{P} .gh", has_text="Lights").first.wait_for()
     await shot(page, "12-no-registries-1440")
 
 
@@ -335,3 +336,34 @@ async def test_action_picker_and_add_device_wizard_use_the_same_navigator(browse
     await shot(page, "14-wizard-1440")
     await row.click()
     await page.get_by_role("heading", name="Pick a Home Assistant entity").wait_for(state="detached")
+
+
+async def test_the_top_of_the_tab_is_compact_and_the_tab_icons_stay_put(browser, big):
+    page = await open_tab(browser, big)
+    box = lambda sel: page.locator(sel).first.bounding_box()  # noqa: E731
+    search = await box(f"{P} input.q")
+    first = await box(f"{P} .gh")
+    assert first["y"] - search["y"] < 4 * 40, "the list starts too far below the search box"
+    # collapsed, the 4 floors + "no floor" + the pinned list are all in view; open one floor and its areas join them
+    await page.locator(P).get_by_role("button", name="Ground").click()
+    await page.locator(f"{P} .gh.d1").first.wait_for()
+    heads = await page.locator(f"{P} .gh").evaluate_all(
+        "(hs, h) => hs.filter(x => { const r = x.getBoundingClientRect(); return r.top >= 0 && r.bottom <= h; }).length",
+        900,
+    )
+    assert heads >= 8, heads
+    # one filter row: Type, Area, Label, Integration and the options menu on one line
+    ys = await page.locator(f"{P} .fchips .fchip").evaluate_all("els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().top)))]")
+    assert len(ys) == 1, ys
+    # switching tabs does not move the other icons under the cursor
+    tabs = page.locator("hh-palette [role=tab]")
+    before = await tabs.evaluate_all("els => els.map(e => Math.round(e.getBoundingClientRect().left))")
+    await tabs.nth(0).click()
+    await page.locator("hh-palette [role=tab][aria-selected=true][aria-label=Devices]").wait_for()
+    assert await tabs.evaluate_all("els => els.map(e => Math.round(e.getBoundingClientRect().left))") == before
+    # every icon has a tooltip (its name) on hover and keyboard focus
+    await tabs.nth(1).hover()
+    tab = await tabs.nth(1).element_handle()
+    await page.wait_for_function("e => getComputedStyle(e, '::after').opacity === '1'", arg=tab)
+    assert await tab.evaluate("e => getComputedStyle(e, '::after').content") == '"Activities"'
+    await shot(page, "15-tab-tooltip-1440")

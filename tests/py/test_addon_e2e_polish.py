@@ -466,7 +466,7 @@ async def test_palette_chips_form_an_aligned_grid(browser, large, size):
     page = await open_large(browser, large, *size)
     for tab in ("Devices", "Activities", "Home Assistant", "Widgets"):
         await page.evaluate(
-            f"() => [...{PALETTE}.querySelectorAll('[role=tab]')].find(b => b.textContent.trim() == '{tab}').click()"
+            f"() => [...{PALETTE}.querySelectorAll('[role=tab]')].find(b => b.getAttribute('aria-label') == '{tab}').click()"
         )
         await page.wait_for_timeout(250)
         bad = await page.evaluate(
