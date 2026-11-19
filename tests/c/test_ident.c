@@ -114,6 +114,8 @@ static void test_precedence_and_persistence(void) {
     /* invalid input changes nothing */
     CT_EQ(hp_ident_set(&t, "default", "n"), HP_IDENT_BAD_ID);
     CT_EQ(hp_ident_set(&t, "bad id", NULL), HP_IDENT_BAD_ID);
+    CT_EQ(hp_ident_set(&t, "-lead", NULL), HP_IDENT_BAD_ID);
+    CT_EQ(hp_ident_set(&t, ".lead", NULL), HP_IDENT_BAD_ID);
     CT_EQ(hp_ident_set(&t, "ok", "bad\xff"), HP_IDENT_BAD_NAME);
     CT_CHECK(!strcmp(t.id, "kitchen"));
     CT_CHECK(slurp(d, "hub_id", b, sizeof b) && !strcmp(b, "kitchen"));

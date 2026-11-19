@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Rename a hub from Home Assistant: *Reconfigure* now has **Hub ID** and **Name** fields. The hub id was `ha-harmony-<hostname>` (Logitech's codename) and only changeable over SSH. The new hub message `set_hub_id` (code 26, reply `hub_id_ack` 27; needs a firmware update) validates and saves the id and an optional display name atomically in the daemon's own state directory (`hub_id`, `hub_name` next to `state.json`) and applies them at once (hello_ack, mDNS re-announced under the new name). Precedence: `hub_id` in hub.conf (pinned; refused with `id_pinned`), then the saved id, then the hostname default; hub.conf is never rewritten. `hello_ack` gains `name`, `hw_id` (MAC-derived), `rename`, `id_pinned`, and the mDNS TXT gains `hw=`.
+- The integration moves everything keyed by the id in one transaction (entry unique id and title, device identifiers, entity unique ids through the entity registry helper, the cached config, the add-on's store) and undoes everything, including the hub, if any step fails. Entity ids are not renamed, so history, dashboards and automations keep working. A hub renamed on the device is recognised by its hardware id (discovery and setup). See `docs/ha-config.md` "Naming your hub", `docs/proto/hub-identity.md`.
+- Add-on: a poll that names the previous id and/or hardware id (`X-Hub-Prev`, `X-Hub-Hw`, `X-Hub-Name` headers) moves that hub's store (draft, applied, history) to the new id, never overwriting an existing store; the editor header shows the hub name with the id as secondary text and the hub switcher uses names. See `docs/addon-api.md`.
 - Editor: the "Config size" meter's bar now uses the same net figures as its label (the hub's fixed load overhead left out), so 18 KiB of 6.5 MiB no longer draws about 19% full.
 
 ## 0.3.9 (2026-11-18)

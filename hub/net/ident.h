@@ -23,7 +23,8 @@ typedef struct {
     bool pinned;              /* the id came from --hub-id */
 } hp_ident_t;
 
-/* [A-Za-z0-9._-], 1..63 chars, not "default" (the add-on's placeholder id). */
+/* [A-Za-z0-9._-], 1..63 chars, not "default" (the add-on's placeholder id). hp_ident_set additionally wants
+ * the first character to be a letter or digit. */
 bool hp_ident_id_valid(const char *id);
 /* UTF-8, <= 48 bytes, no control characters; "" is valid (no name). */
 bool hp_ident_name_valid(const char *name);

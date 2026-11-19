@@ -30,23 +30,21 @@ from .const import (
     CONF_ADDON_HOST,
     CONF_ADDON_PORT,
     CONF_ADDON_TOKEN,
+    CONF_HUB_NAME,
+    CONF_HW_ID,
     CONF_TOKEN,
     CONFIG_SUBDIR,
     DOMAIN,
     STORE_VERSION,
 )
 from .coordinator import (
-    ISSUE_INVALID,
-    ISSUE_OTA_DEV_KEY,
-    ISSUE_OTA_ROLLBACK,
-    ISSUE_REJECTED,
-    ISSUE_SCHEMA,
     ISSUE_YAML,
     HarmonyCoordinator,
 )
 from .errors import invalid
 from .harmony_core.config_model import validate_ir
 from .ota import parse_image, path_allowed, read_image
+from .rename import RenameError, async_migrate_entry, clear_hub_issues, default_title, identity_data
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -160,8 +158,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
         raise ConfigEntryNotReady(str(exc)) from exc
 
     if client.hub_id != entry.unique_id:
-        await client.async_close()
-        raise ConfigEntryError("Host now answers as a different hub; re-add the integration")
+        # the same hub (its stable hardware id matches) renamed on the device, e.g. hub_id in hub.conf: follow it
+        hw = entry.data.get(CONF_HW_ID)
+        taken = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, client.hub_id or "")
+        if not (hw and client.hw_id == hw and client.hub_id and taken is None):
+            await client.async_close()
+            raise ConfigEntryError("Host now answers as a different hub; re-add the integration")
+        try:
+            await async_migrate_entry(hass, entry, client.hub_id, client.hub_name, hw_id=hw)
+        except RenameError as exc:
+            await client.async_close()
+            raise ConfigEntryError(f"Could not follow the hub's new id {client.hub_id}: {exc}") from exc
+        _LOGGER.info("The hub is now called %s; moved its entities, devices and cache", client.hub_id)
+    _sync_identity(hass, entry, client)
 
     coordinator = HarmonyCoordinator(hass, entry, client)
     entry.runtime_data = coordinator
@@ -233,17 +242,22 @@ def _device_kwargs(coordinator: HarmonyCoordinator) -> dict[str, Any]:
     }
 
 
+def _sync_identity(hass: HomeAssistant, entry: HarmonyConfigEntry, client: HarmonyHubClient) -> None:
+    """Remember what the hub says about itself (hardware id, name, whether it can be renamed)."""
+    new = identity_data(entry, client)
+    if all(entry.data.get(k) == v for k, v in new.items()):
+        return
+    title = entry.title
+    if entry.data.get(CONF_HUB_NAME, "") != client.hub_name:
+        title = default_title(client.hub_id or "", client.hub_name)
+    hass.config_entries.async_update_entry(entry, data={**entry.data, **new}, title=title)
+
+
 async def async_remove_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> None:
     """The entry is deleted: drop its cached add-on bundle (`.storage`) and its repair issues."""
     hub = entry.unique_id or ""
     await Store(hass, STORE_VERSION, f"{DOMAIN}.bundle.{hub}").async_remove()
-    for key in (ISSUE_INVALID, ISSUE_REJECTED, ISSUE_SCHEMA, ISSUE_YAML):
-        ir.async_delete_issue(hass, DOMAIN, f"{key}_{hub}")
-    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_OTA_DEV_KEY}_{hub}")
-    prefix = f"{ISSUE_OTA_ROLLBACK}_{hub}_"
-    for domain, issue_id in list(ir.async_get(hass).issues):
-        if domain == DOMAIN and issue_id.startswith(prefix):
-            ir.async_delete_issue(hass, DOMAIN, issue_id)
+    clear_hub_issues(hass, hub)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> bool:

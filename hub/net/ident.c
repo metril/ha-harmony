@@ -73,7 +73,8 @@ int hp_ident_init(hp_ident_t *t, const char *dir, const char *flag_id, const cha
 }
 
 int hp_ident_set(hp_ident_t *t, const char *id, const char *name) {
-    if (!hp_ident_id_valid(id)) return HP_IDENT_BAD_ID;
+    /* a new id must also start with a letter or digit: the add-on keys its store files by it */
+    if (!hp_ident_id_valid(id) || !((id[0] >= 'a' && id[0] <= 'z') || (id[0] >= 'A' && id[0] <= 'Z') || (id[0] >= '0' && id[0] <= '9'))) return HP_IDENT_BAD_ID;
     if (name && !hp_ident_name_valid(name)) return HP_IDENT_BAD_NAME;
     bool id_change = strcmp(id, t->id) != 0;
     if (id_change && t->pinned) return HP_IDENT_PINNED;

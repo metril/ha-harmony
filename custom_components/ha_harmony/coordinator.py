@@ -196,6 +196,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         super().__init__(hass, _LOGGER, config_entry=entry, name=DOMAIN)
         self.client = client
         self.hub_id: str = client.hub_id or ""
+        self.hub_name: str = client.hub_name
         self.fw_version = client.fw_version
         self.activities: list[str] = list(client.activities)
         self.device_states: dict[str, DeviceState] = {}
@@ -481,10 +482,33 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def async_start_link(self, client: AddonClient) -> None:
         self._link = client
         client.limits_provider = lambda: self.client.limits
+        client.identity = self._link_identity()
         self.link_state = "connecting"
         self.config_entry.async_create_background_task(
             self.hass, self._link_loop(client), f"{DOMAIN} add-on link {self.hub_id}"
         )
+
+    def _link_identity(self) -> dict[str, str]:
+        """Which hub this is, for the add-on's polls: the hardware id, the id before a rename (until the
+        add-on has answered once) and the display name."""
+        data = self.config_entry.data
+        out: dict[str, str] = {}
+        if data.get(const.CONF_HW_ID):
+            out["hw"] = data[const.CONF_HW_ID]
+        if data.get(const.CONF_PREV_ID):
+            out["prev"] = data[const.CONF_PREV_ID]
+        out["name"] = data.get(const.CONF_HUB_NAME, "")
+        return out
+
+    def _prev_id_seen(self) -> None:
+        """The add-on answered a poll that carried the previous id: it has moved (or refused) the store."""
+        data = self.config_entry.data
+        if data.get(const.CONF_PREV_ID):
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, data={k: v for k, v in data.items() if k != const.CONF_PREV_ID}
+            )
+        if self._link is not None:
+            self._link.identity.pop("prev", None)
 
     async def async_wait_first_config(self, timeout: float | None = None) -> None:
         """First run with nothing cached: give the link loop's first pull (the only one) a few seconds
@@ -538,6 +562,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         delay = const.LINK_BACKOFF_MIN
         while True:
             started = loop.time()
+            client.identity = self._link_identity()
             try:
                 if self._known_rev is None:
                     raw: bytes | None = await client.fetch(self.hub_id)
@@ -549,6 +574,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                         raw = await client.fetch(self.hub_id)
                 if self.link_state in ("unreachable", "auth_failed"):
                     _LOGGER.info("Harmony Editor add-on is reachable again")
+                self._prev_id_seen()
                 if raw is not None:
                     try:
                         bundle = await self.async_process_raw(raw)
@@ -570,6 +596,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     self.async_set_link_state("ok" if self.managed else "connecting")
                 delay = const.LINK_BACKOFF_MIN
             except NothingApplied as exc:
+                self._prev_id_seen()
                 self._note_link_failure(exc)
                 self._known_rev = ""
                 await asyncio.sleep(delay)
@@ -1041,6 +1068,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.available = connected
         if connected:
             self.note_ota_key()
+            if self.client.hub_id and self.client.hub_id != self.hub_id:
+                # the hub answers under another id (renamed on the device): setup follows it by hardware id
+                _LOGGER.info("Hub %s now answers as %s; reloading", self.hub_id, self.client.hub_id)
+                self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
+                return
         if connected and self.ota_state == "restarting":
             self._set_ota("installed")  # the hub came back from the update
         if connected:

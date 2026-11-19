@@ -163,6 +163,7 @@ async def test_reconfigure_changes_host_port_and_token(hass, hub_process, fast_c
     assert res["type"] is FlowResultType.ABORT and res["reason"] == "reconfigure_successful"
     assert entry.data["host"] == "127.0.0.1" and entry.data["port"] == hub_process.port
     assert entry.data["token"] == TOKEN
+    await hass.async_block_till_done()  # the reload the flow scheduled finishes before the test ends
 
 
 async def test_options_flow_toggles_hold_events(hass):

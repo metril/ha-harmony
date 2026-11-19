@@ -42,6 +42,16 @@ export function pickHub(search: string, resp: HubsResponse | null, remembered: s
   return { hub: 'default', reason: 'default', choices, anyLinked };
 }
 
+/** The display name an integration reported for `hub`, or '' (the id is then the only label). */
+export function hubName(resp: HubsResponse | null, hub: string): string {
+  return resp?.linked.find((l) => l.id === hub)?.name ?? '';
+}
+/** "Name (id)" for a switcher option; just the id when the hub has no name. */
+export function hubLabel(resp: HubsResponse | null, hub: string): string {
+  const n = hubName(resp, hub);
+  return n ? `${n} (${hub})` : hub;
+}
+
 /** The integration long-polls (about 55 s), so anything older than this is not polling. */
 export const POLL_FRESH_S = 150;
 

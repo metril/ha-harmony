@@ -117,13 +117,14 @@ export interface ApplyStatus {
   last_seen: number | null;
   /** when an integration last polled for THIS hub id (older add-ons omit the three fields below) */
   hub_last_seen?: number | null;
-  linked_hubs?: { id: string; last_seen: number }[];
+  linked_hubs?: { id: string; last_seen: number; name?: string }[];
   /** add-on clock, unix seconds */
   now?: number;
 }
 export interface HubsResponse {
   hubs: HubInfo[];
-  linked: { id: string; last_seen: number }[];
+  /** `name`: the hub's display name, when its integration reported one */
+  linked: { id: string; last_seen: number; name?: string }[];
   now?: number;
   /** a store under `default` that can move to one of these linked ids */
   adopt: { from: string; to: string[] } | null;

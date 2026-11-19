@@ -11,6 +11,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 from homeassistant.exceptions import HomeAssistantError
@@ -21,6 +22,10 @@ from .harmony_core.compiler import Compiled, CompileError, compile_config
 from .harmony_core.config_model import ConfigError, parse_data
 from .harmony_core.hub_limits import CURRENT, LIMITS_HEADER, HubLimits
 
+HW_HEADER = "X-Hub-Hw"  # the hub's stable hardware id
+PREV_HEADER = "X-Hub-Prev"  # the id the hub had before a rename
+NAME_HEADER = "X-Hub-Name"  # display name, percent-encoded UTF-8
+ADOPT_HEADER = "X-HH-Adopt"  # the add-on's answer to a rename: moved | exists | none
 ENVELOPE_KEYS = frozenset({"schema", "core_version", "hub_id", "applied_at", "rev", "config"})
 _REV = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -115,12 +120,23 @@ class AddonClient:
         # the connected hub's limits, sent with every poll so the editor shows ITS caps (an add-on
         # that does not know the header ignores it)
         self.limits_provider: Callable[[], HubLimits | None] | None = None
+        # which hub this is, sent with every poll (docs/addon-api.md "Renamed hubs"): the stable hardware id, the
+        # previous id after a rename and the display name. Empty = send none (an old add-on ignores them anyway).
+        self.identity: dict[str, str] = {}
+        self.last_adopt: str | None = None  # the add-on's X-HH-Adopt answer to the last poll: moved | exists | none
 
     def _poll_headers(self) -> dict[str, str]:
+        headers = dict(self._headers)
+        if (hw := self.identity.get("hw")) is not None:
+            headers[HW_HEADER] = hw
+        if (prev := self.identity.get("prev")) is not None:
+            headers[PREV_HEADER] = prev
+        if (name := self.identity.get("name")) is not None:
+            headers[NAME_HEADER] = quote(name, safe="")  # HTTP headers are not UTF-8: percent-encoded
         lim = self.limits_provider() if self.limits_provider else None
-        if lim is None:
-            return self._headers
-        return {**self._headers, LIMITS_HEADER: json.dumps(lim.to_wire(), separators=(",", ":"))}
+        if lim is not None:
+            headers[LIMITS_HEADER] = json.dumps(lim.to_wire(), separators=(",", ":"))
+        return headers
 
     async def _get(self, path: str, params: dict[str, str], wait: float) -> bytes | None:
         timeout = aiohttp.ClientTimeout(total=wait, sock_connect=5, sock_read=wait)
@@ -132,6 +148,7 @@ class AddonClient:
                 timeout=timeout,
                 allow_redirects=False,
             ) as resp:
+                self.last_adopt = resp.headers.get(ADOPT_HEADER)
                 if resp.status in (204, 304):
                     return None
                 if resp.status == 429:  # throttled by the add-on: back off, the token may be fine

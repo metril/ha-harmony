@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { byteCounter, summarize, utf8Bytes, validateCode } from '../src/lib/codes';
 import { locate, summarizeErrors } from '../src/lib/errors';
 import { hashFor, hubFromSearch, parseHash } from '../src/lib/router';
-import { linkInfo, linkProblem, pickHub } from '../src/lib/hubs';
+import { hubLabel, hubName, linkInfo, linkProblem, pickHub } from '../src/lib/hubs';
 import type { HubsResponse } from '../src/lib/api';
 import { tvConfig } from './helpers';
 
@@ -106,6 +106,17 @@ describe('router', () => {
     expect(hubFromSearch('?hub=sim_hub')).toBe('sim_hub');
     expect(hubFromSearch('?hub=../x')).toBe('default');
     expect(hubFromSearch('')).toBe('default');
+  });
+});
+
+describe('hub names', () => {
+  const resp = { hubs: [], linked: [{ id: 'ha-1', last_seen: 1, name: 'Living room' }, { id: 'ha-2', last_seen: 1 }], adopt: null } as HubsResponse;
+  it('shows the name with the id, or the id alone', () => {
+    expect(hubName(resp, 'ha-1')).toBe('Living room');
+    expect(hubLabel(resp, 'ha-1')).toBe('Living room (ha-1)');
+    expect(hubLabel(resp, 'ha-2')).toBe('ha-2');
+    expect(hubLabel(resp, 'unknown')).toBe('unknown');
+    expect(hubLabel(null, 'ha-1')).toBe('ha-1');
   });
 });
 

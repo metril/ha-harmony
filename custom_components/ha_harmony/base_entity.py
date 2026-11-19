@@ -16,7 +16,7 @@ from .coordinator import TOPIC_AVAILABLE, HarmonyCoordinator
 def hub_device_info(coordinator: HarmonyCoordinator) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, coordinator.hub_id)},
-        name=f"Harmony hub {coordinator.hub_id}",
+        name=coordinator.hub_name or f"Harmony hub {coordinator.hub_id}",
         manufacturer="Custom firmware",
         sw_version=coordinator.fw_version,
     )
