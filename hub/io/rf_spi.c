@@ -37,7 +37,11 @@ static const uint8_t CMD_INIT[7] = {0x10, 0xFF, 0x80, 0x00, 0x00, 0x01, 0x00};
 typedef struct {
     hp_rf_transport t; /* first member */
     hp_rf_spi_ops_t ops;
-    uint8_t slot;
+    uint8_t slot;       /* peer slot; valid only while slot_known (guarded by mu) */
+    bool slot_known;    /* configured, or learned from a link-up report */
+    bool slot_fixed;    /* configured: never overridden by the radio */
+    char slot_file[256]; /* persisted learned slot ("" = none) */
+    uint8_t persisted;  /* what the file holds (0 = nothing) */
     hp_rf_spi_role_t role;
     uint8_t powermode;
     int fd;
@@ -194,11 +198,57 @@ static size_t q_push(spi_t *s, bool lost) {
     return qi;
 }
 
+/* Persist the learned slot (tmp + rename; best effort): a restart on an already-up link gets no link-up
+ * report, so the last known slot is the provisional start value. Caller holds mu. */
+static void persist_slot(spi_t *s) {
+    if (!s->slot_file[0] || s->persisted == s->slot) return;
+    char tmp[sizeof s->slot_file + 8];
+    snprintf(tmp, sizeof tmp, "%s.tmp", s->slot_file);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    int ok = fprintf(f, "%u\n", (unsigned)s->slot) > 0;
+    ok = fclose(f) == 0 && ok;
+    if (ok && rename(tmp, s->slot_file) == 0) s->persisted = s->slot;
+    else unlink(tmp);
+}
+
+static void load_slot(spi_t *s, const char *path) {
+    if (!path || !*path || strlen(path) >= sizeof s->slot_file) return;
+    snprintf(s->slot_file, sizeof s->slot_file, "%s", path);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    unsigned v = 0;
+    char c = 0;
+    int n = fscanf(f, "%u%c", &v, &c);
+    fclose(f);
+    if (n >= 1 && v >= 1 && v <= 15 && (n == 1 || c == '\n')) {
+        s->slot = (uint8_t)v;
+        s->slot_known = true; /* provisional: a report or frame on another slot corrects it while detached */
+        s->persisted = (uint8_t)v;
+    }
+}
+
+/* The slot comes from the radio unless configured: a link-up report (`10 NN 41 04 <status> <wpid>`, loss
+ * bit clear) or the first data frame (hub `0x12 NN ...`, remote `0x20 <pipe> 0x12 ...`, slot = pipe & 0x0F),
+ * because a restart on an already-up link gets no link-up report. A slot is only taken while detached, so a
+ * second remote cannot hijack a live link, and a re-link on another slot is picked up. The wpid is not
+ * checked: the hub pairs one remote. Caller holds mu. */
+static void learn_slot(spi_t *s, unsigned slot, const char *from) {
+    if (s->slot_fixed || slot < 1 || slot > 15) return;
+    if (s->slot_known && (s->slot == slot || s->attached)) return;
+    s->slot = (uint8_t)slot;
+    s->slot_known = true;
+    s->txs_n = 0; /* statuses of the old slot */
+    slogf(s, "rf_spi: slot %u learned from %s", slot, from);
+    persist_slot(s);
+}
+
 static void on_report(spi_t *s, const uint8_t *b, size_t n) {
     pthread_mutex_lock(&s->mu);
     const uint8_t *inner = NULL;
     bool txs_shape = n == HP_RF_REMOTE_FRAME_LEN && b[0] == REPORT_REMOTE_DATA && b[2] == TX_STATUS_ID;
-    if (txs_shape && (s->role == HP_RF_SPI_ROLE_REMOTE || b[1] == s->slot)) {
+    if (txs_shape && !s->slot_known) learn_slot(s, b[1] & 0x0F, "TX status");
+    if (txs_shape && (s->role == HP_RF_SPI_ROLE_REMOTE || (s->slot_known && b[1] == s->slot))) {
         if (s->txs_n == TXSQ) { s->txs_head = (s->txs_head + 1) % TXSQ; s->txs_n--; }
         uint8_t *e = s->txs[(s->txs_head + s->txs_n++) % TXSQ];
         e[0] = s->role == HP_RF_SPI_ROLE_REMOTE ? (uint8_t)(b[1] & 0x0F) : b[1];
@@ -210,17 +260,25 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
     if (s->role == HP_RF_SPI_ROLE_HUB) {
         /* only the configured peer's data: another slot's uplink must not look like our remote's
          * (same filter as the TX status above) */
-        if (n == HP_RF_HUB_FRAME_LEN && b[0] == REPORT_HUB_DATA && b[1] == s->slot) inner = b + 2;
+        if (n == HP_RF_HUB_FRAME_LEN && b[0] == REPORT_HUB_DATA) {
+            learn_slot(s, b[1], "data frame");
+            if (s->slot_known && b[1] == s->slot) inner = b + 2;
+            else if (!s->slot_known && s->debug) slogf(s, "rf_spi: data dropped, slot not learned yet");
+        }
     } else if (n == HP_RF_REMOTE_FRAME_LEN && b[0] == REPORT_REMOTE_DATA && b[2] == 0x12) {
-        inner = b + 4;
+        learn_slot(s, b[1] & 0x0F, "data frame");
+        if (s->slot_known) inner = b + 4;
+        else if (s->debug) slogf(s, "rf_spi: data dropped, slot not learned yet");
     }
+    if (n >= 5 && (b[0] == 0x10 || b[0] == 0x11) && b[2] == 0x41 && b[3] == 0x04 && !(b[4] & LINK_LOST))
+        learn_slot(s, b[1], "link report");
     if (inner) {
         s->attached = true;
         size_t qi = q_push(s, false); /* a full queue (reader outran the hub loop) drops the oldest frame */
         memcpy(s->q[qi], inner, HP_RF_INNER_LEN);
         s->q_at[qi] = (uint32_t)s->ops.now_ms(s->ops.ctx);
         push_event(s);
-    } else if ((b[0] == 0x10 || b[0] == 0x11) && n >= 5 && b[1] == s->slot && b[2] == 0x41 && b[3] == 0x04) {
+    } else if ((b[0] == 0x10 || b[0] == 0x11) && n >= 5 && s->slot_known && b[1] == s->slot && b[2] == 0x41 && b[3] == 0x04) {
         int up = !(b[4] & LINK_LOST);
         if (s->link_logged != up) {
             s->link_logged = up;
@@ -287,12 +345,20 @@ static int spi_send(void *self, const uint8_t *frame, size_t len) {
     if (!s->claimed) return -HP_E_INVAL;
     if (!frame || !len) return -HP_E_INVAL;
     if (len > HP_RF_INNER_LEN) return -HP_E_TOOBIG;
+    pthread_mutex_lock(&s->mu);
+    bool known = s->slot_known;
+    uint8_t slot = s->slot;
+    pthread_mutex_unlock(&s->mu);
+    if (!known) { /* never guess a slot: nothing is written before the radio has reported one */
+        if (s->debug) slogf(s, "rf_spi: send dropped, slot not learned yet");
+        return -HP_E_NOENT;
+    }
     hp_rf_inner_t in;
     memset(in.b, 0, sizeof in.b); /* a short block is zero padded */
     memcpy(in.b, frame, len);
     hp_rf_frame_t w;
-    if (s->role == HP_RF_SPI_ROLE_REMOTE) hp_rf_wrap_remote(s->slot, s->powermode, &in, &w);
-    else hp_rf_wrap_hub(s->slot, &in, &w);
+    if (s->role == HP_RF_SPI_ROLE_REMOTE) hp_rf_wrap_remote(slot, s->powermode, &in, &w);
+    else hp_rf_wrap_hub(slot, &in, &w);
     return spi_write(s, w.data, w.len);
 }
 
@@ -384,7 +450,9 @@ int hp_rf_spi_open(const hp_rf_spi_cfg_t *cfg, hp_rf_transport **out) {
         return -HP_E_INVAL;
     }
     s->powermode = cfg ? (uint8_t)(cfg->powermode & 0xF0) : 0; /* upper nibble only */
-    s->slot = (cfg && cfg->slot) ? cfg->slot : s->role == HP_RF_SPI_ROLE_REMOTE ? HP_RF_SPI_REMOTE_SLOT : HP_RF_SPI_SLOT;
+    s->slot = (cfg && cfg->slot) ? cfg->slot : 0; /* 0 = learn it from the link-up report */
+    s->slot_known = s->slot_fixed = s->slot != 0;
+    if (!s->slot_fixed && cfg) load_slot(s, cfg->slot_file);
     s->fd = -1;
     s->link_logged = -1;
     if (cfg) {
@@ -498,4 +566,13 @@ int hp_rf_spi_unpair(hp_rf_transport *t, unsigned slot) {
 int hp_rf_spi_write_for_test(hp_rf_transport *t, const uint8_t *buf, size_t n) {
     if (!t || t->recv != spi_recv || !buf) return -HP_E_INVAL;
     return spi_write(t->self, buf, n);
+}
+
+int hp_rf_spi_slot(const hp_rf_transport *t) {
+    if (!t || t->recv != spi_recv) return -1;
+    spi_t *s = t->self;
+    pthread_mutex_lock(&s->mu);
+    int r = s->slot_known ? s->slot : -1;
+    pthread_mutex_unlock(&s->mu);
+    return r;
 }

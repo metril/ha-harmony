@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Hub and remote can learn their RF slot from the radio (link-up report, or the first data frame when the link was already up; the learned slot is saved in `rf_slot` next to the hub state file / in `/data/app` and used as a provisional start slot). Opt-in until the bench gate passes: `install_boot_hook.py install --learn-slot`, `deploy_remote.py install-hook --learn-slot`; `--rf-slot` / `--slot` still pass a fixed slot by default and override learning. Nothing is sent to a guessed slot before it is known. The remote's `--slot 0` is now rejected (omit the flag to learn).
+
 ## 0.3.6 (2026-11-18)
 
 - Editor: the Elite drawing's proportions now follow the photo (taller body, Off lower and inset, screen centred, keys and the D-pad ring placed from one table of body fractions, empty rounded grip at the bottom).

@@ -404,6 +404,15 @@ def test_rf_conf_keys_become_daemon_argv(root: Path) -> None:
     assert "--token " not in argv
 
 
+def test_rf_without_slot_passes_no_slot_flag(root: Path) -> None:
+    install_daemon(root, ARGV_DAEMON)
+    install_conf(root, "token=t\nport=8099\nrf=spi\n")
+    source_hook(root)
+    argv = _argv(root)
+    assert "--rf-spi" in argv
+    assert "--rf-slot" not in argv
+
+
 def test_no_rf_key_means_no_rf_flags(root: Path) -> None:
     install_daemon(root, ARGV_DAEMON)
     install_conf(root)

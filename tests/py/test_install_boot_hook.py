@@ -412,6 +412,18 @@ def test_rf_slot_lands_in_conf(hub: FakeHub) -> None:
         install(FakeHub(), rf_slot=16)
 
 
+def test_learn_slot_is_opt_in_and_exclusive(hub: FakeHub) -> None:
+    hub0 = FakeHub()
+    install(hub0)
+    assert "rf=" not in hub0.files[ibh.CONF].decode()  # default: radio off, as before
+    install(hub, learn_slot=True)
+    conf = hub.files[ibh.CONF].decode()
+    assert "rf=spi\n" in conf
+    assert "rf_slot" not in conf
+    with pytest.raises(ibh.InstallError, match="exclusive"):
+        install(FakeHub(), rf_slot=2, learn_slot=True)
+
+
 def test_keep_lua_writes_the_switch(hub: FakeHub) -> None:
     install(hub, stop_lua=False)
     assert "stop_lua=0\n" in hub.files[ibh.CONF].decode()
