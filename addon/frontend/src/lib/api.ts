@@ -36,6 +36,8 @@ export interface Usage {
   /** a current hub: what loading this config needs of its memory, and the budget it allows (bytes); null on old firmware */
   config_bytes: number | null;
   config_budget: number | null;
+  /** the fixed part of a load the hub reports (slack_b); the meter shows config_bytes and config_budget without it */
+  config_overhead?: number | null;
   soft_keys: number;
   soft_keys_max: number;
   /** wire pages (a long list page counts each of its pages) and the remote's cap */

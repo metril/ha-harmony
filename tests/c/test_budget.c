@@ -147,6 +147,33 @@ static void test_peak_memory(void) {
 static const char *SMALL = "{\"format\":2,\"devices\":[{\"id\":\"a\",\"commands\":{\"x\":{\"proto\":\"nec\",\"addr\":1,\"cmd\":2},"
                            "\"y\":{\"raw\":{\"hz\":38000,\"us\":[9000,4500,560,560]}}}}]}";
 
+/* Boundary configs (protocol, Pronto, raw): tests/py/test_limits.py extracts the BOUNDARY_* literals and asserts the
+ * same estimates and the same accept/refuse edge from the Python mirror (the editor's pre-check). */
+static const char *BOUNDARY_PROTO = "{\"format\":2,\"devices\":[{\"id\":\"a\",\"commands\":{\"x\":{\"proto\":\"nec\",\"addr\":1,\"cmd\":2},"
+                                    "\"y\":{\"proto\":\"nec\",\"addr\":1,\"cmd\":3},\"z\":{\"proto\":\"rc5\",\"addr\":5,\"cmd\":9}}}]}";
+static const char *BOUNDARY_PRONTO = "{\"format\":2,\"devices\":[{\"id\":\"a\",\"commands\":{\"x\":{\"pronto\":\"0000 006d 0001 0000 0018 0018\"},"
+                                     "\"y\":{\"pronto\":\"0000 006d 0002 0000 0018 0018 0018 0018\"}}}]}";
+static const char *BOUNDARY_RAW = "{\"format\":2,\"devices\":[{\"id\":\"a\",\"commands\":{\"x\":{\"raw\":{\"hz\":38000,\"us\":[9000,4500,560,560,560,1680]}},"
+                                  "\"y\":{\"raw\":{\"hz\":38000,\"us\":[9000,4500]}}}},{\"id\":\"b\",\"commands\":{\"z\":{\"proto\":\"nec\",\"addr\":2,\"cmd\":1}}}]}";
+
+static void test_budget_boundary(void) {
+    const char *cfg[] = {BOUNDARY_PROTO, BOUNDARY_PRONTO, BOUNDARY_RAW};
+    for (size_t i = 0; i < 3; i++) {
+        size_t est = 0;
+        CT_EQ(hp_map_estimate(cfg[i], strlen(cfg[i]), &est), 0);
+        fprintf(stderr, "boundary %zu: est %zu\n", i, est);
+        hp_map_t m;
+        hp_map_init(&m);
+        hp_map_set_budget(&m, est); /* exactly the estimate: accepted */
+        CT_EQ(hp_map_load(&m, cfg[i], strlen(cfg[i])), 0);
+        hp_map_free(&m);
+        hp_map_init(&m);
+        hp_map_set_budget(&m, est - 1); /* one byte less: refused */
+        CT_CHECK(hp_map_load(&m, cfg[i], strlen(cfg[i])) < 0);
+        hp_map_free(&m);
+    }
+}
+
 /* Golden numbers: tests/py/test_limits.py asserts the same ones from the Python mirror. */
 static void test_estimate_golden(void) {
     size_t est = 0;
@@ -586,6 +613,7 @@ int main(int argc, char **argv) {
         return rc == 0 && grown <= limit ? 0 : 1;
     }
     CT_RUN(test_estimate_golden);
+    CT_RUN(test_budget_boundary);
     CT_RUN(test_big_loads);
     CT_RUN(test_peak_memory);
     CT_RUN(test_failed_load_keeps_old_map);

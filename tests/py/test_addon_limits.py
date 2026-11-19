@@ -43,6 +43,7 @@ async def test_editor_shows_the_caps_of_the_hub_that_is_linked(aiohttp_client, t
     u = body["usage"]
     assert u["commands"] == 900 and u["commands_max"] is None and u["json_max"] is None
     assert u["config_budget"] == CURRENT.budget and 0 < u["config_bytes"] < u["config_budget"]
+    assert u["config_overhead"] == CURRENT.slack_b
     # another hub still gets the old numbers; a hub that reports old firmware ({}) too
     assert not (await prev("hub-b"))["ok"]
     await c.get("/api/v1/bundle?hub=hub-b", headers={**BEARER, LIMITS_HEADER: "{}"})

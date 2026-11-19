@@ -438,6 +438,7 @@ def compile_config(
         # a current hub: one byte budget for the whole config (None on a legacy hub)
         "config_bytes": need if not limits.legacy else None,
         "config_budget": limits.budget if not limits.legacy else None,
+        "config_overhead": limits.slack_b if not limits.legacy else None,  # the hub's fixed part of a load, from its own limits
         "soft_keys": sum(1 for c in names if c >= SOFT_KEY_BASE),
         "soft_keys_max": MAX_SOFT_KEYS,
         "pages": max(wire_count, len(models)),

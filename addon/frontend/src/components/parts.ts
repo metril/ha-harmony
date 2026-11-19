@@ -16,6 +16,15 @@ export function meter(label: string, text: string, value: number, max: number, h
   </div>`;
 }
 
+const net = (bytes: number, overhead?: number | null) => Math.max(0, bytes - (overhead ?? 0));
+/** KiB below 1 MiB (one decimal under 10), MiB above; rounded up for a used size and down for a limit, so "over" never reads as equal. */
+export function sizeText(bytes: number, round: 'up' | 'down'): string {
+  const r = round === 'up' ? Math.ceil : Math.floor;
+  if (bytes >= 1048576) return `${r((bytes / 1048576) * 10) / 10} MiB`;
+  const kib = bytes / 1024;
+  return `${kib < 10 ? r(kib * 10) / 10 : r(kib)} KiB`;
+}
+
 /** The draft meters, fed by the preview's `usage`. A current hub has one: "Config size X of Y KiB on this hub" (its memory
  * budget); old firmware has fixed limits: config KiB, IR pool %, commands. Pages are the remote's. */
 export function meters(store: Store): TemplateResult {
@@ -24,7 +33,7 @@ export function meters(store: Store): TemplateResult {
   const cmax = u?.commands_max ?? LIMITS.commands;
   if (u && u.config_budget != null && u.config_bytes != null)
     return html`
-      ${meter('Config size', `${Math.ceil(u.config_bytes / 1024)} of ${Math.floor(u.config_budget / 1024)} KiB on this hub`, u.config_bytes, u.config_budget, 'over, remove commands', 'The hub reserves a fixed part of this budget to load any config, so even a tiny config shows a large size.')}
+      ${meter('Config size', `${sizeText(net(u.config_bytes, u.config_overhead), 'up')} of ${sizeText(net(u.config_budget, u.config_overhead), 'down')} on this hub`, u.config_bytes, u.config_budget, 'over, remove commands', 'The hub keeps a fixed part of its budget to load any config; it is left out here, so an empty config reads about 0 and the right side is what you can fill.')}
       ${meter('Pages', `${u.pages} / ${u.page_limit}`, u.pages, u.page_limit)}
     `;
   return html`

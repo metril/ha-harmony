@@ -383,7 +383,7 @@ describe('hub limits are refused before apply', () => {
 describe('the editor shows the connected hub\'s caps', () => {
   const many = (n: number): Config => ({ devices: [{ id: 'd', commands: Object.fromEntries(Array.from({ length: n }, (_, i) => [`c${i}`, { proto: 'nec', addr: 1, cmd: i % 256 }])) }] });
   afterEach(() => Object.assign(LIMITS, LEGACY_LIMITS));
-  const current = { ...USAGE, json_max: null, pool_max: null, commands_max: null, inputs_max: null, devices_max: 255, config_bytes: 3 * 1024 * 1024, config_budget: 8 * 1024 * 1024 };
+  const current = { ...USAGE, json_max: null, pool_max: null, commands_max: null, inputs_max: null, devices_max: 255, config_bytes: 3 * 1024 * 1024, config_budget: 8 * 1024 * 1024, config_overhead: 1536 * 1024 };
   it('a current hub has no command or input count limit, so nothing is refused for count', () => {
     applyUsageLimits(current);
     expect(LIMITS.commands).toBe(Infinity);
@@ -401,10 +401,14 @@ describe('the editor shows the connected hub\'s caps', () => {
     const host = document.createElement('div');
     render(meters({ usage: current, config: many(10) } as never), host);
     expect(host.textContent).toContain('Config size');
-    expect(host.textContent).toContain('3072 of 8192 KiB on this hub');
+    expect(host.textContent).toContain('1.5 MiB of 6.5 MiB on this hub');
     expect(host.textContent).not.toContain('IR pool');
     expect(host.textContent).not.toContain('Commands');
     expect(host.textContent).not.toContain('remove commands');
+    render(meters({ usage: { ...current, config_bytes: 1536 * 1024 + 800 }, config: many(10) } as never), host);
+    expect(host.textContent).toContain('0.8 KiB of 6.5 MiB on this hub');
+    render(meters({ usage: { ...current, config_bytes: 1000 }, config: many(10) } as never), host);
+    expect(host.textContent).toContain('0 KiB of 6.5 MiB');
     render(meters({ usage: { ...current, config_bytes: 9000 * 1024 }, config: many(10) } as never), host);
     expect(host.textContent).toContain('over, remove commands');
     render(meters({ usage: USAGE, config: many(10) } as never), host);

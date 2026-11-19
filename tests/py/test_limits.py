@@ -91,6 +91,26 @@ def _c_golden() -> str:
     return "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', lit)).encode().decode("unicode_escape")
 
 
+def _c_literal(name: str) -> str:
+    src = (ROOT / "tests/c/test_budget.c").read_text()
+    lit = src[src.index(f"static const char *{name}") :].split(";", 1)[0]
+    return "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', lit)).encode().decode("unicode_escape")
+
+
+# estimates the hub computes for tests/c/test_budget.c's BOUNDARY_* configs (it prints them; the same C test
+# loads each with budget == estimate (accepted) and estimate - 1 (refused))
+BOUNDARY_EST = {"BOUNDARY_PROTO": 1573448, "BOUNDARY_PRONTO": 1573356, "BOUNDARY_RAW": 1573688}
+
+
+@pytest.mark.parametrize("name", sorted(BOUNDARY_EST))
+def test_precheck_accepts_and_refuses_exactly_where_the_hub_does(name):
+    stats = config_stats(json.loads(_c_literal(name)))
+    est = estimate_bytes(CURRENT, **stats)
+    assert est == BOUNDARY_EST[name]
+    assert fit_error(stats, CURRENT.with_budget(est)) is None
+    assert "KiB of hub memory" in fit_error(stats, CURRENT.with_budget(est - 1))
+
+
 def test_estimate_equals_the_c_golden():
     cfg = json.loads(_c_golden())
     stats = config_stats(cfg)
