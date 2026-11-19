@@ -33,3 +33,11 @@ set_device_state:
       example: hdmi1
       selector:
         text:
+install_firmware:
+  fields:
+    config_entry: *entry
+    path:
+      required: true
+      example: /config/ha_harmony/firmware/hub-12.img
+      selector:
+        text:

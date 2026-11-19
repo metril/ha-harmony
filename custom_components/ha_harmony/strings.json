@@ -73,6 +73,10 @@
     "yaml_unused": {
       "title": "Upload your Harmony YAML in the Harmony Editor add-on",
       "description": "Integration 0.3.0 no longer reads {path} for hub {hub}. Upload that file in the Harmony Editor add-on (import YAML, then apply). The file is untouched; delete it once imported."
+    },
+    "ota_rolled_back": {
+      "title": "Hub firmware update rolled back",
+      "description": "Hub {hub} did not come up healthy after installing build {build} and went back to its previous firmware ({reason}). Nothing was lost; check the build and try again."
     }
   },
   "services": {
@@ -131,6 +135,20 @@
           "description": "Selected input name; empty for unknown."
         }
       }
+    },
+    "install_firmware": {
+      "name": "Install firmware",
+      "description": "Upload a signed hub firmware image. The hub verifies the signature itself, applies it, restarts into it and rolls back automatically if the new build does not come up healthy.",
+      "fields": {
+        "config_entry": {
+          "name": "Config entry",
+          "description": "Hub (entry id or hub id). Optional when only one hub is set up."
+        },
+        "path": {
+          "name": "Image path",
+          "description": "Path of the signed .img file, under config/ha_harmony/firmware or a directory in allowlist_external_dirs."
+        }
+      }
     }
   },
   "entity": {
@@ -152,6 +170,18 @@
       },
       "page_format": {
         "name": "Page format"
+      },
+      "firmware_update": {
+        "name": "Firmware update",
+        "state": {
+          "idle": "Idle",
+          "uploading": "Uploading",
+          "applying": "Applying",
+          "restarting": "Restarting",
+          "installed": "Installed",
+          "failed": "Failed",
+          "rolled_back": "Rolled back"
+        }
       }
     },
     "select": {
@@ -223,6 +253,27 @@
     },
     "need_power_or_input": {
       "message": "Give power and/or input."
+    },
+    "ota_not_signed": {
+      "message": "That file is not a signed Harmony firmware image (no HOTA header). Unsigned files are never sent to the hub."
+    },
+    "ota_wrong_target": {
+      "message": "That image is not for the hub."
+    },
+    "ota_truncated": {
+      "message": "The image is incomplete: its header says {expected} bytes but the file has {actual}. Download it again."
+    },
+    "ota_file_missing": {
+      "message": "No such file: {path}"
+    },
+    "ota_path_not_allowed": {
+      "message": "{path} is not under config/ha_harmony/firmware or an allowlist_external_dirs directory."
+    },
+    "ota_in_progress": {
+      "message": "A firmware update is already being uploaded to this hub."
+    },
+    "ota_failed": {
+      "message": "The firmware update failed: {error}"
     }
   },
   "options": {

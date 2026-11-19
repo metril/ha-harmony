@@ -63,6 +63,7 @@ from .harmony_core.compiler import Compiled, HaStep, compile_config
 from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
+from .ota import CHUNK, TARGET_HUB, UPLOAD_ATTEMPTS, Image, encode_chunk
 from .tile_format import tile_state, tile_text
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ __all__ = ["HarmonyCoordinator", "tile_text"]
 TOPIC_AVAILABLE = "available"  # the hub connection went up or down
 TOPIC_ACTIVITY = "activity"  # the running activity or the activity list
 TOPIC_CONFIG = "config"  # a new applied config (devices, key names)
+TOPIC_OTA = "ota"  # firmware update state or progress
 TOPIC_LINK = "link"  # the add-on link state, revision or last error
 
 
@@ -92,6 +94,7 @@ ISSUE_INVALID = "config_invalid"
 ISSUE_REJECTED = "config_rejected"
 ISSUE_SCHEMA = "bundle_schema"
 ISSUE_YAML = "yaml_unused"
+ISSUE_OTA_ROLLBACK = "ota_rolled_back"  # + _<hub>_<build>: the hub restored its previous firmware
 
 # add-on link states (the diagnostic sensor's values)
 LINK_STATES = (
@@ -226,6 +229,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._first_apply = asyncio.Event()  # the link loop's first pull has been handled
         self.last_error: str | None = None
         self.timings: dict[str, float] = {}  # last compile / set_config round trip, in ms (diagnostics)
+        # firmware update (ota.py): idle | uploading | applying | restarting | installed | failed | rolled_back
+        self.ota_state = "idle"
+        self.ota_progress = 0  # percent of the image the hub holds
+        self.ota_build: int | None = None
+        self.ota_error: str | None = None
+        self.ota_reason: str | None = None  # why the hub rolled back (its boot hook's text)
+        self._ota_lock = asyncio.Lock()
         self.page_pushes = 0  # page_push requests sent
         self.config_pushes = 0  # set_config requests sent (observable by tests)
         self.tile_updates = 0
@@ -329,6 +339,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         ids = {f"{h}_remote", f"{h}_activity"}
         if self.has_addon_link:
             ids.add(f"{h}_addon_link")
+        ids.add(f"{h}_firmware")
         for r in self.remotes:
             ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}", f"{h}_pagefmt_{r}"}
         for dev in self.compiled.devices.values():
@@ -999,6 +1010,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     @callback
     def _on_state(self, connected: bool, err: HarmonyError | None) -> None:
         self.available = connected
+        if connected and self.ota_state == "restarting":
+            self._set_ota("installed")  # the hub came back from the update
         if connected:
             # hello was re-sent by the client: refresh what the hub told us. The hub re-announces
             # its remotes (remote_info) right after hello_ack. The next state_update is compared
@@ -1054,6 +1067,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 if self.device_states.get(data["device"]) != new:
                     self.device_states[data["device"]] = new
                     self._notify(topic_device(data["device"]))
+        elif mtype is MsgType.OTA_STATUS:
+            self._on_ota_status(data)
         elif mtype is MsgType.REMOTE_ATTACHED:
             self._on_remote_attached()
         elif mtype is MsgType.REMOTE_INFO:
@@ -1064,6 +1079,87 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             if self.battery.get(data["remote"]) != new_b:
                 self.battery[data["remote"]] = new_b
                 self._notify(topic_battery(data["remote"]))
+
+    # ------------------------------------------------------------ firmware update
+    def _set_ota(self, state: str, *, progress: int | None = None, error: str | None = None) -> None:
+        self.ota_state = state
+        if progress is not None:
+            self.ota_progress = progress
+        self.ota_error = error
+        self._notify(TOPIC_OTA)
+
+    def _on_ota_status(self, data: dict[str, Any]) -> None:
+        """A rolled_back status arrives after every hello while the hub holds the boot hook's record."""
+        if data["state"] != "rolled_back":
+            return
+        build = data.get("build", 0)
+        reason = data.get("reason", "")
+        self.ota_build, self.ota_reason = build, reason
+        if self.ota_state not in ("uploading", "applying"):
+            self._set_ota("rolled_back")
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"{ISSUE_OTA_ROLLBACK}_{self.hub_id}_{build}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_OTA_ROLLBACK,
+            translation_placeholders={"hub": self.hub_id, "build": str(build), "reason": reason},
+        )
+
+    def _clear_ota_issues(self) -> None:
+        reg = ir.async_get(self.hass)
+        prefix = f"{ISSUE_OTA_ROLLBACK}_{self.hub_id}_"
+        for domain, issue_id in list(reg.issues):
+            if domain == DOMAIN and issue_id.startswith(prefix):
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
+    async def _wait_connected(self, tries: int = 40) -> bool:
+        for _ in range(tries):
+            if self.client.connected:
+                return True
+            await self.async_sleep(0.5)
+        return self.client.connected
+
+    async def async_install_firmware(self, image: Image) -> None:
+        """Upload a (client-checked) signed image; the hub verifies, applies and restarts itself.
+
+        Resumable: after a dropped connection the same begin returns the offset the hub holds."""
+        if self._ota_lock.locked():
+            raise invalid("ota_in_progress")
+        async with self._ota_lock:
+            self.ota_build = image.build
+            self._set_ota("uploading", progress=0)
+            attempts = 0
+            while True:
+                try:
+                    await self._upload(image)
+                    break
+                except HarmonyConnectionError as exc:
+                    attempts += 1
+                    if attempts >= UPLOAD_ATTEMPTS or not await self._wait_connected():
+                        self._set_ota("failed", error=str(exc))
+                        raise ha_error("ota_failed", error=exc) from exc
+                except HarmonyCommandError as exc:
+                    self._set_ota("failed", error=f"{exc.code}: {exc.message}")
+                    raise ha_error("ota_failed", error=f"{exc.code}: {exc.message}") from exc
+            self._clear_ota_issues()
+            self._set_ota("restarting", progress=100)
+
+    async def _upload(self, image: Image) -> None:
+        reply = await self.client.async_send(
+            MsgType.OTA_BEGIN,
+            {"target": TARGET_HUB, "size": image.size, "build": image.build, "sha": image.sha512},
+        )
+        off = reply["offset"]  # where the hub already holds the image (a resume)
+        while off < image.size:
+            await self.client.async_send(
+                MsgType.OTA_CHUNK, {"offset": off, "data": encode_chunk(image, off)}
+            )
+            off = min(off + CHUNK, image.size)
+            self._set_ota("uploading", progress=off * 100 // image.size)
+        self._set_ota("applying", progress=100)
+        await self.client.async_send(MsgType.OTA_END, {})
 
     # ------------------------------------------------------------ Home Assistant actions
     @property
