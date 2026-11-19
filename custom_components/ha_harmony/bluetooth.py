@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.exceptions import HomeAssistantError
 
 from . import const
-from .addon_link import AddonClient, AddonError
+from .addon_link import AddonClient, AddonError, AddonRejected
 from .api import HarmonyCommandError, HarmonyConnectionError
 from .errors import invalid
 from .harmony_core.bt_relay import (
@@ -42,6 +42,7 @@ _ID = re.compile(r"^[A-Za-z0-9_-]{1,16}$")
 RESULTS_MAX = 32
 EVENTS_MAX = 64
 LEASE_MAX = 300
+EVENT_RATE = 20  # remote-key events per second fired on the HA bus (burst of the same size)
 
 HUB_ERRORS = {  # the hub's error codes (docs/proto/bluetooth.md), as a sentence
     "bad_addr": "that is not a Bluetooth address",
@@ -68,7 +69,12 @@ class BtError(HomeAssistantError):
         super().__init__(
             translation_domain=const.DOMAIN, translation_key=key, translation_placeholders={"error": msg}
         )
-        self.code, self.msg = code, msg
+        self.code, self.msg = _code(code), str(msg)
+
+
+def _code(raw: object) -> str:
+    """A hub error code as the add-on accepts it (`[a-z_]{1,32}`); anything else is "failed"."""
+    return re.sub(r"[^a-z_]", "_", str(raw or "").lower())[:32] or "failed"
 
 
 class BtManager:
@@ -81,7 +87,13 @@ class BtManager:
         self._leases: dict[str, float] = {}  # who asked to listen -> monotonic deadline
         self._timer: asyncio.TimerHandle | None = None
         self.addon_listen = False  # the editor wants key events (add-on answer)
-        self._events: collections.deque[dict[str, Any]] = collections.deque(maxlen=EVENTS_MAX)
+        self._events: collections.deque[tuple[int, dict[str, Any]]] = collections.deque(maxlen=EVENTS_MAX)
+        self._eseq = 0  # seq of the last queued key event: reports are acknowledged by it
+        self.events_dropped = 0  # queued key events pushed out of a full ring before the add-on took them
+        self.events_rate_dropped = 0  # key events not fired on the HA bus (rate limit)
+        self._tokens, self._token_t = float(EVENT_RATE), time.monotonic()
+        self._rejected_logged = False
+        self._listen_lock = asyncio.Lock()
         self._fast_hint = False
         self._results: collections.deque[dict[str, Any]] = collections.deque(maxlen=RESULTS_MAX)
         self.exchanges = 0  # relay round trips made (observable by tests)
@@ -176,10 +188,30 @@ class BtManager:
         if not self.listening():
             return
         slot, page, usage, down = data.get("slot"), data.get("page"), data.get("usage"), data.get("down")
-        if type(slot) is not int or type(page) is not int or type(usage) is not int or type(down) is not bool:
-            return
-        remote = next((e for e in (self.state or {}).get("remotes", ()) if e["slot"] == slot), None)
+        if (
+            type(slot) is not int
+            or type(page) is not int
+            or type(usage) is not int
+            or type(down) is not bool
+            or not 0 <= slot <= 255
+            or not 0 <= page <= 255
+            or not 0 <= usage <= 0xFFFF
+        ):
+            return  # the add-on would refuse the whole report over it
         event = {"slot": slot, "page": page, "usage": usage, "down": down}
+        if self.addon_listen:
+            if len(self._events) == EVENTS_MAX:
+                self.events_dropped += 1  # the oldest unsent one goes
+            self._eseq += 1
+            self._events.append((self._eseq, event))
+        now = time.monotonic()  # token bucket: a stuck or chattering remote must not flood the event bus
+        self._tokens = min(EVENT_RATE, self._tokens + (now - self._token_t) * EVENT_RATE)
+        self._token_t = now
+        if self._tokens < 1:
+            self.events_rate_dropped += 1
+            return
+        self._tokens -= 1
+        remote = next((e for e in (self.state or {}).get("remotes", ()) if e["slot"] == slot), None)
         self.c.hass.bus.async_fire(
             const.EVENT_BT_REMOTE_KEY,
             {
@@ -189,20 +221,19 @@ class BtManager:
                 "name": remote.get("name") if remote else None,
             },
         )
-        if self.addon_listen:
-            self._events.append(event)
 
     # ------------------------------------------------------------ listening
     async def sync_listen(self) -> None:
         """Make the hub's opt-in match what is wanted; never raises."""
-        want = self.listening() and self.supported
-        if want == self._hub_listen or not self.c.available:
-            return
-        try:
-            await self.c.client.async_send(MsgType.BT_LISTEN, {"on": want})
-            self._hub_listen = want
-        except (HarmonyCommandError, HarmonyConnectionError) as exc:
-            _LOGGER.debug("bt_listen failed: %s", exc)
+        async with self._listen_lock:  # one at a time: a second call sees what the first achieved
+            want = self.listening() and self.supported
+            if want == self._hub_listen or not self.c.available:
+                return
+            try:
+                await self.c.client.async_send(MsgType.BT_LISTEN, {"on": want})
+                self._hub_listen = want
+            except (HarmonyCommandError, HarmonyConnectionError) as exc:
+                _LOGGER.debug("bt_listen failed: %s", exc)
 
     def _arm_timer(self) -> None:
         if self._timer is not None:
@@ -325,51 +356,65 @@ class BtManager:
             self.c.hass, self._relay_loop(client), f"{const.DOMAIN} bt relay {self.c.hub_id}"
         )
 
-    def _report(self) -> dict[str, Any]:
+    def _report(self) -> tuple[dict[str, Any], int, int]:
+        """The report body, how many results it carries and the highest event seq in it."""
+        events = list(self._events)
         body: dict[str, Any] = {
             "hub": self.c.hub_id,
             "supported": self.supported,
             "online": self.c.available,
             "results": list(self._results),
-            "events": list(self._events),
+            "events": [e for _, e in events],
         }
         if self.supported:
             body["state"] = self.state
             body["limits"] = self.limits
-        return body
+        return body, len(body["results"]), events[-1][0] if events else 0
 
-    async def _run_command(self, raw: Any) -> None:
-        """One command from the add-on: validated again here, its outcome queued for the next report."""
+    def _sent(self, results: int, event_seq: int) -> None:
+        """Forget what the add-on has taken: that many results, the events up to `event_seq` (by seq, so a
+        newer one that arrived meanwhile stays)."""
+        for _ in range(min(results, len(self._results))):
+            self._results.popleft()
+        while self._events and self._events[0][0] <= event_seq:
+            self._events.popleft()
+
+    async def _run_command(self, raw: Any) -> bool:
+        """One command from the add-on: validated again here, its outcome queued for the next report.
+        False when it had no usable id (nobody can be told)."""
         cid = raw.get("id") if isinstance(raw, dict) else None
         if not isinstance(cid, str) or not _ID.fullmatch(cid):
-            return  # nobody can be told
+            return False
         res: dict[str, Any] = {"id": cid, "ok": True}
         try:
             self._need_bt()
             await self._do(check_command(raw, self.limits))
         except RelayError as exc:
-            res |= {"ok": False, "code": exc.code, "msg": exc.msg}
+            res |= {"ok": False, "code": _code(exc.code), "msg": exc.msg[:200]}
         except BtError as exc:
-            res |= {"ok": False, "code": re.sub(r"[^a-z_]", "_", exc.code)[:32], "msg": exc.msg[:200]}
+            res |= {"ok": False, "code": _code(exc.code), "msg": exc.msg[:200]}
         except HomeAssistantError as exc:
             res |= {"ok": False, "code": "invalid", "msg": str(getattr(exc, "translation_placeholders", {}).get("error", "refused"))[:200]}
         except Exception:  # a bug must not stop the relay
             _LOGGER.exception("Bluetooth relay command failed")
             res |= {"ok": False, "code": "failed", "msg": "internal error"}
         self._results.append(res)
+        return True
 
-    async def exchange_once(self, client: AddonClient) -> bool:
-        """One report/collect round trip; True when commands ran (then the next one should follow at once)."""
-        body = self._report()
-        sent_results, sent_events = len(body["results"]), len(body["events"])
-        data = await client.bt_exchange(body)
-        for _ in range(min(sent_results, len(self._results))):
-            self._results.popleft()
-        for _ in range(min(sent_events, len(self._events))):
-            self._events.popleft()
+    async def _swap(self, client: AddonClient) -> list[Any]:
+        """One report; what the add-on asked for comes back as a list of commands. A 400 from the add-on drops what
+        was sent (one bad item must not be resent for ever)."""
+        body, n_results, seq = self._report()
+        try:
+            data = await client.bt_exchange(body)
+        except AddonRejected:
+            self._sent(n_results, seq)
+            if not self._rejected_logged:
+                self._rejected_logged = True
+                _LOGGER.warning("The add-on refused a Bluetooth report; dropped it")
+            raise
+        self._sent(n_results, seq)
         self.exchanges += 1
-        cmds = data.get("commands")
-        cmds = cmds[:MAX_COMMANDS] if isinstance(cmds, list) else []
         want = data.get("listen") is True
         if want != self.addon_listen:
             self.addon_listen = want
@@ -377,25 +422,51 @@ class BtManager:
                 self._events.clear()
             await self.sync_listen()
         self._fast_hint = data.get("fast") is True
-        for raw in cmds:
-            await self._run_command(raw)
-        return bool(cmds)
+        cmds = data.get("commands")
+        return cmds[:MAX_COMMANDS] if isinstance(cmds, list) else []
+
+    async def exchange_once(self, client: AddonClient) -> bool:
+        """One report/collect round trip, and the commands it brought. Each result is reported as soon as its
+        command finishes (a slow one does not hold back the others). True when a command with a usable id ran."""
+        cmds = await self._swap(client)
+        ran = False
+        budget = 4 * MAX_COMMANDS  # commands per round, however many exchanges bring more
+        while cmds and budget > 0:
+            budget -= 1
+            ran = await self._run_command(cmds.pop(0)) or ran
+            if cmds and self._results:
+                cmds += (await self._swap(client))[: max(0, budget - len(cmds))]
+        return ran
 
     def fast(self) -> bool:
         return bool(self.window) or self.listening() or self._fast_hint or bool(self._results)
+
+    def _addon_gone(self) -> None:
+        """The add-on stopped answering: nobody is reading keys for it any more."""
+        if self.addon_listen:
+            self.addon_listen = False
+            self.c.config_entry.async_create_background_task(
+                self.c.hass, self.sync_listen(), f"{const.DOMAIN} bt listen off"
+            )
+        self._events.clear()
 
     async def _relay_loop(self, client: AddonClient) -> None:
         await self.c._first_apply.wait()  # the add-on knows this hub id once the bundle loop has polled it
         delay = const.LINK_BACKOFF_MIN
         while True:
             try:
-                if await self.exchange_once(client):
-                    continue
+                ran = await self.exchange_once(client)
                 delay = const.LINK_BACKOFF_MIN
-                await asyncio.sleep(const.BT_POLL_FAST if self.fast() else const.BT_POLL_IDLE)
+                self._rejected_logged = False
+                # a valid command was run: report it at once; otherwise never faster than the fast cadence
+                if not ran:
+                    await asyncio.sleep(const.BT_POLL_FAST if self.fast() else const.BT_POLL_IDLE)
+            except AddonRejected:
+                await asyncio.sleep(const.BT_POLL_IDLE)
             except AddonError:
+                self._addon_gone()
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, const.LINK_BACKOFF_MAX)
+                delay = min(delay * 2, 60.0)
             except Exception:
                 _LOGGER.exception("Unexpected error in the Bluetooth relay; retrying")
                 await asyncio.sleep(const.LINK_BACKOFF_MAX)

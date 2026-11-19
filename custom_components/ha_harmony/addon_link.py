@@ -43,6 +43,10 @@ class AddonAuthError(AddonError):
     pass
 
 
+class AddonRejected(AddonError):
+    """The add-on understood a request and refused its content (HTTP 400): resending it cannot help."""
+
+
 class NothingApplied(AddonError):
     pass
 
@@ -239,6 +243,8 @@ class AddonClient:
             ) as resp:
                 if resp.status in (401, 403):
                     raise AddonAuthError("the add-on refused the token")
+                if resp.status == 400:
+                    raise AddonRejected("the add-on refused the Bluetooth report")
                 if resp.status in (404, 405):  # an add-on without the relay (older), or no poll recorded yet
                     raise AddonUnreachable("the add-on has no Bluetooth relay")
                 if resp.status != 200:

@@ -250,12 +250,66 @@ async def test_queue_is_bounded(c, monkeypatch):
         j.cancel()
 
 
-async def test_exchange_asks_for_fast_polling_while_the_editor_is_there(c, clock):
+async def test_fast_polling_only_for_a_reason(c, clock):
     assert (await xchg(c))[1]["fast"] is False
-    await status(c)  # the editor looks
+    for _ in range(3):
+        await status(c)  # the editor looking does not speed the integration up
+    assert (await xchg(c))[1]["fast"] is False
+    t = serve(c)
+    await post(c, "pair/stop")  # a command does, for a while
+    await t
     assert (await xchg(c))[1]["fast"] is True
     clock.t += bt_routes.ACTIVE_S + 1
     assert (await xchg(c))[1]["fast"] is False
+    assert (await xchg(c, state={**STATE, "window": "host"}))[1]["fast"] is True  # a pairing window is open
+
+
+async def test_command_ids_make_a_repost_idempotent(c, monkeypatch):
+    assert bt_routes.RESULT_WAIT_S >= 20
+    await xchg(c)
+    t = serve(c)
+    code, body = await post(c, "pair/stop", cmd_id="my-1")
+    await t
+    assert code == 200 and body["id"] == "my-1"
+    code, again = await post(c, "pair/stop", cmd_id="my-1")  # the editor retried: the stored result, nothing queued
+    assert code == 200 and again["id"] == "my-1"
+    assert (await xchg(c))[1]["commands"] == []
+    assert (await post(c, "pair/stop", cmd_id="bad id!"))[0] == 400
+    # two posts of one id while it is in flight: one command, both answered
+    j1 = asyncio.ensure_future(post(c, "pair/stop", cmd_id="my-2"))
+    await asyncio.sleep(0.05)
+    j2 = asyncio.ensure_future(post(c, "pair/stop", cmd_id="my-2"))
+    await asyncio.sleep(0.05)
+    _st, data = await xchg(c)
+    assert [x["id"] for x in data["commands"]] == ["my-2"]
+    await xchg(c, results=[{"id": "my-2", "ok": True}])
+    assert (await j1)[0] == 200 and (await j2)[0] == 200
+
+
+async def test_a_result_after_the_editor_gave_up_is_kept_for_the_retry(c, monkeypatch):
+    monkeypatch.setattr(bt_routes, "RESULT_WAIT_S", 0.1)
+    await xchg(c)
+    j = asyncio.ensure_future(post(c, "pair/stop", cmd_id="late-1"))
+    await asyncio.sleep(0.02)
+    assert [x["id"] for x in (await xchg(c))[1]["commands"]] == ["late-1"]  # delivered
+    code, body = await j
+    assert code == 504 and body["error"]["id"] == "late-1"
+    await xchg(c, results=[{"id": "late-1", "ok": False, "code": "bt_busy", "msg": "busy"}])
+    code, body = await post(c, "pair/stop", cmd_id="late-1")  # the retry gets the answer, no second command
+    assert code == 502 and body["error"]["hub_code"] == "bt_busy"
+    assert (await xchg(c))[1]["commands"] == []
+
+
+async def test_relay_state_of_a_renamed_hub_is_dropped(c):
+    from harmony_addon.app import LINKED_KEY
+
+    await xchg(c)
+    assert HUB in c.app[bt_routes.BT_KEY].hubs
+    linked = c.app[LINKED_KEY]
+    linked.rename(HUB, "h2")
+    assert (await xchg(c, hub="h2"))[0] == 200
+    assert list(c.app[bt_routes.BT_KEY].hubs) == ["h2"]
+    assert (await status(c))["status"] == "unknown"
 
 
 # ------------------------------------------------------------------ listen and events

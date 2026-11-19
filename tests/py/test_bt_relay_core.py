@@ -26,6 +26,9 @@ def test_clean_limits():
         "hosts_max": 0, "conn_max": 0, "remotes_max": 0, "le_bonds_max": 0, "pages": [7], "le": False
     }
     assert bt_relay.clean_limits(None) is None
+    absent = bt_relay.clean_limits({"conn_max": 2})  # not reported: the protocol's maxima, not zero
+    assert absent["hosts_max"] == 255 and absent["remotes_max"] == 32
+    assert bt_relay.check_command({"op": "forget", "kind": "remote", "slot": 5}, absent)["slot"] == 5
 
 
 def test_gen_ordering_is_serial_arithmetic():

@@ -242,10 +242,18 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
 The hub's Bluetooth pairing and key learning (protocol: `docs/proto/bluetooth.md`; user guide: `docs/bluetooth.md`) reach the
 editor through the integration: the add-on never talks to the hub. Editor requests are queued per hub; the integration
 collects them with its next `POST bundle/bt` (about every 5 s, every 1 s while a pairing window or key listen is active or the
-editor asked in the last 10 s), runs them against the hub and reports the outcome with the new `bt_state` in its next
+command), runs them against the hub and reports the outcome with the new `bt_state` in its next
 exchange. Every queue is bounded (16 commands, 8 per exchange, 32 results, a 64-key ring, 32 hubs); the integration
 validates every command again against the hub's limits.
 
+- **Cadence.** The integration exchanges every 5 s, and every 1 s only while a pairing window is open, a listen lease holds, or
+  within 10 s of a command (or while one is in flight). A plain `bt/status` poll does not speed it up, so status is fresh to
+  within about 5 s when idle. After a command it is within about 1 s.
+- **Command ids.** Every command POST (`pair`, `pair/stop`, `pick`, `forget`, `key`) takes an optional `cmd_id`
+  (`[A-Za-z0-9_-]{1,16}`; generated when absent) and returns it as `id` (also in error bodies). Re-posting a `cmd_id` that is in
+  flight joins it, and one that has finished (the last 32 per hub) returns the stored result: a retry after a timeout never runs
+  the command twice. A command is delivered to the integration once. The integration reports each result as soon as its
+  command finishes.
 - `GET bt/status?hub=` -> `{hub, status: "ok"|"unsupported"|"offline"|"unknown", state, limits, listening, age_s}`.
   `unknown`: the integration has never reported (not linked, or an integration without Bluetooth support);
   `offline`: the hub is disconnected or the last report is over 30 s old; `unsupported`: the hub has no Bluetooth.
@@ -253,8 +261,8 @@ validates every command again against the hub's limits.
   pairing?: {result, addr?, name?, transport?, kind?}, hosts: [{slot, addr, name?, transport, connected, configured?}],
   remotes: [{slot, addr, name?, connected, battery?, configured?}], candidates?: [{addr, name?, rssi}]}`, addresses upper-case);
   it is `null` when none is known. `limits` is `hello_ack.bt`: `{hosts_max, conn_max, remotes_max, le_bonds_max, pages, le}`.
-  The editor polls this (1 s while its Bluetooth view is open); polling it keeps the integration on its fast poll.
-- Commands, each `{hub?, ...}`, answered `200 {ok: true, state}` once the integration has run it against the hub (up to 10 s;
+  The editor may poll this about every 2 s while its Bluetooth view is open (see Cadence).
+- Commands, each `{hub?, ...}`, answered `200 {ok: true, state}` once the integration has run it against the hub (up to 20 s;
   `state` is the snapshot reported with the outcome, the pairing result itself arrives later in `bt/status`):
   - `POST bt/pair` `{mode?: "host"|"remote" (host), transport?: "any"|"classic"|"le" (any), secs?: 1..300 (120)}`.
     Remote mode scans: found devices appear as `state.candidates`; nothing is bonded until `bt/pick`.
@@ -265,7 +273,7 @@ validates every command again against the hub's limits.
   - Errors: `400 bad_request` (schema), `422 invalid_bt` (`error.bt_code`, e.g. a slot beyond the hub's limits, `no_le`), `409
     bt_unknown | hub_offline | bt_unsupported`, `429 bt_busy` (too many waiting), `502 hub_refused` (`error.hub_code` is the hub's
     code: `no_candidate`, `no_slot`, `bt_not_ready`, `bt_busy`, ...; `msg` a sentence), `504 hub_timeout` (the integration did
-    not answer in 10 s; the command is dropped, never delivered late).
+    not answer in 20 s; if it was never delivered it is withdrawn, if it was delivered a retry with the same `cmd_id` gets its result).
 - `POST bt/listen` `{hub?, on: bool}` -> `{ok, listening}`: a 30 s lease. While it holds, the integration opts in to the hub's
   remote keys and forwards them; the lease is renewed by `GET bt/events` and `listen on`, and lapses when the editor stops
   asking (or on `on: false`). Nothing is listened to otherwise.

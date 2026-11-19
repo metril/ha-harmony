@@ -34,9 +34,10 @@ from .web_util import CLOCK_KEY, error, jresp, query, read_body
 
 BT_KEY = web.AppKey("bt_relay", object)
 STALE_S = 30  # a report older than this: the integration (or Home Assistant) is not there
-ACTIVE_S = 10  # the integration polls fast this long after the editor last asked
+ACTIVE_S = 10  # the integration polls fast this long after the editor last sent a command
 LISTEN_S = 30  # a listen request lapses unless the editor keeps asking (listen / events)
-RESULT_WAIT_S = 10.0  # how long an editor request waits for the integration to run its command
+RESULT_WAIT_S = 20.0  # how long an editor request waits for the integration to run its command
+PENDING_TTL_S = 60  # a delivered command's slot is freed after this, answered or not
 EVENTS_MAX = 64
 RESULTS_MAX = 32
 PENDING_MAX = 16  # commands queued or in flight per hub
@@ -53,6 +54,8 @@ class HubBt:
     reported: float | None = None
     queue: collections.deque[dict[str, Any]] = field(default_factory=collections.deque)
     waiting: dict[str, asyncio.Future[dict[str, Any]]] = field(default_factory=dict)
+    born: dict[str, float] = field(default_factory=dict)  # command id -> when it was queued
+    done: collections.OrderedDict[str, dict[str, Any]] = field(default_factory=collections.OrderedDict)  # recent results by id
     events: collections.deque[dict[str, Any]] = field(default_factory=lambda: collections.deque(maxlen=EVENTS_MAX))
     seq: int = 0
     listen_until: float = 0.0
@@ -69,6 +72,11 @@ class BtRelay:
         if h is None and create and len(self.hubs) < MAX_LINKED:
             h = self.hubs[hub] = HubBt()
         return h
+
+    def prune(self, linked: set[str]) -> None:
+        """Drop hubs nothing polls for any more (a rename, a removed integration); their waiters are told."""
+        for hub in [k for k in self.hubs if k not in linked]:
+            _wake(self.hubs.pop(hub))
 
     @staticmethod
     def status(h: HubBt | None, now: float) -> str:
@@ -112,26 +120,27 @@ EXCHANGE = vol.Schema(
 )
 _HUB_ONLY = {vol.Optional("hub", default="default"): _hub}
 STATUS_QUERY = vol.Schema(_HUB_ONLY, extra=vol.PREVENT_EXTRA)
+_CMD = {**_HUB_ONLY, vol.Optional("cmd_id"): vol.All(str, vol.Match(_ID))}  # the caller's id: a re-post is not a second command
 EVENTS_QUERY = vol.Schema(
     {**_HUB_ONLY, vol.Optional("after", default="0"): vol.All(str, vol.Match(r"^[0-9]{1,12}$"))},
     extra=vol.PREVENT_EXTRA,
 )
 PAIR = vol.Schema(
     {
-        **_HUB_ONLY,
+        **_CMD,
         vol.Optional("mode"): vol.In(["host", "remote"]),
         vol.Optional("transport"): vol.In(["any", "classic", "le"]),
         vol.Optional("secs"): vol.All(int, vol.Range(min=1, max=300)),
     },
     extra=vol.PREVENT_EXTRA,
 )
-STOP = vol.Schema(_HUB_ONLY, extra=vol.PREVENT_EXTRA)
+STOP = vol.Schema(_CMD, extra=vol.PREVENT_EXTRA)
 PICK = vol.Schema(
-    {**_HUB_ONLY, vol.Required("addr"): vol.All(str, vol.Match(ADDR))}, extra=vol.PREVENT_EXTRA
+    {**_CMD, vol.Required("addr"): vol.All(str, vol.Match(ADDR))}, extra=vol.PREVENT_EXTRA
 )
 FORGET = vol.Schema(
     {
-        **_HUB_ONLY,
+        **_CMD,
         vol.Required("slot"): vol.All(int, vol.Range(min=0, max=254)),
         vol.Optional("kind"): vol.In(["host", "remote"]),
     },
@@ -139,7 +148,7 @@ FORGET = vol.Schema(
 )
 KEY = vol.Schema(
     {
-        **_HUB_ONLY,
+        **_CMD,
         vol.Required("slot"): vol.All(int, vol.Range(min=0, max=254)),
         vol.Required("page"): vol.In([7, 12]),
         vol.Required("usage"): vol.All(int, vol.Range(min=0, max=65535)),
@@ -174,6 +183,7 @@ async def exchange(request: web.Request) -> web.Response:
 
     if hub not in request.app[LINKED_KEY].ids():
         raise error(404, "not_linked", "no Home Assistant integration polls for that hub id")
+    relay.prune(set(request.app[LINKED_KEY].ids()))  # a renamed or forgotten hub id must not linger
     h = relay.hub(hub, create=True)
     if h is None:
         raise error(429, "rate_limited", "too many hubs")
@@ -185,18 +195,26 @@ async def exchange(request: web.Request) -> web.Response:
         h.state = h.limits = None
     for r in body["results"]:
         fut = h.waiting.pop(r["id"], None)
-        if fut is not None and not fut.done():
+        if fut is None:
+            continue  # not a command this add-on is waiting for
+        h.born.pop(r["id"], None)
+        h.done[r["id"]] = r
+        while len(h.done) > RESULTS_MAX:
+            h.done.popitem(last=False)
+        if not fut.done():
             fut.set_result(r)
     if now < h.listen_until:
         for ev in body["events"]:
             h.seq += 1
             h.events.append({"seq": h.seq, **ev, "t": int(now)})
     commands = [h.queue.popleft() for _ in range(min(MAX_COMMANDS, len(h.queue)))]
+    window = bool(h.state and h.state.get("window"))
     return jresp(
         {
             "commands": commands,
             "listen": now < h.listen_until,
-            "fast": now < h.active_until or bool(h.queue) or bool(h.waiting),
+            # fast only for a reason: a pairing window, a listen lease, or a command recently asked for or in flight
+            "fast": window or now < h.listen_until or now < h.active_until or bool(h.queue) or bool(h.waiting),
         }
     )
 
@@ -217,40 +235,69 @@ def _state_or_refuse(request: web.Request, hub: str) -> HubBt:
     return h
 
 
-async def _run(request: web.Request, hub: str, cmd: dict[str, Any]) -> dict[str, Any]:
-    """Validate, queue for the integration's next exchange, wait for the outcome."""
+def _answer(h: HubBt, cid: str, res: dict[str, Any]) -> dict[str, Any]:
+    if not res["ok"]:
+        raise error(
+            502, "hub_refused", str(res.get("msg") or "the hub refused")[:200], hub_code=res.get("code", "failed"), id=cid
+        )
+    return {"ok": True, "id": cid, "state": h.state}
+
+
+def _expire(h: HubBt, now: float) -> None:
+    """A delivered command whose result never came: forget it, so it cannot hold a pending slot for ever."""
+    for cid in [c for c, t in h.born.items() if now - t > PENDING_TTL_S]:
+        fut = h.waiting.pop(cid, None)
+        h.born.pop(cid, None)
+        if fut is not None and not fut.done():
+            fut.set_result({"ok": False, "code": "expired", "msg": "the integration never answered"})
+
+
+async def _run(request: web.Request, hub: str, cmd: dict[str, Any], cid: str | None = None) -> dict[str, Any]:
+    """Validate, queue for the integration's next exchange, wait for the outcome. `cid` (the caller's command id) makes a
+    re-post of the same command safe: it joins the one in flight or gets the stored result, and never runs twice."""
+    known = _relay(request).hub(hub)
+    if known is not None and cid is not None:
+        if cid in known.done:
+            return _answer(known, cid, known.done[cid])
+        if cid in known.waiting:
+            return await _wait(known, cid)
     h = _state_or_refuse(request, hub)
     try:
         cmd = check_command(cmd, h.limits)
     except RelayError as exc:
         raise error(422, "invalid_bt", exc.msg, bt_code=exc.code) from None
+    _expire(h, _now(request))
     if len(h.waiting) >= PENDING_MAX:  # every queued command is also waiting for its result
         raise error(429, "bt_busy", "too many Bluetooth requests are waiting")
-    cid = f"c{next(_relay(request)._ids) & 0xFFFFFFF:x}"
+    cid = cid or f"c{next(_relay(request)._ids) & 0xFFFFFFF:x}"
     cmd["id"] = cid
-    fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-    h.waiting[cid] = fut
+    h.waiting[cid] = asyncio.get_running_loop().create_future()
+    h.born[cid] = _now(request)
     h.queue.append(cmd)
+    return await _wait(h, cid)
+
+
+async def _wait(h: HubBt, cid: str) -> dict[str, Any]:
+    fut = h.waiting.get(cid)
+    if fut is None:  # the result arrived between the check and here
+        return _answer(h, cid, h.done[cid])
     try:
-        res = await asyncio.wait_for(fut, RESULT_WAIT_S)
+        res = await asyncio.wait_for(asyncio.shield(fut), RESULT_WAIT_S)
     except TimeoutError:
-        raise error(504, "hub_timeout", "Home Assistant did not answer in time") from None
-    finally:
-        h.waiting.pop(cid, None)
-        for c in [c for c in h.queue if c.get("id") == cid]:
+        queued = [c for c in h.queue if c.get("id") == cid]
+        for c in queued:  # never delivered: withdraw it. A delivered one stays, so a retry finds its result.
             h.queue.remove(c)
-    if not res["ok"]:
-        raise error(502, "hub_refused", str(res.get("msg") or "the hub refused")[:200], hub_code=res.get("code", "failed"))
-    return {"ok": True, "state": h.state}
+            h.waiting.pop(cid, None)
+            h.born.pop(cid, None)
+        raise error(504, "hub_timeout", "Home Assistant did not answer in time", id=cid) from None
+    return _answer(h, cid, res)
 
 
 async def status(request: web.Request) -> web.Response:
     q = query(request, STATUS_QUERY)
     relay, now = _relay(request), _now(request)
     h = relay.hub(q["hub"])
-    st = relay.status(h, now)
-    if h is not None and st in ("ok", "unsupported"):
-        h.active_until = now + ACTIVE_S
+    st = relay.status(h, now)  # a plain status poll does not speed the integration up: it is fresh to within 5 s
     return jresp(
         {
             "hub": q["hub"],
@@ -265,30 +312,30 @@ async def status(request: web.Request) -> web.Response:
 
 async def pair(request: web.Request) -> web.Response:
     body = await read_body(request, PAIR)
-    cmd = {"op": "pair", **{k: v for k, v in body.items() if k != "hub"}}
-    return jresp(await _run(request, body["hub"], cmd))
+    cmd = {"op": "pair", **{k: v for k, v in body.items() if k not in ("hub", "cmd_id")}}
+    return jresp(await _run(request, body["hub"], cmd, body.get("cmd_id")))
 
 
 async def pair_stop(request: web.Request) -> web.Response:
     body = await read_body(request, STOP)
-    return jresp(await _run(request, body["hub"], {"op": "pair_stop"}))
+    return jresp(await _run(request, body["hub"], {"op": "pair_stop"}, body.get("cmd_id")))
 
 
 async def pick(request: web.Request) -> web.Response:
     body = await read_body(request, PICK)
-    return jresp(await _run(request, body["hub"], {"op": "pick", "addr": body["addr"]}))
+    return jresp(await _run(request, body["hub"], {"op": "pick", "addr": body["addr"]}, body.get("cmd_id")))
 
 
 async def forget(request: web.Request) -> web.Response:
     body = await read_body(request, FORGET)
     cmd = {"op": "forget", "slot": body["slot"], "kind": body.get("kind", "host")}
-    return jresp(await _run(request, body["hub"], cmd))
+    return jresp(await _run(request, body["hub"], cmd, body.get("cmd_id")))
 
 
 async def key(request: web.Request) -> web.Response:
     body = await read_body(request, KEY)
-    cmd = {"op": "key", **{k: v for k, v in body.items() if k != "hub"}}
-    return jresp(await _run(request, body["hub"], cmd))
+    cmd = {"op": "key", **{k: v for k, v in body.items() if k not in ("hub", "cmd_id")}}
+    return jresp(await _run(request, body["hub"], cmd, body.get("cmd_id")))
 
 
 async def listen(request: web.Request) -> web.Response:
@@ -311,7 +358,6 @@ async def events(request: web.Request) -> web.Response:
         return jresp({"events": [], "last": after, "listening": False, "dropped": False})
     if now < h.listen_until:  # polling keeps the listen alive
         h.listen_until = now + LISTEN_S
-        h.active_until = now + ACTIVE_S
     out = [e for e in h.events if e["seq"] > after]
     first = h.events[0]["seq"] if h.events else h.seq + 1
     return jresp(

@@ -46,7 +46,7 @@ remote's `address` and `name`. Normal key handling happens in the hub and needs 
 ## The editor relay
 
 The add-on never talks to the hub. The editor's Bluetooth requests wait in the add-on, the integration collects them (every
-5 s, every second while a window or a key listen is active or the editor has the view open), runs them on the hub and
+5 s, every second while a window or a key listen is active or just after a command), runs them on the hub and
 reports the result and the hub's state back. If Home Assistant is down or the hub is offline the editor says so instead of
 guessing. See [addon-api.md](addon-api.md) "Bluetooth relay".
 

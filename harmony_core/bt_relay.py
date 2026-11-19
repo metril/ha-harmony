@@ -115,8 +115,13 @@ def clean_limits(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     out: dict[str, Any] = {}
-    for k, hi in (("hosts_max", 255), ("conn_max", 255), ("remotes_max", 32), ("le_bonds_max", 255)):
-        out[k] = _int(raw.get(k), 0, hi) or 0
+    for k, hi, absent in (
+        ("hosts_max", 255, MAX_HOSTS),  # not reported: the protocol's maximum; reported but invalid: none
+        ("conn_max", 255, 0),
+        ("remotes_max", 32, MAX_REMOTES),
+        ("le_bonds_max", 255, 0),
+    ):
+        out[k] = absent if k not in raw else (_int(raw[k], 0, hi) or 0)
     pages = raw.get("pages")
     out["pages"] = sorted({p for p in pages if p in PAGES}) if isinstance(pages, list) else list(PAGES)
     out["le"] = raw.get("le") is True

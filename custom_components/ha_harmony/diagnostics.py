@@ -20,7 +20,7 @@ from .const import (
 )
 
 TO_REDACT = {CONF_TOKEN, CONF_ADDON_TOKEN, CONF_ADDON_UUID, CONF_ADDON_HOST, CONF_HOST}
-TO_REDACT_BT = {"addr"}  # Bluetooth addresses (bonds, the last pairing, scan candidates)
+TO_REDACT_BT = {"addr", "name"}  # Bluetooth addresses and device names (bonds, the last pairing, scan candidates)
 
 
 async def async_get_config_entry_diagnostics(
@@ -97,6 +97,8 @@ async def async_get_config_entry_diagnostics(
             "gen": c.btm.gen,
             "listening": c.btm.listening(),
             "relay_exchanges": c.btm.exchanges,
+            "events_dropped": c.btm.events_dropped,
+            "events_rate_dropped": c.btm.events_rate_dropped,
         },
         "counters": {
             "config_pushes": c.config_pushes,
