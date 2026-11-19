@@ -7,7 +7,7 @@
 
 // body size in viewBox units: the photo's screen is 190 px wide, ours 240, so one photo px = 240/190 units
 const S = 240 / 190;
-export const BODY = { x: 8, y: 8, w: Math.round(267 * S), h: Math.round(979 * S), rTop: 46, rBottom: 84 };
+export const BODY = { x: 8, y: 8, w: Math.round(267 * S), h: Math.round(979 * S), rTop: 76, rBottom: 84 };
 export const VIEW = { w: BODY.w + 16, h: BODY.h + 16 };
 /** the mini remote shows just the body (no margin) so its keys stay as large as the width allows */
 export const MINI_VIEW = { x: BODY.x - 3, y: BODY.y - 3, w: BODY.w + 6, h: BODY.h + 6 };
@@ -18,11 +18,20 @@ export const SCREEN = { w: 240, h: 320, x: Math.round(fx(0.498) - 120), y: Math.
 /** the black glass face around the screen and the Off key */
 export const GLASS = { x: BODY.x + 14, y: BODY.y + 14, w: BODY.w - 28, h: Math.round(0.371 * BODY.h), r: 30 };
 
-/** Rounded-rectangle path of the body: tighter at the top, a rounder grip at the bottom. `inset` shrinks it. */
-export function bodyPath(inset = 0): string {
-  const x = BODY.x + inset, y = BODY.y + inset, w = BODY.w - 2 * inset, h = BODY.h - 2 * inset;
-  const t = BODY.rTop - inset, b = BODY.rBottom - inset;
+/** Body outline: a broad dome at the top, a rounder end at the bottom. */
+export function bodyPath(): string {
+  const { x, y, w, h } = BODY;
+  const t = BODY.rTop, b = BODY.rBottom;
   return `M${x + t} ${y}h${w - 2 * t}a${t} ${t} 0 0 1 ${t} ${t}v${h - t - b}a${b} ${b} 0 0 1 -${b} ${b}h-${w - 2 * b}a${b} ${b} 0 0 1 -${b} -${b}v-${h - t - b}a${t} ${t} 0 0 1 ${t} -${t}z`;
+}
+/** y of the seam above the matte grip (0.90 of the body height) */
+export const GRIP_Y = Math.round(BODY.y + 0.9 * BODY.h);
+/** the matte grip below the seam */
+export function gripPath(): string {
+  const { x, w } = BODY;
+  const b = BODY.rBottom;
+  const yEnd = BODY.y + BODY.h;
+  return `M${x} ${GRIP_Y}h${w}v${yEnd - GRIP_Y - b}a${b} ${b} 0 0 1 -${b} ${b}h-${w - 2 * b}a${b} ${b} 0 0 1 -${b} -${b}z`;
 }
 
 /**
@@ -39,7 +48,8 @@ export const PHYSICAL_KEYS = {
   socketLower: 'home_control_4',
 } as const;
 
-export type KeyShape = 'rect' | 'pill' | 'circle' | 'rock-top' | 'rock-bottom' | 'wedge-up' | 'wedge-down' | 'wedge-left' | 'wedge-right';
+export type KeyShape = 'rect' | 'pill' | 'circle' | 'rock-top' | 'rock-bottom' | 'path';
+type Radii = [number, number, number, number];
 export interface KeyGeom {
   name: string;
   /** stock spelling, for tooltips */
@@ -50,22 +60,24 @@ export interface KeyGeom {
   printed?: string;
   group: string;
   shape: KeyShape;
+  /** bounding box */
   x: number;
   y: number;
   w: number;
   h: number;
-  /** colour keys */
+  /** colour keys: the colour of the ring drawn inside the key */
   color?: string;
+  /** rect: corner radii (top-left, top-right, bottom-right, bottom-left) */
+  radii?: Radii;
+  /** shape 'path': the outline */
+  d?: string;
 }
-type Opts = { printed?: string; color?: string };
+type Opts = { printed?: string; color?: string; radii?: Radii };
 /** name, label, group, shape, centre x, centre y, width, height (fractions of the body), options */
 type Row = readonly [string, string, string, KeyShape, number, number, number, number, Opts?];
 
-/** Static printed text on the body (not a control): text, centre x, y (fractions). */
-export const PRINTED: readonly { text: string; x: number; y: number }[] = [
-  { text: 'Vol', x: fx(0.170), y: fy(0.634) + 3 },
-  { text: 'Ch/Pg', x: fx(0.825), y: fy(0.634) + 3 },
-];
+/** Static printed text on the body (not a control). `sub` is a second line under a rule (Ch over Pg). */
+export interface Printed { text: string; x: number; y: number; sub?: string }
 
 const STOCK: Record<string, string> = { prev_channel: 'PrevChannel', home_control_1: 'HomeControl1', home_control_2: 'HomeControl2', home_control_3: 'HomeControl3', home_control_4: 'HomeControl4' };
 const stockOf = (name: string): string => STOCK[name] ?? name.replace(/(^|_)([a-z0-9])/g, (_m, _u, c: string) => c.toUpperCase());
@@ -74,58 +86,126 @@ const geom = ([name, label, group, shape, cx, cy, w, h, o]: Row): KeyGeom => ({
   x: fx(cx) - (w * BODY.w) / 2, y: fy(cy) - (h * BODY.h) / 2, w: w * BODY.w, h: h * BODY.h, ...o,
 });
 
-// the d-pad: a ring around OK. Centre and radii as fractions of the body width.
-const DPAD_C = { x: 0.498, y: 0.633 };
-const DPAD_R = 0.24;
-const DPAD_IN = 0.127;
-/** ring centre and outer radius in viewBox units (the ring is drawn behind the wedges) */
-export const DPAD = { x: fx(DPAD_C.x), y: fy(DPAD_C.y), r: Math.round(DPAD_R * BODY.w) };
-const DR = DPAD.r;
-const DI = Math.round(DPAD_IN * BODY.w);
-const dpadKeys: KeyGeom[] = ([
-  { name: 'up', label: '', group: 'nav', shape: 'wedge-up', x: DPAD.x - DR + 14, y: DPAD.y - DR, w: 2 * DR - 28, h: DR - DI },
-  { name: 'left', label: '', group: 'nav', shape: 'wedge-left', x: DPAD.x - DR, y: DPAD.y - DR + 14, w: DR - DI, h: 2 * DR - 28 },
-  { name: 'select', label: 'OK', group: 'nav', shape: 'circle', x: DPAD.x - DI, y: DPAD.y - DI, w: 2 * DI, h: 2 * DI },
-  { name: 'right', label: '', group: 'nav', shape: 'wedge-right', x: DPAD.x + DI, y: DPAD.y - DR + 14, w: DR - DI, h: 2 * DR - 28 },
-  { name: 'down', label: '', group: 'nav', shape: 'wedge-down', x: DPAD.x - DR + 14, y: DPAD.y + DI, w: 2 * DR - 28, h: DR - DI },
-] satisfies Omit<KeyGeom, 'stock'>[]).map((g) => ({ ...g, stock: stockOf(g.name) }));
+// ---- the cluster round the D-pad: Exit, Menu, Vol, Ch/Pg, Mute, Back and a rounded diamond with OK.
+// Its outlines are traced in a 3x zoomed crop of the photo (crop px); cp() maps them into viewBox units.
+type Pt = [number, number];
+const cp = (cx: number, cy: number): Pt => {
+  const px = 421 + (cx - 62) / 3, py = 532 + (cy - 35) / 3;
+  return [fx((px - 394) / 267), fy((py - 2) / 979)];
+};
+const mx = (cx: number): number => 760 - cx; // the cluster is symmetric about crop x = 380
+const flip = (crop: Pt[]): Pt[] => crop.map(([x, y]) => [mx(x), y] as Pt);
+/** a closed polygon with rounded corners (radius r in viewBox units) */
+function roundedPoly(pts: Pt[], r: number): string {
+  const n = pts.length;
+  let d = '';
+  pts.forEach((c, i) => {
+    const p = pts[(i + n - 1) % n] as Pt, q = pts[(i + 1) % n] as Pt;
+    const d1 = Math.hypot(p[0] - c[0], p[1] - c[1]), d2 = Math.hypot(q[0] - c[0], q[1] - c[1]);
+    const k = Math.min(r, d1 / 2, d2 / 2);
+    const a: Pt = [c[0] + ((p[0] - c[0]) * k) / d1, c[1] + ((p[1] - c[1]) * k) / d1];
+    const b: Pt = [c[0] + ((q[0] - c[0]) * k) / d2, c[1] + ((q[1] - c[1]) * k) / d2];
+    d += `${i ? 'L' : 'M'}${a[0].toFixed(1)} ${a[1].toFixed(1)}Q${c[0].toFixed(1)} ${c[1].toFixed(1)} ${b[0].toFixed(1)} ${b[1].toFixed(1)}`;
+  });
+  return d + 'z';
+}
+const bbox = (pts: Pt[]) => {
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+};
+const polyKey = (name: string, group: string, crop: Pt[], o: { label?: string; printed?: string } = {}): KeyGeom => {
+  const pts = crop.map(([x, y]) => cp(x, y));
+  return { name, stock: stockOf(name), label: o.label ?? '', group, shape: 'path', ...bbox(pts), d: roundedPoly(pts, 5), ...(o.printed ? { printed: o.printed } : {}) };
+};
+const EXIT: Pt[] = [[62, 35], [345, 35], [345, 60], [290, 113], [62, 113]];
+const MUTE: Pt[] = [[62, 503], [290, 503], [345, 558], [345, 580], [62, 580]];
+const VOL_TOP: Pt[] = [[62, 152], [215, 152], [148, 308], [62, 308]];
+const VOL_BOT: Pt[] = [[62, 308], [148, 308], [215, 465], [62, 465]];
+
+// the diamond (a square turned 45 degrees, rounded), split into four kites that meet round the OK button
+const DC = cp(382, 305);
+const DT = cp(382, 110), DR_ = cp(575, 305), DB = cp(382, 500), DL = cp(189, 305);
+const OK_R = Math.round((80 / 3) * (BODY.w / 267));
+/** diamond centre and half-diagonal in viewBox units */
+export const DPAD = { x: DC[0], y: DC[1], r: Math.round((DR_[0] - DL[0]) / 2) };
+const lerp = (a: Pt, b: Pt, t: number): Pt => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+/** one direction of the diamond: the region round tip `tip`, between its neighbours `a` and `b`; `ang` is the tip's bearing from the centre */
+const kite = (name: string, tip: Pt, a: Pt, b: Pt, ang: number): KeyGeom => {
+  const mid = (p: Pt, q: Pt): Pt => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+  const ra = OK_R + 4;
+  const on = (t: number): Pt => [DC[0] + ra * Math.cos(t), DC[1] + ra * Math.sin(t)];
+  const a0 = on(ang - Math.PI / 4), a1 = on(ang + Math.PI / 4);
+  const m1 = mid(tip, a), m2 = mid(tip, b);
+  const p1 = lerp(tip, a, 0.3), p2 = lerp(tip, b, 0.3);
+  const f = (p: Pt) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`;
+  const d = `M${f(a0)}L${f(m1)}L${f(p1)}Q${f(tip)} ${f(p2)}L${f(m2)}L${f(a1)}A${ra} ${ra} 0 0 0 ${f(a0)}z`;
+  return { name, stock: stockOf(name), label: '', group: 'nav', shape: 'path', ...bbox([m1, p1, tip, p2, m2, a0, a1]), d };
+};
+const SPECIAL: Record<string, KeyGeom> = {};
+[
+  polyKey('exit', 'menu', EXIT, { label: 'Exit' }),
+  polyKey('menu', 'menu', flip(EXIT), { label: 'Menu' }),
+  polyKey('volume_up', 'volume', VOL_TOP, { printed: 'Vol +' }),
+  polyKey('volume_down', 'volume', VOL_BOT, { printed: 'Vol −' }),
+  polyKey('channel_up', 'channel', flip(VOL_TOP), { printed: 'Ch/Pg +' }),
+  polyKey('channel_down', 'channel', flip(VOL_BOT), { printed: 'Ch/Pg −' }),
+  polyKey('volume_mute', 'volume', MUTE, { printed: 'Mute' }),
+  polyKey(PHYSICAL_KEYS.return, 'channel', flip(MUTE), { printed: 'Back' }),
+  kite('up', DT, DL, DR_, -Math.PI / 2),
+  kite('left', DL, DB, DT, Math.PI),
+  kite('right', DR_, DT, DB, 0),
+  kite('down', DB, DR_, DL, Math.PI / 2),
+  { name: 'select', stock: 'Select', label: 'OK', group: 'nav', shape: 'circle' as const, x: DC[0] - OK_R, y: DC[1] - OK_R, w: 2 * OK_R, h: 2 * OK_R },
+].forEach((g) => { SPECIAL[g.name] = g; });
+
+/** Printed text beside the rocker keys: "Vol", and "Ch" over "Pg" with a rule, at mid height near the outer edge. */
+const [vx, vy] = cp(95, 308), [chx, chy] = cp(658, 318);
+export const PRINTED: readonly Printed[] = [
+  { text: 'Vol', x: vx, y: vy + 3 },
+  { text: 'Ch', sub: 'Pg', x: chx, y: chy - 6 },
+];
 
 const PK = PHYSICAL_KEYS;
-/** In keyboard order: top to bottom, left to right. */
-const LAYOUT: readonly (Row | 'dpad')[] = [
-  ['power_off_activity', 'Off', 'power', 'pill', 0.243, 0.048, 0.165, 0.014, { color: '#7a2b27' }],
-  ['home', 'ACTIVITIES', 'strip', 'rect', 0.257, 0.423, 0.258, 0.022, { printed: 'ACTIVITIES' }],
-  ['favorites', 'DEVICES', 'strip', 'rect', 0.740, 0.423, 0.258, 0.022, { printed: 'DEVICES' }],
-  ['rewind', '', 'transport', 'rect', 0.232, 0.474, 0.262, 0.026],
-  ['play', '', 'transport', 'rock-top', 0.494, 0.478, 0.142, 0.032],
-  ['fast_forward', '', 'transport', 'rect', 0.764, 0.474, 0.262, 0.026],
-  ['record', '', 'transport', 'rect', 0.232, 0.513, 0.262, 0.026],
-  ['pause', '', 'transport', 'rock-bottom', 0.494, 0.511, 0.142, 0.030],
-  ['stop', '', 'transport', 'rect', 0.764, 0.513, 0.262, 0.026],
-  ['exit', 'Exit', 'menu', 'rect', 0.311, 0.555, 0.419, 0.027],
-  ['menu', 'Menu', 'menu', 'rect', 0.723, 0.555, 0.345, 0.027],
-  ['volume_up', '+', 'volume', 'rock-top', 0.170, 0.604, 0.139, 0.043, { printed: 'Vol +' }],
-  'dpad',
-  ['channel_up', '+', 'channel', 'rock-top', 0.825, 0.604, 0.139, 0.043, { printed: 'Ch/Pg +' }],
-  ['volume_down', '−', 'volume', 'rock-bottom', 0.170, 0.667, 0.139, 0.043, { printed: 'Vol −' }],
-  ['channel_down', '−', 'channel', 'rock-bottom', 0.825, 0.667, 0.139, 0.043, { printed: 'Ch/Pg −' }],
-  ['volume_mute', 'Mute', 'volume', 'rect', 0.275, 0.713, 0.348, 0.026],
-  [PK.return, '', 'channel', 'rect', 0.723, 0.713, 0.345, 0.026, { printed: 'Back' }],
-  ['dvr', 'DVR', 'guide', 'rect', 0.228, 0.759, 0.255, 0.026],
-  ['guide', 'Guide', 'guide', 'rect', 0.498, 0.759, 0.240, 0.026],
-  ['info', 'Info', 'guide', 'rect', 0.768, 0.759, 0.255, 0.026],
-  ['red', 'Red', 'colour', 'pill', 0.191, 0.797, 0.180, 0.016, { color: '#b8423a' }],
-  ['green', 'Green', 'colour', 'pill', 0.401, 0.797, 0.180, 0.016, { color: '#3e8e52' }],
-  ['yellow', 'Yellow', 'colour', 'pill', 0.596, 0.797, 0.180, 0.016, { color: '#bc9727' }],
-  ['blue', 'Blue', 'colour', 'pill', 0.805, 0.797, 0.180, 0.016, { color: '#3b69b8' }],
-  [PK.lightUpper, '', 'home', 'rect', 0.232, 0.837, 0.262, 0.030, { printed: 'upper light' }],
-  ['home_control_plus', '+', 'home', 'rock-top', 0.494, 0.838, 0.142, 0.032],
-  [PK.socketUpper, '', 'home', 'rect', 0.764, 0.837, 0.262, 0.030, { printed: 'upper socket' }],
-  [PK.lightLower, '', 'home', 'rect', 0.232, 0.876, 0.262, 0.030, { printed: 'lower light' }],
-  ['home_control_minus', '−', 'home', 'rock-bottom', 0.494, 0.874, 0.142, 0.033],
-  [PK.socketLower, '', 'home', 'rect', 0.764, 0.876, 0.262, 0.030, { printed: 'lower socket' }],
+/** In keyboard order: top to bottom, left to right. A string is a pre-built key of the D-pad cluster above. */
+const LAYOUT: readonly (Row | string)[] = [
+  ['power_off_activity', 'Off', 'power', 'pill', 0.242, 0.047, 0.176, 0.011],
+  ['home', 'ACTIVITIES', 'strip', 'rect', 0.257, 0.422, 0.258, 0.022, { printed: 'ACTIVITIES', radii: [0, 0, 0, 0] }],
+  ['favorites', 'DEVICES', 'strip', 'rect', 0.740, 0.422, 0.258, 0.022, { printed: 'DEVICES', radii: [0, 0, 0, 0] }],
+  ['rewind', '', 'transport', 'rect', 0.232, 0.473, 0.262, 0.026, { radii: [11, 3, 3, 3] }],
+  ['play', '', 'transport', 'rock-top', 0.498, 0.477, 0.150, 0.033],
+  ['fast_forward', '', 'transport', 'rect', 0.764, 0.473, 0.262, 0.026, { radii: [3, 11, 3, 3] }],
+  ['record', '', 'transport', 'rect', 0.232, 0.513, 0.262, 0.026, { radii: [3, 3, 3, 11] }],
+  ['pause', '', 'transport', 'rock-bottom', 0.498, 0.510, 0.150, 0.033],
+  ['stop', '', 'transport', 'rect', 0.764, 0.513, 0.262, 0.026, { radii: [3, 3, 11, 3] }],
+  'exit',
+  'menu',
+  'volume_up',
+  'up',
+  'left',
+  'select',
+  'right',
+  'down',
+  'channel_up',
+  'volume_down',
+  'channel_down',
+  'volume_mute',
+  PK.return,
+  ['dvr', 'DVR', 'guide', 'rect', 0.232, 0.759, 0.262, 0.027, { radii: [14, 2, 2, 14] }],
+  ['guide', 'Guide', 'guide', 'rect', 0.496, 0.759, 0.266, 0.027, { radii: [2, 2, 2, 2] }],
+  ['info', 'Info', 'guide', 'rect', 0.762, 0.759, 0.266, 0.027, { radii: [2, 14, 14, 2] }],
+  ['red', 'Red', 'colour', 'rect', 0.180, 0.800, 0.157, 0.016, { color: '#e0584c', radii: [6, 6, 6, 6] }],
+  ['green', 'Green', 'colour', 'rect', 0.393, 0.800, 0.157, 0.016, { color: '#4fb56a', radii: [6, 6, 6, 6] }],
+  ['yellow', 'Yellow', 'colour', 'rect', 0.607, 0.800, 0.157, 0.016, { color: '#e6c23a', radii: [6, 6, 6, 6] }],
+  ['blue', 'Blue', 'colour', 'rect', 0.816, 0.800, 0.157, 0.016, { color: '#5b8fe0', radii: [6, 6, 6, 6] }],
+  [PK.lightUpper, '', 'home', 'rect', 0.234, 0.836, 0.266, 0.026, { printed: 'upper light', radii: [6, 6, 6, 6] }],
+  ['home_control_plus', '+', 'home', 'rock-top', 0.498, 0.840, 0.150, 0.033],
+  [PK.socketUpper, '', 'home', 'rect', 0.762, 0.836, 0.266, 0.026, { printed: 'upper socket', radii: [6, 6, 6, 6] }],
+  [PK.lightLower, '', 'home', 'rect', 0.234, 0.876, 0.266, 0.027, { printed: 'lower light', radii: [6, 6, 6, 6] }],
+  ['home_control_minus', '−', 'home', 'rock-bottom', 0.498, 0.873, 0.150, 0.033],
+  [PK.socketLower, '', 'home', 'rect', 0.762, 0.876, 0.266, 0.027, { printed: 'lower socket', radii: [6, 6, 6, 6] }],
 ];
-export const KEYS: readonly KeyGeom[] = LAYOUT.flatMap((r) => (r === 'dpad' ? dpadKeys : [geom(r)]));
+export const KEYS: readonly KeyGeom[] = LAYOUT.map((r) => (typeof r === 'string' ? (SPECIAL[r] as KeyGeom) : geom(r)));
 
 export const keyByName = new Map(KEYS.map((g) => [g.name, g]));
 /** "Volume Up" style name for tooltips and announcements, plus what is printed on the real key when that differs */
@@ -136,34 +216,32 @@ export const keyTitle = (name: string): string => {
   return g.printed && g.printed.toLowerCase() !== t.toLowerCase() ? `${t} (${g.printed})` : t;
 };
 
-/** SVG path for a key shape in its own box (x,y,w,h). */
+/** SVG path of a key's outline. */
 export function keyPath(g: KeyGeom): string {
   const { x, y, w, h } = g;
-  const rr = (r: number) => `M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${h - 2 * r}a${r} ${r} 0 0 1 -${r} ${r}h-${w - 2 * r}a${r} ${r} 0 0 1 -${r} -${r}v-${h - 2 * r}a${r} ${r} 0 0 1 ${r} -${r}z`;
-  // per-corner radii: top-left, top-right, bottom-right, bottom-left
   const rr4 = (a: number, b: number, c: number, d: number) => `M${x + a} ${y}h${w - a - b}a${b} ${b} 0 0 1 ${b} ${b}v${h - b - c}a${c} ${c} 0 0 1 -${c} ${c}h-${w - c - d}a${d} ${d} 0 0 1 -${d} -${d}v-${h - d - a}a${a} ${a} 0 0 1 ${a} -${a}z`;
   switch (g.shape) {
+    case 'path':
+      return g.d ?? '';
     case 'circle': {
       const r = w / 2;
       return `M${x} ${y + r}a${r} ${r} 0 1 0 ${w} 0a${r} ${r} 0 1 0 -${w} 0z`;
     }
     case 'pill':
-      return rr(h / 2);
-    case 'rect':
-      return rr(8);
-    // one half of a rocker: rounded on the outer end, nearly square where the two halves meet
+      return rr4(h / 2, h / 2, h / 2, h / 2);
+    case 'rect': {
+      const [a, b, c, d] = g.radii ?? [6, 6, 6, 6];
+      return rr4(a, b, c, d);
+    }
+    // one half of a joined key: rounded on the outer end, square where the two halves meet
     case 'rock-top':
-      return rr4(10, 10, 3, 3);
+      return rr4(7, 7, 0, 0);
     case 'rock-bottom':
-      return rr4(3, 3, 10, 10);
-    // d-pad wedges: a rounded outer edge, a straight inner edge towards the OK button
-    case 'wedge-up':
-      return `M${x + 4} ${y + h}L${x + 12} ${y + 8}Q${x + w / 2} ${y - 4} ${x + w - 12} ${y + 8}L${x + w - 4} ${y + h}Q${x + w / 2} ${y + h + 6} ${x + 4} ${y + h}z`;
-    case 'wedge-down':
-      return `M${x + 4} ${y}Q${x + w / 2} ${y - 6} ${x + w - 4} ${y}L${x + w - 12} ${y + h - 8}Q${x + w / 2} ${y + h + 4} ${x + 12} ${y + h - 8}z`;
-    case 'wedge-left':
-      return `M${x + w} ${y + 4}Q${x + w + 6} ${y + h / 2} ${x + w} ${y + h - 4}L${x + 8} ${y + h - 12}Q${x - 4} ${y + h / 2} ${x + 8} ${y + 12}z`;
-    case 'wedge-right':
-      return `M${x} ${y + 4}L${x + w - 8} ${y + 12}Q${x + w + 4} ${y + h / 2} ${x + w - 8} ${y + h - 12}L${x} ${y + h - 4}Q${x - 6} ${y + h / 2} ${x} ${y + 4}z`;
+      return rr4(0, 0, 7, 7);
   }
+}
+/** The outlined pill drawn inside a colour key, in its colour. */
+export function tintPath(g: KeyGeom): string {
+  const ix = g.x + 5, iy = g.y + 4.5, iw = g.w - 10, ih = g.h - 9, r = ih / 2;
+  return `M${ix + r} ${iy}h${iw - 2 * r}a${r} ${r} 0 0 1 0 ${ih}h-${iw - 2 * r}a${r} ${r} 0 0 1 0 -${ih}z`;
 }
