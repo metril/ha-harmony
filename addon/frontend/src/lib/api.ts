@@ -128,6 +128,8 @@ export interface ApplyStatus {
   now?: number;
   /** what the linked remote's firmware cannot show (colours / custom themes), when the integration reports it */
   theme_notices?: string[];
+  /** the linked remotes as the integration last reported them (colour tier and what it costs) */
+  remotes?: { remote: number; caps: number; tier: 'none' | 'palette' | 'custom'; notices: string[] }[];
 }
 export interface HubsResponse {
   hubs: HubInfo[];

@@ -510,6 +510,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def async_start_link(self, client: AddonClient) -> None:
         self._link = client
         client.limits_provider = lambda: self.client.limits
+        client.remotes_provider = self._remotes_report
         client.identity = self._link_identity()
         self.link_state = "connecting"
         self.config_entry.async_create_background_task(
@@ -897,6 +898,27 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return False
         rp = c.for_caps(link.page_caps)
         return info.gen == rp.gen and info.pages == len(rp.pages_v2)
+
+    def _remotes_report(self) -> list[dict[str, Any]]:
+        """What the add-on's editor is told about each remote whose caps are known: its colour tier
+        ("none", "palette", "custom") and the notices of what that costs the current config."""
+        out: list[dict[str, Any]] = []
+        for remote in self.remotes:
+            info = self._rlink(remote).info
+            if info is None:
+                continue
+            tier = (
+                "custom" if info.caps & const.CAP_THEME_CUSTOM else "palette" if info.caps & const.CAP_THEME_COLOR else "none"
+            )
+            out.append(
+                {
+                    "remote": remote,
+                    "caps": info.caps,
+                    "tier": tier,
+                    "notices": [n["msg"] for n in self.theme_notices(remote)],
+                }
+            )
+        return out
 
     def theme_notices(self, remote: int) -> list[dict[str, Any]]:
         """What this remote's caps cost it in colours and themes (empty when nothing is degraded)."""

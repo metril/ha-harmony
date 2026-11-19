@@ -38,6 +38,7 @@ class LinkedHubs:
         self._limits: dict[str, dict[str, int]] = {}  # hub -> the limits its integration reported (wire form; {} = legacy)
         self._hw: dict[str, str] = {}  # hub -> its stable hardware id, as its integration reported it
         self._names: dict[str, str] = {}  # hub -> display name (absent = none)
+        self._remotes: dict[str, list[dict[str, Any]]] = {}  # hub -> its remotes as the integration last reported (memory only)
         self._persisted = 0
         try:
             raw = json.loads(self._path.read_bytes())
@@ -99,6 +100,8 @@ class LinkedHubs:
         if old == new or old not in self._seen:
             return
         self._seen[new] = max(self._seen.pop(old), self._seen.get(new, 0))
+        if old in self._remotes:
+            self._remotes.setdefault(new, self._remotes.pop(old))
         for table in (self._hw, self._names, self._limits):
             if old in table:
                 table.setdefault(new, table[old])
@@ -122,6 +125,27 @@ class LinkedHubs:
         if self._limits.get(hub) != clean:
             self._limits[hub] = clean
             self._persist(int(self._clock()))
+
+    def remotes(self, hub: str) -> list[dict[str, Any]]:
+        """The linked remotes of `hub` (caps tier and theme notices) as its integration last reported them."""
+        return self._remotes.get(hub, [])
+
+    def set_remotes(self, hub: str, raw: Any) -> None:
+        """Record the X-Hub-Remotes report: a list of {remote, caps, tier, notices}. Anything malformed is dropped."""
+        if hub not in self._seen or not isinstance(raw, list):
+            return
+        rows: list[dict[str, Any]] = []
+        for r in raw[:8]:
+            if not isinstance(r, dict):
+                continue
+            rem, caps, tier, notes = r.get("remote"), r.get("caps"), r.get("tier"), r.get("notices")
+            if type(rem) is not int or type(caps) is not int or tier not in ("none", "palette", "custom"):
+                continue
+            msgs = [m[:200] for m in notes if isinstance(m, str)][:8] if isinstance(notes, list) else []
+            rows.append({"remote": rem, "caps": caps, "tier": tier, "notices": msgs})
+        if raw and not rows:
+            return  # nothing in it made sense: keep the last good report
+        self._remotes[hub] = rows
 
     def seen(self, hub: str) -> bool:
         """Record an authenticated bundle request for `hub`; True when the id is new."""

@@ -198,6 +198,10 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
 
 - `GET bundle?hub=` -> `{schema, core_version, hub_id, applied_at, rev, config}` with `ETag`;
   `If-None-Match` -> `304`; `404 nothing_applied`. `config` never contains `editor`.
+  Also `remotes: [{remote, caps, tier: "none"|"palette"|"custom", notices: [str]}]` and `theme_notices: [str]`
+  (every remote's notices, once each): what the integration last reported (header `X-Hub-Remotes`, below) about the
+  hub's linked remotes and what their colour support costs the applied config. Both are empty until a poll carried
+  the header, and the editor's Themes view and apply dialog show `theme_notices` (a remote with no notices shows none).
 - `GET bundle/wait?hub=&rev=` -> the bundle when its rev differs from `rev`, else `204` after about
   55 s (or at once on shutdown).
 - `POST bundle/ack` body `{hub, rev, result: "ok"|"error", detail?: str (<= 200)}` -> `{ok:true}`;
@@ -214,6 +218,13 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
   `X-HH-Adopt: moved | exists | none` whenever one of the headers was sent (`exists`: refused because `hub` already has
   a store; `none`: nothing to move, which is also the answer to a repeat). Moving back is the same call the other way
   round (`hub=<old>`, `X-Hub-Prev: <new>`), which the integration uses to undo a rename.
+- **Linked remotes.** A poll may carry `X-Hub-Remotes`: compact ASCII JSON, at most 4000 characters, a list of
+  `{remote: int, caps: int (the remote_info caps), tier: "none"|"palette"|"custom", notices: [str <= 200]}` (at most 8
+  remotes, 8 notices each; the integration drops notices from the end to fit). `tier` is the colour support: `none`
+  (no colours), `palette` (palette colours and presets) or `custom` (free colours and user themes). The add-on keeps
+  the last well-formed report per hub in memory (a malformed or oversized one is ignored) and shows it in
+  `config/status`. Additive: an add-on that does not know the header ignores it, an integration that does not send it
+  leaves `remotes` and `theme_notices` empty.
 - Failed bearer attempts are rate limited (`429`); a valid token never is. `401 unauthorized` for
   every other miss.
 
@@ -236,7 +247,8 @@ whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
 - `POST /bundle/ack` takes `{hub,rev,result:"ok"|"error",detail?<=200}`. It is bearer-only with no
   CSRF header; the content type must still be JSON. It returns 404 if the hub has nothing applied and 409
   `stale_rev` if `rev` is not the currently applied one.
-- `GET /config/status?hub=` returns `{hub,applied_rev,acked_rev,result,detail,acked_at,linked,last_seen}`.
+- `GET /config/status?hub=` returns `{hub,applied_rev,acked_rev,result,detail,acked_at,linked,last_seen}` (and the
+  fields listed under Status and hubs, among them `remotes` and `theme_notices`).
   `linked` is process-lifetime.
 - IR routes: brands `{brands:[{name,slug,count}]}` at most 50; models `{brand,total,offset,limit,
   models:[{file,name,id}]}` limit 1-200; device `{device,forms,notes,skipped:[{name,reason}],

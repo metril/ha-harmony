@@ -229,3 +229,34 @@ async def test_axe_on_the_theme_views_and_the_colour_row(browser, site, scheme):
         bad += [f"editor@{width}: {v}" for v in found]
         await page.context.close()
     assert bad == [], json.dumps(bad)
+
+
+async def test_a_palette_only_remote_shows_its_notice_in_the_themes_view(browser, site):
+    import aiohttp
+    from test_addon_e2e import TOKEN
+
+    page = await studio(browser, site)
+    await page.goto(f"{site}{PREFIX}/#/themes")
+    await page.get_by_role("article", name="Cards").wait_for()
+    assert await page.locator("#theme-notice").count() == 0  # nothing reported: no banner
+    report = [
+        {
+            "remote": 1,
+            "caps": 7,
+            "tier": "palette",
+            "notices": ["theme 'dusk' replaced by its base preset 'midnight': the remote firmware has no custom colour support"],
+        }
+    ]
+    headers = {"Authorization": f"Bearer {TOKEN}", "X-Hub-Remotes": json.dumps(report)}
+    async with (  # the integration's poll, as the real one sends it
+        aiohttp.ClientSession() as s,
+        s.get(f"{site}/api/v1/bundle?hub=default", headers=headers) as r,
+    ):
+        assert r.status in (200, 404)
+    await page.reload()
+    await page.get_by_role("article", name="Cards").wait_for()
+    notice = page.locator("#theme-notice")
+    await notice.wait_for()
+    assert "palette colours only" in await notice.inner_text()
+    await shot(page, "theme-notice-palette-remote")
+    await page.context.close()

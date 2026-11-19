@@ -80,6 +80,7 @@ LINKED_KEY = web.AppKey("linked_hubs", LinkedHubs)
 HW_HEADER = "X-Hub-Hw"  # a poll names which hub it is: stable hardware id, previous id, display name (docs/addon-api.md)
 PREV_HEADER = "X-Hub-Prev"
 NAME_HEADER = "X-Hub-Name"
+REMOTES_HEADER = "X-Hub-Remotes"  # the linked remotes' caps tier and theme notices (docs/addon-api.md)
 ACKS_KEY = web.AppKey("acks", dict)
 MEMO_KEY = web.AppKey("preview_memo", dict)
 SENDER_KEY = web.AppKey("ir_sender", object)
@@ -160,6 +161,12 @@ def make_auth_mw(auth: Auth):
                 linked.note_identity(hub, hw, None if raw_name is None else clean_name(unquote(raw_name)))
                 if new:
                     _auto_adopt(request.app)
+                raw_remotes = request.headers.get(REMOTES_HEADER)
+                if raw_remotes is not None and len(raw_remotes) <= 4000:  # the remotes' caps tier and theme notices
+                    try:
+                        linked.set_remotes(hub, json.loads(raw_remotes))
+                    except ValueError:
+                        pass
                 raw_limits = request.headers.get(LIMITS_HEADER)
                 if raw_limits is not None and len(raw_limits) <= 2000:  # the hub's own limits, as its integration knows them
                     try:
@@ -764,6 +771,14 @@ async def adopt_hub(request: web.Request) -> web.Response:
     return jresp({"ok": True, "hub": dst})
 
 
+def _theme_notices(remotes: list[dict[str, Any]]) -> list[str]:
+    """Every remote's degradation notices, once each, in remote order."""
+    out: list[str] = []
+    for r in sorted(remotes, key=lambda r: r["remote"]):
+        out += [m for m in r["notices"] if m not in out]
+    return out
+
+
 async def config_status(request: web.Request) -> web.Response:
     q = query(request, schemas.QUERY)
     state = _store_call(request.app[STORE_KEY].load, q["hub"])
@@ -782,6 +797,8 @@ async def config_status(request: web.Request) -> web.Response:
             "last_seen": last_seen,
             "hub_last_seen": request.app[LINKED_KEY].last_seen(q["hub"]),
             "linked_hubs": request.app[LINKED_KEY].entries(),
+            "remotes": request.app[LINKED_KEY].remotes(q["hub"]),
+            "theme_notices": _theme_notices(request.app[LINKED_KEY].remotes(q["hub"])),
             "now": int(request.app[CLOCK_KEY]()),
         }
     )

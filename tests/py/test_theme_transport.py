@@ -175,15 +175,15 @@ async def test_a_caps_change_that_adds_bit_3_sends_the_theme(hass, rig, clock): 
 
 
 # ------------------------------------------------------------------ a set the remote never confirms
-async def drain(hass, clock, until):
-    """Release the manual clock until `until()` holds (a signal, never a real sleep)."""
+async def drain(hass, clk, until):
+    """Release the manual clk until `until()` holds (a signal, never a real sleep)."""
     for _ in range(40):
         if until():
             return
-        await settle(hass, lambda: clock.active() or until())
+        await settle(hass, lambda: clk.active() or until())
         if until():
             return
-        clock.elapse()
+        clk.elapse()
     await settle(hass, until)
 
 
@@ -224,7 +224,7 @@ async def test_an_unconfirmed_theme_set_is_not_marked_pushed_and_is_retried_with
 
 async def test_backoff_is_bounded(hass, rig, clock, monkeypatch):  # noqa: F811
     monkeypatch.setattr(const, "THEME_ACK_WAIT", 1.0)
-    hub, c = await start(hass, rig)
+    _hub, c = await start(hass, rig)
     link = c.links[1]
     for _ in range(12):  # many rounds with a remote that never confirms
         await drain(hass, clock, lambda: retrying(link))
