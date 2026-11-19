@@ -151,6 +151,7 @@ typedef struct {
     hub_info_t info[HUB_INFO_MAX]; /* remote_info per remote; dropped when the RF link is lost */
     void (*bcast_hook)(void *ctx, const char *type, const cJSON *d); /* tests: sees every broadcast, in order */
     void *bcast_ctx;
+    bool bt_dirty;          /* the link reported a change: hub_flush_pending sends one bt_state */
     hp_ident_t ident;       /* id, name, hardware id; set_hub_id (docs/proto/hub-identity.md). id[0]==0: no identity (tests) */
     void (*ident_changed)(void *ctx, const hp_ident_t *); /* after a set_hub_id changed the id: re-announce */
     void *ident_ctx;
@@ -171,6 +172,8 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx);
  * tracked device to one connection; used right after a successful hello so a (re)connecting client
  * learns the live state. No activity running -> {activity:0, power:false}. */
 void hub_send_state(hub_ctx_t *, hp_ws_conn_t *);
+/* The bt_state frame (id 0) hub_send_state sends after hello; -HP_E_NOENT when this build has no Bluetooth. */
+int hub_bt_state_frame(char *buf, size_t cap, size_t *len);
 /* The cached remote_info of `remote`, or NULL. */
 const hub_info_t *hub_remote_info(const hub_ctx_t *, uint8_t remote);
 /* A connection went away: an upload it owned stays resumable by a matching ota_begin. */

@@ -210,15 +210,22 @@ typedef struct {
 /* The bt key a physical key press holds down (its up goes out at the release). Survives reloads. */
 typedef struct {
     bool active;
-    uint8_t key, host, page;
+    uint8_t remote, key, host, page; /* remote: the source of the press; only it can release the key */
     uint16_t usage;
 } hp_bt_held_t;
+
+#define HP_BT_HOLD_CAP_MS 3000 /* a held bt key is released after this long without a HOLD (a lost RELEASE) */
+#define HP_BT_KEYS_PER_REMOTE_MAX 255
 
 typedef struct {
     int format;
     hp_bt_host_t *bt_hosts;   /* nbt_hosts entries in file order (look up with hp_map_bt_host) */
     uint16_t nbt_hosts;
     hp_bt_held_t bt_held;
+    hp_sched_handle bt_cap_h;      /* the hold cap timer of bt_held (needs the IR output runtime's scheduler) */
+    const hp_sinks_t *bt_sinks;    /* sinks of the active bt_held, for its cap and for a reload */
+    uint16_t bt_hosts_cap, bt_remotes_cap; /* what pass 1 sized the tables for */
+    size_t bt_keys_left;           /* remote keys pass 1 counted, not yet stored */
     hp_bt_remote_t *bt_remotes; /* nbt_remotes entries (look up with hp_map_bt_remote) */
     uint16_t nbt_remotes;
     hp_bt_rdown_t bt_rdown[HH_BT_MAX_REMOTES]; /* by slot */
@@ -359,6 +366,13 @@ const hp_bt_remote_t *hp_map_bt_remote(const hp_map_t *, uint8_t slot);
  * releases the previous one first. Returns hp_key_handle's result. */
 int hp_map_bt_remote_key(hp_map_t *, const hp_sinks_t *, uint8_t slot, uint8_t page, uint16_t usage, bool down,
                          hp_key_emit_fn emit, void *ctx);
+
+/* Sends the key up of the bt key a physical press holds down (cap timer cancelled), if any. Called on
+ * an activity switch, power-off, reload and free. */
+int hp_map_bt_release(hp_map_t *, const hp_sinks_t *);
+/* The link to Bluetooth remote `slot` was lost: releases the key it has down (a RELEASE, as for an RF
+ * remote). */
+int hp_map_bt_remote_lost(hp_map_t *, const hp_sinks_t *, uint8_t slot, hp_key_emit_fn emit, void *ctx);
 
 /* Cache (HA-offline fallback). File = "HPMC" | version u8 (1) | len u32 BE |
  * config text | CRC-32 (IEEE) u32 BE over everything before it, written with hp_atomic_write.

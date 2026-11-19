@@ -353,6 +353,7 @@ int hp_actsm_start_idx(hp_actsm_t *e, int idx) {
     }
     cancel_plan(e);
     hp_irout_cancel(m->out); /* a key hold must not repeat into the plan's frames */
+    hp_map_bt_release(m, e->sinks);
     const hp_activity_t *a = &m->acts[idx];
     bool used[HP_MAP_MAX_DEVICES] = {false};
     for (uint8_t i = 0; i < a->ndevs; i++) used[a->devs[i].dev] = true;
@@ -388,6 +389,7 @@ int hp_actsm_off(hp_actsm_t *e) {
     if (prev < 0 && !anyon) return -HP_E_INVAL;
     cancel_plan(e);
     hp_irout_cancel(m->out);
+    hp_map_bt_release(m, e->sinks);
     for (int d = 0; d < e->ndev; d++) add(e, HP_STEP_PWR_OFF, d, -1, NULL);
     if (prev >= 0 && prev < m->nacts)
         for (uint8_t i = 0; i < m->acts[prev].noff; i++) add(e, HP_STEP_OFFX, 0, -1, &m->acts[prev].off[i]);

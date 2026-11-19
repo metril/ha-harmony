@@ -448,6 +448,80 @@ static void test_bt_table_limits(void) {
     free(r);
 }
 
+static uint32_t g_now;
+static uint32_t clk(void *c) { (void)c; return g_now; }
+
+static void test_bt_release_paths(void) {
+    setup();
+    hp_sched_t sched;
+    hp_irout_t out;
+    hp_sched_init(&sched, clk, NULL);
+    hp_irout_init(&out, &sched);
+    g_now = 1000;
+    hp_map_t m;
+    hp_map_init(&m);
+    hp_map_set_out(&m, &out);
+    CT_EQ(hp_map_load(&m, BTRCFG, strlen(BTRCFG)), 0);
+    seq_t q = {0};
+    /* a lost release: the cap lets the host key go; HOLD refreshes it */
+    hp_key_handle(&m, &sinks, 1, 1, HP_KEY_ACTION_PRESS, NULL, NULL);
+    CT_EQ(hp_sim_count(&sim), 1);
+    g_now += HP_BT_HOLD_CAP_MS - 100;
+    hp_sched_run(&sched, g_now);
+    hp_key_handle(&m, &sinks, 1, 1, HP_KEY_ACTION_HOLD, NULL, NULL);
+    g_now += HP_BT_HOLD_CAP_MS - 100;
+    hp_sched_run(&sched, g_now);
+    CT_EQ(hp_sim_count(&sim), 1); /* refreshed: still down */
+    g_now += 200;
+    hp_sched_run(&sched, g_now);
+    CT_EQ(hp_sim_count(&sim), 2);
+    CT_EQ(hp_sim_rec(&sim, 1)->down, 0);
+    CT_CHECK(!m.bt_held.active);
+    /* a release from another source cannot release a key held by a remote */
+    hp_map_bt_remote_key(&m, &sinks, 0, 7, 82, true, on_seq, &q); /* key 1, remote 0x80 */
+    CT_EQ(hp_sim_count(&sim), 3);
+    hp_key_handle(&m, &sinks, 1, 1, HP_KEY_ACTION_RELEASE, NULL, NULL); /* RF remote 1 */
+    CT_EQ(hp_sim_count(&sim), 3);
+    /* the remote's link is lost: its RELEASE goes out and frees the host key */
+    CT_EQ(hp_map_bt_remote_lost(&m, &sinks, 0, on_seq, &q), 0);
+    CT_EQ(q.action[q.n - 1], HP_KEY_ACTION_RELEASE);
+    CT_EQ(hp_sim_count(&sim), 4);
+    CT_EQ(hp_map_bt_remote_lost(&m, &sinks, 0, on_seq, &q), 0); /* nothing down: no-op */
+    CT_EQ(hp_sim_count(&sim), 4);
+    /* a reload, an activity change and a free release a held key */
+    hp_key_handle(&m, &sinks, 1, 1, HP_KEY_ACTION_PRESS, NULL, NULL);
+    CT_EQ(hp_sim_count(&sim), 5);
+    CT_EQ(hp_map_load(&m, BTRCFG, strlen(BTRCFG)), 0);
+    CT_EQ(hp_sim_count(&sim), 6);
+    hp_key_handle(&m, &sinks, 1, 1, HP_KEY_ACTION_PRESS, NULL, NULL);
+    CT_EQ(hp_map_bt_release(&m, &sinks), 0);
+    CT_EQ(hp_sim_count(&sim), 8);
+    hp_key_handle(&m, &sinks, 1, 1, HP_KEY_ACTION_PRESS, NULL, NULL);
+    hp_map_free(&m);
+    CT_EQ(hp_sim_count(&sim), 10);
+    CT_EQ(hp_sched_pending(&sched), 0);
+}
+
+static char *remote_keys(int n) {
+    char *t = malloc(4096 * 2), *w = t;
+    w += sprintf(w, "{\"bt_remotes\":[{\"slot\":0,\"keys\":[");
+    for (int i = 0; i < n; i++) w += sprintf(w, "%s[7,%d,1]", i ? "," : "", i + 1);
+    strcpy(w, "]}]}");
+    return t;
+}
+
+static void test_bt_remote_key_cap(void) {
+    hp_map_t m;
+    hp_map_init(&m);
+    char *t = remote_keys(256);
+    CT_EQ(hp_map_load(&m, t, strlen(t)), -HP_E_TOOBIG); /* 256 > 255 */
+    free(t);
+    t = remote_keys(HP_BT_KEYS_PER_REMOTE_MAX);
+    CT_EQ(hp_map_load(&m, t, strlen(t)), 0);
+    free(t);
+    hp_map_free(&m);
+}
+
 static void test_sim_rf_single_owner(void) {
     setup();
     hp_rf_transport *rf = sinks.rf;
@@ -473,6 +547,8 @@ int main(void) {
     CT_RUN(test_bt_remote);
     CT_RUN(test_bt_remote_budget_and_bad);
     CT_RUN(test_bt_table_limits);
+    CT_RUN(test_bt_release_paths);
+    CT_RUN(test_bt_remote_key_cap);
     CT_RUN(test_sim_rf_single_owner);
     return CT_DONE();
 }

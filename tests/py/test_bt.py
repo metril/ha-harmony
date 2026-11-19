@@ -181,15 +181,15 @@ def test_remote_keys_override_defaults_and_are_validated():
 
 
 def test_remote_limit_and_compiled_table():
-    one = "{name: R%d, address: aa:bb:cc:dd:ee:0%d}"
-    cfg = "bt_remotes: [" + ", ".join(one % (i, i % 10) for i in range(32)) + "]\n"
+    one = "{name: R%d, address: aa:bb:cc:dd:ee:%02x}"
+    cfg = "bt_remotes: [" + ", ".join(one % (i, i) for i in range(32)) + "]\n"
     hub = compile_config(parse_model(cfg)).hub_json
     assert [r["slot"] for r in hub["bt_remotes"]] == list(range(32))
     assert hub["bt_remotes"][1]["addr"] == "AA:BB:CC:DD:EE:01"
     first = hub["bt_remotes"][0]["keys"]
     assert [7, 0x52, 1] in first and [12, 0xE9, 8] in first  # [page, usage, key id]
     with pytest.raises(ConfigError, match="too many Bluetooth remotes: 33 .*at most 32"):
-        parse_model("bt_remotes: [" + ", ".join(one % (i, i % 10) for i in range(33)) + "]\n")
+        parse_model("bt_remotes: [" + ", ".join(one % (i, i) for i in range(33)) + "]\n")
     assert "bt_remotes" not in compile_config(parse_model("devices: []")).hub_json
 
 
@@ -217,7 +217,34 @@ def test_a_bare_yaml_address_asks_for_quotes():
         parse_model("devices: [{id: b, kind: bt, address: 11:22:33:44:55:44}]\n")
 
 
-def test_the_hub_limit_hook_defaults_to_the_model_limits():
-    from custom_components.ha_harmony.harmony_core.hub_limits import CURRENT, bt_table_limits
+def test_menu_is_the_consumer_menu_and_guide_is_separate():
+    assert bt_codes.resolve("Menu") == (12, 0x40) and bt_codes.resolve("Guide") == (12, 0x8D)
+    with pytest.raises(bt_codes.BtCodeError):
+        bt_codes.resolve("settings")
 
-    assert bt_table_limits(CURRENT) == (bt_codes.BT_MAX_HOSTS, bt_codes.BT_MAX_REMOTES)
+
+def test_addresses_are_unique_across_bt_devices_and_remotes():
+    a = "aa:bb:cc:dd:ee:ff"
+    with pytest.raises(ConfigError, match="already used by devices"):
+        parse_model(
+            f"devices: [{{id: a, kind: bt, address: '{a}'}}, {{id: b, kind: bt, address: AA:BB:CC:DD:EE:FF}}]\n"
+        )
+    with pytest.raises(ConfigError, match="already used by devices"):
+        parse_model(
+            f"devices: [{{id: a, kind: bt, address: '{a}'}}]\nbt_remotes: [{{name: R, address: '{a}'}}]\n"
+        )
+
+
+def test_push_time_check_against_hello_ack_bt():
+    from custom_components.ha_harmony.harmony_core.hub_limits import bt_fit_error
+
+    hub = compile_config(parse_model(CFG)).hub_json  # 2 bt devices
+    assert "no Bluetooth support" in bt_fit_error(hub, None)
+    assert bt_fit_error(hub, {"hosts_max": 2, "remotes_max": 0}) is None
+    assert "too many Bluetooth devices: 2 (the hub allows at most 1)" == bt_fit_error(
+        hub, {"hosts_max": 1, "remotes_max": 4}
+    )
+    rem = compile_config(parse_model("bt_remotes: [{name: R}]\n")).hub_json
+    assert "too many Bluetooth remotes: 1" in bt_fit_error(rem, {"hosts_max": 4, "remotes_max": 0})
+    plain = compile_config(parse_model("devices: [{id: tv}]")).hub_json
+    assert bt_fit_error(plain, None) is None  # no bt content: any hub

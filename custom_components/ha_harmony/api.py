@@ -103,6 +103,7 @@ class HarmonyHubClient:
         self.fw_build: int | None = None  # installed firmware build id (absent: hub without OTA)
         self.ota_key: str | None = None  # "dev" | "release" | None
         self.config_hash: str | None = None  # hub's CRC-32 hex of its loaded config text
+        self.bt: dict[str, Any] | None = None  # hello_ack.bt; None = a hub without Bluetooth
         self.limits: HubLimits | None = None  # hello_ack.limits (LEGACY for a hub that sends none); None before the first hello
 
     @property
@@ -224,6 +225,7 @@ class HarmonyHubClient:
             self.ota_key = d.get("ota_key")
             self.config_hash = d.get("config_hash")
             self.limits = HubLimits.from_hello(d.get("limits"))
+            self.bt = d["bt"] if isinstance(d.get("bt"), dict) else None
             acts = d.get("activities")
             self.activities = (
                 [a for a in acts if isinstance(a, str)] if isinstance(acts, list) else []

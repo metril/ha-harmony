@@ -122,13 +122,20 @@ CURRENT = HubLimits(
 )
 
 
-def bt_table_limits(lim: HubLimits) -> tuple[int, int]:
-    """(max bt devices, max bt remotes) a hub takes. HOOK: the model's own constants for now; once
-    the hub advertises its bt table sizes in hello_ack.limits, read them from `lim` here and let the
-    push-time check (not written yet) compare the compiled `bt_hosts` / `bt_remotes` against this."""
-    from .bt_codes import BT_MAX_HOSTS, BT_MAX_REMOTES
-
-    return BT_MAX_HOSTS, BT_MAX_REMOTES
+def bt_fit_error(hub_json: dict[str, Any], bt: Any) -> str | None:
+    """Why a hub that reported `bt` (hello_ack.bt, None = no Bluetooth support) cannot take the
+    config's Bluetooth devices / remotes, or None."""
+    hosts, remotes = len(hub_json.get("bt_hosts", ())), len(hub_json.get("bt_remotes", ()))
+    if not hosts and not remotes:
+        return None
+    if not isinstance(bt, dict):
+        return "this config has Bluetooth devices or remotes, but the hub has no Bluetooth support (update its firmware)"
+    hmax, rmax = bt.get("hosts_max"), bt.get("remotes_max")
+    if isinstance(hmax, int) and hosts > hmax:
+        return f"too many Bluetooth devices: {hosts} (the hub allows at most {hmax})"
+    if isinstance(rmax, int) and remotes > rmax:
+        return f"too many Bluetooth remotes: {remotes} (the hub allows at most {rmax})"
+    return None
 
 
 def estimate_bytes(

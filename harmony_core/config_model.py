@@ -718,6 +718,17 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
             f"too many Bluetooth devices: {len(bts)} (a hub handles at most {BT_MAX_HOSTS})",
         )
 
+    seen_addr: dict[str, list[Any]] = {}
+    for sect, items in (("devices", model["devices"]), ("bt_remotes", model.get("bt_remotes", []))):
+        for i, it in enumerate(items):
+            a = it.get("address")
+            if a is None or (sect == "devices" and it.get("kind") != "bt"):
+                continue
+            if a in seen_addr:
+                fail([sect, i, "address"], f"Bluetooth address {a} is already used by {fmt_path(seen_addr[a])}")
+            else:
+                seen_addr[a] = [sect, i]
+
     # An alias must name exactly one device, and never shadow another device's real id --
     # otherwise `device: X` would silently reach a different device than it says.
     owner: dict[str, str] = {}

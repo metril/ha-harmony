@@ -47,6 +47,12 @@ class MsgType(IntEnum):
     OTA_FRAG_ACK = 32
     OTA_COMMIT = 33
     OTA_RESULT = 34
+    BT_PAIR = 35
+    BT_STATE = 36
+    BT_FORGET = 37
+    BT_KEY = 38
+    BT_REMOTE_KEY = 39
+    BT_LISTEN = 40
 
 
 ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'hold': 2}}
@@ -54,7 +60,7 @@ ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'ho
 # name -> (code, transport, ((field, wire type, optional), ...))
 MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'hello': (1, 'ws', (('token', 'str', False), ('client', 'str', True), )),
-    'hello_ack': (2, 'ws', (('hub_id', 'str', False), ('fw_version', 'str', True), ('activities', 'json', True), ('config_hash', 'str', True), ('limits', 'json', True), ('fw_build', 'u32', True), ('ota_key', 'str', True), ('name', 'str', True), ('hw_id', 'str', True), ('rename', 'bool', True), ('id_pinned', 'bool', True), )),
+    'hello_ack': (2, 'ws', (('hub_id', 'str', False), ('fw_version', 'str', True), ('activities', 'json', True), ('config_hash', 'str', True), ('limits', 'json', True), ('fw_build', 'u32', True), ('ota_key', 'str', True), ('name', 'str', True), ('hw_id', 'str', True), ('rename', 'bool', True), ('id_pinned', 'bool', True), ('bt', 'json', True), )),
     'error': (3, 'ws', (('code', 'str', False), ('message', 'str', False), ('ref_id', 'u32', True), )),
     'ping': (4, 'ws', ()),
     'pong': (5, 'ws', ()),
@@ -85,6 +91,12 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'ota_frag_ack': (32, 'rf', (('offset', 'u32', False), )),
     'ota_commit': (33, 'rf', ()),
     'ota_result': (34, 'rf', (('code', 'u8', False), ('build', 'u32', False), )),
+    'bt_pair': (35, 'ws', (('on', 'bool', False), ('secs', 'u16', True), ('transport', 'str', True), ('mode', 'str', True), )),
+    'bt_state': (36, 'ws', (('state', 'str', False), ('discoverable', 'bool', False), ('discoverable_secs', 'u16', True), ('le', 'bool', True), ('gen', 'u32', True), ('pairing', 'json', True), ('hosts', 'json', False), ('remotes', 'json', True), )),
+    'bt_forget': (37, 'ws', (('slot', 'u8', False), ('kind', 'str', True), )),
+    'bt_key': (38, 'ws', (('slot', 'u8', False), ('page', 'u8', False), ('usage', 'u16', False), ('action', 'str', False), )),
+    'bt_remote_key': (39, 'ws', (('slot', 'u8', False), ('page', 'u8', False), ('usage', 'u16', False), ('down', 'bool', False), )),
+    'bt_listen': (40, 'ws', (('on', 'bool', False), )),
 }
 
 _INT_RANGES = {

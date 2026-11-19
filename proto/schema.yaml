@@ -36,6 +36,9 @@ messages:
       - {name: hw_id, type: str, optional: true}
       - {name: rename, type: bool, optional: true}
       - {name: id_pinned, type: bool, optional: true}
+      # Bluetooth HID (docs/proto/bluetooth.md): present only when the hub build has Bluetooth:
+      # {hosts_max, conn_max, remotes_max, le_bonds_max, pages: [7, 12], le} (paired-host limit, simultaneous-connection limit, HID usage pages, LE supported). Absent = no bt_* messages.
+      - {name: bt, type: json, optional: true}
 
   - name: error
     code: 3
@@ -265,6 +268,68 @@ messages:
     fields:
       - {name: code, type: u8}
       - {name: build, type: u32}
+
+  # Bluetooth HID (docs/proto/bluetooth.md), ws only, authenticated. 35/37/38 are requests; 36 is the hub's
+  # state push (also the reply to bt_pair / bt_forget, and sent to every client on any change).
+  # bt_pair: on=true opens the pairing window for `secs` (default 120, 1..300) on `transport` (default any), on=false closes it.
+  - name: bt_pair
+    code: 35
+    transport: ws
+    fields:
+      - {name: "on", type: bool}
+      - {name: secs, type: u16, optional: true}
+      - {name: transport, type: str, optional: true}  # any (default) | classic | le
+      - {name: mode, type: str, optional: true}       # host (default: be discoverable to a phone/TV) | remote (scan for and bond an advertising LE remote; transport any|le)
+
+  # state: off | starting | ready | no_adapter | disabled. pairing = the last pairing outcome
+  # {result: ok|failed|refused, addr, name?, transport?, kind?: host|remote}. hosts = [{slot, addr, name?, transport: classic|le, connected}].
+  - name: bt_state
+    code: 36
+    transport: ws
+    fields:
+      - {name: state, type: str}
+      - {name: discoverable, type: bool}
+      - {name: discoverable_secs, type: u16, optional: true}
+      - {name: le, type: bool, optional: true}  # the adapter can do Bluetooth LE
+      - {name: gen, type: u32, optional: true}  # bumped by the link on every change (not by the discoverable_secs countdown)
+      - {name: pairing, type: json, optional: true}
+      - {name: hosts, type: json}
+      - {name: remotes, type: json, optional: true}  # bonded LE remotes (input): [{slot, addr, name?, connected, battery?}]
+
+  - name: bt_forget
+    code: 37
+    transport: ws
+    fields:
+      - {name: slot, type: u8}
+      - {name: kind, type: str, optional: true}  # host (default) | remote
+
+  # Test-fire one HID usage at a paired host. page 7 = keyboard, 12 = consumer; action down | up | press.
+  - name: bt_key
+    code: 38
+    transport: ws
+    fields:
+      - {name: slot, type: u8}
+      - {name: page, type: u8}
+      - {name: usage, type: u16}
+      - {name: action, type: str}
+
+  # A key from a bonded LE remote, for the editor's "press a key on the remote to learn it". Sent only to
+  # authenticated clients that sent bt_listen on=true; normal key handling happens in the hub and never needs it.
+  - name: bt_remote_key
+    code: 39
+    transport: ws
+    fields:
+      - {name: slot, type: u8}
+      - {name: page, type: u8}
+      - {name: usage, type: u16}
+      - {name: down, type: bool}
+
+  # Opt this socket in (on=true) or out of bt_remote_key pushes; reset by every hello. Answered with command_result.
+  - name: bt_listen
+    code: 40
+    transport: ws
+    fields:
+      - {name: "on", type: bool}
 
 # The 35 physical keys of the Harmony Elite remote (docs/hardware/remote-elite.md, "Input").
 # `id` is the logical key code carried in key_event.key (u8): stable, unique, < 128 (128+ are page

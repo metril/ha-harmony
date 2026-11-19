@@ -48,6 +48,9 @@ static void *xcalloc(size_t n, size_t sz) {
     return calloc(n, sz);
 }
 
+static int bt_release_stored(hp_map_t *m);
+static int bt_release_held(hp_map_t *m, const hp_sinks_t *s);
+
 /* Frees every table the map owns (not the cache text). */
 static void release_tables(hp_map_t *m) {
     free(m->keys);
@@ -79,6 +82,7 @@ static void release_tables(hp_map_t *m) {
 }
 
 void hp_map_free(hp_map_t *m) {
+    if (m->bt_sinks) bt_release_stored(m);
     release_tables(m);
     free(m->src);
     m->src = NULL;
@@ -166,6 +170,7 @@ static bool bt_addr_ok(const char *s) {
 }
 typedef struct {
     size_t ndevs, ncmds, ninputs, keys, pool;
+    size_t nbtkeys;
     size_t nbthosts, nbtremotes; /* bt_hosts / bt_remotes entries (a remote's keys are counted in `keys`) */
     size_t rest_bytes; /* text of the retained top-level sections (format, activities, keys), held as cJSON trees */
 } dims_t;
@@ -198,7 +203,11 @@ static int count_bt_tables(hp_map_t *m, const cJSON *arr, bool remotes, dims_t *
     d->nbtremotes = n;
     for (const cJSON *e = arr->child; e; e = e->next) {
         const cJSON *k = cJSON_IsObject(e) ? cJSON_GetObjectItemCaseSensitive(e, "keys") : NULL;
-        if (cJSON_IsArray(k)) d->keys += (size_t)cJSON_GetArraySize(k); /* budgeted as key-map entries */
+        if (!cJSON_IsArray(k)) continue;
+        size_t nk = (size_t)cJSON_GetArraySize(k);
+        if (nk > HP_BT_KEYS_PER_REMOTE_MAX) return fail(m, TOOBIG, "more than %d keys in a bt_remotes entry", HP_BT_KEYS_PER_REMOTE_MAX);
+        d->keys += nk; /* budgeted as key-map entries */
+        d->nbtkeys += nk;
     }
     return 0;
 }
@@ -224,7 +233,7 @@ static int parse_bt_hosts(hp_map_t *m, const cJSON *arr) {
         const cJSON *sl = cJSON_IsObject(e) ? cJSON_GetObjectItemCaseSensitive(e, "slot") : NULL;
         if (!int_in(sl, 0, HH_BT_MAX_HOSTS - 1)) return fail(m, INVAL, "bt_hosts slot must be 0..%d", HH_BT_MAX_HOSTS - 1);
         if (hp_map_bt_host(m, (uint8_t)sl->valuedouble)) return fail(m, INVAL, "duplicate bt_hosts slot %d", (int)sl->valuedouble);
-        if (!m->bt_hosts) return fail(m, INVAL, "config changed while loading");
+        if (m->nbt_hosts >= m->bt_hosts_cap) return fail(m, INVAL, "config changed while loading");
         hp_bt_host_t *h = &m->bt_hosts[m->nbt_hosts++];
         h->slot = (uint8_t)sl->valuedouble;
         int r = parse_bt_ident(m, e, &h->has_addr, h->addr, h->name);
@@ -248,7 +257,7 @@ static int parse_bt_remotes(hp_map_t *m, const cJSON *arr) {
         const cJSON *sl = cJSON_IsObject(e) ? cJSON_GetObjectItemCaseSensitive(e, "slot") : NULL;
         if (!int_in(sl, 0, HH_BT_MAX_REMOTES - 1)) return fail(m, INVAL, "bt_remotes slot must be 0..%d", HH_BT_MAX_REMOTES - 1);
         if (hp_map_bt_remote(m, (uint8_t)sl->valuedouble)) return fail(m, INVAL, "duplicate bt_remotes slot %d", (int)sl->valuedouble);
-        if (!m->bt_remotes) return fail(m, INVAL, "config changed while loading");
+        if (m->nbt_remotes >= m->bt_remotes_cap) return fail(m, INVAL, "config changed while loading");
         hp_bt_remote_t *r = &m->bt_remotes[m->nbt_remotes++];
         r->slot = (uint8_t)sl->valuedouble;
         int rc = parse_bt_ident(m, e, &r->has_addr, r->addr, r->name);
@@ -257,8 +266,10 @@ static int parse_bt_remotes(hp_map_t *m, const cJSON *arr) {
         if (!ks) continue;
         if (!cJSON_IsArray(ks)) return fail(m, INVAL, "bt_remotes keys must be an array");
         int n = cJSON_GetArraySize(ks);
-        if (n > 65535) return fail(m, TOOBIG, "too many bt_remotes keys");
+        if (n > HP_BT_KEYS_PER_REMOTE_MAX) return fail(m, TOOBIG, "more than %d keys in a bt_remotes entry", HP_BT_KEYS_PER_REMOTE_MAX);
         if (n == 0) continue;
+        if ((size_t)n > m->bt_keys_left) return fail(m, INVAL, "config changed while loading");
+        m->bt_keys_left -= (size_t)n;
         if (!(r->keys = xcalloc((size_t)n, sizeof *r->keys))) return oom(m);
         for (const cJSON *k = ks->child; k; k = k->next) {
             const cJSON *pg = cJSON_IsArray(k) ? cJSON_GetArrayItem(k, 0) : NULL;
@@ -1051,6 +1062,9 @@ static size_t est_full(const dims_t *d) {
 /* One allocation per table, each exactly as large as this config needs. */
 static int alloc_tables(hp_map_t *m, const dims_t *d) {
     if (d->ndevs > HP_MAP_MAX_DEVICES) return fail(m, TOOBIG, "more than %d devices", HP_MAP_MAX_DEVICES);
+    m->bt_hosts_cap = (uint16_t)d->nbthosts;
+    m->bt_remotes_cap = (uint16_t)d->nbtremotes;
+    m->bt_keys_left = d->nbtkeys;
     if (d->nbthosts && !(m->bt_hosts = xcalloc(d->nbthosts, sizeof *m->bt_hosts))) return oom(m);
     if (d->nbtremotes && !(m->bt_remotes = xcalloc(d->nbtremotes, sizeof *m->bt_remotes))) return oom(m);
     if (d->ndevs && !(m->devs = xcalloc(d->ndevs, sizeof *m->devs))) return oom(m);
@@ -1176,12 +1190,11 @@ void hp_map_commit(hp_map_t *m, hp_map_t *scratch, char *src) {
     hp_irout_t *outrt = m->out;
     hp_map_actops_t ops = m->actops;
     size_t budget = m->budget;
-    hp_bt_held_t held = m->bt_held;
+    if (m->bt_sinks) bt_release_stored(m); /* a reload never leaves a host key down */
     hp_bt_rdown_t rdown[HH_BT_MAX_REMOTES];
     memcpy(rdown, m->bt_rdown, sizeof rdown);
     hp_map_free(m);
     *m = *scratch;
-    m->bt_held = held;
     memcpy(m->bt_rdown, rdown, sizeof rdown);
     m->out = outrt;
     m->actops = ops;
@@ -1332,6 +1345,7 @@ static int run_steps(const hp_map_t *m, const hp_action_t *steps, uint8_t n, con
 
 int hp_activity_set(hp_map_t *m, const char *name, const hp_sinks_t *s) {
     if (!m || !name || !s) return -HP_E_INVAL;
+    hp_map_bt_release(m, s);
     for (uint8_t i = 0; i < m->nacts; i++) {
         if (strcmp(m->acts[i].name, name)) continue;
         int r = run_steps(m, m->acts[i].steps, m->acts[i].nsteps, s);
@@ -1343,7 +1357,9 @@ int hp_activity_set(hp_map_t *m, const char *name, const hp_sinks_t *s) {
 }
 
 int hp_activity_off(hp_map_t *m, const hp_sinks_t *s) {
-    if (!m || !s || m->current < 0 || m->current >= m->nacts) return -HP_E_INVAL;
+    if (!m || !s) return -HP_E_INVAL;
+    hp_map_bt_release(m, s);
+    if (m->current < 0 || m->current >= m->nacts) return -HP_E_INVAL;
     int idx = m->current;
     int r = run_steps(m, m->acts[idx].off, m->acts[idx].noff, s);
     if (r < 0) return r;
@@ -1353,6 +1369,7 @@ int hp_activity_off(hp_map_t *m, const hp_sinks_t *s) {
 
 static int apply_key_action(hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s, uint8_t key) {
     if (a->type != HP_ACT_ACTIVITY) return apply_action(m, a, s, key);
+    bt_release_held(m, s);
     int r;
     if (m->actops.start) {
         if (a->target == HP_TARGET_OFF) {
@@ -1371,12 +1388,47 @@ static int apply_key_action(hp_map_t *m, const hp_action_t *a, const hp_sinks_t 
     return r < 0 ? r : 0;
 }
 
+static void bt_cap_cb(void *arg, uint32_t now) {
+    (void)now;
+    hp_map_t *m = arg;
+    m->bt_cap_h = 0;
+    bt_release_stored(m);
+}
+
+static void bt_cap_arm(hp_map_t *m) {
+    if (!m->out || !m->out->sched) return;
+    hp_sched_cancel(m->out->sched, m->bt_cap_h);
+    m->bt_cap_h = hp_sched_after(m->out->sched, HP_BT_HOLD_CAP_MS, bt_cap_cb, m);
+}
+
+/* Up for the held bt key through the sinks it was pressed with. */
+static int bt_release_stored(hp_map_t *m) {
+    hp_bt_held_t h = m->bt_held;
+    const hp_sinks_t *s = m->bt_sinks;
+    if (m->out && m->out->sched) hp_sched_cancel(m->out->sched, m->bt_cap_h);
+    m->bt_cap_h = 0;
+    m->bt_held.active = false;
+    m->bt_sinks = NULL;
+    return h.active && s && s->bt ? s->bt->key(s->bt->self, h.host, h.page, h.usage, false) : 0;
+}
+
 /* Sends the key up of the bt key a physical press holds down, if any. */
 static int bt_release_held(hp_map_t *m, const hp_sinks_t *s) {
-    hp_bt_held_t h = m->bt_held;
-    if (!h.active) return 0;
-    m->bt_held.active = false;
-    return s->bt ? s->bt->key(s->bt->self, h.host, h.page, h.usage, false) : 0;
+    (void)s;
+    return bt_release_stored(m); /* through the sinks the key was pressed with */
+}
+
+int hp_map_bt_release(hp_map_t *m, const hp_sinks_t *s) {
+    if (!m || !s) return -HP_E_INVAL;
+    return bt_release_held(m, s);
+}
+
+int hp_map_bt_remote_lost(hp_map_t *m, const hp_sinks_t *s, uint8_t slot, hp_key_emit_fn emit, void *ctx) {
+    if (!m || !s) return -HP_E_INVAL;
+    if (slot >= HH_BT_MAX_REMOTES || !m->bt_rdown[slot].active) return 0;
+    m->bt_rdown[slot].active = false;
+    return hp_key_handle(m, s, (uint8_t)(HH_BT_REMOTE_ID_BASE + slot), m->bt_rdown[slot].key, HP_KEY_ACTION_RELEASE, emit,
+                         ctx);
 }
 
 int hp_key_handle(hp_map_t *m, const hp_sinks_t *s, uint8_t remote, uint8_t key, hp_key_action_t action,
@@ -1393,14 +1445,19 @@ int hp_key_handle(hp_map_t *m, const hp_sinks_t *s, uint8_t remote, uint8_t key,
                 rc = 0; /* mid-transition: the key would overlap the planned frames */
             else if (a.type == HP_ACT_BT && s->bt) { /* down now, up at the release */
                 rc = s->bt->key(s->bt->self, a.host, a.page, a.usage, true);
-                if (rc >= 0) m->bt_held = (hp_bt_held_t){true, key, a.host, a.page, a.usage};
+                if (rc >= 0) {
+                    m->bt_held = (hp_bt_held_t){true, remote, key, a.host, a.page, a.usage};
+                    m->bt_sinks = s;
+                    bt_cap_arm(m);
+                }
             } else rc = apply_key_action(m, &a, s, key);
         }
     } else if (action == HP_KEY_ACTION_HOLD) {
         hp_irout_hold(m->out, key);
+        if (m->bt_held.active && m->bt_held.key == key && m->bt_held.remote == remote) bt_cap_arm(m);
     } else if (action == HP_KEY_ACTION_RELEASE) {
         hp_irout_release(m->out, key);
-        if (m->bt_held.active && m->bt_held.key == key) rc = bt_release_held(m, s);
+        if (m->bt_held.active && m->bt_held.key == key && m->bt_held.remote == remote) rc = bt_release_held(m, s);
     }
     if (emit) emit(ctx, remote, key, action);
     return rc;

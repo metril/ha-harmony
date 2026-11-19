@@ -163,6 +163,7 @@ add_library(hp_hub STATIC
   hub/io/hw_sinks.c
   hub/io/rf_pair.c
   hub/ir/encode.c
+  hub/bt_link_stub.c
   hub/hub_handlers.c
   hub/ota/hub_ota.c
 )

@@ -28,6 +28,11 @@ add_hp_test(rf_spi)
 target_compile_definitions(test_rf_spi PRIVATE HP_LINK_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/rf/link_status.json")
 add_hp_test(mdns)
 add_hp_test(ident)
+add_hp_test(bt_stub)
+# test_bt links the fake bt_link instead of hub/bt_link_stub.c (the fake defines every symbol, so the archive member is not pulled).
+add_executable(test_bt test_bt.c bt_link_fake.c)
+target_link_libraries(test_bt PRIVATE hp_hub)
+add_test(NAME bt COMMAND test_bt)
 add_hp_test(hwkeys)
 
 # RF object codec: golden vectors shared with the remote build (argv[1] = frames.json).

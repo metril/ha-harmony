@@ -71,7 +71,7 @@ async def test_a_config_far_over_256_commands_reaches_the_real_hub_in_chunks(has
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-def _fake_hub_handler(limits, log):
+def _fake_hub_handler(limits, log, bt=None):
     async def handler(ws, env):
         t = env["t"]
         reply = {"v": 1, "id": env["id"]}
@@ -79,6 +79,8 @@ def _fake_hub_handler(limits, log):
             d = {"hub_id": HUB_ID, "activities": []}
             if limits is not None:
                 d["limits"] = limits
+            if bt is not None:
+                d["bt"] = bt
             await ws.send_json({**reply, "t": "hello_ack", "d": d})
         elif t == "command":
             log.append(env)
@@ -241,7 +243,7 @@ async def test_bt_devices_get_the_same_command_buttons_as_ir_ones(hass, fake_hub
         ]
     }
     log = []
-    hub = await fake_hub(_fake_hub_handler(CURRENT.to_wire(), log))
+    hub = await fake_hub(_fake_hub_handler(CURRENT.to_wire(), log, bt={"hosts_max": 255, "remotes_max": 32}))
     write_yaml(cfg)
     entry = await setup(hass, hub)
     await _compiled(hass, entry)

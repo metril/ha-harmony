@@ -65,6 +65,7 @@ from .harmony_core.compiler import Compiled, HaStep, compile_config, config_stat
 from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
+from .harmony_core.hub_limits import bt_fit_error
 from .ota import CHUNK, TARGET_HUB, UPLOAD_ATTEMPTS, Image, encode_chunk
 from .tile_format import tile_state, tile_text
 
@@ -696,6 +697,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             too_big = await self.hass.async_add_executor_job(
                 lambda: fit_error(config_stats(compiled.hub_json, self.client.limits.max_pronto), self.client.limits)
             )
+        too_big = too_big or bt_fit_error(compiled.hub_json, self.client.bt)
         try:
             if too_big:
                 hint = " (this hub runs older firmware; updating it raises the limit)" if self.client.limits.legacy else ""
