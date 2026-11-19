@@ -366,7 +366,140 @@ static void test_remote_info_broadcast_when_the_stored_set_changes(void) {
     CT_EQ(H.info_bcast, 3u);
 }
 
+/* ---- theme_push: queued like a page_push, delivered before the pages of its gen ---- */
+typedef struct { uint8_t type, key; } seen_t; /* key: the page id of a page_push, the gen of a theme_push */
+static seen_t seen[64];
+static int nseen;
+static void th_hook(const hp_rf_msg_t *m) {
+    hp_rf_val_t v[3];
+    if ((m->type != HP_MSG_PAGE_PUSH && m->type != HP_MSG_THEME_PUSH) || hp_rf_unpack(m->type, m->payload, m->len, v, 3) != 0) return;
+    if (nseen < 64) seen[nseen++] = (seen_t){(uint8_t)m->type, (uint8_t)v[1].u};
+    if (m->type == HP_MSG_PAGE_PUSH) (void)hp_store_put(&ST, v[2].p, v[2].len);
+    else (void)hp_store_theme(&ST, (uint8_t)v[1].u, v[2].p, v[2].len);
+}
+static void th_reset(void) { nseen = 0; hp_store_init(&ST); }
+static void th_world(void) {
+    remote_hook = th_hook;
+    world_reset_hook = th_reset;
+    world_init(true, MODEL_S3);
+    run(400);
+    CT_CHECK(R.up);
+}
+static int push_theme(uint8_t gen, uint8_t seed) {
+    uint8_t t[HP_THEME_BYTES];
+    memset(t, seed, sizeof t);
+    t[0] = 1;
+    char b64[200], js[320];
+    hp_base64_encode(t, sizeof t, b64);
+    snprintf(js, sizeof js, "{\"remote\":1,\"gen\":%u,\"data\":\"%s\"}", gen, b64);
+    cJSON *d = cJSON_Parse(js);
+    char reply[512];
+    size_t len = 0;
+    int rc = TBL.handler[HP_MSG_THEME_PUSH](&H, NULL, 7, d, reply, sizeof reply, &len);
+    cJSON_Delete(d);
+    reply[len < sizeof reply ? len : sizeof reply - 1] = 0;
+    return rc == 0 && strstr(reply, "\"ok\":true");
+}
+static size_t themed(uint8_t *o, uint8_t id, uint8_t total, uint8_t gen) {
+    size_t n = mkpage(o, id, total, gen, 0, 0);
+    o[7] = (uint8_t)(HP_PAGE_THEME_CUSTOM << 3);
+    return n;
+}
+static void away(void) {
+    hp_rf_link_set_awake(&RL, false, R.now);
+    run(900);
+    CT_CHECK(!R.up);
+}
+
+/* the theme is queued first and arrives first; the set is complete when its pages are in */
+static void test_theme_arrives_before_its_pages(void) {
+    th_world();
+    uint8_t raw[40];
+    CT_CHECK(push_theme(5, 1));
+    for (uint8_t i = 0; i < 3; i++) CT_CHECK(push_raw(i, raw, themed(raw, i, 3, 5)));
+    run(5000);
+    CT_EQ(nseen, 4);
+    CT_EQ(seen[0].type, HP_MSG_THEME_PUSH);
+    for (int i = 1; i < 4; i++) CT_EQ(seen[i].type, HP_MSG_PAGE_PUSH);
+    CT_CHECK(hp_store_complete(&ST) && hp_store_theme_ok(&ST));
+    CT_EQ(H.npend, 0);
+}
+
+/* held while the remote is away: one theme per remote (the latest wins), a newer gen drops the old set and its theme,
+ * and what is delivered when it returns is the new theme first */
+static void test_held_themes_supersede_and_a_newer_gen_cancels_the_old_set(void) {
+    th_world();
+    away();
+    uint8_t raw[40];
+    CT_CHECK(push_theme(5, 1));
+    CT_CHECK(push_raw(0, raw, themed(raw, 0, 2, 5)));
+    CT_CHECK(push_theme(5, 2)); /* same gen, new bytes: replaces the held one (same key) */
+    CT_EQ(count_pend(HP_MSG_THEME_PUSH), 1);
+    CT_CHECK(push_raw(1, raw, themed(raw, 1, 2, 5)));
+    CT_EQ(H.npend, 3);
+    CT_CHECK(push_theme(6, 3)); /* the config changed: the whole old set (pages and theme) goes */
+    CT_EQ(H.npend, 1);
+    CT_CHECK(push_raw(0, raw, themed(raw, 0, 1, 6)));
+    CT_EQ(count_pend(HP_MSG_PAGE_PUSH), 1);
+    CT_EQ(count_pend(HP_MSG_THEME_PUSH), 1);
+    CT_EQ(H.pend[0].type, HP_MSG_THEME_PUSH);
+    hp_rf_link_set_awake(&RL, true, R.now);
+    run(8000);
+    CT_EQ(nseen, 2);
+    CT_EQ(seen[0].type, HP_MSG_THEME_PUSH);
+    CT_EQ(seen[0].key, 6);
+    CT_EQ(seen[1].type, HP_MSG_PAGE_PUSH);
+    CT_CHECK(hp_store_complete(&ST) && ST.gen == 6);
+    CT_EQ(H.npend, 0);
+}
+
+/* a lost theme is resent, bounded, and its pages do not overtake it */
+static void test_failed_theme_is_resent_before_its_pages_and_bounded(void) {
+    th_world();
+    uint8_t raw[40];
+    R.drop_dl = 1000; /* everything the hub transmits is lost */
+    CT_CHECK(push_theme(5, 1));
+    CT_CHECK(push_raw(0, raw, themed(raw, 0, 1, 5)));
+    run(4000);
+    CT_EQ(nseen, 0);
+    CT_CHECK(R.up);
+    R.drop_dl = 0;
+    run(8000);
+    CT_EQ(nseen, 2);
+    CT_EQ(seen[0].type, HP_MSG_THEME_PUSH); /* the theme first, though both failed */
+    CT_EQ(seen[1].type, HP_MSG_PAGE_PUSH);
+    CT_CHECK(hp_store_complete(&ST));
+    CT_EQ(H.npend, 0);
+    /* a remote that never answers: HUB_PAGE_RESENDS resends, then dropped and counted */
+    uint32_t f0 = hp_rf_link_status(&H.link).failures, d0 = H.pend_dropped;
+    R.drop_dl = 100000;
+    CT_CHECK(push_theme(6, 4));
+    run(30000);
+    CT_EQ(hp_rf_link_status(&H.link).failures - f0, 1u + HUB_PAGE_RESENDS);
+    CT_CHECK(H.pend_dropped > d0);
+    CT_EQ(count_pend(HP_MSG_THEME_PUSH), 0);
+}
+
+/* a stale failed theme (a newer gen was pushed meanwhile) is not resent */
+static void test_stale_failed_theme_is_not_resent(void) {
+    th_world();
+    R.drop_dl = 1000;
+    CT_CHECK(push_theme(5, 1));
+    run(500);
+    R.drop_dl = 100000;
+    CT_CHECK(push_theme(6, 2));
+    run(30000);
+    CT_EQ(H.npend, 0);
+    R.drop_dl = 0;
+    run(2000);
+    for (int i = 0; i < nseen; i++) CT_CHECK(seen[i].key != 5 || seen[i].type != HP_MSG_THEME_PUSH);
+}
+
 int main(void) {
+    test_theme_arrives_before_its_pages();
+    test_held_themes_supersede_and_a_newer_gen_cancels_the_old_set();
+    test_failed_theme_is_resent_before_its_pages_and_bounded();
+    test_stale_failed_theme_is_not_resent();
     test_remote_info_broadcast_when_the_stored_set_changes();
     test_remote_info_cached_and_cleared_on_link_loss();
     test_unknown_and_unexpected_types_are_dropped();

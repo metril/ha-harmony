@@ -56,6 +56,7 @@
 #include "hub/rf/link.h"
 #include "hub/rf/rf_payload.h"
 #include "remote/page/page.h"
+#include "remote/page/store.h"
 
 #define SIM_RF_SLOT 1 /* the sim socket carries hub-mode (30 B) frames both ways */
 
@@ -206,12 +207,31 @@ static struct {
     uint8_t gen;
 } st = {.last = -1};
 
+/* The remote's own completeness rule (remote/page/store.c): a set whose pages use theme id 7 is complete only with the theme
+ * of its gen. g_themes counts theme_push objects heard, g_theme_first = a theme_push of the set's gen came before its first page. */
+static hp_store_t g_store;
+static int g_themes, g_theme_first, g_pages_first;
+
+static void on_theme(const hp_rf_val_t *v) {
+    if (v[2].len != HP_THEME_BYTES || v[2].p[0] != 1) {
+        fprintf(stderr, "remote_sim: rejected theme_push\n");
+        return;
+    }
+    if (hp_store_theme(&g_store, (uint8_t)v[1].u, v[2].p, v[2].len) < 0) return;
+    g_themes++;
+    if (!hp_store_count(&g_store)) g_theme_first = 1;
+}
+
 static int on_page(const hp_rf_val_t *v) {
     hp_page_t p;
     int rc = hp_page_decode(v[2].p, v[2].len, &p);
     if (rc < 0) {
         fprintf(stderr, "remote_sim: rejected page_push (page %u): error %d\n", (unsigned)v[1].u, -rc);
         return 0;
+    }
+    if (p.version == 2) {
+        if (!hp_store_count(&g_store) && !(g_store.have_theme && g_store.theme_gen == p.gen)) g_pages_first = 1;
+        (void)hp_store_put(&g_store, v[2].p, v[2].len);
     }
     if (p.version == 2) { /* a new gen is a new config: forget the old pages */
         if (st.have_gen && st.gen != p.gen) memset(st.used, 0, sizeof st.used);
@@ -255,6 +275,9 @@ static int pump(long timeout_ms, int stop_on_page) {
             hp_rf_val_t v[4], v5[5];
             if (msg.type == HP_MSG_PAGE_PUSH && hp_rf_unpack(HP_MSG_PAGE_PUSH, msg.payload, msg.len, v, 3) == 0) {
                 if (on_page(v) && stop_on_page) return 1;
+                if (!stop_on_page) deadline = now_ms() + timeout_ms;
+            } else if (msg.type == HP_MSG_THEME_PUSH && hp_rf_unpack(HP_MSG_THEME_PUSH, msg.payload, msg.len, v, 3) == 0) {
+                on_theme(v);
                 if (!stop_on_page) deadline = now_ms() + timeout_ms;
             } else if (msg.type == HP_MSG_TILE_UPDATE &&
                        hp_rf_unpack(HP_MSG_TILE_UPDATE, msg.payload, msg.len, v, 4) == 0) {
@@ -306,6 +329,19 @@ static int dump_layout(long timeout_ms, long settle_ms) {
         }
         cJSON_AddNumberToObject(o, "act", p->act);
         cJSON_AddStringToObject(o, "title", p->title);
+    }
+    if (p->version == 2) { /* the theme slot and the completeness rule, see g_store */
+        cJSON_AddNumberToObject(o, "theme_id", p->theme);
+        cJSON_AddBoolToObject(o, "complete", hp_store_complete(&g_store));
+        cJSON_AddNumberToObject(o, "themes_heard", g_themes);
+        cJSON_AddBoolToObject(o, "theme_first", g_theme_first && !g_pages_first);
+        if (g_store.have_theme) {
+            char hex[2 * HP_THEME_BYTES + 1];
+            for (int i = 0; i < HP_THEME_BYTES; i++) snprintf(hex + 2 * i, 3, "%02x", g_store.theme[i]);
+            cJSON *t = cJSON_AddObjectToObject(o, "theme");
+            cJSON_AddNumberToObject(t, "gen", g_store.theme_gen);
+            cJSON_AddStringToObject(t, "hex", hex);
+        }
     }
     for (unsigned i = 0; i < p->count; i++) {
         const hp_widget_t *w = &p->widgets[i];

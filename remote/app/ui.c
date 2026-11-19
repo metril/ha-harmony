@@ -647,6 +647,7 @@ static void retheme(void *ctx) {
 void ra_ui_init(ra_ui_t *ui) {
   memset(ui, 0, sizeof *ui);
   theme_ui = ui;
+  custom_loaded = 0; /* a restart has no custom theme until theme_push delivers one */
   ra_theme_init();
   ra_theme_set_listener(retheme, ui);
   ui->soc = -1;

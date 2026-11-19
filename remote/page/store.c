@@ -6,6 +6,17 @@
 
 void hp_store_init(hp_store_t *s) { memset(s, 0, sizeof *s); }
 
+/* Drops the page set, keeps the theme slot. */
+static void reset_pages(hp_store_t *s) {
+    bool have = s->have_theme;
+    uint8_t gen = s->theme_gen, th[HP_THEME_BYTES];
+    memcpy(th, s->theme, sizeof th);
+    hp_store_init(s);
+    s->have_theme = have;
+    s->theme_gen = gen;
+    memcpy(s->theme, th, sizeof th);
+}
+
 static void drop_tiles(hp_store_t *s, int page) {
     for (unsigned i = 0; i < HP_STORE_TILES; i++)
         if (s->tiles[i].used && (page < 0 || s->tiles[i].page == page)) s->tiles[i].used = 0;
@@ -19,7 +30,7 @@ int hp_store_put(hp_store_t *s, const uint8_t *raw, size_t len) {
     int ret = HP_STORE_OK;
     if (s->have_gen && (s->gen != p.gen || s->total != p.total)) { /* gen is one byte: a changed total is a new set too */
         bool had = s->count > 0;
-        hp_store_init(s);
+        reset_pages(s);
         if (had) ret = HP_STORE_CLEARED;
     }
     s->have_gen = true;
@@ -29,7 +40,7 @@ int hp_store_put(hp_store_t *s, const uint8_t *raw, size_t len) {
     if (!m->len) s->count++;
     memcpy(s->raw[p.page_id], raw, len);
     *m = (hp_store_meta_t){.len = (uint8_t)len, .kind = p.kind, .act = p.act, .seq_idx = p.seq_idx, .seq_cnt = p.seq_cnt,
-                           .back = p.back};
+                           .back = p.back, .theme = p.theme};
     drop_tiles(s, p.page_id);
     return ret;
 }
@@ -39,10 +50,38 @@ bool hp_store_same(const hp_store_t *s, const uint8_t *raw, size_t len) {
     return s->have_gen && s->gen == raw[5] && s->meta[raw[1]].len == len && !memcmp(s->raw[raw[1]], raw, len);
 }
 
+int hp_store_theme(hp_store_t *s, uint8_t gen, const uint8_t *bytes, size_t len) {
+    if (!bytes || len != HP_THEME_BYTES) return -HP_E_INVAL;
+    bool stale = s->have_gen && s->gen != gen && s->count; /* the held set is of another generation */
+    int ret = stale ? HP_STORE_CLEARED : HP_STORE_OK;
+    if (stale) reset_pages(s);
+    if (!stale && s->have_theme && s->theme_gen == gen && !memcmp(s->theme, bytes, len)) return HP_STORE_SAME;
+    s->have_theme = true;
+    s->theme_gen = gen;
+    memcpy(s->theme, bytes, len);
+    return ret;
+}
+
+static bool uses_theme(const hp_store_t *s) {
+    for (unsigned i = 0; i < HP_STORE_MAX; i++)
+        if (s->meta[i].len && s->meta[i].theme == HP_PAGE_THEME_CUSTOM) return true;
+    return false;
+}
+
+bool hp_store_theme_ok(const hp_store_t *s) { return s->have_theme && s->have_gen && s->theme_gen == s->gen; }
+
+bool hp_store_theme_missing(const hp_store_t *s) { return uses_theme(s) && !hp_store_theme_ok(s); }
+
+bool hp_store_ready(const hp_store_t *s, uint8_t id) {
+    return hp_store_has(s, id) && (s->meta[id].theme != HP_PAGE_THEME_CUSTOM || hp_store_theme_ok(s));
+}
+
 bool hp_store_has(const hp_store_t *s, uint8_t id) { return id < HP_STORE_MAX && s->meta[id].len; }
 unsigned hp_store_count(const hp_store_t *s) { return s->count; }
 unsigned hp_store_need(const hp_store_t *s) { return s->total < HP_STORE_MAX ? s->total : HP_STORE_MAX; }
-bool hp_store_complete(const hp_store_t *s) { return s->count && s->count >= hp_store_need(s); }
+bool hp_store_complete(const hp_store_t *s) {
+    return s->count && s->count >= hp_store_need(s) && !hp_store_theme_missing(s);
+}
 
 int hp_store_get(const hp_store_t *s, uint8_t id, hp_page_t *out) {
     if (!hp_store_has(s, id)) return -HP_E_NOENT;

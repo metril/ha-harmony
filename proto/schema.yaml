@@ -235,7 +235,17 @@ messages:
       - {name: hub_id, type: str}
       - {name: name, type: str, optional: true}
 
-  # 28..29 spare. 30..34 are RESERVED for the remote's RF transport (not implemented): the hub
+  # theme_push: the 99-byte wire theme of a config generation (docs/proto/themes-transport.md). Acked like page_push; the
+  # hub treats it like one (supersedes by (type, remote), dropped when a newer generation is pushed, resent while attached).
+  - name: theme_push
+    code: 28
+    transport: both
+    fields:
+      - {name: remote, type: u8}
+      - {name: gen, type: u8}
+      - {name: data, type: bytes}
+
+  # 29 spare. 30..34 are RESERVED for the remote's RF transport (not implemented): the hub
   # relays a verified remote image as fragments and the remote answers per window.
   - name: ota_offer
     code: 30

@@ -200,4 +200,5 @@ class HarmonyPageFormat(HarmonyEntity, SensorEntity):
             "caps": [n for bit, n in names.items() if info.caps & bit],
             "icons": info.icons,
             "theme_notices": [n["msg"] for n in self.coordinator.theme_notices(self._remote)],
+            "theme": self.coordinator.theme_status(self._remote),
         }

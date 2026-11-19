@@ -6,6 +6,7 @@
 
 #include "hub/hp_errors.h"
 #include "proto/gen/harmony_proto.h"
+#include "remote/app/theme_derive.h"
 
 #define LINK_POLL_MS 100 /* select() timeout cap for a link with no fd to wait on */
 #define LINK_EVENTS_PER_STEP 8
@@ -32,7 +33,8 @@ static void show_cur(app_t *a) {
   unsigned have = hp_store_count(&a->store), need = hp_store_need(&a->store);
   ra_display_note(&a->display, RA_WHY_PAGE, 0);
   hp_page_t p;
-  if ((hp_store_complete(&a->store) || a->partial) && a->cur >= 0 && hp_store_get(&a->store, (uint8_t)a->cur, &p) == 0) {
+  if ((hp_store_complete(&a->store) || a->partial) && a->cur >= 0 && hp_store_ready(&a->store, (uint8_t)a->cur) &&
+      hp_store_get(&a->store, (uint8_t)a->cur, &p) == 0) { /* never with a stale or missing custom theme */
     ra_ui_show_page(&a->ui, &p);
     return;
   }
@@ -212,6 +214,7 @@ static void heard(app_t *a, uint64_t now) {
  * page (else page 0, or the running activity's page) is shown; afterwards a page is re-rendered only when the one on
  * screen was replaced. An identical re-push of a stored page changes nothing, but only in v2 mode: the first v2 page after
  * v1 pages always switches the remote to v2. */
+static void settle(app_t *a, int page);
 static void push_v2(app_t *a, const uint8_t *raw, size_t len, uint64_t now) {
   if (a->v2 && hp_store_same(&a->store, raw, len)) return;
   int r = hp_store_put(&a->store, raw, len);
@@ -230,6 +233,12 @@ static void push_v2(app_t *a, const uint8_t *raw, size_t len, uint64_t now) {
     a->cur = -1;
     a->partial = false;
   }
+  settle(a, raw[1]);
+}
+
+/* The store changed (a page, or the custom theme). Incomplete: "Receiving" (or the best stored page after the partial
+ * timeout); complete: pick the start page, or redraw when the visible page was replaced (`page`; -1 = any: the theme). */
+static void settle(app_t *a, int page) {
   bool complete = hp_store_complete(&a->store);
   if (!complete && !a->partial) {
     if (a->ui.page.version != 2 || a->ui.page.page_id != a->cur || a->cur < 0) show_cur(a); /* progress */
@@ -242,9 +251,33 @@ static void push_v2(app_t *a, const uint8_t *raw, size_t len, uint64_t now) {
       if (pg >= 0) a->cur = pg;
     }
     show_cur(a);
-  } else if (raw[1] == a->cur || !on_stored_page(a)) { /* the visible page was replaced, or the screen is not a stored page */
+  } else if (page < 0 || page == a->cur || !on_stored_page(a)) { /* the visible page was replaced, or the screen is not a stored page */
     if (hp_store_has(&a->store, (uint8_t)a->cur)) show_cur(a);
   }
+}
+
+/* theme_push: the custom theme of a generation. Validated first (a bad theme changes nothing). A new gen clears the
+ * page set like a page of a new gen; the same gen with other bytes replaces the slot and repaints; the same bytes are
+ * ignored. Pages of theme id 7 count as received only while the slot is of their gen (hp_store_complete / _ready). */
+static void theme_v2(app_t *a, uint8_t gen, const uint8_t *bytes, size_t len, uint64_t now) {
+  ra_theme_t t;
+  if (len != HP_THEME_BYTES || ra_theme_decode(bytes, (unsigned)len, &t) < 0) {
+    ra_logf(&a->sys, "theme_push rejected");
+    return;
+  }
+  int r = hp_store_theme(&a->store, gen, bytes, len);
+  if (r < 0 || r == HP_STORE_SAME) return;
+  a->last_page_ms = now;
+  if (r == HP_STORE_CLEARED) { /* the held set is stale: off the screen before the new theme is applied */
+    a->cur = -1;
+    a->partial = false;
+    if (a->v2) show_cur(a);
+  }
+  if (ra_ui_set_custom_theme(bytes, len) < 0) { /* cannot happen: validated above */
+    ra_logf(&a->sys, "theme_push not applied");
+    return;
+  }
+  if (a->v2 && hp_store_count(&a->store)) settle(a, -1);
 }
 
 /* state_update: the highlight always; the page only on a change: a running activity shows its `act` page, power off
@@ -290,6 +323,10 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
     }
     break;
   }
+  case APP_LINK_EV_THEME_PUSH:
+    heard(a, now);
+    theme_v2(a, ev->gen, ev->data, ev->len, now);
+    break;
   case APP_LINK_EV_TILE_UPDATE:
   case APP_LINK_EV_TILE_STATE:
     heard(a, now);

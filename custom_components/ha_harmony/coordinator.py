@@ -8,6 +8,7 @@ config hash differs) -> push pages -> keep tiles in sync with their bound entiti
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import logging
 import time
@@ -61,7 +62,14 @@ from .const import (
     UNKNOWN_KEY,
 )
 from .errors import ha_error, invalid
-from .harmony_core.compiler import Compiled, HaStep, compile_config, config_stats, fit_error
+from .harmony_core.compiler import (
+    Compiled,
+    HaStep,
+    RemotePages,
+    compile_config,
+    config_stats,
+    fit_error,
+)
 from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
@@ -136,6 +144,8 @@ class RemoteLink:
     epoch: int = 0  # bumped at every link-up: the remote may have lost its page store
     pushed: tuple[int, int, int, int] | None = None  # (config gen, format, epoch, theme caps) of the last complete set
     inflight: tuple[int, int, int, int] | None = None
+    hub_theme: bool = True  # the hub understands theme_push (False once it answered unknown_type: bit 3 is then masked off)
+    theme_sent: int | None = None  # gen of the custom theme the hub accepted for this remote's current set
     waiting: bool = False  # waiting for remote_info
     attached: bool = True  # False after "no remote" until the remote shows signs of life
     pending: bool = False  # a push failed for want of a remote: redo when it is back
@@ -150,10 +160,12 @@ class RemoteLink:
     @property
     def page_caps(self) -> int:
         """The theme caps the pages are built for: 0 for v1 or an unknown remote. Bit 3 counts only
-        once a theme can be sent (const.THEME_TRANSPORT); until then a user theme is its base preset."""
+        while a theme can be sent (this integration and the hub both speak theme_push); otherwise a
+        user theme is its base preset and free colours are snapped (bit 2 behaviour)."""
         if self.page_fmt < 2 or self.info is None:
             return 0
-        mask = const.CAP_THEME_COLOR | (const.CAP_THEME_CUSTOM if const.THEME_TRANSPORT else 0)
+        custom = const.THEME_TRANSPORT and self.hub_theme
+        mask = const.CAP_THEME_COLOR | (const.CAP_THEME_CUSTOM if custom else 0)
         return self.info.caps & mask
 
     @property
@@ -211,6 +223,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.device_states: dict[str, DeviceState] = {}
         self.battery: dict[int, tuple[int, int]] = {}  # remote -> (percent, millivolts)
         self.remotes: tuple[int, ...] = DEFAULT_REMOTE_IDS
+        self._hub_theme = True  # the hub understands theme_push (until it says unknown_type)
         self.links: dict[int, RemoteLink] = {r: RemoteLink() for r in self.remotes}
         self._cfg_gen = 0  # bumped whenever the compiled config changes
         self._accepted = False  # the hub is known to run `compiled` (it reported the matching hash)
@@ -251,6 +264,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._ota_lock = asyncio.Lock()
         self._rolled_back: set[int] = set()  # builds the hub reported rolling back
         self.page_pushes = 0  # page_push requests sent
+        self.theme_pushes = 0  # theme_push requests sent
         self.config_pushes = 0  # set_config requests sent (observable by tests)
         self.tile_updates = 0
         self._topic_subs: dict[str, list[Callable[[], None]]] = {}
@@ -751,7 +765,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return self._rlink(remote).page_fmt
 
     def _rlink(self, remote: int) -> RemoteLink:
-        return self.links.setdefault(remote, RemoteLink())
+        return self.links.setdefault(remote, RemoteLink(hub_theme=self._hub_theme))
 
     @property
     def hub_accepted(self) -> bool:
@@ -811,7 +825,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         link.inflight = want
         t0 = time.monotonic()
         try:
-            if await self._push_set(remote, link, want[1]):
+            ok = await self._push_set(remote, link, want[1])
+            rp = self.compiled.for_caps(link.page_caps) if want[1] >= 2 else None
+            if ok and rp is not None and rp.theme_wire is not None and not await self._await_theme_ack(link, rp):
+                _LOGGER.warning("Remote %s did not report the custom theme set; sending it once more", remote)
+                ok = await self._push_set(remote, link, want[1])  # the hub gave up on it (the remote was away)
+            if ok:
                 link.pushed, link.pending = want, False
                 link.push_ms = round((time.monotonic() - t0) * 1000, 1)
                 await self._send_all_tiles(remote)
@@ -842,15 +861,22 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             timer.cancel()
 
     async def _push_set(self, remote: int, link: RemoteLink, fmt: int) -> bool:
-        """Send every page of format `fmt`, one after the other (each command result is the
-        backpressure). False when it did not complete (no remote, link down, newer config)."""
+        """Send the custom theme (when the set has one), then every page of format `fmt`, one after the
+        other (each command result is the backpressure). The theme goes first: the remote shows no
+        page of a set until its theme is in. False when it did not complete (no remote, link down,
+        newer config)."""
         gen = self._cfg_gen
-        if self.compiled.theme_wire is not None and link.info is not None and link.info.caps & const.CAP_THEME_CUSTOM:
-            # seam: the 99-byte theme (compiled.theme_wire) goes out here once a transport exists
-            _LOGGER.info("Custom theme %r needs transport; remote %s shows %r", self.compiled.theme_name, remote, self.compiled.theme_base)
-        pages = (
-            self.compiled.for_caps(link.page_caps).pages_v2_b64 if fmt >= 2 else self.compiled.encoded_pages_b64(1)
-        )
+        caps = link.page_caps
+        rp = self.compiled.for_caps(caps) if fmt >= 2 else None
+        link.theme_sent = None
+        if rp is not None and rp.theme_wire is not None:
+            ok = await self._send_theme(remote, link, rp)
+            if ok is None:
+                return False
+            if ok is False:  # the hub cannot carry it: pages built for what it can (the base preset)
+                self._request_push(remote, wait=False)
+                return False
+        pages = rp.pages_v2_b64 if rp is not None else self.compiled.encoded_pages_b64(1)
         for idx, b64 in enumerate(pages):
             if gen != self._cfg_gen:
                 return False
@@ -869,6 +895,76 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 _LOGGER.debug("Page push to remote %s interrupted: %s", remote, exc)
                 return False
         return True
+
+    async def _send_theme(self, remote: int, link: RemoteLink, rp: RemotePages) -> bool | None:
+        """theme_push of the set's custom theme. True: the hub took it. None: not delivered (no remote,
+        link down): the push is redone later. False: this hub does not know theme_push (old firmware):
+        bit 3 is masked off for it and the set is rebuilt without the custom theme."""
+        assert rp.theme_wire is not None
+        payload = {"remote": remote, "gen": rp.gen, "data": base64.b64encode(rp.theme_wire).decode()}
+        self.theme_pushes += 1
+        try:
+            await self.client.async_send(MsgType.THEME_PUSH, payload)
+        except HarmonyCommandError as exc:
+            if exc.code == "unknown_type":
+                _LOGGER.info(
+                    "The hub does not know theme_push (older firmware); custom theme %r shows as %r",
+                    self.compiled.theme_name,
+                    self.compiled.theme_base,
+                )
+                self._set_hub_theme(False)
+                return False
+            if exc.code == "no_remote":
+                link.pending, link.attached = True, False
+                return None
+            _LOGGER.warning("Hub refused the custom theme: %s", exc)
+            return True  # the pages still go: the remote shows what it can
+        except HarmonyConnectionError as exc:
+            link.pending = True
+            _LOGGER.debug("Theme push to remote %s interrupted: %s", remote, exc)
+            return None
+        link.theme_sent = rp.gen
+        return True
+
+    def _set_hub_theme(self, ok: bool) -> None:
+        for lk in self.links.values():
+            lk.hub_theme = ok
+        self._hub_theme = ok
+
+    def _theme_acked(self, link: RemoteLink, rp: RemotePages) -> bool:
+        """The remote reports the whole set (its pages and, for a custom theme, the theme) as held."""
+        info = link.info
+        return info is not None and info.gen == rp.gen and info.pages == len(rp.pages_v2)
+
+    async def _await_theme_ack(self, link: RemoteLink, rp: RemotePages) -> bool:
+        """Up to THEME_ACK_WAIT seconds for the remote_info that says the set is complete."""
+        timer = asyncio.ensure_future(self._sleep(const.THEME_ACK_WAIT))
+        try:
+            while not self._theme_acked(link, rp):
+                link.info_event.clear()
+                waiter = asyncio.ensure_future(link.info_event.wait())
+                try:
+                    await asyncio.wait({waiter, timer}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    waiter.cancel()
+                if timer.done():
+                    break
+        finally:
+            timer.cancel()
+        return self._theme_acked(link, rp)
+
+    def theme_status(self, remote: int) -> dict[str, Any]:
+        """The custom theme of this remote's set: name, preset id, whether the hub took it, whether the remote holds it."""
+        link = self._rlink(remote)
+        c = self.compiled
+        rp = c.for_caps(link.page_caps) if link.page_fmt == 2 else None
+        custom = rp is not None and rp.theme_wire is not None
+        return {
+            "name": c.theme_name,
+            "id": c.theme_id,
+            "sent": custom and link.theme_sent == rp.gen,
+            "acked": custom and self._theme_acked(link, rp),
+        }
 
     def _remote_seen(self) -> None:
         """A key or battery message proves a remote is attached: redo what failed for want of it."""
@@ -1101,6 +1197,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # with the activity known before the drop: a change while disconnected still runs its
             # Home Assistant steps (only the very first report after HA starts is a baseline).
             self._accepted = False  # the hub may have rebooted: the resync confirms its config
+            self._set_hub_theme(True)  # and may run other firmware: theme_push is tried again
             for link in self.links.values():
                 link.epoch += 1
                 link.info, link.pushed = None, None

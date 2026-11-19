@@ -19,13 +19,14 @@ typedef enum {
   APP_LINK_EV_TILE_UPDATE, /* page, tile, text */
   APP_LINK_EV_TILE_STATE,  /* page, tile, state, text (hp_tile_state_t) */
   APP_LINK_EV_STATE_UPDATE,/* activity, power */
+  APP_LINK_EV_THEME_PUSH,  /* gen, data[0..len) = the 99-byte custom theme */
   APP_LINK_EV_FAILED,      /* a send failed after all retries (fatal: the link cannot work at all) */
   APP_LINK_EV_ALIVE        /* any frame arrived from the hub */
 } app_link_event_kind_t;
 
 typedef struct {
   app_link_event_kind_t kind;
-  uint8_t page, tile, activity, state;
+  uint8_t page, tile, activity, state, gen;
   bool power, fatal; /* fatal: FAILED that shows the fallback at once */
   uint8_t data[HP_PAGE_MAX_BYTES];
   size_t len;

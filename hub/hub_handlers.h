@@ -93,7 +93,7 @@
 typedef struct {
     uint8_t type, remote, page, tile; /* the key: page_push (remote,page), tile_update / tile_state (remote,page,tile; one
                                        * shared key), state_update () */
-    uint8_t gen;                      /* page_push of a v2 page: its gen byte (a push of another gen drops this one) */
+    uint8_t gen;                      /* page_push of a v2 page, or a theme_push: its gen byte (a push of another gen drops this one) */
     bool has_gen;
     bool wait;                        /* a page_push that failed its retries: resent after the next frame heard from the remote */
     uint32_t rx_mark;                 /* link rx_frames when it failed */
@@ -143,6 +143,7 @@ typedef struct {
     uint8_t npend;
     uint8_t page_tries[256]; /* resends of an unacked page_push per page id (bounded by HUB_PAGE_RESENDS); reset by a fresh push or an ack */
     uint8_t page_out[256];   /* page_push objects of a page id handed to the link and not yet resolved */
+    uint8_t theme_tries, theme_out; /* as page_tries / page_out for the (single) theme_push of the remote */
     uint8_t last_gen;        /* gen of the newest v2 page pushed: an older page that failed is not resent */
     bool has_last_gen;
     bool info_fresh;         /* a link-up was seen: the next remote_info is broadcast even if identical (one per link-up) */

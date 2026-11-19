@@ -152,6 +152,12 @@ static const hp_field_desc_t hp_fields_hub_id_ack[] = {
     {"name", HP_T_STR, true, NULL},
 };
 
+static const hp_field_desc_t hp_fields_theme_push[] = {
+    {"remote", HP_T_U8, false, NULL},
+    {"gen", HP_T_U8, false, NULL},
+    {"data", HP_T_BYTES, false, NULL},
+};
+
 static const hp_field_desc_t hp_fields_ota_offer[] = {
     {"size", HP_T_U32, false, NULL},
     {"build", HP_T_U32, false, NULL},
@@ -199,6 +205,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"ota_status", HP_MSG_OTA_STATUS, HP_TRANSPORT_WS, 5, hp_fields_ota_status},
     {"set_hub_id", HP_MSG_SET_HUB_ID, HP_TRANSPORT_WS, 2, hp_fields_set_hub_id},
     {"hub_id_ack", HP_MSG_HUB_ID_ACK, HP_TRANSPORT_WS, 2, hp_fields_hub_id_ack},
+    {"theme_push", HP_MSG_THEME_PUSH, HP_TRANSPORT_BOTH, 3, hp_fields_theme_push},
     {"ota_offer", HP_MSG_OTA_OFFER, HP_TRANSPORT_RF, 2, hp_fields_ota_offer},
     {"ota_frag", HP_MSG_OTA_FRAG, HP_TRANSPORT_RF, 2, hp_fields_ota_frag},
     {"ota_frag_ack", HP_MSG_OTA_FRAG_ACK, HP_TRANSPORT_RF, 1, hp_fields_ota_frag_ack},

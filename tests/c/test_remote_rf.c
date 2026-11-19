@@ -432,7 +432,7 @@ static void test_remote_info_is_first_uplink(void) {
   WAIT_FOR(nhinfo >= 1 && nhbatt >= 1);
   CT_EQ(hinfo[0].remote, RF_LINK_REMOTE_ID);
   CT_EQ(hinfo[0].fmt, 2);
-  CT_EQ(hinfo[0].caps, 7);
+  CT_EQ(hinfo[0].caps, 15);
   CT_EQ(hinfo[0].icons, RA_ICON_MAX);
   CT_CHECK(hinfo[0].ord < hbatt[0].ord);
   CT_EQ(nhinfo, 1);
