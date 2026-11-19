@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.6 (2026-11-18)
 
 - Editor: the Elite drawing's proportions now follow the photo (taller body, Off lower and inset, screen centred, keys and the D-pad ring placed from one table of body fractions, empty rounded grip at the bottom).
 - Editor: History page simplified (Compare and Restore actions per entry) and the hub indicator sits in the header.

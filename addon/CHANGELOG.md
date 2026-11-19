@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.3.6 (2026-11-18)
+
+- Editor: the Elite drawing follows the photo proportions.
+- Fix: the "upload your YAML in the add-on" repair clears once the hub accepts an add-on config and can be dismissed.
 
 - History page: each earlier version has the same two actions in an aligned column, Compare and Restore (Restore loads it as the draft; nothing reaches the hub until Apply). The Revert button is gone (Restore, then Apply, covers it). Rows show the revision, relative time (exact on hover), a one-line summary and Applied / Acknowledged by Home Assistant / Rejected badges.
 - The editor header always shows "Hub: id" with whether Home Assistant is polling for it (the hub switcher when several are linked).
