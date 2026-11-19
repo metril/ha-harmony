@@ -2,6 +2,7 @@
 remote-key events, diagnostics, rename, and the editor relay round trip through the real add-on app."""
 
 import asyncio
+import collections
 import json
 
 import aiohttp
@@ -15,7 +16,8 @@ from pytest_homeassistant_custom_component.common import async_capture_events
 
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
 from custom_components.ha_harmony import const, rename
-from custom_components.ha_harmony.addon_link import AddonClient, AddonUnreachable
+from custom_components.ha_harmony.addon_link import AddonClient, AddonRejected, AddonUnreachable
+from custom_components.ha_harmony.bluetooth import BtError
 from custom_components.ha_harmony.const import DOMAIN
 from custom_components.ha_harmony.diagnostics import async_get_config_entry_diagnostics
 from custom_components.ha_harmony.harmony_core import bt_relay
@@ -373,6 +375,8 @@ async def test_diagnostics_redact_addresses(hass, fake_hub, fake_addon):
     assert b["supported"] is True and b["hello_bt"]["hosts_max"] == 4 and b["gen"] == 3
     assert b["state"]["hosts"][0]["addr"] == "**REDACTED**" and b["state"]["pairing"]["addr"] == "**REDACTED**"
     assert b["state"]["candidates"][0]["addr"] == "**REDACTED**" and b["state"]["hosts"][0]["slot"] == 0
+    assert b["state"]["hosts"][0]["name"] == "**REDACTED**" and b["state"]["remotes"][0]["name"] == "**REDACTED**"
+    assert "Homatics" not in text.replace("Harmony", "")  # device names are redacted too
 
 
 # ------------------------------------------------------------------ the editor relay, end to end
@@ -493,3 +497,128 @@ async def test_relay_survives_an_addon_without_it(hass, fake_hub, fake_addon, mo
     entry, c, _ = await boot(hass, fake_hub, fake_addon, bt)
     await until(hass, lambda: len(calls) >= 2)  # keeps trying, with backoff, and the entry stays loaded
     assert entry.state is ConfigEntryState.LOADED and c.bt_state is not None
+
+
+# ------------------------------------------------------------------ hardening
+def _quiet_addon(monkeypatch, reply):
+    """Replace the exchange: `reply(body)` returns the add-on's answer (or raises). Returns the list of bodies sent."""
+    sent = []
+
+    async def fake(self, body):
+        sent.append(body)
+        return reply(body)
+
+    monkeypatch.setattr(AddonClient, "bt_exchange", fake)
+    return sent
+
+
+async def test_out_of_range_keys_never_reach_the_report(hass, fake_hub, fake_addon, monkeypatch):
+    sent = _quiet_addon(monkeypatch, lambda b: {"commands": [], "listen": True, "fast": False})
+    _entry, c, _ = await boot(hass, fake_hub, fake_addon, BtHub())
+    await until(hass, lambda: c.btm.addon_listen)
+    for bad in ({"slot": 256, "page": 12, "usage": 1, "down": True}, {"slot": 0, "page": 300, "usage": 1, "down": True},
+                {"slot": 0, "page": 12, "usage": 70000, "down": True}, {"slot": -1, "page": 12, "usage": 1, "down": True}):
+        c.btm.on_key(bad)
+    assert not c.btm._events
+    c.btm.on_key({"slot": 255, "page": 255, "usage": 65535, "down": False})
+    assert len(c.btm._events) == 1
+    await until(hass, lambda: any(b["events"] for b in sent))
+
+
+async def test_a_refused_report_is_dropped_not_resent(hass, fake_hub, fake_addon, monkeypatch):
+    calls = []
+
+    def reply(body):
+        calls.append(body)
+        if body["events"]:
+            raise AddonRejected("400")
+        return {"commands": [], "listen": True, "fast": False}
+
+    _quiet_addon(monkeypatch, reply)
+    _entry, c, _ = await boot(hass, fake_hub, fake_addon, BtHub())
+    await until(hass, lambda: c.btm.addon_listen)
+    c.btm.on_key({"slot": 0, "page": 12, "usage": 1, "down": True})
+    await until(hass, lambda: not c.btm._events and sum(1 for b in calls if b["events"]) == 1)
+    n = len(calls)
+    await until(hass, lambda: len(calls) > n + 2)
+    assert sum(1 for b in calls if b["events"]) == 1  # sent once, never again
+
+
+async def test_events_are_acknowledged_by_seq(hass, fake_hub, fake_addon):
+    _entry, c, _ = await boot(hass, fake_hub, fake_addon, BtHub())
+    m = c.btm
+    m.addon_listen = True
+    m.on_key({"slot": 0, "page": 12, "usage": 1, "down": True})
+    _body, n_results, seq = m._report()
+    m.on_key({"slot": 0, "page": 12, "usage": 2, "down": True})  # arrives while the report is in flight
+    m._sent(n_results, seq)
+    assert [e["usage"] for _, e in m._events] == [2]
+    for i in range(bt_relay.MAX_COMMANDS * 20):
+        m.on_key({"slot": 0, "page": 12, "usage": i, "down": True})
+    assert len(m._events) == 64 and m.events_dropped > 0
+    m.addon_listen = False
+
+
+async def test_hub_events_are_rate_limited_on_the_bus(hass, fake_hub, fake_addon):
+    entry, c, _ = await boot(hass, fake_hub, fake_addon, BtHub())
+    events = async_capture_events(hass, const.EVENT_BT_REMOTE_KEY)
+    await call(hass, "bt_listen")
+    for i in range(200):
+        c.btm.on_key({"slot": 0, "page": 12, "usage": i, "down": True})
+    await hass.async_block_till_done()
+    assert 15 <= len(events) <= 30 and c.btm.events_rate_dropped >= 170
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["bluetooth"]["events_rate_dropped"] == c.btm.events_rate_dropped
+
+
+async def test_odd_hub_error_codes_become_a_valid_result_code(hass, fake_hub, fake_addon):
+    bt = BtHub()
+    _entry, c, _ = await boot(hass, fake_hub, fake_addon, bt)
+    assert BtError("k", "", "m").code == "failed" and BtError("k", None, "m").code == "failed"
+    assert BtError("k", "Bad-Code 9", "m").code == "bad_code__"
+    bt.fail["bt_pair"] = ""
+    await c.btm._run_command({"id": "e1", "op": "pair_stop"})
+    assert c.btm._results[-1] == {"id": "e1", "ok": False, "code": "failed", "msg": "refused"}
+
+
+async def test_when_the_addon_goes_away_listening_stops(hass, fake_hub, fake_addon, monkeypatch):
+    bt = BtHub()
+    state_ = {"down": False}
+
+    def reply(body):
+        if state_["down"]:
+            raise AddonUnreachable("gone")
+        return {"commands": [], "listen": True, "fast": False}
+
+    _quiet_addon(monkeypatch, reply)
+    _entry, c, _ = await boot(hass, fake_hub, fake_addon, bt)
+    await until(hass, lambda: bt.sent("bt_listen") == [{"on": True}])
+    c.btm.on_key({"slot": 0, "page": 12, "usage": 1, "down": True})
+    state_["down"] = True
+    await until(hass, lambda: bt.sent("bt_listen")[-1] == {"on": False})
+    assert not c.btm.addon_listen and not c.btm._events
+
+
+async def test_commands_without_an_id_do_not_spin_the_loop(hass, fake_hub, fake_addon, monkeypatch):
+    sent = _quiet_addon(monkeypatch, lambda b: {"commands": [{"op": "pair_stop"}, {"id": "../x", "op": "pair_stop"}], "fast": False})
+    _entry, c, _ = await boot(hass, fake_hub, fake_addon, BtHub())
+    n = len(sent)
+    await asyncio.sleep(0.5)
+    assert len(sent) - n <= 15  # paced at the (patched, 0.05 s) idle cadence, not a tight loop
+    assert bt_relay is not None and c.btm._results == collections.deque()
+
+
+async def test_each_result_is_reported_as_its_command_finishes(hass, fake_hub, fake_addon, monkeypatch):
+    bodies = []
+    batch = [{"id": "a1", "op": "pair_stop"}, {"id": "a2", "op": "pair_stop"}]
+
+    def reply(body):
+        bodies.append(body)
+        return {"commands": [dict(x) for x in batch] if len(bodies) == 1 else [], "fast": False}
+
+    _quiet_addon(monkeypatch, reply)
+    bt = BtHub()
+    _entry, _c, _ = await boot(hass, fake_hub, fake_addon, bt)
+    await until(hass, lambda: len(bt.sent("bt_pair")) == 2)
+    await until(hass, lambda: any(b["results"] for b in bodies))
+    assert [r["id"] for r in next(b for b in bodies if b["results"])["results"]] == ["a1"]  # before a2 had run
