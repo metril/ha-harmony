@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.12 (2026-11-19)
+
+- Fixed "Home Assistant cannot be read" on larger installs: the add-on cut Home Assistant's answer short when it arrived in more than one piece, so entities and services never loaded. The add-on log now says why whenever Home Assistant cannot be read.
+
 ## 0.3.11 (2026-11-19)
 
 - Colours and themes in the editor: give any button or tile a colour from the palette or a custom one, pick a built-in theme (Cards, Midnight, Daylight, High contrast) or create your own in the new theme editor with a live preview. The remote needs a firmware update to show them; the editor says what a linked remote cannot display yet.
