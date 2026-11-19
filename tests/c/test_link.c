@@ -25,6 +25,7 @@ typedef struct {
     int sent_objs, sent_acks;                     /* frames that left this endpoint */
     int gone;                                     /* recv reports -HP_E_NOENT once */
     int refuse;                                   /* send fails with -HP_E_IO this many times */
+    int noent;                                    /* send fails with -HP_E_NOENT while set */
     uint32_t at[64];                              /* net->now of each non-ack frame sent */
     int nat;
     uint8_t txs[16][2];                           /* queued TX statuses (slot, status) */
@@ -46,6 +47,7 @@ static int t_send(void *self, const uint8_t *frame, size_t len) {
     ep_t *e = self;
     ep_t *peer = &e->net->ep[1 - e->idx];
     bool ack = is_ack(e->net, frame);
+    if (e->noent) return -HP_E_NOENT;
     if (e->refuse > 0) {
         e->refuse--;
         return -HP_E_IO;
@@ -303,6 +305,30 @@ static void test_noent_synchronous(void) {
     CT_EQ(hp_rf_link_status(&l).failures, 0);
 }
 
+static int res_ok, res_bad;
+static void count_result(void *ctx, hp_msg_type_t t, const uint8_t *b, size_t l, bool ok) {
+    (void)ctx; (void)t; (void)b; (void)l;
+    if (ok) res_ok++;
+    else res_bad++;
+}
+
+/* queued objects that find nobody home are reported as failed (the hub counts what is in flight by results) */
+static void test_queued_objects_without_a_peer_are_reported(void) {
+    net_t n;
+    net_init(&n, false);
+    uint8_t b[3] = {1, 2, 3};
+    res_ok = res_bad = 0;
+    n.ep[0].link.result = count_result;
+    CT_EQ(send_obj(&n, 0, 10, b, sizeof b), 0); /* in flight */
+    CT_EQ(send_obj(&n, 0, 11, b, sizeof b), 0); /* queued behind it */
+    CT_EQ(send_obj(&n, 0, 12, b, sizeof b), 0);
+    n.ep[0].noent = 1; /* the remote vanishes before the queued ones start */
+    run(&n, 300);
+    CT_EQ(res_ok, 1);
+    CT_EQ(res_bad, 2);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 0);
+}
+
 /* ---- pacing ---- */
 
 static void add_status(ep_t *e, uint8_t slot, uint8_t st) {
@@ -481,6 +507,7 @@ int main(void) {
     test_first_frame_refused_is_retried();
     test_peer_lost_resets();
     test_noent_synchronous();
+    test_queued_objects_without_a_peer_are_reported();
     test_pacing_gap();
     test_pacing_tx_status();
     test_pacing_single_frame_unaffected();

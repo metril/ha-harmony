@@ -11,7 +11,7 @@
  * objects, so nothing is expected while nobody presses a key.
  *
  * REMOTE_INFO. The first object after open, after every re-attach and after a send that failed all its retries (the
- * hub may have restarted and forgotten it) is remote_info {remote, 2, caps 7, highest icon id}, ahead of the battery
+ * hub may have restarted and forgotten it) is remote_info {remote, 2, caps 15, highest icon id}, ahead of the battery
  * message; it is also repeated every RF_LINK_BATTERY_MS just ahead of the battery message (4 bytes; the hub only relays changes). A failed or refused send is
  * retried in RF_LINK_RETRY_MS. Receives tile_state like tile_update.
  *
@@ -44,8 +44,8 @@
 #define RF_LINK_CAP_TILE_STATE 0x01  /* bit 0 */
 #define RF_LINK_CAP_PAGE_STORE 0x02   /* bit 1 */
 #define RF_LINK_CAP_THEME_COLOR 0x04  /* bit 2: palette widget colours + preset themes */
-#define RF_LINK_CAP_THEME_CUSTOM 0x08 /* bit 3: custom theme + free colours (not announced yet) */
-#define RF_LINK_CAPS (RF_LINK_CAP_TILE_STATE | RF_LINK_CAP_PAGE_STORE | RF_LINK_CAP_THEME_COLOR)
+#define RF_LINK_CAP_THEME_CUSTOM 0x08 /* bit 3: custom theme (theme_push) + free colours */
+#define RF_LINK_CAPS (RF_LINK_CAP_TILE_STATE | RF_LINK_CAP_PAGE_STORE | RF_LINK_CAP_THEME_COLOR | RF_LINK_CAP_THEME_CUSTOM)
 #define RF_LINK_BATTERY_MS (5 * 60 * 1000)
 #define RF_LINK_RETRY_MS 5000
 #define RF_LINK_POLL_MS HP_LINK_POLL_MS          /* poll gap while an object awaits its ack */

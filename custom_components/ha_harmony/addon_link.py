@@ -25,6 +25,7 @@ from .harmony_core.hub_limits import CURRENT, LIMITS_HEADER, HubLimits
 HW_HEADER = "X-Hub-Hw"  # the hub's stable hardware id
 PREV_HEADER = "X-Hub-Prev"  # the id the hub had before a rename
 NAME_HEADER = "X-Hub-Name"  # display name, percent-encoded UTF-8
+REMOTES_HEADER = "X-Hub-Remotes"  # JSON: the linked remotes' caps tier and current theme notices (docs/addon-api.md)
 ADOPT_HEADER = "X-HH-Adopt"  # the add-on's answer to a rename: moved | exists | none
 ENVELOPE_KEYS = frozenset({"schema", "core_version", "hub_id", "applied_at", "rev", "config"})
 _REV = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -112,6 +113,22 @@ def parse_bundle(raw: bytes, hub_id: str, limits: HubLimits | None = None) -> Bu
     return Bundle(rev, applied_at, data["config"], compiled)
 
 
+REMOTES_HEADER_MAX = 4000
+
+
+def encode_remotes(remotes: list[dict[str, Any]]) -> str:
+    """The header value: compact ASCII JSON, notices dropped from the end until it fits."""
+    rows = [{**r, "notices": [str(m)[:200] for m in r.get("notices", [])][:8]} for r in remotes[:8]]
+    while True:
+        out = json.dumps(rows, separators=(",", ":"))
+        if len(out) <= REMOTES_HEADER_MAX:
+            return out
+        victim = max(rows, key=lambda r: len(r["notices"]))
+        if not victim["notices"]:
+            return "[]"
+        victim["notices"].pop()
+
+
 class AddonClient:
     def __init__(self, session: aiohttp.ClientSession, host: str, port: int, token: str) -> None:
         self._session = session
@@ -120,6 +137,8 @@ class AddonClient:
         # the connected hub's limits, sent with every poll so the editor shows ITS caps (an add-on
         # that does not know the header ignores it)
         self.limits_provider: Callable[[], HubLimits | None] | None = None
+        # the linked remotes (caps tier, theme notices), sent with every poll so the editor can say what a remote cannot show
+        self.remotes_provider: Callable[[], list[dict[str, Any]]] | None = None
         # which hub this is, sent with every poll (docs/addon-api.md "Renamed hubs"): the stable hardware id, the
         # previous id after a rename and the display name. Empty = send none (an old add-on ignores them anyway).
         self.identity: dict[str, str] = {}
@@ -136,6 +155,9 @@ class AddonClient:
         lim = self.limits_provider() if self.limits_provider else None
         if lim is not None:
             headers[LIMITS_HEADER] = json.dumps(lim.to_wire(), separators=(",", ":"))
+        rem = self.remotes_provider() if self.remotes_provider else None
+        if rem is not None:  # an empty list too: it clears what the add-on kept
+            headers[REMOTES_HEADER] = encode_remotes(rem)
         return headers
 
     async def _get(self, path: str, params: dict[str, str], wait: float) -> bytes | None:

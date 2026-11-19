@@ -42,6 +42,7 @@ class MsgType(IntEnum):
     OTA_STATUS = 24
     SET_HUB_ID = 26
     HUB_ID_ACK = 27
+    THEME_PUSH = 28
     OTA_OFFER = 30
     OTA_FRAG = 31
     OTA_FRAG_ACK = 32
@@ -86,6 +87,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'ota_status': (24, 'ws', (('state', 'str', False), ('offset', 'u32', False), ('size', 'u32', False), ('build', 'u32', True), ('reason', 'str', True), )),
     'set_hub_id': (26, 'ws', (('id', 'str', False), ('name', 'str', True), )),
     'hub_id_ack': (27, 'ws', (('hub_id', 'str', False), ('name', 'str', True), )),
+    'theme_push': (28, 'both', (('remote', 'u8', False), ('gen', 'u8', False), ('data', 'bytes', False), )),
     'ota_offer': (30, 'rf', (('size', 'u32', False), ('build', 'u32', False), )),
     'ota_frag': (31, 'rf', (('offset', 'u32', False), ('data', 'bytes', False), )),
     'ota_frag_ack': (32, 'rf', (('offset', 'u32', False), )),

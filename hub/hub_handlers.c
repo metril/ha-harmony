@@ -101,6 +101,7 @@ static void rf_link_ensure(hub_ctx_t *h) {
 
 /* ---- messages held while the remote is away ---- */
 
+static bool is_set_msg(uint8_t t) { return t == HP_MSG_PAGE_PUSH || t == HP_MSG_THEME_PUSH; } /* what a gen's set is made of */
 static bool is_tile_msg(uint8_t t) { return t == HP_MSG_TILE_UPDATE || t == HP_MSG_TILE_STATE; }
 
 /* tile_update and tile_state are one key: the later of the two replaces the held one. */
@@ -126,14 +127,14 @@ static void pend_supersede(hub_ctx_t *h, uint8_t type, uint8_t remote, uint8_t p
     }
 }
 
-/* A v2 page of a new gen (the config changed) makes every held page of another gen for that remote stale, and the
+/* A v2 page or theme of a new gen (the config changed) makes every held page and theme of another gen for that remote stale, and the
  * tile messages held with them (they were queued before this push, so they belong to the old config). Tiles queued
  * after an earlier page of the same new gen are untouched: no older-gen page is held by then. */
 static void pend_drop_old_gen(hub_ctx_t *h, uint8_t remote, uint8_t gen) {
     bool dropped = false;
     for (uint8_t i = 0; i < h->npend;) {
         const hub_pend_t *p = &h->pend[i];
-        if (p->type == HP_MSG_PAGE_PUSH && p->remote == remote && p->has_gen && p->gen != gen) {
+        if (is_set_msg(p->type) && p->remote == remote && p->has_gen && p->gen != gen) {
             pend_remove(h, i);
             dropped = true;
         } else {
@@ -159,6 +160,11 @@ static bool pend_make_room(hub_ctx_t *h, hp_msg_type_t incoming) {
         }
     if (!h->pend_dropped++) fprintf(stderr, "hub: held queue full of pages; dropping (counted in pend_dropped)\n");
     if (is_tile_msg((uint8_t)incoming)) return false;
+    for (uint8_t i = 0; i < h->npend; i++) /* the oldest page; the theme of the set is the last thing to lose */
+        if (h->pend[i].type != HP_MSG_THEME_PUSH) {
+            pend_remove(h, i);
+            return true;
+        }
     pend_remove(h, 0);
     return true;
 }
@@ -177,27 +183,57 @@ static bool rf_up(const hub_ctx_t *h) { return !h->sinks.rf->attached || h->sink
 static void link_result(void *ctx, hp_msg_type_t type, const uint8_t *body, size_t len, bool ok) {
     hub_ctx_t *h = ctx;
     hp_rf_val_t v[3];
-    if (type != HP_MSG_PAGE_PUSH || hp_rf_unpack(type, body, len, v, 3) != 0 || v[1].u > 255 || v[0].u > 255) return;
-    uint8_t pg = (uint8_t)v[1].u;
-    if (h->page_out[pg]) h->page_out[pg]--;
+    bool theme = type == HP_MSG_THEME_PUSH;
+    if ((type != HP_MSG_PAGE_PUSH && !theme) || hp_rf_unpack(type, body, len, v, 3) != 0 || v[0].u > 255 || v[1].u > 255) return;
+    /* a theme_push is keyed (remote, -) like a page_push (remote, page): its own counters, its gen is v[1] */
+    uint8_t pg = theme ? 0 : (uint8_t)v[1].u;
+    uint8_t *out = theme ? &h->theme_out : &h->page_out[pg], *tries = theme ? &h->theme_tries : &h->page_tries[pg];
+    if (*out) (*out)--;
     if (ok) {
-        h->page_tries[pg] = 0;
+        *tries = 0;
         return;
     }
-    bool has_gen = v[2].len >= HP_PAGE_V2_HEADER && v[2].p[0] == 2;
+    bool has_gen = theme || (v[2].len >= HP_PAGE_V2_HEADER && v[2].p[0] == 2);
+    uint8_t gen = theme ? (uint8_t)v[1].u : has_gen ? v[2].p[5] : 0;
     for (uint8_t i = 0; i < h->npend; i++)
         if (pend_match(&h->pend[i], (uint8_t)type, (uint8_t)v[0].u, pg, 0)) return;
-    if (h->page_out[pg] || !rf_up(h) || (has_gen && h->has_last_gen && v[2].p[5] != h->last_gen)) return;
-    if (h->page_tries[pg] >= HUB_PAGE_RESENDS) {
-        fprintf(stderr, "hub: page %u not delivered after %d resends; giving up\n", pg, HUB_PAGE_RESENDS);
+    if (*out || !rf_up(h) || (has_gen && h->has_last_gen && gen != h->last_gen)) return;
+    if (*tries >= HUB_PAGE_RESENDS) {
+        fprintf(stderr, "hub: %s %u not delivered after %d resends; giving up\n", theme ? "theme" : "page", pg, HUB_PAGE_RESENDS);
         h->pend_dropped++;
         return;
     }
-    h->page_tries[pg]++;
-    hub_pend_t n = {.type = (uint8_t)type, .remote = (uint8_t)v[0].u, .page = pg, .has_gen = has_gen,
-                    .gen = has_gen ? v[2].p[5] : 0, .wait = true, .rx_mark = h->link.rx_frames, .len = len};
+    (*tries)++;
+    hub_pend_t n = {.type = (uint8_t)type, .remote = (uint8_t)v[0].u, .page = pg, .has_gen = has_gen, .gen = gen, .wait = true,
+                    .rx_mark = h->link.rx_frames, .len = len};
     memcpy(n.payload, body, len);
     pend_add(h, &n);
+}
+
+/* ORDER of a set: the theme_push of a generation is delivered (acked, or given up on) before any of its pages. A page of a
+ * v2 set is held while a theme_push of that remote is in flight on the link or held (waiting to be resent), so a theme that
+ * fails and is resent is not overtaken by pages already queued behind it. Only one generation is ever pushed at a time
+ * (a newer one drops the older held messages), so the check does not need the gen. */
+static bool theme_pending(const hub_ctx_t *h, uint8_t remote, bool v2_page) {
+    if (!v2_page) return false;
+    if (h->theme_out) return true;
+    for (uint8_t i = 0; i < h->npend; i++)
+        if (h->pend[i].type == HP_MSG_THEME_PUSH && h->pend[i].remote == remote) return true;
+    return false;
+}
+
+/* ORDER of tiles: a tile_update/tile_state of a page must reach the remote AFTER that page (a page arriving drops the
+ * tiles it already shows). So a tile is held while its page is held for any reason (a failed delivery waiting to be
+ * resent, the set's theme in flight) or while a theme of the remote is in flight or held (the pages wait for it). The
+ * link is ordered, so a page already handed to it keeps its tiles behind it. */
+static bool tile_blocked(const hub_ctx_t *h, uint8_t remote, uint8_t page) {
+    if (h->theme_out) return true;
+    for (uint8_t i = 0; i < h->npend; i++) {
+        const hub_pend_t *p = &h->pend[i];
+        if (p->remote != remote) continue;
+        if (p->type == HP_MSG_THEME_PUSH || (p->type == HP_MSG_PAGE_PUSH && p->page == page)) return true;
+    }
+    return false;
 }
 
 /* Packs and queues one RF message on the link (stop-and-wait, driven by hub_pump_rf). While the remote
@@ -213,20 +249,26 @@ static int rf_send_keyed(hub_ctx_t *h, hp_msg_type_t t, const hp_rf_val_t *v, si
     if (rc < 0) return rc;
     rf_link_ensure(h);
     pend_supersede(h, (uint8_t)t, remote, page, tile);
-    bool has_gen = t == HP_MSG_PAGE_PUSH && nv == 3 && v[2].len >= HP_PAGE_V2_HEADER && v[2].p[0] == 2;
-    uint8_t gen = has_gen ? v[2].p[5] : 0;
+    bool theme = t == HP_MSG_THEME_PUSH && nv == 3;
+    bool has_gen = theme || (t == HP_MSG_PAGE_PUSH && nv == 3 && v[2].len >= HP_PAGE_V2_HEADER && v[2].p[0] == 2);
+    uint8_t gen = theme ? (uint8_t)v[1].u : has_gen ? v[2].p[5] : 0;
     if (has_gen) pend_drop_old_gen(h, remote, gen);
-    if (t == HP_MSG_PAGE_PUSH) {
-        h->page_tries[page] = 0;
+    if (t == HP_MSG_PAGE_PUSH || theme) {
+        if (theme) h->theme_tries = 0;
+        else h->page_tries[page] = 0;
         if (has_gen) {
             h->last_gen = gen;
             h->has_last_gen = true;
         }
     }
-    if (rf_up(h)) {
+    bool set_msg = t == HP_MSG_PAGE_PUSH || theme;
+    if (rf_up(h) && !(t == HP_MSG_PAGE_PUSH && theme_pending(h, remote, has_gen)) && /* a page waits for its theme */
+        !(is_tile_msg((uint8_t)t) && tile_blocked(h, remote, page))) { /* a tile waits for its page */
+        uint8_t *out = t == HP_MSG_PAGE_PUSH ? &h->page_out[page] : theme ? &h->theme_out : NULL;
+        if (out) (*out)++; /* counted before the send: the link may resolve it (report) before the call returns */
         rc = hp_rf_link_send(&h->link, t, payload, plen, hp_sched_now(&h->sched));
-        if (rc == 0 && t == HP_MSG_PAGE_PUSH) h->page_out[page]++;
-        if (rc != -HP_E_NOENT) return rc;
+        if (out && rc != 0 && *out) (*out)--; /* not queued: refused, busy or nobody there */
+        if (rc != -HP_E_NOENT && !(rc == -HP_E_BUSY && set_msg)) return rc; /* a full link queue holds a page or theme */
     }
     hub_pend_t n = {.type = (uint8_t)t, .remote = remote, .page = page, .tile = tile, .has_gen = has_gen, .gen = gen,
                     .len = plen};
@@ -247,9 +289,16 @@ static void pend_flush(hub_ctx_t *h) {
             i++;
             continue;
         }
+        if ((p->type == HP_MSG_PAGE_PUSH && theme_pending(h, p->remote, p->has_gen)) || /* the set's theme goes first */
+            (is_tile_msg(p->type) && tile_blocked(h, p->remote, p->page))) { /* and a page before its tiles */
+            i++;
+            continue;
+        }
+        uint8_t *out = p->type == HP_MSG_PAGE_PUSH ? &h->page_out[p->page] : p->type == HP_MSG_THEME_PUSH ? &h->theme_out : NULL;
+        if (out) (*out)++;
         int rc = hp_rf_link_send(&h->link, (hp_msg_type_t)p->type, p->payload, p->len, hp_sched_now(&h->sched));
+        if (out && rc != 0 && *out) (*out)--;
         if (rc == -HP_E_BUSY || rc == -HP_E_NOENT) return; /* later */
-        if (rc == 0 && p->type == HP_MSG_PAGE_PUSH) h->page_out[p->page]++;
         pend_remove(h, i); /* sent, or unsendable */
     }
 }
@@ -732,6 +781,25 @@ static int on_page_push(void *vctx, hp_session_t *sess, uint32_t id, const cJSON
     return reply_ok(id, "command_result", true, NULL, reply, cap, len);
 }
 
+/* theme_push {remote, gen, data}: queued exactly like a page_push (superseded by (type, remote), dropped by a newer gen,
+ * resent while attached). The 99-byte theme is validated by the remote; the hub only checks that it fits an RF object. */
+static int on_theme_push(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap, size_t *len) {
+    (void)sess;
+    hub_ctx_t *h = vctx;
+    const cJSON *r = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "remote");
+    const cJSON *g = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "gen");
+    const cJSON *b64 = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "data");
+    uint8_t data[256];
+    size_t n = hp_base64_decode(b64->valuestring, strlen(b64->valuestring), data, sizeof data);
+    if (n == (size_t)-1 || n > HP_PAGE_MAX_BYTES) return reply_err(id, "too_big", "theme data exceeds 251 bytes", reply, cap, len);
+    hp_rf_val_t v[3] = {{.u = (uint32_t)r->valuedouble}, {.u = (uint32_t)g->valuedouble}, {.p = data, .len = n}};
+    int rc = rf_send_keyed(h, HP_MSG_THEME_PUSH, v, 3, (uint8_t)v[0].u, 0, 0);
+    if (rc == -HP_E_TOOBIG) return reply_err(id, "too_big", "theme does not fit the RF budget", reply, cap, len);
+    if (rc == -HP_E_NOENT) return reply_err(id, "no_remote", "no remote attached", reply, cap, len);
+    if (rc < 0) return reply_err(id, "rf_error", "RF send failed", reply, cap, len);
+    return reply_ok(id, "command_result", true, NULL, reply, cap, len);
+}
+
 static cJSON *on_activities(void *vctx) { return activities_json(vctx); }
 
 static bool on_config_hash(void *vctx, char out[9]) {
@@ -1124,6 +1192,7 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->handler[HP_MSG_CONFIG_CHUNK] = on_config_chunk;
     tbl->handler[HP_MSG_COMMAND] = on_command;
     tbl->handler[HP_MSG_PAGE_PUSH] = on_page_push;
+    tbl->handler[HP_MSG_THEME_PUSH] = on_theme_push;
     tbl->handler[HP_MSG_SET_HUB_ID] = on_set_hub_id;
     tbl->handler[HP_MSG_BT_PAIR] = on_bt_pair;
     tbl->handler[HP_MSG_BT_FORGET] = on_bt_forget;
@@ -1155,6 +1224,10 @@ static void rf_link_up(hub_ctx_t *h) {
     if (h->rf_attached) return;
     h->rf_attached = true;
     h->info_fresh = true;
+    if (!hp_rf_link_status(&h->link).queued) { /* nothing is in flight: whatever a lost result left counted is void */
+        h->theme_out = 0; /* (a strict link keeps its queue across a drop: those objects still report) */
+        memset(h->page_out, 0, sizeof h->page_out);
+    }
     cJSON *d = cJSON_CreateObject();
     if (d) hub_broadcast(h, "remote_attached", d);
     for (unsigned i = 0; i < HUB_INFO_MAX; i++) {
@@ -1171,7 +1244,10 @@ static void rf_link_up(hub_ctx_t *h) {
 static void rf_link_lost(hub_ctx_t *h) {
     h->rf_attached = false;
     h->info_fresh = true;
-    memset(h->page_out, 0, sizeof h->page_out); /* the link dropped what was in flight without a result */
+    if (!hp_rf_link_status(&h->link).queued) { /* the link dropped what was in flight without a result */
+        h->theme_out = 0;
+        memset(h->page_out, 0, sizeof h->page_out);
+    }
     memset(h->info, 0, sizeof h->info); /* the remote may come back as another firmware: ask again */
 }
 

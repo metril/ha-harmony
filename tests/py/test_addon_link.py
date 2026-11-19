@@ -713,3 +713,31 @@ async def test_link_says_nothing_applied_after_a_quiet_poll(hass, fake_hub, fake
     fake_addon.apply(SOURCE)
     await until(lambda: coord.link_state in ("ok", "connecting") and coord.rev is not None)
     await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_poll_carries_the_remotes_tier_and_notices_and_they_are_bounded(aiohttp_server):
+    seen = {}
+
+    async def handler(request):
+        seen["h"] = request.headers.get("X-Hub-Remotes")
+        return web.Response(status=204)
+
+    app = web.Application()
+    app.router.add_get("/api/v1/bundle/wait", handler)
+    srv = await aiohttp_server(app)
+    rows = [{"remote": 1, "caps": 7, "tier": "palette", "notices": ["n" * 900] * 12}]
+    async with aiohttp.ClientSession() as s:
+        c = AddonClient(s, "127.0.0.1", srv.port, "tok")
+        await c.wait("h", "r1")
+        assert seen["h"] is None  # nothing known: no header
+        c.remotes_provider = list
+        await c.wait("h", "r1")
+        assert seen["h"] == "[]"  # no remote known: still sent, so the add-on drops what it kept
+        c.remotes_provider = lambda: rows * 12
+        await c.wait("h", "r1")
+        assert len(json.loads(seen["h"])) == 8  # at most 8 rows
+        c.remotes_provider = lambda: rows
+        await c.wait("h", "r1")
+    got = json.loads(seen["h"])
+    assert len(seen["h"]) <= 4000 and got[0]["tier"] == "palette" and got[0]["caps"] == 7
+    assert 0 < len(got[0]["notices"]) < 12 and all(len(m) <= 200 for m in got[0]["notices"])

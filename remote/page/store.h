@@ -17,10 +17,12 @@
 
 #define HP_STORE_OK 0
 #define HP_STORE_CLEARED 1 /* stored, and the pages of an older gen were dropped */
+#define HP_STORE_SAME 2    /* hp_store_theme: identical to the slot, nothing changed */
+#define HP_THEME_BYTES 99  /* the wire theme (harmony_core/themes.py) */
 
 typedef struct {
     uint8_t len; /* 0 = absent */
-    uint8_t kind, act, seq_idx, seq_cnt, back;
+    uint8_t kind, act, seq_idx, seq_cnt, back, theme;
 } hp_store_meta_t;
 
 typedef struct {
@@ -35,18 +37,35 @@ typedef struct {
     uint8_t raw[HP_STORE_MAX][HP_PAGE_MAX_BYTES];
     hp_store_tile_t tiles[HP_STORE_TILES];
     uint8_t tile_next;
+    /* The custom theme slot (theme_push): one {gen, wire bytes}, RAM only. Not part of the page set: it survives the set
+     * being replaced, and a page of theme id 7 counts only while theme_gen == gen (see hp_store_complete). */
+    bool have_theme;
+    uint8_t theme_gen;
+    uint8_t theme[HP_THEME_BYTES];
 } hp_store_t;
 
 void hp_store_init(hp_store_t *);
 /* Validates `raw` with the page decoder and stores it. HP_STORE_OK / HP_STORE_CLEARED; -HP_E_INVAL (bad page, or not
  * version 2); -HP_E_TOOBIG (page id or total > HP_STORE_MAX: it cannot be held). A changed gen OR total clears the store first (gen is one byte). Storing a page drops its tile overlay. */
 int hp_store_put(hp_store_t *, const uint8_t *raw, size_t len);
+/* Stores the (already validated) custom theme of generation `gen`. A gen other than the held set's clears the set's pages
+ * (HP_STORE_CLEARED, only when some were held); the same gen with other bytes replaces the slot (HP_STORE_OK); the same
+ * gen and bytes change nothing (HP_STORE_SAME). -HP_E_INVAL: wrong length. */
+int hp_store_theme(hp_store_t *, uint8_t gen, const uint8_t *bytes, size_t len);
+/* The slot holds the theme of the current set's gen. */
+bool hp_store_theme_ok(const hp_store_t *);
+/* Some stored page uses the custom theme (id 7) and the slot does not hold its gen: the set cannot be drawn yet. */
+bool hp_store_theme_missing(const hp_store_t *);
+/* Page `id` is held and can be drawn: a page of theme id 7 needs the slot of its gen, so it never shows a stale or
+ * missing custom theme. */
+bool hp_store_ready(const hp_store_t *, uint8_t id);
 bool hp_store_has(const hp_store_t *, uint8_t id);
 /* The stored bytes of page `id` are exactly raw[0..len) (and the gen matches): a re-push that changes nothing. */
 bool hp_store_same(const hp_store_t *, const uint8_t *raw, size_t len);
 unsigned hp_store_count(const hp_store_t *);
 /* Pages the set needs before it is complete: min(total, HP_STORE_MAX); 0 until a page arrived. */
 unsigned hp_store_need(const hp_store_t *);
+/* Every page is held AND, when any page uses the custom theme (id 7), the slot has that set's theme. */
 bool hp_store_complete(const hp_store_t *);
 /* Decodes page `id` into *out and applies its tile overlay. 0; -HP_E_NOENT if absent. */
 int hp_store_get(const hp_store_t *, uint8_t id, hp_page_t *out);

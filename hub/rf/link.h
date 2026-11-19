@@ -57,6 +57,7 @@ typedef struct {
     uint8_t start_tries;   /* first-transmission attempts for the head object */
     uint32_t start_at;     /* next attempt time while the transport refuses the first frame */
     int last_rc;           /* last transport send() result */
+    bool sending;          /* inside hp_rf_link_send: a refusal is returned, not reported */
     bool noent;            /* the head object hit -HP_E_NOENT on its first frame and was dropped */
     uint32_t failures;     /* objects dropped after all retries (monotonic) */
     uint32_t delivered;    /* objects delivered up (monotonic) */

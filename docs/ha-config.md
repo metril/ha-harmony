@@ -178,8 +178,9 @@ pages:
 - **Older remote firmware** (the remote reports `caps` bit 2 = colours, bit 3 = custom colours and themes): without
   bit 2 colours and the theme are dropped (role colours); with bit 2 only, free colours snap to the nearest palette
   entry and a user theme shows as its base preset. A remote whose firmware is updated gets its pages again. What was
-  lost is listed in the *Remote N page format* sensor (`theme_notices`) and in the diagnostics. Sending a user theme
-  to the remote needs a transport that does not exist yet, so for now bit 3 counts as bit 2 only.
+  lost is listed in the *Remote N page format* sensor (`theme_notices`) and in the diagnostics. A user theme is sent
+  to the remote with `theme_push` (docs/proto/themes-transport.md) before its pages; with an older hub firmware (no
+  `theme_push`) bit 3 counts as bit 2 only. The sensor's `theme` attribute says whether the hub took it and the remote holds it.
 
 ## Home Assistant actions
 

@@ -207,6 +207,8 @@ async def test_ack_roundtrip_and_status(feed, tmp_path):
         "last_seen": None,
         "hub_last_seen": None,
         "linked_hubs": [],
+        "remotes": [],
+        "theme_notices": [],
         "now": st["now"],
     }
     rev = await apply(feed, "h1")

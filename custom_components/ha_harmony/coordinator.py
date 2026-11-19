@@ -8,6 +8,7 @@ config hash differs) -> push pages -> keep tiles in sync with their bound entiti
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import logging
 import time
@@ -61,7 +62,14 @@ from .const import (
     UNKNOWN_KEY,
 )
 from .errors import ha_error, invalid
-from .harmony_core.compiler import Compiled, HaStep, compile_config, config_stats, fit_error
+from .harmony_core.compiler import (
+    Compiled,
+    HaStep,
+    RemotePages,
+    compile_config,
+    config_stats,
+    fit_error,
+)
 from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
@@ -137,11 +145,17 @@ class RemoteLink:
     epoch: int = 0  # bumped at every link-up: the remote may have lost its page store
     pushed: tuple[int, int, int, int] | None = None  # (config gen, format, epoch, theme caps) of the last complete set
     inflight: tuple[int, int, int, int] | None = None
+    hub_theme: bool = True  # the hub understands theme_push (False once it answered unknown_type: bit 3 is then masked off)
+    theme_sent: int | None = None  # gen of the custom theme the hub accepted for this remote's current set
     waiting: bool = False  # waiting for remote_info
     attached: bool = True  # False after "no remote" until the remote shows signs of life
     pending: bool = False  # a push failed for want of a remote: redo when it is back
     push_ms: float | None = None  # duration of the last complete page push (diagnostics)
     task: asyncio.Task[None] | None = None
+    refused: bool = False  # the hub refused a message for a transient reason (not "no remote"): retry with backoff
+    retries: int = 0  # consecutive re-pushes of an unconfirmed set; drives the backoff, reset on confirmation
+    retry_task: asyncio.Task[None] | None = None  # the pending delayed re-push (cancellable, one per remote)
+    retry_want: tuple[int, int, int, int] | None = None  # the set that re-push is for
     info_event: asyncio.Event = field(default_factory=asyncio.Event)
 
     @property
@@ -151,10 +165,12 @@ class RemoteLink:
     @property
     def page_caps(self) -> int:
         """The theme caps the pages are built for: 0 for v1 or an unknown remote. Bit 3 counts only
-        once a theme can be sent (const.THEME_TRANSPORT); until then a user theme is its base preset."""
+        while a theme can be sent (this integration and the hub both speak theme_push); otherwise a
+        user theme is its base preset and free colours are snapped (bit 2 behaviour)."""
         if self.page_fmt < 2 or self.info is None:
             return 0
-        mask = const.CAP_THEME_COLOR | (const.CAP_THEME_CUSTOM if const.THEME_TRANSPORT else 0)
+        custom = const.THEME_TRANSPORT and self.hub_theme
+        mask = const.CAP_THEME_COLOR | (const.CAP_THEME_CUSTOM if custom else 0)
         return self.info.caps & mask
 
     @property
@@ -212,6 +228,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.device_states: dict[str, DeviceState] = {}
         self.battery: dict[int, tuple[int, int]] = {}  # remote -> (percent, millivolts)
         self.remotes: tuple[int, ...] = DEFAULT_REMOTE_IDS
+        self._hub_theme = True  # the hub understands theme_push (until it says unknown_type)
         self.links: dict[int, RemoteLink] = {r: RemoteLink() for r in self.remotes}
         self._cfg_gen = 0  # bumped whenever the compiled config changes
         self._accepted = False  # the hub is known to run `compiled` (it reported the matching hash)
@@ -252,6 +269,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._ota_lock = asyncio.Lock()
         self._rolled_back: set[int] = set()  # builds the hub reported rolling back
         self.page_pushes = 0  # page_push requests sent
+        self.theme_pushes = 0  # theme_push requests sent
         self.config_pushes = 0  # set_config requests sent (observable by tests)
         self.tile_updates = 0
         self._topic_subs: dict[str, list[Callable[[], None]]] = {}
@@ -287,7 +305,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             unsub()
         self._unsubs = []
         self._untrack_tiles()
-        for t in [self._ha_task, self._flush_task, *(lk.task for lk in self.links.values())]:
+        for t in [self._ha_task, self._flush_task, *(lk.task for lk in self.links.values()),
+                  *(lk.retry_task for lk in self.links.values())]:
             if t is not None and not t.done():
                 t.cancel()
         await super().async_shutdown()
@@ -492,6 +511,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def async_start_link(self, client: AddonClient) -> None:
         self._link = client
         client.limits_provider = lambda: self.client.limits
+        client.remotes_provider = self._remotes_report
         client.identity = self._link_identity()
         self.link_state = "connecting"
         self.config_entry.async_create_background_task(
@@ -753,7 +773,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return self._rlink(remote).page_fmt
 
     def _rlink(self, remote: int) -> RemoteLink:
-        return self.links.setdefault(remote, RemoteLink())
+        return self.links.setdefault(remote, RemoteLink(hub_theme=self._hub_theme))
 
     @property
     def hub_accepted(self) -> bool:
@@ -779,6 +799,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             want = (self._cfg_gen, link.page_fmt, link.epoch, link.page_caps)
             if want in (link.pushed, link.inflight):
                 return old if running else None
+            if link.retry_task is not None and not link.retry_task.done():
+                if link.retry_want == want:
+                    return old if running else None  # backing off: the retry task pushes when it is due
+                self._retry_reset(link)  # another set (new config, caps, epoch): no reason to wait
         if running:
             old.cancel()
         link.task = self.config_entry.async_create_background_task(
@@ -808,17 +832,66 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # the remote kept its page store (a HA<->hub reconnect, a hub restart): nothing to send
             # but the tile values that changed meanwhile
             link.pushed, link.pending = want, False
+            self._retry_reset(link)
             await self._send_tiles({self._cur(t.entity_id) for t in self.compiled.tiles}, (remote,))
             return
         link.inflight = want
         t0 = time.monotonic()
         try:
-            if await self._push_set(remote, link, want[1]):
+            link.refused = False
+            ok = await self._push_set(remote, link, want[1])
+            rp = self.compiled.for_caps(link.page_caps) if want[1] >= 2 else None
+            themed = rp is not None and rp.theme_wire is not None
+            if ok and themed and not await self._await_theme_ack(link, rp):
+                _LOGGER.warning("Remote %s did not report the custom theme set; sending it once more", remote)
+                ok = await self._push_set(remote, link, want[1])  # the hub gave up on it (the remote was away)
+                if ok and not await self._await_theme_ack(link, rp):
+                    # never mark a set pushed that the remote did not confirm: stay pending, try again later
+                    _LOGGER.warning("Remote %s still does not hold the custom theme set; will retry", remote)
+                    link.pending = True
+                    self._schedule_retry(remote, want)
+                    return
+            if ok:
                 link.pushed, link.pending = want, False
+                if themed:  # the remote confirmed the set; otherwise only its remote_info does
+                    self._retry_reset(link)
                 link.push_ms = round((time.monotonic() - t0) * 1000, 1)
                 await self._send_all_tiles(remote)
+            elif link.refused:
+                link.pending = True
+                self._schedule_retry(remote, want)
         finally:
             link.inflight = None
+
+    def _retry_reset(self, link: RemoteLink) -> None:
+        link.retries = 0
+        rt, link.retry_task = link.retry_task, None
+        if rt is not None and not rt.done() and rt is not asyncio.current_task():
+            rt.cancel()
+
+    def _schedule_retry(self, remote: int, want: tuple[int, int, int, int], immediate: bool = False) -> None:
+        """Push the set again later: bounded exponential backoff (PUSH_RETRY_BASE doubling up to
+        PUSH_RETRY_MAX), the first one at once when `immediate`. One pending retry per remote, cancelled
+        on unload; it does not hold up any other remote."""
+        link = self._rlink(remote)
+        if link.retry_task is not None and not link.retry_task.done() and link.retry_want == want:
+            return
+        n = link.retries
+        link.retries += 1
+        delay = 0.0 if immediate and n == 0 else min(const.PUSH_RETRY_BASE * 2 ** min(n, 16), const.PUSH_RETRY_MAX)
+        link.retry_want = want
+        link.retry_task = self.config_entry.async_create_background_task(
+            self.hass, self._retry_push(remote, want, delay), name=f"{DOMAIN} repush {remote}"
+        )
+
+    async def _retry_push(self, remote: int, want: tuple[int, int, int, int], delay: float) -> None:
+        link = self._rlink(remote)
+        if delay:
+            await self._sleep(delay)
+        link.retry_task = None
+        if link.pushed == want:
+            link.pushed = None  # the remote did not keep it: send it again
+        self._request_push(remote, wait=False)
 
     def _remote_holds_set(self, link: RemoteLink) -> bool:
         """The remote reported exactly the v2 set we would send: same format, generation and count."""
@@ -827,6 +900,27 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return False
         rp = c.for_caps(link.page_caps)
         return info.gen == rp.gen and info.pages == len(rp.pages_v2)
+
+    def _remotes_report(self) -> list[dict[str, Any]]:
+        """What the add-on's editor is told about each remote whose caps are known: its colour tier
+        ("none", "palette", "custom") and the notices of what that costs the current config."""
+        out: list[dict[str, Any]] = []
+        for remote in self.remotes:
+            info = self._rlink(remote).info
+            if info is None:
+                continue
+            tier = (
+                "custom" if info.caps & const.CAP_THEME_CUSTOM else "palette" if info.caps & const.CAP_THEME_COLOR else "none"
+            )
+            out.append(
+                {
+                    "remote": remote,
+                    "caps": info.caps,
+                    "tier": tier,
+                    "notices": [n["msg"] for n in self.theme_notices(remote)],
+                }
+            )
+        return out
 
     def theme_notices(self, remote: int) -> list[dict[str, Any]]:
         """What this remote's caps cost it in colours and themes (empty when nothing is degraded)."""
@@ -844,15 +938,22 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             timer.cancel()
 
     async def _push_set(self, remote: int, link: RemoteLink, fmt: int) -> bool:
-        """Send every page of format `fmt`, one after the other (each command result is the
-        backpressure). False when it did not complete (no remote, link down, newer config)."""
+        """Send the custom theme (when the set has one), then every page of format `fmt`, one after the
+        other (each command result is the backpressure). The theme goes first: the remote shows no
+        page of a set until its theme is in. False when it did not complete (no remote, link down,
+        newer config)."""
         gen = self._cfg_gen
-        if self.compiled.theme_wire is not None and link.info is not None and link.info.caps & const.CAP_THEME_CUSTOM:
-            # seam: the 99-byte theme (compiled.theme_wire) goes out here once a transport exists
-            _LOGGER.info("Custom theme %r needs transport; remote %s shows %r", self.compiled.theme_name, remote, self.compiled.theme_base)
-        pages = (
-            self.compiled.for_caps(link.page_caps).pages_v2_b64 if fmt >= 2 else self.compiled.encoded_pages_b64(1)
-        )
+        caps = link.page_caps
+        rp = self.compiled.for_caps(caps) if fmt >= 2 else None
+        link.theme_sent = None
+        if rp is not None and rp.theme_wire is not None:
+            ok = await self._send_theme(remote, link, rp)
+            if ok is None:
+                return False
+            if ok is False:  # the hub cannot carry it: pages built for what it can (the base preset)
+                self._request_push(remote, wait=False)
+                return False
+        pages = rp.pages_v2_b64 if rp is not None else self.compiled.encoded_pages_b64(1)
         for idx, b64 in enumerate(pages):
             if gen != self._cfg_gen:
                 return False
@@ -865,12 +966,89 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     link.pending, link.attached = True, False  # redone when the remote is alive
                     _LOGGER.debug("No remote attached; page %s not delivered yet", idx)
                     return False
+                if exc.code != "too_big":
+                    _LOGGER.warning("Hub refused page %s (%s); will retry", idx, exc)
+                    link.pending, link.refused = True, True
+                    return False
                 _LOGGER.warning("Hub refused page %s: %s", idx, exc)
             except HarmonyConnectionError as exc:
                 link.pending = True
                 _LOGGER.debug("Page push to remote %s interrupted: %s", remote, exc)
                 return False
         return True
+
+    async def _send_theme(self, remote: int, link: RemoteLink, rp: RemotePages) -> bool | None:
+        """theme_push of the set's custom theme. True: the hub took it. None: not delivered (no remote,
+        link down): the push is redone later. False: this hub does not know theme_push (old firmware):
+        bit 3 is masked off for it and the set is rebuilt without the custom theme."""
+        assert rp.theme_wire is not None
+        payload = {"remote": remote, "gen": rp.gen, "data": base64.b64encode(rp.theme_wire).decode()}
+        self.theme_pushes += 1
+        try:
+            await self.client.async_send(MsgType.THEME_PUSH, payload)
+        except HarmonyCommandError as exc:
+            if exc.code == "unknown_type":
+                _LOGGER.info(
+                    "The hub does not know theme_push (older firmware); custom theme %r shows as %r",
+                    self.compiled.theme_name,
+                    self.compiled.theme_base,
+                )
+                self._set_hub_theme(False)
+                return False
+            if exc.code == "no_remote":
+                link.pending, link.attached = True, False
+                return None
+            # busy or another transient refusal: the theme is not queued, so the set is not sent (the pages
+            # would arrive without it) and is retried with backoff
+            _LOGGER.warning("Hub refused the custom theme (%s); will retry", exc)
+            link.pending, link.refused = True, True
+            return None
+        except HarmonyConnectionError as exc:
+            link.pending = True
+            _LOGGER.debug("Theme push to remote %s interrupted: %s", remote, exc)
+            return None
+        link.theme_sent = rp.gen
+        return True
+
+    def _set_hub_theme(self, ok: bool) -> None:
+        for lk in self.links.values():
+            lk.hub_theme = ok
+        self._hub_theme = ok
+
+    def _theme_acked(self, link: RemoteLink, rp: RemotePages) -> bool:
+        """The remote reports the whole set (its pages and, for a custom theme, the theme) as held."""
+        info = link.info
+        return info is not None and info.gen == rp.gen and info.pages == len(rp.pages_v2)
+
+    async def _await_theme_ack(self, link: RemoteLink, rp: RemotePages) -> bool:
+        """Up to THEME_ACK_WAIT seconds for the remote_info that says the set is complete."""
+        timer = asyncio.ensure_future(self._sleep(const.THEME_ACK_WAIT))
+        try:
+            while not self._theme_acked(link, rp):
+                link.info_event.clear()
+                waiter = asyncio.ensure_future(link.info_event.wait())
+                try:
+                    await asyncio.wait({waiter, timer}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    waiter.cancel()
+                if timer.done():
+                    break
+        finally:
+            timer.cancel()
+        return self._theme_acked(link, rp)
+
+    def theme_status(self, remote: int) -> dict[str, Any]:
+        """The custom theme of this remote's set: name, preset id, whether the hub took it, whether the remote holds it."""
+        link = self._rlink(remote)
+        c = self.compiled
+        rp = c.for_caps(link.page_caps) if link.page_fmt == 2 else None
+        custom = rp is not None and rp.theme_wire is not None
+        return {
+            "name": c.theme_name,
+            "id": c.theme_id,
+            "sent": custom and link.theme_sent == rp.gen,
+            "acked": custom and self._theme_acked(link, rp),
+        }
 
     def _remote_seen(self) -> None:
         """A key or battery message proves a remote is attached: redo what failed for want of it."""
@@ -885,6 +1063,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             link = self._rlink(remote)
             link.epoch += 1  # the remote may have rebooted and lost its store
             link.info, link.pushed, link.attached = None, None, True
+            self._retry_reset(link)
             link.info_event.clear()
             self._request_push(remote, wait=True)
             self._notify(topic_remote(remote))
@@ -899,7 +1078,23 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         # One push per link-up: a task still waiting for this message carries on by itself, and a
         # set already sent (or being sent) in this format and epoch is not repeated.
         if remote in self.remotes:
-            self._request_push(remote, wait=False)
+            want = (self._cfg_gen, link.page_fmt, link.epoch, link.page_caps)
+            if self._remote_holds_set(link):
+                self._retry_reset(link)
+                self._request_push(remote, wait=False)
+            elif (
+                link.pushed == want
+                and link.page_fmt == 2
+                and self.compiled.pages_v2
+                and self.hub_accepted
+                and link.inflight is None
+                and (link.task is None or link.task.done())
+            ):
+                # we think the remote holds the set but it says it does not (it rebooted without the
+                # hub seeing the link drop, or the hub gave up on a page): push again, backing off
+                self._schedule_retry(remote, want, immediate=new.gen == 0 and new.pages == 0)
+            else:
+                self._request_push(remote, wait=False)
         if changed:
             self._notify(topic_remote(remote))
 
@@ -1103,9 +1298,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # with the activity known before the drop: a change while disconnected still runs its
             # Home Assistant steps (only the very first report after HA starts is a baseline).
             self._accepted = False  # the hub may have rebooted: the resync confirms its config
+            self._set_hub_theme(True)  # and may run other firmware: theme_push is tried again
             for link in self.links.values():
                 link.epoch += 1
                 link.info, link.pushed = None, None
+                self._retry_reset(link)
                 link.info_event.clear()
             self._set_activities(self.client.activities)
             self.config_entry.async_create_background_task(

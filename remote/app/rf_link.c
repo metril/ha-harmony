@@ -43,6 +43,18 @@ static void deliver(void *ctx, const hp_rf_msg_t *m) {
       ra_logf(&l->sys, "rf_link: bad page_push dropped");
     }
     break;
+  case HP_MSG_THEME_PUSH:
+    if (hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0 && v[2].len == HP_THEME_BYTES && v[1].u <= 255) {
+      app_link_event_t *e = ring_push(l);
+      if (!e) return;
+      e->kind = APP_LINK_EV_THEME_PUSH;
+      e->gen = (uint8_t)v[1].u;
+      memcpy(e->data, v[2].p, v[2].len);
+      e->len = v[2].len;
+    } else {
+      ra_logf(&l->sys, "rf_link: bad theme_push dropped");
+    }
+    break;
   case HP_MSG_TILE_UPDATE:
     if (hp_rf_unpack(m->type, m->payload, m->len, v, 4) == 0 && v[3].len <= HP_PAGE_MAX_TEXT) {
       app_link_event_t *e = ring_push(l);
@@ -127,7 +139,9 @@ static int rf_send_key(void *ctx, uint8_t code, uint8_t action) {
 }
 
 static void store_view(const rf_link_t *l, uint8_t *gen, uint8_t *pages) {
-  bool have = l->store && l->store->have_gen && hp_store_count(l->store) > 0;
+  /* a set whose custom theme has not arrived is not held yet: it is reported as 0 pages (the hub then sends the theme) */
+  bool have = l->store && l->store->have_gen && hp_store_count(l->store) > 0 &&
+              !hp_store_theme_missing(l->store);
   *gen = have ? l->store->gen : 0;
   *pages = have ? (uint8_t)hp_store_count(l->store) : 0;
 }

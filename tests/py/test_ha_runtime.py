@@ -90,7 +90,9 @@ class ScriptHub:
         self.got: list[tuple[str, dict]] = []
         self.gate: asyncio.Event | None = None  # while cleared, page_push replies wait
         self.no_remote = False
+        self.old_hub = False  # firmware before theme_push: that message is answered unknown_type
         self.reject_config = False  # answer set_config with ok=false
+        self.refuse: dict[str, int] = {}  # message type -> how many to answer with rf_error (the link queue was full)
         self.tile_delay = 0.0  # seconds a tile_update reply is held
         self.tiles_inflight = self.tiles_peak = 0
         self.config_hash: str | None = None  # of the last accepted set_config, as hello_ack reports it
@@ -124,8 +126,14 @@ class ScriptHub:
             self.tiles_inflight += 1
             self.tiles_peak = max(self.tiles_peak, self.tiles_inflight)
             self._late.append(asyncio.create_task(self._tile_reply_later(ws, reply)))
-        elif t in ("page_push", "command"):
-            if t == "page_push" and self.gate is not None and not self.gate.is_set():
+        elif self.refuse.get(t):
+            self.refuse[t] -= 1
+            await ws.send_json({**reply, "t": "error", "d": {"code": "rf_error", "message": "RF send failed"}})
+        elif t == "theme_push" and self.old_hub:
+            err = {"code": "unknown_type", "message": "unknown message type"}
+            await ws.send_json({**reply, "t": "error", "d": err})
+        elif t in ("page_push", "command", "theme_push"):
+            if t != "command" and self.gate is not None and not self.gate.is_set():
                 self._late.append(asyncio.create_task(self._reply_when_open(ws, reply)))
                 return
             if self.no_remote:
@@ -148,6 +156,9 @@ class ScriptHub:
 
     def pages(self):
         return [decode_page(base64.b64decode(d["data"])) for t, d in self.got if t == "page_push"]
+
+    def themes(self):
+        return [(d["gen"], base64.b64decode(d["data"])) for t, d in self.got if t == "theme_push"]
 
     def tiles(self):
         return [d["args"] for t, d in self.got if t == "command" and d["command"] == "tile_update"]
@@ -398,14 +409,23 @@ async def test_burst_of_changes_is_one_message_with_the_latest_value(hass, rig, 
     hub, _c = await rig()
     await hub.push("remote_info", V2_INFO)
     await settle(hass, lambda: hub.tiles())
-    # the page push's own full tile resend must be over, or it lands inside the burst window
-    await settle(hass, lambda: all(lk.task is None or lk.task.done() for lk in _c.links.values()))
+    # the v2 push and its full tile resend (which would land inside the burst) are over when the link
+    # holds a v2 set and its task is done. "Any tile seen" is not enough: the v1 push's tiles satisfy it
+    # before the remote_info above has even been read.
+    link = _c.links[1]
+    await settle(hass, lambda: link.pushed is not None and link.pushed[1] == 2 and (link.task is None or link.task.done()))
     await settle(hass, lambda: hub.tiles_inflight == 0)
     hub.got.clear()
     for i in range(2, 12):
         hass.states.async_set("sensor.t", str(i), {"unit_of_measurement": "C"})
-    await settle(hass, lambda: hub.tiles())
-    await asyncio.sleep(0.2)
+    # the debounce timer fired, its flush ran, and nothing is marked or pending any more
+    await settle(
+        hass,
+        lambda: hub.tiles()
+        and _c._tile_timer is None
+        and not _c._tile_dirty
+        and (_c._flush_task is None or _c._flush_task.done()),
+    )
     sent = [t for t in hub.tiles() if t["text"].endswith("C")]
     assert len(sent) == 1 and sent[0]["text"] == "11 C"
 

@@ -36,6 +36,7 @@ typedef enum {
     HP_MSG_OTA_STATUS = 24,
     HP_MSG_SET_HUB_ID = 26,
     HP_MSG_HUB_ID_ACK = 27,
+    HP_MSG_THEME_PUSH = 28,
     HP_MSG_OTA_OFFER = 30,
     HP_MSG_OTA_FRAG = 31,
     HP_MSG_OTA_FRAG_ACK = 32,
@@ -49,7 +50,7 @@ typedef enum {
     HP_MSG_BT_LISTEN = 40
 } hp_msg_type_t;
 
-#define HP_MSG_COUNT 38
+#define HP_MSG_COUNT 39
 #define HP_MSG_MAX_CODE 40 /* highest message code: handler tables are indexed by code */
 
 typedef enum {

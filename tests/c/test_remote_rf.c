@@ -15,6 +15,7 @@
 #include "remote/app/cli.h"
 #include "remote/app/icons.h"
 #include "remote/app/rf_link.h"
+#include "remote/app/theme.h"
 #include "remote_fake.h"
 
 #ifndef HP_PAGES_JSON
@@ -369,6 +370,137 @@ static void test_page_push_renders_golden(void) {
   teardown();
 }
 
+/* ---- theme chain: compiled config (tests/vectors/theme_chain.json, made by tests/py/test_theme_chain.py) -> hub link -> radio
+ * -> remote -> framebuffer, against rendering the same theme and page directly ---- */
+/* The hub's frames reach the remote on its polls, which follow the fake clock: advance it, not just the threads. */
+#define TICK_FOR(cond) \
+  do { int _i; for (_i = 0; _i < 600 && !(cond); _i++) tick(50); CT_CHECK(cond); } while (0)
+#ifndef HP_THEME_CHAIN_JSON
+#error "HP_THEME_CHAIN_JSON must be defined"
+#endif
+static struct {
+  uint8_t gen, theme[HP_THEME_BYTES], pages[8][HP_PAGE_MAX_BYTES];
+  size_t plen[8];
+  int n;
+} chain;
+
+static void chain_load(void) {
+  char *t = slurp(HP_THEME_CHAIN_JSON);
+  cJSON *j = t ? cJSON_Parse(t) : NULL;
+  CT_CHECK(j != NULL);
+  if (!j) return;
+  chain.gen = (uint8_t)cJSON_GetObjectItem(j, "gen")->valueint;
+  CT_EQ(unhex(cJSON_GetObjectItem(j, "theme")->valuestring, chain.theme, sizeof chain.theme), (size_t)HP_THEME_BYTES);
+  const cJSON *p;
+  chain.n = 0;
+  cJSON_ArrayForEach(p, cJSON_GetObjectItem(j, "pages")) {
+    chain.plen[chain.n] = unhex(p->valuestring, chain.pages[chain.n], HP_PAGE_MAX_BYTES);
+    chain.n++;
+  }
+  cJSON_Delete(j);
+  free(t);
+}
+
+static int hub_push_theme(void) {
+  hp_rf_val_t v[3] = {{.u = 1}, {.u = chain.gen}, {.p = chain.theme, .len = HP_THEME_BYTES}};
+  return hub_send(HP_MSG_THEME_PUSH, v, 3);
+}
+
+static void status_bar_neutral(void) { /* as the page golden: the fake gauge and link state out of the picture */
+  ra_ui_set_battery(&app.ui, -1, 0);
+  ra_ui_set_link(&app.ui, 0);
+}
+
+static uint64_t chain_direct_render(int page) {
+  fk_init(&fk);
+  ra_ops_t ops = fk_ops(&fk);
+  CT_EQ(app_init(&app, &ops, &app_link_null, NULL), 0);
+  CT_EQ(ra_ui_set_custom_theme(chain.theme, HP_THEME_BYTES), 0);
+  hp_page_t p;
+  CT_EQ(hp_page_decode(chain.pages[page], chain.plen[page], &p), 0);
+  ra_ui_show_page(&app.ui, &p);
+  status_bar_neutral();
+  uint64_t h = fb_hash();
+  app_destroy(&app);
+  return h;
+}
+
+static void test_theme_chain_renders_like_a_direct_render(void) {
+  chain_load();
+  CT_CHECK(chain.n >= 1);
+  setup();
+  CT_EQ(hub_push_theme(), 0); /* the theme first, as the hub orders it */
+  for (int i = 0; i < chain.n; i++) {
+    hp_rf_val_t v[3] = {{.u = 1}, {.u = i}, {.p = chain.pages[i], .len = chain.plen[i]}};
+    CT_EQ(hub_send(HP_MSG_PAGE_PUSH, v, 3), 0);
+  }
+  TICK_FOR(hp_store_complete(&app.store) && app.cur >= 0 && app.ui.page.page_id == app.cur);
+  TICK_FOR(hp_rf_link_status(&rf.link).queued == 0 && hp_rf_link_status(&hub_link).queued == 0);
+  CT_EQ(ra_theme_cur()->id, RA_THEME_CUSTOM_ID);
+  int cur = app.cur;
+  status_bar_neutral();
+  uint64_t chained = fb_hash();
+  /* the remote reported the complete set only now */
+  TICK_FOR(nhinfo >= 2 && hinfo[nhinfo - 1].gen == chain.gen && hinfo[nhinfo - 1].pages == chain.n);
+  teardown();
+  uint64_t direct = chain_direct_render(cur);
+  CT_CHECK(chained == direct);
+  if (chained != direct) fprintf(stderr, "chain %016llx direct %016llx\n", (unsigned long long)chained, (unsigned long long)direct);
+}
+
+/* pages first: the remote reports no set and shows none until the late theme arrives, then both follow */
+static void test_theme_chain_late_theme_completes_the_set(void) {
+  chain_load();
+  setup();
+  for (int i = 0; i < chain.n; i++) {
+    hp_rf_val_t v[3] = {{.u = 1}, {.u = i}, {.p = chain.pages[i], .len = chain.plen[i]}};
+    CT_EQ(hub_send(HP_MSG_PAGE_PUSH, v, 3), 0);
+  }
+  TICK_FOR(hp_store_count(&app.store) == (unsigned)chain.n);
+  TICK_FOR(hp_rf_link_status(&rf.link).queued == 0 && hp_rf_link_status(&hub_link).queued == 0);
+  tick(RF_LINK_RETRY_MS);
+  CT_CHECK(!hp_store_complete(&app.store));
+  CT_CHECK(!(app.ui.page.version == 2 && !app.ui.recv_total));
+  for (int i = 0; i < nhinfo; i++) CT_EQ(hinfo[i].pages, 0); /* never reported as held */
+  CT_EQ(hub_push_theme(), 0);
+  TICK_FOR(hp_store_complete(&app.store) && app.ui.page.version == 2 && !app.ui.recv_total);
+  TICK_FOR(hinfo[nhinfo - 1].gen == chain.gen && hinfo[nhinfo - 1].pages == chain.n);
+  teardown();
+}
+
+/* a theme that is not valid changes nothing */
+static void test_theme_chain_corrupt_theme_is_ignored(void) {
+  chain_load();
+  setup();
+  uint8_t bad[HP_THEME_BYTES];
+  memcpy(bad, chain.theme, sizeof bad);
+  bad[0] = 0;
+  hp_rf_val_t v[3] = {{.u = 1}, {.u = chain.gen}, {.p = bad, .len = sizeof bad}};
+  CT_EQ(hub_send(HP_MSG_THEME_PUSH, v, 3), 0);
+  TICK_FOR(hp_rf_link_status(&rf.link).queued == 0 && hp_rf_link_status(&hub_link).queued == 0);
+  tick(200);
+  CT_CHECK(!app.store.have_theme);
+  teardown();
+}
+
+/* compat (docs/proto/compat.md): a hub->remote message type the remote does not know (what an old remote makes of theme_push) is
+ * acked and dropped; the link and the next page are unaffected. Code 29 is unassigned. */
+static void test_unknown_hub_message_type_is_acked_and_ignored(void) {
+  setup();
+  const uint8_t junk[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+  CT_EQ(hp_rf_link_send(&hub_link, (hp_msg_type_t)29, junk, sizeof junk, (uint32_t)fk.now), 0);
+  TICK_FOR(hp_rf_link_status(&hub_link).queued == 0);
+  CT_EQ(hp_rf_link_status(&hub_link).failures, 0u);
+  CT_CHECK(!app.ui.fallback);
+  uint8_t raw[300];
+  size_t n;
+  char hash[20];
+  CT_CHECK(golden("one_button", raw, &n, hash));
+  CT_EQ(hub_push_page(raw, n), 0);
+  TICK_FOR(app.ui.page.page_id == 1);
+  teardown();
+}
+
 static void test_keys_and_taps_reach_the_hub(void) {
   uint8_t raw[300];
   size_t n;
@@ -432,7 +564,7 @@ static void test_remote_info_is_first_uplink(void) {
   WAIT_FOR(nhinfo >= 1 && nhbatt >= 1);
   CT_EQ(hinfo[0].remote, RF_LINK_REMOTE_ID);
   CT_EQ(hinfo[0].fmt, 2);
-  CT_EQ(hinfo[0].caps, 7);
+  CT_EQ(hinfo[0].caps, 15);
   CT_EQ(hinfo[0].icons, RA_ICON_MAX);
   CT_CHECK(hinfo[0].ord < hbatt[0].ord);
   CT_EQ(nhinfo, 1);
@@ -852,6 +984,10 @@ static void test_full_session_is_safe_with_rf(void) {
 
 int main(void) {
   CT_RUN(test_page_push_renders_golden);
+  CT_RUN(test_theme_chain_renders_like_a_direct_render);
+  CT_RUN(test_theme_chain_late_theme_completes_the_set);
+  CT_RUN(test_theme_chain_corrupt_theme_is_ignored);
+  CT_RUN(test_unknown_hub_message_type_is_acked_and_ignored);
   CT_RUN(test_keys_and_taps_reach_the_hub);
   CT_RUN(test_tile_update_changes_render);
   CT_RUN(test_tile_state_applies_and_unknown_types_are_dropped);

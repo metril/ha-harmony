@@ -43,6 +43,7 @@ async def async_get_config_entry_diagnostics(
             },
             "pushed_as": link.pushed,  # (config gen, format, link epoch, theme caps) of the last complete set
             "theme_notices": [n["msg"] for n in c.theme_notices(r)],
+            "theme": c.theme_status(r),  # name, id, sent (the hub took it), acked (the remote holds the set)
             "pending": link.pending,
             "attached": link.attached,
             "last_push_ms": link.push_ms,
@@ -91,6 +92,7 @@ async def async_get_config_entry_diagnostics(
         "counters": {
             "config_pushes": c.config_pushes,
             "page_pushes": c.page_pushes,
+            "theme_pushes": c.theme_pushes,
             "tile_updates": c.tile_updates,
         },
         "timings_ms": dict(c.timings),
