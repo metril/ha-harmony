@@ -189,6 +189,8 @@ export interface StudioHost {
   activateKey(name: string): void;
   activateWidget(page: number, index: number): void;
   activateCell(page: number, x: number, y: number): void;
+  /** clear the selected key or widget and close its popover */
+  deselect(): void;
   /** commit a new box for a widget (move / resize) */
   setBox(page: number, index: number, box: { x: number; y: number; w: number; h: number }): void;
   nudge(page: number, index: number, dx: number, dy: number, resize: boolean): void;

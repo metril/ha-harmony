@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.13 (2026-11-19)
+
+- Add-on editor: the palette lists commands in a uniform grid (equal-height rows, ellipsis and tooltip for long names); a selected key or widget clears on a second click, a click on the remote body, the canvas background or Escape; key labels, the Vol and Ch legends and glyphs keep AA contrast in every key state; the four colour keys are wide dark keys with a coloured ring, and the light and socket keys show a spotlight and a US outlet.
+
 ## 0.3.12 (2026-11-19)
 
 - Add-on: the editor no longer reports "Home Assistant cannot be read" on a large install. The add-on read only the first network chunk of the entity list, so any answer over one chunk looked like broken JSON; it now reads the whole answer (still capped at 8 MB, 20 s total). When Home Assistant cannot be read the add-on logs one warning with the path and cause (not repeated while the cause stays the same, plus a line on recovery), and the 503 carries a short `reason`.
