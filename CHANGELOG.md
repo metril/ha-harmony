@@ -4,6 +4,9 @@
 
 - Add-on editor: the palette's tab is called **Home Assistant** (it was "Home", which clashes with the remote's Home key and page) and the tab strip shows icons with the selected tab's full name. It is rebuilt for installs with thousands of entities: groups (Area under its floor, Type, Device, Integration, Label) are collapsed by default and only open groups draw rows; search matches name, entity id, area, device, integration and labels and opens the groups it finds; type chips with counts and Area/Label/Integration filters combine and show an "n filters" state; Favourites, Used in this config and Recently used sit at the top; arrow-key navigation, a live result count, a loading skeleton, a Retry that says why Home Assistant cannot be read, and a notice when only type grouping is available. The action picker and the add-device wizard use the same list.
 - Add-on: reads Home Assistant's area, device, entity and floor registries over the Supervisor's WebSocket proxy (read only, an allow-list of four `*/list` commands enforced in code, cached 60 s) so entities carry their area, device and integration; disabled and hidden entities and, unless asked for, diagnostic and config ones are left out. Without the registries the list falls back to the REST data (type grouping). `GET /api/v1/ha/entities` gains `area`, `diagnostic`, a richer row, `areas`, `registries` and an `ETag`.
+
+## 0.3.13 (2026-11-19)
+
 - Add-on editor: the palette lists commands in a uniform grid (equal-height rows, ellipsis and tooltip for long names); a selected key or widget clears on a second click, a click on the remote body, the canvas background or Escape; key labels, the Vol and Ch legends and glyphs keep AA contrast in every key state; the four colour keys are wide dark keys with a coloured ring, and the light and socket keys show a spotlight and a US outlet.
 
 ## 0.3.12 (2026-11-19)

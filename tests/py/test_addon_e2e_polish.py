@@ -97,6 +97,7 @@ async def open_large(browser, origin, width=1440, height=900, **kw):
     await page.route(f"{origin}{PREFIX}/**", to_server)
     await page.goto(f"{origin}{PREFIX}/#/remote")
     await page.locator("hh-remote [data-key]").first.wait_for()
+    await _settle(page)
     return page
 
 
@@ -487,6 +488,18 @@ async def test_palette_chips_form_an_aligned_grid(browser, large, size):
     await page.context.close()
 
 
+async def _settle(page):
+    """Two frames, and every running CSS transition finished: layout and colours are final."""
+    await page.evaluate(
+        """async () => {
+      for (let i = 0; i < 2; i++) {
+        await new Promise((r) => requestAnimationFrame(r));
+        await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {})));
+      }
+    }"""
+    )
+
+
 async def _sel(page):
     return await page.evaluate(f"() => JSON.stringify({STUDIO_EL}.st.sel)")
 
@@ -501,14 +514,15 @@ async def _key_centre(page, name="select"):
 async def test_selection_can_be_cleared(browser, large, how):
     page = await open_large(browser, large)
     x, y = await _key_centre(page)
-    await page.mouse.click(x, y)
-    await page.wait_for_timeout(250)
-    assert '"key"' in await _sel(page)
     pressed = f"() => {REMOTE}.querySelector('[data-key=select]').getAttribute('aria-pressed')"
-    assert await page.evaluate(pressed) == "true"
+    await page.mouse.click(x, y)
+    # selection state and the re-rendered aria-pressed land asynchronously (Lit update): wait, never sleep
+    await page.wait_for_function(
+        f"() => JSON.stringify({STUDIO_EL}.st.sel).includes('\"key\"') && ({pressed})() === 'true'", timeout=10000
+    )
     if how in ("reclick", "body"):  # the popover may sit over the key: dismiss it first, the key stays selected
         await page.keyboard.press("Escape")
-        await page.wait_for_function(f"() => !{STUDIO}.querySelector('.pop')", timeout=3000)
+        await page.wait_for_function(f"() => !{STUDIO}.querySelector('.pop')", timeout=10000)
         assert '"key"' in await _sel(page)
     if how == "reclick":
         await page.mouse.click(x, y)
@@ -524,12 +538,12 @@ async def test_selection_can_be_cleared(browser, large, how):
         await page.mouse.click(*r)
     elif how == "escape":
         await page.keyboard.press("Escape")  # the first Escape closes the popover
-        await page.wait_for_timeout(150)
+        await page.wait_for_function(f"() => !{STUDIO}.querySelector('.pop')", timeout=10000)
         await page.keyboard.press("Escape")
     else:
         await page.evaluate(f"() => {STUDIO_EL}.st.setLayer('watch_tv')")
-    await page.wait_for_function(f"() => JSON.stringify({STUDIO_EL}.st.sel) === 'null'", timeout=3000)
-    assert await page.evaluate(pressed) == "false"
+    await page.wait_for_function(f"() => JSON.stringify({STUDIO_EL}.st.sel) === 'null'", timeout=10000)
+    await page.wait_for_function(f"() => ({pressed})() === 'false'", timeout=10000)
     assert await page.evaluate(f"() => !{STUDIO}.querySelector('.pop')")
     await page.context.close()
 
@@ -537,16 +551,15 @@ async def test_selection_can_be_cleared(browser, large, how):
 async def test_widget_selection_clears_on_reclick(browser, large):
     page = await open_large(browser, large)
     await page.evaluate(f"() => {STUDIO_EL}.st.set({{mode: 'screen'}})")
-    await page.wait_for_timeout(300)
+    await page.locator("hh-remote [data-widget]").first.wait_for()
+    await _settle(page)
     box = await page.evaluate(
         f"() => {{ const r = {REMOTE}.querySelector('[data-widget]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }}"
     )
     await page.mouse.click(*box)
-    await page.wait_for_timeout(250)
-    assert '"widget"' in await _sel(page)
+    await page.wait_for_function(f"() => JSON.stringify({STUDIO_EL}.st.sel).includes('\"widget\"')", timeout=10000)
     await page.mouse.click(*box)
-    await page.wait_for_timeout(250)
-    assert await _sel(page) == "null"
+    await page.wait_for_function(f"() => JSON.stringify({STUDIO_EL}.st.sel) === 'null'", timeout=10000)
     await page.context.close()
 
 
@@ -624,7 +637,7 @@ async def test_every_key_label_and_glyph_is_readable_when_selected(browser, larg
                 )
             hover = state.endswith("hover")
             await page.mouse.move(*(await _key_centre(page, name))) if hover else await page.mouse.move(0, 0)
-            await page.wait_for_timeout(150)
+            await _settle(page)
             for key, is_text, col, bg, ratio in await _measure(page):
                 if ratio < (4.5 if is_text else 3.0):
                     bad.append(f"{state} {name}: {key} {col} on {bg} = {ratio:.2f}")
