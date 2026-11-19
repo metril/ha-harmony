@@ -45,6 +45,7 @@ static long file_len(const char *p) {
 
 static char *slurp(const char *p, size_t *n) {
     FILE *f = fopen(p, "rb");
+    *n = 0;
     if (!f) return NULL;
     char *b = malloc(65536);
     *n = fread(b, 1, 65536, f);
@@ -102,7 +103,7 @@ static void test_good_update(void) {
     CT_EQ(hp_ota_end(&o, &own, &b), 0);
     CT_EQ(b, 7);
     CT_CHECK(o.restart);
-    size_t n;
+    size_t n = 0;
     char *got = slurp(x.hub, &n);
     CT_EQ(n, 5000);
     CT_MEM_EQ(got, x.img + OTA_HDR_BYTES, 5000);
@@ -241,7 +242,7 @@ static void test_space_and_enospc(void) {
     CT_CHECK(!exists(p)); /* the partial file is gone */
     CT_CHECK(!o2.receiving);
     CT_EQ(hp_ota_chunk(&o2, &a, 4096, x.img + 4096, 10), HP_OTA_E_STATE);
-    size_t n;
+    size_t n = 0;
     char *got = slurp(x.hub, &n);
     CT_CHECK(n == 10 && !memcmp(got, "OLD-BINARY", 10));
     free(got);
@@ -273,7 +274,7 @@ static void test_rejected_images_leave_binary_alone(void) {
         /* the remote-targeted image is refused as the wrong target, the rest as verify failures */
         CT_EQ(e, HP_OTA_E_VERIFY);
         CT_CHECK(o.verify_rc == (k == 0 ? OTA_E_DIGEST : k == 2 ? OTA_E_TARGET : k == 3 || k == 4 ? OTA_E_FORMAT : OTA_E_SIG));
-        size_t n;
+        size_t n = 0;
         char *got = slurp(x.hub, &n);
         CT_CHECK(n == 10 && !memcmp(got, "OLD-BINARY", 10));
         free(got);
@@ -327,7 +328,7 @@ static void test_power_loss_mid_apply(void) {
     CT_EQ(waitpid(pid, &st, 0), pid);
     CT_CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 9);
     /* the installed binary is whole and executable; the next start sweeps the leftovers */
-    size_t n;
+    size_t n = 0;
     char *got = slurp(x.hub, &n);
     CT_CHECK(n == 10 && !memcmp(got, "OLD-BINARY", 10));
     free(got);
@@ -373,7 +374,7 @@ static void test_power_loss_between_link_and_rename(void) {
     CT_EQ(stat(x.hub, &h), 0);
     CT_EQ(stat(x.prev, &p), 0);
     CT_CHECK(h.st_ino == p.st_ino); /* hub.prev IS the running binary: the hook's rollback is a no-op, never N-2 */
-    size_t n;
+    size_t n = 0;
     char *got = slurp(x.hub, &n);
     CT_CHECK(n == 10 && !memcmp(got, "OLD-BINARY", 10));
     free(got);
@@ -392,7 +393,7 @@ static void test_unwritable_marker_aborts_the_swap(void) {
     CT_EQ(hp_ota_begin(&o, &a, 1, (uint32_t)x.len, 6, x.sha), 0);
     CT_EQ(send_all(&o, &a, &x, 0, 4096), 0);
     CT_EQ(hp_ota_end(&o, &a, NULL), HP_OTA_E_IO);
-    size_t n;
+    size_t n = 0;
     char *got = slurp(x.hub, &n);
     CT_CHECK(n == 10 && !memcmp(got, "OLD-BINARY", 10)); /* nothing changed */
     free(got);

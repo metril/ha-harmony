@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- CI: the mips qemu test build no longer fails on a `-Werror=maybe-uninitialized` in `test_hub_ota.c` (gcc 13); the boot-hook selftest for an update applied inside the health window no longer races the (tiny) test window. Tests only, no firmware change.
+
 ## 0.3.7 (2026-11-18)
 
 - Fix: integration 0.3.6 and older refuse to connect to hub firmware that reports extra handshake fields; receivers now ignore unknown fields (hub and integration alike; unknown message types from a newer peer are ignored too; what each side sends is still strictly validated).

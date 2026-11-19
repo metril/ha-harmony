@@ -1116,12 +1116,19 @@ OLD_EARLY = (  # applies immediately: inside the first health window
 )
 
 
+# OLD_EARLY must finish writing its markers before the window closes, however starved the runner is: a
+# 0.1 s window (2 polls) can expire mid-apply, and the hook then clears a half-written pending marker as
+# "healthy" (the rollback loses prev= and leaves the new build id behind). A real hub never applies
+# before the health mark (hub_ota.c refuses with NOTREADY), so only this early applier needs the slack.
+_EARLY_WINDOW = {"HAH_HEALTHY_POLLS": "40"}
+
+
 def test_update_inside_the_health_window_is_a_planned_relaunch_not_a_death(root: Path) -> None:
     install_daemon(root, OLD_EARLY)
     _install_new(root, NEW_OK)
     install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=1\n")
-    source_hook(root, healthy=1)
-    log = _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    source_hook(root, healthy=1, extra_env=_EARLY_WINDOW)
+    log = _wait_text(root / "cache" / "ha-harmony.log", "healthy after", tries=1000)
     assert "inside the health window - launching the new build" in log
     assert "died within" not in log and not (root / "reboot.log").exists()
     assert _count(root, "runs_new") == 1
@@ -1134,7 +1141,7 @@ def test_update_inside_the_window_that_dies_rolls_back_once_and_restores_ota_bui
     install_daemon(root, OLD_EARLY)
     _install_new(root, NEW_BAD)
     install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=0\n")
-    source_hook(root, healthy=1)
+    source_hook(root, healthy=1, extra_env=_EARLY_WINDOW)
     _wait_text(root / "cache" / "ha-harmony.log", "restored hub.prev")
     _wait_count(root, "runs_old", 2)
     assert (_hub_dir(root) / "ota-build").read_text().strip() == "1"  # the previous build id is back
