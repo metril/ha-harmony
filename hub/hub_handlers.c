@@ -38,6 +38,7 @@ static void hub_notify(void *vctx, hp_actsm_evt_t evt, int idx) {
 
 void hub_ctx_init(hub_ctx_t *c) {
     memset(c, 0, sizeof *c);
+    hp_ota_init(&c->ota, NULL, NULL); /* disabled until main() gives it a directory */
     hp_map_init(&c->map);
     hp_sched_init(&c->sched, mono_ms, NULL);
     hp_irout_init(&c->irout, &c->sched);
@@ -325,6 +326,20 @@ void hub_send_state(hub_ctx_t *h, hp_ws_conn_t *c) {
         cJSON *o = device_json(h, i);
         if (o && hp_make_reply(0, "device_state", o, buf, sizeof buf, &n) == 0) (void)hp_ws_send(c, buf, n);
     }
+    uint32_t rb = 0;
+    char why[96];
+    if (hp_ota_rollback_info(&h->ota, &rb, why, sizeof why)) {
+        cJSON *o = cJSON_CreateObject();
+        if (o) {
+            cJSON_AddStringToObject(o, "state", "rolled_back");
+            cJSON_AddNumberToObject(o, "offset", 0);
+            cJSON_AddNumberToObject(o, "size", 0);
+            cJSON_AddNumberToObject(o, "build", rb);
+            cJSON_AddStringToObject(o, "reason", why);
+            char ob[320];
+            if (hp_make_reply(0, "ota_status", o, ob, sizeof ob, &n) == 0) (void)hp_ws_send(c, ob, n);
+        }
+    }
 }
 
 void hub_flush_pending(hub_ctx_t *h) {
@@ -563,6 +578,67 @@ static bool on_config_hash(void *vctx, char out[9]) {
     return hp_map_hash_hex(&h->map, out);
 }
 
+/* ------------------------------------------------------------------ ota */
+
+static int ota_reply(hub_ctx_t *h, uint32_t id, const char *state, const uint32_t *build, char *reply, size_t cap,
+                     size_t *len) {
+    cJSON *o = cJSON_CreateObject();
+    if (!o) return -HP_E_INVAL;
+    cJSON_AddStringToObject(o, "state", state);
+    cJSON_AddNumberToObject(o, "offset", h->ota.receiving ? h->ota.offset : 0);
+    cJSON_AddNumberToObject(o, "size", h->ota.receiving ? h->ota.size : 0);
+    if (build) cJSON_AddNumberToObject(o, "build", *build);
+    return hp_make_reply(id, "ota_status", o, reply, cap, len);
+}
+
+static int ota_fail(hub_ctx_t *h, uint32_t id, int e, char *reply, size_t cap, size_t *len) {
+    return hp_make_error(id, hp_ota_code(e), hp_ota_message(&h->ota, e), reply, cap, len);
+}
+
+static double num_of(const cJSON *d, const char *k) { return cJSON_GetObjectItemCaseSensitive((cJSON *)d, k)->valuedouble; }
+
+static int on_ota_begin(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap, size_t *len) {
+    hub_ctx_t *h = vctx;
+    const cJSON *sha = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "sha");
+    int e = hp_ota_begin(&h->ota, sess, (unsigned)num_of(d, "target"), (uint32_t)num_of(d, "size"),
+                         (uint32_t)num_of(d, "build"), sha->valuestring);
+    if (e) return ota_fail(h, id, e, reply, cap, len);
+    return ota_reply(h, id, "receiving", NULL, reply, cap, len);
+}
+
+static int on_ota_chunk(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap, size_t *len) {
+    hub_ctx_t *h = vctx;
+    const cJSON *b64 = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "data");
+    static uint8_t buf[HP_OTA_CHUNK_MAX + 8];
+    size_t blen = strlen(b64->valuestring);
+    if (blen > ((HP_OTA_CHUNK_MAX + 2) / 3) * 4) return ota_fail(h, id, HP_OTA_E_CHUNK, reply, cap, len);
+    size_t n = hp_base64_decode(b64->valuestring, blen, buf, sizeof buf);
+    if (n == (size_t)-1 || n > HP_OTA_CHUNK_MAX) return ota_fail(h, id, HP_OTA_E_CHUNK, reply, cap, len);
+    int e = hp_ota_chunk(&h->ota, sess, (uint32_t)num_of(d, "offset"), buf, n);
+    if (e == HP_OTA_E_OFFSET) return hp_make_error(id, hp_ota_code(e), "chunk offset is ahead of the received data", reply, cap, len);
+    if (e) return ota_fail(h, id, e, reply, cap, len);
+    return ota_reply(h, id, "receiving", NULL, reply, cap, len);
+}
+
+static int on_ota_end(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap, size_t *len) {
+    (void)d;
+    hub_ctx_t *h = vctx;
+    uint32_t build = 0;
+    int e = hp_ota_end(&h->ota, sess, &build);
+    if (e) return ota_fail(h, id, e, reply, cap, len);
+    return ota_reply(h, id, "applied", &build, reply, cap, len);
+}
+
+static int on_ota_abort(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap, size_t *len) {
+    (void)d;
+    hub_ctx_t *h = vctx;
+    int e = hp_ota_abort(&h->ota, sess);
+    if (e) return ota_fail(h, id, e, reply, cap, len);
+    return ota_reply(h, id, "aborted", NULL, reply, cap, len);
+}
+
+void hub_session_closed(hub_ctx_t *h, const hp_session_t *sess) { hp_ota_owner_gone(&h->ota, sess); }
+
 void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->ctx = ctx;
     tbl->activities = on_activities;
@@ -570,6 +646,10 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->handler[HP_MSG_SET_CONFIG] = on_set_config;
     tbl->handler[HP_MSG_COMMAND] = on_command;
     tbl->handler[HP_MSG_PAGE_PUSH] = on_page_push;
+    tbl->handler[HP_MSG_OTA_BEGIN] = on_ota_begin;
+    tbl->handler[HP_MSG_OTA_CHUNK] = on_ota_chunk;
+    tbl->handler[HP_MSG_OTA_END] = on_ota_end;
+    tbl->handler[HP_MSG_OTA_ABORT] = on_ota_abort;
 }
 
 /* ------------------------------------------------------------------ rf */

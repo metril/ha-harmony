@@ -161,6 +161,7 @@ add_library(hp_hub STATIC
   hub/io/rf_pair.c
   hub/ir/encode.c
   hub/hub_handlers.c
+  hub/ota/hub_ota.c
 )
 find_package(Threads REQUIRED)
 target_link_libraries(hp_hub PUBLIC hp_core cjson m Threads::Threads)

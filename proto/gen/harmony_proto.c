@@ -109,6 +109,45 @@ static const hp_field_desc_t hp_fields_tile_state[] = {
     {"text", HP_T_STR, false, NULL},
 };
 
+static const hp_field_desc_t hp_fields_ota_begin[] = {
+    {"target", HP_T_U8, false, NULL},
+    {"size", HP_T_U32, false, NULL},
+    {"build", HP_T_U32, false, NULL},
+    {"sha", HP_T_STR, false, NULL},
+};
+
+static const hp_field_desc_t hp_fields_ota_chunk[] = {
+    {"offset", HP_T_U32, false, NULL},
+    {"data", HP_T_BYTES, false, NULL},
+};
+
+static const hp_field_desc_t hp_fields_ota_status[] = {
+    {"state", HP_T_STR, false, NULL},
+    {"offset", HP_T_U32, false, NULL},
+    {"size", HP_T_U32, false, NULL},
+    {"build", HP_T_U32, true, NULL},
+    {"reason", HP_T_STR, true, NULL},
+};
+
+static const hp_field_desc_t hp_fields_ota_offer[] = {
+    {"size", HP_T_U32, false, NULL},
+    {"build", HP_T_U32, false, NULL},
+};
+
+static const hp_field_desc_t hp_fields_ota_frag[] = {
+    {"offset", HP_T_U32, false, NULL},
+    {"data", HP_T_BYTES, false, NULL},
+};
+
+static const hp_field_desc_t hp_fields_ota_frag_ack[] = {
+    {"offset", HP_T_U32, false, NULL},
+};
+
+static const hp_field_desc_t hp_fields_ota_result[] = {
+    {"code", HP_T_U8, false, NULL},
+    {"build", HP_T_U32, false, NULL},
+};
+
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
     {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 4, hp_fields_hello_ack},
@@ -129,6 +168,16 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"remote_attached", HP_MSG_REMOTE_ATTACHED, HP_TRANSPORT_WS, 0, NULL},
     {"remote_info", HP_MSG_REMOTE_INFO, HP_TRANSPORT_BOTH, 6, hp_fields_remote_info},
     {"tile_state", HP_MSG_TILE_STATE, HP_TRANSPORT_RF, 5, hp_fields_tile_state},
+    {"ota_begin", HP_MSG_OTA_BEGIN, HP_TRANSPORT_WS, 4, hp_fields_ota_begin},
+    {"ota_chunk", HP_MSG_OTA_CHUNK, HP_TRANSPORT_WS, 2, hp_fields_ota_chunk},
+    {"ota_end", HP_MSG_OTA_END, HP_TRANSPORT_WS, 0, NULL},
+    {"ota_abort", HP_MSG_OTA_ABORT, HP_TRANSPORT_WS, 0, NULL},
+    {"ota_status", HP_MSG_OTA_STATUS, HP_TRANSPORT_WS, 5, hp_fields_ota_status},
+    {"ota_offer", HP_MSG_OTA_OFFER, HP_TRANSPORT_RF, 2, hp_fields_ota_offer},
+    {"ota_frag", HP_MSG_OTA_FRAG, HP_TRANSPORT_RF, 2, hp_fields_ota_frag},
+    {"ota_frag_ack", HP_MSG_OTA_FRAG_ACK, HP_TRANSPORT_RF, 1, hp_fields_ota_frag_ack},
+    {"ota_commit", HP_MSG_OTA_COMMIT, HP_TRANSPORT_RF, 0, NULL},
+    {"ota_result", HP_MSG_OTA_RESULT, HP_TRANSPORT_RF, 2, hp_fields_ota_result},
 };
 
 const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT] = {
