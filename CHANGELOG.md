@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix: the studio's layer pills are no longer squeezed to a few pixels at narrow widths or with wider fallback fonts; the pill row measures its room and moves the rest into the "More" menu.
+
 ## 0.3.6 (2026-11-18)
 
 - Editor: the Elite drawing's proportions now follow the photo (taller body, Off lower and inset, screen centred, keys and the D-pad ring placed from one table of body fractions, empty rounded grip at the bottom).

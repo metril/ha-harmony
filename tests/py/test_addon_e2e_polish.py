@@ -381,26 +381,47 @@ async def test_permissions_panel_groups_20_entities_and_scrolls_inside_its_card(
         await page.locator("hh-overview section[aria-labelledby=hp]").screenshot(path=f"{SHOTS}/permissions.png")
 
 
-async def test_layer_pills_fit_at_1024_and_overflow_into_a_menu_past_five(browser, large):
+async def test_layer_pills_fit_at_1024_and_overflow_into_a_menu_by_measured_width(browser, large):
     page = await open_large(browser, large, 1024, 768)
-    fits = (
-        "() => { const r = " + STUDIO + ".querySelector('.layers'); return [r.scrollWidth <= r.clientWidth + 1, r.querySelectorAll('button').length, "
-        + STUDIO
-        + ".querySelectorAll('.lw select').length]; }"
+    await page.evaluate("() => document.fonts.ready")
+    # measured geometry: [no pill squeezed or ellipsised and no scroll, pills shown, layers in the "More" menu]
+    state = (
+        "() => { const r = " + STUDIO + ".querySelector('.layers'); const bs = [...r.querySelectorAll('button')];"
+        " const m = " + STUDIO + ".querySelector('select[aria-label=\"More layers\"]');"
+        " return [r.scrollWidth <= r.clientWidth + 1 && bs.every(b => b.scrollWidth <= b.clientWidth + 1), bs.length, m ? m.options.length - 1 : 0]; }"
     )
-    assert await page.evaluate(fits) == [True, 4, 0]  # Default + 3 activities
+
+    async def settled(total):
+        # the pill count converges after a few renders; wait for it, then assert on the final geometry
+        await page.wait_for_function(
+            "([s, n]) => { const [ok, p, m] = eval('(' + s + ')')(); return ok && p + m === n; }", arg=[state, total]
+        )
+        ok, pills, menu = await page.evaluate(state)
+        assert ok and pills + menu == total and pills >= 1, (ok, pills, menu)
+        return pills, menu
+
+    await settled(4)  # Default + 3 activities
     await page.evaluate(
         f"() => {STORE}.edit(c => {{ c.activities.push({{id: 'a4', name: 'Music', devices: [{{device: 'avr'}}]}}); }})"
     )
-    assert await page.evaluate(fits) == [True, 5, 0]  # five layers: all pills, no scroll
+    await settled(5)
     await page.evaluate(
         f"() => {STORE}.edit(c => {{ for (const n of ['a5', 'a6', 'a7']) c.activities.push({{id: n, name: 'Extra ' + n, devices: [{{device: 'avr'}}]}}); }})"
     )
-    assert await page.evaluate(fits) == [True, 4, 1]  # eight layers: four pills and a "More" menu
+    _, menu = await settled(8)
+    assert menu >= 1  # eight layers never fit in one row at 1024
     more = page.locator("hh-studio").locator("select[aria-label='More layers']")
     await more.select_option("a7")
     await page.locator("hh-studio .layers button[aria-selected=true]", has_text="Extra a7").wait_for()
-    assert await page.evaluate(fits) == [True, 4, 1]
+    await settled(8)
+    # a wide window shows five pills with no menu, and four pills plus the menu past five
+    await page.set_viewport_size({"width": 1600, "height": 900})
+    await page.evaluate(f"() => {STORE}.edit(c => {{ c.activities.length = 3; }})")
+    await page.wait_for_function("([s]) => eval('(' + s + ')')()[1] === 4", arg=[state])
+    await page.evaluate(
+        f"() => {STORE}.edit(c => {{ for (const n of ['a4', 'a5', 'a6']) c.activities.push({{id: n, name: 'More ' + n, devices: [{{device: 'avr'}}]}}); }})"
+    )
+    assert await settled(7) == (4, 3)
 
 
 async def test_hub_limits_are_refused_in_the_ui_with_the_reason(browser, large):
