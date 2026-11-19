@@ -27,6 +27,7 @@ add_hp_test(store)
 add_hp_test(rf_spi)
 target_compile_definitions(test_rf_spi PRIVATE HP_LINK_VECTORS="${CMAKE_SOURCE_DIR}/tests/vectors/rf/link_status.json")
 add_hp_test(mdns)
+add_hp_test(ident)
 add_hp_test(hwkeys)
 
 # RF object codec: golden vectors shared with the remote build (argv[1] = frames.json).

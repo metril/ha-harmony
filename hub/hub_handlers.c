@@ -778,8 +778,38 @@ void hub_session_closed(hub_ctx_t *h, const hp_session_t *sess) {
     hp_ota_owner_gone(&h->ota, sess);
 }
 
+static int on_set_hub_id(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap,
+                         size_t *len) {
+    (void)sess;
+    hub_ctx_t *h = vctx;
+    if (!h->ident.id[0]) return reply_err(id, "unsupported", "this hub has no identity store", reply, cap, len);
+    const cJSON *jid = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "id");
+    const cJSON *jn = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "name");
+    bool changed = strcmp(jid->valuestring, h->ident.id) != 0;
+    int rc = hp_ident_set(&h->ident, jid->valuestring, jn ? jn->valuestring : NULL);
+    switch (rc) {
+    case HP_IDENT_OK: break;
+    case HP_IDENT_BAD_ID: return reply_err(id, "bad_id", "hub id must be 1-63 characters of A-Z a-z 0-9 . _ - and not \"default\"", reply, cap, len);
+    case HP_IDENT_BAD_NAME: return reply_err(id, "bad_name", "name must be valid UTF-8 without control characters, at most 48 bytes", reply, cap, len);
+    case HP_IDENT_PINNED: return reply_err(id, "id_pinned", "the hub id is pinned by hub_id in hub.conf on the device; remove it there to rename from Home Assistant", reply, cap, len);
+    default: return reply_err(id, "io", "could not save the hub identity", reply, cap, len);
+    }
+    if (changed && h->ident_changed) h->ident_changed(h->ident_ctx, &h->ident);
+    cJSON *o = cJSON_CreateObject();
+    if (!o) return -HP_E_INVAL;
+    cJSON_AddStringToObject(o, "hub_id", h->ident.id);
+    if (h->ident.name[0]) cJSON_AddStringToObject(o, "name", h->ident.name);
+    return hp_make_reply(id, "hub_id_ack", o, reply, cap, len);
+}
+
 static void on_hello_extra(void *vctx, cJSON *ack) {
     hub_ctx_t *h = vctx;
+    if (h->ident.id[0]) {
+        if (h->ident.name[0]) cJSON_AddStringToObject(ack, "name", h->ident.name);
+        if (h->ident.hw[0]) cJSON_AddStringToObject(ack, "hw_id", h->ident.hw);
+        cJSON_AddBoolToObject(ack, "rename", 1);
+        if (h->ident.pinned) cJSON_AddBoolToObject(ack, "id_pinned", 1);
+    }
     if (!h->ota.enabled) return;
     cJSON_AddNumberToObject(ack, "fw_build", h->ota.min_build);
     cJSON_AddStringToObject(ack, "ota_key", h->ota.key_dev ? "dev" : "release");
@@ -795,6 +825,7 @@ void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->handler[HP_MSG_CONFIG_CHUNK] = on_config_chunk;
     tbl->handler[HP_MSG_COMMAND] = on_command;
     tbl->handler[HP_MSG_PAGE_PUSH] = on_page_push;
+    tbl->handler[HP_MSG_SET_HUB_ID] = on_set_hub_id;
     tbl->handler[HP_MSG_OTA_BEGIN] = on_ota_begin;
     tbl->handler[HP_MSG_OTA_CHUNK] = on_ota_chunk;
     tbl->handler[HP_MSG_OTA_END] = on_ota_end;

@@ -25,6 +25,10 @@ static const hp_field_desc_t hp_fields_hello_ack[] = {
     {"limits", HP_T_JSON, true, NULL},
     {"fw_build", HP_T_U32, true, NULL},
     {"ota_key", HP_T_STR, true, NULL},
+    {"name", HP_T_STR, true, NULL},
+    {"hw_id", HP_T_STR, true, NULL},
+    {"rename", HP_T_BOOL, true, NULL},
+    {"id_pinned", HP_T_BOOL, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_error[] = {
@@ -138,6 +142,16 @@ static const hp_field_desc_t hp_fields_ota_status[] = {
     {"reason", HP_T_STR, true, NULL},
 };
 
+static const hp_field_desc_t hp_fields_set_hub_id[] = {
+    {"id", HP_T_STR, false, NULL},
+    {"name", HP_T_STR, true, NULL},
+};
+
+static const hp_field_desc_t hp_fields_hub_id_ack[] = {
+    {"hub_id", HP_T_STR, false, NULL},
+    {"name", HP_T_STR, true, NULL},
+};
+
 static const hp_field_desc_t hp_fields_ota_offer[] = {
     {"size", HP_T_U32, false, NULL},
     {"build", HP_T_U32, false, NULL},
@@ -159,7 +173,7 @@ static const hp_field_desc_t hp_fields_ota_result[] = {
 
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
-    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 7, hp_fields_hello_ack},
+    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 11, hp_fields_hello_ack},
     {"error", HP_MSG_ERROR, HP_TRANSPORT_WS, 3, hp_fields_error},
     {"ping", HP_MSG_PING, HP_TRANSPORT_WS, 0, NULL},
     {"pong", HP_MSG_PONG, HP_TRANSPORT_WS, 0, NULL},
@@ -183,6 +197,8 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"ota_end", HP_MSG_OTA_END, HP_TRANSPORT_WS, 0, NULL},
     {"ota_abort", HP_MSG_OTA_ABORT, HP_TRANSPORT_WS, 0, NULL},
     {"ota_status", HP_MSG_OTA_STATUS, HP_TRANSPORT_WS, 5, hp_fields_ota_status},
+    {"set_hub_id", HP_MSG_SET_HUB_ID, HP_TRANSPORT_WS, 2, hp_fields_set_hub_id},
+    {"hub_id_ack", HP_MSG_HUB_ID_ACK, HP_TRANSPORT_WS, 2, hp_fields_hub_id_ack},
     {"ota_offer", HP_MSG_OTA_OFFER, HP_TRANSPORT_RF, 2, hp_fields_ota_offer},
     {"ota_frag", HP_MSG_OTA_FRAG, HP_TRANSPORT_RF, 2, hp_fields_ota_frag},
     {"ota_frag_ack", HP_MSG_OTA_FRAG_ACK, HP_TRANSPORT_RF, 1, hp_fields_ota_frag_ack},

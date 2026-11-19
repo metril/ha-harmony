@@ -151,6 +151,7 @@ add_library(hp_hub STATIC
   hub/net/jsonrpc.c
   hub/net/mdns.c
   hub/net/mdns_srv.c
+  hub/net/ident.c
   hub/engine/mapping.c
   hub/engine/sched.c
   hub/engine/irout.c

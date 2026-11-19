@@ -59,6 +59,10 @@
  *   ota_begin/chunk/end/abort -> signed hub firmware upload (docs/proto/ota-image.md): replies ota_status
  *                     {state,offset,size,build?} or `error` ota_*; after a good ota_end the daemon exits
  *                     HP_EXIT_OTA_RESTART. hub_send_state also pushes ota_status rolled_back after a hello.
+ *   set_hub_id     -> {id, name?}: validates and persists the hub id / display name (hub/net/ident.h), applies
+ *                     them at once (hello_ack, mDNS) and answers hub_id_ack {hub_id, name?}; error codes bad_id,
+ *                     bad_name, id_pinned (hub.conf pins the id), io, unsupported. hello_ack also carries name,
+ *                     hw_id, rename and id_pinned.
  *   state_update   -> also sent over RF (best effort) whenever the activity
  *                     changes, if a remote is attached.
  *   from RF        -> hub_pump_rf: frames (cap 32) are reassembled; key_event
@@ -76,6 +80,7 @@
 #include "hub/engine/sched.h"
 #include "hub/rf/framing.h"
 #include "hub/rf/link.h"
+#include "hub/net/ident.h"
 #include "hub/net/jsonrpc.h"
 #include "hub/net/ws.h"
 #include "hub/ota/hub_ota.h"
@@ -146,6 +151,9 @@ typedef struct {
     hub_info_t info[HUB_INFO_MAX]; /* remote_info per remote; dropped when the RF link is lost */
     void (*bcast_hook)(void *ctx, const char *type, const cJSON *d); /* tests: sees every broadcast, in order */
     void *bcast_ctx;
+    hp_ident_t ident;       /* id, name, hardware id; set_hub_id (docs/proto/hub-identity.md). id[0]==0: no identity (tests) */
+    void (*ident_changed)(void *ctx, const hp_ident_t *); /* after a set_hub_id changed the id: re-announce */
+    void *ident_ctx;
     hp_ota_t ota;           /* signed firmware update (hub/ota/hub_ota.h); disabled until hp_ota_init gets a dir */
 } hub_ctx_t;
 

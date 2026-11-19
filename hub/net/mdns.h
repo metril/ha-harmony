@@ -7,7 +7,7 @@
  *
  * Advertised: PTR _haharmony._tcp.local. -> <hub_id>._haharmony._tcp.local.,
  * the meta-query PTR _services._dns-sd._udp.local., SRV (-> <hub_id>.local.
- * :port), TXT (hub_id=<id>, v=<proto>) and one A record.
+ * :port), TXT (hub_id=<id>, v=<proto>[, hw=<hardware id>]) and one A record.
  *
  * NOT implemented: probing / conflict resolution, IPv6 / AAAA, multiple
  * interfaces, TC-bit multi-packet known-answer lists, SRV/TXT known-answer
@@ -42,6 +42,7 @@ typedef struct {
     uint16_t port;
     uint32_t ipv4; /* host byte order */
     unsigned proto_v;
+    char hw[32]; /* stable hardware id, advertised as TXT hw=<id> when not empty */
 } hp_mdns_svc_t;
 
 typedef struct {
