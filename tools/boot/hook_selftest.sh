@@ -36,6 +36,11 @@ run_hook() {
 	rm -f "$T/out" "$T/argv"
 	(
 		killall() { :; }
+		# each sleep the hook starts is one line in $SELFTEST_POLLMARK: cases sync on it, not on timing
+		sleep() {
+			[ -n "${SELFTEST_POLLMARK:-}" ] && echo "$1" >>"$SELFTEST_POLLMARK"
+			command sleep "$@"
+		}
 		reboot() { echo reboot >>"$T/reboot.log"; }
 		HAH_ROOT="$R" HAH_START_DELAY=0 HAH_HEALTHY_SECS=1 HAH_POLL_SECS=1
 		HAH_POLL_SLEEP="${HAH_SELFTEST_NAP:-}" HAH_HEALTHY_POLLS="${HAH_SELFTEST_POLLS:-}"
@@ -60,6 +65,14 @@ run_hook() {
 		sleep "${HAH_SELFTEST_TICK:-1}"
 	done
 	sleep "${HAH_SELFTEST_SETTLE:-2}" # let the backgrounded daemon stub write its argv
+	# A launched argv-recording stub may still be starting on a loaded host: wait for its file.
+	if grep -q 'daemon started pid [0-9]' "$R/cache/ha-harmony.log" 2>/dev/null && grep -q '/argv' "$R/data/ha-harmony/hub" 2>/dev/null; then
+		ha=0
+		while [ ! -s "$T/argv" ] && [ "$ha" -lt 500 ]; do
+			ha=$((ha + 1))
+			sleep "${HAH_SELFTEST_TICK:-1}"
+		done
+	fi
 	DEMO='unset'
 	[ -r "$T/out" ] && while read -r l; do
 		case "$l" in
@@ -69,6 +82,46 @@ run_hook() {
 }
 
 mkdir -p "$T" || exit 2
+GAP="${HAH_SELFTEST_GAP:-4}"
+TICK="${HAH_SELFTEST_TICK:-1}"
+CLOG() { echo "$R/cache/ha-harmony.log"; }
+
+# wait_log PATTERN: poll the hook log up to ~200 ticks for a line containing PATTERN
+wait_log() {
+	wl=0
+	while [ "$wl" -lt 200 ]; do
+		if [ -r "$(CLOG)" ]; then
+			while IFS= read -r l; do
+				case "$l" in
+				*"$1"*) return 0 ;;
+				esac
+			done <"$(CLOG)"
+		fi
+		wl=$((wl + 1))
+		sleep "$TICK"
+	done
+	return 1
+}
+
+# Block until the hook has started $1 more sleeps (its poll loop has gone round, so it has seen
+# every file written before this call). Bounded: ~20 s at the default tick.
+pollcount() {
+	pc=0
+	[ -r "$SELFTEST_POLLMARK" ] && while IFS= read -r l; do pc=$((pc + 1)); done <"$SELFTEST_POLLMARK"
+}
+wait_polls() {
+	pollcount
+	wp=$((pc + $1))
+	wi=0
+	while [ "$wi" -lt 1000 ]; do
+		pollcount
+		[ "$pc" -ge "$wp" ] && return 0
+		wi=$((wi + 1))
+		sleep "${HAH_SELFTEST_TICK:-1}"
+	done
+	return 1
+}
+
 echo "selftest in $T (hook $HOOK)"
 
 # 1. conf loop terminates, including a last line with no trailing newline
@@ -164,59 +217,55 @@ if [ "$DEMO" = unset ]; then pass "stock watchdog enabled: stock"; else fail "wa
 
 # 9. the daemon log is capped in place while the daemon keeps writing (O_APPEND)
 mkroot 'token=abc\nrespawn_max=0\n' # no respawn: a leftover watcher must not relaunch later stubs
-printf '#!/bin/sh\ni=0\nwhile [ $i -lt 30 ]; do echo line$i; i=$((i+1)); done\nsleep "%s"\necho AFTER\nsleep "%s"\n' "${HAH_SELFTEST_GAP:-4}" "${HAH_SELFTEST_GAP:-4}" >"$R/data/ha-harmony/hub"
+# the stub writes 30 lines, then waits for the case's go file before the last line (no timing)
+printf '#!/bin/sh\ni=0\nwhile [ $i -lt 30 ]; do echo line$i; i=$((i+1)); done\nwhile [ ! -e "%s/go9" ]; do sleep "%s"; done\necho AFTER\n' "$T" "$TICK" >"$R/data/ha-harmony/hub"
+rm -f "$T/go9"
 SELFTEST_LOGMAX=10
-export SELFTEST_LOGMAX
+SELFTEST_POLLMARK="$T/polls9"
+rm -f "$SELFTEST_POLLMARK"
+export SELFTEST_LOGMAX SELFTEST_POLLMARK
 run_hook
-sleep "${HAH_SELFTEST_GAP:-4}"
+wait_log "healthy"
+wait_polls 3 # the poll loop has capped the 30 lines
+: >"$T/go9"
+dl="$R/var/volatile/ha-harmony.log"
+w9=0
+while [ "$w9" -lt 500 ]; do # the last line lands after the cap
+	w9=$((w9 + 1))
+	grep -q AFTER "$dl" 2>/dev/null && break
+	sleep "${HAH_SELFTEST_TICK:-1}"
+done
 nl=0
 while IFS= read -r l; do
 	nl=$((nl + 1))
-done <"$R/var/volatile/ha-harmony.log" 2>/dev/null
+done <"$dl" 2>/dev/null
+wait_log "watcher done" # respawn_max=0: it ends once the stub has exited
 if [ "$nl" -lt 30 ] && [ "$nl" -ge 1 ]; then pass "log capped in place ($nl lines left of 30+)"; else fail "log cap (lines=$nl)"; fi
-unset SELFTEST_LOGMAX
+unset SELFTEST_LOGMAX SELFTEST_POLLMARK
 
 # --- bounded respawn (after the health mark), wedge cover ---------------------------------
-GAP="${HAH_SELFTEST_GAP:-4}"
-TICK="${HAH_SELFTEST_TICK:-1}"
-CLOG() { echo "$R/cache/ha-harmony.log"; }
-
-# wait_log PATTERN: poll the hook log up to ~200 ticks for a line containing PATTERN
-wait_log() {
-	wl=0
-	while [ "$wl" -lt 200 ]; do
-		if [ -r "$(CLOG)" ]; then
-			while IFS= read -r l; do
-				case "$l" in
-				*"$1"*) return 0 ;;
-				esac
-			done <"$(CLOG)"
-		fi
-		wl=$((wl + 1))
-		sleep "$TICK"
-	done
-	return 1
-}
-
 runs() {
 	n=0
 	[ -r "$T/runs" ] && while IFS= read -r l; do n=$((n + 1)); done <"$T/runs"
 	echo "$n"
 }
 
-# stub that counts launches and dies $GAP seconds after each start
+# stub that counts launches and dies once the case creates $T/die (never on a timer: a loaded host
+# would otherwise let it die inside the health window)
 mortal() {
-	printf '#!/bin/sh\necho x >> "%s/runs"\nsleep "%s"\nexit 1\n' "$T" "$GAP" >"$R/data/ha-harmony/hub"
+	printf '#!/bin/sh\necho x >> "%s/runs"\nwhile [ ! -e "%s/die" ]; do sleep "%s"; done\nexit 1\n' "$T" "$T" "$TICK" >"$R/data/ha-harmony/hub"
 	chmod 755 "$R/data/ha-harmony/hub"
-	rm -f "$T/runs" "$T/reboot.log"
+	rm -f "$T/runs" "$T/reboot.log" "$T/die"
 }
 
 # 10. death after the health mark respawns; the budget runs out; no reboot; strike untouched
 mkroot 'token=abc\nrespawn_max=1\n'
 mortal
 run_hook
+wait_log "healthy"
+: >"$T/die"
 wait_log "budget exhausted"
-sleep "$GAP"
+wait_log "watcher done"
 if [ "$(runs)" = 2 ] && [ ! -e "$T/reboot.log" ] && [ ! -e "$R/cache/ha-harmony-boot.n" ]; then
 	pass "respawn_max=1: one respawn, then inert; no reboot, strikes untouched"
 else
@@ -227,8 +276,10 @@ fi
 mkroot 'token=abc\nrespawn_max=0\n'
 mortal
 run_hook
+wait_log "healthy"
+: >"$T/die"
 wait_log "no respawn"
-sleep "$GAP"
+wait_log "watcher done"
 if [ "$(runs)" = 1 ] && [ ! -e "$T/reboot.log" ]; then pass "respawn_max=0: no respawn"; else fail "respawn_max=0 (runs=$(runs))"; fi
 
 # 12. stale heartbeat: the daemon is alive but silent, so it is killed and respawned
@@ -240,7 +291,6 @@ export SELFTEST_CLOCK
 run_hook
 wait_log "healthy"
 sleep "${HAH_SELFTEST_NAP:-1}"
-sleep "${HAH_SELFTEST_NAP:-1}"
 printf '1100.00 1.00\n' >"$T/clock"
 if wait_log "heartbeat stale" && [ ! -e "$T/reboot.log" ] && [ ! -e "$R/cache/ha-harmony-boot.n" ]; then
 	pass "stale heartbeat: killed, no reboot, strikes untouched"
@@ -248,34 +298,38 @@ else
 	fail "stale heartbeat"
 fi
 unset SELFTEST_CLOCK
-sleep "$GAP"
-sleep "$GAP"
+: >"$T/die"
+wait_log "budget exhausted"
+wait_log "watcher done" # let this watcher finish before the next case reuses the root
 
 # 13. an empty heartbeat read is no information (never 0): a healthy daemon is not killed
 mkroot 'token=abc\nrespawn_max=1\n'
-printf '#!/bin/sh\necho x >> "%s/runs"\ni=0\nwhile [ $i -lt 4 ]; do sleep "%s"; i=$((i+1)); done\n' "$T" "$GAP" >"$R/data/ha-harmony/hub"
+# the daemon lives until the case says stop (not for a fixed time: a loaded host would let it die first)
+printf '#!/bin/sh\necho x >> "%s/runs"\nwhile [ ! -e "%s/stop13" ]; do sleep "%s"; done\n' "$T" "$T" "$TICK" >"$R/data/ha-harmony/hub"
 chmod 755 "$R/data/ha-harmony/hub"
-rm -f "$T/runs" "$T/reboot.log"
+rm -f "$T/runs" "$T/reboot.log" "$T/stop13"
 printf '1000.00 1.00\n' >"$T/clock"
 SELFTEST_CLOCK="$T/clock"
-export SELFTEST_CLOCK
+SELFTEST_POLLMARK="$T/polls"
+rm -f "$SELFTEST_POLLMARK"
+export SELFTEST_CLOCK SELFTEST_POLLMARK
 run_hook
 wait_log "healthy"
-sleep "${HAH_SELFTEST_NAP:-1}"
-sleep "${HAH_SELFTEST_NAP:-1}"
+wait_polls 2
 printf '1090\n' >"$R/var/volatile/ha-harmony.hb"
 printf '1100.00 1.00\n' >"$T/clock"
-sleep "${HAH_SELFTEST_NAP:-1}"
+wait_polls 2 # the hook has read the good value
 : >"$R/var/volatile/ha-harmony.hb" # empty, as seen mid-rewrite
-sleep "${HAH_SELFTEST_NAP:-1}"
-sleep "${HAH_SELFTEST_NAP:-1}"
+wait_polls 3
 if [ "$(runs)" = 1 ] && ! grep -q "heartbeat stale" "$(CLOG)" 2>/dev/null; then
 	pass "empty heartbeat read does not trigger a kill"
 else
 	fail "empty heartbeat read (runs=$(runs))"
 fi
-unset SELFTEST_CLOCK
-wait_log "budget exhausted" # let this watcher finish before the next case reuses the root
+unset SELFTEST_CLOCK SELFTEST_POLLMARK
+: >"$T/stop13"
+wait_log "budget exhausted"
+wait_log "watcher done" # let this watcher finish before the next case reuses the root
 
 # 14. respawn that records no pid: stop supervising, no further launches, no reboot
 mkroot 'token=abc\nrespawn_max=3\n'
@@ -284,8 +338,9 @@ run_hook
 wait_log "healthy"
 rm -rf "$R/cache/ha-harmony.pid" 2>/dev/null
 mkdir "$R/cache/ha-harmony.pid" # the pid file can no longer be written
+: >"$T/die"
 if wait_log "no pid recorded" && [ ! -e "$T/reboot.log" ]; then
-	sleep "$GAP"
+	wait_log "watcher done"
 	if [ "$(runs)" -le 2 ]; then pass "no pid after respawn: supervision stops"; else fail "no-pid respawn kept launching (runs=$(runs))"; fi
 else
 	fail "no pid after respawn: not detected"

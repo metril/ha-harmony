@@ -762,8 +762,10 @@ def test_onhub_selftest_script_passes_under_host_shells(tmp_path: Path) -> None:
                           stderr=subprocess.STDOUT, text=True, env=env, start_new_session=True)  # fmt: skip
     _PGIDS.append(pr.pid)
     out = pr.communicate(timeout=60)[0]
+    failed = [ln for ln in out.splitlines() if ln.startswith("FAIL")]
+    assert not failed, f"failing selftest cases: {failed}\n{out}"
     assert pr.returncode == 0 and "0 failure(s)" in out, out
-    assert out.count("PASS") >= 12 and "FAIL" not in out
+    assert out.count("PASS") >= 12
     assert not (Path("/etc/ha-harmony-enable")).exists()
 
 
