@@ -213,6 +213,9 @@ async def rig(hass, fake_hub, fake_addon, clock):
         entry.add_to_hass(hass)
         assert await hass.config_entries.async_setup(entry.entry_id)
         await settle(hass, lambda: any(t == "set_config" for t, _ in hub.got))
+        # `compiled` is the config the hub runs: empty until the hub reports its hash. Tests size their
+        # expectations from it (len(c.compiled.pages)), so wait for it rather than race the first sync.
+        await settle(hass, lambda: entry.runtime_data._accepted)
         if pages:
             await settle(hass, clock.active)  # the start-up push waits for a remote_info
             clock.elapse()
@@ -270,14 +273,18 @@ async def test_v2_pages_when_remote_info_arrives_within_the_wait_and_only_one_pu
 
 async def test_late_info_with_another_format_repushes(hass, rig, clock):
     hub, c = await rig()
+    before = len(hub.pages())  # the start-up push is already in
     await hub.push("remote_attached", {})
     await settle(hass, clock.active)
     clock.elapse()
-    await settle(hass, lambda: len(hub.pages()) >= len(c.compiled.pages))
+    await settle(hass, lambda: len(hub.pages()) >= before + len(c.compiled.pages))
+    # the v1 push is over once its task is: otherwise its tail pages land after the next push began
+    await settle(hass, lambda: all(lk.task is None or lk.task.done() for lk in c.links.values()))
     sent = len(hub.pages())
     await hub.push("remote_info", V2_INFO)
     await settle(hass, lambda: len(hub.pages()) >= sent + len(c.compiled.pages_v2))
     assert hub.pages()[-1].version == 2
+    await settle(hass, lambda: all(lk.task is None or lk.task.done() for lk in c.links.values()))
     await hub.push("remote_info", V1_INFO)  # downgrade: v1 again
     await settle(hass, lambda: hub.pages()[-1].version == 1)
 
