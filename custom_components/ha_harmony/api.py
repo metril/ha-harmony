@@ -21,6 +21,7 @@ from .harmony_core.harmony_proto import (
     encode_ws,
 )
 from .harmony_core.hub_limits import HubLimits
+from .sockopts import keepalive_ws
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ class HarmonyHubClient:
         self.config_hash: str | None = None  # hub's CRC-32 hex of its loaded config text
         self.bt: dict[str, Any] | None = None  # hello_ack.bt; None = a hub without Bluetooth
         self.bt_state: dict[str, Any] | None = None  # the last bt_state push of this connection (a coordinator made later still sees it)
+        self.tcp_keepalive = False  # hello_ack.tcp_keepalive: the hub detects a dead peer by TCP keepalive; no app PING needed
         self.limits: HubLimits | None = None  # hello_ack.limits (LEGACY for a hub that sends none); None before the first hello
 
     @property
@@ -193,6 +195,7 @@ class HarmonyHubClient:
             )
         except (aiohttp.ClientError, OSError, TimeoutError) as exc:
             raise HarmonyConnectionError(f"cannot connect to {self._url}: {exc}") from exc
+        keepalive_ws(ws)
         try:
             hello = {"token": self._token, "client": "home-assistant"}
             await ws.send_json(encode_ws(MsgType.HELLO, hello, 1))
@@ -221,6 +224,9 @@ class HarmonyHubClient:
             self.hw_id = d.get("hw_id") or None
             self.can_rename = d.get("rename") is True
             self.id_pinned = d.get("id_pinned") is True
+            # read from the raw frame: the generated hello_ack schema may not list the field yet (unknown fields are dropped)
+            raw_d = env.get("d") if isinstance(env, dict) else None
+            self.tcp_keepalive = isinstance(raw_d, dict) and raw_d.get("tcp_keepalive") is True
             self.fw_version = d.get("fw_version")
             self.fw_build = d.get("fw_build")
             self.ota_key = d.get("ota_key")
@@ -308,7 +314,8 @@ class HarmonyHubClient:
             await ws.close()
 
     async def _serve(self, ws: aiohttp.ClientWebSocketResponse) -> None:
-        beat = asyncio.create_task(self._heartbeat(ws), name="ha_harmony heartbeat")
+        # a hub with TCP keepalive finds a dead peer itself, so no timer runs; an old firmware still gets the PING
+        beat = None if self.tcp_keepalive else asyncio.create_task(self._heartbeat(ws), name="ha_harmony heartbeat")
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
@@ -319,8 +326,9 @@ class HarmonyHubClient:
                     self._check_version(env)
                     self._dispatch(env)
         finally:
-            beat.cancel()
-            await asyncio.gather(beat, return_exceptions=True)
+            if beat is not None:
+                beat.cancel()
+                await asyncio.gather(beat, return_exceptions=True)
 
     def _dispatch(self, env: Any) -> None:
         if isinstance(env, dict) and env.get("t") == "error" and isinstance(env.get("d"), dict):

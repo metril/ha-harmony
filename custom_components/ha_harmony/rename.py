@@ -25,7 +25,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
-from .addon_link import AddonClient, AddonError, BundleRejected, NothingApplied
+from .addon_link import AddonClient, AddonError, AddonOutdated
 from .api import HarmonyCommandError, HarmonyConnectionError, HarmonyError, HarmonyHubClient
 from .const import (
     CLIENT_KWARGS,
@@ -43,6 +43,7 @@ from .const import (
     STORE_VERSION,
 )
 from .coordinator import (
+    ISSUE_ADDON_OUTDATED,
     ISSUE_INVALID,
     ISSUE_OTA_DEV_KEY,
     ISSUE_OTA_ROLLBACK,
@@ -204,21 +205,23 @@ def _addon_client(hass: HomeAssistant, data: dict[str, Any]) -> AddonClient | No
 async def _addon_move(
     hass: HomeAssistant, data: dict[str, Any], src: str, dst: str, hw_id: str | None, following: bool = False
 ) -> Undo:
-    """Ask the add-on to move the hub's store to `dst` now (it would also do it on the next poll, from
-    the same headers). An unreachable add-on is not a failure (the poll carries the old id until it has
+    """Ask the add-on to move the hub's store to `dst` now (it would also do it on the next hello, from
+    the same fields). An unreachable add-on is not a failure (the hello carries the old id until it has
     seen it); an add-on that answers `exists` refuses to overwrite a store already under `dst`, and one that
-    does not answer the adopt header at all is too old to move the store (the rename is refused)."""
+    has no channel or never answers `adopt` is too old to move the store (the rename is refused)."""
     client = _addon_client(hass, data)
     if client is None:
         return _noop
     client.identity = {"prev": src, **({"hw": hw_id} if hw_id else {})}
     try:
-        await client.fetch(dst)
-    except NothingApplied, BundleRejected:
-        pass  # answered: the poll was seen
+        await client.hello_once(dst)
+    except AddonOutdated:
+        if following:
+            return _noop
+        raise RenameError("addon_too_old") from None
     except AddonError:
         return _noop
-    if client.last_adopt is None:  # answered without the adopt header: an add-on that ignores the rename headers
+    if client.last_adopt is None:  # answered without `adopt`: an add-on that ignores the rename fields
         if following:
             return _noop
         raise RenameError("addon_too_old")
@@ -233,7 +236,7 @@ async def _addon_move(
             return
         back.identity = {"prev": dst, **({"hw": hw_id} if hw_id else {})}
         try:
-            await back.fetch(src)
+            await back.hello_once(src)
         except AddonError:
             _LOGGER.warning("Could not move the add-on config of hub %s back to %s", dst, src)
 
@@ -254,6 +257,7 @@ def clear_hub_issues(hass: HomeAssistant, hub: str) -> None:
         ir.async_delete_issue(hass, DOMAIN, f"{key}_{hub}")
     ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_OTA_DEV_KEY}_{hub}")
     ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_ADDON_STORE}_{hub}")
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_ADDON_OUTDATED}_{hub}")
     prefix = f"{ISSUE_OTA_ROLLBACK}_{hub}_"
     for domain, issue_id in list(ir.async_get(hass).issues):
         if domain == DOMAIN and issue_id.startswith(prefix):

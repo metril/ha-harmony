@@ -19,7 +19,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
-from .addon_link import AddonAuthError, AddonClient, AddonError, BundleRejected, NothingApplied
+from .addon_link import AddonAuthError, AddonClient, AddonError
 from .api import HarmonyAuthError, HarmonyConnectionError, HarmonyHubClient, HarmonyVersionError
 from .const import (
     ADDON_SLUG,
@@ -342,12 +342,10 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
             a[CONF_ADDON_PORT],
             a[CONF_ADDON_TOKEN],
         )
-        try:  # "nothing applied yet" still proves host and token
-            await client.fetch(entries[0].unique_id or "")
+        try:  # opening the channel proves host and token (no hello: nothing is stored or replaced)
+            await client.probe(entries[0].unique_id or "")
         except AddonAuthError:
             return self.async_abort(reason="invalid_auth")
-        except NothingApplied, BundleRejected:
-            pass
         except AddonError:
             return self.async_abort(reason="cannot_connect")
         self._link_entries(entries)

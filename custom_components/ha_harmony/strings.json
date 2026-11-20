@@ -87,6 +87,10 @@
       "title": "The hub rejected the Harmony config",
       "description": "Hub {hub} refused the pushed config and keeps running its previous one: {error}"
     },
+    "addon_outdated": {
+      "title": "The Harmony Editor add-on is too old",
+      "description": "Hub {hub}: the add-on has no channel for this integration ({error}). Update the Harmony Editor add-on; the integration keeps trying and the previous config stays active."
+    },
     "bundle_schema": {
       "title": "Harmony add-on and integration versions do not match",
       "description": "Hub {hub}: {error}. Update the Harmony Editor add-on and the Harmony integration to matching versions; the previous config stays active."
@@ -259,7 +263,9 @@
           "unreachable": "Add-on unreachable",
           "auth_failed": "Token refused",
           "nothing_applied": "No config applied for this hub in the add-on",
-          "rejected": "Config rejected"
+          "rejected": "Config rejected",
+          "addon_outdated": "Add-on too old: update it",
+          "integration_outdated": "Integration too old: update it"
         }
       },
       "device_input": {
