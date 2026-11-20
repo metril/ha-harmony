@@ -370,10 +370,10 @@ class HarmonyHubClient:
         try:
             await ws.send_json(envelope)
             return await asyncio.wait_for(fut, timeout or self._req_timeout)
+        except TimeoutError as exc:  # before OSError, which it subclasses
+            raise HarmonyConnectionError(f"request timed out after {timeout or self._req_timeout:g} s") from exc
         except (aiohttp.ClientError, OSError) as exc:
-            raise HarmonyConnectionError(str(exc)) from exc
-        except TimeoutError as exc:
-            raise HarmonyConnectionError("request timed out") from exc
+            raise HarmonyConnectionError(str(exc) or type(exc).__name__) from exc
         finally:
             self._pending.pop(msg_id, None)
 
