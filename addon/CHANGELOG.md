@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The Home Assistant tab can now group and filter by label: the add-on also reads Home Assistant's label list (read-only, like the other registries).
+- Fixed the filter buttons switching to icons only when a group was expanded, and the list overlapping the filter row after changing Group by.
+
 ## 0.3.14 (2026-11-19)
 
 - The Home Assistant tab is rebuilt for large installs: it is called "Home Assistant", everything starts collapsed with counts, and you can search by name, entity id, area, device or integration, filter by type, area and integration, and group by area (with floors), type, device or integration. Favourites, "Used in this config" and "Recently used" are pinned at the top. Hidden and disabled entities are left out; diagnostic ones are behind an option. The same browser is used when picking an entity for an action and when adding a device.

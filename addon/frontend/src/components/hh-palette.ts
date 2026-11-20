@@ -34,7 +34,7 @@ export class HhPalette extends LitElement {
       details.typed-d { margin: 10px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding-top: 4px; }
       .typed-d summary { min-height: 32px; padding: 0 2px; font-weight: 600; font-size: 12px; color: var(--tx2); border-radius: var(--r1); }
       input[type="search"], .typed input { height: 34px; width: 100%; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; }
-      .body { overflow: auto; padding: 8px 12px 16px; flex: 1; min-height: 0; }
+      .body { overflow: auto; scrollbar-gutter: stable; padding: 8px 12px 16px; flex: 1; min-height: 0; }
       details { border: 1px solid var(--line); border-radius: var(--r2); margin: 8px 0; background: var(--sf); }
       summary { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 10px; cursor: pointer; font-weight: 650; list-style: none; border-radius: var(--r2); }
       summary::-webkit-details-marker { display: none; }

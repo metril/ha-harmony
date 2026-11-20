@@ -62,12 +62,12 @@ export class HhHaBrowser extends LitElement {
       .tools .btn { padding: 0 6px; }
       .tools .btn.icon { width: 30px; padding: 0; }
       .fchip.menu { font-size: 16px; line-height: 1; padding: 0 9px; }
-.fchips { display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; }
+      .fchips { display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; }
       .fchips .fchip { flex: none; }
       .fchip .car { flex: none; }
       .fchip .sic { width: 14px; height: 14px; flex: none; }
-      .fchips.ic .l, .fchips.ic .car { display: none; }
-      .fchips.ic .fchip { padding: 0 8px; }
+      .fchips.icons .l, .fchips.icons .car { display: none; }
+      .fchips.icons .fchip { padding: 0 8px; }
       .fchip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 7px; border-radius: 13px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
       .fchip:hover { background: var(--sf2); }
       .fchip small { color: var(--tx3); font-weight: 500; font-size: 11px; }
@@ -173,8 +173,8 @@ export class HhHaBrowser extends LitElement {
   private fitChips = () => {
     const row = this.shadowRoot?.querySelector<HTMLElement>('.fchips');
     if (!row) return;
-    row.classList.remove('ic');
-    row.classList.toggle('ic', row.scrollWidth > row.clientWidth + 0.5);
+    row.classList.remove('icons');
+    row.classList.toggle('icons', row.scrollWidth > row.clientWidth + 0.5);
   };
   protected override updated(): void {
     this.fitChips();

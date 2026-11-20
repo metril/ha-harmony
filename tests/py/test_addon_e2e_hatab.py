@@ -8,10 +8,12 @@ Skipped like test_addon_e2e.py. Set HH_SHOTS=<dir> to write screenshots of every
 
 import os
 import time
+from itertools import pairwise
 from pathlib import Path
 
+import playwright.async_api as pw
 import pytest
-from test_addon_e2e import DIST, PREFIX, TOKEN, WIDE_CSS, H, api, browser  # noqa: F401
+from test_addon_e2e import DIST, PREFIX, TOKEN, WIDE_CSS, H, _stress, api, browser  # noqa: F401
 from test_addon_e2e_polish import LARGE, STORE, open_large
 
 from harmony_addon.app import create_app
@@ -423,3 +425,77 @@ async def test_the_top_of_the_tab_survives_a_wide_fallback_font(browser, big, si
     await page.get_by_role("tab", name="Home Assistant", exact=True).click()
     await page.locator(P).get_by_role("button", name="Ground").click()
     await page.locator(f"{P} .gh.d1").first.wait_for()
+
+
+@pytest.fixture
+async def classic(browser):
+    """a browser with real (classic, layout-taking) scrollbars, like Chrome on macOS with a mouse; headless hides them by default"""
+    async with pw.async_playwright() as p:
+        b = await p.chromium.launch(executable_path=os.environ.get("HH_CHROMIUM"), ignore_default_args=["--hide-scrollbars"])
+        _stress(b)
+        yield b
+        await b.close()
+
+
+async def test_the_filter_mode_does_not_depend_on_the_list_height(classic, big):
+    """a long open list gets a scrollbar; the filter buttons' icon+word / icons mode must not change with it"""
+    for width in (1440, 1280, 1024):
+        page = await open_tab(classic, big, width)
+        body = "e => { const b = e.shadowRoot.querySelector('.body'); return b.offsetWidth - b.clientWidth; }"
+        short = await page.locator(f"{P} .fchips").evaluate("e => e.classList.contains('icons')")
+        gutter = await page.locator(P).evaluate(body)
+        await page.locator(f"{P} select[aria-label='Group by']").select_option("type")
+        await page.locator(f"{P} .gh").first.click()
+        await page.locator(ROWS).first.wait_for()
+        scrolls = await page.locator(P).evaluate("e => { const b = e.shadowRoot.querySelector('.body'); return b.scrollHeight > b.clientHeight; }")
+        assert scrolls, "the list should be long enough to scroll"
+        assert await page.locator(P).evaluate(body) > 0, "this browser has overlay scrollbars, so the test proves nothing"
+        await page.wait_for_timeout(100)
+        now = await page.locator(f"{P} .fchips").evaluate("e => e.classList.contains('icons')")
+        assert now == short, f"the filter mode changed when the list grew (width {width})"
+        assert await page.locator(P).evaluate(body) == gutter, "the scrollbar changes the width the controls get"
+        await shot(page, f"20-long-list-{width}")
+        await page.close()
+
+
+@pytest.mark.parametrize("size", [(1440, 900), (1280, 800), (1024, 700)])
+@pytest.mark.parametrize("by", ["area", "type", "device", "integration", "label"])
+async def test_the_header_keeps_its_layout_in_every_group_by_mode(classic, big, by, size):
+    page = await open_tab(classic, big, *size)
+    await page.locator(f"{P} select[aria-label='Group by']").select_option(by)
+    await page.locator(f"{P} .gh").first.wait_for()
+    await page.wait_for_timeout(150)
+    await shot(page, f"21-group-{by}-{size[0]}")
+    boxes = await page.locator(f"{P} hh-ha-browser").evaluate(
+        """e => { const r = e.shadowRoot;
+          const o = (s) => { const b = r.querySelector(s).getBoundingClientRect(); return { top: b.top, bottom: b.bottom }; };
+          return { search: o('.search'), chips: o('.fchips'), tools: o('.tools'), sum: o('.sum'), list: o('.list') }; }"""
+    )
+    order = ["search", "chips", "tools", "sum", "list"]
+    for a, b in pairwise(order):
+        assert boxes[a]["bottom"] <= boxes[b]["top"] + 0.5, f"{by}: {a} overlaps {b}: {boxes}"
+    first = await page.locator(f"{P} .gh").first.bounding_box()
+    assert first["y"] >= boxes["chips"]["bottom"], f"{by}: the list starts above the filter row"
+    assert boxes["tools"]["bottom"] - boxes["tools"]["top"] <= 40, boxes
+    # the header's controls are the same size whichever way it groups and stay inside their row
+    fit = await page.locator(f"{P} hh-ha-browser").evaluate(
+        """e => { const t = e.shadowRoot.querySelector('.tools'), tb = t.getBoundingClientRect(), sel = t.querySelector('select').getBoundingClientRect();
+          return { select: Math.round(sel.width), inside: [...t.children].every(c => c.getBoundingClientRect().right <= tb.right + 0.5 && c.getBoundingClientRect().left >= tb.left - 0.5) }; }"""
+    )
+    assert fit["inside"], f"{by}: the group-by row spills out of its box {fit}"
+    # the four filter buttons sit inside their row (a row narrower than its buttons let them spill over the group-by row)
+    chips = await page.locator(f"{P} hh-ha-browser").evaluate(
+        """e => { const r = e.shadowRoot, row = r.querySelector('.fchips').getBoundingClientRect(), host = e.getBoundingClientRect();
+          return [...r.querySelectorAll('.fchips .fchip')].map(c => { const b = c.getBoundingClientRect(); return b.width > 20 && b.right <= row.right + 0.5 && b.bottom <= row.bottom + 0.5 && b.top >= row.top - 0.5; }); }"""
+    )
+    assert chips == [True] * 4, f"{by}: a filter button is cut or pushed out: {chips}"
+
+
+async def test_the_group_by_box_is_one_width_in_every_mode(classic, big):
+    page = await open_tab(classic, big, 1280, 800)
+    seen = set()
+    for by in ("area", "type", "device", "integration", "label"):
+        await page.locator(f"{P} select[aria-label='Group by']").select_option(by)
+        await page.wait_for_timeout(100)
+        seen.add(await page.locator(f"{P} select[aria-label='Group by']").evaluate("e => Math.round(e.getBoundingClientRect().width)"))
+    assert len(seen) == 1, f"the group-by box resizes with its choice: {seen}"

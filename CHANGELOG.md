@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Hub: ARP keepalive for peers on the hub's own segment. After a reboot a peer such as Home Assistant could fail to ARP for the hub (broadcast ARP missed on the hub's Wi-Fi) and its connection failed at once. The hub now remembers the IPv4 address of each peer that authenticated (newest 64, private addresses only, `peers` file next to `state.json`, atomic, written only when a new address appears) and, at startup and every 30 s, sends one UDP byte to port 9 of each remembered peer that has no live authenticated connection; the kernel ARPs for the peer, which learns the hub's MAC. Stripped hub grows by about 3 KiB. See `docs/runbooks/phase4-persistence.md`.
+- Add-on: the read-only registry client may now also send `config/label_registry/list` (optional), so the Home Assistant tab can group and filter by label. Nothing can be written.
+- Editor: the filter buttons no longer switch between icon + word and icons when a group is opened (the list scrollbar no longer changes the width they are measured against), and changing Group by no longer moves the box into the filter row.
 
 ## 0.3.14 (2026-11-19)
 
