@@ -318,7 +318,7 @@ ACTIVITY_CONFIG = {
 
 @pytest.fixture
 def fast_client(monkeypatch):
-    """Short reconnect/heartbeat timings so the HA tests stay quick."""
+    """Short reconnect timings so the HA tests stay quick."""
     from custom_components.ha_harmony import const
     from custom_components.ha_harmony.const import CLIENT_KWARGS
 
@@ -326,7 +326,6 @@ def fast_client(monkeypatch):
 
     monkeypatch.setitem(CLIENT_KWARGS, "backoff_min", 0.05)
     monkeypatch.setitem(CLIENT_KWARGS, "backoff_max", 0.2)
-    monkeypatch.setitem(CLIENT_KWARGS, "heartbeat_interval", 5.0)
     monkeypatch.setitem(CLIENT_KWARGS, "request_timeout", 3.0)
 
 

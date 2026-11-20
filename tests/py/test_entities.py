@@ -241,7 +241,7 @@ async def test_runtime_version_mismatch_reloads_into_setup_error(hass, fake_hub,
                     "v": 1,
                     "id": env["id"],
                     "t": "hello_ack",
-                    "d": {"hub_id": HUB_ID, "activities": []},
+                    "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True},
                 }
             )
             await ws.send_json({"v": 2, "id": 0, "t": "state_update", "d": {}})

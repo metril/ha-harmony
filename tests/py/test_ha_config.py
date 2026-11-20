@@ -679,7 +679,7 @@ async def test_hub_rejection_raises_repair_issue(hass, fake_hub, write_yaml, cap
         reply = {"v": 1, "id": env["id"]}
         if t == "hello":
             await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": ["A"]}}
+                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": ["A"], "tcp_keepalive": True}}
             )
             await ws.send_json(
                 {"v": 1, "id": 0, "t": "state_update", "d": {"activity": 7, "power": True}}

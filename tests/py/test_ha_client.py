@@ -19,7 +19,7 @@ pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
 
 def _ack(env):
-    return {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": ["A"]}}
+    return {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": ["A"], "tcp_keepalive": True}}
 
 
 async def _client(hub, **kw):
@@ -29,41 +29,17 @@ async def _client(hub, **kw):
     return c, session
 
 
-async def test_missing_pong_is_a_dead_connection(fake_hub):
+async def test_hub_without_tcp_keepalive_is_refused_with_a_version_error(fake_hub):
     async def handler(ws, env):
         if env["t"] == "hello":
-            await ws.send_json(_ack(env))  # never answers ping
+            ack = _ack(env)
+            await ws.send_json({**ack, "d": {"hub_id": "h", "activities": []}})
 
     hub = await fake_hub(handler)
-    c, session = await _client(hub, heartbeat_interval=0.1, pong_timeout=0.1)
-    states = []
-    c.async_subscribe_state(lambda up, err: states.append(up))
-    await c.async_connect()
+    c, session = await _client(hub)
     try:
-        async with asyncio.timeout(5):
-            while hub.connections < 2:
-                await asyncio.sleep(0.05)
-            while True not in states:  # the hub counts the connection before the client reports it up
-                await asyncio.sleep(0.02)
-        assert False in states and True in states  # dropped, then reconnected with a new hello
-    finally:
-        await c.async_close()
-        await session.close()
-
-
-async def test_pong_keeps_connection_alive(fake_hub):
-    async def handler(ws, env):
-        reply = (
-            _ack(env) if env["t"] == "hello" else {"v": 1, "id": env["id"], "t": "pong", "d": {}}
-        )
-        await ws.send_json(reply)
-
-    hub = await fake_hub(handler)
-    c, session = await _client(hub, heartbeat_interval=0.05, pong_timeout=2.0)
-    await c.async_connect()
-    try:
-        await asyncio.sleep(0.4)
-        assert hub.connections == 1 and c.connected
+        with pytest.raises(HarmonyVersionError, match="firmware"):
+            await c.async_connect()
     finally:
         await c.async_close()
         await session.close()
@@ -260,23 +236,21 @@ async def test_hub_with_tcp_keepalive_gets_no_ping_timer_and_the_socket_has_keep
 
     async def handler(ws, env):
         if env["t"] == "hello":
-            ack = _ack(env)
-            await ws.send_json({**ack, "d": {**ack["d"], "tcp_keepalive": True}})
+            await ws.send_json(_ack(env))
         elif env["t"] == "ping":
             pinged.set()
 
     hub = await fake_hub(handler)
-    c, session = await _client(hub, heartbeat_interval=0.05, pong_timeout=0.05)
+    c, session = await _client(hub)
     await c.async_connect()
     try:
-        assert c.tcp_keepalive is True
         sock = c._ws._response.connection.transport.get_extra_info("socket")
         assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
         if hasattr(socket, "TCP_KEEPIDLE"):
             assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 60
             assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 10
             assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 3
-        with pytest.raises(TimeoutError):  # six old-firmware heartbeat periods pass without a single ping
+        with pytest.raises(TimeoutError):  # no ping is ever sent
             await asyncio.wait_for(pinged.wait(), 0.3)
         assert hub.connections == 1
     finally:

@@ -70,8 +70,6 @@ class HarmonyHubClient:
         *,
         backoff_min: float = 1.0,
         backoff_max: float = 30.0,
-        heartbeat_interval: float = 30.0,
-        pong_timeout: float = 10.0,
         request_timeout: float = 10.0,
         stable_after: float = 30.0,
         clock: Callable[[], float] = time.monotonic,
@@ -82,8 +80,6 @@ class HarmonyHubClient:
         self._token = token
         self._session = session
         self._backoff = (backoff_min, backoff_max)
-        self._hb_interval = heartbeat_interval
-        self._pong_timeout = pong_timeout
         self._req_timeout = request_timeout
         self._stable_after = stable_after  # a link must stay up this long to reset the backoff
         self._clock, self._rand, self._sleep = clock, rand, sleep
@@ -106,8 +102,7 @@ class HarmonyHubClient:
         self.config_hash: str | None = None  # hub's CRC-32 hex of its loaded config text
         self.bt: dict[str, Any] | None = None  # hello_ack.bt; None = a hub without Bluetooth
         self.bt_state: dict[str, Any] | None = None  # the last bt_state push of this connection (a coordinator made later still sees it)
-        self.tcp_keepalive = False  # hello_ack.tcp_keepalive: the hub detects a dead peer by TCP keepalive; no app PING needed
-        self.limits: HubLimits | None = None  # hello_ack.limits (LEGACY for a hub that sends none); None before the first hello
+        self.limits: HubLimits | None = None  # hello_ack.limits None before the first hello
 
     @property
     def connected(self) -> bool:
@@ -224,9 +219,8 @@ class HarmonyHubClient:
             self.hw_id = d.get("hw_id") or None
             self.can_rename = d.get("rename") is True
             self.id_pinned = d.get("id_pinned") is True
-            # read from the raw frame: the generated hello_ack schema may not list the field yet (unknown fields are dropped)
-            raw_d = env.get("d") if isinstance(env, dict) else None
-            self.tcp_keepalive = isinstance(raw_d, dict) and raw_d.get("tcp_keepalive") is True
+            if d.get("tcp_keepalive") is not True:  # no app ping runs: liveness is the kernel's TCP keepalive on both ends
+                raise HarmonyVersionError("the hub firmware is too old (no TCP keepalive); update the hub firmware")
             self.fw_version = d.get("fw_version")
             self.fw_build = d.get("fw_build")
             self.ota_key = d.get("ota_key")
@@ -314,21 +308,15 @@ class HarmonyHubClient:
             await ws.close()
 
     async def _serve(self, ws: aiohttp.ClientWebSocketResponse) -> None:
-        # a hub with TCP keepalive finds a dead peer itself, so no timer runs; an old firmware still gets the PING
-        beat = None if self.tcp_keepalive else asyncio.create_task(self._heartbeat(ws), name="ha_harmony heartbeat")
-        try:
-            async for msg in ws:
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    try:
-                        env = msg.json()
-                    except ValueError:
-                        continue
-                    self._check_version(env)
-                    self._dispatch(env)
-        finally:
-            if beat is not None:
-                beat.cancel()
-                await asyncio.gather(beat, return_exceptions=True)
+        # no timer runs: both ends use TCP keepalive to find a dead peer
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                try:
+                    env = msg.json()
+                except ValueError:
+                    continue
+                self._check_version(env)
+                self._dispatch(env)
 
     def _dispatch(self, env: Any) -> None:
         if isinstance(env, dict) and env.get("t") == "error" and isinstance(env.get("d"), dict):
@@ -364,16 +352,6 @@ class HarmonyHubClient:
                 cb(mtype, data)
             except Exception:
                 _LOGGER.exception("push callback failed")
-
-    async def _heartbeat(self, ws: aiohttp.ClientWebSocketResponse) -> None:
-        while True:
-            await asyncio.sleep(self._hb_interval)
-            try:
-                await asyncio.wait_for(self._request(MsgType.PING, {}), self._pong_timeout)
-            except TimeoutError, HarmonyError:
-                _LOGGER.debug("no pong from hub; dropping connection")
-                await ws.close()
-                return
 
     async def _request(
         self, msg_type: MsgType, data: dict[str, Any], timeout: float | None = None

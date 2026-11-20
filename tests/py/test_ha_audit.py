@@ -244,7 +244,7 @@ async def test_flapping_hub_backs_off_exponentially_with_jitter(fake_hub):
     async def handler(ws, env):
         if env["t"] == "hello":
             await ws.send_json(
-                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": []}}
+                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": [], "tcp_keepalive": True}}
             )
             await ws.close()  # accepted, then dropped at once
 
@@ -295,7 +295,7 @@ async def test_stable_connection_resets_the_backoff(fake_hub):
         nonlocal conns, now
         if env["t"] == "hello":
             await ws.send_json(
-                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": []}}
+                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": [], "tcp_keepalive": True}}
             )
             conns += 1
             if conns == 3:

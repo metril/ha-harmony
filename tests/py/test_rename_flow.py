@@ -430,7 +430,7 @@ async def test_discovery_with_another_hardware_id_is_a_new_hub(hass):
 async def old_hub(fake_hub):
     async def handler(ws, env):
         if env["t"] == "hello":
-            await ws.send_json({"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": HUB_ID}})
+            await ws.send_json({"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": HUB_ID, "tcp_keepalive": True}})
         elif env["t"] == "set_hub_id":
             await ws.send_json(
                 {

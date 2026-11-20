@@ -70,13 +70,11 @@ CMD_SET_DEVICE_STATE = "set_device_state"
 # Remotes assumed paired until the hub reports its pairing table.
 DEFAULT_REMOTE_IDS: tuple[int, ...] = (1,)
 
-# Reconnect/heartbeat tuning (seconds). Hub drops connections silent for 90 s.
+# Reconnect tuning (seconds).
 # Mutable so tests can shorten it.
 CLIENT_KWARGS: dict[str, Any] = {
     "backoff_min": 1.0,
     "backoff_max": 30.0,
-    "heartbeat_interval": 30.0,
-    "pong_timeout": 10.0,
     "request_timeout": 10.0,
 }
 

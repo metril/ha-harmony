@@ -75,7 +75,7 @@ class BtHub:
         t, i, d = env["t"], env["id"], env.get("d", {})
         self.ws = ws
         if t == "hello":
-            ack = {"hub_id": HUB_ID, "activities": [], **({"bt": self.bt} if self.bt else {})}
+            ack = {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, **({"bt": self.bt} if self.bt else {})}
             await ws.send_json({"v": 1, "id": i, "t": "hello_ack", "d": ack})
             if self.bt:
                 await self.push("bt_state", self.state)

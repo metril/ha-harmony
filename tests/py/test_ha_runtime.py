@@ -104,7 +104,7 @@ class ScriptHub:
         reply = {"v": 1, "id": env["id"]}
         t, d = env["t"], env["d"]
         if t == "hello":
-            ack = {"hub_id": HUB_ID, "activities": self.activities}
+            ack = {"hub_id": HUB_ID, "activities": self.activities, "tcp_keepalive": True}
             if self.config_hash:
                 ack["config_hash"] = self.config_hash
             await ws.send_json({**reply, "t": "hello_ack", "d": ack})

@@ -139,7 +139,7 @@ def hub_handler(sets):
         reply = {"v": 1, "id": env["id"]}
         if env["t"] == "hello":
             await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": []}}
+                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True}}
             )
         elif env["t"] == "set_config":
             sets.append(env["d"]["config"])
@@ -636,7 +636,7 @@ async def test_hub_rejection_is_acked_as_error(hass, fake_hub, fake_addon):
         reply = {"v": 1, "id": env["id"]}
         if env["t"] == "hello":
             await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": []}}
+                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True}}
             )
         elif env["t"] == "set_config":
             await ws.send_json(

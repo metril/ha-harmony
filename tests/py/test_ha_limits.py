@@ -76,7 +76,7 @@ def _fake_hub_handler(limits, log, bt=None):
         t = env["t"]
         reply = {"v": 1, "id": env["id"]}
         if t == "hello":
-            d = {"hub_id": HUB_ID, "activities": []}
+            d = {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True}
             if limits is not None:
                 d["limits"] = limits
             if bt is not None:
