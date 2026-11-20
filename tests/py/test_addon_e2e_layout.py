@@ -85,7 +85,7 @@ async def test_palette_tabs_inspector_and_tab_strip_under_a_wide_font(browser, l
 async def test_bluetooth_panel_wizards_and_key_map_under_a_wide_font(browser, bt, site, size):
     bt.add_host(configured=False, result=False)
     bt.add_remote(configured=False)
-    bt.candidates({"addr": REMOTE, "name": "Homatics Remote", "rssi": -48}, {"addr": "11:22:33:44:55:02", "rssi": -80})
+    bt.candidates({"addr": "11:22:33:44:55:09", "name": "Homatics Remote", "rssi": -48}, {"addr": "11:22:33:44:55:02", "rssi": -80})
     page, _ = await open_bt(browser, site)
     await page.get_by_text("Living room box").first.wait_for()
     await wide(page, size, "30-bt-panel")
