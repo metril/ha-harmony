@@ -40,22 +40,25 @@ async def test_editor_shows_the_caps_of_the_hub_that_is_linked(aiohttp_client, t
         r = await c.post(f"/api/v1/config/preview?hub={hub}", json={"config": cfg}, headers=H)
         return await r.json()
 
-    # a hub the add-on knows nothing about: the fixed limits of old firmware
+    tight = {**CURRENT.to_wire(), "budget": 128 * 1024}
+    # a hub the add-on knows nothing about is checked against the newest firmware's limits
+    assert (await prev("hub-a"))["ok"]
+    # its integration says hello and reports a smaller budget
+    await hello(c, "hub-a", tight)
     body = await prev("hub-a")
-    assert not body["ok"] and "too many commands: 900 (the hub allows at most 256)" in body["errors"][0]["msg"]
-    # its integration says hello and reports the hub's limits (a current hub): one memory budget instead
+    assert not body["ok"] and "KiB of hub memory" in body["errors"][0]["msg"]
     await hello(c, "hub-a", CURRENT.to_wire())
     body = await prev("hub-a")
     assert body["ok"], body["errors"]
     u = body["usage"]
-    assert u["commands"] == 900 and u["commands_max"] is None and u["json_max"] is None
+    assert u["commands"] == 900
     assert u["config_budget"] == CURRENT.budget and 0 < u["config_bytes"] < u["config_budget"]
     assert u["config_overhead"] == CURRENT.slack_b
-    # another hub still gets the old numbers; a hub that reports old firmware ({}) too
+    # another hub is unaffected; a hello without credible limits is ignored (the previous limits stay)
+    await hello(c, "hub-b", tight)
     assert not (await prev("hub-b"))["ok"]
     await hello(c, "hub-b", "{}")
     assert not (await prev("hub-b"))["ok"]
-    # junk in the hello is ignored (the previous limits stay)
     await hello(c, "hub-a", "not json")
     assert (await prev("hub-a"))["ok"]
 
@@ -72,8 +75,9 @@ async def test_apply_uses_the_same_limits(aiohttp_client, tmp_path):
     c = await aiohttp_client(_app(tmp_path))
     cfg = _many_commands(900)
     await c.put("/api/v1/config/draft?hub=hub-a", json={"config": cfg}, headers=H)
+    await hello(c, "hub-a", {**CURRENT.to_wire(), "budget": 128 * 1024})
     r = await c.post("/api/v1/config/apply?hub=hub-a", json={}, headers=H)
-    assert r.status == 422  # old firmware assumed
+    assert r.status == 422
     await hello(c, "hub-a", CURRENT.to_wire())
     r = await c.post("/api/v1/config/apply?hub=hub-a", json={}, headers=H)
     assert r.status == 200

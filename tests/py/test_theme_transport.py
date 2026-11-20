@@ -97,35 +97,12 @@ async def test_a_newer_config_cancels_a_running_theme_push(hass, rig, clock, fak
     assert hub.themes()[-1] == (rp.gen, c.compiled.theme_wire)
 
 
-async def test_old_hub_without_theme_push_gets_the_base_preset(hass, rig, clock):  # noqa: F811
-    hub, c = await rig(USER, pages=False)
-    hub.old_hub = True
-    await hub.push("remote_attached", {})
-    await hub.push("remote_info", FULL)
-    low = c.compiled.for_caps(7)  # bit 3 masked off for this hub
-    await settle(hass, lambda: len([1 for k, _ in sent(hub) if k == "page"]) >= len(low.pages_v2))
-    assert len(hub.themes()) == 1  # the one attempt the hub answered unknown_type; never again
-    assert c.links[1].page_caps == const.CAP_THEME_COLOR
-    pages = hub.pages()
-    assert {p.theme for p in pages} == {MIDNIGHT} and {p.gen for p in pages} == {low.gen}
-    assert any("dusk" in n["msg"] for n in c.theme_notices(1))
-    assert c.theme_status(1)["sent"] is False
-
-
 async def test_old_remote_without_bit_3_gets_no_theme(hass, rig, clock):  # noqa: F811
     hub, c = await start(hass, rig, info={**FULL, "caps": 7})
     n = len(c.compiled.for_caps(7).pages_v2)
     await settle(hass, lambda: len(hub.pages()) == n)
     assert hub.themes() == [] and {p.theme for p in hub.pages()} == {MIDNIGHT}
     assert c.theme_status(1) == {"name": "dusk", "id": 7, "sent": False, "acked": False}
-
-
-async def test_old_integration_never_sends_a_theme(hass, rig, clock, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(const, "THEME_TRANSPORT", False)  # the seam an integration without theme_push has
-    hub, c = await start(hass, rig)
-    n = len(c.compiled.for_caps(7).pages_v2)
-    await settle(hass, lambda: len(hub.pages()) == n)
-    assert hub.themes() == [] and {p.theme for p in hub.pages()} == {MIDNIGHT}
 
 
 async def test_a_preset_set_needs_no_theme_push(hass, rig, clock):  # noqa: F811

@@ -225,7 +225,10 @@ class HarmonyHubClient:
             self.fw_build = d.get("fw_build")
             self.ota_key = d.get("ota_key")
             self.config_hash = d.get("config_hash")
-            self.limits = HubLimits.from_hello(d.get("limits"))
+            try:
+                self.limits = HubLimits.from_hello(d.get("limits"))
+            except ValueError as exc:
+                raise HarmonyVersionError(f"the hub firmware is too old ({exc}); update the hub firmware") from exc
             self.bt = d["bt"] if isinstance(d.get("bt"), dict) else None
             self.bt_state = None
             acts = d.get("activities")

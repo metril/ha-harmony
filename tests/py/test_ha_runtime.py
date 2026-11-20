@@ -21,6 +21,7 @@ from custom_components.ha_harmony.harmony_core.ha_actions import HaCall
 from custom_components.ha_harmony.harmony_core.harmony_proto import MsgType
 from custom_components.ha_harmony.harmony_core.page_codec import decode_page
 from custom_components.ha_harmony.tile_format import tile_state, tile_text
+from harmony_core.hub_limits import CURRENT
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
 
@@ -90,7 +91,6 @@ class ScriptHub:
         self.got: list[tuple[str, dict]] = []
         self.gate: asyncio.Event | None = None  # while cleared, page_push replies wait
         self.no_remote = False
-        self.old_hub = False  # firmware before theme_push: that message is answered unknown_type
         self.reject_config = False  # answer set_config with ok=false
         self.refuse: dict[str, int] = {}  # message type -> how many to answer with rf_error (the link queue was full)
         self.tile_delay = 0.0  # seconds a tile_update reply is held
@@ -104,7 +104,7 @@ class ScriptHub:
         reply = {"v": 1, "id": env["id"]}
         t, d = env["t"], env["d"]
         if t == "hello":
-            ack = {"hub_id": HUB_ID, "activities": self.activities, "tcp_keepalive": True}
+            ack = {"hub_id": HUB_ID, "activities": self.activities, "tcp_keepalive": True, "limits": CURRENT.to_wire()}
             if self.config_hash:
                 ack["config_hash"] = self.config_hash
             await ws.send_json({**reply, "t": "hello_ack", "d": ack})
@@ -129,9 +129,6 @@ class ScriptHub:
         elif self.refuse.get(t):
             self.refuse[t] -= 1
             await ws.send_json({**reply, "t": "error", "d": {"code": "rf_error", "message": "RF send failed"}})
-        elif t == "theme_push" and self.old_hub:
-            err = {"code": "unknown_type", "message": "unknown message type"}
-            await ws.send_json({**reply, "t": "error", "d": err})
         elif t in ("page_push", "command", "theme_push"):
             if t != "command" and self.gate is not None and not self.gate.is_set():
                 self._late.append(asyncio.create_task(self._reply_when_open(ws, reply)))

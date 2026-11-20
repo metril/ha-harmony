@@ -22,6 +22,7 @@ from test_ha_runtime import (  # noqa: F401  (fixtures)
 
 from custom_components.ha_harmony import const
 from custom_components.ha_harmony.harmony_core.harmony_proto import MsgType
+from harmony_core.hub_limits import CURRENT
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
 
@@ -244,7 +245,7 @@ async def test_flapping_hub_backs_off_exponentially_with_jitter(fake_hub):
     async def handler(ws, env):
         if env["t"] == "hello":
             await ws.send_json(
-                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": [], "tcp_keepalive": True}}
+                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
             )
             await ws.close()  # accepted, then dropped at once
 
@@ -295,7 +296,7 @@ async def test_stable_connection_resets_the_backoff(fake_hub):
         nonlocal conns, now
         if env["t"] == "hello":
             await ws.send_json(
-                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": [], "tcp_keepalive": True}}
+                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
             )
             conns += 1
             if conns == 3:

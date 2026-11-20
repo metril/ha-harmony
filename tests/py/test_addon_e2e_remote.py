@@ -70,7 +70,7 @@ async def test_labels_fit_and_centre_on_their_keys(browser, site):
 
 CHIPS = """() => {
   const find = (n) => { for (const el of n.querySelectorAll('*')) { if (el.tagName === 'HH-INSPECTOR') return el.shadowRoot; if (el.shadowRoot) { const x = find(el.shadowRoot); if (x) return x; } } return null; };
-  return [...find(document.querySelector('hh-app').shadowRoot).querySelectorAll('.free.grid button')].map((b) => ({ text: b.textContent.trim(), cut: b.scrollWidth - b.clientWidth, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height }));
+  return [...find(document.querySelector('hh-app').shadowRoot).querySelectorAll('.free.grid button')].map((b) => ({ text: b.textContent.trim(), cut: b.scrollWidth - b.clientWidth, x: Math.round(b.getBoundingClientRect().x), w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height }));
 }"""
 
 
@@ -83,7 +83,12 @@ async def test_free_key_chips_are_readable_names_that_are_not_cut(browser, site)
         assert "_" not in c["text"], c
         assert c["cut"] <= 0, f"{c['text']} is cut"
         assert c["h"] < 40, f"{c['text']} wraps"
-    assert len({round(c["w"]) for c in chips}) == 1, "free-key cells are not one width"
+    # short labels share one cell width; a long one spans exactly two cells (rows stay aligned)
+    one = min(round(c["w"]) for c in chips)
+    assert all(round(c["w"]) in (one, round(2 * one + 6)) or abs(c["w"] - 2 * one) < 12 for c in chips), "free-key cells are not on one grid"
+    short = [c for c in chips if len(c["text"]) <= 9]
+    assert len({c["x"] for c in short}) >= 2, "short free keys sit in one column"
+    assert len({round(c["h"]) for c in chips}) == 1, "uneven free-key heights"
 
 
 async def test_page_tour_screenshots(browser, large):
@@ -124,7 +129,7 @@ PALETTE = """() => {
   const find = (n) => { for (const el of n.querySelectorAll('*')) { if (el.tagName === 'HH-PALETTE') return el.shadowRoot; if (el.shadowRoot) { const x = find(el.shadowRoot); if (x) return x; } } return null; };
   return [...find(document.querySelector('hh-app').shadowRoot).querySelectorAll('.cells')].map((g) => [...g.querySelectorAll('.chip2')].map((b) => {
     const r = b.getBoundingClientRect(), s = b.querySelector('span');
-    return { text: s.textContent.trim(), w: r.width, h: r.height, cut: s.scrollWidth - s.clientWidth, cx: s.getBoundingClientRect().x + s.getBoundingClientRect().width / 2 - (r.x + r.width / 2) };
+    return { text: s.textContent.trim(), x: Math.round(r.x), w: r.width, h: r.height, cut: s.scrollWidth - s.clientWidth, cx: s.getBoundingClientRect().x + s.getBoundingClientRect().width / 2 - (r.x + r.width / 2) };
   }));
 }"""
 
@@ -134,6 +139,11 @@ async def test_palette_commands_are_readable_and_sit_on_a_uniform_grid(browser, 
     groups = await page.evaluate(PALETTE)
     texts = {c["text"] for g in groups for c in g}
     assert {"Power on", "Volume up", "Volume down", "Mute", "HDMI 1", "OK", "Menu"} <= texts
+    await page.set_viewport_size({"width": 1600, "height": 1000})
+    await page.wait_for_timeout(300)
+    groups = await page.evaluate(PALETTE)
+    wide = [g for g in groups if len(g) >= 2 and max(len(c["text"]) for c in g) <= 9]
+    assert wide and all(len({c["x"] for c in g}) >= 2 for g in wide), "short palette labels sit in one column at 1600px"
     for g in groups:
         assert len({round(c["w"]) for c in g}) == 1 and len({round(c["h"]) for c in g}) == 1, f"uneven cells: {g}"
         for c in g:

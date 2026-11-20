@@ -121,14 +121,6 @@ def _over_budget(c):
     ]
 
 
-def _devices_cap(c):
-    c["devices"] += [{"id": f"d{n}", "commands": {}} for n in range(14)]
-
-
-def _cmd_cap(c):
-    c["devices"][0]["commands"].update({f"c{n}": IR for n in range(200)})
-
-
 def _ha_dev_bad(c):
     c["devices"][4]["commands"]["x"] = IR
 
@@ -227,8 +219,6 @@ CASES: list[tuple[str, object, list]] = [
     ),
     ("alias is another device id", _alias_dup, ["devices", 0, "aliases"]),
     ("duplicate device id", _dup_dev, ["devices", 1, "id"]),
-    ("max 16 devices", _devices_cap, []),
-    ("max 256 commands", _cmd_cap, []),
     ("HA device takes only ha actions", _ha_dev_bad, ["devices", 4, "commands"]),
     ("HA device power needs on and off", _ha_power, ["devices", 4, "power"]),
     (

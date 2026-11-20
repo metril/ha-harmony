@@ -16,7 +16,7 @@ from harmony_core.compiler import (
     fit_error,
 )
 from harmony_core.config_model import parse_model
-from harmony_core.hub_limits import CURRENT, LEGACY, HubLimits, estimate_bytes
+from harmony_core.hub_limits import CURRENT, HubLimits, estimate_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
 NEC = "{proto: nec, addr: 4, cmd: 2}"
@@ -67,21 +67,6 @@ def test_hello_limits_keys_match_what_the_hub_sends():
     body = src[src.index("static cJSON *on_limits") :]
     sent = set(re.findall(r'cJSON_AddNumberToObject\(o, "(\w+)"', body[: body.index("return o;")]))
     assert sent == set(CURRENT.to_wire())  # incl. flash_free (a runtime value: 0 in the model)
-
-
-def test_frontend_legacy_constants_match():
-    src = (ROOT / "addon/frontend/src/lib/model.ts").read_text()
-    m = re.search(r"export const LEGACY_LIMITS = \{([^}]*)\}", src)
-    assert m
-    ts = {k: _num(v) for k, v in re.findall(r"(\w+): ([\d\s*]+)", m[1])}
-    assert ts["devices"] == LEGACY.max_devices and ts["activities"] == LEGACY.max_activities
-    assert ts["commands"] == LEGACY.max_commands and ts["inputs"] == LEGACY.max_inputs
-    assert ts["jsonBytes"] == LEGACY.max_json
-
-
-def test_legacy_numbers_are_the_old_firmwares():
-    assert (LEGACY.max_commands, LEGACY.max_inputs, LEGACY.max_devices, LEGACY.pool_words) == (256, 64, 16, 16384)
-    assert LEGACY.legacy and not CURRENT.legacy and CURRENT.chunk > 0 and LEGACY.chunk == 0
 
 
 # ------------------------------------------------------------------ the estimate
@@ -143,15 +128,14 @@ def test_pool_words_and_keys_are_counted_like_the_hub():
 # ------------------------------------------------------------------ what a hub reports
 def test_from_hello_roundtrips_and_distrusts_junk():
     assert HubLimits.from_hello(CURRENT.to_wire()) == CURRENT
-    assert HubLimits.from_hello(None) is LEGACY and HubLimits.from_hello({}) is LEGACY
-    assert HubLimits.from_hello("x") is LEGACY
-    bad = CURRENT.to_wire() | {"budget": 5}  # below any real hub
-    assert HubLimits.from_hello(bad) is LEGACY
-    bad = CURRENT.to_wire() | {"dev_b": True}
-    assert HubLimits.from_hello(bad) is LEGACY
-    missing = {k: v for k, v in CURRENT.to_wire().items() if k != "chunk"}
-    assert HubLimits.from_hello(missing) is LEGACY
-    assert LEGACY.to_wire() == {}
+    for junk in (None, {}, "x"):
+        with pytest.raises(ValueError):
+            HubLimits.from_hello(junk)
+    bad = {**CURRENT.to_wire(), "budget": 1}
+    with pytest.raises(ValueError):
+        HubLimits.from_hello(bad)
+    with pytest.raises(ValueError):
+        HubLimits.from_hello({k: v for k, v in CURRENT.to_wire().items() if k != "chunk"})
 
 
 # ------------------------------------------------------------------ the compiler
@@ -164,13 +148,10 @@ def _cmds(n, per=250):
     return parse_model("devices:\n" + "\n".join(devs) + "\n")
 
 
-def test_legacy_hub_rejects_257_commands_current_accepts_thousands():
-    m = _cmds(257)
-    with pytest.raises(CompileError, match="too many commands: 257 .the hub allows at most 256"):
-        compile_config(m)
+def test_current_hub_accepts_thousands_of_commands():
     c = compile_config(_cmds(5000), limits=CURRENT)
     u = c.usage
-    assert u["commands"] == 5000 and u["commands_max"] is None and u["json_max"] is None
+    assert u["commands"] == 5000
     assert u["config_budget"] == CURRENT.budget and 0 < u["config_bytes"] < CURRENT.budget
 
 
@@ -213,7 +194,6 @@ def test_fit_error_checks_a_compiled_config_against_another_hub():
     c = compile_config(_cmds(1000), limits=CURRENT)  # compiled before the hub reported itself
     stats = config_stats(c.hub_json)
     assert fit_error(stats, CURRENT) is None
-    assert "too many commands: 1000" in fit_error(stats, LEGACY)
     assert "KiB of hub memory" in fit_error(stats, CURRENT.with_budget(100 * 1024))
 
 

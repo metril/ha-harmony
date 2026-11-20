@@ -20,6 +20,7 @@ from test_ha_runtime import YAML
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
 from custom_components.ha_harmony import const, rename
 from custom_components.ha_harmony.const import DOMAIN
+from harmony_core.hub_limits import CURRENT
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
 
@@ -430,7 +431,7 @@ async def test_discovery_with_another_hardware_id_is_a_new_hub(hass):
 async def old_hub(fake_hub):
     async def handler(ws, env):
         if env["t"] == "hello":
-            await ws.send_json({"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": HUB_ID, "tcp_keepalive": True}})
+            await ws.send_json({"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": HUB_ID, "tcp_keepalive": True, "limits": CURRENT.to_wire()}})
         elif env["t"] == "set_hub_id":
             await ws.send_json(
                 {

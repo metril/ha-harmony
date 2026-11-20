@@ -99,20 +99,15 @@ export interface ValidationError {
   severity?: 'warning';
 }
 
-/** The fixed limits of a hub on firmware <= 0.3.5 (harmony_core.hub_limits.LEGACY; tests/py/test_limits.py keeps them equal). */
-export const LEGACY_LIMITS = { devices: 16, activities: 16, commands: 256, inputs: 64, widgets: 128, jsonBytes: 128 * 1024 };
-/** The connected hub's limits: the legacy ones until a preview reports the hub's own (`applyUsageLimits`). A current hub has
- * no count limit for commands/inputs (Infinity): only its memory budget, see `Usage.config_budget`. */
-export const LIMITS: { devices: number; activities: number; commands: number; inputs: number; widgets: number; jsonBytes: number } = { ...LEGACY_LIMITS };
+/** The connected hub's limits: a current hub's until a preview reports the hub's own (`applyUsageLimits`). A hub has no count
+ * limit for commands/inputs (Infinity): only its memory budget, see `Usage.config_budget`. */
+export const LIMITS: { devices: number; activities: number; commands: number; inputs: number; widgets: number } = { devices: 255, activities: 16, commands: Infinity, inputs: Infinity, widgets: 128 };
 
 /** Adopt the limits a preview's `usage` carries (they are the connected hub's). */
-export function applyUsageLimits(u: { devices_max: number; activities_max: number; commands_max: number | null; inputs_max: number | null; json_max: number | null } | null): void {
+export function applyUsageLimits(u: { devices_max: number; activities_max: number } | null): void {
   if (!u) return;
   LIMITS.devices = u.devices_max;
   LIMITS.activities = u.activities_max;
-  LIMITS.commands = u.commands_max ?? Infinity;
-  LIMITS.inputs = u.inputs_max ?? Infinity;
-  LIMITS.jsonBytes = u.json_max ?? Infinity;
 }
 
 export function counts(c: Config | null) {

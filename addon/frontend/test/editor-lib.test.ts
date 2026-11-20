@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { IrCandidate, IrDeviceResult } from '../src/lib/api';
 import { addActivity, addActivityDevice, addControlPage, addStartButton, addStep, applyHandler, chainOrder, deleteActivity, handlerOf, matchZone, moveChain, moveStep, normName, removeStep, timeline } from '../src/lib/activity-edit';
 import { deviceIdFor, duplicateCommand, nameProblem, powerStatus, setPowerMode, sourceLabel, withPorts, withRepeats } from '../src/lib/device-edit';
@@ -7,7 +7,7 @@ import { boundEditor, editorBytes } from '../src/lib/activity-edit';
 import { capProblem } from '../src/lib/device-edit';
 import { byDomain } from '../src/lib/permissions';
 import { proposeFromEntity } from '../src/lib/ha-propose';
-import { LEGACY_LIMITS, LIMITS, applyUsageLimits, type Config } from '../src/lib/model';
+import { LIMITS, applyUsageLimits, type Config } from '../src/lib/model';
 import { configSizeFigures, meters } from '../src/components/parts';
 import { render } from 'lit';
 import { USAGE } from './helpers';
@@ -366,6 +366,8 @@ describe('permissions grouped by domain', () => {
 
 describe('hub limits are refused before apply', () => {
   const many = (n: number, kind: 'commands' | 'inputs'): Config => ({ devices: [{ id: 'd', [kind]: Object.fromEntries(Array.from({ length: n }, (_, i) => [`c${i}`, { proto: 'nec', addr: 1, cmd: i % 256 }])) }] });
+  beforeEach(() => Object.assign(LIMITS, { devices: 16, commands: 256, inputs: 64 }));
+  afterEach(() => Object.assign(LIMITS, { devices: 255, commands: Infinity, inputs: Infinity }));
   it('commands past 256, inputs past 64, devices past 16', () => {
     expect(capProblem(many(255, 'commands'), 'command')).toBeNull();
     expect(capProblem(many(256, 'commands'), 'command')).toContain('at most 256 commands');
@@ -382,20 +384,14 @@ describe('hub limits are refused before apply', () => {
 
 describe('the editor shows the connected hub\'s caps', () => {
   const many = (n: number): Config => ({ devices: [{ id: 'd', commands: Object.fromEntries(Array.from({ length: n }, (_, i) => [`c${i}`, { proto: 'nec', addr: 1, cmd: i % 256 }])) }] });
-  afterEach(() => Object.assign(LIMITS, LEGACY_LIMITS));
-  const current = { ...USAGE, json_max: null, pool_max: null, commands_max: null, inputs_max: null, devices_max: 255, config_bytes: 3 * 1024 * 1024, config_budget: 8 * 1024 * 1024, config_overhead: 1536 * 1024 };
+  afterEach(() => Object.assign(LIMITS, { devices: 255, activities: 16, commands: Infinity, inputs: Infinity }));
+  const current = { ...USAGE, devices_max: 255, config_bytes: 3 * 1024 * 1024, config_budget: 8 * 1024 * 1024, config_overhead: 1536 * 1024 };
   it('a current hub has no command or input count limit, so nothing is refused for count', () => {
     applyUsageLimits(current);
     expect(LIMITS.commands).toBe(Infinity);
     expect(capProblem(many(5000), 'command')).toBeNull();
     expect(capProblem(many(5000), 'input', 300)).toBeNull();
     expect(capProblem({ devices: Array.from({ length: 255 }, (_, i) => ({ id: `d${i}` })) }, 'device')).toContain('at most 255 devices');
-  });
-  it('old firmware keeps the fixed numbers (and so does a missing preview)', () => {
-    applyUsageLimits(null);
-    expect(capProblem(many(256), 'command')).toContain('at most 256 commands');
-    applyUsageLimits({ ...current, commands_max: 256, inputs_max: 64, json_max: 131072, devices_max: 16 });
-    expect(capProblem(many(256), 'command')).toContain('at most 256 commands');
   });
   it('one "Config size X of Y KiB on this hub" meter replaces the count meters on a current hub', () => {
     const host = document.createElement('div');
@@ -411,16 +407,13 @@ describe('the editor shows the connected hub\'s caps', () => {
     expect(host.textContent).toContain('0 KiB of 6.5 MiB');
     render(meters({ usage: { ...current, config_bytes: 9000 * 1024 }, config: many(10) } as never), host);
     expect(host.textContent).toContain('over, remove commands');
-    render(meters({ usage: USAGE, config: many(10) } as never), host);
-    expect(host.textContent).toContain('IR pool');
-    expect(host.textContent).toContain('62 / 256');
   });
 });
 
 describe('config size meter: label and bar come from one function', () => {
   const OH = 1536 * 1024;
   const BUDGET = 8 * 1024 * 1024;
-  const cur = { ...USAGE, json_max: null, pool_max: null, commands_max: null, inputs_max: null, config_budget: BUDGET, config_overhead: OH };
+  const cur = { ...USAGE, config_budget: BUDGET, config_overhead: OH };
   function shown(bytes: number) {
     const host = document.createElement('div');
     render(meters({ usage: { ...cur, config_bytes: bytes }, config: {} } as never), host);

@@ -19,6 +19,7 @@ import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows
 from custom_components.ha_harmony import const
 from custom_components.ha_harmony.coordinator import tile_text
 from custom_components.ha_harmony.harmony_core.harmony_proto import MsgType
+from harmony_core.hub_limits import CURRENT
 from proto import rf_codec
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
@@ -679,7 +680,7 @@ async def test_hub_rejection_raises_repair_issue(hass, fake_hub, write_yaml, cap
         reply = {"v": 1, "id": env["id"]}
         if t == "hello":
             await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": ["A"], "tcp_keepalive": True}}
+                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": ["A"], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
             )
             await ws.send_json(
                 {"v": 1, "id": 0, "t": "state_update", "d": {"activity": 7, "power": True}}

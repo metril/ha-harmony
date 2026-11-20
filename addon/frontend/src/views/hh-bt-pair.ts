@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { signal, BtElement, btCss } from './bt-base';
 import './hh-bt-commands';
 import './hh-bt-keys';
-import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, patchHost, clock, outcome, remoteNameProblem, remotesOf, secsLeft, nextCountdown, sameAddr } from '../lib/bt-model';
+import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, patchHost, patchRemote, clock, outcome, remoteNameProblem, remotesOf, secsLeft, nextCountdown, sameAddr } from '../lib/bt-model';
 import { announce, derive, observe, startRun, type Phase, type Run } from '../lib/bt-wizard';
 import { byteCounter, trimBytes } from '../lib/codes';
 import { capProblem } from '../lib/device-edit';
@@ -36,6 +36,7 @@ export class HhBtPair extends BtElement {
   private cPick = new CmdId();
   private focusKey = '';
   private defaultsApplied = false;
+  private remoteAddr = ''; // the draft remote made the moment a remote paired (remote mode)
   private devId = ''; // the draft entry made the moment a device paired (host mode)
 
   override disconnectedCallback(): void {
@@ -85,6 +86,7 @@ export class HhBtPair extends BtElement {
     this.name = trimBytes(p.name ?? (this.mode === 'host' ? 'Bluetooth device' : 'Bluetooth remote'));
     this.step = 'setup';
     if (this.mode === 'host') this.persist(p);
+    else this.persistRemote(p);
   }
   private defaultCommands(): Record<string, string> {
     return Object.fromEntries((this.codes?.builtins ?? []).filter((b) => b.default).map((b) => [b.name, b.name]));
@@ -106,6 +108,16 @@ export class HhBtPair extends BtElement {
     const r = addHostDevice(cfg, { name: this.name, address: p.addr, transport: p.transport ?? (this.transport === 'any' ? 'auto' : this.transport), commands: this.commands });
     this.store.replace(r.config);
     this.devId = r.id;
+  }
+  /** A paired remote goes into the draft at once too (name and address); saving then completes that entry with its keys. */
+  private persistRemote(p: { addr: string; name?: string }) {
+    const cfg = this.store.config;
+    if (remotesOf(cfg).some((r) => sameAddr(r.address, p.addr))) return; // already listed: the banner says so, saving adds another
+    this.store.replace(addRemote(cfg, { name: this.name, address: p.addr }));
+    this.remoteAddr = p.addr;
+  }
+  private remoteIndex(): number {
+    return this.remoteAddr ? remotesOf(this.store.config).findIndex((r) => sameAddr(r.address, this.remoteAddr)) : -1;
   }
   private async start() {
     this.err = '';
@@ -182,13 +194,15 @@ export class HhBtPair extends BtElement {
       this.store.toast(`Added ${name} to the draft (${Object.keys(this.commands).length} commands). Nothing is applied yet.`, 'info', true);
       location.hash = hashFor('devices', id);
     } else {
-      this.store.replace(addRemote(cfg, { name, address: p.addr, ...(Object.keys(this.keys).length ? { keys: this.keys } : {}) }));
+      const at = this.remoteIndex();
+      const keys = Object.keys(this.keys).length ? { keys: this.keys } : {};
+      this.store.replace(at >= 0 ? patchRemote(cfg, at, { name, ...keys }) : addRemote(cfg, { name, address: p.addr, ...keys }));
       this.store.toast(`Added the remote ${name} to the draft. Nothing is applied yet.`, 'info', true);
       location.hash = hashFor('bluetooth');
     }
   }
   private nameProblem(): string {
-    if (this.mode === 'remote') return remoteNameProblem(this.store.config, this.name);
+    if (this.mode === 'remote') return remoteNameProblem(this.store.config, this.name, this.remoteIndex());
     const n = this.name.trim();
     if (!n) return 'Give it a name.';
     return byteCounter(n).over > 0 ? 'That name is too long.' : '';
@@ -251,7 +265,7 @@ export class HhBtPair extends BtElement {
     const prob = this.nameProblem();
     const bytes = byteCounter(this.name);
     const slot = (host ? this.bt?.hosts : this.bt?.remotes)?.find((e) => sameAddr(e.addr, p.addr))?.slot ?? null;
-    const dup = host ? undefined : remotesOf(this.store.config).find((r) => sameAddr(r.address, p.addr));
+    const dup = host || this.remoteAddr ? undefined : remotesOf(this.store.config).find((r) => sameAddr(r.address, p.addr));
     return html`<h1 id="step-title" tabindex="-1">${host ? 'Name it and choose its commands' : 'Choose what its buttons do'}</h1>
       <p class="lead">${outcome('ok', host ? 'device' : 'remote', p.name).title}. <span class="mono">${p.addr}</span>${p.transport ? ` · ${p.transport === 'le' ? 'Bluetooth LE' : 'Bluetooth BR/EDR'}` : ''}</p>
       ${dup ? html`<div class="banner ir" role="status">This address is already in your config${'name' in dup && dup.name ? ` as ${dup.name}` : ''}. Adding it again creates a second entry.</div>` : nothing}
@@ -267,7 +281,7 @@ export class HhBtPair extends BtElement {
           <span class="hint">${bytes.used} of ${bytes.max} bytes (the hub stores at most ${bytes.max})</span>
           ${prob ? html`<span class="err" role="alert">${prob}</span>` : nothing}
           <button class="btn pri" ?disabled=${!!prob || !this.codes} @click=${() => this.save()}>${host ? 'Add device' : 'Add remote'}</button>
-          <span class="hint">${host ? 'The device is already in the draft.' : 'Adds to the draft only.'} Review and apply it from the bar at the top.</span>
+          <span class="hint">${host ? 'The device is already in the draft.' : this.remoteAddr ? 'The remote is already in the draft.' : 'Adds to the draft only.'} Review and apply it from the bar at the top.</span>
         </aside>
       </div>`;
   }

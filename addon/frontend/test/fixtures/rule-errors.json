@@ -115,16 +115,6 @@
   "msg": "duplicate device id 'tv'"
  },
  {
-  "rule": "max 16 devices",
-  "path": [],
-  "msg": "too many devices: 18 (the hub allows at most 16)"
- },
- {
-  "rule": "max 256 commands",
-  "path": [],
-  "msg": "too many commands: 296 (the hub allows at most 256)"
- },
- {
   "rule": "HA device takes only ha actions",
   "path": [
    "devices",

@@ -12,6 +12,7 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
 from custom_components.ha_harmony.const import OFF_OPTION
+from harmony_core.hub_limits import CURRENT
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
@@ -241,7 +242,7 @@ async def test_runtime_version_mismatch_reloads_into_setup_error(hass, fake_hub,
                     "v": 1,
                     "id": env["id"],
                     "t": "hello_ack",
-                    "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True},
+                    "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()},
                 }
             )
             await ws.send_json({"v": 2, "id": 0, "t": "state_update", "d": {}})

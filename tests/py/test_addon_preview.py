@@ -12,7 +12,7 @@ from harmony_addon.app import create_app
 from harmony_addon.auth import NoAuth
 from harmony_core.compiler import compile_config
 from harmony_core.config_model import parse_data, validate_pages
-from harmony_core.hub_limits import LEGACY
+from harmony_core.hub_limits import CURRENT
 from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, Page, Widget, page_size
 
 TOKEN = "ab" * 32
@@ -138,8 +138,7 @@ async def test_page_and_total_usage_match_the_compiler(c):
     assert u["json_bytes"] == len(
         json.dumps(comp.hub_json, separators=(",", ":"), ensure_ascii=False)
     )
-    assert u["json_max"] == LEGACY.max_json and u["pool_max"] == LEGACY.pool_words
-    assert u["keys"] == len(comp.hub_json["keys"]) and u["keys_max"] == LEGACY.max_keys
+    assert u["keys"] == len(comp.hub_json["keys"]) and u["keys_max"] == CURRENT.max_keys
     assert u["soft_keys"] == 120 and u["commands"] == 240 and u["inputs"] == 24
     assert body["hash"] == comp.config_hash
 

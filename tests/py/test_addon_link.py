@@ -26,6 +26,7 @@ from custom_components.ha_harmony.addon_link import (
     parse_bundle,
 )
 from harmony_core import BUNDLE_SCHEMA
+from harmony_core.hub_limits import CURRENT
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
 
@@ -139,7 +140,7 @@ def hub_handler(sets):
         reply = {"v": 1, "id": env["id"]}
         if env["t"] == "hello":
             await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True}}
+                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
             )
         elif env["t"] == "set_config":
             sets.append(env["d"]["config"])
@@ -636,7 +637,7 @@ async def test_hub_rejection_is_acked_as_error(hass, fake_hub, fake_addon):
         reply = {"v": 1, "id": env["id"]}
         if env["t"] == "hello":
             await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True}}
+                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
             )
         elif env["t"] == "set_config":
             await ws.send_json(

@@ -154,7 +154,6 @@ class RemoteLink:
     epoch: int = 0  # bumped at every link-up: the remote may have lost its page store
     pushed: tuple[int, int, int, int] | None = None  # (config gen, format, epoch, theme caps) of the last complete set
     inflight: tuple[int, int, int, int] | None = None
-    hub_theme: bool = True  # the hub understands theme_push (False once it answered unknown_type: bit 3 is then masked off)
     theme_sent: int | None = None  # gen of the custom theme the hub accepted for this remote's current set
     waiting: bool = False  # waiting for remote_info
     attached: bool = True  # False after "no remote" until the remote shows signs of life
@@ -174,13 +173,10 @@ class RemoteLink:
     @property
     def page_caps(self) -> int:
         """The theme caps the pages are built for: 0 for v1 or an unknown remote. Bit 3 counts only
-        while a theme can be sent (this integration and the hub both speak theme_push); otherwise a
-        user theme is its base preset and free colours are snapped (bit 2 behaviour)."""
+        as the remote announces them."""
         if self.page_fmt < 2 or self.info is None:
             return 0
-        custom = const.THEME_TRANSPORT and self.hub_theme
-        mask = const.CAP_THEME_COLOR | (const.CAP_THEME_CUSTOM if custom else 0)
-        return self.info.caps & mask
+        return self.info.caps & (const.CAP_THEME_COLOR | const.CAP_THEME_CUSTOM)
 
     @property
     def tile_state(self) -> bool:
@@ -237,7 +233,6 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.device_states: dict[str, DeviceState] = {}
         self.battery: dict[int, tuple[int, int]] = {}  # remote -> (percent, millivolts)
         self.remotes: tuple[int, ...] = DEFAULT_REMOTE_IDS
-        self._hub_theme = True  # the hub understands theme_push (until it says unknown_type)
         self.links: dict[int, RemoteLink] = {r: RemoteLink() for r in self.remotes}
         self._cfg_gen = 0  # bumped whenever the compiled config changes
         self._accepted = False  # the hub is known to run `compiled` (it reported the matching hash)
@@ -840,8 +835,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         too_big = too_big or bt_fit_error(compiled.hub_json, self.client.bt)
         try:
             if too_big:
-                hint = " (this hub runs older firmware; updating it raises the limit)" if self.client.limits.legacy else ""
-                ack = {"ok": False, "message": too_big + hint}
+                ack = {"ok": False, "message": too_big}
             else:
                 ack = await self.client.async_set_config(compiled.hub_json)
         except HarmonyCommandError as exc:
@@ -893,7 +887,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return self._rlink(remote).page_fmt
 
     def _rlink(self, remote: int) -> RemoteLink:
-        return self.links.setdefault(remote, RemoteLink(hub_theme=self._hub_theme))
+        return self.links.setdefault(remote, RemoteLink())
 
     @property
     def hub_accepted(self) -> bool:
@@ -1068,10 +1062,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         link.theme_sent = None
         if rp is not None and rp.theme_wire is not None:
             ok = await self._send_theme(remote, link, rp)
-            if ok is None:
-                return False
-            if ok is False:  # the hub cannot carry it: pages built for what it can (the base preset)
-                self._request_push(remote, wait=False)
+            if not ok:
                 return False
         pages = rp.pages_v2_b64 if rp is not None else self.compiled.encoded_pages_b64(1)
         for idx, b64 in enumerate(pages):
@@ -1099,22 +1090,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
 
     async def _send_theme(self, remote: int, link: RemoteLink, rp: RemotePages) -> bool | None:
         """theme_push of the set's custom theme. True: the hub took it. None: not delivered (no remote,
-        link down): the push is redone later. False: this hub does not know theme_push (old firmware):
-        bit 3 is masked off for it and the set is rebuilt without the custom theme."""
+        link down, refused): the push is redone later."""
         assert rp.theme_wire is not None
         payload = {"remote": remote, "gen": rp.gen, "data": base64.b64encode(rp.theme_wire).decode()}
         self.theme_pushes += 1
         try:
             await self.client.async_send(MsgType.THEME_PUSH, payload)
         except HarmonyCommandError as exc:
-            if exc.code == "unknown_type":
-                _LOGGER.info(
-                    "The hub does not know theme_push (older firmware); custom theme %r shows as %r",
-                    self.compiled.theme_name,
-                    self.compiled.theme_base,
-                )
-                self._set_hub_theme(False)
-                return False
             if exc.code == "no_remote":
                 link.pending, link.attached = True, False
                 return None
@@ -1129,11 +1111,6 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return None
         link.theme_sent = rp.gen
         return True
-
-    def _set_hub_theme(self, ok: bool) -> None:
-        for lk in self.links.values():
-            lk.hub_theme = ok
-        self._hub_theme = ok
 
     def _theme_acked(self, link: RemoteLink, rp: RemotePages) -> bool:
         """The remote reports the whole set (its pages and, for a custom theme, the theme) as held."""
@@ -1423,7 +1400,6 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # Home Assistant steps (only the very first report after HA starts is a baseline).
             self._accepted = False  # the hub may have rebooted: the resync confirms its config
             self.btm.on_connect()
-            self._set_hub_theme(True)  # and may run other firmware: theme_push is tried again
             for link in self.links.values():
                 link.epoch += 1
                 link.info, link.pushed = None, None

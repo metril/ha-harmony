@@ -1,9 +1,8 @@
 """What a hub accepts as a config. Pure, no HA imports.
 
 Hubs report their limits in `hello_ack.limits` (see docs/proto/config-format-2.md "Limits"). A hub
-that reports none (firmware <= 0.3.5) has the fixed count limits of `LEGACY`; a current hub has no
-count limits for commands, inputs, devices' codes or the IR word pool, only ONE memory budget, plus
-the per-item bounds below. `CURRENT` mirrors hub/engine/mapping.h; tests/py/test_limits.py parses
+that reports none (or junk) is refused; a hub has no count limits for commands, inputs, devices' codes
+or the IR word pool, only ONE memory budget, plus the per-item bounds below. `CURRENT` mirrors hub/engine/mapping.h; tests/py/test_limits.py parses
 the header and fails when the two differ.
 """
 
@@ -12,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
-__all__ = ["CURRENT", "LEGACY", "LIMITS_HEADER", "HubLimits", "estimate_bytes"]
+__all__ = ["CURRENT", "LIMITS_HEADER", "HubLimits", "estimate_bytes"]
 
 LIMITS_HEADER = (
     "X-Hub-Limits"  # the integration tells the add-on the connected hub's limits (JSON, `to_wire`)
@@ -39,7 +38,7 @@ _BOUNDS = (  # key of hello_ack.limits -> sane range (a hub reporting anything e
 
 @dataclass(frozen=True)
 class HubLimits:
-    """Per-item bounds, and either a memory budget (budget > 0) or legacy fixed totals."""
+    """Per-item bounds and the memory budget."""
 
     max_devices: int
     max_activities: int
@@ -48,7 +47,7 @@ class HubLimits:
     max_act_devs: int
     max_pronto: int
     name_max: int  # bytes + NUL
-    budget: int = 0  # bytes one config's tables may need (0 = legacy hub); a load builds beside the old map
+    budget: int = 0  # bytes one config's tables may need; a load builds beside the old map
     chunk: int = 0  # config_chunk data bytes the hub takes (0 = no chunked transfer)
     slack_b: int = 1536 * 1024  # fixed part of a load (scratch map, the value in hand, sections)
     flash_free: int = 0  # bytes free for the cached config when the hub said hello (0 = unknown, unless flash_low)
@@ -57,33 +56,24 @@ class HubLimits:
     cmd_b: int = 120  # one command or input
     key_b: int = 72
     word_b: int = 2
-    # legacy hubs only (None = no such limit)
-    max_json: int | None = None
-    max_commands: int | None = None
-    max_inputs: int | None = None
-    pool_words: int | None = None
-
-    @property
-    def legacy(self) -> bool:
-        return self.budget == 0
 
     @classmethod
     def from_hello(cls, raw: Any) -> HubLimits:
-        """The limits a hello_ack carries; LEGACY when absent or not credible."""
+        """The limits a hello_ack carries; ValueError when absent or not credible."""
         if not isinstance(raw, dict):
-            return LEGACY
+            raise ValueError("the hub reported no limits")  # noqa: TRY004
         vals: dict[str, int] = {}
         for key, lo, hi in _BOUNDS:
             v = raw.get(key, 0 if key == "flash_free" else None)  # flash_free is optional
+            if key == "flash_free" and type(v) is int and v > hi:
+                v = hi  # a disk bigger than any hub flash (the sim): plenty
             if type(v) is not int or not lo <= v <= hi:
-                return LEGACY
+                raise ValueError(f"the hub reported an invalid limit: {key}")
             vals[key] = v
         return cls(**vals, flash_low=raw.get("flash_low") is True and vals["flash_free"] == 0)
 
     def to_wire(self) -> dict[str, Any]:
         """The `limits` object (a hello_ack as sent; also what the add-on is told about a hub)."""
-        if self.legacy:
-            return {}
         wire: dict[str, Any] = {key: getattr(self, key) for key, _lo, _hi in _BOUNDS}
         if self.flash_low:
             wire["flash_low"] = True
@@ -92,21 +82,6 @@ class HubLimits:
     def with_budget(self, budget: int) -> HubLimits:
         return replace(self, budget=budget)
 
-
-# Firmware <= 0.3.5: fixed totals, no hello_ack.limits, no config_chunk.
-LEGACY = HubLimits(
-    max_devices=16,
-    max_activities=16,
-    max_keys=128,
-    max_steps=16,
-    max_act_devs=8,
-    max_pronto=520,
-    name_max=32,
-    max_json=131072,
-    max_commands=256,
-    max_inputs=64,
-    pool_words=16384,
-)
 
 # The newest firmware (hub/engine/mapping.h); what a config is compiled against until a hub reports.
 CURRENT = HubLimits(
