@@ -7,6 +7,7 @@ const NAMES: Record<string, string> = {
   prev_channel: 'Previous Channel', power_off_activity: 'Power Off Activity',
   select: 'OK', ok: 'OK', dvr: 'DVR', tv: 'TV', fast_forward: 'Fast Forward', play_pause: 'Play/Pause',
   arrowup: 'Arrow Up', arrowdown: 'Arrow Down', arrowleft: 'Arrow Left', arrowright: 'Arrow Right', arrow_up: 'Arrow Up', arrow_down: 'Arrow Down', arrow_left: 'Arrow Left', arrow_right: 'Arrow Right',
+  direction_up: 'Up', direction_down: 'Down', direction_left: 'Left', direction_right: 'Right',
   capslock: 'Caps Lock', caps_lock: 'Caps Lock',
 };
 /** What a screen reader and the palette search get for names that are printed as a symbol. */

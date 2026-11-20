@@ -72,7 +72,7 @@ describe('displayKey: Title Case', () => {
 describe('displayKey', () => {
   it.each([
     ['select', 'OK'], ['Menu', 'Menu'], ['dvr', 'DVR'], ['DVR', 'DVR'], ['Num5', '5'], ['key_105', '5'], ['key_7', 'Key 7'],
-    ['hdmi_input_2', 'HDMI Input 2'], ['direction_up', 'Direction Up'], ['DirectionUp', 'Direction Up'],
+    ['hdmi_input_2', 'HDMI Input 2'], ['direction_up', 'Up'], ['DirectionUp', 'Up'], ['direction_right', 'Right'], ['DirectionLeft', 'Left'],
   ])('%s -> %s', (raw, want) => expect(displayKey(raw)).toBe(want));
   it('never leaves underscores or a lower-case start', () => {
     for (const k of ['some_new_key', 'SomeNewKey', 'x_1', 'a']) {

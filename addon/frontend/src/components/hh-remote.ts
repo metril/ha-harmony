@@ -26,6 +26,43 @@ interface Session {
 const tid = (t: Target): string => (t.kind === 'key' ? `k:${t.name}` : t.kind === 'cell' ? `c:${t.page}:${t.x}:${t.y}` : `w:${t.page}:${t.index}`);
 export { tid };
 
+/** Where the inherited-from-default dot sits: inside the key. Rect keys use the bbox top-right; path keys use their top-right vertex pulled toward the centroid. */
+const DOTS = new Map<string, [number, number]>();
+/** D-pad wedges: angle (deg, y down) of the dot on the ring, toward the wedge's top-right. */
+const DPAD_DOT: Record<string, number> = { up: -62, right: -28, down: 62, left: 208 };
+function dotAnchor(g: KeyGeom): [number, number] {
+  const hit = DOTS.get(g.name);
+  if (hit) return hit;
+  let out: [number, number] = [g.x + g.w - 8, g.y + 8];
+  if (g.shape === 'circle') {
+    const r = g.w / 2;
+    DOTS.set(g.name, (out = [g.x + r + r * 0.6, g.y + r - r * 0.6]));
+    return out;
+  }
+  const wedge = DPAD_DOT[g.name];
+  if (wedge !== undefined) {
+    const t = (wedge * Math.PI) / 180, rr = DPAD.r * 0.66;
+    DOTS.set(g.name, (out = [DPAD.x + rr * Math.cos(t), DPAD.y + rr * Math.sin(t)]));
+    return out;
+  }
+  if (g.shape === 'path' && g.d) {
+    const pts: [number, number][] = [];
+    for (const seg of g.d.split(/(?=[A-Za-z])/)) {
+      const n = (seg.slice(1).match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+      if (seg[0] === 'A') { if (n.length >= 7) pts.push([n[5] as number, n[6] as number]); } else if (seg[0] === 'Q') { if (n.length >= 4) pts.push([n[2] as number, n[3] as number]); } else if ('ML'.includes(seg[0] as string)) for (let i = 0; i + 1 < n.length; i += 2) pts.push([n[i] as number, n[i + 1] as number]);
+    }
+    if (pts.length) {
+      const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length, cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+      const v = pts.reduce((b, p) => (p[0] - p[1] > b[0] - b[1] ? p : b));
+      const dist = Math.hypot(cx - v[0], cy - v[1]) || 1;
+      const k = Math.min(0.5, 10 / dist);
+      out = [v[0] + (cx - v[0]) * k, v[1] + (cy - v[1]) * k];
+    }
+  }
+  DOTS.set(g.name, out);
+  return out;
+}
+
 /** The Harmony Elite drawing with the live screen, hard keys as buttons, and the screen editor overlay. */
 @customElement('hh-remote')
 export class HhRemote extends LitElement {
@@ -77,6 +114,7 @@ export class HhRemote extends LitElement {
     .key.ex .glow { fill: rgba(5, 8, 11, 0.4); stroke: #687888; stroke-width: 1; stroke-dasharray: 3 2; }
     .key.bad .glow { stroke: #f85848; stroke-width: 2; }
     .dot { fill: #8d99a5; pointer-events: none; }
+    .legend { font-size: 0.75rem; color: #8d99a5; text-align: center; margin-top: 0.25rem; }
     .key.tgt .glow { fill: rgba(32, 200, 176, 0.1); stroke: #20c8b0; stroke-width: 1.4; stroke-dasharray: 4 3; animation: pulse 1.2s ease-in-out infinite; }
     .key.over .glow { fill: rgba(8, 96, 84, 0.78); stroke: #5fe3cf; stroke-width: 2; stroke-dasharray: none; animation: none; }
     .key.invalid .glow { stroke: #f85848; fill: rgba(248, 88, 72, 0.18); animation: none; }
@@ -393,7 +431,7 @@ export class HhRemote extends LitElement {
       <path class="glow" d=${path}></path>
       ${this.keyGlyph(g)}
       ${!g.label ? nothing : svg`<text class="lab" x=${g.lx ?? g.x + g.w / 2} y=${g.ly ?? g.y + g.h / 2}>${g.label}</text>`}
-      ${inh ? svg`<circle class="dot" cx=${g.x + g.w - 8} cy=${g.y + 8} r="2.6"></circle>` : nothing}
+      ${inh ? ((): TemplateResult => { const [dx, dy] = dotAnchor(g); return svg`<circle class="dot" cx=${dx} cy=${dy} r="2.6"><title>Inherited from Default</title></circle>`; })() : nothing}
     </g>`;
   }
 
@@ -507,6 +545,6 @@ export class HhRemote extends LitElement {
       ${PLATES.map((d) => svg`<path class="plate" d=${d}></path>`)}
       ${KEYS.map((g) => this.keyEl(g, byKey.get(g.name), errKeys))}
       ${PRINTED.map((p) => { const n = Math.max(p.text.length, p.sub?.length ?? 0) * 7 + 8; return svg`<rect class="pbk" x=${p.x - n / 2} y=${p.sub ? p.y - 17 : p.y - 9} width=${n} height=${p.sub ? 34 : 18} rx="4"></rect><text class="pr" x=${p.x} y=${p.sub ? p.y - 8 : p.y}>${p.text}</text>${p.sub ? svg`<path class="prl" d=${`M${p.x - 8} ${p.y}h16`}></path><text class="pr" x=${p.x} y=${p.y + 8}>${p.sub}</text>` : nothing}`; })}
-    </svg>`;
+    </svg>${st.layer !== DEFAULT_LAYER ? html`<div class="legend"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.6" fill="#8d99a5"></circle></svg> Inherited from Default</div>` : nothing}`;
   }
 }
