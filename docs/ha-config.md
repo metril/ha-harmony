@@ -227,7 +227,7 @@ off; `lock` unlocked / unlocking / open = on, locked / locking = off; `media_pla
 unknown power. Everything else works as for IR devices:
 `{device: shield, command: ok}` on a key or button becomes that service call, the device gets its buttons,
 `remote.send_command` and a power sensor, and activities may list it with an `input`. It does not count
-against the hub's device limits and never reaches the hub. Turn HDMI-CEC power control off on these devices (and on TVs they connect to): it fights Harmony's own power handling.
+against the hub's device limits and never reaches the hub. Turn HDMI-CEC off on these devices and on the TV they connect to (Samsung calls it Anynet+): CEC fights Harmony's own power handling, and a device put to sleep while the TV powers off can wake straight back up.
 
 **Order when an activity starts or stops** (the hub runs its IR sequence as always; Home Assistant runs its
 steps once the hub *reports the result*, so they come after the TV's settle time): when the hub reports
