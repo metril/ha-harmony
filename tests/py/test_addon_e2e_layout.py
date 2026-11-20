@@ -91,7 +91,7 @@ async def test_bluetooth_panel_wizards_and_key_map_under_a_wide_font(browser, bt
     await wide(page, size, "30-bt-panel")
     await audit(page, "panel")
     await page.get_by_role("link", name="Add Bluetooth device").click()
-    await page.get_by_role("radio", name="Any (recommended)").wait_for()
+    await page.get_by_role("radio", name="Automatic (recommended)").wait_for()
     await wide(page, size, "31-bt-host-start")
     await audit(page, "host wizard")
     await page.evaluate("location.hash = '#/bluetooth'")

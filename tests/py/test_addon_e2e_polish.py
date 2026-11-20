@@ -8,12 +8,22 @@ axe tests also need `npm ci` in addon/frontend.
 """
 
 import json
-import re
 import os
+import re
 from pathlib import Path
 
 import pytest
-from test_addon_e2e import DIST, INGRESS_HEADERS, PREFIX, TOKEN, H, api, browser, open_editor  # noqa: F401
+from test_addon_e2e import (  # noqa: F401
+    DIST,
+    INGRESS_HEADERS,
+    PREFIX,
+    TOKEN,
+    H,
+    api,
+    browser,
+    open_editor,
+    proxy_ws,
+)
 
 from harmony_addon.app import create_app
 from harmony_addon.auth import NoAuth
@@ -73,7 +83,6 @@ async def large(aiohttp_server, tmp_path):
         static_dir=DIST,
         bundle_token=TOKEN,
         bundle_networks=None,
-        wait_seconds=1.0,
         ha_api=FakeHa(),
     )
     server = await aiohttp_server(app)
@@ -96,6 +105,7 @@ async def open_large(browser, origin, width=1440, height=900, **kw):
         )
 
     await page.route(f"{origin}{PREFIX}/**", to_server)
+    await proxy_ws(page, origin)
     await page.goto(f"{origin}{PREFIX}/#/remote")
     await page.locator("hh-remote [data-key]").first.wait_for()
     await _settle(page)

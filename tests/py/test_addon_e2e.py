@@ -54,7 +54,6 @@ async def site(aiohttp_server, tmp_path):
         static_dir=DIST,
         bundle_token=TOKEN,
         bundle_networks=None,
-        wait_seconds=1.0,
     )
     server = await aiohttp_server(app)
     return f"http://127.0.0.1:{server.port}"
@@ -104,6 +103,36 @@ def _stress(b):
     b.new_context = new_context
 
 
+async def proxy_ws(page, origin):
+    """The ingress proxy for WebSockets (`page.route` does not see them): strip the prefix, add what Supervisor adds,
+    relay both ways to the real server."""
+    ws_origin = "ws" + origin[4:]
+
+    async def relay(route):
+        session = aiohttp.ClientSession()
+        up = await session.ws_connect(
+            route.url.replace(PREFIX, "", 1), headers={**INGRESS_HEADERS, "Origin": origin}
+        )
+
+        async def pump():
+            async for m in up:
+                if m.type == aiohttp.WSMsgType.TEXT:
+                    route.send(m.data)
+            await route.close()
+
+        task = asyncio.ensure_future(pump())
+
+        async def stop(*_):
+            task.cancel()
+            await up.close()
+            await session.close()
+
+        route.on_message(lambda m: asyncio.ensure_future(up.send_str(m if isinstance(m, str) else m.decode())))
+        route.on_close(lambda *a: asyncio.ensure_future(stop()))
+
+    await page.route_web_socket(f"{ws_origin}{PREFIX}/**", relay)
+
+
 async def open_editor(browser, origin, problems=None, **kw):
     page = await browser.new_page(**kw)
     if problems is not None:
@@ -119,6 +148,7 @@ async def open_editor(browser, origin, problems=None, **kw):
         )
 
     await page.route(f"{origin}{PREFIX}/**", to_real_server)
+    await proxy_ws(page, origin)
     await page.goto(f"{origin}{PREFIX}/")
     return page
 
@@ -130,16 +160,82 @@ async def api(origin, method, path, **kw):
         return r.status, (await r.json() if r.status != 204 else None)
 
 
-async def ack(origin, result="ok", detail=None):
-    """What the integration does after pulling the bundle: GET it, then POST /bundle/ack."""
-    auth = {"Authorization": f"Bearer {TOKEN}"}
-    status, bundle = await api(origin, "GET", "/api/v1/bundle?hub=default", headers=auth)
-    assert status == 200
-    body = {"hub": "default", "rev": bundle["rev"], "result": result}
-    if detail:
-        body["detail"] = detail
-    status, _ = await api(origin, "POST", "/api/v1/bundle/ack", json=body, headers=auth)
-    assert status == 200
+class Channel:
+    """What Home Assistant's integration is to the add-on: the bearer-authenticated channel WebSocket of one hub
+    (`hello`, then `bundle` / `bt_cmd` frames in, `ack` / `bt_state` / `bt_result` frames out)."""
+
+    def __init__(self, origin, hub="default"):
+        self.origin, self.hub = origin, hub
+        self.session = self.ws = None
+        self.latest: dict | None = None  # the newest bundle received
+        self.frames: list[dict] = []
+
+    async def open(self, known_rev=None, **hello):
+        self.session = aiohttp.ClientSession()
+        self.ws = await self.session.ws_connect(
+            f"{self.origin}/api/v1/channel?hub={self.hub}", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
+        await self.ws.send_json({"t": "hello", "v": 1, "hub": self.hub, "known_rev": known_rev, **hello})
+        return self
+
+    async def send(self, t, **fields):
+        await self.ws.send_json({"t": t, **fields})
+
+    async def recv(self, t=None, timeout=8.0):
+        """The next frame (of type `t`)."""
+        while True:
+            msg = await asyncio.wait_for(self.ws.receive(), timeout)
+            if msg.type != aiohttp.WSMsgType.TEXT:
+                raise AssertionError(f"channel closed ({msg.type.name})")
+            frame = msg.json()
+            self.frames.append(frame)
+            if frame.get("t") == "bundle":
+                self.latest = frame["body"]
+            if t is None or frame.get("t") == t:
+                return frame
+
+    async def bundle(self, timeout=8.0):
+        return (await self.recv("bundle", timeout))["body"]
+
+    async def ack(self, result="ok", detail=None, *, next=True):
+        """Ack the next bundle to arrive (or, `next=False`, the newest one already received)."""
+        rev = (await self.bundle() if next or self.latest is None else self.latest)["rev"]
+        await self.send("ack", rev=rev, result=result, **({"detail": detail} if detail else {}))
+
+    async def close(self):
+        if self.ws is not None:
+            await self.ws.close()
+        if self.session is not None:
+            await self.session.close()
+
+
+async def link(origin, hub="default", **hello):
+    """The integration says hello for `hub` (so the add-on knows it) and goes away."""
+    ch = await Channel(origin, hub).open(**hello)
+    await ch.close()
+
+
+async def ack(origin, result="ok", detail=None, hub="default"):
+    """What the integration does with an applied config: hello, take the bundle, send the ack."""
+    ch = await Channel(origin, hub).open()
+    try:
+        await ch.ack(result, detail)
+        await ch.ws.send_str("{}")  # frames are handled in order: the answer to this one says the ack is done
+        await ch.recv("error")
+    finally:
+        await ch.close()
+
+
+async def hub_status(origin, hub="default"):
+    """The `hub:<id>` snapshot the editor gets from /live."""
+    async with aiohttp.ClientSession() as s, s.ws_connect(
+        f"{origin}/api/v1/live", headers={**INGRESS_HEADERS, "Origin": origin}
+    ) as ws:
+        await ws.send_json({"sub": [f"hub:{hub}"]})
+        while True:
+            m = (await asyncio.wait_for(ws.receive(), 8)).json()
+            if m.get("t") == "snapshot":
+                return m["topics"][f"hub:{hub}"]
 
 
 async def seed(origin, *configs):
@@ -207,9 +303,10 @@ async def test_a_second_tab_editing_the_draft_shows_the_conflict_banner(browser,
 
 async def test_waiting_message_after_30s_is_reachable_and_late_ack_still_completes(browser, site):
     await seed(site, SMALL)
-    # the integration is linked (it polls for this hub): with no poller at all the dialog says
+    # the integration is linked (it said hello for this hub): with none at all the dialog says
     # "No Home Assistant integration is linked" instead
-    await api(site, "GET", "/api/v1/bundle?hub=default", headers={"Authorization": f"Bearer {TOKEN}"})
+    ch = await Channel(site).open()  # the integration is connected
+    await ch.bundle()
     page = await open_editor(browser, site)
     await page.get_by_text("No changes since rev 1").wait_for()
     # an edit through the store, then apply it from the UI with a shortened wait
@@ -223,8 +320,9 @@ async def test_waiting_message_after_30s_is_reachable_and_late_ack_still_complet
     await page.get_by_role("button", name="Review & apply").click()
     await page.get_by_role("button", name="Apply to hub").click()
     await page.get_by_text("Home Assistant has not picked it up yet").wait_for(timeout=8000)
-    await ack(site)
+    await ch.ack()
     await page.get_by_text("On the remote").wait_for(timeout=8000)
+    await ch.close()
 
 
 async def shots(page, name):
@@ -413,7 +511,6 @@ async def site_ir(aiohttp_server, tmp_path):
         static_dir=DIST,
         bundle_token=TOKEN,
         bundle_networks=None,
-        wait_seconds=1.0,
         irdb=IrdbArchive(FakeSession(), tmp_path / "irc"),
         ir_sender=Sender(),
     )
@@ -581,7 +678,6 @@ async def site_ha(aiohttp_server, tmp_path):
         static_dir=DIST,
         bundle_token=TOKEN,
         bundle_networks=None,
-        wait_seconds=1.0,
         ha_api=FakeHaApi(),
     )
     server = await aiohttp_server(app)
@@ -642,9 +738,10 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
     await page.get_by_role("button", name="Apply to hub").click()
     await page.get_by_text("Saved as rev 1").wait_for()
 
-    auth = {"Authorization": f"Bearer {TOKEN}"}
-    status, bundle = await api(site, "GET", "/api/v1/bundle?hub=default", headers=auth)
-    assert status == 200 and "editor" not in bundle["config"]
+    ch = await Channel(site).open()
+    bundle = await ch.bundle()
+    await ch.close()
+    assert "editor" not in bundle["config"]
     assert bundle["config"]["activities"][1]["keys"]["channel_up"]["ha"]["service"] == "light.toggle"
     assert [w for p in bundle["config"]["pages"] for w in p["widgets"] if w["type"] == "tile"]
     if os.environ.get("HH_WRITE_FIXTURE"):
@@ -653,13 +750,13 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
     assert [p for p in problems if "Failed to load resource" not in p] == []
 
 
-async def test_editor_follows_the_hub_id_the_integration_polls(browser, site):
-    """The reported bug: the integration polls the add-on with its own hub id (404 until something is
-    applied), while the editor used `default`, so nothing was ever fetched or acked."""
+async def test_editor_follows_the_hub_id_the_integration_uses(browser, site):
+    """The reported bug: the integration talks to the add-on with its own hub id (nothing applied for it
+    at first), while the editor used `default`, so nothing was ever fetched or acked."""
     hub = "living-room-hub"
-    auth = {"Authorization": f"Bearer {TOKEN}"}
-    assert (await api(site, "GET", f"/api/v1/bundle?hub={hub}", headers=auth))[0] == 404
-    assert (await api(site, "GET", f"/api/v1/bundle/wait?hub={hub}&rev=", headers=auth))[0] == 204
+    ch = await Channel(site, hub).open()
+    assert (await ch.recv())["t"] == "nothing_applied"  # nothing is applied for it yet
+    await ch.close()
 
     problems: list[str] = []
     page = await open_editor(browser, site, problems)  # no ?hub=
@@ -673,22 +770,23 @@ async def test_editor_follows_the_hub_id_the_integration_polls(browser, site):
     await page.get_by_role("button", name="Apply to hub").click()
     await page.get_by_text("Saved as rev 1").wait_for()
 
-    status, got = await api(site, "GET", f"/api/v1/bundle?hub={hub}", headers=auth)
-    assert status == 200 and got["hub_id"] == hub  # servable to the integration's id
-    body = {"hub": hub, "rev": got["rev"], "result": "ok"}
-    assert (await api(site, "POST", "/api/v1/bundle/ack", json=body, headers=auth))[0] == 200
+    ch = await Channel(site, hub).open()
+    got = await ch.bundle()
+    assert got["hub_id"] == hub  # servable to the integration's id
+    await ch.ack(next=False)
     await page.get_by_text("(pending)").wait_for(state="detached", timeout=8000)
     await page.get_by_text("On the remote").wait_for()
-    st = (await api(site, "GET", f"/api/v1/config/status?hub={hub}"))[1]
+    st = await hub_status(site, hub)
     assert st["acked_rev"] == st["applied_rev"] and st["result"] == "ok"
+    await ch.close()
     assert [p for p in problems if "Failed to load resource" not in p] == []
 
 
 async def test_history_status_follows_the_remote(browser, site):
     """One status chip on the newest rev: Sending... until the integration acks, then On the remote; a rejection says why."""
-    auth = {"Authorization": f"Bearer {TOKEN}"}
     await seed(site, YAML, SMALL)
-    await api(site, "GET", "/api/v1/bundle?hub=default", headers=auth)  # the integration polls: linked, not acked
+    ch = await Channel(site).open()  # the integration is connected, but has not acked
+    await ch.bundle()
     page = await open_editor(browser, site)
     await page.goto(f"{site}{PREFIX}/#/history")
     status = page.locator("hh-history li").first.locator(".chip")
@@ -697,17 +795,17 @@ async def test_history_status_follows_the_remote(browser, site):
     await page.get_by_text("is being sent to the remote").wait_for()
     if SHOTS:
         await shots(page, "history-sending")
-    await ack(site)
+    await ch.ack(next=False)
     await page.reload()
     await page.get_by_text("On the remote").wait_for()
     if SHOTS:
         await shots(page, "history-on-remote")
     await seed(site, YAML)
-    await api(site, "GET", "/api/v1/bundle?hub=default", headers=auth)
-    await ack(site, "error", "bad key map")
+    await ch.ack("error", "bad key map")
     await page.reload()
     await page.get_by_text("Rejected by hub").wait_for()
     await page.get_by_role("button", name="See why").click()
     await page.get_by_text("bad key map").first.wait_for()
     if SHOTS:
         await shots(page, "history-rejected")
+    await ch.close()

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 import pytest
-from test_addon_e2e import DIST, PREFIX, H, api, browser, open_editor, site  # noqa: F401
+from test_addon_e2e import DIST, PREFIX, H, api, browser, link, open_editor, site  # noqa: F401
 
 from harmony_core.config_model import load_source
 
@@ -232,8 +232,6 @@ async def test_axe_on_the_theme_views_and_the_colour_row(browser, site, scheme):
 
 
 async def test_a_palette_only_remote_shows_its_notice_in_the_themes_view(browser, site):
-    import aiohttp
-    from test_addon_e2e import TOKEN
 
     page = await studio(browser, site)
     await page.goto(f"{site}{PREFIX}/#/themes")
@@ -250,12 +248,7 @@ async def test_a_palette_only_remote_shows_its_notice_in_the_themes_view(browser
             ],
         }
     ]
-    headers = {"Authorization": f"Bearer {TOKEN}", "X-Hub-Remotes": json.dumps(report)}
-    async with (  # the integration's poll, as the real one sends it
-        aiohttp.ClientSession() as s,
-        s.get(f"{site}/api/v1/bundle?hub=default", headers=headers) as r,
-    ):
-        assert r.status in (200, 404)
+    await link(site, remotes=report)  # the integration's hello, as the real one sends it
     await page.reload()
     await page.get_by_role("article", name="Cards").wait_for()
     notice = page.locator("#theme-notice")

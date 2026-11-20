@@ -103,7 +103,6 @@ async def site_for(aiohttp_server, tmp_path, ha, reg):
         static_dir=DIST,
         bundle_token=TOKEN,
         bundle_networks=None,
-        wait_seconds=1.0,
         ha_api=ha,
         ha_registry=reg,
     )
