@@ -6,7 +6,9 @@
 #include "bt_hid_queue.h"
 #include "bt_reconnect_queue.h"
 #include "bt_remote.h"
+#include "bt_win.h"
 
+uint8_t g_win_tr; /* BT_PAIR_TR_* of the open host window */
 bool g_classic_paging; /* a page attempt runs: LE scanning pauses */
 
 static btstack_timer_source_t s_win_timer, s_loop_timer;
@@ -21,13 +23,30 @@ static uint32_t now_ms(void) { return btstack_run_loop_get_time_ms(); }
 /* ---- pairing window ---- */
 
 bool bt_pair_host_open(void) { return g_window == 1; }
+bool bt_pair_classic_open(void) { return bt_win_classic_pairing(g_window, g_win_tr); }
+bool bt_pair_le_open(void) { return bt_win_le_pairing(g_window, g_win_tr); }
+
+static bool classic_bond_exists(void) {
+    for (int i = 0; i < g_hosts_n; i++)
+        if (g_hosts[i].used && g_hosts[i].transport == BT_TR_CLASSIC) return true;
+    return false;
+}
+
+/* Classic inquiry/page scan follow the window: discoverable only when Classic may take a new bond, page scan
+ * off in an LE-only window unless a Classic bond needs to reconnect. The prior state (connectable, not
+ * discoverable) comes back when the window closes. */
+void bt_classic_scan_update(void) {
+    gap_discoverable_control(bt_win_classic_pairing(g_window, g_win_tr) ? 1 : 0);
+    gap_connectable_control(bt_win_classic_connectable(g_window, g_win_tr, classic_bond_exists()) ? 1 : 0);
+}
 bool bt_pair_remote_open(void) { return g_window == 2; }
 
 static void window_closed(void) {
     btstack_run_loop_remove_timer(&s_win_timer);
-    gap_discoverable_control(0);
     s_new_key_valid = false;
     g_window = 0;
+    g_win_tr = BT_PAIR_TR_ANY;
+    bt_classic_scan_update();
     bt_adv_update();
     bt_remote_scan_update();
     bt_push_state();
@@ -46,7 +65,7 @@ static void win_timeout(btstack_timer_source_t *ts) {
     bt_pair_finish(kind, BT_PR_TIMEOUT, BT_SLOT_NONE);
 }
 
-void bt_pair_window(bool on, uint16_t secs, uint8_t mode) {
+void bt_pair_window(bool on, uint16_t secs, uint8_t mode, uint8_t transport) {
     if (!on) {
         if (g_window) bt_pair_finish(g_window == 2 ? BT_KIND_REMOTE : BT_KIND_HOST, BT_PR_CLOSED, BT_SLOT_NONE);
         return;
@@ -61,11 +80,14 @@ void bt_pair_window(bool on, uint16_t secs, uint8_t mode) {
     if (secs > BT_PAIR_MAX_S) secs = BT_PAIR_MAX_S;
     g_window = mode == BT_KIND_REMOTE ? 2 : 1;
     s_new_key_valid = false;
-    if (g_window == 1) gap_discoverable_control(1);
+    g_win_tr = g_window == 1 && transport <= BT_PAIR_TR_LE ? transport : BT_PAIR_TR_ANY;
+    if (g_win_tr == BT_PAIR_TR_LE && !g_bt_le) g_win_tr = BT_PAIR_TR_ANY; /* no LE radio: do not lock Classic out */
+    bt_classic_scan_update();
     btstack_run_loop_set_timer_handler(&s_win_timer, win_timeout);
     btstack_run_loop_set_timer(&s_win_timer, (uint32_t)secs * 1000u);
     btstack_run_loop_add_timer(&s_win_timer);
-    bt_logf("pairing window open (%s, %u s)", g_window == 1 ? "host" : "remote", secs);
+    bt_logf("pairing window open (%s, transport %s, %u s)", g_window == 1 ? "host" : "remote",
+            g_window == 2 ? "le" : g_win_tr == BT_PAIR_TR_LE ? "le" : g_win_tr == BT_PAIR_TR_CLASSIC ? "classic" : "any", secs);
     bt_adv_update();
     bt_remote_scan_update();
     bt_push_state();
@@ -184,7 +206,7 @@ static void loop_start(int slot) {
 }
 
 void bt_classic_link_key(const bd_addr_t addr) {
-    if (g_window == 1) {
+    if (bt_pair_classic_open()) {
         memcpy(s_new_key, addr, 6);
         s_new_key_valid = true;
     }
@@ -206,7 +228,6 @@ void bt_classic_hid_opened(uint8_t status, uint16_t cid, const bd_addr_t addr, h
     if (status != ERROR_CODE_SUCCESS) {
         bt_logf("Classic HID open to %s failed (0x%02x)", bd_addr_to_str(addr), status);
         if (s >= 0) g_hosts[s].cid = 0; /* the loop tries again */
-        if (g_window == 1 && s < 0) return;
         return;
     }
     if (cid == 0) { /* a link the stack cannot address: drop it, the next attempt opens a clean one */
@@ -215,7 +236,7 @@ void bt_classic_hid_opened(uint8_t status, uint16_t cid, const bd_addr_t addr, h
     }
     bool is_new = false;
     if (s < 0) {
-        if (g_window == 1 && s_new_key_valid && memcmp(s_new_key, addr, 6) == 0) {
+        if (bt_pair_classic_open() && s_new_key_valid && memcmp(s_new_key, addr, 6) == 0) {
             s = bt_host_alloc(BT_TR_CLASSIC, 0, addr, "");
             if (s < 0) {
                 log_msg("pairing: host table full");
@@ -272,6 +293,7 @@ void bt_classic_acl_gone(hci_con_handle_t handle) {
 #ifdef HH_BT_LE
 static btstack_timer_source_t s_adv_timer;
 static bool s_adv_on;
+static uint8_t s_adv_flags;
 static uint32_t s_le_reconn_until;
 #define UNIDENTIFIED_MS 10000 /* an LE central that is neither a known host nor pairing is dropped */
 static struct {
@@ -291,23 +313,29 @@ void bt_adv_update(void) {
     if (!g_bt_le) return;
     bool reconn = s_le_reconn_until && (int32_t)(s_le_reconn_until - now_ms()) > 0;
     if (!reconn) s_le_reconn_until = 0;
-    bool want = g_bt_state == BT_ST_READY && (g_window == 1 || reconn) && bt_hosts_connected() < HH_BT_MAX_CONN;
+    bool want = g_bt_state == BT_ST_READY && (bt_pair_le_open() || reconn) && bt_hosts_connected() < HH_BT_MAX_CONN;
     btstack_run_loop_remove_timer(&s_adv_timer);
     if (reconn) {
         btstack_run_loop_set_timer_handler(&s_adv_timer, adv_timer);
         btstack_run_loop_set_timer(&s_adv_timer, s_le_reconn_until - now_ms());
         btstack_run_loop_add_timer(&s_adv_timer);
     }
-    if (want == s_adv_on) return;
-    if (want) {
+    uint8_t flags = bt_win_adv_flags(bt_pair_le_open()); /* general discoverable only inside the window */
+    int act = bt_win_adv_action(s_adv_on, want, s_adv_flags, flags);
+    if (act == BT_ADV_NONE) return;
+    if (act == BT_ADV_START) {
         bd_addr_t null_addr = {0};
-        s_adv_data[2] = g_window == 1 ? 0x06 : 0x04; /* general discoverable only inside the window */
         gap_advertisements_set_params(0x30, 0x30, 0, 0, null_addr, 0x07, 0x00);
+    }
+    if (act == BT_ADV_START || act == BT_ADV_REFRESH) {
+        s_adv_data[2] = flags;
+        s_adv_flags = flags;
         gap_advertisements_set_data(sizeof s_adv_data, s_adv_data);
     }
-    gap_advertisements_enable(want);
+    if (act != BT_ADV_REFRESH) gap_advertisements_enable(want);
     s_adv_on = want;
-    bt_logf("LE advertising %s", want ? "on" : "off");
+    if (act == BT_ADV_REFRESH) bt_logf("LE advertising data refreshed (flags 0x%02x)", flags);
+    else bt_logf("LE advertising %s (flags 0x%02x)", want ? "on" : "off", want ? flags : 0);
 }
 
 static void pending_check(btstack_timer_source_t *ts) {
@@ -315,7 +343,7 @@ static void pending_check(btstack_timer_source_t *ts) {
     bool any = false;
     for (size_t i = 0; i < sizeof s_pending / sizeof s_pending[0]; i++) {
         if (!s_pending[i].handle) continue;
-        if (g_window != 1 && now_ms() - s_pending[i].t_ms > UNIDENTIFIED_MS) {
+        if (!bt_pair_le_open() && now_ms() - s_pending[i].t_ms > UNIDENTIFIED_MS) {
             bt_logf("LE link 0x%04x not identified: disconnecting", s_pending[i].handle);
             gap_disconnect(s_pending[i].handle);
             s_pending[i].handle = 0;
@@ -374,7 +402,7 @@ void bt_le_host_identified(hci_con_handle_t handle, const bd_addr_t addr, uint8_
     pending_set(handle, false);
     int s = bt_host_find_addr(addr, BT_TR_LE);
     if (s < 0) {
-        if (!(new_bond && g_window == 1)) { /* a bond nobody asked for */
+        if (!(new_bond && bt_pair_le_open())) { /* a bond nobody asked for */
             gap_delete_bonding((bd_addr_type_t)addr_type, (uint8_t *)addr);
             gap_disconnect(handle);
             return;
@@ -445,6 +473,7 @@ void bt_forget_host(int slot) {
     bt_host_free(slot);
     bt_push_hosts();
     bt_adv_update();
+    bt_classic_scan_update();
 }
 
 void bt_pairing_controller_ready(void) {

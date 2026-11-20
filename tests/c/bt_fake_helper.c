@@ -125,8 +125,9 @@ static void on_frame(uint8_t type, const uint8_t *p, size_t n) {
         if (n == 5) log_line("KEY %u %u %u %u", p[0], p[1], (p[2] << 8) | p[3], p[4]);
         break;
     case BT_IPC_PAIR:
-        if (n != 4) break;
+        if (n != 4 && n != 5) break;
         log_line("PAIR %u %u %u", p[0], (p[1] << 8) | p[2], p[3]);
+        if (n == 5) log_line("PAIRTR %u", p[4]);
         state(BT_ST_READY, p[0] ? (uint8_t)(1 + p[3]) : 0);
         if (p[0] && p[3] == 1) candidates();
         break;

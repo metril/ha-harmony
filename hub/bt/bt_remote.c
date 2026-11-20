@@ -332,7 +332,6 @@ static void hids_start(int slot, hci_con_handle_t handle) {
 void bt_remote_pairing_complete(hci_con_handle_t handle, const bd_addr_t addr, uint8_t addr_type, uint8_t status) {
     if (!s_cand.active || s_cand.handle != handle) return;
     if (status != ERROR_CODE_SUCCESS) {
-        bt_logf("remote: pairing failed (0x%02x)", status);
         gap_disconnect(handle);
         if (g_window == 2) bt_push_pairres(BT_KIND_REMOTE, BT_PR_FAILED, BT_SLOT_NONE);
         return;

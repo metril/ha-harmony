@@ -24,6 +24,8 @@ typedef void (*hidq_request_fn)(uint16_t cid);
 typedef void (*hidq_log_fn)(const char *line);
 
 void hidq_init(hidq_send_fn send, hidq_request_fn request, hidq_log_fn log);
+/* Where the routine "refused by the stack: waiting" / "sent after waiting" lines go (debug level); NULL (the default) drops them */
+void hidq_set_debug_log(hidq_log_fn log);
 
 /* Sends the report, or queues it when the stack refuses it or reports are already waiting */
 void hidq_send(uint16_t cid, const uint8_t *report, uint16_t len, uint32_t now_ms);

@@ -7,7 +7,7 @@ gets the normal `unauthorized` `error`. Compatibility rules: [compat.md](compat.
 
 | Code | Type | Direction | Fields |
 |---|---|---|---|
-| 35 | `bt_pair` | client -> hub | `on: bool`, `secs: u16?` (default 120, 1..300), `transport: "any"\|"classic"\|"le"?` (default any), `mode: "host"\|"remote"?` (default host), `addr: str?` (`AA:BB:CC:DD:EE:FF`, either case; see "Picking a remote") |
+| 35 | `bt_pair` | client -> hub | `on: bool`, `secs: u16?` (default 120, 1..300), `transport: "any"\|"classic"\|"le"?` (default any; which radio takes a new host bond, see "Window transport"), `mode: "host"\|"remote"?` (default host), `addr: str?` (`AA:BB:CC:DD:EE:FF`, either case; see "Picking a remote") |
 | 36 | `bt_state` | hub -> client | see below; also the reply to `bt_pair` / `bt_forget` (same id), and pushed (id 0) on any change |
 | 37 | `bt_forget` | client -> hub | `slot: u8`, `kind: "host"\|"remote"?` (default host) |
 | 38 | `bt_key` | client -> hub | `slot: u8`, `page: 7\|12`, `usage: u16`, `action: "down"\|"up"\|"press"` (test-fire at a host) |
@@ -53,11 +53,55 @@ that is not bonded has no entry in `hosts`; `bt_key` / `bt_forget` for its slot 
 The hub runs the Bluetooth helper as a child process (`hub bt-helper`, `hub/bt/bt_ipc.h`) only while it is needed: the loaded
 config has `bt_hosts` or `bt_remotes`, or a pairing window is open (or closed less than 60 s ago, so a fresh bond stays
 visible). Before the first start of a boot the stock `bluetoothd` is stopped if it is running (nothing is changed on disk, so
-the stock firmware gets it back at the next boot). The hub pings every 5 s and kills a helper that has been silent for 15 s,
+the stock firmware gets it back at the next boot). It is found by the name in `/proc/<pid>/comm`, else `stat`, else `cmdline` (the hub's 2.6.31 kernel has no `comm`); only `bluetoothd` is stopped, `hciattach` (which attaches the UART controller) stays. The log says whether it was stopped, not found or survived SIGKILL. The hub pings every 5 s and kills a helper that has been silent for 15 s,
 or that sends a malformed frame; it restarts it after 5, 30, then 120 s, at most 5 times a boot, after which `state` is
 `disabled` until the hub restarts. A helper death is not a boot failure: `state` leaves `ready`, `hosts` / `remotes` /
 `candidates` / `pairing` / `window` are cleared, `gen` changes, a key held down for a host is released and every connected
 remote is reported lost to the key mapping; IR and RF are unaffected. Config bt slots are bound to the helper's bonds by address.
+
+## Window transport
+
+`bt_pair {transport}` decides which radio takes a new host bond while the window is open (`mode: host`; a remote window is
+always LE):
+
+| transport | Classic inquiry / page scan | LE advertising |
+|---|---|---|
+| `any` | discoverable | on, general discoverable |
+| `classic` | discoverable | off (a bonded LE host asked to connect may still get a short reconnect advertisement) |
+| `le` | not discoverable; page scan off unless a Classic bond exists | on, general discoverable |
+
+In an `le` window Classic cannot bond: the PIN / SSP requests are refused and an unknown Classic host's HID channel is
+dropped. Page scan stays on only when at least one Classic host is bonded, so that host can still reconnect (an unbonded
+host cannot find or pair with the hub). In a `classic` window an LE central's pairing request is declined. When the window
+closes the usual state returns (connectable, not discoverable, no pairing advertising). Without LE support an `le` window
+falls back to `any` in the helper (the hub already answers `no_le`).
+
+The helper logs one line (default level, no key material) for the start of each pairing (`pairing start: transport le|classic,
+peer ...`), each refusal (`pairing refused: ...`) and each failure (`pairing failed: transport ..., peer ..., SMP reason 0x..` /
+`HCI status 0x..` / `auth status 0x..`). Routine HID back-pressure lines ("refused by the stack ... waiting to send") are debug
+level: set `HH_BT_DEBUG` in the helper's environment to see them.
+
+## LE address, Secure Connections, diagnostics
+
+- **LE address.** The helper advertises and connects over LE with a random static address (top two bits 11), not the
+  controller's public BD_ADDR that Classic hosts inquire and page, so a host's "pair" on that listing cannot fall onto
+  BR/EDR. It is generated once from `/dev/urandom` and kept in `le_addr` next to `keys.tlv` (6 bytes, written atomically,
+  reused at every start so LE bonds reconnect; an invalid file is replaced; if it cannot be stored LE keeps the public
+  address). It is logged at start (`LE address (static random) ...`), not part of `bt_state`. Changing the LE address
+  invalidates LE bonds made under the old one (the first start with this change: re-pair LE hosts and remotes).
+- **Advertising data.** The Flags byte is general discoverable (0x06) only while a window takes LE bonds (else 0x04). When a
+  window opens or closes while advertising is already on, the data is replaced in place.
+- **LE Secure Connections** (Just Works, IO capability NoInputNoOutput, bonding) with software P-256 (vendored micro-ecc,
+  BSD-2, `vendor/btstack/3rd-party/micro-ecc`; the controller has no HCI ECC), falling back to legacy pairing when the peer
+  has no SC. Keys stay 16 bytes. The first SC pairing spends some seconds of CPU on the hub's MIPS core.
+- **Info-level helper log** (besides the pairing lines above): Classic connection request / complete (peer, link type,
+  status), LE connection complete (role, peer, type, status), LE pairing complete for every status (SMP reason or HCI status),
+  link disconnection (handle, status, reason) and the status of LE Set Advertising Parameters / Data / Enable (failures
+  always, success once).
+- **HCI trace** (bench diagnosis only): create the file `hci_trace` in the helper's data directory (next to `keys.tlv`, e.g.
+  `/data/ha-harmony/bt/hci_trace`; contents ignored) and restart the helper (it restarts itself after being killed). Packets go, one
+  text line each (first 48 bytes in hex; key material such as link keys, LTK commands and SMP key / confirm / random PDUs is shown as `**`), to `/tmp/bt-hci.log` (mode 0600, RAM, never flash), which restarts when it reaches 512 KiB.
+  Delete the file and restart the helper to turn it off.
 
 ## Picking a remote
 

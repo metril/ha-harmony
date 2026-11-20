@@ -17,7 +17,9 @@
  *   KEY     0x02  slot u8, page u8, usage u16, down u8 (1 = press, 0 = release)   [to a host]
  *                 page 0x07 keyboard/keypad, page 0x0C consumer. Queued up to 5 s while the host
  *                 is connecting; a key held 10 s is released.
- *   PAIR    0x03  on u8, secs u16, mode u8      pairing window (secs 0 = default 120, max 600).
+ *   PAIR    0x03  on u8, secs u16, mode u8 [, transport u8]   pairing window (secs 0 = default 120, max 600).
+ *                 transport (host mode, optional, default 0): BT_PAIR_TR_*, which radio takes NEW bonds: 0 both,
+ *                 1 Classic only (no LE advertising), 2 LE only (no Classic inquiry/page scan for new bonds).
  *                 mode 0 = host: discoverable (Classic) + advertising (LE); 1 = remote: scan and
  *                 report advertising HID remotes as CANDIDATE; nothing is bonded until PAIR_REMOTE.
  *                 Pairing is accepted only while open; one mode at a time (a new window replaces it).
@@ -70,6 +72,8 @@ enum { BT_ST_STARTING = 0, BT_ST_READY = 1, BT_ST_NO_ADAPTER = 2, BT_ST_ERROR = 
 enum { BT_KIND_HOST = 0, BT_KIND_REMOTE = 1 };
 /* host transport */
 enum { BT_TR_CLASSIC = 0, BT_TR_LE = 1 };
+/* PAIR.transport */
+enum { BT_PAIR_TR_ANY = 0, BT_PAIR_TR_CLASSIC = 1, BT_PAIR_TR_LE = 2 };
 /* PAIRRES.result */
 enum { BT_PR_OK = 0, BT_PR_TIMEOUT = 1, BT_PR_FAILED = 2, BT_PR_FULL = 3, BT_PR_CLOSED = 4 };
 #define BT_SLOT_NONE 0xFF

@@ -12,6 +12,11 @@
 #include "hub/bt/bt_hid.h"
 #include "hub/bt/bt_hid_queue.h"
 #include "hub/bt/bt_txq.h"
+#include "hub/bt/bt_win.h"
+#include "hub/bt/bt_leaddr.h"
+#include "hub/bt/bt_trace.h"
+#include "hci_dump.h"
+#include <sys/stat.h>
 #include "hub/bt/bt_ipc.h"
 #include "hub/bt/bt_remote.h"
 
@@ -229,6 +234,183 @@ static void test_hidq_overflow(void) {
     CT_CHECK(hidq_is_release(s_sent[s_sent_n - 1], 10)); /* the last thing the host sees is a release */
 }
 
+/* ---- window transport -> scan / advertising decision, failure line ---- */
+static void test_window_transport(void) {
+    /* no window: nothing discoverable, no pairing, page scan on (the prior state) */
+    for (uint8_t tr = 0; tr <= 2; tr++) {
+        CT_CHECK(!bt_win_classic_pairing(0, tr) && !bt_win_le_pairing(0, tr));
+        CT_CHECK(bt_win_classic_connectable(0, tr, false));
+        CT_CHECK(!bt_win_classic_pairing(2, tr) && !bt_win_le_pairing(2, tr)); /* a remote window opens no host pairing */
+    }
+    CT_CHECK(bt_win_classic_pairing(1, BT_PAIR_TR_ANY) && bt_win_le_pairing(1, BT_PAIR_TR_ANY)); /* auto: both */
+    CT_CHECK(!bt_win_classic_pairing(1, BT_PAIR_TR_LE) && bt_win_le_pairing(1, BT_PAIR_TR_LE));   /* le: no classic */
+    CT_CHECK(bt_win_classic_pairing(1, BT_PAIR_TR_CLASSIC) && !bt_win_le_pairing(1, BT_PAIR_TR_CLASSIC)); /* classic: no adv */
+    CT_CHECK(!bt_win_classic_connectable(1, BT_PAIR_TR_LE, false)); /* LE-only, no classic bond: no page scan */
+    CT_CHECK(bt_win_classic_connectable(1, BT_PAIR_TR_LE, true));   /* a bonded classic host may still reconnect */
+    CT_CHECK(bt_win_classic_connectable(1, BT_PAIR_TR_CLASSIC, false) && bt_win_classic_connectable(1, BT_PAIR_TR_ANY, false));
+}
+
+static void test_pair_fail_line(void) {
+    char l[120];
+    bt_pair_fail_line(l, sizeof l, "le", "AA:BB:CC:DD:EE:FF", "SMP reason", 0x05);
+    CT_CHECK(!strcmp(l, "pairing failed: transport le, peer AA:BB:CC:DD:EE:FF, SMP reason 0x05"));
+    bt_pair_fail_line(l, sizeof l, "classic", "11:22:33:44:55:66", "HCI status", 0x18);
+    CT_CHECK(!strcmp(l, "pairing failed: transport classic, peer 11:22:33:44:55:66, HCI status 0x18"));
+    CT_CHECK(!strchr(l, '\n'));
+}
+
+/* the refused / sent-after-waiting lines are debug level: the default log stays silent */
+static int s_log_n, s_dbg_n;
+static void c_log(const char *l) { (void)l; s_log_n++; }
+static void c_dbg(const char *l) { (void)l; s_dbg_n++; }
+static void test_hidq_log_levels(void) {
+    uint8_t rel[10] = {0xA1, 1};
+    s_sent_n = 0;
+    hidq_init(q_send, q_req, c_log);
+    hidq_set_debug_log(c_dbg);
+    s_accept = 0;
+    hidq_send(9, rel, 10, 0); /* refused, queued */
+    s_accept = 1;
+    hidq_service(9, 1); /* sent after waiting */
+    CT_EQ(s_log_n, 0);
+    CT_CHECK(s_dbg_n >= 2);
+    hidq_set_debug_log(NULL); /* default: dropped, no crash */
+    s_accept = 0;
+    hidq_send(9, rel, 10, 2);
+    s_accept = 1;
+    hidq_service(9, 3);
+    CT_EQ(s_log_n, 0);
+}
+
+/* ---- LE static random address: valid, persisted, reused ---- */
+static bool rnd_fixed(uint8_t *b, size_t n) {
+    static const uint8_t v[6] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC}; /* top bits not 11: generate forces them */
+    memcpy(b, v, n);
+    return true;
+}
+static bool rnd_zero(uint8_t *b, size_t n) { memset(b, 0, n); return true; }
+static bool rnd_fail(uint8_t *b, size_t n) { (void)b; (void)n; return false; }
+
+static void test_leaddr(void) {
+    uint8_t a[6], b[6];
+    CT_CHECK(bt_leaddr_generate(a, NULL) && bt_leaddr_valid(a)); /* real urandom: top two bits 11 */
+    CT_EQ(a[0] & 0xC0, 0xC0);
+    CT_CHECK(bt_leaddr_generate(a, rnd_fixed) && a[0] == 0xD2 && a[5] == 0xBC);
+    uint8_t bad1[6] = {0x3F, 1, 2, 3, 4, 5}, bad2[6] = {0xC0, 0, 0, 0, 0, 0}, bad3[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    CT_CHECK(!bt_leaddr_valid(bad1) && !bt_leaddr_valid(bad2) && !bt_leaddr_valid(bad3));
+    CT_CHECK(!bt_leaddr_generate(a, rnd_zero)); /* an all-zero random part is never accepted, 0xC0 forced or not */
+    CT_CHECK(!bt_leaddr_generate(a, rnd_fail));
+
+    char dir[] = "/tmp/hh_leaddr_XXXXXX", path[80];
+    CT_CHECK(mkdtemp(dir) != NULL);
+    snprintf(path, sizeof path, "%s/le_addr", dir);
+    CT_EQ(bt_leaddr_load_or_create(path, a, NULL), 1); /* created */
+    CT_CHECK(bt_leaddr_valid(a));
+    CT_EQ(bt_leaddr_load_or_create(path, b, rnd_fixed), 0); /* reused, never regenerated */
+    CT_CHECK(!memcmp(a, b, 6));
+    FILE *fp = fopen(path, "w"); /* a damaged file is replaced by a valid address */
+    fputs("xx", fp);
+    fclose(fp);
+    CT_EQ(bt_leaddr_load_or_create(path, b, rnd_fixed), 1);
+    CT_CHECK(bt_leaddr_valid(b) && b[0] == 0xD2);
+    CT_EQ(bt_leaddr_load_or_create(path, a, NULL), 0);
+    CT_CHECK(!memcmp(a, b, 6));
+    char tmp[90];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    CT_CHECK(access(tmp, F_OK) != 0); /* the atomic write leaves no temp file */
+    unlink(path);
+    CT_EQ(bt_leaddr_load_or_create("/nonexistent_dir_hh/le_addr", a, NULL), -1); /* cannot persist: not to be used */
+    rmdir(dir);
+}
+
+/* ---- advertising flags / data refresh when the window changes while advertising ---- */
+static void test_adv_action(void) {
+    CT_EQ(bt_win_adv_flags(true), 0x06);
+    CT_EQ(bt_win_adv_flags(false), 0x04);
+    CT_EQ(bt_win_adv_action(false, true, 0, 0x06), BT_ADV_START);
+    CT_EQ(bt_win_adv_action(true, false, 0x06, 0x04), BT_ADV_STOP);
+    CT_EQ(bt_win_adv_action(true, true, 0x04, 0x06), BT_ADV_REFRESH); /* a window opened under reconnect advertising */
+    CT_EQ(bt_win_adv_action(true, true, 0x06, 0x04), BT_ADV_REFRESH); /* the window closed, a reconnect keeps advertising */
+    CT_EQ(bt_win_adv_action(true, true, 0x06, 0x06), BT_ADV_NONE);
+    CT_EQ(bt_win_adv_action(false, false, 0x06, 0x04), BT_ADV_NONE);
+}
+
+/* ---- HCI trace: line format and the size cap ---- */
+static void test_trace(void) {
+    char l[256];
+    uint8_t pkt[4] = {0x0E, 0x04, 0x01, 0x0A};
+    size_t n = bt_trace_format(l, sizeof l, 12, 1, 4, pkt, 4);
+    CT_CHECK(n == strlen(l) && !strcmp(l, "12 < type=4 len=4 0e 04 01 0a"));
+    uint8_t big[100] = {0};
+    bt_trace_format(l, sizeof l, 1, 0, 2, big, 100);
+    CT_CHECK(strstr(l, "...") && strlen(l) < 200);
+
+    /* key material never reaches the trace */
+    uint8_t lk[26] = {0x18, 24, 1, 2, 3, 4, 5, 6, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 5};
+    bt_trace_format(l, sizeof l, 0, 1, 4, lk, 26);
+    CT_CHECK(!strstr(l, "aa") && strstr(l, "05 06 **"));
+    uint8_t cmd[35] = {0x19, 0x20, 28, 0x40, 0, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB};
+    bt_trace_format(l, sizeof l, 0, 0, 1, cmd, 35); /* LE Start Encryption */
+    CT_CHECK(!strstr(l, "bb") && strstr(l, "40 00 **"));
+    uint8_t lkr[25] = {0x0B, 0x04, 22, 1, 2, 3, 4, 5, 6, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC};
+    bt_trace_format(l, sizeof l, 0, 0, 1, lkr, 25);
+    CT_CHECK(!strstr(l, "cc") && strstr(l, "06 **"));
+    uint8_t ltk[23] = {0x1A, 0x20, 18, 0x40, 0, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD};
+    bt_trace_format(l, sizeof l, 0, 0, 1, ltk, 23);
+    CT_CHECK(!strstr(l, "dd") && strstr(l, "40 00 **"));
+    uint8_t enc[35] = {0x17, 0x20, 32, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE};
+    bt_trace_format(l, sizeof l, 0, 0, 1, enc, 35);
+    CT_CHECK(!strstr(l, "ee") && strstr(l, "17 20 20 **"));
+    uint8_t encr[22] = {0x0E, 20, 1, 0x17, 0x20, 0, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99};
+    bt_trace_format(l, sizeof l, 0, 1, 4, encr, 22);
+    CT_CHECK(!strstr(l, "99") && strstr(l, "20 00 **"));
+    /* SMP: Encryption Info (key), Identity Info, Signing Info on CID 6 are redacted; Pairing Request (0x01) is not */
+    uint8_t smp[26] = {0x40, 0x20, 21, 0, 17, 0, 6, 0, 0x06, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77};
+    for (int i = 0; i < 3; i++) {
+        smp[8] = i == 0 ? 0x06 : i == 1 ? 0x08 : 0x0A;
+        bt_trace_format(l, sizeof l, 0, 1, 2, smp, 26);
+        CT_CHECK(!strstr(l, "77") && strstr(l, "06 00 0"));
+    }
+    smp[8] = 0x01;
+    bt_trace_format(l, sizeof l, 0, 1, 2, smp, 26);
+    CT_CHECK(strstr(l, "77") && !strstr(l, "**"));
+
+    char dir[] = "/tmp/hh_trace_XXXXXX";
+    CT_CHECK(mkdtemp(dir) != NULL);
+    static char path[80];
+    snprintf(path, sizeof path, "%s/t.log", dir);
+    CT_EQ(bt_trace_start(path, 2000), 0);
+    for (int i = 0; i < 200; i++) hci_dump_packet(1, 1, pkt, 4);
+    bt_trace_stop();
+    struct stat st;
+    CT_EQ(stat(path, &st), 0);
+    CT_CHECK(st.st_size > 0 && st.st_size <= 2000); /* capped: the file restarted instead of growing */
+    CT_EQ(st.st_mode & 0777, 0600);
+    unlink(path);
+    rmdir(dir);
+}
+
+/* a file that cannot be read is neither replaced nor used */
+static void test_leaddr_unreadable(void) {
+    char dir[] = "/tmp/hh_leaddr2_XXXXXX", p[90];
+    CT_CHECK(mkdtemp(dir) != NULL);
+    uint8_t a[6];
+    snprintf(p, sizeof p, "%s/le_addr", dir);
+    CT_CHECK(mkdir(p, 0700) == 0); /* open() works, read() fails with EISDIR */
+    CT_EQ(bt_leaddr_load_or_create(p, a, NULL), -1);
+    struct stat st;
+    CT_CHECK(stat(p, &st) == 0 && S_ISDIR(st.st_mode)); /* untouched */
+    rmdir(p);
+    char nd[100];
+    snprintf(nd, sizeof nd, "%s/x", dir);
+    FILE *fp = fopen(nd, "w"); /* a path through a regular file: ENOTDIR, not ENOENT */
+    fclose(fp);
+    snprintf(p, sizeof p, "%s/x/le_addr", dir);
+    CT_EQ(bt_leaddr_load_or_create(p, a, NULL), -1);
+    unlink(nd);
+    rmdir(dir);
+}
+
 int main(void) {
     CT_RUN(test_keyboard_reports);
     CT_RUN(test_six_key_rollover);
@@ -239,5 +421,12 @@ int main(void) {
     CT_RUN(test_backoff);
     CT_RUN(test_bonds);
     CT_RUN(test_hidq_overflow);
+    CT_RUN(test_window_transport);
+    CT_RUN(test_pair_fail_line);
+    CT_RUN(test_hidq_log_levels);
+    CT_RUN(test_leaddr);
+    CT_RUN(test_adv_action);
+    CT_RUN(test_trace);
+    CT_RUN(test_leaddr_unreadable);
     return CT_DONE();
 }

@@ -91,7 +91,7 @@ static struct {
     unsigned rk_pass;     /* RKEY frames handled in this pass */
     bool backlog;         /* complete frames are still buffered: run again at once */
     bool pend_pair;       /* a pair request waiting for the helper to be ready */
-    uint8_t pend_mode;
+    uint8_t pend_mode, pend_tr; /* the pair request that waits for the helper: mode and BT_PAIR_TR_* */
     uint16_t pend_secs;
     enum bt_link_window window; /* optimistic until the helper's STATE says */
     uint64_t win_deadline;      /* host window only */
@@ -369,26 +369,82 @@ static void reap(uint64_t now) {
     }
 }
 
-static int default_bluetoothd_signal(int sig) {
-    DIR *d = opendir("/proc");
+/* The process name of /proc/<pid>: comm when the kernel has it (2.6.31 does not), else the 2nd field of stat "(name)", else the
+ * basename of the first cmdline word. */
+static bool proc_name(const char *root, long pid, char *name, size_t cap) {
+    char path[96], buf[512];
+    name[0] = 0;
+    snprintf(path, sizeof path, "%s/%ld/comm", root, pid);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        if (fgets(name, (int)cap, f)) name[strcspn(name, "\n")] = 0;
+        fclose(f);
+        if (name[0]) return true;
+    }
+    snprintf(path, sizeof path, "%s/%ld/stat", root, pid);
+    f = fopen(path, "r");
+    if (f) {
+        size_t n = fread(buf, 1, sizeof buf - 1, f);
+        fclose(f);
+        buf[n] = 0;
+        char *o = strchr(buf, '('), *c = strrchr(buf, ')'); /* the name may hold spaces or parentheses: first '(' .. last ')' */
+        if (o && c && c > o + 1) {
+            snprintf(name, cap, "%.*s", (int)(c - o - 1), o + 1);
+            return true;
+        }
+    }
+    snprintf(path, sizeof path, "%s/%ld/cmdline", root, pid);
+    f = fopen(path, "r");
+    if (f) {
+        size_t n = fread(buf, 1, sizeof buf - 1, f);
+        fclose(f);
+        buf[n] = 0; /* argv[0] ends at the first NUL */
+        const char *base = strrchr(buf, '/');
+        snprintf(name, cap, "%s", base ? base + 1 : buf);
+        return name[0] != 0;
+    }
+    return false;
+}
+
+/* a zombie or dead process (state Z / X in stat) is not a running daemon */
+static bool proc_gone(const char *root, long pid) {
+    char path[96], buf[512];
+    snprintf(path, sizeof path, "%s/%ld/stat", root, pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    const char *c = strrchr(buf, ')');
+    return c && c[1] == ' ' && (c[2] == 'Z' || c[2] == 'X');
+}
+
+/* pids of every stock `bluetoothd` under the /proc-like directory root; returns how many (at most max are stored) */
+int bt_link_find_bluetoothd(const char *root, long self, long *pids, int max) {
+    DIR *d = opendir(root);
     if (!d) return 0;
     int n = 0;
     struct dirent *e;
     while ((e = readdir(d))) {
         char *end;
         long pid = strtol(e->d_name, &end, 10);
-        if (*end || pid <= 1 || pid == (long)getpid()) continue;
-        char path[64], comm[32] = "";
-        snprintf(path, sizeof path, "/proc/%ld/comm", pid);
-        FILE *f = fopen(path, "r");
-        if (!f) continue;
-        if (fgets(comm, sizeof comm, f)) comm[strcspn(comm, "\n")] = 0;
-        fclose(f);
-        if (strcmp(comm, "bluetoothd") != 0) continue;
-        if (kill((pid_t)pid, sig) == 0) n++;
+        if (*end || pid <= 1 || pid == self) continue;
+        char name[64];
+        if (!proc_name(root, pid, name, sizeof name) || strcmp(name, "bluetoothd") != 0) continue;
+        if (proc_gone(root, pid)) continue;
+        if (n < max) pids[n] = pid;
+        n++;
     }
     closedir(d);
     return n;
+}
+
+static int default_bluetoothd_signal(int sig) {
+    long pids[16];
+    int n = bt_link_find_bluetoothd("/proc", (long)getpid(), pids, 16), sent = 0;
+    for (int i = 0; i < n && i < 16; i++)
+        if (kill((pid_t)pids[i], sig) == 0) sent++;
+    return sent;
 }
 
 /* Non-blocking stop of the stock daemon before the first spawn of a boot. Returns true when the spawn may go ahead. */
@@ -396,20 +452,31 @@ static bool bluetoothd_clear(uint64_t now) {
     if (L.hk.skip_bluetoothd || L.bz == 3) return true;
     int (*sig)(int) = L.hk.bluetoothd_signal ? L.hk.bluetoothd_signal : default_bluetoothd_signal;
     if (L.bz == 0) {
-        if (sig(0) == 0) { L.bz = 3; return true; }
+        if (sig(0) == 0) {
+            fprintf(stderr, "hub: bluetooth: stock bluetoothd not found, nothing to stop\n");
+            L.bz = 3;
+            return true;
+        }
+        fprintf(stderr, "hub: bluetooth: stopping stock bluetoothd (SIGTERM); hciattach is left running (it attaches the controller)\n");
         sig(SIGTERM);
         L.bz = 1;
         L.bz_deadline = now + 3000;
         return false;
     }
-    if (sig(0) == 0) { L.bz = 3; return true; }
+    if (sig(0) == 0) {
+        fprintf(stderr, "hub: bluetooth: stock bluetoothd stopped\n");
+        L.bz = 3;
+        return true;
+    }
     if (now < L.bz_deadline) return false;
     if (L.bz == 1) {
+        fprintf(stderr, "hub: bluetooth: bluetoothd ignored SIGTERM, sending SIGKILL\n");
         sig(SIGKILL);
         L.bz = 2;
         L.bz_deadline = now + 1000;
         return false;
     }
+    fprintf(stderr, "hub: bluetooth: bluetoothd still running after SIGKILL, starting the helper anyway\n");
     L.bz = 3; /* gave up waiting: spawn anyway, the helper reports no_adapter if the controller is still taken */
     return true;
 }
@@ -528,7 +595,7 @@ static bool bad(void) { return false; }
 
 /* Sends the pair request that waited for the helper; a full control queue leaves it pending (retried every pass). */
 static bool try_pend_pair(void) {
-    uint8_t f[4] = {1, (uint8_t)(L.pend_secs >> 8), (uint8_t)L.pend_secs, L.pend_mode};
+    uint8_t f[5] = {1, (uint8_t)(L.pend_secs >> 8), (uint8_t)L.pend_secs, L.pend_mode, L.pend_tr};
     if (send_ctl(BT_IPC_PAIR, f, sizeof f) != BT_LINK_OK) return false;
     L.pend_pair = false;
     return true;
@@ -802,7 +869,6 @@ void bt_link_set_config(const struct bt_link_cfg_entry *hosts, unsigned nh, cons
 }
 
 int bt_link_pair(bool on, unsigned secs, enum bt_link_transport transport, enum bt_link_pair_mode mode) {
-    (void)transport;
     if (L.disabled) return BT_LINK_E_NOT_READY;
     if (!on) {
         L.pend_pair = false;
@@ -819,15 +885,18 @@ int bt_link_pair(bool on, unsigned secs, enum bt_link_transport transport, enum 
     }
     if (L.st.status == BT_NO_ADAPTER) return BT_LINK_E_NOT_READY;
     uint8_t m = mode == BT_MODE_REMOTE ? 1 : 0;
+    /* which radio takes a new host bond (a remote window is always LE; the helper ignores it there) */
+    uint8_t tr = transport == BT_TRANSPORT_CLASSIC ? BT_PAIR_TR_CLASSIC : transport == BT_TRANSPORT_LE ? BT_PAIR_TR_LE : BT_PAIR_TR_ANY;
     clear_pairing(); /* rebuild() below bumps gen and fires the listener, so a poller sees the result go */
     L.n_cand = 0;
     if (L.st.status == BT_READY) {
-        uint8_t f[4] = {1, (uint8_t)(secs >> 8), (uint8_t)secs, m};
+        uint8_t f[5] = {1, (uint8_t)(secs >> 8), (uint8_t)secs, m, tr};
         int rc = send_ctl(BT_IPC_PAIR, f, sizeof f);
         if (rc != BT_LINK_OK) return rc;
     } else {
         L.pend_pair = true; /* sent when the helper reports ready */
         L.pend_mode = m;
+        L.pend_tr = tr;
         L.pend_secs = (uint16_t)secs;
         if (!running() && L.st.status == BT_OFF) L.st.status = BT_STARTING;
     }

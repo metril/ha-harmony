@@ -15,7 +15,9 @@
 #define ENABLE_BLE
 #define ENABLE_LE_PERIPHERAL
 #define ENABLE_LE_CENTRAL     /* physical LE remotes (HOGP host) */
-#define ENABLE_SOFTWARE_AES128 /* legacy LE pairing (Just Works) only: no ECC */
+#define ENABLE_SOFTWARE_AES128
+#define ENABLE_LE_SECURE_CONNECTIONS  /* LE Secure Connections (Just Works), legacy pairing when the peer has no SC */
+#define ENABLE_MICRO_ECC_P256         /* software P-256 (vendor/btstack/3rd-party/micro-ecc): the controller has no HCI ECC */
 #endif
 
 #define ENABLE_LOG_ERROR

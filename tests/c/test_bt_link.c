@@ -411,6 +411,46 @@ static void test_slow_reader(void) {
     bt_link_reset();
 }
 
+/* a kernel without /proc/<pid>/comm (the hub's 2.6.31): the name comes from stat or cmdline */
+static void put_n(const char *dir, long pid, const char *file, const char *text, size_t len) {
+    char d[160], p[200];
+    snprintf(d, sizeof d, "%s/%ld", dir, pid);
+    mkdir(d, 0700);
+    snprintf(p, sizeof p, "%s/%s", d, file);
+    FILE *f = fopen(p, "w");
+    fwrite(text, 1, len, f); /* explicit length: cmdline holds NULs */
+    fclose(f);
+}
+#define put(d, pid, file, text) put_n(d, pid, file, text, sizeof(text) - 1)
+
+static void test_bluetoothd_find(void) {
+    char root[] = "/tmp/hh_proc_XXXXXX";
+    CT_CHECK(mkdtemp(root) != NULL);
+    put(root, 100, "stat", "100 (hciattach) S 1 100 100 0");           /* must not match */
+    put(root, 200, "stat", "200 (bluetoothd) S 1 200 200 0");          /* stat only */
+    put(root, 300, "cmdline", "/usr/sbin/bluetoothd\0-n\0");          /* cmdline only */
+    put(root, 400, "comm", "bluetoothd\n");                            /* newer kernels */
+    put(root, 500, "stat", "500 (blue (toothd)) S 1 500 500 0");       /* odd name, not it */
+    put(root, 600, "stat", "600 (bluetoothd-x) S 1 600 600 0");        /* a prefix is not it */
+    put(root, 700, "stat", "700 (bluetoothd) S 1 700 700 0");          /* skipped as self */
+    put(root, 800, "stat", "800 (bluetoothd) Z 1 800 800 0");          /* zombie: not running */
+    put(root, 900, "stat", "900 (bluetoothd) X 1 900 900 0");          /* dead */
+    long pids[16];
+    CT_EQ(bt_link_find_bluetoothd(root, 700, pids, 16), 3);
+    CT_CHECK(pids[0] + pids[1] + pids[2] == 200 + 300 + 400);
+    CT_EQ(bt_link_find_bluetoothd("/nonexistent_hh_proc", 1, pids, 16), 0);
+    static const long ids[] = {100, 200, 300, 400, 500, 600, 700, 800, 900};
+    static const char *const fs[] = {"stat", "stat", "cmdline", "comm", "stat", "stat", "stat", "stat", "stat"};
+    for (int i = 0; i < 9; i++) {
+        char p[200];
+        snprintf(p, sizeof p, "%s/%ld/%s", root, ids[i], fs[i]);
+        unlink(p);
+        snprintf(p, sizeof p, "%s/%ld", root, ids[i]);
+        rmdir(p);
+    }
+    rmdir(root);
+}
+
 static void test_bluetoothd(void) {
     setup("normal"); /* running: stopped once, before the first spawn only */
     bz_running = 1;
@@ -523,6 +563,11 @@ static void test_pairing_windows(void) {
     CT_EQ(bt_link_pair(false, 0, BT_TRANSPORT_ANY, BT_MODE_HOST), BT_LINK_OK);
     CT_EQ(st()->window, BT_WIN_NONE);
     CT_CHECK(PUMP(log_count("PAIR 0") == 1, 2000));
+    CT_CHECK(PUMP(log_count("PAIRTR 1") == 1, 2000)); /* the classic window carried its transport to the helper */
+    CT_EQ(bt_link_pair(true, 30, BT_TRANSPORT_LE, BT_MODE_HOST), BT_LINK_OK);
+    CT_CHECK(PUMP(log_count("PAIRTR 2") == 1, 2000));
+    CT_EQ(bt_link_pair(true, 30, BT_TRANSPORT_ANY, BT_MODE_HOST), BT_LINK_OK);
+    CT_CHECK(PUMP(log_count("PAIRTR 0") == 1, 2000));
     bt_link_reset();
 }
 
@@ -611,6 +656,7 @@ int main(int argc, char **argv) {
     CT_RUN(test_partial_frames);
     CT_RUN(test_flood);
     CT_RUN(test_slow_reader);
+    CT_RUN(test_bluetoothd_find);
     CT_RUN(test_bluetoothd);
     CT_RUN(test_pairing_windows);
     CT_RUN(test_stubborn_stop);
