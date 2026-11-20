@@ -5,7 +5,7 @@ export function fitCells(root: ParentNode): void {
     if (!kids.length) continue;
     kids.forEach((k) => k.removeAttribute('data-span'));
     const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
-    const cut = (k: HTMLElement) => k.scrollWidth > k.clientWidth;
+    const cut = (k: HTMLElement) => k.scrollWidth > k.clientWidth || [...k.querySelectorAll('span')].some((s) => s.scrollWidth > s.clientWidth);
     const wide = kids.filter(cut);
     wide.forEach((k) => k.setAttribute('data-span', cols > 1 ? '2' : 'full'));
     wide.filter(cut).forEach((k) => k.setAttribute('data-span', 'full'));
@@ -21,9 +21,15 @@ export function watchCells(el: HTMLElement, root: ParentNode): () => void {
   };
   const ro = new ResizeObserver(run);
   ro.observe(el);
+  const grids = new Set<Element>();
+  const watch = () => root.querySelectorAll('.cells').forEach((g) => { if (!grids.has(g)) { grids.add(g); ro.observe(g); } });
+  watch();
+  const mo = new MutationObserver(() => { watch(); run(); });
+  mo.observe(root as unknown as Node, { childList: true, subtree: true });
   void document.fonts?.ready.then(run);
   return () => {
     ro.disconnect();
+    mo.disconnect();
     cancelAnimationFrame(raf);
   };
 }
