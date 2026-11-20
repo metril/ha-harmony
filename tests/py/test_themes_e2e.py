@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 import pytest
-from test_addon_e2e import ensure_cfg, DIST, PREFIX, H, api, browser, link, open_editor, site  # noqa: F401
+from test_addon_e2e import DIST, PREFIX, H, api, browser, ensure_cfg, link, open_editor, site  # noqa: F401
 
 from harmony_core.config_model import load_source
 

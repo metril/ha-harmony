@@ -6,7 +6,7 @@ import pytest
 from addon_ws import TOKEN, bt_online, connect, drain, live, recv
 from aiohttp import WSServerHandshakeError
 from cfgapi import apply_draft, put_apply, put_draft
-from test_addon import CONFIG, H
+from test_addon import CONFIG
 
 from harmony_addon import channel as channel_mod
 from harmony_addon import live as live_mod

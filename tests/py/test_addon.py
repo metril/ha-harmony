@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 from aiohttp import FormData
-
 from cfgapi import apply_draft, ensure, put_apply
 from cfgapi import put_draft as _put_draft
 

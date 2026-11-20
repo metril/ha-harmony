@@ -15,13 +15,13 @@ from pathlib import Path
 import pytest
 from test_addon_e2e import (  # noqa: F401
     DIST,
-    ensure_cfg,
     INGRESS_HEADERS,
     PREFIX,
     TOKEN,
     H,
     api,
     browser,
+    ensure_cfg,
     open_editor,
     proxy_ws,
 )

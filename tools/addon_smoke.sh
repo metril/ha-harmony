@@ -1,6 +1,6 @@
 #!/bin/sh
 # Build the add-on image (amd64) and smoke-test it: health 200 from the ingress gateway IP, 403
-# from any other peer, server running as a non-root user, draft write under /data works.
+# from any other peer, server running as a non-root user, config create + draft write under /data works.
 #   tools/addon_smoke.sh [image-tag]
 set -eu
 cd "$(dirname "$0")/.."
@@ -58,8 +58,10 @@ check "ingress without a user id" "$(NOUSER=1 probe 172.30.32.2 GET /api/v1/heal
 asset="$(docker exec "$CT" sh -c 'ls /opt/app/frontend/assets | grep "\.js$"' | head -1)"
 check "built bundle present in image" "$([ -n "$asset" ] && echo yes || echo no)" yes
 check "bundle from ingress IP" "$(probe 172.30.32.2 GET "/assets/$asset")" 200
+check "config create from ingress IP" \
+  "$(probe 172.30.32.2 POST /api/v1/configs '{"name":"smoke"}')" 201
 check "draft write from ingress IP" \
-  "$(probe 172.30.32.2 PUT /api/v1/config/draft '{"config":{}}')" 200
+  "$(probe 172.30.32.2 PUT /api/v1/configs/smoke/draft '{"config":{}}')" 200
 user="$(docker exec "$CT" sh -c "ps -o user,args | grep '[h]armony_addon' | awk '{print \$1}'")"
 check "server user" "$user" app
 [ "$fail" = 0 ] || { docker logs "$CT"; exit 1; }

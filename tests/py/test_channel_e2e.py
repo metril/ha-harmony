@@ -7,8 +7,8 @@ import json
 
 import pytest
 from addon_ws import live, recv
-from conftest import ADDON_TOKEN, HUB_ID, make_entry
 from cfgapi import put_apply
+from conftest import ADDON_TOKEN, HUB_ID, make_entry
 from test_addon import H
 from test_ha_bluetooth import CFG, BtHub, state, until
 

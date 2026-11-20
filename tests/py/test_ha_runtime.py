@@ -672,7 +672,7 @@ async def test_off_powers_down_ha_devices_the_leaving_activity_did_not_list(hass
     async_mock_service(hass, "remote", "turn_on")
     async_mock_service(hass, "remote", "send_command")
     hass.states.async_set("media_player.shield", "off")
-    hub, c = await rig()
+    hub, _c = await rig()
     off = async_mock_service(hass, "remote", "turn_off")
     await hub.push("state_update", {"activity": 0, "power": True})  # tv_on: no shield in it
     await settle(hass)

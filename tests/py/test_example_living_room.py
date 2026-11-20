@@ -20,7 +20,7 @@ def test_devices_favorites_navigate_to_device_pages_and_home_has_nav():
     pages = {p["id"]: p for p in model["pages"]}
     assert pages["devices"]["kind"] == "favorites" and pages["home"]["kind"] == "home"
     assert pages["home"]["title"] == "Home"
-    navs = lambda p: {w["label"]: w["nav"] for w in pages[p]["widgets"] if w.get("nav")}  # noqa: E731
+    navs = lambda p: {w["label"]: w["nav"] for w in pages[p]["widgets"] if w.get("nav")}
     assert navs("devices") == {
         "TV": "dev_tv",
         "Shield": "dev_shield",

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.20 (2026-11-20)
+
+Release fix; no functional change from 0.3.19. The integration 0.3.19 release was never published because CI failed (lint and the add-on image smoke test); this version carries the same changes.
+
 ## 0.3.19 (2026-11-20)
 
 Editor, integration and remote firmware; no hub firmware change. Update the add-on, then the integration, then flash the remote.

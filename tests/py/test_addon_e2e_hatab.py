@@ -13,7 +13,7 @@ from pathlib import Path
 
 import playwright.async_api as pw
 import pytest
-from test_addon_e2e import ensure_cfg, DIST, PREFIX, TOKEN, WIDE_CSS, H, _stress, api, browser  # noqa: F401
+from test_addon_e2e import DIST, PREFIX, TOKEN, WIDE_CSS, H, _stress, api, browser, ensure_cfg  # noqa: F401
 from test_addon_e2e_polish import LARGE, STORE, open_large
 
 from harmony_addon.app import create_app

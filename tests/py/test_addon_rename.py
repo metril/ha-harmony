@@ -4,7 +4,7 @@ integration polls with the previous id and/or the stable hardware id. Never over
 import pytest
 from addon_ws import connect, drain
 from cfgapi import put_apply
-from test_addon import CONFIG, H
+from test_addon import CONFIG
 from test_addon_linked import make
 
 HW_A, HW_B = "aabbccddee01", "aabbccddee02"
