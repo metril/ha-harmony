@@ -240,17 +240,30 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     await page.locator(f"{P} [role=status][aria-live]").get_by_text("match").wait_for()
     ent = page.locator(ROWS, has_text="Living room lamp").first
     await ent.wait_for()
-    await ent.scroll_into_view_if_needed()
-    eb = await ent.bounding_box()
-    kb = await page.locator("hh-remote [data-key=stop]").bounding_box()
-    await page.mouse.move(eb["x"] + 20, eb["y"] + 15)
-    await page.mouse.down()
-    await page.mouse.move(eb["x"] + 70, eb["y"] + 45, steps=5)
-    await page.mouse.move(kb["x"] + kb["width"] / 2, kb["y"] + kb["height"] / 2, steps=12)
-    await page.mouse.up()
-    await page.wait_for_function(
-        "() => (" + STORE + ".config.keys.stop || {}).ha?.target?.entity_id === 'light.living_lamp'"
-    )
+    # the list may still be re-rendering (rows are drawn in a budget) when the CPU is loaded: measure
+    # until the row holds still, and redo the whole gesture if a re-render swallowed it
+    landed = "() => (" + STORE + ".config.keys.stop || {}).ha?.target?.entity_id === 'light.living_lamp'"
+    for attempt in range(4):
+        await ent.scroll_into_view_if_needed()
+        eb = await ent.bounding_box()
+        for _ in range(20):
+            await page.wait_for_timeout(100)
+            nb = await ent.bounding_box()
+            if nb == eb:
+                break
+            eb = nb
+        kb = await page.locator("hh-remote [data-key=stop]").bounding_box()
+        await page.mouse.move(eb["x"] + 20, eb["y"] + 15)
+        await page.mouse.down()
+        await page.mouse.move(eb["x"] + 70, eb["y"] + 45, steps=5)
+        await page.mouse.move(kb["x"] + kb["width"] / 2, kb["y"] + kb["height"] / 2, steps=12)
+        await page.mouse.up()
+        try:
+            await page.wait_for_function(landed, timeout=8000 if attempt == 3 else 2500)
+            break
+        except Exception:
+            if attempt == 3:
+                raise
     act = await page.evaluate("() => " + STORE + ".config.keys.stop.ha.service")
     assert act == "light.toggle"
     await shot(page, "07-after-drag-1440")

@@ -716,9 +716,10 @@ async def test_hub_restart_recovery(hass, start_hub, write_yaml, tmp_path, keep_
     start_hub("--cache", cache, port=port)
     await until(hass, lambda: hass.states.get(SELECT).state == "Off")
     await until(hass, lambda: coord.config_pushes == (1 if keep_cache else 2))
+    # config_pushes counts the request; the activity list is applied when the hub acks it
+    await until(hass, lambda: hass.states.get(SELECT).attributes.get("options") == ["Télé", "Music", "Off"])
     await asyncio.sleep(0.1)
     assert coord.config_pushes == (1 if keep_cache else 2)  # pushed again only when the hub lost it
-    assert hass.states.get(SELECT).attributes["options"] == ["Télé", "Music", "Off"]
     assert uids(hass, entry) == before
     await hass.services.async_call(
         "select", "select_option", {"entity_id": SELECT, "option": "Music"}, blocking=True

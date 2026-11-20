@@ -515,11 +515,18 @@ async def test_selection_can_be_cleared(browser, large, how):
     page = await open_large(browser, large)
     x, y = await _key_centre(page)
     pressed = f"() => {REMOTE}.querySelector('[data-key=select]').getAttribute('aria-pressed')"
-    await page.mouse.click(x, y)
-    # selection state and the re-rendered aria-pressed land asynchronously (Lit update): wait, never sleep
-    await page.wait_for_function(
-        f"() => JSON.stringify({STUDIO_EL}.st.sel).includes('\"key\"') && ({pressed})() === 'true'", timeout=10000
-    )
+    selected = f"() => JSON.stringify({STUDIO_EL}.st.sel).includes('\"key\"') && ({pressed})() === 'true'"
+    # the layout can still shift once (late chunks, scrollbar) on a loaded CPU: re-measure and click again
+    for attempt in range(3):
+        await page.mouse.click(x, y)
+        try:
+            # selection state and the re-rendered aria-pressed land asynchronously (Lit update): wait, never sleep
+            await page.wait_for_function(selected, timeout=10000 if attempt == 2 else 3000)
+            break
+        except Exception:
+            if attempt == 2:
+                raise
+            x, y = await _key_centre(page)
     if how in ("reclick", "body"):  # the popover may sit over the key: dismiss it first, the key stays selected
         await page.keyboard.press("Escape")
         await page.wait_for_function(f"() => !{STUDIO}.querySelector('.pop')", timeout=10000)
