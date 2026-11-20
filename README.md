@@ -2,11 +2,7 @@
   <img src="custom_components/ha_harmony/brand/logo.png" alt="Harmony" width="373">
 </p>
 
-<h1 align="center">ha-harmony</h1>
-
-<p align="center">
-  <img src="custom_components/ha_harmony/brand/icon.png" alt="Harmony" width="96">
-</p>
+<h1 align="center">Harmony</h1>
 
 Custom firmware for the Logitech Harmony Hub and Elite remote, a Home Assistant integration that
 talks to the hub directly over your LAN, and a **Harmony Editor** add-on to design the setup. The
