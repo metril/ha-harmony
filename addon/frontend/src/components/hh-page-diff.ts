@@ -74,7 +74,7 @@ export class HhPageDiff extends StoreElement {
         return html`<div class="pg"><b class="vh">${p.title}</b>
           ${this.thumb('Before', ai >= 0 ? this.beforePages?.[ai] : null, this.marks(applied?.pages?.[ai], ai >= 0 ? this.beforePages?.[ai] : null, p.kind === 'changed' ? ch.before : []), before ?? after)}
           ${this.thumb('After', bi >= 0 ? s.pages[bi] : null, this.marks(s.config.pages?.[bi], bi >= 0 ? s.pages[bi] : null, p.kind === 'changed' ? ch.after : []), after)}
-          <div><b>${p.title}</b> <span class="chip ${p.kind === 'added' ? 'ok' : p.kind === 'removed' ? 'bad' : 'ir'}">${KIND_LABEL[p.kind]}</span>${!p.widgets.length && p.kind === 'changed' && themed ? html`<div class="muted">Theme changed</div>` : nothing}${p.widgets.length ? html`<div class="muted">Widgets: ${p.widgets.slice(0, 6).join(', ')}${p.widgets.length > 6 ? ` and ${p.widgets.length - 6} more` : ''}</div>` : nothing}</div></div>`;
+          <div><b>${p.title}</b> <span class="chip ${p.kind === 'added' ? 'ok' : p.kind === 'removed' ? 'bad' : 'ir'}">${KIND_LABEL[p.kind]}</span>${!p.widgets.length && p.kind === 'changed' && themed ? html`<div class="muted">Theme Changed</div>` : nothing}${p.widgets.length ? html`<div class="muted">Widgets: ${p.widgets.slice(0, 6).join(', ')}${p.widgets.length > 6 ? ` and ${p.widgets.length - 6} more` : ''}</div>` : nothing}</div></div>`;
       })}</div>`;
   }
 }

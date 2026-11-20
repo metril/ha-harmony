@@ -30,8 +30,8 @@ const sourceOf = (e: HaEntity): Source => ({ kind: 'entity', entity_id: e.entity
 const ents = (n: number) => `${n.toLocaleString('en')} ${n === 1 ? 'entity' : 'entities'}`;
 const PINS = [
   { id: 'fav', title: 'Favourites' },
-  { id: 'used', title: 'Used in this config' },
-  { id: 'recent', title: 'Recently used' },
+  { id: 'used', title: 'Used in This Config' },
+  { id: 'recent', title: 'Recently Used' },
 ] as const;
 
 /**
@@ -443,8 +443,8 @@ export class HhHaBrowser extends LitElement {
     if (!dim) return nothing;
     if (dim === 'menu')
       return html`<div class="pop" role="group" aria-label="Options">
-        ${this.registries && this.mode === 'drag' ? html`<label class="chk"><input type="checkbox" .checked=${this.diag} @change=${(e: Event) => this.dispatchEvent(new CustomEvent('hh-ha-diag', { detail: (e.target as HTMLInputElement).checked, bubbles: true, composed: true }))} /> Show diagnostic and config entities</label>` : nothing}
-        <button class="btn sm" @click=${() => this.dispatchEvent(new CustomEvent('hh-ha-refresh', { bubbles: true, composed: true }))}>Refresh the list</button>
+        ${this.registries && this.mode === 'drag' ? html`<label class="chk"><input type="checkbox" .checked=${this.diag} @change=${(e: Event) => this.dispatchEvent(new CustomEvent('hh-ha-diag', { detail: (e.target as HTMLInputElement).checked, bubbles: true, composed: true }))} /> Show Diagnostic and Config Entities</label>` : nothing}
+        <button class="btn sm" @click=${() => this.dispatchEvent(new CustomEvent('hh-ha-refresh', { bubbles: true, composed: true }))}>Refresh the List</button>
       </div>`;
     const none = dim === 'types' ? '' : NONE;
     const counts = this.facetOf(dim);
@@ -503,13 +503,13 @@ export class HhHaBrowser extends LitElement {
       ${this.pop === 'menu' ? nothing : this.popPanel()}
       ${nf ? html`<div class="pills"><span class="count">${nf} ${nf === 1 ? 'filter' : 'filters'}</span>${this.pills()}<button class="btn ghost sm" @click=${() => this.clearFilters()}>Clear</button></div>` : nothing}
       <div class="tools">
-        <label><span class="gb">Group by</span>
+        <label><span class="gb">Group By</span>
           <select aria-label="Group by" .value=${this.by} @change=${(e: Event) => this.setBy((e.target as HTMLSelectElement).value as GroupBy)}>
             ${GROUP_BY.filter((g) => this.bys.includes(g.id)).map((g) => html`<option value=${g.id} ?selected=${g.id === this.by}>${g.label}</option>`)}
           </select>
         </label>
         <span class="sp"></span>
-        <button class="btn ghost sm icon" aria-label=${anyOpen ? 'Collapse all' : 'Expand all'} title=${anyOpen ? 'Collapse all' : 'Expand all'} @click=${() => this.setAll(!anyOpen)}>
+        <button class="btn ghost sm icon" aria-label=${anyOpen ? 'Collapse All' : 'Expand All'} title=${anyOpen ? 'Collapse All' : 'Expand All'} @click=${() => this.setAll(!anyOpen)}>
           <svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${anyOpen ? svg`<path d="M6 15l6-6 6 6M6 21l6-6 6 6" transform="translate(0 -6)"/>` : svg`<path d="M6 9l6 6 6-6M6 3l6 6 6-6" transform="translate(0 6)"/>`}</svg>
         </button>
         ${this.menu()}
@@ -520,7 +520,7 @@ export class HhHaBrowser extends LitElement {
       <div class="sum" role="status" aria-live="polite">${summary}${this.searching ? ` match “${this.f.q.trim()}”` : nf ? ' match the filters' : ''}</div>
       <div class="list" @keydown=${this.nav}>
         ${pinned}
-        ${list.length ? repeat(groups, (g) => g.id, (g) => this.group(g, 0, budget, words)) : html`<div class="empty">${total ? html`<span>No entities match${this.searching ? ` “${this.f.q.trim()}”` : ''}${nf ? ' with these filters' : ''}.</span><button class="btn sm" @click=${() => { this.draft = ''; this.setQ('', true); this.clearFilters(); }}>Clear filters</button>` : html`<span>Home Assistant has no entities of the supported kinds.</span>`}</div>`}
+        ${list.length ? repeat(groups, (g) => g.id, (g) => this.group(g, 0, budget, words)) : html`<div class="empty">${total ? html`<span>No entities match${this.searching ? ` “${this.f.q.trim()}”` : ''}${nf ? ' with these filters' : ''}.</span><button class="btn sm" @click=${() => { this.draft = ''; this.setQ('', true); this.clearFilters(); }}>Clear Filters</button>` : html`<span>Home Assistant has no entities of the supported kinds.</span>`}</div>`}
       </div>`;
   }
 }

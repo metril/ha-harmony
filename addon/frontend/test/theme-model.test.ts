@@ -67,12 +67,12 @@ describe('theme editing', () => {
     expect(Object.keys(c.themes ?? {})).toEqual(['dusk', 'kid']);
     expect(c.themes?.['kid']?.extends).toBe('dusk');
   });
-  it('problems and fixes: Fix all clears them', () => {
+  it('problems and fixes: Fix All clears them', () => {
     let c = duplicateTheme(base(), 'midnight').config;
     c = setToken(c, 'my_midnight', 'tx', '#404848');
     const probs = themeProblems(themeNamed(c, 'my_midnight').theme);
     expect(probs.length).toBeGreaterThan(1);
-    expect(probs[0]?.title).toMatch(/Main text on/);
+    expect(probs[0]?.title).toMatch(/Main Text on/);
     const fixed = fixAll(c, 'my_midnight');
     expect(themeProblems(themeNamed(fixed, 'my_midnight').theme)).toEqual([]);
   });
@@ -139,7 +139,7 @@ describe('picker logic and bookkeeping', () => {
     const b = selectTheme(duplicateTheme(a, 'default').config, 'my_default');
     const rows = diffConfig(a, b).map((r) => `${r.kind} ${r.area} ${r.label}`);
     expect(rows).toContain('added Theme my_default');
-    expect(rows).toContain('changed Active theme my_default');
+    expect(rows).toContain('changed Active Theme my_default');
     expect(diffConfig(a, base())).toEqual([]);
   });
 });

@@ -20,7 +20,7 @@ export interface CodeEdit {
 export interface CodeSave extends CodeEdit {
   newName: string;
 }
-const TABS: [string, string][] = [['proto', 'Protocol'], ['pronto', 'Pronto'], ['raw', 'Raw'], ['import', 'Paste or upload']];
+const TABS: [string, string][] = [['proto', 'Protocol'], ['pronto', 'Pronto'], ['raw', 'Raw'], ['import', 'Paste or Upload']];
 
 /** Code editor dialog: name with byte counter, protocol / Pronto / raw / pasted file, IR ports, repeats, Send IR. */
 @customElement('hh-code-dialog')
@@ -136,7 +136,7 @@ export class HhCodeDialog extends LitElement {
         ${['proto', 'addr', 'cmd'].map((f) => (errs[f] ? html`<span class="err" role="alert">${errs[f]}</span>` : nothing))}`;
     }
     if (this.tab === 'pronto' && k === 'pronto')
-      return html`<label class="f">Pronto code<textarea aria-label="Pronto code" .value=${this.code.pronto ?? ''} @input=${(e: Event) => (this.code = { ...this.code, pronto: (e.target as HTMLTextAreaElement).value })}></textarea></label>${errs['pronto'] ? html`<span class="err" role="alert">${errs['pronto']}</span>` : nothing}`;
+      return html`<label class="f">Pronto Code<textarea aria-label="Pronto code" .value=${this.code.pronto ?? ''} @input=${(e: Event) => (this.code = { ...this.code, pronto: (e.target as HTMLTextAreaElement).value })}></textarea></label>${errs['pronto'] ? html`<span class="err" role="alert">${errs['pronto']}</span>` : nothing}`;
     if (this.tab === 'raw' && k === 'raw') {
       const r = this.code.raw as { hz: number; us: number[] };
       return html`<div class="row"><label class="f">Carrier (Hz)<input type="number" aria-label="Carrier Hz" .value=${String(r.hz)} @input=${(e: Event) => (this.code = { ...this.code, raw: { ...r, hz: Number((e.target as HTMLInputElement).value) } })} /></label></div>
@@ -145,10 +145,10 @@ export class HhCodeDialog extends LitElement {
     }
     if (this.tab === 'import') {
       return html`<label class="f">Format<select aria-label="Format" @change=${(e: Event) => (this.pasteKind = (e.target as HTMLSelectElement).value as typeof this.pasteKind)}>
-          <option value="pronto" ?selected=${this.pasteKind === 'pronto'}>Pronto hex</option><option value="flipper" ?selected=${this.pasteKind === 'flipper'}>Flipper .ir file</option><option value="smartir" ?selected=${this.pasteKind === 'smartir'}>SmartIR .json</option></select></label>
+          <option value="pronto" ?selected=${this.pasteKind === 'pronto'}>Pronto Hex</option><option value="flipper" ?selected=${this.pasteKind === 'flipper'}>Flipper .ir file</option><option value="smartir" ?selected=${this.pasteKind === 'smartir'}>SmartIR .json</option></select></label>
         <label class="f">Paste the text, or choose a file<textarea aria-label="Pasted codes" .value=${this.text} @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}></textarea></label>
         <div class="row"><input type="file" aria-label="Upload a file" accept=".ir,.json,.txt" @change=${async (e: Event) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) { this.text = await f.text(); if (f.name.endsWith('.ir')) this.pasteKind = 'flipper'; else if (f.name.endsWith('.json')) this.pasteKind = 'smartir'; } }} />
-          <button class="btn sm" ?disabled=${this.busy || !this.text.trim()} @click=${() => void this.parse()}>${this.busy ? 'Reading…' : 'Read codes'}</button></div>
+          <button class="btn sm" ?disabled=${this.busy || !this.text.trim()} @click=${() => void this.parse()}>${this.busy ? 'Reading…' : 'Read Codes'}</button></div>
         ${this.parseErr ? html`<span class="err" role="alert">${this.parseErr}</span>` : nothing}
         ${this.parsed ? html`<div class="pick" role="radiogroup" aria-label="Codes found">${this.parsed.actions.map((a) => html`<label><input type="radio" name="found" @change=${() => this.use(a.action, a.name)} /> <b>${a.name}</b> <span class="muted">${summarize(a.action)}</span></label>`)}</div>
           ${this.parsed.skipped.length ? html`<span class="hint">Skipped ${this.parsed.skipped.length}: ${this.parsed.skipped.slice(0, 3).map((s) => `${s.name} (${s.reason})`).join(', ')}</span>` : nothing}` : nothing}`;
@@ -165,7 +165,7 @@ export class HhCodeDialog extends LitElement {
     const mask = this.code.port_mask ?? 7;
     const uses = e.name && e.where !== 'power' ? findRefs(store.config, e.where === 'commands' ? { device: d.id, command: e.name } : { device: d.id, input: e.name }) : [];
     const prob = this.problem();
-    const title = e.where === 'power' ? `Power ${e.name}` : e.name ? `Edit ${e.name}` : e.where === 'inputs' ? 'New input' : 'New command';
+    const title = e.where === 'power' ? `Power ${e.name}` : e.name ? `Edit ${e.name}` : e.where === 'inputs' ? 'New Input' : 'New Command';
     return html`<hh-dialog .open=${true} heading=${title} @close=${() => this.dispatchEvent(new Event('hh-code-close', { bubbles: true, composed: true }))}>
       ${e.where !== 'power'
         ? html`<label class="f">Name<span class="cnt ${bytes.over ? 'over' : ''}"><span>${bytes.hint || 'Shown in the palette'}</span><span>${bytes.used}/${bytes.max} B</span></span>
@@ -175,11 +175,11 @@ export class HhCodeDialog extends LitElement {
       <div class="tabs" role="tablist" aria-label="Kind of code">${TABS.map(([id, label]) => html`<button role="tab" aria-selected=${this.tab === id} @click=${() => this.pickTab(id)}>${label}</button>`)}</div>
       ${this.fields()}
       <div class="row">
-        <div class="f">IR ports<div class="ports" role="group" aria-label="IR ports">${[1, 2, 4].map((bit, i) => html`<button aria-pressed=${(mask & bit) !== 0} aria-label="Port ${i + 1}" @click=${() => { const m = mask ^ bit; this.code = withPorts(this.code, m === 0 ? 7 : m); }}>${i + 1}</button>`)}</div><span class="hint">${mask === 7 ? 'All ports' : `Only ports ${[1, 2, 4].map((b, i) => (mask & b ? i + 1 : 0)).filter(Boolean).join(' and ')}`}</span></div>
+        <div class="f">IR Ports<div class="ports" role="group" aria-label="IR ports">${[1, 2, 4].map((bit, i) => html`<button aria-pressed=${(mask & bit) !== 0} aria-label="Port ${i + 1}" @click=${() => { const m = mask ^ bit; this.code = withPorts(this.code, m === 0 ? 7 : m); }}>${i + 1}</button>`)}</div><span class="hint">${mask === 7 ? 'All Ports' : `Only ports ${[1, 2, 4].map((b, i) => (mask & b ? i + 1 : 0)).filter(Boolean).join(' and ')}`}</span></div>
         ${this.ha25 ? html`<label class="f">Repeats<input type="number" min="1" max="8" aria-label="Repeats" .value=${String(this.code.repeats ?? 1)} @input=${(ev: Event) => (this.code = withRepeats(this.code, Number((ev.target as HTMLInputElement).value)))} /><span class="hint">1 to 8 frames in total</span></label>` : nothing}
       </div>
       <div class="send"><hh-send-ir .code=${this.code} name=${this.name || e.name || 'this code'}></hh-send-ir><span class="hint">Sends this draft code once through Home Assistant. Nothing is sent until you press it.</span></div>
-      ${uses.length ? html`<div class="f">Used by<ul>${uses.slice(0, 8).map((r) => html`<li>${describeRef(r)}</li>`)}${uses.length > 8 ? html`<li>and ${uses.length - 8} more</li>` : nothing}</ul></div>` : nothing}
+      ${uses.length ? html`<div class="f">Used By<ul>${uses.slice(0, 8).map((r) => html`<li>${describeRef(r)}</li>`)}${uses.length > 8 ? html`<li>and ${uses.length - 8} more</li>` : nothing}</ul></div>` : nothing}
       ${e.name && e.where !== 'power' ? html`<div slot="footer" class="fl">
         ${e.where === 'commands' ? html`<button class="btn" @click=${() => this.dispatchEvent(new CustomEvent('hh-code-dup', { detail: e.name, bubbles: true, composed: true }))}>Duplicate</button>` : nothing}
         <button class="btn danger" @click=${() => this.dispatchEvent(new CustomEvent('hh-code-delete', { detail: e, bubbles: true, composed: true }))}>Delete</button></div>` : nothing}

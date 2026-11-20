@@ -90,7 +90,7 @@ async def test_palette_colour_updates_the_preview_and_the_yaml(browser, site):
     page = await studio(browser, site)
     await page.locator("hh-remote [data-widget]").nth(1).click()  # Watch TV
     insp = page.locator("hh-inspector")
-    await insp.get_by_role("button", name="red", exact=True).click()
+    await insp.get_by_role("button", name="Red", exact=True).click()
     await page.wait_for_function(
         "() => [...document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').shadowRoot"
         ".querySelector('hh-remote').shadowRoot.querySelectorAll('svg.scr rect')].some(r => r.getAttribute('fill') === '#f85848')"
@@ -138,7 +138,7 @@ async def test_duplicate_a_preset_edit_the_accent_and_see_it_in_the_apply_dialog
         ".querySelectorAll('svg text')].map(t => t.getAttribute('fill'))"
     )
     assert "#f88c40" in fills  # the thumbnails draw the new accent (snapped to 5-6-5)
-    await page.get_by_role("button", name="Review & apply").click()
+    await page.get_by_role("button", name="Review & Apply").click()
     dlg = page.locator("hh-apply-dialog")
     await dlg.get_by_text("my_default").first.wait_for()
     assert await dlg.get_by_text("Theme", exact=False).count() >= 1
@@ -211,10 +211,10 @@ async def test_axe_on_the_theme_views_and_the_colour_row(browser, site, scheme):
             bad += [f"{name}@{width}: {v}" for v in found]
         await page.get_by_role("button", name="Duplicate Midnight").click()
         await page.get_by_label("Accent hex", exact=True).wait_for()
-        await page.get_by_label("Main text hex", exact=True).fill(
+        await page.get_by_label("Main Text hex", exact=True).fill(
             "#404848"
         )  # a contrast problem shows too
-        await page.get_by_label("Main text hex", exact=True).press("Tab")
+        await page.get_by_label("Main Text hex", exact=True).press("Tab")
         await page.get_by_text("contrast problem").first.wait_for()
         await page.evaluate("() => window.scrollTo(0, 0)")
         await page.wait_for_timeout(300)

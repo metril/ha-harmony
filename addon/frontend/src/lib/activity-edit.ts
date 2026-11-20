@@ -1,5 +1,6 @@
 // Pure edits and models for activities: devices and inputs, the start/stop timeline, "who handles it".
 import type { Activity, Config, Device } from './model';
+import { displayCommand } from './key-names';
 import { commandNames } from './bt';
 import { trimBytes } from './codes';
 import { activityOf } from './refs';
@@ -147,12 +148,12 @@ export function timeline(cfg: Config, id: string, when: 'start' | 'stop'): { ite
       if (!d) continue;
       const name = d.name ?? d.id;
       if (hasPower(d)) {
-        items.push({ kind: 'auto', label: d.power?.toggle && !d.power.on ? `Power ${name} (toggle)` : `Power on ${name}`, device: dv, ha: d.kind === 'ha' });
+        items.push({ kind: 'auto', label: d.power?.toggle && !d.power.on ? `Power ${name} (toggle)` : `Power On ${name}`, device: dv, ha: d.kind === 'ha' });
         if (d.settle_ms) items.push({ kind: 'gap', ms: d.settle_ms });
       }
       const input = entry(dv)?.input;
       if (input) {
-        items.push({ kind: 'auto', label: `${name} → ${input}`, device: dv, ha: d.kind === 'ha' });
+        items.push({ kind: 'auto', label: `${name} → ${displayCommand(input)}`, device: dv, ha: d.kind === 'ha' });
         if (d.settle_ms) items.push({ kind: 'gap', ms: d.settle_ms });
       }
     }
@@ -161,7 +162,7 @@ export function timeline(cfg: Config, id: string, when: 'start' | 'stop'): { ite
     items.push(...userItems('off'));
     for (const dv of [...order].reverse()) {
       const d = devs.get(dv);
-      if (d && hasPower(d)) items.push({ kind: 'auto', label: d.power?.toggle && !d.power.off ? `Power ${d.name ?? d.id} (toggle)` : `Power off ${d.name ?? d.id}`, device: dv, ha: d.kind === 'ha' });
+      if (d && hasPower(d)) items.push({ kind: 'auto', label: d.power?.toggle && !d.power.off ? `Power ${d.name ?? d.id} (toggle)` : `Power Off ${d.name ?? d.id}`, device: dv, ha: d.kind === 'ha' });
     }
   }
   return { items, totalMs: items.reduce((n, i) => n + (i.kind === 'gap' ? i.ms : 0), 0) };

@@ -195,7 +195,7 @@ async def test_pair_a_host_name_it_pick_commands_and_save(browser, bt, site):
     await page.get_by_role("link", name="Add Bluetooth device").click()
     await page.get_by_role("radio", name="Automatic (recommended)").wait_for()
     await shot(page, "02-host-start")
-    await page.get_by_role("button", name="Start pairing").click()
+    await page.get_by_role("button", name="Start Pairing").click()
     await page.get_by_role("timer").wait_for()
     await page.get_by_text("pair with “Harmony …”").wait_for()
     assert await page.get_by_role("timer").inner_text() != ""
@@ -203,7 +203,7 @@ async def test_pair_a_host_name_it_pick_commands_and_save(browser, bt, site):
     await shot(page, "03-host-waiting")
 
     bt.add_host()  # the TV box pairs
-    await page.get_by_role("heading", name="Name it and choose its commands").wait_for()
+    await page.get_by_role("heading", name="Name It and Choose Its Commands").wait_for()
     focused = await page.evaluate("document.querySelector('hh-app').shadowRoot.querySelector('hh-bluetooth').shadowRoot.querySelector('hh-bt-pair').shadowRoot.activeElement?.id")
     assert focused == "step-title"  # focus moved into the new step
     # the paired device is in the draft already (address and the transport it paired on), before the form is finished
@@ -213,15 +213,15 @@ async def test_pair_a_host_name_it_pick_commands_and_save(browser, bt, site):
     await page.get_by_label("Name", exact=True).fill("Living room box")
     await page.get_by_label("Search commands").fill("F1")
     await page.get_by_role("checkbox", name=re.compile(r"^F1 ")).check()
-    await page.get_by_label("Command name").fill("Netflix")
-    await page.get_by_label("HID code").fill("HID:0C:0223")
-    await page.get_by_role("button", name="Add code").click()
-    await page.get_by_label("Command name").fill("Bad")
-    await page.get_by_label("HID code").fill("HID:09:0001")
-    await page.get_by_role("button", name="Add code").click()
+    await page.get_by_label("Command Name").fill("Netflix")
+    await page.get_by_label("HID Code").fill("HID:0C:0223")
+    await page.get_by_role("button", name="Add Code").click()
+    await page.get_by_label("Command Name").fill("Bad")
+    await page.get_by_label("HID Code").fill("HID:09:0001")
+    await page.get_by_role("button", name="Add Code").click()
     await page.get_by_text("The page must be 07").wait_for()
     await shot(page, "04-host-setup")
-    await page.get_by_role("button", name="Add device").click()
+    await page.get_by_role("button", name="Add Device").click()
     await page.wait_for_function("location.hash.startsWith('#/devices/living_room_box')")
     cfg = await draft_has(site, lambda c: any(d.get("kind") == "bt" and "Netflix" in d.get("commands", {}) for d in c.get("devices", [])))
     dev = cfg["devices"][0]
@@ -242,14 +242,14 @@ async def test_a_host_already_paired_but_not_in_the_config_is_added(browser, bt,
     await page.get_by_text("Living room box").first.wait_for()
     assert await page.get_by_text("Not in your config").count() == 2
     await shot(page, "06-panel-paired")
-    await page.get_by_role("link", name="Add to config").first.click()
-    await page.get_by_role("heading", name="Name it and choose its commands").wait_for()
-    await page.get_by_role("button", name="Add device").click()
+    await page.get_by_role("link", name="Add to Config").first.click()
+    await page.get_by_role("heading", name="Name It and Choose Its Commands").wait_for()
+    await page.get_by_role("button", name="Add Device").click()
     cfg = await draft_has(site, lambda c: bool(c.get("devices")))
     assert cfg["devices"][0]["address"] == BOX
     # back in the panel the host now shows as part of the config
     await page.evaluate("location.hash = '#/bluetooth'")
-    await page.get_by_text("In your config").first.wait_for()
+    await page.get_by_text("In Your Config").first.wait_for()
 
 
 async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
@@ -257,19 +257,19 @@ async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
     page, problems = await open_bt(browser, site)
     await page.get_by_role("link", name="Add Bluetooth remote").click()
     await shot(page, "07-remote-start")
-    await page.get_by_role("button", name="Scan for remotes").click()
+    await page.get_by_role("button", name="Scan for Remotes").click()
     await page.get_by_role("list", name="Remotes found").wait_for()
     assert await page.get_by_role("img", name="Signal strong").count() == 1
     assert await page.get_by_role("img", name="Signal weak").count() == 1
     await page.get_by_text("Unnamed remote").wait_for()
     await shot(page, "08-remote-candidates")
     await page.get_by_role("button", name="Pair with Homatics Remote").click()
-    await page.get_by_role("heading", name="Choose what its buttons do").wait_for()
+    await page.get_by_role("heading", name="Choose What Its Buttons Do").wait_for()
     paired = await draft_has(site, lambda c: bool(c.get("bt_remotes")))  # saved to the draft on pairing, before any key
     assert paired["bt_remotes"] == [{"name": "Homatics Remote", "address": REMOTE}]
     await page.get_by_label("Key for Home", exact=True).wait_for()
     # learn mode: press a button on the "real" remote
-    await page.get_by_role("button", name="Learn a button").click()
+    await page.get_by_role("button", name="Learn a Button").click()
     await page.get_by_text("Listening. Press any button").wait_for()
     await page.wait_for_function("true")
     for _ in range(40):
@@ -284,15 +284,15 @@ async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
     bt.press(12, 0x9999 % 0x400)  # a usage nobody mapped
     await page.get_by_text("Not mapped").first.wait_for()
     await shot(page, "09-remote-learn")
-    await page.get_by_role("button", name="Stop listening").click()
-    await page.get_by_role("button", name="Add remote").click()
+    await page.get_by_role("button", name="Stop Listening").click()
+    await page.get_by_role("button", name="Add Remote").click()
     cfg = await draft_has(site, lambda c: bool(c.get("bt_remotes") and c["bt_remotes"][0].get("keys")))
     assert len(cfg["bt_remotes"]) == 1
     r = cfg["bt_remotes"][0]
     assert r["address"] == REMOTE and r["name"] == "Homatics Remote" and r["keys"] == {"Home": "menu"}
     assert any(c["op"] == "pick" and c["addr"] == REMOTE for c in bt.ran)
     # the panel offers the key editor of a configured remote
-    await page.get_by_role("link", name="Edit buttons").first.click()
+    await page.get_by_role("link", name="Edit Buttons").first.click()
     await page.get_by_role("list", name="Remote buttons and their keys").wait_for()
     await shot(page, "10-remote-keys")
     # phone width: a key row is two lines (name, usage and Default/Reset, then the picker) and nothing scrolls sideways
@@ -354,7 +354,7 @@ async def test_unsupported_offline_and_unknown_say_what_to_do(browser, site):
         f.online = True
         f.state["state"] = "no_adapter"
         f.push()
-        await page.get_by_text("No adapter", exact=True).first.wait_for(timeout=8000)
+        await page.get_by_text("No Adapter", exact=True).first.wait_for(timeout=8000)
         await page.get_by_text("cannot find a Bluetooth adapter").wait_for()
         assert await page.get_by_role("button", name="Add Bluetooth device").is_disabled()
         await shot(page, "15-state-no-adapter")
@@ -365,12 +365,12 @@ async def test_unsupported_offline_and_unknown_say_what_to_do(browser, site):
 async def test_errors_are_sentences_and_pairing_results_say_what_next(browser, bt, site):
     page, _ = await open_bt(browser, site, "bluetooth/host")
     bt.refuse["pair"] = ("bt_not_ready", "adapter busy")
-    await page.get_by_role("button", name="Start pairing").click()
+    await page.get_by_role("button", name="Start Pairing").click()
     await page.get_by_text("still starting").wait_for()
     assert await page.get_by_text("bt_not_ready").count() == 0
     await shot(page, "16-error-not-ready")
     del bt.refuse["pair"]
-    await page.get_by_role("button", name="Start pairing").click()
+    await page.get_by_role("button", name="Start Pairing").click()
     await page.get_by_role("timer").wait_for()
     # the device refuses the pairing
     bt.close_window()
@@ -380,8 +380,8 @@ async def test_errors_are_sentences_and_pairing_results_say_what_next(browser, b
     await page.get_by_role("alert").get_by_text("The device refused to pair.").wait_for()
     await page.get_by_text("remove any old \"Harmony\" entry").wait_for()
     await shot(page, "17-result-refused")
-    await page.get_by_role("button", name="Try again").click()
-    await page.get_by_role("button", name="Start pairing").click()
+    await page.get_by_role("button", name="Try Again").click()
+    await page.get_by_role("button", name="Start Pairing").click()
     await page.get_by_role("timer").wait_for()
     bt.close_window()  # the window closes with nothing paired
     bt.state["pairing"] = {"result": "failed", "kind": "host"}
@@ -413,15 +413,15 @@ activities:
     )
     page, problems = await open_bt(browser, site, "remote")
     await page.get_by_text("Shield").first.wait_for()
-    await page.get_by_text("Volume up").first.wait_for()  # chips of the explicit set
-    await page.get_by_text("Direction up").first.wait_for()  # the default set of "TV box" (it lists no commands)
+    await page.get_by_text("Volume Up").first.wait_for()  # chips of the explicit set
+    await page.get_by_text("Direction Up").first.wait_for()  # the default set of "TV box" (it lists no commands)
     await shot(page, "19-palette-bt-commands")
     await page.evaluate("location.hash = '#/devices'")
     await page.get_by_text("Bluetooth", exact=True).first.wait_for()
     await shot(page, "20-devices-gallery")
     await page.evaluate("location.hash = '#/devices/tvbox'")
     await page.get_by_role("heading", name="Commands").wait_for()
-    await page.get_by_text("Not paired yet").first.wait_for()
+    await page.get_by_text("Not Paired yet").first.wait_for()
     assert clean(problems) == []
 
 
@@ -443,14 +443,14 @@ async def test_the_host_wizard_works_from_the_keyboard_alone(browser, bt, site):
     await page.get_by_text("Ready", exact=True).first.wait_for()
     await tab_to(page, "Add Bluetooth device")
     await page.keyboard.press("Enter")
-    await page.get_by_role("button", name="Start pairing").wait_for()
-    await tab_to(page, "Start pairing")
+    await page.get_by_role("button", name="Start Pairing").wait_for()
+    await tab_to(page, "Start Pairing")
     await page.keyboard.press("Enter")
     await page.get_by_role("timer").wait_for()
     bt.add_host()
-    await page.get_by_role("heading", name="Name it and choose its commands").wait_for()
-    assert await page.evaluate(ACTIVE) == "Name it and choose its commands"  # focus moved to the new step
-    await tab_to(page, "Add device")
+    await page.get_by_role("heading", name="Name It and Choose Its Commands").wait_for()
+    assert await page.evaluate(ACTIVE) == "Name It and Choose Its Commands"  # focus moved to the new step
+    await tab_to(page, "Add Device")
     await page.keyboard.press("Enter")
     cfg = await draft_has(site, lambda c: bool(c.get("devices")))
     assert cfg["devices"][0]["address"] == BOX
@@ -462,16 +462,16 @@ async def test_the_remote_wizard_works_from_the_keyboard_alone(browser, bt, site
     await page.get_by_text("Ready", exact=True).first.wait_for()
     await tab_to(page, "Add Bluetooth remote")
     await page.keyboard.press("Enter")
-    await page.get_by_role("button", name="Scan for remotes").wait_for()
-    await tab_to(page, "Scan for remotes")
+    await page.get_by_role("button", name="Scan for Remotes").wait_for()
+    await tab_to(page, "Scan for Remotes")
     await page.keyboard.press("Enter")
     await page.get_by_role("list", name="Remotes found").wait_for()
     await tab_to(page, "Pair with Homatics Remote")
     await page.keyboard.press("Enter")
-    await page.get_by_role("heading", name="Choose what its buttons do").wait_for()
+    await page.get_by_role("heading", name="Choose What Its Buttons Do").wait_for()
     await tab_to(page, "Key for Back")
     await page.keyboard.press("ArrowDown")  # a select: change it from the keyboard
-    await tab_to(page, "Add remote")
+    await tab_to(page, "Add Remote")
     await page.keyboard.press("Enter")
     cfg = await draft_has(site, lambda c: bool(c.get("bt_remotes") and c["bt_remotes"][0].get("keys")))
     assert cfg["bt_remotes"][0]["address"] == REMOTE and "Back" in cfg["bt_remotes"][0].get("keys", {})
@@ -484,9 +484,9 @@ async def test_a_default_can_be_set_to_does_nothing_and_the_picker_has_human_nam
     sel = page.get_by_label("Key for Back", exact=True)
     await sel.wait_for()
     opts = await sel.locator("option").all_inner_texts()
-    assert "Does nothing" in opts and "Digit 0" in opts and "Volume up" in opts and "up" not in opts
+    assert "Does Nothing" in opts and "Digit 0" in opts and "Volume Up" in opts and "up" not in opts
     assert await sel.locator("optgroup").evaluate_all("g => g.map(x => x.label)") == ["Navigation", "Transport", "Volume and channel", "Colour", "Digits", "Other"]
-    await sel.select_option(label="Does nothing")
+    await sel.select_option(label="Does Nothing")
     cfg = await draft_has(site, lambda c: (c.get("bt_remotes") or [{}])[0].get("keys", {}).get("Back", 1) is None)
     assert cfg["bt_remotes"][0]["keys"] == {"Back": None}
     await page.get_by_role("button", name="Reset Back to Exit").click()

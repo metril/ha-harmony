@@ -1,5 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import { displayKey } from '../lib/key-names';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { STOCK_ICONS } from '../lib/stock-icons';
 import { shared } from '../lib/styles';
@@ -30,10 +31,10 @@ export class HhIconPicker extends LitElement {
     const icons = STOCK_ICONS.filter((i) => !q || i.name.includes(q) || i.keywords.some((k) => k.includes(q)));
     return html`<input type="search" placeholder="Search icons" aria-label="Search icons" .value=${this.q} @input=${(e: Event) => (this.q = (e.target as HTMLInputElement).value)} />
       <div class="grid" role="group" aria-label="Icon">
-        ${icons.map((i) => html`<button aria-pressed=${this.value === i.name} aria-label=${i.name} title=${i.name} @click=${() => this.pick(i.name)}>${stockIconSvg(i.id)}</button>`)}
+        ${icons.map((i) => html`<button aria-pressed=${this.value === i.name} aria-label=${displayKey(i.name)} title=${displayKey(i.name)} @click=${() => this.pick(i.name)}>${stockIconSvg(i.id)}</button>`)}
       </div>
       ${icons.length ? '' : html`<p class="muted">No icon matches.</p>`}
-      <button class="btn sm none" ?disabled=${!this.value} @click=${() => this.pick(undefined)}>Use the default icon</button>`;
+      <button class="btn sm none" ?disabled=${!this.value} @click=${() => this.pick(undefined)}>Use the Default Icon</button>`;
   }
 }
 declare global { interface HTMLElementTagNameMap { 'hh-icon-picker': HhIconPicker } }

@@ -4,6 +4,7 @@ import { setStyle } from '../lib/set-style';
 import type { Store } from '../lib/store';
 import type { Problem } from '../lib/problems';
 import { icon } from '../lib/icons';
+import { orderUnits } from '../lib/key-order';
 import { degradeText } from '../lib/theme-model';
 
 export function meter(label: string, text: string, value: number, max: number, hint?: string, tip?: string): TemplateResult {
@@ -91,5 +92,9 @@ export function themeNotice(msgs: readonly string[] | undefined): TemplateResult
   const text = degradeText(msgs);
   if (!text) return nothing;
   return html`<div class="banner ir" role="status" id="theme-notice"><span>${icon('alert')} ${text}</span>
-    <details><summary>What changes</summary><ul>${(msgs ?? []).map((m) => html`<li>${m}</li>`)}</ul></details></div>`;
+    <details><summary>What Changes</summary><ul>${(msgs ?? []).map((m) => html`<li>${m}</li>`)}</ul></details></div>`;
 }
+
+/** Cells in the canonical key order; a left|right pair is one `.pair` item so it can never be split across rows. */
+export const orderedCells = <T,>(items: readonly T[], nameOf: (t: T) => string, one: (t: T) => TemplateResult): TemplateResult[] =>
+  orderUnits(items, nameOf).map((u) => (u.length === 2 ? html`<div class="pair">${one(u[0])}${one(u[1])}</div>` : one(u[0])));

@@ -218,7 +218,7 @@ describe('hh-ha-browser', () => {
   });
   it('never draws more rows than the budget, however many groups are open; Show more adds what it says', async () => {
     const el = await mount();
-    [...el.shadowRoot.querySelectorAll<HTMLButtonElement>('.tools .btn')].find((b) => b.getAttribute('aria-label') === 'Expand all')!.click();
+    [...el.shadowRoot.querySelectorAll<HTMLButtonElement>('.tools .btn')].find((b) => b.getAttribute('aria-label') === 'Expand All')!.click();
     await el.updateComplete;
     expect(rows(el)).toBeGreaterThan(50);
     expect(rows(el)).toBeLessThanOrEqual(300);
@@ -279,7 +279,7 @@ describe('hh-ha-browser', () => {
     const box = el.shadowRoot.querySelector<HTMLInputElement>('.pop input[type="checkbox"]')!;
     box.click();
     expect(diag).toBe(true);
-    [...el.shadowRoot.querySelectorAll<HTMLButtonElement>('.pop .btn')].find((b) => b.textContent === 'Refresh the list')!.click();
+    [...el.shadowRoot.querySelectorAll<HTMLButtonElement>('.pop .btn')].find((b) => b.textContent === 'Refresh the List')!.click();
     expect(refreshed).toBe(1);
   });
   it('unreadable: reason in plain words and a Retry event', async () => {

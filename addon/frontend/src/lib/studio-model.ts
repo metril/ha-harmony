@@ -73,7 +73,7 @@ export function describeAction(cfg: Config, a: unknown, names?: ReadonlyMap<stri
     return 'command' in x ? `${dn} · ${displayCommand(String(x['command']))}` : `${dn} · input ${displayCommand(String(x['input']))}`;
   }
   if ('activity' in x) {
-    if (x['activity'] === 'off') return 'All off';
+    if (x['activity'] === 'off') return 'All Off';
     const a2 = (cfg.activities ?? []).find((v) => v.id === x['activity']);
     return `Start ${a2?.name ?? x['activity']}`;
   }
@@ -185,7 +185,7 @@ export function describeSource(cfg: Config, s: Source): string {
     case 'activity':
       return `Start ${(cfg.activities ?? []).find((a) => a.id === s.id)?.name ?? s.id}`;
     case 'alloff':
-      return 'All off';
+      return 'All Off';
     case 'entity':
       return s.name ?? s.entity_id;
     case 'ha':
@@ -206,7 +206,7 @@ export function sourceLabel(cfg: Config, s: Source): string {
     case 'activity':
       return (cfg.activities ?? []).find((a) => a.id === s.id)?.name ?? pretty(s.id);
     case 'alloff':
-      return 'All off';
+      return 'All Off';
     case 'entity':
     case 'ha':
       return s.kind === 'entity' && s.name ? s.name : pretty(entityDomain(s.entity_id) === '' ? '' : (s.entity_id.split('.')[1] ?? ''));
@@ -550,11 +550,11 @@ export function deletePage(cfg: Config, index: number): Config {
 
 export type TemplateId = 'activities' | 'activity' | 'numbers' | 'lights' | 'devices' | 'blank';
 export const TEMPLATES: { id: TemplateId; name: string; note: string }[] = [
-  { id: 'activities', name: 'Activities home', note: 'One button per activity, plus All off' },
-  { id: 'activity', name: 'Activity control', note: 'Transport and volume of the first device' },
-  { id: 'numbers', name: 'Number pad', note: '0-9 of the first device that has them' },
-  { id: 'lights', name: 'Lights and scenes', note: 'Tiles for Home Assistant lights' },
-  { id: 'devices', name: 'Device list', note: 'One row per device command' },
+  { id: 'activities', name: 'Activities Home', note: 'One button per activity, plus All off' },
+  { id: 'activity', name: 'Activity Control', note: 'Transport and volume of the first device' },
+  { id: 'numbers', name: 'Number Pad', note: '0-9 of the first device that has them' },
+  { id: 'lights', name: 'Lights and Scenes', note: 'Tiles for Home Assistant lights' },
+  { id: 'devices', name: 'Device List', note: 'One row per device command' },
   { id: 'blank', name: 'Blank', note: 'Empty 4x6 grid' },
 ];
 export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { entity_id: string; name?: string }[]; activity?: string; device?: string } = {}): Page {
@@ -608,7 +608,7 @@ export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { en
       return { id: pid, cols: 1, list: { rows: 6 }, title: 'Devices', back: true, widgets };
     }
     default:
-      return { id: pid, cols: 4, rows: 6, title: 'New page', widgets: [] };
+      return { id: pid, cols: 4, rows: 6, title: 'New Page', widgets: [] };
   }
 }
 export function addPage(cfg: Config, page: Page, at?: number): Config {

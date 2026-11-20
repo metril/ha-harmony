@@ -229,11 +229,11 @@ export const KEYS: readonly KeyGeom[] = LAYOUT.map((r) => (typeof r === 'string'
 
 export const keyByName = new Map(KEYS.map((g) => [g.name, g]));
 /** "Volume Up" style name for tooltips and announcements, plus what is printed on the real key when that differs */
-import { displayKey } from './key-names';
+import { spokenKey } from './key-names';
 export const keyTitle = (name: string): string => {
   const g = keyByName.get(name);
   if (!g) return name;
-  const t = displayKey(name);
+  const t = spokenKey(name);
   return g.printed && g.printed.toLowerCase() !== t.toLowerCase() ? `${t} (${g.printed})` : t;
 };
 

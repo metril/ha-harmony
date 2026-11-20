@@ -23,7 +23,7 @@ export function describePath(path: (string | number)[]): { label: string; open?:
     if (a === 'inputs' && b !== undefined) return { label: `Input ${String(b)}`, open: { where: 'inputs', name: String(b) } };
     if (a === 'power') return b !== undefined ? { label: `Power ${String(b)}`, open: { where: 'power', name: String(b) } } : { label: 'Power' };
     if (a === 'aliases') return { label: `Alias ${nth(b ?? '')}` };
-    if (a === 'settle_ms') return { label: 'Settle time' };
+    if (a === 'settle_ms') return { label: 'Settle Time' };
     if (a === 'entity') return { label: 'Entity' };
     if (a === 'id') return { label: 'Id' };
     if (a === 'name') return { label: 'Name' };
@@ -38,7 +38,7 @@ export function describePath(path: (string | number)[]): { label: string; open?:
     if (a === 'name') return { label: 'Name' };
     return { label: a === undefined ? 'Activity' : String(a) };
   }
-  if (path[0] === 'editor') return { label: 'Editor notes' };
+  if (path[0] === 'editor') return { label: 'Editor Notes' };
   return { label: path.join(' / ') };
 }
 

@@ -220,7 +220,7 @@ export class HhApp extends StoreElement {
   }
 
   private sectionTitle(): string {
-    const names: Record<string, string> = { remote: 'Remote studio', overview: 'Overview', devices: 'Devices', ir: 'Add a device', activities: 'Activities', themes: 'Themes', bluetooth: 'Bluetooth', history: 'History' };
+    const names: Record<string, string> = { remote: 'Remote Studio', overview: 'Overview', devices: 'Devices', ir: 'Add a Device', activities: 'Activities', themes: 'Themes', bluetooth: 'Bluetooth', history: 'History' };
     return names[this.router.route.section] ?? 'Harmony Editor';
   }
 
@@ -271,7 +271,7 @@ export class HhApp extends StoreElement {
     const errs = s.errorSummary.bySection;
     return html`
       <header>
-        <button class="skip" @click=${() => this.shadowRoot?.querySelector('main')?.focus()}>Skip to content</button>
+        <button class="skip" @click=${() => this.shadowRoot?.querySelector('main')?.focus()}>Skip to Content</button>
         <button class="btn ghost icon menu" aria-label="Menu" aria-expanded=${this.railOpen} @click=${() => (this.railOpen = !this.railOpen)}>${icon('menu')}</button>
         <span class="brand">${icon('hub')} Harmony Editor</span>
         ${this.hubIndicator()}

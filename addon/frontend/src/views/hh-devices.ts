@@ -1,6 +1,7 @@
 import '../components/hh-icon-picker';
 import { css, html, nothing, type TemplateResult } from 'lit';
 import { displayCommand } from '../lib/key-names';
+import { orderBy, orderUnits } from '../lib/key-order';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../components/hh-action-picker';
 import '../components/hh-code-dialog';
@@ -71,6 +72,8 @@ export class HhDevices extends StoreElement {
       .grp { margin-bottom: 18px; }
       .grp h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; display: flex; gap: 8px; align-items: center; }
       .grp h2 .sic { width: 18px; height: 18px; color: var(--acc); }
+      .keys > .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; grid-column: span 2; }
+      @media (max-width: 480px) { .keys > .pair { grid-column: 1 / -1; } }
       .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; }
       .key { display: flex; align-items: center; gap: 6px; height: 48px; padding: 0 6px 0 4px; border-radius: var(--r2); border: 1px solid var(--line); background: linear-gradient(var(--sf), var(--sf2)); min-width: 0; }
       .key.bad { border-color: var(--bad); background: var(--bads); }
@@ -152,7 +155,7 @@ export class HhDevices extends StoreElement {
     return confirmAction(this, {
       title: `Delete ${what}?`,
       body: `It is used by: ${list}${refs.length > 8 ? `; and ${refs.length - 8} more` : ''}. Deleting it clears those places (keys do nothing, buttons lose their action, steps are removed). You can undo this.`,
-      ok: 'Delete anyway',
+      ok: 'Delete Anyway',
       danger: true,
     });
   }
@@ -168,7 +171,7 @@ export class HhDevices extends StoreElement {
     const ok = await confirmAction(this, {
       title: `Delete ${d.name ?? d.id}?`,
       body: refs.length ? `It is used by ${refs.length} place${refs.length === 1 ? '' : 's'}: ${refs.slice(0, 6).map(describeRef).join('; ')}${refs.length > 6 ? '; …' : ''}. They are cleared too. You can undo this.` : 'Its commands are removed from the draft. You can undo this.',
-      ok: 'Delete device',
+      ok: 'Delete Device',
       danger: true,
     });
     if (!ok) return;
@@ -231,7 +234,7 @@ export class HhDevices extends StoreElement {
       <div class="head"><h1>Devices</h1><span class="chip">${all.length} / ${LIMITS.devices}</span><span class="muted">What the hub can control. Open one to see its keypad.</span></div>
       <div class="gallery" role="list" aria-label="Devices">
         ${all.map((d, i) => html`<div role="listitem" class="cont">${this.card(d, i)}</div>`)}
-        <div role="listitem" class="addw">${all.length >= LIMITS.devices ? html`<span class="add" aria-disabled="true" title=${capProblem(this.store.config, 'device') ?? ''}><span class="plus">${icon('plus')}</span>Add device<span class="muted">The hub holds at most ${LIMITS.devices} devices.</span></span>` : html`<a class="add" href=${hashFor('devices', 'new')}><span class="plus">${icon('plus')}</span>Add device<span class="muted">From the IR archive, pasted codes or Home Assistant</span></a>`}</div>
+        <div role="listitem" class="addw">${all.length >= LIMITS.devices ? html`<span class="add" aria-disabled="true" title=${capProblem(this.store.config, 'device') ?? ''}><span class="plus">${icon('plus')}</span>Add Device<span class="muted">The hub holds at most ${LIMITS.devices} devices.</span></span>` : html`<a class="add" href=${hashFor('devices', 'new')}><span class="plus">${icon('plus')}</span>Add Device<span class="muted">From the IR archive, pasted codes or Home Assistant</span></a>`}</div>
       </div>
       ${all.length === 0 ? html`<p class="muted">No devices yet. Add your first one to get started.</p>` : nothing}`;
   }
@@ -272,13 +275,13 @@ export class HhDevices extends StoreElement {
         else rest.push(it);
       }
     }
-    const numbered = g === 'numbers' ? [...items].sort((a, b) => (/\d/.exec(a[0])?.[0] ?? '9').localeCompare(/\d/.exec(b[0])?.[0] ?? '9')) : items;
+    const numbered = orderBy(items, (e) => e[0]);
     const dp = ['', 'up', '', 'left', 'ok', 'right', '', 'down', ''];
     const map = new Map(items);
     return html`<section class="grp" aria-label="${pretty(g)} keys">
       <h2>${stockIconSvg(groupIconId(g))} ${pretty(g)}<span class="muted">${items.length}</span></h2>
       ${nav && Object.keys(dpadNames).length ? html`<div class="dpad">${dp.map((s) => (s && dpadNames[s] ? this.key(d, where, dpadNames[s] as string, map.get(dpadNames[s] as string) as IrAction) : html`<span></span>`))}</div>` : nothing}
-      <div class=${g === 'numbers' && numbered.length >= 8 ? 'numpad' : 'keys'}>${(nav ? rest : numbered).map(([n, c]) => this.key(d, where, n, c))}${g === 'inputs' ? this.placeholder(d, 'inputs', 'input') : nothing}</div>
+      <div class=${g === 'numbers' && numbered.length >= 8 ? 'numpad' : 'keys'}>${(nav ? orderUnits(rest, (e) => e[0]) : g === 'numbers' ? numbered.map((e): [typeof e] => [e]) : orderUnits(numbered, (e) => e[0])).map((u) => (u.length === 2 ? html`<div class="pair">${this.key(d, where, u[0][0], u[0][1])}${this.key(d, where, u[1][0], u[1][1])}</div>` : this.key(d, where, u[0][0], u[0][1])))}${g === 'inputs' ? this.placeholder(d, 'inputs', 'input') : nothing}</div>
     </section>`;
   }
   private keypad(d: Device) {
@@ -302,7 +305,7 @@ export class HhDevices extends StoreElement {
       ${this.sel.length
         ? html`<div class="bulk" role="region" aria-label="Bulk edit"><b>${this.sel.length} selected</b>
             <div class="ports" role="group" aria-label="IR ports">${[1, 2, 4].map((bit, i) => html`<button aria-pressed=${(mask & bit) !== 0} aria-label="Port ${i + 1}" @click=${() => (this.bulkPorts = (mask ^ bit) || 7)}>${i + 1}</button>`)}</div>
-            <button class="btn sm" @click=${() => this.put(mapCodes(this.store.config, d.id, this.sel, (c) => withPorts(c, mask)), undefined, `Set IR ports on ${this.sel.length} commands`)}>Set IR ports</button>
+            <button class="btn sm" @click=${() => this.put(mapCodes(this.store.config, d.id, this.sel, (c) => withPorts(c, mask)), undefined, `Set IR ports on ${this.sel.length} commands`)}>Set IR Ports</button>
             ${ha ? html`<button class="btn sm" @click=${() => this.put(mapCodes(this.store.config, d.id, this.sel, (c) => withRepeats(c, 2)), undefined, 'Set repeats to 2')}>Repeat ×2</button>` : nothing}
             <button class="btn sm danger" @click=${() => void this.bulkDelete(d)}>Delete</button></div>`
         : nothing}
@@ -340,7 +343,7 @@ export class HhDevices extends StoreElement {
   // ------------------------------------------------------------ side panels
   private powerPanel(d: Device) {
     const mode = powerMode(d);
-    const modes: [PowerMode, string][] = [['both', 'On and off'], ['toggle', 'One toggle'], ['none', 'None']];
+    const modes: [PowerMode, string][] = [['both', 'On and Off'], ['toggle', 'One Toggle'], ['none', 'None']];
     return html`<section class="card" aria-label="Power control">
       <h2>Power</h2>
       <div class="seg" role="group" aria-label="Power control">${modes.map(([m, label]) => html`<button aria-pressed=${mode === m} @click=${() => this.put(setPowerMode(this.store.config, d.id, m))}>${label}</button>`)}</div>
@@ -353,7 +356,7 @@ export class HhDevices extends StoreElement {
     const refs = findRefs(this.store.config, { device: d.id });
     return html`<section class="card" aria-label="Settings">
       <h2>Settings</h2>
-      <label class="f">Settle time (ms)<input type="number" min="0" max="60000" step="100" aria-label="Settle time in milliseconds" .value=${String(d.settle_ms ?? 0)} @change=${(e: Event) => this.put(patchDevice(this.store.config, d.id, { settle_ms: Math.max(0, Math.min(60000, Number((e.target as HTMLInputElement).value) || 0)) || undefined }), `settle${d.id}`)} />
+      <label class="f">Settle Time (ms)<input type="number" min="0" max="60000" step="100" aria-label="Settle time in milliseconds" .value=${String(d.settle_ms ?? 0)} @change=${(e: Event) => this.put(patchDevice(this.store.config, d.id, { settle_ms: Math.max(0, Math.min(60000, Number((e.target as HTMLInputElement).value) || 0)) || undefined }), `settle${d.id}`)} />
         <span class="hint">How long the hub waits after power-on or an input change before the next step. TVs need 2000 or more.</span></label>
       <div class="f mt">IR ports for all commands
         <div class="ports" role="group" aria-label="IR ports for all commands">${[1, 2, 4].map((bit, i) => html`<button aria-pressed=${mask !== 0 && (mask & bit) !== 0} aria-label="Port ${i + 1}" @click=${() => { const m = ((mask || 7) ^ bit) || 7; this.put(mapCodes(this.store.config, d.id, null, (c) => withPorts(c, m)), undefined, `IR ports set for every command`); }}>${i + 1}</button>`)}</div>
@@ -369,7 +372,7 @@ export class HhDevices extends StoreElement {
   private haAction(label: string, current: IrAction | undefined, onPick: (a: IrAction | null) => void, extra?: TemplateResult) {
     const text = current?.ha ? `${current.ha.service} ${Array.isArray(current.ha.target.entity_id) ? current.ha.target.entity_id.join(', ') : current.ha.target.entity_id}${current.ha.data ? ` ${JSON.stringify(current.ha.data)}` : ''}` : 'Not set';
     return html`<div class="haact"><div class="row bare"><span class="l"><b>${label}</b><small>${text}</small></span>${extra ?? nothing}</div>
-      <details class="pick"><summary>${current ? 'Change action' : 'Choose action'}</summary>
+      <details class="pick"><summary>${current ? 'Change Action' : 'Choose Action'}</summary>
         <hh-action-picker .host=${HOST(this.ha)} .value=${current ?? null} mode="widget" @pick=${(e: CustomEvent<Source>) => { const a = sourceAction(e.detail); if (a && 'ha' in a) onPick(a as unknown as IrAction); }}></hh-action-picker></details></div>`;
   }
   private haDevice(d: Device) {
@@ -381,7 +384,7 @@ export class HhDevices extends StoreElement {
     return html`
       ${ok ? nothing : html`<div class="banner ir" role="note">Home Assistant devices cannot be edited here: this add-on version does not store Home Assistant actions yet (the add-on reports ha_actions: off).</div>`}
       <section class="card" aria-label="Entity"><h2>Entity</h2>
-        <label class="f">Where its state comes from<input type="text" list="hh-dev-ents" aria-label="Entity" .value=${d.entity ?? ''} placeholder="media_player.shield" ?disabled=${!ok} @change=${(e: Event) => set(patchDevice(this.store.config, d.id, { entity: (e.target as HTMLInputElement).value.trim() || undefined }))} />
+        <label class="f">Where Its State Comes From<input type="text" list="hh-dev-ents" aria-label="Entity" .value=${d.entity ?? ''} placeholder="media_player.shield" ?disabled=${!ok} @change=${(e: Event) => set(patchDevice(this.store.config, d.id, { entity: (e.target as HTMLInputElement).value.trim() || undefined }))} />
           <datalist id="hh-dev-ents">${(st.entities ?? []).slice(0, 300).map((e) => html`<option value=${e.entity_id}>${e.name ?? ''}</option>`)}</datalist>
           <span class="hint">Power shows as on unless this entity is off, standby, unavailable or unknown.</span></label></section>
       <section class="card" aria-label="Power control"><h2>Power</h2>
@@ -404,9 +407,9 @@ export class HhDevices extends StoreElement {
     const bytes = byteCounter(d.name ?? d.id);
     return html`
       <div class="dbar">
-        <a class="back" href=${hashFor('devices')}>← All devices</a><span class="sp"></span>
-        ${ha || bt ? nothing : html`<div class="seg" role="group" aria-label="View"><button aria-pressed=${this.view === 'keypad'} @click=${() => (this.view = 'keypad')}>Keypad</button><button aria-pressed=${this.view === 'list'} @click=${() => (this.view = 'list')}>List view</button></div>`}
-        <button class="btn danger" @click=${() => void this.removeDev(d)}>Delete device</button>
+        <a class="back" href=${hashFor('devices')}>← All Devices</a><span class="sp"></span>
+        ${ha || bt ? nothing : html`<div class="seg" role="group" aria-label="View"><button aria-pressed=${this.view === 'keypad'} @click=${() => (this.view = 'keypad')}>Keypad</button><button aria-pressed=${this.view === 'list'} @click=${() => (this.view = 'list')}>List View</button></div>`}
+        <button class="btn danger" @click=${() => void this.removeDev(d)}>Delete Device</button>
       </div>
       ${problemList(problemsFor(this.store.errors, 'devices', idx), (p) => p.open && this.openProblem(d, p))}
       <div class="dbar">
@@ -433,7 +436,7 @@ export class HhDevices extends StoreElement {
   protected override render() {
     const sel = this.selected;
     const d = this.devices.find((x) => x.id === sel);
-    if (sel && !d) return html`<div class="card empty"><h2>That device is gone</h2><a class="btn" href=${hashFor('devices')}>All devices</a></div>`;
+    if (sel && !d) return html`<div class="card empty"><h2>That Device Is Gone</h2><a class="btn" href=${hashFor('devices')}>All Devices</a></div>`;
     return d ? this.devicePage(d) : this.gallery();
   }
 }

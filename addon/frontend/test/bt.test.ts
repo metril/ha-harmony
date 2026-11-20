@@ -172,7 +172,7 @@ describe('key table', () => {
     expect(setRowKey({ 'HID:0C:00CD': 'play' }, { id: 'HID:0C:00CD' }, null)).toEqual({});
   });
   it('key names get human labels and groups', () => {
-    expect([keyLabel('key_100'), keyLabel('volume_up'), keyLabel('power_off_activity'), keyLabel('key_5')]).toEqual(['Digit 0', 'Volume up', 'Power off activity', 'Key 5']);
+    expect([keyLabel('key_100'), keyLabel('volume_up'), keyLabel('power_off_activity'), keyLabel('key_5')]).toEqual(['Digit 0', 'Volume Up', 'Power Off Activity', 'Key 5']);
     const g = keyOptions({ ...codes, keys: ['up', 'play', 'volume_up', 'red', 'key_103', 'favorites', 'zzz'] }).map((x) => [x.group, x.keys.map((k) => k.id)]);
     expect(g).toEqual([['Navigation', ['up', 'favorites']], ['Transport', ['play']], ['Volume and channel', ['volume_up']], ['Colour', ['red']], ['Digits', ['key_103']], ['Other', ['zzz']]]);
   });

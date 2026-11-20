@@ -1,3 +1,5 @@
+import { displayKey } from '../lib/key-names';
+import { orderBy } from '../lib/key-order';
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { BtCodes } from '../lib/api';
@@ -72,26 +74,26 @@ export class HhBtCommands extends LitElement {
     if (!c) return html`<p class="hint" role="status">Loading the command list…</p>`;
     const names = new Set(c.builtins.map((b) => b.name));
     const own = Object.entries(this.value).filter(([n, v]) => !(names.has(n) && v === n));
-    const list = searchBuiltins(c.builtins, this.q);
+    const list = orderBy(searchBuiltins(c.builtins, this.q), (b) => b.name);
     const count = Object.keys(this.value).length;
     return html`
       <div class="tools">
         <input type="search" aria-label="Search commands" placeholder="Search commands" .value=${this.q} @input=${(e: Event) => (this.q = (e.target as HTMLInputElement).value)} />
-        <button class="btn sm" @click=${() => this.emit(this.defaults())}>Default set</button>
+        <button class="btn sm" @click=${() => this.emit(this.defaults())}>Default Set</button>
         <button class="btn sm" ?disabled=${!count} @click=${() => this.emit({})}>Clear</button>
         <span class="muted" role="status">${count} command${count === 1 ? '' : 's'} chosen</span>
       </div>
       <div class="grid" role="group" aria-label="Built-in commands">
-        ${list.map((b) => html`<label class="chk"><input type="checkbox" .checked=${this.value[b.name] === b.name} @change=${(e: Event) => this.toggle(b.name, (e.target as HTMLInputElement).checked)} /><span><b>${b.name}</b><small>${pageName(b.page)} ${hidCode(b.page, b.usage).slice(4)}</small></span></label>`)}
+        ${list.map((b) => html`<label class="chk"><input type="checkbox" .checked=${this.value[b.name] === b.name} @change=${(e: Event) => this.toggle(b.name, (e.target as HTMLInputElement).checked)} /><span title=${b.name}><b>${displayKey(b.name)}</b><small>${pageName(b.page)} ${hidCode(b.page, b.usage).slice(4)}</small></span></label>`)}
         ${list.length ? nothing : html`<p class="hint">No built-in command matches "${this.q}".</p>`}
       </div>
-      <h3>Your own codes</h3>
+      <h3>Your Own Codes</h3>
       <div class="own">
         ${own.map(([n, v]) => html`<div class="orow"><b>${n}</b><span class="mono muted">${v}</span><button class="btn sm" aria-label="Remove ${n}" @click=${() => { const x = { ...this.value }; delete x[n]; this.emit(x); }}>Remove</button></div>`)}
         <div class="add">
-          <label>Command name<input type="text" .value=${this.cname} placeholder="Netflix" @input=${(e: Event) => (this.cname = (e.target as HTMLInputElement).value)} @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && this.add()} /></label>
-          <label>HID code<input type="text" .value=${this.ccode} placeholder="HID:0C:0223" @input=${(e: Event) => (this.ccode = (e.target as HTMLInputElement).value)} @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && this.add()} /></label>
-          <button class="btn sm" @click=${() => this.add()}>Add code</button>
+          <label>Command Name<input type="text" .value=${this.cname} placeholder="Netflix" @input=${(e: Event) => (this.cname = (e.target as HTMLInputElement).value)} @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && this.add()} /></label>
+          <label>HID Code<input type="text" .value=${this.ccode} placeholder="HID:0C:0223" @input=${(e: Event) => (this.ccode = (e.target as HTMLInputElement).value)} @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && this.add()} /></label>
+          <button class="btn sm" @click=${() => this.add()}>Add Code</button>
         </div>
         ${this.cerr ? html`<span class="err" role="alert">${this.cerr}</span>` : html`<p class="hint">For a key that is not in the list. Page 07 is the keyboard, 0C the consumer (media) page; both numbers are hex.</p>`}
       </div>`;

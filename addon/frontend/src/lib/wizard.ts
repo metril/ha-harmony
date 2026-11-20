@@ -61,7 +61,7 @@ export function stepsFor(source: WSource | null): { id: WStep; label: string }[]
   if (source === 'ha') return [{ id: 'source', label: 'Source' }, { id: 'entity', label: 'Entity' }, { id: 'review', label: 'Review' }];
   return [
     { id: 'source', label: 'Source' }, { id: 'brand', label: 'Brand' }, { id: 'type', label: 'Type' },
-    { id: 'test', label: 'Power test' }, { id: 'model', label: 'Model' }, { id: 'review', label: 'Review' },
+    { id: 'test', label: 'Power Test' }, { id: 'model', label: 'Model' }, { id: 'review', label: 'Review' },
   ];
 }
 const BACK: Record<WStep, WStep> = { source: 'source', brand: 'source', type: 'brand', test: 'type', model: 'test', review: 'model', paste: 'source', entity: 'source' };

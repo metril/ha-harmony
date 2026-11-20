@@ -29,12 +29,12 @@ export class HhBtRemote extends BtElement {
   }
   protected override render() {
     const r = remotesOf(this.store.config)[this.index];
-    if (!r) return html`<div class="card pad"><h1>That remote is gone</h1><a class="btn" href=${hashFor('bluetooth')}>Back to Bluetooth</a></div>`;
+    if (!r) return html`<div class="card pad"><h1>That Remote Is Gone</h1><a class="btn" href=${hashFor('bluetooth')}>Back to Bluetooth</a></div>`;
     const live = this.bt?.remotes.find((x) => sameAddr(x.addr, r.address));
     const bytes = byteCounter(r.name);
     return html`
-      <div class="top"><a class="btn ghost" href=${hashFor('bluetooth')}>← Bluetooth</a><span class="sp"></span><button class="btn danger" @click=${() => void this.drop(r.name)}>Remove from config</button></div>
-      <div class="head"><h1>${r.name}</h1>${live ? html`<span class="chip ${live.connected ? 'ok' : ''}">${live.connected ? 'Connected' : 'Not connected'}</span>` : html`<span class="chip ir">Not paired</span>`}<span class="mono muted">${r.address ?? 'no address yet'}</span></div>
+      <div class="top"><a class="btn ghost" href=${hashFor('bluetooth')}>← Bluetooth</a><span class="sp"></span><button class="btn danger" @click=${() => void this.drop(r.name)}>Remove From Config</button></div>
+      <div class="head"><h1>${r.name}</h1>${live ? html`<span class="chip ${live.connected ? 'ok' : ''}">${live.connected ? 'Connected' : 'Not Connected'}</span>` : html`<span class="chip ir">Not Paired</span>`}<span class="mono muted">${r.address ?? 'no address yet'}</span></div>
       ${this.downBanner()}
       <label class="f narrow">Name<input type="text" aria-label="Remote name" .value=${r.name} aria-invalid=${this.nameErr ? 'true' : 'false'} @change=${(e: Event) => this.rename(e.target as HTMLInputElement)} /></label>
       ${this.nameErr ? html`<span class="err" role="alert">${this.nameErr}</span>` : nothing}

@@ -187,7 +187,7 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     await page.locator(P).get_by_role("button", name="Remove filter Area: Kitchen").click()
 
     # group by Type / Device / Integration / Label (all have data), collapsed, with counts
-    sel = page.locator(P).get_by_role("combobox", name="Group by")
+    sel = page.locator(P).get_by_role("combobox", name="Group By")
     assert await sel.locator("option").all_text_contents() == ["Area", "Type", "Device", "Integration", "Label"]
     await sel.select_option("type")
     await page.locator(f"{P} .gh", has_text="Lights").first.wait_for()
@@ -218,12 +218,12 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     await page.keyboard.press("ArrowLeft")  # Left on an open header collapses it
     assert await first.get_attribute("aria-expanded") == "false"
 
-    # "Used in this config" and the recently used list, at the top
+    # "Used in This Config" and the recently used list, at the top
     await page.evaluate(
         "() => " + STORE + ".edit(c => { c.keys = c.keys || {}; c.keys.play = { ha: { service: 'light.toggle', target: { entity_id: 'light.living_lamp' } } }; })"
     )
-    await page.locator(P).get_by_role("button", name="Used in this config").wait_for()
-    await page.locator(P).get_by_role("button", name="Used in this config").click()
+    await page.locator(P).get_by_role("button", name="Used in This Config").wait_for()
+    await page.locator(P).get_by_role("button", name="Used in This Config").click()
     used = page.locator(ROWS, has_text="Living room lamp")
     await used.first.wait_for()
     assert "toggle" in (await used.first.text_content())  # says which service the config calls
@@ -276,7 +276,7 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
 
 async def test_the_dom_stays_bounded_and_typing_stays_fast(browser, big):
     page = await open_tab(browser, big)
-    await page.locator(P).get_by_role("button", name="Expand all").click()
+    await page.locator(P).get_by_role("button", name="Expand All").click()
     await page.locator(f"{P} .more").first.wait_for()
     n = await page.locator(ROWS).count()
     assert 20 < n <= 300, n  # 3,000 entities never become 3,000 rows
@@ -327,7 +327,7 @@ async def test_without_registries_it_groups_by_type_and_says_so(aiohttp_server, 
     await page.get_by_role("tab", name="Home Assistant", exact=True).click()
     note = page.locator(P).get_by_role("note")
     await note.get_by_text("grouped by type only").wait_for()
-    assert await page.locator(P).get_by_role("combobox", name="Group by").locator("option").all_text_contents() == ["Type"]
+    assert await page.locator(P).get_by_role("combobox", name="Group By").locator("option").all_text_contents() == ["Type"]
     await page.locator(f"{P} .gh", has_text="Lights").first.wait_for()
     await shot(page, "12-no-registries-1440")
 
@@ -353,7 +353,7 @@ async def test_action_picker_and_add_device_wizard_use_the_same_navigator(browse
     assert await nav.get_by_role("button", name="Sensors").count() == 0  # not a domain a device can be made from
     await shot(page, "14-wizard-1440")
     await row.click()
-    await page.get_by_role("heading", name="Pick a Home Assistant entity").wait_for(state="detached")
+    await page.get_by_role("heading", name="Pick a Home Assistant Entity").wait_for(state="detached")
 
 
 # every browser-side check below is about structure (one line, nothing cut or sideways), never a pixel constant tuned to one font

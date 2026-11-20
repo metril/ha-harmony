@@ -124,7 +124,7 @@ export class HhApplyDialog extends StoreElement {
     return [
       { label: 'Validated', state: 'done' },
       { label: `Saved as rev ${this.rev}`, state: 'done' },
-      { label: this.ack === 'ok' ? 'On the remote' : this.ack === 'error' ? 'Rejected by hub' : 'Sending to the remote', state: w },
+      { label: this.ack === 'ok' ? 'On the Remote' : this.ack === 'error' ? 'Rejected By Hub' : 'Sending to the Remote', state: w },
     ];
   }
 
@@ -133,7 +133,7 @@ export class HhApplyDialog extends StoreElement {
     const hub = s.hub === 'default' ? 'the hub' : s.hub;
     const diff = s.diff;
     if (this.phase === 'review' || this.phase === 'applying') {
-      return html`<hh-dialog .open=${this.open} heading="Apply draft to ${hub}?" @close=${() => this.close()}>
+      return html`<hh-dialog .open=${this.open} heading="Apply Draft to ${hub}?" @close=${() => this.close()}>
         ${diff.length
           ? html`<ul class="diff" aria-label="Changes">
               ${diff.map((r) => html`<li><span class="k ${r.kind}">${r.kind}</span><span><strong>${r.area}</strong> ${r.label}</span>${r.detail ? html`<span class="muted">${r.detail}</span>` : nothing}</li>`)}
@@ -147,12 +147,12 @@ export class HhApplyDialog extends StoreElement {
         ${this.message ? html`<div class="banner bad" role="alert">${this.message}</div>` : nothing}
         <button slot="footer" class="btn" @click=${() => this.close()}>Cancel</button>
         <button slot="footer" class="btn pri" aria-disabled=${this.phase === 'applying'} @click=${() => (this.phase === 'applying' ? undefined : void this.apply())}>
-          ${this.phase === 'applying' ? 'Applying…' : 'Apply to hub'}
+          ${this.phase === 'applying' ? 'Applying…' : 'Apply to Hub'}
         </button>
       </hh-dialog>`;
     }
     if (this.phase === 'error') {
-      return html`<hh-dialog .open=${this.open} heading="Could not apply" @close=${() => this.close()}>
+      return html`<hh-dialog .open=${this.open} heading="Could Not Apply" @close=${() => this.close()}>
         <div class="banner bad" role="alert">${this.message}</div>
         <button slot="footer" class="btn" @click=${() => this.close()}>Close</button>
       </hh-dialog>`;
@@ -177,7 +177,7 @@ export class HhApplyDialog extends StoreElement {
       ${this.ack === 'error' && s.history.length
         ? html`<button slot="footer" class="btn danger" @click=${() => void this.revertPrevious()}>Revert to rev ${s.history[0]?.rev}</button>`
         : nothing}
-      <button slot="footer" class="btn pri" @click=${() => this.close()}>${this.ack === 'ok' || this.ack === 'error' ? 'Done' : 'Keep waiting in background'}</button>
+      <button slot="footer" class="btn pri" @click=${() => this.close()}>${this.ack === 'ok' || this.ack === 'error' ? 'Done' : 'Keep Waiting in Background'}</button>
     </hh-dialog>`;
   }
 }

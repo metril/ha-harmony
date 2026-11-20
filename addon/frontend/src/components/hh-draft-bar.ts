@@ -70,9 +70,9 @@ export class HhDraftBar extends StoreElement {
 
   private async discard() {
     const ok = await confirmAction(this, {
-      title: 'Discard draft?',
+      title: 'Discard Draft?',
       body: 'Your unapplied changes will be deleted and the applied config shown again.',
-      ok: 'Discard draft',
+      ok: 'Discard Draft',
       danger: true,
     });
     if (!ok) return;
@@ -121,14 +121,14 @@ export class HhDraftBar extends StoreElement {
       </div>
       <span class="sp"></span>
       <div class="actions">
-        <button class="btn ghost" ?hidden=${!s.hasDraft} @click=${() => this.discard()}>${icon('undo')}<span class="long">Discard draft</span><span class="vh">Discard draft</span></button>
+        <button class="btn ghost" ?hidden=${!s.hasDraft} @click=${() => this.discard()}>${icon('undo')}<span class="long">Discard Draft</span><span class="vh">Discard Draft</span></button>
         <button
           class="btn pri"
           aria-disabled=${reason ? 'true' : 'false'}
           title=${reason ?? 'Review the changes, then apply them to the hub'}
           @click=${() => (reason ? undefined : this.dispatchEvent(new Event('hh-review', { bubbles: true, composed: true })))}
         >
-          Review &amp; apply
+          Review &amp; Apply
         </button>
       </div>
     </div>`;

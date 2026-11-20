@@ -11,7 +11,7 @@ import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, isHaAction, fieldDat
 import './hh-send-ir';
 
 type Kind = 'command' | 'input' | 'activity' | 'alloff' | 'ha';
-const KINDS: [Kind, string][] = [['command', 'Command'], ['input', 'Input'], ['activity', 'Activity'], ['alloff', 'All off'], ['ha', 'Home Assistant action']];
+const KINDS: [Kind, string][] = [['command', 'Command'], ['input', 'Input'], ['activity', 'Activity'], ['alloff', 'All Off'], ['ha', 'Home Assistant Action']];
 
 /** Pick an action for a hard key or button: device command or input, start an activity, all off, or a Home Assistant service. */
 @customElement('hh-action-picker')
@@ -124,7 +124,7 @@ export class HhActionPicker extends LitElement {
     return html`
       <label>Device
         <select .value=${this.device} @change=${(e: Event) => { this.device = (e.target as HTMLSelectElement).value; this.name = ''; }}>
-          <option value="">Choose a device</option>
+          <option value="">Choose a Device</option>
           ${devs.map((x) => html`<option value=${x.id} ?selected=${x.id === this.device}>${x.name ?? x.id}</option>`)}
         </select>
       </label>
@@ -155,7 +155,7 @@ export class HhActionPicker extends LitElement {
       <label>Service
         ${services.length
           ? html`<select .value=${this.service} @change=${(e: Event) => { this.service = (e.target as HTMLSelectElement).value; this.fields = {}; }}>
-              <option value="">Choose a service</option>
+              <option value="">Choose a Service</option>
               ${services.map((s) => html`<option value=${s} ?selected=${s === this.service}>${s}</option>`)}
             </select>`
           : html`<input type="text" placeholder="light.toggle" .value=${this.service} @input=${(e: Event) => (this.service = (e.target as HTMLInputElement).value.trim())} />`}
@@ -172,7 +172,7 @@ export class HhActionPicker extends LitElement {
       ${st.entities === null && st.haLoaded ? html`<p class="why">Home Assistant could not be read, so type the entity id.</p>` : nothing}
       ${this.entity && !HA_ENTITY_ID.test(this.entity) ? html`<p class="why" role="alert">Entity ids look like light.living_room.</p>` : this.haIssue() ? html`<p class="why" role="alert">${this.haIssue()}</p>` : nothing}
       ${this.serviceFields().map((f) => html`<label>${f}<input type="text" aria-label="Field ${f}" placeholder="optional" .value=${this.fields[f] ?? ''} @input=${(e: Event) => (this.fields = { ...this.fields, [f]: (e.target as HTMLInputElement).value })} /></label>`)}
-      ${this.mode === 'key' ? html`<label class="chk"><input type="checkbox" .checked=${this.repeatHeld} @change=${(e: Event) => (this.repeatHeld = (e.target as HTMLInputElement).checked)} /> Repeat while held</label>` : nothing}`;
+      ${this.mode === 'key' ? html`<label class="chk"><input type="checkbox" .checked=${this.repeatHeld} @change=${(e: Event) => (this.repeatHeld = (e.target as HTMLInputElement).checked)} /> Repeat While Held</label>` : nothing}`;
   }
 
   protected override render() {
@@ -195,7 +195,7 @@ export class HhActionPicker extends LitElement {
         : this.kind === 'activity'
           ? html`<label>Activity
               <select .value=${this.activity} @change=${(e: Event) => (this.activity = (e.target as HTMLSelectElement).value)}>
-                <option value="">Choose an activity</option>
+                <option value="">Choose an Activity</option>
                 ${(this.cfg.activities ?? []).map((a) => html`<option value=${a.id} ?selected=${a.id === this.activity}>${a.name ?? a.id}</option>`)}
               </select>
             </label>`
@@ -203,9 +203,9 @@ export class HhActionPicker extends LitElement {
             ? html`<p class="why">Starts the built-in "all off": every device switches off.</p>`
             : this.haFields()}
       <div class="row">
-        <button class="btn pri sm" ?disabled=${!this.ready()} @click=${() => this.commit()}>Set action</button>
+        <button class="btn pri sm" ?disabled=${!this.ready()} @click=${() => this.commit()}>Set Action</button>
         ${this.mode === 'key' && this.inherits ? html`<button class="btn sm" @click=${() => this.fire({ kind: 'default' })}>Use Default</button>` : nothing}
-        <button class="btn sm" @click=${() => this.fire({ kind: 'none' })}>${this.mode === 'key' ? 'Do nothing' : 'No action'}</button>
+        <button class="btn sm" @click=${() => this.fire({ kind: 'none' })}>${this.mode === 'key' ? 'Do Nothing' : 'No Action'}</button>
       </div>
       ${this.kind === 'ha' && !this.host.state.haWritable ? html`<span class="why">Disabled: this add-on version has no Home Assistant actions.</span>` : nothing}
     `;

@@ -36,7 +36,7 @@ async def open_remote(browser, site):
     await page.get_by_text("Set up your first hub config").wait_for()
     await page.get_by_role("button", name="Import YAML", exact=True).click()
     await page.locator("textarea").fill(STUDIO_YAML)
-    await page.get_by_role("button", name="Import as draft").click()
+    await page.get_by_role("button", name="Import As Draft").click()
     await page.locator("hh-remote svg.scr").wait_for()
     await page.evaluate("() => document.fonts.ready")
     await page.wait_for_timeout(300)
@@ -78,7 +78,7 @@ async def test_free_key_chips_are_readable_names_that_are_not_cut(browser, site)
     page = await open_remote(browser, site)
     chips = await page.evaluate(CHIPS)
     names = {c["text"] for c in chips}
-    assert {"Previous channel", "Upper bulb", "Lower socket", "Volume down", "Fast forward", "DVR"} <= names
+    assert {"Previous Channel", "Upper Bulb", "Lower Socket", "Volume Down", "Fast Forward", "DVR"} <= names
     for c in chips:
         assert "_" not in c["text"], c
         assert c["cut"] <= 0, f"{c['text']} is cut"
@@ -117,10 +117,10 @@ async def test_device_icon_picker_sets_the_icon_in_the_draft(browser, large):
     await page.locator("details.iconpick summary").click()
     picker = page.locator("hh-icon-picker")
     await picker.locator("input[type=search]").fill("music")
-    await picker.get_by_role("button", name="music", exact=True).click()
+    await picker.get_by_role("button", name="Music", exact=True).click()
     icon = await page.evaluate("document.querySelector('hh-app').store.config.devices.find(d => d.id === 'tv').icon")
     assert icon == "music"
-    await picker.get_by_role("button", name="Use the default icon").click()
+    await picker.get_by_role("button", name="Use the Default Icon").click()
     assert await page.evaluate("document.querySelector('hh-app').store.config.devices.find(d => d.id === 'tv').icon") is None
     await page.context.close()
 
@@ -138,7 +138,7 @@ async def test_palette_commands_are_readable_and_sit_on_a_uniform_grid(browser, 
     page = await open_remote(browser, site)
     groups = await page.evaluate(PALETTE)
     texts = {c["text"] for g in groups for c in g}
-    assert {"Power on", "Volume up", "Volume down", "Mute", "HDMI 1", "OK", "Menu"} <= texts
+    assert {"Power On", "Volume Up", "Volume Down", "Mute", "HDMI 1", "OK", "Menu"} <= texts
     await page.set_viewport_size({"width": 1600, "height": 1000})
     await page.wait_for_timeout(300)
     groups = await page.evaluate(PALETTE)

@@ -93,7 +93,7 @@ export class HhHistory extends StoreElement {
       const revs = [s.applied.rev, ...s.history.map((h) => h.rev)];
       const sums: Record<number, string> = {};
       revs.forEach((rev, i) => {
-        sums[rev] = i + 1 < cfgs.length ? summarize(diffConfig(cfgs[i + 1] ?? null, cfgs[i] ?? null)) : rev === 1 ? 'First version' : 'Oldest version kept';
+        sums[rev] = i + 1 < cfgs.length ? summarize(diffConfig(cfgs[i + 1] ?? null, cfgs[i] ?? null)) : rev === 1 ? 'First Version' : 'Oldest Version Kept';
       });
       this.sums = sums;
     } catch {
@@ -127,7 +127,7 @@ export class HhHistory extends StoreElement {
       const ok = await confirmAction(this, {
         title: `Restore rev ${rev}?`,
         body: 'You have unapplied changes. Restoring replaces them with that version.',
-        ok: 'Replace draft',
+        ok: 'Replace Draft',
         danger: true,
       });
       if (!ok) return;
@@ -165,11 +165,11 @@ export class HhHistory extends StoreElement {
     if (!l || l.applied_rev === null) return nothing;
     const acked = l.acked_rev === l.applied_rev;
     if (acked && l.result === 'error')
-      return html`${statusChip('bad', 'Rejected by hub', { title: l.detail ?? undefined })}
-        <button class="btn sm" aria-expanded=${this.why} aria-controls="why" @click=${() => (this.why = !this.why)}>See why</button>`;
-    if (acked) return statusChip('ok', 'On the remote', { check: true });
+      return html`${statusChip('bad', 'Rejected By Hub', { title: l.detail ?? undefined })}
+        <button class="btn sm" aria-expanded=${this.why} aria-controls="why" @click=${() => (this.why = !this.why)}>See Why</button>`;
+    if (acked) return statusChip('ok', 'On the Remote', { check: true });
     const info = linkInfo(this.hubs, l, hub);
-    if (info.kind === 'none') return statusChip('', 'Not sent', { title: linkProblem(info, hub) ?? undefined });
+    if (info.kind === 'none') return statusChip('', 'Not Sent', { title: linkProblem(info, hub) ?? undefined });
     return statusChip('', 'Sending…', { title: linkProblem(info, hub) ?? 'Waiting for Home Assistant to pick it up.' });
   }
 

@@ -48,7 +48,7 @@ describe('themes view', () => {
     expect(store.config.theme).toBeUndefined();
     expect(store.config.themes).toBeUndefined();
   });
-  it('the editor shows tokens and a problems list with Fix all', async () => {
+  it('the editor shows tokens and a problems list with Fix All', async () => {
     const cfg = { ...tvConfig(), theme: 'x', themes: { x: { extends: 'midnight', tokens: { tx: '#404848' } } } };
     const { el, store } = await mount(cfg);
     el.selected = 'x';
@@ -57,7 +57,7 @@ describe('themes view', () => {
     expect(root.querySelector('#prob-chip')?.textContent).toContain('contrast problem');
     expect(root.querySelectorAll('.tk .pi').length).toBeGreaterThan(0);
     expect(root.querySelectorAll('.tk').length).toBe(13);
-    [...root.querySelectorAll<HTMLButtonElement>('.side button')].find((b) => b.textContent === 'Fix all')!.click();
+    [...root.querySelectorAll<HTMLButtonElement>('.side button')].find((b) => b.textContent === 'Fix All')!.click();
     await settle(el);
     expect(root.querySelector('#prob-chip')).toBeNull();
     expect(store.config.themes?.['x']?.tokens?.['tx']).toMatch(/^#[0-9A-F]{6}$/);
@@ -76,7 +76,7 @@ describe('colour field', () => {
   it('shows Default + 12 palette swatches + Custom, each with its ink', async () => {
     const el = await field('teal');
     expect(el.shadowRoot!.querySelectorAll('.sw')).toHaveLength(14);
-    expect(el.shadowRoot!.querySelector('.sw[aria-pressed="true"]')?.getAttribute('aria-label')).toBe('teal');
+    expect(el.shadowRoot!.querySelector('.sw[aria-pressed="true"]')?.getAttribute('aria-label')).toBe('Teal');
   });
   it('a low-contrast custom colour warns and offers the nearest readable one', async () => {
     const el = await field('#777777');
@@ -92,7 +92,7 @@ describe('colour field', () => {
     const el = await field();
     const got: (string | undefined)[] = [];
     el.addEventListener('colour', (e) => got.push((e as CustomEvent<{ value?: string }>).detail.value));
-    el.shadowRoot!.querySelector<HTMLButtonElement>('.sw[aria-label="red"]')!.click();
+    el.shadowRoot!.querySelector<HTMLButtonElement>('.sw[aria-label="Red"]')!.click();
     el.shadowRoot!.querySelector<HTMLButtonElement>('.sw.def')!.click();
     expect(got).toEqual(['red', undefined]);
   });

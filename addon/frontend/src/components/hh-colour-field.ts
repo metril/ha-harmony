@@ -1,3 +1,4 @@
+import { displayKey } from '../lib/key-names';
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { setStyle } from '../lib/set-style';
@@ -101,8 +102,8 @@ export class HhColourField extends LitElement {
     return html`<div class="grid" role="group" aria-label=${this.heading}>
       <button class="sw def" aria-pressed=${!this.value} title=${this.defaultLabel} aria-label=${this.defaultLabel} @click=${() => { this.open = false; this.emit(undefined); }}>
         <i style=${setStyle({ background: hex6(df), color: hex6(di), border: '1px solid var(--line)' })}>Aa</i><span>Default</span></button>
-      ${th.swatches.map((s) => html`<button class="sw" aria-pressed=${this.value === s.name} title=${s.name} aria-label=${s.name} @click=${() => { this.open = false; this.emit(s.name); }}>
-        <i class=${needsOutline(s.fill, th.tokens.bg) ? 'ol' : ''} style=${setStyle({ background: hex6(s.fill), color: hex6(s.ink) })}>Aa</i><span>${s.name}</span></button>`)}
+      ${th.swatches.map((s) => html`<button class="sw" aria-pressed=${this.value === s.name} title=${displayKey(s.name)} aria-label=${displayKey(s.name)} @click=${() => { this.open = false; this.emit(s.name); }}>
+        <i class=${needsOutline(s.fill, th.tokens.bg) ? 'ol' : ''} style=${setStyle({ background: hex6(s.fill), color: hex6(s.ink) })}>Aa</i><span>${displayKey(s.name)}</span></button>`)}
       <button class="sw cus" aria-pressed=${free} aria-expanded=${this.open} title="Any colour" @click=${() => (this.open = !this.open)}>
         <i style=${setStyle(free ? { background: hex6(contrastBg(this.value as string, th)), color: hex6(contrastInk(this.value as string, th)) } : { background: 'var(--sf)', color: 'var(--tx2)' })}>${free ? (this.value as string).toUpperCase() : 'Aa'}</i><span>Custom…</span></button>
     </div>`;
@@ -137,7 +138,7 @@ export class HhColourField extends LitElement {
             <select id="slot" aria-label="Palette colour to replace" .value=${String(this.repl)} @change=${(e: Event) => (this.repl = Number((e.target as HTMLSelectElement).value))}>
               ${PALETTE_NAMES.map((n, i) => html`<option value=${i} ?selected=${i === this.repl}>${n}</option>`)}
             </select>
-            <button class="btn sm" @click=${() => this.dispatchEvent(new CustomEvent<AddPaletteDetail>('add-palette', { detail: { hex: cur, slot: this.repl }, bubbles: true, composed: true }))}>Add to my theme's palette</button>
+            <button class="btn sm" @click=${() => this.dispatchEvent(new CustomEvent<AddPaletteDetail>('add-palette', { detail: { hex: cur, slot: this.repl }, bubbles: true, composed: true }))}>Add to My Theme's Palette</button>
           </div>`
         : nothing}
     </div>`;

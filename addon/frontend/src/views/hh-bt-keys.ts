@@ -124,8 +124,8 @@ export class HhBtKeys extends LitElement {
     if (!c) return nothing;
     const val = current === null ? NONE : current;
     return html`<select aria-label=${label} @change=${(e: Event) => on((e.target as HTMLSelectElement).value)}>
-      ${blank ? html`<option value="" ?selected=${current === ''}>Choose a key…</option>` : nothing}
-      <option value=${NONE} ?selected=${val === NONE}>Does nothing</option>
+      ${blank ? html`<option value="" ?selected=${current === ''}>Choose a Key…</option>` : nothing}
+      <option value=${NONE} ?selected=${val === NONE}>Does Nothing</option>
       ${keyOptions(c, current || null).map((g) => html`<optgroup label=${g.group}>${g.keys.map((k) => html`<option value=${k.id} title=${k.id} ?selected=${val === k.id}>${k.label}</option>`)}</optgroup>`)}
     </select>`;
   }
@@ -139,17 +139,17 @@ export class HhBtKeys extends LitElement {
     const unmapped = this.seen.filter((s) => !isMapped(rows, s.page, s.usage));
     return html`
       <section class="card learn" aria-label="Learn a button">
-        <h3>Press a button on the remote</h3>
+        <h3>Press a Button on the Remote</h3>
         <p>${this.learning ? 'Listening. Press any button on the remote; it appears here.' : 'Not sure which usage a button sends? Start listening, press it, then choose its key.'}</p>
         <div class="row">
-          ${this.learning ? html`<button class="btn" @click=${() => this.stopLearn()}>Stop listening</button><span class="pulse" aria-hidden="true"></span>` : html`<button class="btn pri" @click=${() => this.startLearn()}>Learn a button</button>`}
+          ${this.learning ? html`<button class="btn" @click=${() => this.stopLearn()}>Stop Listening</button><span class="pulse" aria-hidden="true"></span>` : html`<button class="btn pri" @click=${() => this.startLearn()}>Learn a Button</button>`}
         </div>
         <div role="status" aria-live="polite">
           ${p
             ? html`<div class="got"><span>You pressed</span><b>${this.rowLabel(p)}</b><span class="muted mono">${hidCode(p.page, p.usage).slice(4)}</span>
                 ${!this.mappable(p)
                   ? html`<span class="chip ir">This button sends something the hub cannot map</span>`
-                  : html`${cur?.key ? html`<span>→ acts as <b>${keyText(cur.key)}</b></span>` : html`<span class="chip ir">${cur ? 'Does nothing' : 'Not mapped'}</span>`}
+                  : html`${cur?.key ? html`<span>→ acts as <b>${keyText(cur.key)}</b></span>` : html`<span class="chip ir">${cur ? 'Does Nothing' : 'Not Mapped'}</span>`}
                 ${this.picker(`Key for ${this.rowLabel(p)}`, this.assign, (v) => (this.assign = v), true)}
                 <button class="btn sm pri" @click=${() => this.assignPressed(p, this.assign)}>${cur?.key ? 'Change' : 'Assign'}</button>`}</div>`
             : nothing}
@@ -158,13 +158,13 @@ export class HhBtKeys extends LitElement {
         ${unmapped.length ? html`<div class="unm"><span class="muted">Pressed but not mapped:</span>${unmapped.map((u) => html`<button class="btn sm" @click=${() => { this.pressed = u; this.assign = ''; }}>${this.rowLabel(u)}</button>`)}</div>` : nothing}
       </section>
       <section class="tbl" aria-label="Button map">
-        <h3>What each button does</h3>
+        <h3>What Each Button Does</h3>
         <p class="hint">Defaults are filled in. Change a key to override it, or choose "Does nothing" to turn a button off.</p>
         <div role="list" aria-label="Remote buttons and their keys">
-          <div class="head" aria-hidden="true"><span>Button</span><span>Usage</span><span>Acts as key</span><span></span></div>
+          <div class="head" aria-hidden="true"><span>Button</span><span>Usage</span><span>Acts As Key</span><span></span></div>
           ${rows.map(
             (r) => html`<div class="kr ${p && r.page === p.page && r.usage === p.usage ? 'hit' : ''}" role="listitem">
-              <b title=${r.id}>${r.id.startsWith('HID:') ? 'Your own code' : r.id}</b>
+              <b title=${r.id}>${r.id.startsWith('HID:') ? 'Your Own Code' : r.id}</b>
               <span class="mono muted use">${r.page ? hidCode(r.page, r.usage).slice(4) : r.id}</span>
               <span class="pick">${this.picker(`Key for ${r.id}`, r.key, (v) => this.setRow(r, v))}</span>
               <span class="end">${r.was === undefined ? html`<button class="btn sm" aria-label="Remove ${r.id}" @click=${() => this.emit(dropRowKey(this.value, r.id))}>Remove</button>` : r.mine ? html`<button class="btn sm" aria-label="Reset ${r.id} to ${keyText(r.was)}" @click=${() => this.emit(dropRowKey(this.value, r.id))}>Reset</button>` : html`<span class="chip">Default</span>`}</span></div>`,

@@ -9,7 +9,7 @@ import { KEYS, keyTitle } from '../lib/remote-layout';
 import { STOCK_ICONS } from '../lib/stock-icons';
 import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
-import { meter } from './parts';
+import { meter, orderedCells } from './parts';
 import { confirmAction } from './base';
 import type { AddPaletteDetail } from './hh-colour-field';
 import { PALETTE_NAMES } from '../lib/themes';
@@ -59,6 +59,7 @@ export class HhInspector extends LitElement {
       .chk { display: flex; gap: 8px; align-items: center; font-weight: 500; color: var(--tx); font-size: 13px; }
       .errs { display: grid; gap: 4px; }
       .err { font-size: 12px; color: var(--bad); background: var(--bads); padding: 6px 8px; border-radius: var(--r1); }
+      .free.grid > .pair { height: 28px; }
       .free.grid button { height: 28px; padding: 0 8px; min-width: 0; display: flex; align-items: center; justify-content: center; text-align: center; white-space: nowrap; line-height: 1; }
       .free button { padding: 0 10px; border-radius: 15px; border: 1px solid var(--line); background: var(--sf2); color: var(--tx2); cursor: pointer; font-size: 12px; }
       .stat { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 13px; }
@@ -126,13 +127,13 @@ export class HhInspector extends LitElement {
     const free = rows.filter((r) => r.source === 'none').map((r) => r.key);
     const act = (this.cfg.activities ?? []).find((a) => a.id === layer);
     return html`<div class="pad">
-      <h2>${this.st.layerName(layer)} layer</h2>
-      <div class="stat"><span>${layer === DEFAULT_LAYER ? 'Assigned keys' : 'Overridden here'}</span><span>${own}</span>
+      <h2>${this.st.layerName(layer)} Layer</h2>
+      <div class="stat"><span>${layer === DEFAULT_LAYER ? 'Assigned Keys' : 'Overridden Here'}</span><span>${own}</span>
         ${layer === DEFAULT_LAYER ? nothing : html`<span>From Default</span><span>${inherited}</span>`}
-        <span>Do nothing</span><span>${free.length}</span></div>
-      ${act?.devices?.length ? html`<div class="sec"><h3>Who handles it</h3><div class="free cells">${act.devices.map((d) => html`<span class="chip">${(this.cfg.devices ?? []).find((x) => x.id === d.device)?.name ?? d.device}${d.input ? ` · ${d.input}` : ''}</span>`)}</div></div>` : nothing}
-      <div class="sec"><h3>Free keys</h3>
-        ${free.length ? html`<div class="free cells grid" style=${setStyle({ "grid-template-columns": gridStyle(free.map(displayKey), '1.5rem', FREE_CAP) })}>${free.map((k) => html`<button title=${keyTitle(k)} @click=${() => this.st.set({ sel: { kind: 'key', name: k } })}>${displayKey(k)}</button>`)}</div>` : html`<p class="why">Every key does something.</p>`}
+        <span>Do Nothing</span><span>${free.length}</span></div>
+      ${act?.devices?.length ? html`<div class="sec"><h3>Who Handles It</h3><div class="free cells">${act.devices.map((d) => html`<span class="chip">${(this.cfg.devices ?? []).find((x) => x.id === d.device)?.name ?? d.device}${d.input ? ` · ${d.input}` : ''}</span>`)}</div></div>` : nothing}
+      <div class="sec"><h3>Free Keys</h3>
+        ${free.length ? html`<div class="free cells grid" style=${setStyle({ "grid-template-columns": gridStyle(free.map(displayKey), '1.5rem', FREE_CAP) })}>${orderedCells(free, (k) => k, (k) => html`<button title=${keyTitle(k)} @click=${() => this.st.set({ sel: { kind: 'key', name: k } })}>${displayKey(k)}</button>`)}</div>` : html`<p class="why">Every key does something.</p>`}
       </div>
       <p class="why">Pick a command in the palette, then a key, or drag it onto a key or the screen. Click a key or a screen widget to edit it here.</p>
     </div>`;
@@ -142,7 +143,7 @@ export class HhInspector extends LitElement {
     const row = this.st.rows().find((r) => r.key === name);
     const layer = this.st.layer;
     const raw = (layer === DEFAULT_LAYER ? this.cfg.keys : (this.cfg.activities ?? []).find((a) => a.id === layer)?.keys)?.[name] ?? null;
-    const state = layer === DEFAULT_LAYER ? (row?.action ? 'Assigned' : 'Does nothing') : row?.source === 'activity' ? 'Overrides Default' : row?.source === 'default' ? 'Inherited from Default' : 'Does nothing';
+    const state = layer === DEFAULT_LAYER ? (row?.action ? 'Assigned' : 'Does Nothing') : row?.source === 'activity' ? 'Overrides Default' : row?.source === 'default' ? 'Inherited From Default' : 'Does Nothing';
     return html`<div class="pad">
       <h2>${keyTitle(name)} <span class="chip">${this.st.layerName(layer)}</span></h2>
       <div class="muted">${state}${row?.action ? ` · ${this.host.state.actionLabel(row.action)}` : ''}</div>
@@ -166,18 +167,18 @@ export class HhInspector extends LitElement {
     return html`<div class="pad">
       <h2>${w.type === 'label' ? 'Label' : w.type === 'tile' ? 'Tile' : 'Button'} <span class="chip">${page.title || page.id}</span></h2>
       ${this.errorsFor((t) => t.kind === 'widget' && t.page === pi && t.index === wi)}
-      <label>Label <span class="cnt ${bytes >= room ? 'full' : bytes >= room - 4 ? 'warn' : ''}"><span>Shown on the remote</span><span aria-live="polite">${bytes}/${room} B</span></span>
+      <label>Label <span class="cnt ${bytes >= room ? 'full' : bytes >= room - 4 ? 'warn' : ''}"><span>Shown on the Remote</span><span aria-live="polite">${bytes}/${room} B</span></span>
         <input type="text" .value=${w.label ?? ''} aria-label="Label" @input=${(e: Event) => this.widgetPatch(pi, wi, { label: trimToBytes((e.target as HTMLInputElement).value, room) }, 'label')} />
       </label>
       <div class="sec"><h3>Type</h3>
         <div class="seg" role="group" aria-label="Widget type">${(['button', 'tile', 'label'] as const).map((t) => html`<button aria-pressed=${w.type === t} @click=${() => this.setType(pi, wi, t)}>${t}</button>`)}</div>
       </div>
       ${isBtn
-        ? html`<div class="sec"><h3>When tapped</h3>
+        ? html`<div class="sec"><h3>When Tapped</h3>
             ${navVal
               ? html`<p class="why">Goes to a page (below). Pick a different tap action to replace the page jump.</p>`
-              : html`<button class="slot ${picked ? 'drop' : ''}" aria-label="When tapped: ${describeAction(this.cfg, w['action'])}. Pick a source first, then click here to assign it." @click=${() => (picked ? this.host.activateWidget(pi, wi) : this.host.openPopover())}><b>${describeAction(this.cfg, w['action'])}</b><span class="muted">${picked ? 'Drop here' : 'Change'}</span></button>`}
-            <details><summary>Choose an action</summary><hh-action-picker .host=${this.host} .value=${w['action'] ?? null} mode="widget" @pick=${(e: CustomEvent<Source>) => this.fireSource({ ...e.detail })}></hh-action-picker></details>
+              : html`<button class="slot ${picked ? 'drop' : ''}" aria-label="When tapped: ${describeAction(this.cfg, w['action'])}. Pick a source first, then click here to assign it." @click=${() => (picked ? this.host.activateWidget(pi, wi) : this.host.openPopover())}><b>${describeAction(this.cfg, w['action'])}</b><span class="muted">${picked ? 'Drop Here' : 'Change'}</span></button>`}
+            <details><summary>Choose an Action</summary><hh-action-picker .host=${this.host} .value=${w['action'] ?? null} mode="widget" @pick=${(e: CustomEvent<Source>) => this.fireSource({ ...e.detail })}></hh-action-picker></details>
           </div>`
         : nothing}
       ${w.type === 'tile'
@@ -194,7 +195,7 @@ export class HhInspector extends LitElement {
             <label>Icon <input type="search" placeholder="Search icons" .value=${this.iconQ} @input=${(e: Event) => (this.iconQ = (e.target as HTMLInputElement).value)} /></label>
             <div class="icons" role="group" aria-label="Icon">
               <button aria-pressed=${!w.icon || w.icon === 'none'} aria-label="No icon" title="No icon" @click=${() => this.widgetPatch(pi, wi, { icon: undefined })}>none</button>
-              ${icons.map((i) => html`<button aria-pressed=${w.icon === i.name} aria-label=${i.name} title=${i.name} @click=${() => this.widgetPatch(pi, wi, { icon: i.name })}>${stockIconSvg(i.id)}</button>`)}
+              ${icons.map((i) => html`<button aria-pressed=${w.icon === i.name} aria-label=${displayKey(i.name)} title=${displayKey(i.name)} @click=${() => this.widgetPatch(pi, wi, { icon: i.name })}>${stockIconSvg(i.id)}</button>`)}
             </div>
             <label class="chk"><input type="checkbox" .checked=${!!w.icon_only} @change=${(e: Event) => this.widgetPatch(pi, wi, { icon_only: (e.target as HTMLInputElement).checked || undefined })} /> Icon only (the label is kept but not drawn)</label>
           </div>`
@@ -217,7 +218,7 @@ export class HhInspector extends LitElement {
         </div>
         <p class="why">Id <code>${w.id ?? '(none)'}</code> · ${isList(page) ? 'list pages place rows themselves' : `grid ${gridOf(page).cols}x${gridOf(page).rows}`}</p>
       </details>
-      <div class="seg"><button @click=${() => this.host.removeWidget(pi, wi)}>Delete widget</button></div>
+      <div class="seg"><button @click=${() => this.host.removeWidget(pi, wi)}>Delete Widget</button></div>
     </div>`;
   }
 
@@ -231,7 +232,7 @@ export class HhInspector extends LitElement {
     const set = (key: 'color' | 'on_color') => (e: CustomEvent<{ value: string | undefined; coalesce: boolean }>) =>
       this.widgetPatch(pi, wi, { [key]: e.detail.value }, e.detail.coalesce ? `col-${key}` : undefined);
     const add = (key: 'color' | 'on_color') => (e: CustomEvent<AddPaletteDetail>) => void this.addToPalette(pi, wi, key, e.detail);
-    return html`<hh-colour-field .theme=${theme} .value=${w.color} heading=${w.type === 'label' ? 'Text colour' : w.type === 'tile' ? 'Colour' : 'Colour'}
+    return html`<hh-colour-field .theme=${theme} .value=${w.color} heading=${w.type === 'label' ? 'Text Colour' : w.type === 'tile' ? 'Colour' : 'Colour'}
         defaultLabel=${w.type === 'label' ? 'Default' : 'Default (role)'} .defaultLook=${w.type === 'label' ? [theme.tokens.bg, theme.tokens.tx2] : [dflt.fill, dflt.ink]}
         @colour=${set('color')} @add-palette=${add('color')}></hh-colour-field>
       ${w.type === 'tile'
@@ -251,7 +252,7 @@ export class HhInspector extends LitElement {
       const ok = await confirmAction(this, {
         title: 'Make a theme of your own?',
         body: `"${PRESETS[name]?.name}" is built in and cannot be changed. This creates your theme "${mine}" on top of it, with ${slot} set to ${d.hex}, and switches the remote to it.`,
-        ok: 'Create theme and add',
+        ok: 'Create Theme and Add',
       });
       if (!ok) return;
       next = E.selectTheme(E.createTheme(cfg, mine, name, { palette: { [String(d.slot + 1)]: { fill: d.hex } } }), mine);
@@ -285,9 +286,9 @@ export class HhInspector extends LitElement {
     const tap = w['tap'];
     const mode = tap === undefined ? 'auto' : tap === 'toggle' ? 'toggle' : tap === 'none' ? 'none' : 'action';
     if (!st.haWritable)
-      return html`<div class="sec"><h3>When tapped</h3><p class="why" role="note">Disabled: this add-on version cannot store tile taps yet (it reports ha_actions: off). Tiles only show state.</p></div>`;
+      return html`<div class="sec"><h3>When Tapped</h3><p class="why" role="note">Disabled: this add-on version cannot store tile taps yet (it reports ha_actions: off). Tiles only show state.</p></div>`;
     const set = (v: unknown) => this.widgetPatch(pi, wi, { tap: v });
-    return html`<div class="sec"><h3>When tapped</h3>
+    return html`<div class="sec"><h3>When Tapped</h3>
       <div class="seg" role="group" aria-label="When tapped">
         <button aria-pressed=${mode === 'auto'} @click=${() => set(undefined)}>Automatic</button>
         <button aria-pressed=${mode === 'toggle'} ?disabled=${!auto} title=${auto ? '' : 'Nothing to toggle for this kind of entity'} @click=${() => set('toggle')}>Toggle</button>
@@ -330,7 +331,7 @@ export class HhInspector extends LitElement {
       ${pp?.error ? html`<div class="errs" role="alert"><div class="err">${pp.error}</div></div>` : nothing}
       ${meter('Page size', `${bytes} / ${limit} B`, bytes, limit)}
       ${meter('Widgets', `${page.widgets.length} / ${pp?.widget_limit ?? 32}`, page.widgets.length, pp?.widget_limit ?? 32)}
-      <label>Title <span class="cnt"><span>Top bar</span><span>${titleB}/24 B</span></span>
+      <label>Title <span class="cnt"><span>Top Bar</span><span>${titleB}/24 B</span></span>
         <input type="text" .value=${page.title ?? ''} @input=${(e: Event) => this.pagePatch(pi, { title: trimToBytes((e.target as HTMLInputElement).value, 24) }, 'title')} />
       </label>
       <div class="sec"><h3>Kind</h3>
@@ -340,11 +341,11 @@ export class HhInspector extends LitElement {
       </div>
       <label>Show when this activity starts
         <select .value=${page.activity ?? ''} @change=${(e: Event) => this.pagePatch(pi, { activity: (e.target as HTMLSelectElement).value || undefined })}>
-          <option value="">Never (manual)</option>
+          <option value="">Never (Manual)</option>
           ${(this.cfg.activities ?? []).map((a) => html`<option value=${a.id} ?selected=${page.activity === a.id}>${a.name ?? a.id}</option>`)}
         </select></label>
-      <label class="chk"><input type="checkbox" .checked=${!!page.back} @change=${(e: Event) => this.pagePatch(pi, { back: (e.target as HTMLInputElement).checked || undefined })} /> Back chevron (Exit goes Home)</label>
-      ${page.list ? html`<label>List rows per screen<input type="number" min="1" max="16" .value=${String(page.list.rows)} @change=${(e: Event) => this.pagePatch(pi, { list: { rows: Math.max(1, Math.min(16, Number((e.target as HTMLInputElement).value) || 6)) } })} /></label>` : nothing}
+      <label class="chk"><input type="checkbox" .checked=${!!page.back} @change=${(e: Event) => this.pagePatch(pi, { back: (e.target as HTMLInputElement).checked || undefined })} /> Back Chevron (Exit Goes Home)</label>
+      ${page.list ? html`<label>List Rows Per Screen<input type="number" min="1" max="16" .value=${String(page.list.rows)} @change=${(e: Event) => this.pagePatch(pi, { list: { rows: Math.max(1, Math.min(16, Number((e.target as HTMLInputElement).value) || 6)) } })} /></label>` : nothing}
       ${!page.list ? html`<div class="grid4"><label>Cols<input type="number" min="1" max="16" .value=${String(page.cols ?? 4)} @change=${(e: Event) => this.pagePatch(pi, { cols: Math.max(1, Math.min(16, Number((e.target as HTMLInputElement).value) || 4)) })} /></label><label>Rows<input type="number" min="1" max="16" .value=${String(page.rows ?? 6)} @change=${(e: Event) => this.pagePatch(pi, { rows: Math.max(1, Math.min(16, Number((e.target as HTMLInputElement).value) || 6)) })} /></label></div>` : html`<p class="why">A list page splits into screens of ${page.list.rows} rows; Up/Down pages through them on the remote.</p>`}
     </div>`;
   }

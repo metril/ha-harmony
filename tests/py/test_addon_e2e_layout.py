@@ -116,20 +116,44 @@ async def test_bluetooth_panel_wizards_and_key_map_under_a_wide_font(browser, bt
     await wide(page, size, "31-bt-host-start")
     await audit(page, "host wizard")
     await page.evaluate("location.hash = '#/bluetooth'")
-    await page.get_by_role("link", name="Add to config").first.click()
-    await page.get_by_role("heading", name="Name it and choose its commands").wait_for()
+    await page.get_by_role("link", name="Add to Config").first.click()
+    await page.get_by_role("heading", name="Name It and Choose Its Commands").wait_for()
     await wide(page, size, "32-bt-host-setup")
     await audit(page, "host setup")
     await page.evaluate("location.hash = '#/bluetooth'")
     await page.get_by_role("link", name="Add Bluetooth remote").click()
-    await page.get_by_role("button", name="Scan for remotes").click()
+    await page.get_by_role("button", name="Scan for Remotes").click()
     await page.get_by_role("list", name="Remotes found").wait_for()
     await wide(page, size, "33-bt-remote-candidates")
     await audit(page, "remote wizard")
     await page.get_by_role("button", name="Pair with Homatics Remote").click()
-    await page.get_by_role("heading", name="Choose what its buttons do").wait_for()
+    await page.get_by_role("heading", name="Choose What Its Buttons Do").wait_for()
     await wide(page, size, "34-bt-remote-keys-step")
     await audit(page, "remote key step")
     # the key map: every button name is shown whole, one value picker per row
     cut = await page.locator(".kr b").evaluate_all("els => els.filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.textContent)")
     assert cut == [], cut
+
+
+@pytest.mark.parametrize("size", [(1600, 900), (1280, 800)])
+async def test_palette_pairs_share_a_row_left_then_right(browser, large, size):
+    """Play|Pause, Rewind|Fast Forward and Volume Up|Down sit side by side in that order; never split across rows."""
+    page = await open_large(browser, large, *size)
+    await wide(page, size, "22-pairs")
+    await page.get_by_role("tab", name="Devices", exact=True).click()
+    pos = await page.evaluate("""() => { const out = {}; const walk = (root) => { for (const b of root.querySelectorAll('.chip2')) {
+        const t = (b.textContent || '').trim(); const r = b.getBoundingClientRect(); const dev = b.closest('details')?.querySelector('summary span')?.textContent || '';
+        if (r.height > 0) out[dev + '|' + t] = [Math.round(r.top), Math.round(r.left)]; }
+      for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot); };
+      walk(document.querySelector('hh-app').shadowRoot); return out; }""")
+    keys = list(pos)
+    checked = 0
+    for left, right in (("Play", "Pause"), ("Rewind", "Fast Forward"), ("Volume Up", "Volume Down"), ("Channel Up", "Channel Down"), ("Up", "Down")):
+        for k in keys:
+            dev, _, name = k.partition("|")
+            if name != left or f"{dev}|{right}" not in pos:
+                continue
+            (lt, ll), (rt, rl) = pos[k], pos[f"{dev}|{right}"]
+            assert lt == rt and ll < rl, (dev, left, right, pos[k], pos[f"{dev}|{right}"])
+            checked += 1
+    assert checked >= 5, (checked, keys[:20])

@@ -172,7 +172,7 @@ describe('remote studio', () => {
     await tick(insp);
   };
 
-  it('tile "When tapped": Automatic by default and says what runs; Toggle, Action and Nothing write the tap schema', async () => {
+  it('tile "When Tapped": Automatic by default and says what runs; Toggle, Action and Nothing write the tap schema', async () => {
     const { insp, store } = await inspectorFor({ kind: 'widget', page: 0, index: 1 });
     expect(insp.shadowRoot.textContent).toContain('Automatic: a tap runs light.toggle on light.lamp.');
     await press(insp, 'Nothing');
@@ -185,7 +185,7 @@ describe('remote studio', () => {
     expect('tap' in store.config.pages![0]!.widgets[1]!).toBe(false);
   });
 
-  it('tile "When tapped" is disabled with a reason when the add-on cannot store taps', async () => {
+  it('tile "When Tapped" is disabled with a reason when the add-on cannot store taps', async () => {
     const { insp } = await inspectorFor({ kind: 'widget', page: 0, index: 1 }, { ha_actions: false });
     expect(insp.shadowRoot.textContent).toContain('Disabled: this add-on version cannot store tile taps yet');
     expect([...insp.shadowRoot.querySelectorAll('button')].some((x) => x.textContent?.trim() === 'Toggle')).toBe(false);
@@ -196,7 +196,7 @@ describe('remote studio', () => {
     const picker = insp.shadowRoot.querySelector('hh-action-picker') as El;
     await tick(picker);
     const root = picker.shadowRoot;
-    ([...root.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant action') as HTMLButtonElement).click();
+    ([...root.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant Action') as HTMLButtonElement).click();
     await tick(picker);
     const svc = root.querySelector('select') as HTMLSelectElement;
     expect([...svc.options].map((o) => o.value)).toEqual(expect.arrayContaining(['light.toggle', 'light.turn_on']));
@@ -213,7 +213,7 @@ describe('remote studio', () => {
     rep.checked = true;
     rep.dispatchEvent(new Event('change'));
     await tick(picker);
-    ([...root.querySelectorAll('button')].find((x) => x.textContent === 'Set action') as HTMLButtonElement).click();
+    ([...root.querySelectorAll('button')].find((x) => x.textContent === 'Set Action') as HTMLButtonElement).click();
     await tick(insp);
     expect(store.config.keys!['red']).toEqual({ ha: { service: 'light.turn_on', target: { entity_id: 'light.lamp' }, data: { brightness_pct: 50 }, repeat: true } });
   });
@@ -222,10 +222,10 @@ describe('remote studio', () => {
     const { insp } = await inspectorFor({ kind: 'key', name: 'red' }, { ha_actions: false });
     const picker = insp.shadowRoot.querySelector('hh-action-picker') as El;
     await tick(picker);
-    ([...picker.shadowRoot.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant action') as HTMLButtonElement).click();
+    ([...picker.shadowRoot.querySelectorAll('.seg button')].find((x) => x.textContent === 'Home Assistant Action') as HTMLButtonElement).click();
     await tick(picker);
     expect(picker.shadowRoot.textContent).toContain('this add-on version has no Home Assistant actions');
-    expect((([...picker.shadowRoot.querySelectorAll('button')].find((x) => x.textContent === 'Set action')) as HTMLButtonElement).disabled).toBe(true);
+    expect((([...picker.shadowRoot.querySelectorAll('button')].find((x) => x.textContent === 'Set Action')) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('a key on a Home Assistant action shows an HA badge, not Send IR, and reads "Lamp · toggle"', async () => {

@@ -223,7 +223,7 @@ async def test_five_late_failures_are_prevented_or_shown_before_apply(browser, l
     page = await open_large(browser, large)
     # 1. a 40-character non-ASCII device name is cut at 31 BYTES, not characters
     await page.goto(f"{large}{PREFIX}/#/devices/tv")
-    box = page.get_by_label("Device name")
+    box = page.get_by_label("Device Name")
     await box.fill("Ж" * 40)
     await box.dispatch_event("change")
     saved = await page.evaluate(f"() => {STORE}.config.devices[0].name")
@@ -242,7 +242,7 @@ async def test_five_late_failures_are_prevented_or_shown_before_apply(browser, l
     await insp.get_by_placeholder("Search entities").fill("light.room_0_light")
     await insp.get_by_label("Field brightness_pct").fill("{{ 5 }}")
     await insp.get_by_text("must not contain a template").wait_for()
-    assert await insp.get_by_role("button", name="Set action").is_disabled()
+    assert await insp.get_by_role("button", name="Set Action").is_disabled()
     # 4. the 33rd widget on a page is refused in the UI (N on the screen = "add a widget")
     await page.goto(f"{large}{PREFIX}/#/remote")
     pi = await page.evaluate(
@@ -286,9 +286,9 @@ async def test_keyboard_only_assign_a_command_to_a_key_then_apply(browser, large
         f"() => {STUDIO}.querySelector('hh-remote').shadowRoot.querySelector('[data-key=play]').getAttribute('aria-label').includes('tv: 3')"
     )
     # review and apply with the keyboard
-    await page.get_by_role("button", name="Review & apply").focus()
+    await page.get_by_role("button", name="Review & Apply").focus()
     await page.keyboard.press("Enter")
-    await page.get_by_role("button", name="Apply to hub").focus()
+    await page.get_by_role("button", name="Apply to Hub").focus()
     await page.keyboard.press("Enter")
     await page.get_by_text("Saved as rev 1").wait_for()
 
@@ -363,7 +363,7 @@ async def test_ha_actions_have_no_test_fire_and_read_as_name_dot_command(browser
     long = [t for t in texts if t.startswith("Living room ceiling")]
     assert long and long[0].endswith("…") and len(long[0]) <= 26, texts
     titles = await remote.locator("text.xl title").all_text_contents()
-    assert any(t == "Living room ceiling shield · Play pause" for t in titles), titles
+    assert any(t == "Living room ceiling shield · Play Pause" for t in titles), titles
     if SHOTS:
         Path(SHOTS).mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=f"{SHOTS}/xray-ha.png")
@@ -391,7 +391,7 @@ async def test_permissions_panel_groups_20_entities_and_scrolls_inside_its_card(
     box = page.locator("hh-overview .scrollbox[aria-label='Entities by domain']")
     await box.wait_for()
     heads = await box.locator("h3").all_text_contents()
-    assert "light (19)" in heads and "switch (10)" in heads, heads
+    assert "Light (19)" in heads and "Switch (10)" in heads, heads
     assert [h.split(" ")[0] for h in heads] == sorted(h.split(" ")[0] for h in heads), heads
     m = await box.evaluate("e => ({sh: e.scrollHeight, ch: e.clientHeight})")
     assert m["sh"] > m["ch"] and m["ch"] <= 300, m

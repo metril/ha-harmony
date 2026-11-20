@@ -118,10 +118,10 @@ export const setPowerCode = (cfg: Config, id: string, which: 'on' | 'off' | 'tog
 export function powerStatus(d: Device): { text: string; tone: 'ok' | 'ir' | 'none' } {
   const p = d.power;
   if (d.kind === 'bt') return { text: 'Bluetooth', tone: 'none' };
-  if (p?.on && p.off) return { text: 'Power on + off', tone: 'ok' };
-  if (p?.toggle) return { text: 'Power toggle only', tone: 'ir' };
-  if (p?.on || p?.off) return { text: 'Half a power pair', tone: 'ir' };
-  return { text: 'No power control', tone: 'none' };
+  if (p?.on && p.off) return { text: 'Power On + Off', tone: 'ok' };
+  if (p?.toggle) return { text: 'Power Toggle Only', tone: 'ir' };
+  if (p?.on || p?.off) return { text: 'Half a Power Pair', tone: 'ir' };
+  return { text: 'No Power Control', tone: 'none' };
 }
 
 /** Where the device came from, for the source chip. */

@@ -3,7 +3,8 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { commandNames } from '../lib/bt';
 import { fitCells, watchCells } from '../lib/fit-cells';
-import { displayCommand, PALETTE_CAP } from '../lib/key-names';
+import { displayCommand } from '../lib/key-names';
+import { orderedCells } from './parts';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { commandIconId } from '../lib/device-art';
 import { chipStyles, shared } from '../lib/styles';
@@ -162,12 +163,10 @@ export class HhPalette extends LitElement {
       const g = deviceChips(d);
       const q = this.st.query.trim();
       const cards = GROUPS.map((grp) => {
-        const long = (c: { name: string }) => displayCommand(c.name).length > PALETTE_CAP ? 0 : 1;
-        // two-cell labels first: the single-cell ones then fill every row and only the last row is short
-        const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id)).sort((a, b) => long(a) - long(b));
+        const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
           ? html`<h2>${pretty(grp)}</h2><div class="cells" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
-              ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(commandIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
+              ${orderedCells(chips, (c) => c.name, (c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(commandIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
             </div>`
           : nothing;
       });
@@ -180,7 +179,7 @@ export class HhPalette extends LitElement {
     return html`
       <div class="cells">
         ${acts.map((a) => this.chip(a.name ?? a.id, { kind: 'activity', id: a.id }, used.has(`activity:${a.id}`), stockIconSvg(stockIconByName('play')?.id ?? 26, 'sic')))}
-        ${this.match('all off', 'power off') ? this.chip('All off', { kind: 'alloff' }, used.has('activity:off'), stockIconSvg(stockIconByName('power')?.id ?? 7, 'sic')) : nothing}
+        ${this.match('all off', 'power off') ? this.chip('All Off', { kind: 'alloff' }, used.has('activity:off'), stockIconSvg(stockIconByName('power')?.id ?? 7, 'sic')) : nothing}
       </div>
       ${acts.length ? nothing : html`<p class="empty">${this.st.query ? 'Nothing matches.' : 'No activities in this config.'}</p>`}
       <p class="hint">Drop one on a key to start it from that key, or on the screen to make a start button.</p>`;
@@ -205,7 +204,7 @@ export class HhPalette extends LitElement {
     return html`<hh-ha-browser .entities=${st.entities} .loaded=${st.haLoaded} .loading=${st.haLoading} .reason=${st.haReason} .registries=${st.haRegistries} .lookups=${st.haLookups} .truncated=${st.haTruncated}
       .domains=${HA_DOMAINS} .used=${used} .pressed=${cur?.kind === 'entity' ? cur.entity_id : ''} .diag=${st.haDiag}
       @hh-ha-retry=${() => void st.loadHa(true)} @hh-ha-refresh=${() => void st.loadHa(true)} @hh-ha-diag=${(e: CustomEvent<boolean>) => st.setHaDiag(e.detail)}></hh-ha-browser>
-      <details class="typed-d" ?open=${st.haLoaded && st.entities === null}><summary>Use an entity id</summary>${typed}</details>`;
+      <details class="typed-d" ?open=${st.haLoaded && st.entities === null}><summary>Use an Entity ID</summary>${typed}</details>`;
   }
   private widgets() {
     const prims: [Source, string, string, string][] = [

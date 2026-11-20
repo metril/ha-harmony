@@ -1,5 +1,6 @@
 import { css, html, nothing } from 'lit';
 import { customElement } from 'lit/decorators.js';
+import { displayKey } from '../lib/key-names';
 import '../components/hh-chain-mini';
 import '../components/hh-mini-remote';
 import { activeTheme } from '../lib/theme-model';
@@ -98,7 +99,7 @@ export class HhOverview extends StoreElement {
       <h2 id="hp">Permissions <span class="sub">Home Assistant entities and services this draft uses</span></h2>
       ${p.entities.length || p.services.length
         ? html`<div class="perm">
-            <div><b>Entities (${p.entities.length})</b><div class="scrollbox" tabindex="0" role="region" aria-label="Entities by domain">${byDomain(p).map((g) => html`<h3>${g.domain} (${g.entities.length})</h3><ul>${g.entities.map((e) => html`<li><span class="mono">${e.id}</span>${live.get(e.id)?.state ? html`<span class="st ${live.get(e.id)?.state === 'on' ? 'on' : ''}">${live.get(e.id)?.state}</span>` : nothing}${e.services.length ? html`<span class="svc">${e.services.map((x) => x.split('.').pop()).join(', ')}</span>` : nothing}<span class="why" title=${e.uses.join(', ')}>${e.uses.slice(0, 2).join(', ')}</span></li>`)}</ul>`)}</div></div>
+            <div><b>Entities (${p.entities.length})</b><div class="scrollbox" tabindex="0" role="region" aria-label="Entities by domain">${byDomain(p).map((g) => html`<h3>${displayKey(g.domain)} (${g.entities.length})</h3><ul>${g.entities.map((e) => html`<li><span class="mono">${e.id}</span>${live.get(e.id)?.state ? html`<span class="st ${live.get(e.id)?.state === 'on' ? 'on' : ''}">${live.get(e.id)?.state}</span>` : nothing}${e.services.length ? html`<span class="svc">${e.services.map((x) => x.split('.').pop()).join(', ')}</span>` : nothing}<span class="why" title=${e.uses.join(', ')}>${e.uses.slice(0, 2).join(', ')}</span></li>`)}</ul>`)}</div></div>
             <div><b>Services (${p.services.length})</b>${p.services.length ? html`<div class="scrollbox"><ul>${p.services.map((s) => html`<li><span class="mono">${s.service}</span><span class="why">${s.uses} use${s.uses === 1 ? '' : 's'}</span></li>`)}</ul></div>` : html`<p class="muted">No service calls.</p>`}</div>
           </div>`
         : html`<p class="muted">The draft does not ask Home Assistant for anything.</p>`}
@@ -110,11 +111,11 @@ export class HhOverview extends StoreElement {
     const s = this.store;
     if (s.isFirstRun) {
       return html`<div class="card empty">
-        <h1>Set up your first hub config</h1>
+        <h1>Set Up Your First Hub Config</h1>
         <p>Nothing has been applied yet. Import a YAML file you already have, or start by adding a device.</p>
         <div class="row">
-          <button class="btn" @click=${() => this.dispatchEvent(new Event('hh-import', { bubbles: true, composed: true }))}>Import YAML file</button>
-          <a class="btn pri" href=${hashFor('devices', 'new')}>Add your first device</a>
+          <button class="btn" @click=${() => this.dispatchEvent(new Event('hh-import', { bubbles: true, composed: true }))}>Import YAML File</button>
+          <a class="btn pri" href=${hashFor('devices', 'new')}>Add Your First Device</a>
         </div>
       </div>`;
     }
@@ -134,14 +135,14 @@ export class HhOverview extends StoreElement {
         ? html`<div class="banner bad" role="alert">
             <span>${errs.total} error${errs.total === 1 ? '' : 's'} stop this draft from being applied. First: <span class="mono">${errs.first?.path || 'config'}</span> ${errs.first?.msg}</span>
             <span class="sp"></span>
-            ${errs.first ? html`<a class="btn sm" href=${'#/' + errs.first.route}>Go to field</a>` : nothing}
+            ${errs.first ? html`<a class="btn sm" href=${'#/' + errs.first.route}>Go to Field</a>` : nothing}
           </div>`
         : nothing}
       <div class="top">
         <section class="card rem" aria-label="Your remote">
-          <h2>Your remote</h2>
+          <h2>Your Remote</h2>
           <hh-mini-remote .page=${homePage} .theme=${activeTheme(s.config).theme} label="Your remote showing the ${s.config.pages?.[home]?.title ?? 'home'} page"></hh-mini-remote>
-          <a class="btn sm" href=${hashFor('remote')}>Open in the studio</a>
+          <a class="btn sm" href=${hashFor('remote')}>Open in the Studio</a>
         </section>
           <div class="stack">
             <div class="stats">
@@ -152,16 +153,16 @@ export class HhOverview extends StoreElement {
               <h2 id="ha">Activities</h2>
               ${acts.length
                 ? html`<div class="acts">${acts.map((a) => html`<a class="act" href=${hashFor('activities', a.id)}><b>${a.name ?? a.id}${changedActs.has(a.id) ? html`<span class="chip ir">Changed</span>` : nothing}</b><hh-chain-mini .cfg=${s.config} activity=${a.id}></hh-chain-mini><span class="muted">${(a.steps ?? []).length + (a.off ?? []).length} own steps · ${Object.keys(a.keys ?? {}).length} keys</span></a>`)}</div>`
-                : html`<p class="muted">No activities yet. <a href=${hashFor('activities')}>Create one</a>.</p>`}
+                : html`<p class="muted">No activities yet. <a href=${hashFor('activities')}>Create One</a>.</p>`}
             </section>
       <section class="card" aria-labelledby="hc">
-              <h2 id="hc">${applied ? `Since rev ${s.applied?.rev}` : 'Changes in this draft'}</h2>
+              <h2 id="hc">${applied ? `Since rev ${s.applied?.rev}` : 'Changes in This Draft'}</h2>
               ${diff.length
                 ? html`
                   <div class="chg">${pages.length ? html`<hh-page-diff></hh-page-diff>` : nothing}
                   ${keys.length ? html`<div class="kk"><h3>Keys</h3>${this.keyRemotes(keys)}</div>` : nothing}</div>
             ${keys.length ? html`<ul>${keys.slice(0, 10).map((k) => html`<li class="row"><span class="k ${k.kind}">${KIND_LABEL[k.kind]}</span><span>${keyTitle(k.key)} <span class="muted">in ${k.layerName}</span></span></li>`)}</ul>` : nothing}
-                  <h3>Everything that changed</h3>
+                  <h3>Everything That Changed</h3>
                   <ul>${diff.map((r) => html`<li class="row"><span class="k ${r.kind}">${r.kind}</span><span><strong>${r.area}</strong> ${r.label}</span>${r.detail ? html`<span class="muted">${r.detail}</span>` : nothing}</li>`)}</ul>`
                 : html`<p class="muted">${s.hasDraft ? 'The draft matches the applied config.' : 'No draft. Edits you make appear here.'}</p>`}
             </section>

@@ -41,9 +41,9 @@ export class HhImportDialog extends StoreElement {
     }
     if (this.store.hasDraft) {
       const ok = await confirmAction(this, {
-        title: 'Replace draft?',
+        title: 'Replace Draft?',
         body: 'You have unapplied changes. Importing replaces them with the YAML.',
-        ok: 'Replace draft',
+        ok: 'Replace Draft',
         danger: true,
       });
       if (!ok) return;
@@ -75,18 +75,18 @@ export class HhImportDialog extends StoreElement {
     const p = this.problem;
     return html`<hh-dialog .open=${this.open} heading="Import YAML" @close=${() => this.close()}>
       <div>
-        <label for="file">YAML file</label>
+        <label for="file">YAML File</label>
         <input id="file" type="file" accept=".yaml,.yml,text/yaml" @change=${(e: Event) => void this.pick(e)} />
       </div>
       <div>
-        <label for="txt">Or paste YAML</label>
+        <label for="txt">Or Paste YAML</label>
         <textarea id="txt" spellcheck="false" .value=${this.text} @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}></textarea>
       </div>
       ${p
         ? html`<div class="banner bad" role="alert"><div>${p.msg}${p.items.length ? html`<ul>${p.items.map((i) => html`<li class="mono">${i}</li>`)}</ul>` : nothing}</div></div>`
         : nothing}
       <button slot="footer" class="btn" @click=${() => this.close()}>Cancel</button>
-      <button slot="footer" class="btn pri" aria-disabled=${this.busy} @click=${() => (this.busy ? undefined : void this.submit())}>${this.busy ? 'Importing…' : 'Import as draft'}</button>
+      <button slot="footer" class="btn pri" aria-disabled=${this.busy} @click=${() => (this.busy ? undefined : void this.submit())}>${this.busy ? 'Importing…' : 'Import As Draft'}</button>
     </hh-dialog>`;
   }
 }

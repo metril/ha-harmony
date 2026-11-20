@@ -59,13 +59,13 @@ export class HhBtPanel extends BtElement {
     return html`<li class="card peer" aria-label=${label}>
       <div class="who"><b title=${label}>${label}</b>
         <div class="meta">
-          ${statusChip(h.connected ? 'ok' : '', h.connected ? 'Connected' : 'Not connected', { check: h.connected })}
+          ${statusChip(h.connected ? 'ok' : '', h.connected ? 'Connected' : 'Not Connected', { check: h.connected })}
           <span class="chip">${h.transport === 'le' ? 'Bluetooth LE' : 'Bluetooth BR/EDR'}</span>
-          ${cfg ? html`<a class="chip acc" href=${hashFor('devices', cfg.id)} aria-label="Open ${label} in Devices">In your config</a>` : statusChip('ir', 'Not in your config')}
+          ${cfg ? html`<a class="chip acc" href=${hashFor('devices', cfg.id)} aria-label="Open ${label} in Devices">In Your Config</a>` : statusChip('ir', 'Not in Your Config')}
           <span class="mono">${h.addr}</span></div></div>
       <div class="acts">
         <hh-bt-test .api=${this.store.api} hub=${this.hub} .peer=${h.slot} .codes=${this.codes} .commands=${cmds} label=${label} ?disabled=${!h.connected} reason="Not connected right now. Wake the device and make sure its Bluetooth is on."></hh-bt-test>
-        ${cfg ? nothing : html`<a class="btn sm pri" href=${hashFor('bluetooth', 'host', h.addr)}>Add to config</a>`}
+        ${cfg ? nothing : html`<a class="btn sm pri" href=${hashFor('bluetooth', 'host', h.addr)}>Add to Config</a>`}
         <button class="btn sm danger" ?disabled=${this.busy === h.addr} aria-label="Forget ${label}" @click=${() => void this.forget('host', h, label)}>Forget</button>
       </div>
       ${this.notes[h.addr] ? html`<span class="msg bad" role="alert">${this.notes[h.addr]}</span>` : nothing}
@@ -78,12 +78,12 @@ export class HhBtPanel extends BtElement {
     return html`<li class="card peer" aria-label=${label}>
       <div class="who"><b title=${label}>${label}</b>
         <div class="meta">
-          ${statusChip(r.connected ? 'ok' : '', r.connected ? 'Connected' : 'Not connected', { check: r.connected })}
+          ${statusChip(r.connected ? 'ok' : '', r.connected ? 'Connected' : 'Not Connected', { check: r.connected })}
           ${r.battery !== undefined ? html`<span class="chip ${r.battery < 15 ? 'bad' : ''}" title="Battery level">Battery ${r.battery}%</span>` : nothing}
-          ${i >= 0 ? html`<a class="chip acc" href=${hashFor('bluetooth', 'keys', i)} aria-label="Edit the buttons of ${label}">In your config</a>` : statusChip('ir', 'Not in your config')}
+          ${i >= 0 ? html`<a class="chip acc" href=${hashFor('bluetooth', 'keys', i)} aria-label="Edit the buttons of ${label}">In Your Config</a>` : statusChip('ir', 'Not in Your Config')}
           <span class="mono">${r.addr}</span></div></div>
       <div class="acts">
-        ${i >= 0 ? html`<a class="btn sm" href=${hashFor('bluetooth', 'keys', i)}>Edit buttons</a>` : html`<a class="btn sm pri" href=${hashFor('bluetooth', 'remote', r.addr)}>Add to config</a>`}
+        ${i >= 0 ? html`<a class="btn sm" href=${hashFor('bluetooth', 'keys', i)}>Edit Buttons</a>` : html`<a class="btn sm pri" href=${hashFor('bluetooth', 'remote', r.addr)}>Add to Config</a>`}
         <button class="btn sm danger" ?disabled=${this.busy === r.addr} aria-label="Forget ${label}" @click=${() => void this.forget('remote', r, label)}>Forget</button>
       </div>
       ${this.notes[r.addr] ? html`<span class="msg bad" role="alert">${this.notes[r.addr]}</span>` : nothing}
@@ -118,10 +118,10 @@ export class HhBtPanel extends BtElement {
           ${s.remotes.length || (st?.limits?.remotes_max ?? 0) > 0 ? html`<h2>Remotes</h2>
             ${s.remotes.length ? html`<ul class="list" aria-label="Paired remotes">${s.remotes.map((r) => this.remoteRow(r))}</ul>` : html`<p class="muted">No remote is paired yet.</p>`}` : nothing}
           ${cfgHosts.length || cfgRemotes.length
-            ? html`<h2>In your config, not paired</h2>
+            ? html`<h2>In Your Config, Not Paired</h2>
               <ul class="list" aria-label="Not paired">
-                ${cfgHosts.map((d) => html`<li class="card peer"><div class="who"><b>${d.name ?? d.id}</b><div class="meta">${statusChip('ir', 'Not paired')}<span class="mono">${d.address ?? 'no address yet'}</span></div></div><div class="acts"><a class="btn sm" href=${hashFor('devices', d.id)}>Open</a></div></li>`)}
-                ${cfgRemotes.map(({ r, i }) => html`<li class="card peer"><div class="who"><b>${r.name}</b><div class="meta">${statusChip('ir', 'Not paired')}<span class="mono">${r.address ?? 'no address yet'}</span></div></div><div class="acts"><a class="btn sm" href=${hashFor('bluetooth', 'keys', i)}>Edit buttons</a></div></li>`)}
+                ${cfgHosts.map((d) => html`<li class="card peer"><div class="who"><b>${d.name ?? d.id}</b><div class="meta">${statusChip('ir', 'Not Paired')}<span class="mono">${d.address ?? 'no address yet'}</span></div></div><div class="acts"><a class="btn sm" href=${hashFor('devices', d.id)}>Open</a></div></li>`)}
+                ${cfgRemotes.map(({ r, i }) => html`<li class="card peer"><div class="who"><b>${r.name}</b><div class="meta">${statusChip('ir', 'Not Paired')}<span class="mono">${r.address ?? 'no address yet'}</span></div></div><div class="acts"><a class="btn sm" href=${hashFor('bluetooth', 'keys', i)}>Edit Buttons</a></div></li>`)}
               </ul>
               <p class="hint">Pair them with the buttons above; the hub matches them to these entries by address.</p>`
             : nothing}`

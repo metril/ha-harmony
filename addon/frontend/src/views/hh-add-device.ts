@@ -312,26 +312,26 @@ export class HhAddDevice extends StoreElement {
   }
   private source() {
     const ok = this.ha.haWritable;
-    return html`<h1>What are you adding?</h1><p class="lead">Pick where its codes come from.</p>
+    return html`<h1>What Are You Adding?</h1><p class="lead">Pick where its codes come from.</p>
       <div class="tiles">
-        <button class="tile" @click=${() => this.pickSource('archive')}>${art('tv', 'art')}IR archive<small>Search thousands of remotes by brand and model</small></button>
-        <button class="tile" @click=${() => this.pickSource('paste')}>${art('other', 'art')}Paste or upload codes<small>Pronto hex, a Flipper .ir file or a SmartIR file</small></button>
+        <button class="tile" @click=${() => this.pickSource('archive')}>${art('tv', 'art')}IR Archive<small>Search thousands of remotes by brand and model</small></button>
+        <button class="tile" @click=${() => this.pickSource('paste')}>${art('other', 'art')}Paste or Upload Codes<small>Pronto hex, a Flipper .ir file or a SmartIR file</small></button>
         <button class="tile" ?disabled=${!ok} title=${ok ? '' : 'This add-on version cannot store Home Assistant actions yet'} @click=${() => this.pickSource('ha')}>${art('streamer', 'art')}Home Assistant entity<small>${ok ? 'A media player or remote you already have' : 'Needs a newer add-on (ha_actions is off)'}</small></button>
-        <a class="tile" id="add-bt-device" href=${hashFor('bluetooth', 'host')}>${icon('bluetooth', 'big')}Bluetooth device<small>Pair a TV box or phone; the hub types to it</small></a>
-        <a class="tile" id="add-bt-remote" href=${hashFor('bluetooth', 'remote')}>${icon('bluetooth', 'big')}Bluetooth remote<small>Use a Bluetooth remote with your activities</small></a>
+        <a class="tile" id="add-bt-device" href=${hashFor('bluetooth', 'host')}>${icon('bluetooth', 'big')}Bluetooth Device<small>Pair a TV box or phone; the hub types to it</small></a>
+        <a class="tile" id="add-bt-remote" href=${hashFor('bluetooth', 'remote')}>${icon('bluetooth', 'big')}Bluetooth Remote<small>Use a Bluetooth remote with your activities</small></a>
       </div>`;
   }
   private brand() {
     const rec = this.q ? [] : readRecents();
     const list = this.brands.filter((b) => !rec.some((r) => r.slug === b.slug));
     const tile = (b: IrBrand) => html`<button class="brand" role="option" @click=${() => this.pickBrand(b)}><b>${b.name}</b><span>${b.count.toLocaleString()} models</span></button>`;
-    return html`<h1>Which brand?</h1><p class="lead">Type to search. Press Enter to take the first match.</p>
+    return html`<h1>Which Brand?</h1><p class="lead">Type to search. Press Enter to take the first match.</p>
       <input class="search" type="search" aria-label="Search brands" placeholder="Sony, Samsung, Denon…" .value=${this.q} autofocus
         @input=${(e: Event) => { this.q = (e.target as HTMLInputElement).value; clearTimeout(this.timer); this.timer = setTimeout(() => void this.loadBrands(this.q.trim()), 200); }}
         @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' && this.brands[0]) this.pickBrand(this.brands[0]); if (e.key === 'ArrowDown') (this.renderRoot.querySelector('.brand') as HTMLElement | null)?.focus(); }} />
       ${this.brandsErr ? html`<div class="banner bad" role="alert"><span>${isOffline({ code: this.brandsErr.code, msg: '', scope: 'brands' }) ? "The IR archive can't be reached. Brands you opened before still work." : this.brandsErr.message}</span><span class="sp"></span><button class="btn sm" @click=${() => void this.loadBrands(this.q)}>Retry</button></div>` : nothing}
       ${rec.length ? html`<h3>Recent</h3><div class="brands" role="listbox" aria-label="Recent brands">${rec.map(tile)}</div>` : nothing}
-      <h3>${this.q ? 'Matches' : 'Most models'}</h3>
+      <h3>${this.q ? 'Matches' : 'Most Models'}</h3>
       <div class="brands" role="listbox" aria-label="Brands" @keydown=${(e: KeyboardEvent) => this.gridKey(e)}>${list.map(tile)}</div>
       ${!list.length && !this.brandsErr ? html`<p class="why">No brand matches "${this.q}". Try fewer letters, or paste codes instead.</p>` : nothing}
       <div class="center"><button class="btn" @click=${() => this.pickSource('paste')}>Paste a Pronto code or upload a file instead</button></div>`;
@@ -365,12 +365,12 @@ export class HhAddDevice extends StoreElement {
             <div class="q">Did the ${what} ${verb}?</div>
             <div class="answers">
               <button class="btn pri" @click=${() => this.answer('yes')}>Yes<kbd>Y</kbd></button>
-              <button class="btn" @click=${() => this.answer('no')}>No, next code<kbd>N</kbd></button>
-              <button class="btn" @click=${() => void this.sender?.fire()}>Send again<kbd>Space</kbd></button>
+              <button class="btn" @click=${() => this.answer('no')}>No, Next Code<kbd>N</kbd></button>
+              <button class="btn" @click=${() => void this.sender?.fire()}>Send Again<kbd>Space</kbd></button>
             </div>
             <div class="tried" aria-label="Codes tried">${(w.candidates ?? []).map((_, i) => { const t = w.tried.find((x) => x.idx === i); return html`<span class="chip ${t?.result === 'yes' ? 'ok' : i === w.idx ? 'acc' : ''}" title=${t ? t.result : i === w.idx ? 'now' : 'not tried'}>${i + 1}${t?.result === 'no' ? ' ✗' : t?.result === 'yes' ? ' ✓' : ''}</span>`; })}</div>
             ${w.truncated ? html`<p class="why">The archive is large, so only part of it was checked. There may be more codes.</p>` : nothing}
-            <div class="row center"><button class="btn" @click=${() => this.answer('skip')}>Skip this code</button><button class="btn" @click=${() => { this.dispatch({ t: 'skipTest' }); void this.loadModels(0, ''); }}>I know my model</button></div>
+            <div class="row center"><button class="btn" @click=${() => this.answer('skip')}>Skip this code</button><button class="btn" @click=${() => { this.dispatch({ t: 'skipTest' }); void this.loadModels(0, ''); }}>I Know My Model</button></div>
           </div>`
         : nothing}`;
   }
@@ -379,11 +379,11 @@ export class HhAddDevice extends StoreElement {
     const m = this.models;
     const likely = likelyModels(w);
     const loading = w.loading && w.model;
-    return html`<h1>Which model?</h1>
+    return html`<h1>Which Model?</h1>
       <p class="lead">${w.confirmed ? 'The code that worked is shared by these models. Pick yours, or search below.' : w.exhausted ? 'No code reacted, or none was offered. Search for your model.' : 'Search for your model.'}</p>
       ${this.banner()}
       ${loading ? html`<p class="lead" role="status">Loading ${w.model?.name}…</p>` : nothing}
-      ${likely.length ? html`<h3>Likely matches</h3><div class="likely">${likely.map((x) => html`<button class="btn" @click=${() => (x.file ? void this.pickModel(x.file, x.name) : void this.pickLikely(x.name))}>${x.name}</button>`)}</div>` : nothing}
+      ${likely.length ? html`<h3>Likely Matches</h3><div class="likely">${likely.map((x) => html`<button class="btn" @click=${() => (x.file ? void this.pickModel(x.file, x.name) : void this.pickLikely(x.name))}>${x.name}</button>`)}</div>` : nothing}
       <input class="search" type="search" aria-label="Search models" placeholder="Model name or number" .value=${this.mq} @input=${(e: Event) => { this.mq = (e.target as HTMLInputElement).value; clearTimeout(this.timer); this.timer = setTimeout(() => void this.loadModels(0, this.mq.trim()), 250); }} />
       ${m
         ? html`<div class="models" role="list" aria-label="Models">${m.models.map((x) => html`<button class="model" role="listitem" ?disabled=${!!loading} @click=${() => void this.pickModel(x.file, x.name)}><b>${x.name}</b><span class="muted">${x.file.replace(/\.json$/, '') === x.name ? '' : x.file}</span></button>`)}</div>
@@ -417,12 +417,12 @@ export class HhAddDevice extends StoreElement {
           ${cmds.length === 0 ? html`<p class="why">No commands yet. Add them on the device page after adding it.</p>` : nothing}
         </div>
         <aside class="side card" aria-label="Summary">
-          <label>Device name<input class="namein" type="text" aria-label="Device name" .value=${this.devName} @input=${(e: Event) => (this.devName = trimBytes((e.target as HTMLInputElement).value))} /></label>
+          <label>Device Name<input class="namein" type="text" aria-label="Device name" .value=${this.devName} @input=${(e: Event) => (this.devName = trimBytes((e.target as HTMLInputElement).value))} /></label>
           <details><summary>Icon${this.devIcon ? `: ${this.devIcon}` : ' (default)'}</summary><hh-icon-picker .value=${this.devIcon} @hh-icon=${(e: CustomEvent<string | undefined>) => (this.devIcon = e.detail ?? '')}></hh-icon-picker></details>
           <span class="muted">${w.selected.length} of ${cmds.length} commands${ha ? '' : ' · settle ' + (d.settle_ms ?? 0) + ' ms'}</span>
           ${this.notes.length || (ha && (r.notes?.length ?? 0)) ? html`<ul class="plain">${(ha ? r.notes : this.notes).map((n) => html`<li>${n}</li>`)}</ul>` : nothing}
           ${r.skipped.length ? html`<div><b>Left out (${r.skipped_total || r.skipped.length})</b><ul class="plain">${r.skipped.slice(0, 8).map((s) => html`<li>${s.name}: ${s.reason}</li>`)}</ul></div>` : nothing}
-          <button class="btn pri" ?disabled=${bad || !this.devName.trim() || !!this.capReason(ha, d.inputs)} @click=${() => this.add()}>Add device</button>
+          <button class="btn pri" ?disabled=${bad || !this.devName.trim() || !!this.capReason(ha, d.inputs)} @click=${() => this.add()}>Add Device</button>
           ${this.capReason(ha, d.inputs) ? html`<span class="why" role="alert">${this.capReason(ha, d.inputs)}</span>` : nothing}
           <span class="why">Adds to the draft only. Review and apply it from the bar at the top.</span>
         </aside>
@@ -430,12 +430,12 @@ export class HhAddDevice extends StoreElement {
   }
   private paste() {
     const p = this.parsed;
-    return html`<h1>Paste or upload codes</h1><p class="lead">Pronto hex, a Flipper .ir file or a SmartIR .json file.</p>
+    return html`<h1>Paste Or Upload Codes</h1><p class="lead">Pronto hex, a Flipper .ir file or a SmartIR .json file.</p>
       <div class="stage">
-        <div class="row center"><select aria-label="Format" @change=${(e: Event) => (this.kind = (e.target as HTMLSelectElement).value as typeof this.kind)}><option value="pronto" ?selected=${this.kind === 'pronto'}>Pronto hex</option><option value="flipper" ?selected=${this.kind === 'flipper'}>Flipper .ir</option><option value="smartir" ?selected=${this.kind === 'smartir'}>SmartIR .json</option></select>
+        <div class="row center"><select aria-label="Format" @change=${(e: Event) => (this.kind = (e.target as HTMLSelectElement).value as typeof this.kind)}><option value="pronto" ?selected=${this.kind === 'pronto'}>Pronto Hex</option><option value="flipper" ?selected=${this.kind === 'flipper'}>Flipper .ir</option><option value="smartir" ?selected=${this.kind === 'smartir'}>SmartIR .json</option></select>
           <input type="file" aria-label="Upload a file" accept=".ir,.json,.txt" @change=${async (e: Event) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) { this.text = await f.text(); this.kind = f.name.endsWith('.ir') ? 'flipper' : f.name.endsWith('.json') ? 'smartir' : this.kind; } }} /></div>
         <textarea aria-label="Pasted codes" .value=${this.text} @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}></textarea>
-        <button class="btn pri" ?disabled=${!this.text.trim()} @click=${() => void this.readPaste()}>Read codes</button>
+        <button class="btn pri" ?disabled=${!this.text.trim()} @click=${() => void this.readPaste()}>Read Codes</button>
         ${this.parseErr ? html`<span class="err" role="alert">${this.parseErr}</span>` : nothing}
         ${p && !p.actions.length ? html`<span class="err">No usable codes found.</span>` : nothing}
       </div>`;
@@ -451,13 +451,13 @@ export class HhAddDevice extends StoreElement {
       this.names = {};
       this.devName = 'Imported device';
       this.notes = [`${r.actions.length} code${r.actions.length === 1 ? '' : 's'} read${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}.`];
-      this.dispatch({ t: 'draft', result: { device: { id: 'imported', name: 'Imported device', commands }, forms: {}, notes: this.notes, skipped: r.skipped, skipped_total: r.skipped.length, device_type: null, source: {} } });
+      this.dispatch({ t: 'draft', result: { device: { id: 'imported', name: 'Imported Device', commands }, forms: {}, notes: this.notes, skipped: r.skipped, skipped_total: r.skipped.length, device_type: null, source: {} } });
     } catch (e) {
       this.parseErr = e instanceof ApiError ? (e.errors[0]?.msg ?? e.message) : 'Could not read that.';
     }
   }
   private entity() {
-    return html`<h1>Pick a Home Assistant entity</h1><p class="lead">We propose commands from what the entity's services can do. We cannot read its source list or remote presets, so those are left for you to fill in.</p>
+    return html`<h1>Pick a Home Assistant Entity</h1><p class="lead">We propose commands from what the entity's services can do. We cannot read its source list or remote presets, so those are left for you to fill in.</p>
       <hh-ha-browser mode="select" scope="wizard" label="media players, remotes, switches, lights and fans" .entities=${this.ha.entities} .loaded=${this.ha.haLoaded} .loading=${this.ha.haLoading} .reason=${this.ha.haReason}
         .registries=${this.ha.haRegistries} .lookups=${this.ha.haLookups} .truncated=${this.ha.haTruncated} .domains=${PROPOSAL_DOMAINS}
         @hh-ha-pick=${(e: CustomEvent<{ entity_id: string; name?: string }>) => this.useEntity(e.detail)} @hh-ha-retry=${() => void this.ha.loadHa(true)}></hh-ha-browser>`;

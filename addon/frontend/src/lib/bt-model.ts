@@ -3,6 +3,7 @@
 import { ApiError, type BtCodes, type BtHost, type BtRemote, type BtState, type BtStatus } from './api';
 import { byteCounter, trimBytes } from './codes';
 import { displayKey } from './key-names';
+import { orderBy } from './key-order';
 import { deviceIdFor } from './device-edit';
 import type { Config, Device } from './model';
 
@@ -76,14 +77,14 @@ export const LINK_CHIP: Record<string, { tone: Tone; label: string; help: string
   off: { tone: '', label: 'Off', help: 'Bluetooth is idle. It starts by itself when you pair something or the config uses it.' },
   starting: { tone: 'ir', label: 'Starting', help: 'The hub is starting its Bluetooth. This takes a few seconds.' },
   ready: { tone: 'ok', label: 'Ready', help: 'Bluetooth is ready.' },
-  no_adapter: { tone: 'bad', label: 'No adapter', help: 'The hub cannot find a Bluetooth adapter. Check the hardware; a restart may help.' },
+  no_adapter: { tone: 'bad', label: 'No Adapter', help: 'The hub cannot find a Bluetooth adapter. Check the hardware; a restart may help.' },
   disabled: { tone: 'bad', label: 'Disabled', help: 'Bluetooth stopped after repeated failures. Restart the hub to try again.' },
 };
 export const BT_DOWN: Record<BtStatus['status'], { tone: Tone; label: string; title: string; body: string }> = {
   ok: { tone: 'ok', label: '', title: '', body: '' },
-  unsupported: { tone: '', label: 'Not supported', title: "This hub's firmware has no Bluetooth yet", body: 'Update the hub firmware to a build with Bluetooth. Bluetooth devices you add to the config stay in the draft but the hub will refuse them until then.' },
-  offline: { tone: 'ir', label: 'Hub offline', title: 'The hub is offline', body: 'Bluetooth settings come back when the hub does. Check its power and network, and that Home Assistant is running.' },
-  unknown: { tone: 'ir', label: 'Not reported yet', title: 'Home Assistant has not reported Bluetooth yet', body: 'The Harmony integration has not told this editor about Bluetooth. Check that it is installed, version 0.3 or newer, and connected to this hub.' },
+  unsupported: { tone: '', label: 'Not Supported', title: "This hub's firmware has no Bluetooth yet", body: 'Update the hub firmware to a build with Bluetooth. Bluetooth devices you add to the config stay in the draft but the hub will refuse them until then.' },
+  offline: { tone: 'ir', label: 'Hub Offline', title: 'The hub is offline', body: 'Bluetooth settings come back when the hub does. Check its power and network, and that Home Assistant is running.' },
+  unknown: { tone: 'ir', label: 'Not Reported Yet', title: 'Home Assistant has not reported Bluetooth yet', body: 'The Harmony integration has not told this editor about Bluetooth. Check that it is installed, version 0.3 or newer, and connected to this hub.' },
 };
 
 /** Paired hosts and remotes against the hub's limits: "2 of 8 devices, 1 of 4 remotes". */
@@ -306,7 +307,7 @@ export function keyGroup(k: string): KeyGroup {
 export function keyOptions(codes: BtCodes, extra?: string | null): { group: KeyGroup; keys: { id: string; label: string }[] }[] {
   const all = new Set(codes.keys);
   if (extra) all.add(extra);
-  return KEY_GROUPS.map((g) => ({ group: g, keys: [...all].filter((k) => keyGroup(k) === g).map((id) => ({ id, label: keyLabel(id) })) })).filter((g) => g.keys.length);
+  return KEY_GROUPS.map((g) => ({ group: g, keys: orderBy([...all].filter((k) => keyGroup(k) === g), (k) => k).map((id) => ({ id, label: keyLabel(id) })) })).filter((g) => g.keys.length);
 }
 /** "Up" for `up`, "Does nothing" for null. */
-export const keyText = (k: string | null): string => (k === null ? 'Does nothing' : keyLabel(k));
+export const keyText = (k: string | null): string => (k === null ? 'Does Nothing' : keyLabel(k));

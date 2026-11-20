@@ -338,7 +338,7 @@ export class HhStudio extends StoreElement implements StudioHost {
     } else if (o.op === 'del') {
       const p = cfg.pages?.[idx];
       if (!p) return;
-      const ok = await confirmAction(this, { title: 'Delete page?', body: `"${p.title || p.id}" and its ${p.widgets.length} widgets will be removed. You can undo this.`, ok: 'Delete page', danger: true });
+      const ok = await confirmAction(this, { title: 'Delete Page?', body: `"${p.title || p.id}" and its ${p.widgets.length} widgets will be removed. You can undo this.`, ok: 'Delete Page', danger: true });
       if (!ok) return;
       this.store.replace(deletePage(this.store.config, idx));
       this.st.setPage(Math.max(0, Math.min(this.st.page, (this.store.config.pages?.length ?? 1) - 1)), false);
@@ -590,9 +590,9 @@ export class HhStudio extends StoreElement implements StudioHost {
             ${this.errorBar()}
             ${s.isFirstRun
               ? html`<div class="first" role="status">
-                  <h2>Set up your first hub config</h2>
+                  <h2>Set Up Your First Hub Config</h2>
                   <p>Nothing has been applied yet. Import a YAML file you already have, then drag its commands onto the remote.</p>
-                  <button class="btn pri" @click=${() => this.dispatchEvent(new Event('hh-import', { bubbles: true, composed: true }))}>Import YAML file</button>
+                  <button class="btn pri" @click=${() => this.dispatchEvent(new Event('hh-import', { bubbles: true, composed: true }))}>Import YAML File</button>
                 </div>`
               : nothing}
             <hh-remote .host=${this} .assigner=${this.assigner}></hh-remote>

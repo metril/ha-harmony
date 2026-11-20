@@ -214,18 +214,18 @@ export class HhBtPair extends BtElement {
     const block = this.canPair();
     const le = this.st?.limits?.le ?? false;
     const s = this.bt?.state;
-    return html`<h1 id="step-title" tabindex="-1">${host ? 'Add a Bluetooth device' : 'Add a Bluetooth remote'}</h1>
+    return html`<h1 id="step-title" tabindex="-1">${host ? 'Add a Bluetooth Device' : 'Add a Bluetooth Remote'}</h1>
       <p class="lead">${host ? 'Pair a TV, TV box or phone so the hub can act as its keyboard and remote.' : 'Pair a Bluetooth remote so its buttons control your activities through the hub.'}</p>
       ${this.downBanner()}
       ${block && this.st?.status === 'ok' ? html`<div class="banner bad" role="alert">${block}</div>` : nothing}
       ${s === 'starting' || s === 'off' ? html`<p class="hint">${LINK_CHIP[s]?.help}</p>` : nothing}
       <div class="stage">
         ${host && le
-          ? html`<fieldset class="opts bare"><legend class="vh">Connection type</legend>
+          ? html`<fieldset class="opts bare"><legend class="vh">Connection Type</legend>
               ${(['any', 'classic', 'le'] as const).map((t) => html`<label class="opt"><input type="radio" name="tr" .checked=${this.transport === t} @change=${() => (this.transport = t)} /><b>${{ any: 'Automatic (recommended)', classic: 'Bluetooth BR/EDR', le: 'Bluetooth LE' }[t]}</b><small>${{ any: 'Let the device choose. Works with almost everything.', classic: 'For older TVs, boxes and speakers.', le: 'For phones and newer devices that look for low-energy keyboards.' }[t]}</small></label>`)}</fieldset>`
           : nothing}
         ${host ? nothing : html`<p class="hint narrow">Put the remote in pairing mode first (usually hold its Home and Back buttons, or a pairing button, until the light blinks). Bluetooth LE remotes only.</p>`}
-        <button class="btn pri" ?disabled=${!!block || this.busy} @click=${() => void this.start()}>${this.busy ? 'Opening…' : host ? 'Start pairing' : 'Scan for remotes'}</button>
+        <button class="btn pri" ?disabled=${!!block || this.busy} @click=${() => void this.start()}>${this.busy ? 'Opening…' : host ? 'Start Pairing' : 'Scan for Remotes'}</button>
         ${this.err ? html`<div class="banner bad" role="alert"><span>${this.err}</span></div>` : nothing}
       </div>`;
   }
@@ -234,11 +234,11 @@ export class HhBtPair extends BtElement {
     const host = this.mode === 'host';
     const left = secsLeft(this.countdown, this.now);
     const timer = this.countdown ? html`<div class="timer" role="timer" aria-live="off" aria-label="Time left">${clock(left)}</div>` : nothing;
-    const stopBtn = html`<button class="btn" @click=${() => void this.stop()}>Stop pairing</button>`;
+    const stopBtn = html`<button class="btn" @click=${() => void this.stop()}>Stop Pairing</button>`;
     let body;
     if (ph.t === 'failed') {
       const o = outcome(ph.result, host ? 'device' : 'remote');
-      body = html`<div class="banner ${o.tone === 'bad' ? 'bad' : 'ir'}" role="alert"><span><b>${o.title}.</b> ${o.body}</span></div><button class="btn pri" @click=${() => this.retry()}>Try again</button>`;
+      body = html`<div class="banner ${o.tone === 'bad' ? 'bad' : 'ir'}" role="alert"><span><b>${o.title}.</b> ${o.body}</span></div><button class="btn pri" @click=${() => this.retry()}>Try Again</button>`;
     } else if (ph.t === 'scanning') {
       body = html`${timer}
         <p class="lead">Put the remote in pairing mode (usually hold Home and Back until its light blinks). It appears below.</p>
@@ -255,18 +255,18 @@ export class HhBtPair extends BtElement {
         <p class="hint">Not listed? Remove an old "Harmony" entry from the device's Bluetooth list first, and stay within a few metres of the hub.</p>
         ${stopBtn}`;
     } else body = html`<span class="pulse" aria-hidden="true"></span><p class="lead">Opening the pairing window…</p><p class="hint">Home Assistant relays this to the hub, which can take a few seconds.</p>`;
-    return html`<h1 id="step-title" tabindex="-1">${host ? 'Pair the device' : 'Pair the remote'}</h1>
+    return html`<h1 id="step-title" tabindex="-1">${host ? 'Pair the Device' : 'Pair the Remote'}</h1>
       <div class="stage">${body}${this.err ? html`<div class="banner bad" role="alert"><span>${this.err}</span></div>` : nothing}</div>`;
   }
   private setupStep() {
     const p = this.paired;
-    if (!p) return html`<h1 id="step-title" tabindex="-1">Looking for it…</h1><p class="lead" role="status">Waiting for the hub to list it.</p>`;
+    if (!p) return html`<h1 id="step-title" tabindex="-1">Looking for It…</h1><p class="lead" role="status">Waiting for the hub to list it.</p>`;
     const host = this.mode === 'host';
     const prob = this.nameProblem();
     const bytes = byteCounter(this.name);
     const slot = (host ? this.bt?.hosts : this.bt?.remotes)?.find((e) => sameAddr(e.addr, p.addr))?.slot ?? null;
     const dup = host || this.remoteAddr ? undefined : remotesOf(this.store.config).find((r) => sameAddr(r.address, p.addr));
-    return html`<h1 id="step-title" tabindex="-1">${host ? 'Name it and choose its commands' : 'Choose what its buttons do'}</h1>
+    return html`<h1 id="step-title" tabindex="-1">${host ? 'Name It and Choose Its Commands' : 'Choose What Its Buttons Do'}</h1>
       <p class="lead">${outcome('ok', host ? 'device' : 'remote', p.name).title}. <span class="mono">${p.addr}</span>${p.transport ? ` · ${p.transport === 'le' ? 'Bluetooth LE' : 'Bluetooth BR/EDR'}` : ''}</p>
       ${dup ? html`<div class="banner ir" role="status">This address is already in your config${'name' in dup && dup.name ? ` as ${dup.name}` : ''}. Adding it again creates a second entry.</div>` : nothing}
       <div class="twocol">
@@ -277,10 +277,10 @@ export class HhBtPair extends BtElement {
           ${this.codesErr ? html`<div class="banner bad" role="alert"><span>${this.codesErr}</span><span class="sp"></span><button class="btn sm" @click=${() => void this.loadCodes()}>Retry</button></div>` : nothing}
         </div>
         <aside class="side card pad" aria-label="Summary">
-          <label class="f">${host ? 'Device name' : 'Remote name'}<input type="text" aria-label="Name" aria-invalid=${prob ? 'true' : 'false'} .value=${this.name} @input=${(e: Event) => (this.name = trimBytes((e.target as HTMLInputElement).value))} /></label>
+          <label class="f">${host ? 'Device Name' : 'Remote Name'}<input type="text" aria-label="Name" aria-invalid=${prob ? 'true' : 'false'} .value=${this.name} @input=${(e: Event) => (this.name = trimBytes((e.target as HTMLInputElement).value))} /></label>
           <span class="hint">${bytes.used} of ${bytes.max} bytes (the hub stores at most ${bytes.max})</span>
           ${prob ? html`<span class="err" role="alert">${prob}</span>` : nothing}
-          <button class="btn pri" ?disabled=${!!prob || !this.codes} @click=${() => this.save()}>${host ? 'Add device' : 'Add remote'}</button>
+          <button class="btn pri" ?disabled=${!!prob || !this.codes} @click=${() => this.save()}>${host ? 'Add Device' : 'Add Remote'}</button>
           <span class="hint">${host ? 'The device is already in the draft.' : this.remoteAddr ? 'The remote is already in the draft.' : 'Adds to the draft only.'} Review and apply it from the bar at the top.</span>
         </aside>
       </div>`;

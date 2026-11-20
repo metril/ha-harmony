@@ -1,14 +1,17 @@
 /** Spans from measured fit, not character counts: a chip whose label is cut takes two cells, and the whole row if two are still too few. */
 export function fitCells(root: ParentNode): void {
   for (const grid of root.querySelectorAll<HTMLElement>('.cells')) {
-    const kids = [...grid.children].filter((k): k is HTMLElement => k instanceof HTMLElement && k.tagName === 'BUTTON');
-    if (!kids.length) continue;
-    kids.forEach((k) => k.removeAttribute('data-span'));
+    const items = [...grid.children].filter((k): k is HTMLElement => k instanceof HTMLElement && (k.tagName === 'BUTTON' || k.classList.contains('pair')));
+    const kids = items.filter((k) => k.tagName === 'BUTTON');
+    const pairs = items.filter((k) => k.classList.contains('pair'));
+    if (!items.length) continue;
+    items.forEach((k) => k.removeAttribute('data-span'));
     const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
     const cut = (k: HTMLElement) => k.scrollWidth > k.clientWidth || [...k.querySelectorAll('span')].some((s) => s.scrollWidth > s.clientWidth);
     const wide = kids.filter(cut);
     wide.forEach((k) => k.setAttribute('data-span', cols > 1 ? '2' : 'full'));
     wide.filter(cut).forEach((k) => k.setAttribute('data-span', 'full'));
+    for (const p of pairs) if (cols < 2 || [...p.children].some((c) => c instanceof HTMLElement && cut(c))) p.setAttribute('data-span', 'full');
   }
 }
 

@@ -6,7 +6,7 @@ import { groupCommand, type Group } from './studio-model';
 import { stockIconByName } from './stock-icons';
 
 export type Kind = 'tv' | 'receiver' | 'soundbar' | 'streamer' | 'console' | 'projector' | 'disc' | 'other';
-export const KIND_LABEL: Record<Kind, string> = { tv: 'TV', receiver: 'AV receiver', soundbar: 'Soundbar', streamer: 'Streaming box', console: 'Game console', projector: 'Projector', disc: 'Blu-ray / DVD', other: 'Something else' };
+export const KIND_LABEL: Record<Kind, string> = { tv: 'TV', receiver: 'AV receiver', soundbar: 'Soundbar', streamer: 'Streaming Box', console: 'Game Console', projector: 'Projector', disc: 'Blu-ray / DVD', other: 'Something Else' };
 /** archive device type id the power-test and model list use for each kind */
 export const KIND_TYPE: Record<Kind, string> = { tv: '1', receiver: '15', soundbar: '16', streamer: '14', console: '13', projector: '17', disc: '4', other: '14' };
 /** the archive's other device types, for "Something else" */

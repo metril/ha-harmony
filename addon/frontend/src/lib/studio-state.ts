@@ -17,8 +17,8 @@ function clientSummary(a: unknown): KeymapRow['action'] {
     if (typeof x['command'] === 'string') return { kind: 'device', device: x['device'], command: x['command'], label: `${x['device']}: ${x['command']}` };
     if (typeof x['input'] === 'string') return { kind: 'device', device: x['device'], input: x['input'], label: `${x['device']} -> ${x['input']}` };
   }
-  if (typeof x['activity'] === 'string' && Object.keys(x).length === 1) return { kind: 'activity', activity: x['activity'], label: x['activity'] === 'off' ? 'Power off' : `Start ${x['activity']}` };
-  if (x['none'] !== undefined && Object.keys(x).length === 1) return { kind: 'none', label: 'Does nothing' };
+  if (typeof x['activity'] === 'string' && Object.keys(x).length === 1) return { kind: 'activity', activity: x['activity'], label: x['activity'] === 'off' ? 'Power Off' : `Start ${x['activity']}` };
+  if (x['none'] !== undefined && Object.keys(x).length === 1) return { kind: 'none', label: 'Does Nothing' };
   return null;
 }
 
@@ -86,7 +86,7 @@ export class StudioState extends EventTarget {
     this.page = pageIndexForLayer(this.store.config, layer);
     this.wire = 0;
     this.sel = null;
-    this.say(layer === DEFAULT_LAYER ? 'Default layer' : `${this.layerName(layer)} layer`);
+    this.say(layer === DEFAULT_LAYER ? 'Default Layer' : `${this.layerName(layer)} Layer`);
   }
   setPage(i: number, user = true): void {
     this.page = i;

@@ -1,3 +1,4 @@
+import { displayKey } from '../lib/key-names';
 import { css, html, nothing, svg } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { V2Page, V2Widget } from '../lib/api';
@@ -175,11 +176,11 @@ export class HhThemes extends StoreElement {
     const active = activeName(this.cfg) === name;
     const label = builtIn ? (PRESETS[name]?.name ?? name) : name;
     return html`<article class="card tc ${active ? 'on' : ''}" aria-label=${label}>
-      <h3><span>${label}</span>${active ? statusChip('ok', 'In use', { check: true }) : statusChip('', builtIn ? 'Built in' : 'Yours')}</h3>
+      <h3><span>${label}</span>${active ? statusChip('ok', 'In Use', { check: true }) : statusChip('', builtIn ? 'Built in' : 'Yours')}</h3>
       ${this.thumbs(th.theme)}
       ${th.error ? html`<p class="fileerr" role="alert">${th.error}</p>` : nothing}
       <div class="acts">
-        <button class="btn sm ${active ? '' : 'pri'}" aria-pressed=${active} aria-label="Use ${label}" ?disabled=${active} @click=${() => this.edit(selectTheme(this.cfg, name))}>${active ? 'In use' : 'Use'}</button>
+        <button class="btn sm ${active ? '' : 'pri'}" aria-pressed=${active} aria-label="Use ${label}" ?disabled=${active} @click=${() => this.edit(selectTheme(this.cfg, name))}>${active ? 'In Use' : 'Use'}</button>
         <button class="btn sm" aria-label="Duplicate ${label}" @click=${() => this.duplicate(name)}>Duplicate</button>
         ${builtIn ? nothing : html`<a class="btn sm" aria-label="Edit ${label}" href=${'#/themes/' + encodeURIComponent(name)}>Edit</a>
           <button class="btn sm" aria-label="Export ${label}" @click=${() => this.download(name)}>Export</button>`}
@@ -244,7 +245,7 @@ export class HhThemes extends StoreElement {
   private paletteCell(name: string, th: RenderTheme, slot: number, probs: ThemeProblem[]) {
     const s = th.swatches[slot];
     if (!s) return nothing;
-    const n = PALETTE_NAMES[slot] as string;
+    const n = displayKey(PALETTE_NAMES[slot] as string);
     const own = overridesSlot(this.cfg, name, slot);
     const set = (h: string) => this.edit(setPaletteFill(this.cfg, name, slot, h), `th-${name}-p${slot}`);
     const ev = this.rowEvents(s.fill);
@@ -267,7 +268,7 @@ export class HhThemes extends StoreElement {
     const ok = await confirmAction(this, {
       title: `Delete "${name}"?`,
       body: use.active ? `The remote uses this theme now. Deleting it switches the remote to "${PRESETS[parent]?.name ?? parent}".` : 'This removes the theme from the config. Undo brings it back.',
-      ok: use.active ? 'Switch and delete' : 'Delete',
+      ok: use.active ? 'Switch and Delete' : 'Delete',
       danger: true,
     });
     if (!ok) return;
@@ -326,14 +327,14 @@ export class HhThemes extends StoreElement {
     const used = activeName(this.cfg) === name;
     const bad = this.nameDraft !== null && !/^[a-z0-9_]{1,31}$/.test(this.nameDraft);
     const idx = Math.min(this.pageIdx, Math.max(0, pages.length - 1));
-    return html`<a class="back" href="#/themes">${icon('overview')} All themes</a>
+    return html`<a class="back" href="#/themes">${icon('overview')} All Themes</a>
       <div class="ed">
         <div class="card">
           <div class="nmrow">
             <label class="muted" for="tname">Name</label>
             <input id="tname" class="nm2" type="text" maxlength="31" spellcheck="false" .value=${this.nameDraft ?? name} aria-invalid=${bad ? 'true' : 'false'} aria-describedby="tname-h"
               @input=${(e: Event) => (this.nameDraft = (e.target as HTMLInputElement).value)} @change=${() => this.rename(name)} />
-            ${statusChip(used ? 'ok' : '', used ? 'In use' : 'Not in use', { check: used })}
+            ${statusChip(used ? 'ok' : '', used ? 'In Use' : 'Not in Use', { check: used })}
             <span class="muted" id="tname-h">Builds on ${PRESETS[parent]?.name ?? parent}. Name: letters a-z (lower case), digits, underscore.</span>
           </div>
           ${error ? html`<div class="banner bad" role="alert">${error}</div>` : nothing}
@@ -347,7 +348,7 @@ export class HhThemes extends StoreElement {
           <div class="pal"><h3>Palette</h3><p class="muted">The 12 colours widgets can use. Text on each is chosen automatically.</p>
             <div class="row">${PALETTE_NAMES.map((_n, i) => this.paletteCell(name, th, i, probs))}</div></div>
           <div class="acts end">
-            <button class="btn" @click=${() => this.edit(selectTheme(this.cfg, name))} ?hidden=${used}>Use this theme</button>
+            <button class="btn" @click=${() => this.edit(selectTheme(this.cfg, name))} ?hidden=${used}>Use This Theme</button>
             <button class="btn" @click=${() => this.duplicate(name)}>Duplicate</button>
             <button class="btn" @click=${() => this.download(name)}>Export</button>
             <button class="btn danger" @click=${() => void this.removeTheme(name)}>Delete</button>
@@ -356,11 +357,11 @@ export class HhThemes extends StoreElement {
         <div class="side" aria-label="Preview">
           <div class="sbar">
             ${probs.length ? statusChip('ir', `${probs.length} contrast problem${probs.length === 1 ? '' : 's'}`, { id: 'prob-chip' }) : statusChip('ok', 'Readable', { check: true })}
-            ${probs.length ? html`<button class="btn sm" @click=${() => this.edit(fixAll(this.cfg, name))}>Fix all</button>` : nothing}
+            ${probs.length ? html`<button class="btn sm" @click=${() => this.edit(fixAll(this.cfg, name))}>Fix All</button>` : nothing}
             <span class="sp"></span>
             <div class="tabs" role="group" aria-label="Preview page">
               <button aria-pressed=${this.tab === 'sample'} @click=${() => (this.tab = 'sample')}>Sample</button>
-              <button aria-pressed=${this.tab === 'pages'} ?disabled=${!pages.length} @click=${() => (this.tab = 'pages')}>Your pages</button>
+              <button aria-pressed=${this.tab === 'pages'} ?disabled=${!pages.length} @click=${() => (this.tab = 'pages')}>Your Pages</button>
             </div>
           </div>
           ${this.preview(th)}
@@ -379,12 +380,12 @@ export class HhThemes extends StoreElement {
     const sel = this.selected && names.includes(this.selected) ? this.selected : '';
     return html`<header class="top"><div><h2 class="t">Themes</h2>
         <span class="muted">One theme styles the whole remote. Pick a built-in one, or duplicate it and make it yours.</span></div>
-        <button class="btn" @click=${() => this.renderRoot.querySelector<HTMLInputElement>('#imp')?.click()}>${icon('upload')} Import theme</button>
+        <button class="btn" @click=${() => this.renderRoot.querySelector<HTMLInputElement>('#imp')?.click()}>${icon('upload')} Import Theme</button>
         <input id="imp" type="file" accept=".json,application/json" hidden aria-label="Import a theme file" @change=${(e: Event) => void this.onFile(e)} />
       </header>
       ${this.fileError ? html`<div class="banner bad" role="alert">${this.fileError}</div>` : nothing}
       ${themeNotice(this.notices)}
-      ${this.selected && !sel ? html`<div class="banner ir" role="status">There is no theme called "${this.selected}". <a href="#/themes">Show all themes</a></div>` : nothing}
+      ${this.selected && !sel ? html`<div class="banner ir" role="status">There is no theme called "${this.selected}". <a href="#/themes">Show All Themes</a></div>` : nothing}
       ${sel
         ? this.editor(sel)
         : html`<div class="gal" role="list" aria-label="Themes">${[...PRESET_KEYS.map((k) => [k, true] as const), ...names.map((n) => [n, false] as const)].map(([n, b]) => html`<div role="listitem">${this.card(n, b)}</div>`)}</div>`}`;

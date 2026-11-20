@@ -17,11 +17,11 @@ export const TYPE_CHIPS: { id: string; label: string; domains: string[] }[] = [
   { id: 'switch', label: 'Switches', domains: ['switch'] },
   { id: 'scene', label: 'Scenes', domains: ['scene'] },
   { id: 'script', label: 'Scripts', domains: ['script'] },
-  { id: 'media_player', label: 'Media players', domains: ['media_player', 'remote'] },
+  { id: 'media_player', label: 'Media Players', domains: ['media_player', 'remote'] },
   { id: 'climate', label: 'Climate', domains: ['climate'] },
   { id: 'cover', label: 'Covers', domains: ['cover'] },
   { id: 'fan', label: 'Fans', domains: ['fan'] },
-  { id: 'input', label: 'Buttons and inputs', domains: ['button', 'input_button', 'input_boolean', 'number', 'select'] },
+  { id: 'input', label: 'Buttons and Inputs', domains: ['button', 'input_button', 'input_boolean', 'number', 'select'] },
   { id: 'sensor', label: 'Sensors', domains: ['sensor', 'binary_sensor'] },
 ];
 const TYPE_OF = new Map(TYPE_CHIPS.flatMap((t) => t.domains.map((d) => [d, t.id] as const)));

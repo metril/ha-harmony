@@ -175,7 +175,7 @@ export class HhPageStrip extends LitElement {
           </div>`;
         })}
         </div>
-        <button class="add" aria-haspopup="menu" aria-expanded=${this.menu} @click=${() => (this.menu = !this.menu)}>${icon('plus')}Add page</button>
+        <button class="add" aria-haspopup="menu" aria-expanded=${this.menu} @click=${() => (this.menu = !this.menu)}>${icon('plus')}Add Page</button>
       </div>
       ${this.menu
         ? html`<div class="menu" role="menu" @keydown=${(e: KeyboardEvent) => e.key === 'Escape' && (this.menu = false)}>

@@ -76,11 +76,11 @@ describe('screens render with a realistic config', () => {
     expect(text(bar)).toContain('Valid');
   });
 
-  it('first-run shows the empty state with Import and Add your first device', async () => {
+  it('first-run shows the empty state with Import and Add Your First Device', async () => {
     const { app } = await boot({ applied: false });
     const ov = await lazyEl(app, 'hh-overview');
     await settle(ov as HTMLElement);
-    expect(text(ov)).toContain('Import YAML file');
+    expect(text(ov)).toContain('Import YAML File');
     expect(ov.shadowRoot!.querySelector('a.btn.pri')?.getAttribute('href')).toBe('#/devices/new');
   });
 
@@ -109,19 +109,19 @@ describe('screens render with a realistic config', () => {
     await vi.waitFor(() => expect(calls.find((c) => c.url.includes('ir/test'))).toBeTruthy());
     expect(JSON.parse(calls.find((c) => c.url.includes('ir/test'))!.body!)).toEqual({ hub: 'h', ir: { proto: 'nec', addr: 4, cmd: 2 } });
     expect(text(dv)).toContain('IR archive · Samsung UE55');
-    ([...dv.shadowRoot!.querySelectorAll('.seg button')].find((b) => b.textContent === 'List view') as HTMLButtonElement).click();
+    ([...dv.shadowRoot!.querySelectorAll('.seg button')].find((b) => b.textContent === 'List View') as HTMLButtonElement).click();
     await settle(dv as HTMLElement);
     expect(dv.shadowRoot!.querySelectorAll('tbody tr').length).toBe(61);
   });
 
-  it('devices gallery: a card per device with power status, counts and source, plus Add device', async () => {
+  it('devices gallery: a card per device with power status, counts and source, plus Add Device', async () => {
     const { app } = await boot({ hash: '#/devices' });
     const dv = await lazyEl(app, 'hh-devices');
     await settle(dv as HTMLElement);
     expect(dv.shadowRoot!.querySelectorAll('.dcard').length).toBe(2);
     const t = text(dv);
-    expect(t).toContain('Power on + off');
-    expect(t).toContain('Power toggle only');
+    expect(t).toContain('Power On + Off');
+    expect(t).toContain('Power Toggle Only');
     expect(t).toContain('61 commands');
     expect(t).toContain('IR archive · Samsung UE55');
     expect(t).toContain('Your Harmony backup');
@@ -133,7 +133,7 @@ describe('screens render with a realistic config', () => {
     const h = await lazyEl(app, 'hh-history');
     await settle(h as HTMLElement);
     expect(text(h)).toContain('Rev 3');
-    await vi.waitFor(() => expect(text(h)).toContain('On the remote'));
+    await vi.waitFor(() => expect(text(h)).toContain('On the Remote'));
     for (const old of ['Applied', 'Acknowledged', 'Current']) expect(text(h)).not.toContain(old);
     const rows = [...h.shadowRoot!.querySelectorAll('li')];
     expect(rows[0]!.querySelectorAll('button').length).toBe(0);
@@ -144,7 +144,7 @@ describe('screens render with a realistic config', () => {
     expect(rows[1]!.querySelector('time')!.getAttribute('title')).toBeTruthy();
   });
 
-  it('history: sending, not sent, and rejected with a reason behind See why', async () => {
+  it('history: sending, not sent, and rejected with a reason behind See Why', async () => {
     const live = { applied_rev: 'aaaa1111' };
     const a = await boot({ hash: '#/history', statuses: [status(live)] });
     const h1 = await lazyEl(a.app, 'hh-history');
@@ -152,13 +152,13 @@ describe('screens render with a realistic config', () => {
     document.body.replaceChildren();
     const b = await boot({ hash: '#/history', statuses: [status({ connected: false })], linked: [] });
     const h2 = await lazyEl(b.app, 'hh-history');
-    await vi.waitFor(() => expect(text(h2)).toContain('Not sent'));
+    await vi.waitFor(() => expect(text(h2)).toContain('Not Sent'));
     document.body.replaceChildren();
     const c = await boot({ hash: '#/history', statuses: [status({ ...live, acked_rev: 'aaaa1111', result: 'error', detail: 'bad key map' })] });
     const h3 = await lazyEl(c.app, 'hh-history');
-    await vi.waitFor(() => expect(text(h3)).toContain('Rejected by hub'));
+    await vi.waitFor(() => expect(text(h3)).toContain('Rejected By Hub'));
     expect(text(h3)).not.toContain('bad key map');
-    const why = [...h3.shadowRoot!.querySelectorAll('button')].find((x) => x.textContent!.trim() === 'See why') as HTMLButtonElement;
+    const why = [...h3.shadowRoot!.querySelectorAll('button')].find((x) => x.textContent!.trim() === 'See Why') as HTMLButtonElement;
     why.click();
     await vi.waitFor(() => expect(h3.shadowRoot!.querySelector('#why')?.textContent).toContain('bad key map'));
   });
@@ -198,15 +198,15 @@ describe('screens render with a realistic config', () => {
     expect(av.shadowRoot!.querySelectorAll('.acard').length).toBe(1);
     expect(text(av)).toContain('Watch TV');
     expect(av.shadowRoot!.querySelector('hh-chain-mini')!.shadowRoot!.textContent).toContain('Port 1');
-    expect(text(av)).toContain('New activity');
+    expect(text(av)).toContain('New Activity');
     location.hash = '#/activities/watch_tv';
-    await vi.waitFor(() => expect(text(av)).toContain('Signal chain'));
+    await vi.waitFor(() => expect(text(av)).toContain('Signal Chain'));
     await settle(av as HTMLElement);
     const t = text(av);
-    expect(t).toContain('Power on Living room TV');
+    expect(t).toContain('Power On Living room TV');
     expect(t).toContain('2 s');
-    expect(t).toContain('Drop a device');
-    expect(t).toContain('Who handles it');
+    expect(t).toContain('Drop a Device');
+    expect(t).toContain('Who Handles It');
     expect(av.shadowRoot!.querySelectorAll('.step.auto').length).toBeGreaterThan(3);
     expect(av.shadowRoot!.querySelectorAll('.pill').length).toBe(2);
   });
@@ -218,7 +218,7 @@ describe('screens render with a realistic config', () => {
     config.activities![0]!.steps = [{ device: 'tv', command: 'cmd_1' }, { device: 'tv', command: 'cmd_2' }];
     const { app, store } = await boot({ hash: '#/activities/watch_tv', config, draft: true });
     const av = await lazyEl(app, 'hh-activities');
-    await vi.waitFor(() => expect(text(av)).toContain('Who handles it'));
+    await vi.waitFor(() => expect(text(av)).toContain('Who Handles It'));
     await settle(av as HTMLElement);
     av.shadowRoot!.querySelector<HTMLElement>('button[aria-label^="Who handles volume"]')!.click();
     await settle(av as HTMLElement);
@@ -227,7 +227,7 @@ describe('screens render with a realistic config', () => {
     expect(store.config.activities![0]!.keys).toMatchObject({ volume_up: { device: 'tv', command: 'vol_up' }, volume_down: { device: 'tv', command: 'vol_down' } });
     expect((store.config.editor as { activities: Record<string, { handlers: object }> }).activities['watch_tv']!.handlers).toEqual({ volume: 'tv' });
     await settle(av as HTMLElement);
-    expect(text(av)).toContain('No match for Volume mute');
+    expect(text(av)).toContain('No match for Volume Mute');
     const step = av.shadowRoot!.querySelector<HTMLElement>('.step[data-step="0"]')!;
     step.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }));
     expect(store.config.activities![0]!.steps!.map((x) => x['command'])).toEqual(['cmd_2', 'cmd_1']);
@@ -250,20 +250,20 @@ describe('screens render with a realistic config', () => {
       const els = [...w.shadowRoot!.querySelectorAll<HTMLElement>(sel)];
       (label ? els.find((e) => e.textContent?.includes(label)) : els[0])!.click();
     };
-    await click('.tile', 'IR archive');
+    await click('.tile', 'IR Archive');
     await vi.waitFor(() => expect(w.shadowRoot!.querySelector('.brand')).toBeTruthy());
     await click('.brand', 'Sony');
     await click('.tile', 'TV');
     await vi.waitFor(() => expect(text(w)).toContain('Code 1 of 2'));
-    await click('button', 'No, next code');
+    await click('button', 'No, Next Code');
     await vi.waitFor(() => expect(text(w)).toContain('Code 2 of 2'));
     await click('button', 'Yes');
-    await vi.waitFor(() => expect(text(w)).toContain('Likely matches'));
+    await vi.waitFor(() => expect(text(w)).toContain('Likely Matches'));
     await click('.likely .btn', 'KDL-1');
     await vi.waitFor(() => expect(text(w)).toContain('12 gaps shortened'));
     expect(text(w)).toContain('weird: unsupported');
     expect(calls.some((c) => c.method === 'PUT')).toBe(false);
-    await click('.side .btn.pri', 'Add device');
+    await click('.side .btn.pri', 'Add Device');
     expect(store.config.devices!.map((d) => d.id)).toContain('sony_kdl_1');
     expect(Object.keys(store.config.devices!.find((d) => d.id === 'sony_kdl_1')!.commands!)).toEqual(['vol_up', 'ok']);
     expect(location.hash).toBe('#/devices/sony_kdl_1');
@@ -279,7 +279,7 @@ describe('screens render with a realistic config', () => {
     });
     const w = await lazyEl(app, 'hh-add-device');
     await settle(w as HTMLElement);
-    ([...w.shadowRoot!.querySelectorAll<HTMLElement>('.tile')].find((e) => e.textContent?.includes('IR archive')))!.click();
+    ([...w.shadowRoot!.querySelectorAll<HTMLElement>('.tile')].find((e) => e.textContent?.includes('IR Archive')))!.click();
     await vi.waitFor(() => expect(text(w)).toContain("The IR archive can't be reached"));
     up = true;
     ([...w.shadowRoot!.querySelectorAll<HTMLElement>('button')].find((e) => e.textContent === 'Retry'))!.click();
@@ -308,14 +308,14 @@ describe('apply dialog', () => {
     const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean };
     dlg.open = true;
     await settle(dlg);
-    expect(dlg.shadowRoot!.querySelector('hh-dialog')?.getAttribute('heading')).toBe('Apply draft to h?');
+    expect(dlg.shadowRoot!.querySelector('hh-dialog')?.getAttribute('heading')).toBe('Apply Draft to h?');
     expect(text(dlg)).toContain('Renamed TV');
-    const apply = [...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement;
+    const apply = [...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement;
     apply.click();
     await vi.waitFor(() => expect(dlg.shadowRoot!.querySelector('hh-dialog')?.getAttribute('heading')).toBe('Rev 4 saved'));
     expect(text(dlg)).toContain('Saved as rev 4');
     expect(store.api).toBeDefined();
-    expect(text(dlg)).toContain('Sending to the remote (pending)');
+    expect(text(dlg)).toContain('Sending to the Remote (pending)');
     expect(store.hasDraft).toBe(false);
   });
 
@@ -326,14 +326,14 @@ describe('apply dialog', () => {
     const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean };
     dlg.open = true;
     await settle(dlg);
-    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(text(dlg)).toContain('Sending to the remote (pending)'));
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(text(dlg)).toContain('Sending to the Remote (pending)'));
     pushStatus(status({ acked_rev: 'old00000', result: 'ok' })); // an ack of another rev does not count
     await settle(dlg);
     expect(text(dlg)).toContain('(pending)');
     pushStatus(status({ acked_rev: 'aaaa1111', result: 'ok' }));
     await vi.waitFor(() => expect(text(dlg)).not.toContain('(pending)'));
-    expect(text(dlg)).toContain('On the remote');
+    expect(text(dlg)).toContain('On the Remote');
     expect(text(dlg)).toContain('Done');
   });
 
@@ -344,7 +344,7 @@ describe('apply dialog', () => {
     const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean };
     dlg.open = true;
     await settle(dlg);
-    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(dlg)).toContain('(pending)'));
     pushStatus(status({ acked_rev: 'aaaa1111', result: 'error', detail: 'bad key map' }));
     await vi.waitFor(() => expect(text(dlg)).toContain('bad key map'));
@@ -358,10 +358,10 @@ describe('apply dialog', () => {
     dlg.waitMs = 30;
     dlg.open = true;
     await settle(dlg);
-    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(dlg)).toContain('No Home Assistant integration is linked'));
     pushStatus(status({ acked_rev: 'aaaa1111', result: 'ok' }));
-    await vi.waitFor(() => expect(text(dlg)).toContain('On the remote'));
+    await vi.waitFor(() => expect(text(dlg)).toContain('On the Remote'));
   });
 
   it('names the hub id when Home Assistant is linked for another one, instead of waiting forever', async () => {
@@ -372,7 +372,7 @@ describe('apply dialog', () => {
     dlg.waitMs = 30;
     dlg.open = true;
     await settle(dlg);
-    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(dlg)).toContain('not connected for this hub (h)'));
     expect(text(dlg)).toContain('living-room-hub');
   });
