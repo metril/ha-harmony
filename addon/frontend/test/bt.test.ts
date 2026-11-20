@@ -5,7 +5,7 @@ import { CmdId, addHostDevice, addRemote, bars, btError, clock, dropRowKey, hidC
 import { announce, derive, observe, startRun } from '../src/lib/bt-wizard';
 import { deviceChips } from '../src/lib/studio-model';
 import { capProblem, irTotals } from '../src/lib/device-edit';
-import { counts } from '../src/lib/model';
+import { LIMITS, counts } from '../src/lib/model';
 import { resolveIr } from '../src/lib/studio-model';
 import type { Config, Device } from '../src/lib/model';
 
@@ -202,7 +202,9 @@ describe('bt devices in the shared editor code', () => {
     expect(irTotals({ devices: [bt] })).toEqual({ commands: 3, inputs: 0 }); // no `commands`: the default set
     expect(irTotals({ devices: [bt, { id: 'ha', kind: 'ha', commands: { a: {} } } as never] }).commands).toBe(3); // HA is not compiled
     expect(counts({ devices: [bt] }).commands).toBe(3);
+    Object.assign(LIMITS, { commands: 256 });
     expect(capProblem({ devices: [bt, { id: 'tv', commands: Object.fromEntries(Array.from({ length: 253 }, (_, i) => [`c${i}`, {}])) } as never] }, 'command')).toContain('at most 256');
+    Object.assign(LIMITS, { commands: Infinity });
     setBtDefaults([]);
   });
 });

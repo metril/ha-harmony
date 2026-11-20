@@ -432,16 +432,16 @@ def test_v038_integration_decodes_hello_ack_with_limits(tmp_path):
     assert got["hub_id"] == "h" and "limits" not in got and got["fw_build"] == 400
 
 
-def test_this_integration_decodes_v038_hello_ack_and_falls_back():
-    """This integration against a 0.3.8 hub: hello_ack without limits -> the fixed legacy limits."""
-    from harmony_core.hub_limits import CURRENT, LEGACY, HubLimits
+def test_this_integration_decodes_v038_hello_ack_and_is_refused():
+    """This integration against a 0.3.8 hub: hello_ack without limits -> no valid limits."""
+    from harmony_core.hub_limits import CURRENT, HubLimits
 
     ns = _real_py()
     env = {"v": 1, "id": 1, "t": "hello_ack",
            "d": {"hub_id": "h", "fw_version": "0.3.8", "fw_build": 366, "ota_key": "dev"}}
     data = ns["decode_ws"](env)[1]
     assert "limits" not in data
-    lim = HubLimits.from_hello(data.get("limits"))
-    assert lim == LEGACY and lim.legacy
+    with pytest.raises(ValueError):
+        HubLimits.from_hello(data.get("limits"))
     wire = {k: v for k, v in CURRENT.to_wire().items() if k != "flash_free"}  # flash_free optional
     assert HubLimits.from_hello(wire) == CURRENT

@@ -445,27 +445,6 @@ async def test_layer_pills_fit_at_1024_and_overflow_into_a_menu_by_measured_widt
     assert await settled(7) == (4, 3)
 
 
-async def test_hub_limits_are_refused_in_the_ui_with_the_reason(browser, large):
-    page = await open_large(browser, large)
-    # 256 commands in total: the keypad's "+ command" is disabled and says why
-    await page.evaluate(
-        f"() => {STORE}.edit(c => {{ const t = c.devices[0]; "
-        "for (let i = 0; Object.keys(t.commands).length + 25 + 21 + 8 < 256; i++) t.commands['pad' + i] = {proto: 'nec', addr: 1, cmd: i % 256}; })"
-    )
-    await page.goto(f"{large}{PREFIX}/#/devices/tv")
-    add = page.locator("hh-devices button.k", has_text="+ command")
-    await add.wait_for()
-    assert await add.is_disabled()
-    assert "at most 256 commands" in (await add.get_attribute("title"))
-    # 16 devices: the gallery's "Add device" is not a link any more
-    await page.evaluate(
-        f"() => {STORE}.edit(c => {{ for (let i = 0; c.devices.length < 16; i++) c.devices.push({{id: 'x' + i, name: 'X' + i, commands: {{a: {{proto: 'nec', addr: 1, cmd: 1}}}}}}); }})"
-    )
-    await page.goto(f"{large}{PREFIX}/#/devices")
-    await page.locator("hh-devices .add[aria-disabled=true]").wait_for()
-    assert await page.locator("hh-devices a.add").count() == 0
-
-
 # ---------------------------------------------------------------- studio: palette list, selection, key contrast
 REMOTE = f"{STUDIO}.querySelector('hh-remote').shadowRoot"
 PALETTE = f"{STUDIO}.querySelector('hh-palette').shadowRoot"

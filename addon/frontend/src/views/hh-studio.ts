@@ -40,6 +40,7 @@ export class HhStudio extends StoreElement implements StudioHost {
     shared,
     css`
       :host { display: block; --pw: 292px; --iw: 300px; }
+      @media (min-width: 1280px) { :host { --pw: 320px; --iw: 300px; } }
       .studio { display: grid; grid-template-columns: var(--pw) minmax(0, 1fr) var(--iw); height: max(560px, calc(100dvh - 108px)); border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; background: var(--sf); position: relative; }
       .pal, .insp { min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--sf); }
       .pal { border-right: 1px solid var(--line); }

@@ -44,7 +44,7 @@ async def test_a_config_far_over_256_commands_reaches_the_real_hub_in_chunks(has
     write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
-    assert coord.client.limits is not None and not coord.client.limits.legacy
+    assert coord.client.limits is not None
     assert coord.client.limits == CURRENT
     sent = []
     real = coord.client._request
@@ -102,25 +102,13 @@ def _fake_hub_handler(limits, log, bt=None):
     return handler
 
 
-async def test_old_firmware_without_limits_gets_the_old_fixed_limits(hass, fake_hub, write_yaml):
+async def test_hub_without_limits_is_refused(hass, fake_hub, write_yaml):
     log = []
     hub = await fake_hub(_fake_hub_handler(None, log))
     write_yaml(many(300))
-    entry = await setup(hass, hub)
-    coord = entry.runtime_data
-    assert coord.client.limits is not None and coord.client.limits.legacy
-    assert "too many commands: 300 (the hub allows at most 256)" in coord.last_error
-    assert not log  # refused before anything was sent
-    await hass.config_entries.async_unload(entry.entry_id)
-
-
-async def test_old_firmware_still_takes_what_fits_in_one_message(hass, fake_hub, write_yaml):
-    log = []
-    hub = await fake_hub(_fake_hub_handler(None, log))
-    write_yaml(many(200))
-    entry = await setup(hass, hub)
-    assert entry.runtime_data.last_error is None
-    assert {e["t"] for e in log} == {"set_config"}  # a hub without `limits` has no config_chunk
+    entry = await setup(hass, hub, ok=False)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert not log
     await hass.config_entries.async_unload(entry.entry_id)
 
 

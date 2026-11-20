@@ -240,12 +240,6 @@ def pronto(words):
 @pytest.mark.parametrize(
     ("text", "needle"),
     [
-        (devices_yaml(17), "too many devices: 17"),
-        (devices_yaml(16, 17), "too many commands: 272"),
-        (
-            "devices: [{id: a, inputs: {" + ", ".join(f"i{j}: {NEC}" for j in range(65)) + "}}]",
-            "too many inputs: 65",
-        ),
         (
             "activities:\n" + "".join(f"  - {{id: a{i}}}\n" for i in range(17)),
             "too many activities",
@@ -261,19 +255,13 @@ def pronto(words):
             + "]}]",
             "9 devices",
         ),
-        (
-            "devices: [{id: a, commands: {"
-            + ", ".join(f"c{i}: {{pronto: {pronto(500)}}}" for i in range(40))
-            + "}}]",
-            "pool holds 16384",
-        ),
     ],
 )
 def test_oversize_is_a_clean_error(text, needle):
     m = model(text)
     with pytest.raises(CompileError, match=re.escape(needle)) as ei:
         compile_config(m)
-    assert "hub allows" in str(ei.value) or "pool holds" in str(ei.value)
+    assert "hub allows" in str(ei.value)
 
 
 @pytest.mark.parametrize("name", ["power_on", "power_off", "input_x", "input_"])

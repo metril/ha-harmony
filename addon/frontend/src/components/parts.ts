@@ -2,7 +2,6 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { classMap } from 'lit/directives/class-map.js';
 import { setStyle } from '../lib/set-style';
 import type { Store } from '../lib/store';
-import { LIMITS, counts } from '../lib/model';
 import type { Problem } from '../lib/problems';
 import { icon } from '../lib/icons';
 import { degradeText } from '../lib/theme-model';
@@ -40,23 +39,13 @@ export function configSizeMeter(bytes: number, budget: number, overhead?: number
 }
 
 /** The draft meters, fed by the preview's `usage`. A current hub has one: "Config size X of Y KiB on this hub" (its memory
- * budget); old firmware has fixed limits: config KiB, IR pool %, commands. Pages are the remote's. */
+ * budget). Pages are the remote's. */
 export function meters(store: Store): TemplateResult {
   const u = store.usage;
-  const cmds = u?.commands ?? counts(store.config).commands;
-  const cmax = u?.commands_max ?? LIMITS.commands;
-  if (u && u.config_budget != null && u.config_bytes != null)
-    return html`
-      ${configSizeMeter(u.config_bytes, u.config_budget, u.config_overhead)}
-      ${meter('Pages', `${u.pages} / ${u.page_limit}`, u.pages, u.page_limit)}
-    `;
+  if (!u) return html``;
   return html`
-    ${u && u.json_max != null
-      ? meter('Config', `${(u.json_bytes / 1024).toFixed(1)} / ${(u.json_max / 1024).toFixed(0)} KiB`, u.json_bytes, u.json_max)
-      : nothing}
-    ${u && u.pool_max != null ? meter('IR pool', `${Math.round((u.pool_words / u.pool_max) * 100)}%`, u.pool_words, u.pool_max) : nothing}
-    ${u ? meter('Pages', `${u.pages} / ${u.page_limit}`, u.pages, u.page_limit) : nothing}
-    ${Number.isFinite(cmax) ? meter('Commands', `${cmds} / ${cmax}`, cmds, cmax) : nothing}
+    ${configSizeMeter(u.config_bytes, u.config_budget, u.config_overhead)}
+    ${meter('Pages', `${u.pages} / ${u.page_limit}`, u.pages, u.page_limit)}
   `;
 }
 

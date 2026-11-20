@@ -20,10 +20,7 @@ export interface PutResponse extends Meta {
 }
 export interface Usage {
   json_bytes: number;
-  /** null: the hub has no fixed text limit (a current hub: see config_budget) */
-  json_max: number | null;
   pool_words: number;
-  pool_max: number | null;
   keys: number;
   keys_max: number;
   devices: number;
@@ -31,12 +28,10 @@ export interface Usage {
   activities: number;
   activities_max: number;
   commands: number;
-  commands_max: number | null;
   inputs: number;
-  inputs_max: number | null;
-  /** a current hub: what loading this config needs of its memory, and the budget it allows (bytes); null on old firmware */
-  config_bytes: number | null;
-  config_budget: number | null;
+  /** a current hub: what loading this config needs of its memory, and the budget it allows (bytes) */
+  config_bytes: number;
+  config_budget: number;
   /** the fixed part of a load the hub reports (slack_b); the meter shows config_bytes and config_budget without it */
   config_overhead?: number | null;
   soft_keys: number;

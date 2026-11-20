@@ -13,7 +13,7 @@ from typing import Any
 from .config_model import Model
 from .ha_actions import HaCall, call_of
 from .harmony_proto import SOFT_KEY_BASE
-from .hub_limits import LEGACY, HubLimits, estimate_bytes
+from .hub_limits import CURRENT, HubLimits, estimate_bytes
 from .keymap import effective
 from .keys import KEY_NAMES, UNKNOWN_KEY, key_code
 from .page_build import MAX_PAGES, MAX_SOFT_KEYS, CompileError, Tile, build_pages, encode_pages
@@ -238,19 +238,7 @@ def config_stats(hub_json: dict[str, Any], max_pronto: int = 520) -> dict[str, i
 
 
 def fit_error(stats: dict[str, int], lim: HubLimits) -> str | None:
-    """Why a hub with limits `lim` cannot take a config of `stats`, or None. Count limits first (a
-    legacy hub), then the one byte budget: the message a hub itself would give."""
-    if lim.max_commands is not None and stats["commands"] > lim.max_commands:
-        return f"too many commands: {stats['commands']} (the hub allows at most {lim.max_commands})"
-    if lim.max_inputs is not None and stats["inputs"] > lim.max_inputs:
-        return f"too many inputs: {stats['inputs']} (the hub allows at most {lim.max_inputs})"
-    if lim.pool_words is not None and stats["words"] > lim.pool_words:
-        return (
-            f"IR data is {stats['words']} words in total (the hub's pool holds {lim.pool_words});"
-            " use protocol codes or fewer raw/pronto codes"
-        )
-    if lim.max_json is not None and stats["text"] > lim.max_json:
-        return f"compiled config is {stats['text']} bytes (the hub allows {lim.max_json})"
+    """Why a hub with limits `lim` cannot take a config of `stats`, or None. Flash first, then the one byte budget: the message a hub itself would give."""
     if lim.flash_low:
         return "the hub's flash is full: there is no room for a config. Free space on the hub first"
     if lim.flash_free and stats["text"] + 4096 + 13 > lim.flash_free:
@@ -258,13 +246,12 @@ def fit_error(stats: dict[str, int], lim: HubLimits) -> str | None:
             f"config needs ~{-(-(stats['text'] + 4096) // 1024)} KiB of flash,"
             f" the hub has {lim.flash_free // 1024} KiB free"
         )
-    if not lim.legacy:
-        need = estimate_bytes(lim, **stats)
-        if need > lim.budget:
-            return (
-                f"config needs ~{-(-need // 1024)} KiB of hub memory, the hub allows"
-                f" {lim.budget // 1024} KiB"
-            )
+    need = estimate_bytes(lim, **stats)
+    if need > lim.budget:
+        return (
+            f"config needs ~{-(-need // 1024)} KiB of hub memory, the hub allows"
+            f" {lim.budget // 1024} KiB"
+        )
     return None
 
 
@@ -302,7 +289,7 @@ def _keymap(
 
 
 def compile_config(
-    model: Model, *, collect: list[Problem] | None = None, limits: HubLimits = LEGACY
+    model: Model, *, collect: list[Problem] | None = None, limits: HubLimits = CURRENT
 ) -> Compiled:
     """Model -> Compiled. Raises CompileError when the hub or the remote cannot take it.
 
@@ -535,9 +522,7 @@ def compile_config(
             )
     usage = {
         "json_bytes": size,
-        "json_max": limits.max_json,  # None unless the hub has the fixed legacy limits
         "pool_words": words,
-        "pool_max": limits.pool_words,
         "keys": len(keys),
         "keys_max": limits.max_keys,
         "devices": len(devices),
@@ -545,15 +530,11 @@ def compile_config(
         "activities": len(activities),
         "activities_max": limits.max_activities,
         "commands": sum(len(d["commands"]) for d in ir_models),
-        "commands_max": limits.max_commands,
         "inputs": sum(len(d["inputs"]) for d in ir_models),
-        "inputs_max": limits.max_inputs,
-        # a current hub: one byte budget for the whole config (None on a legacy hub)
-        "config_bytes": need if not limits.legacy else None,
-        "config_budget": limits.budget if not limits.legacy else None,
-        "config_overhead": limits.slack_b
-        if not limits.legacy
-        else None,  # the hub's fixed part of a load, from its own limits
+        # one byte budget for the whole config
+        "config_bytes": need,
+        "config_budget": limits.budget,
+        "config_overhead": limits.slack_b,  # the hub's fixed part of a load, from its own limits
         "soft_keys": sum(1 for c in names if c >= SOFT_KEY_BASE),
         "soft_keys_max": MAX_SOFT_KEYS,
         "pages": max(wire_count, len(models)),

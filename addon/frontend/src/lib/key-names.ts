@@ -37,7 +37,9 @@ export function displayCommand(name: string): string {
 }
 
 /** An equal-column grid sized to the longest label, so every cell is as wide as the widest word needs and nothing truncates. */
-export const gridStyle = (labels: readonly string[]): string => {
-  const n = Math.max(4, ...labels.map((l) => l.length));
-  return `repeat(auto-fill, minmax(min(100%, calc(${n}ch + 3.25rem)), 1fr))`;
+export const gridStyle = (labels: readonly string[], pad = '2.6rem', cap = Infinity): string => {
+  const n = Math.min(cap, Math.max(4, ...labels.map((l) => l.length)));
+  return `repeat(auto-fill, minmax(min(100%, calc(${n}ch + ${pad})), 1fr))`;
 };
+/** Labels longer than the column width a capped grid is sized to take two columns (rows stay aligned, nothing is cut). */
+export const FREE_CAP = 9;

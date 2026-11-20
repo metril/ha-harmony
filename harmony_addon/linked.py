@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from harmony_core.hub_limits import LEGACY, HubLimits
+from harmony_core.hub_limits import CURRENT, HubLimits
 
 from .store import HUB_ID, atomic_write
 
@@ -28,6 +28,14 @@ def clean_name(raw: object) -> str | None:
 
 
 PERSIST_EVERY = 60  # seconds between rewrites for a hub that is already known
+
+
+def _valid(wire: Any) -> bool:
+    try:
+        HubLimits.from_hello(wire)
+    except ValueError:
+        return False
+    return True
 
 
 class LinkedHubs:
@@ -54,8 +62,8 @@ class LinkedHubs:
                 if HUB_ID.fullmatch(k) and type(v) is int and len(self._seen) < MAX_LINKED:
                     self._seen[k] = v
             for k, v in raw.get("limits", {}).items():
-                if k in self._seen and isinstance(v, dict):
-                    self._limits[k] = v if HubLimits.from_hello(v) is not LEGACY else {}
+                if k in self._seen and isinstance(v, dict) and _valid(v):
+                    self._limits[k] = v
             for k, v in raw.get("hw", {}).items():
                 if k in self._seen and isinstance(v, str) and HW_ID.fullmatch(v):
                     self._hw[k] = v
@@ -118,18 +126,19 @@ class LinkedHubs:
         return self._seen.get(hub)
 
     def limits(self, hub: str) -> HubLimits:
-        """The connected hub's config limits as its integration last reported them; LEGACY (the
-        fixed limits of old firmware) when it never did."""
-        return HubLimits.from_hello(self._limits.get(hub))
+        """The connected hub's config limits as its integration last reported them; CURRENT
+        until it does."""
+        wire = self._limits.get(hub)
+        return HubLimits.from_hello(wire) if wire else CURRENT
 
     def set_limits(self, hub: str, wire: Any) -> None:
-        """Record what an integration reported for `hub` (a hello_ack.limits object; {} = old firmware)."""
+        """Record what an integration reported for `hub` (a hello_ack.limits object; an invalid one is ignored)."""
         if hub not in self._seen or not isinstance(wire, dict):
             return
+        if not _valid(wire):
+            return
         lim = HubLimits.from_hello(wire)
-        clean = (
-            {} if lim.legacy else {k: v for k, v in lim.to_wire().items() if k != "flash_free"}
-        )  # free flash moves: only the integration checks it, at push time; "none left" (flash_low) is passed on so the editor can say so
+        clean = {k: v for k, v in lim.to_wire().items() if k != "flash_free"}  # free flash moves: only the integration checks it, at push time; "none left" (flash_low) is passed on so the editor can say so
         if self._limits.get(hub) != clean:
             self._limits[hub] = clean
             self._persist(int(self._clock()))

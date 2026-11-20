@@ -33,7 +33,7 @@ from harmony_core.config_model import (
     validate_ir,
     validate_pages,
 )
-from harmony_core.hub_limits import LEGACY, HubLimits
+from harmony_core.hub_limits import CURRENT, HubLimits
 from harmony_core.keymap import resolve_keymaps
 from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, page_to_dict
 from harmony_core.theme_build import theme_warnings
@@ -372,7 +372,7 @@ def _warnings(ws: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _compile(config: dict[str, Any], limits: HubLimits = LEGACY):
+def _compile(config: dict[str, Any], limits: HubLimits = CURRENT):
     model, errors = _check(config)
     if errors:
         return None, None, errors
@@ -402,7 +402,7 @@ def _blank(page: dict[str, Any], i: int) -> dict[str, Any]:
 
 
 def _compile_tolerant(
-    model: dict[str, Any], problems: list[tuple[list[Any], str]], limits: HubLimits = LEGACY
+    model: dict[str, Any], problems: list[tuple[list[Any], str]], limits: HubLimits = CURRENT
 ) -> tuple[Any, set[int]]:
     """Compile in collect mode; pages that fail to build are blanked and the rest recompiled, so
     one bad page never hides the others. Every problem found lands in `problems` (deduplicated)."""
@@ -445,7 +445,7 @@ def _wire_entry(m: Any, u: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _preview(config: dict[str, Any], limits: HubLimits = LEGACY) -> dict[str, Any]:
+def _preview(config: dict[str, Any], limits: HubLimits = CURRENT) -> dict[str, Any]:
     """Blocking (CPU). Always answers: pages that compile are returned even when the draft has
     errors elsewhere; apply stays strict because it uses `_compile`, not this."""
     raw_pages = config.get("pages") if isinstance(config.get("pages"), list) else []

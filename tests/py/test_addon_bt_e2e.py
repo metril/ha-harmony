@@ -265,6 +265,8 @@ async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
     await shot(page, "08-remote-candidates")
     await page.get_by_role("button", name="Pair with Homatics Remote").click()
     await page.get_by_role("heading", name="Choose what its buttons do").wait_for()
+    paired = await draft_has(site, lambda c: bool(c.get("bt_remotes")))  # saved to the draft on pairing, before any key
+    assert paired["bt_remotes"] == [{"name": "Homatics Remote", "address": REMOTE}]
     await page.get_by_label("Key for Home", exact=True).wait_for()
     # learn mode: press a button on the "real" remote
     await page.get_by_role("button", name="Learn a button").click()
@@ -284,7 +286,8 @@ async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
     await shot(page, "09-remote-learn")
     await page.get_by_role("button", name="Stop listening").click()
     await page.get_by_role("button", name="Add remote").click()
-    cfg = await draft_has(site, lambda c: bool(c.get("bt_remotes")))
+    cfg = await draft_has(site, lambda c: bool(c.get("bt_remotes") and c["bt_remotes"][0].get("keys")))
+    assert len(cfg["bt_remotes"]) == 1
     r = cfg["bt_remotes"][0]
     assert r["address"] == REMOTE and r["name"] == "Homatics Remote" and r["keys"] == {"Home": "menu"}
     assert any(c["op"] == "pick" and c["addr"] == REMOTE for c in bt.ran)
@@ -470,7 +473,7 @@ async def test_the_remote_wizard_works_from_the_keyboard_alone(browser, bt, site
     await page.keyboard.press("ArrowDown")  # a select: change it from the keyboard
     await tab_to(page, "Add remote")
     await page.keyboard.press("Enter")
-    cfg = await draft_has(site, lambda c: bool(c.get("bt_remotes")))
+    cfg = await draft_has(site, lambda c: bool(c.get("bt_remotes") and c["bt_remotes"][0].get("keys")))
     assert cfg["bt_remotes"][0]["address"] == REMOTE and "Back" in cfg["bt_remotes"][0].get("keys", {})
 
 

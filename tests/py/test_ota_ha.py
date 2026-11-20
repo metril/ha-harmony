@@ -16,6 +16,7 @@ from homeassistant.helpers import issue_registry as ir
 
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
 from custom_components.ha_harmony.ota import CHUNK, HOTA_HEADER, parse_image
+from harmony_core.hub_limits import CURRENT
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
 
@@ -49,7 +50,7 @@ class ScriptedHub:
         self.seen.append(t)
         reply = {"v": 1, "id": rid}
         if t == "hello":
-            await ws.send_json({**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "fw_build": self.fw_build, "ota_key": self.ota_key}})
+            await ws.send_json({**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire(), "fw_build": self.fw_build, "ota_key": self.ota_key}})
             if self.rollback:
                 await ws.send_json({"v": 1, "id": 0, "t": "ota_status", "d": {
                     "state": "rolled_back", "offset": 0, "size": 0, "build": self.rollback[0], "reason": self.rollback[1]}})  # fmt: skip

@@ -3,8 +3,6 @@
 import pytest
 from test_ha_runtime import V2_INFO, YAML, clock, rig, settle  # noqa: F401  (fixtures)
 
-from custom_components.ha_harmony import const
-
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
 
 PALETTE = {
@@ -50,12 +48,6 @@ async def test_caps_change_repushes_with_degraded_colours(hass, rig, clock, monk
     assert lamp.color == "red" and lamp.on_color in PALETTE and mid[0].theme == 1
     assert len(hub.pages()) == sent + len(mid)
     assert any("custom colours snapped" in n["msg"] for n in c.theme_notices(1))
-    # an integration without the theme transport counts bit 3 as bit 2 only: the same set, nothing re-sent
-    monkeypatch.setattr(const, "THEME_TRANSPORT", False)
-    await hub.push("remote_info", {**V2_INFO, "caps": 15})
-    await settle(hass)
-    assert len(hub.pages()) == sent + len(mid)
-    # with a transport the free colour survives
-    monkeypatch.setattr(const, "THEME_TRANSPORT", True)
+    # with bit 3 the free colour survives
     full = await _pushed_set(hass, hub, c, {**V2_INFO, "caps": 15, "gen": 1})
     assert full[0].widgets[0].on_color.startswith("#") and c.theme_notices(1) == []

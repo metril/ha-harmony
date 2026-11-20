@@ -87,7 +87,7 @@ async def test_draft_validate_preview_apply_revert(client):
     v2 = p["pages"][0]["page"]
     assert v2["version"] == 2 and v2["total"] == len(p["pages"]) and v2["widgets"]
     assert {"role", "shape", "icon", "bind", "icon_only"} <= set(v2["widgets"][0])
-    assert p["usage"]["pool_max"] == 16384
+    assert p["usage"]["config_budget"] > 0
 
     a = await (await client.post("/api/v1/config/apply", json={}, headers=H)).json()
     assert a["applied"]["rev"] == 1 and a["applied"]["hash"] == p["hash"]

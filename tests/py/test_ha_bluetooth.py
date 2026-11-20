@@ -16,6 +16,7 @@ from custom_components.ha_harmony import const, rename
 from custom_components.ha_harmony.bluetooth import BtError
 from custom_components.ha_harmony.const import DOMAIN
 from custom_components.ha_harmony.diagnostics import async_get_config_entry_diagnostics
+from harmony_core.hub_limits import CURRENT
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
 
@@ -75,7 +76,7 @@ class BtHub:
         t, i, d = env["t"], env["id"], env.get("d", {})
         self.ws = ws
         if t == "hello":
-            ack = {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, **({"bt": self.bt} if self.bt else {})}
+            ack = {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire(), **({"bt": self.bt} if self.bt else {})}
             await ws.send_json({"v": 1, "id": i, "t": "hello_ack", "d": ack})
             if self.bt:
                 await self.push("bt_state", self.state)
