@@ -1,4 +1,4 @@
-"""Hub ids the integration polls the add-on for (id -> last seen), in memory and in /data."""
+"""Hub ids the integration has opened a channel for (id -> last seen), in memory and in /data."""
 
 from __future__ import annotations
 

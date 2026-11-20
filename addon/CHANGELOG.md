@@ -1,8 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.3.16 (2026-11-20)
 
+**Upgrade order: hub firmware first, then this add-on, then the integration, all in the same sitting.**
+
+- No more polling: the add-on talks to Home Assistant over one push connection and to the editor over another. The editor refreshes the instant something changes (applied configs, Bluetooth state, remote keys) and no page timer asks again and again.
+- Bluetooth labels now read "Automatic", "Bluetooth BR/EDR" and "Bluetooth LE".
+- Pairing: a device that pairs goes straight to "Name and commands" and is saved in the draft at once. Applying a config no longer restarts the pairing view.
+- Remote editor: readable names for keys and devices, tidier grids, and a choice of icon per device.
 - The add-on is no longer marked experimental in the add-on store.
+- Fixed the hub showing as offline: the hub now refreshes Home Assistant's network entry itself (firmware), and commands waiting on a hub that disconnects report "hub offline" immediately.
 
 ## 0.3.15 (2026-11-20)
 

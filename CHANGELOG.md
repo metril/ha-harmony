@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.3.16 (2026-11-20)
+
+**Upgrade order: hub firmware first, then the add-on, then the integration, all in the same sitting.** Older versions are no longer supported alongside the new ones: an integration refuses a hub whose firmware does not announce TCP keepalive, and an add-on without the new channel shows a repair issue.
+
+- No more polling. The integration and the add-on talk over one push connection (the add-on's `channel`), and the editor gets live updates over its own connection. Keeping the links alive is left to the operating system's TCP keepalive, so there are no ping timers and nothing wakes up every few seconds.
+- Bluetooth LE fixes on the hub: Service Changed is sent once per pairing, the hub offers the standard Generic Attribute service, and remote keys wait until the host is ready to receive them.
+- Fixed the hub showing as offline in Home Assistant ("Connect call failed") when the hub had not answered Home Assistant's ARP request: the hub now refreshes that entry itself, when a peer connects or goes quiet, instead of on a timer.
+- If the add-on says it cannot talk to this integration version, the link shows "integration outdated" and stays that way until the integration is reloaded.
+- A device that has just paired is added to the draft straight away, so it is not lost if you take a while to finish the form.
 
 - Hub: the stock `bluetoothd` is now really stopped before the Bluetooth helper starts: it was never found because the hub's kernel has no `/proc/<pid>/comm` (the name now comes from `stat`, else `cmdline`). `hciattach` is left alone. The log says stopped / not found / ignored SIGKILL. The LE "pairing start" line shows the connection's peer address instead of zeros.
 
