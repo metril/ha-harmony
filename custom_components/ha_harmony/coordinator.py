@@ -499,12 +499,17 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def _ack_later(self, rev: str | None, result: str, detail: str | None = None) -> None:
         """Report to the add-on what became of a bundle (an `ack` frame). Deduplicated, never fatal; with no open
         channel nothing is sent and the next sync (or the next connect) tries again."""
-        if self._channel is None or rev is None or self._acked == (rev, result, detail):
+        if rev is None or self._acked == (rev, result, detail):
+            return
+        self._acked = (rev, result, detail)  # kept for a reconnect: _serve_channel re-sends it
+        self._send_ack(rev, result, detail)
+
+    def _send_ack(self, rev: str, result: str, detail: str | None) -> None:
+        if self._channel is None:
             return
         fields: dict[str, Any] = {"rev": rev, "result": result}
         if detail:
             fields["detail"] = detail[:200]
-        self._acked = (rev, result, detail)
         self.addon_send("ack", **fields)
 
     def addon_send(self, t: str, **fields: Any) -> None:
@@ -673,7 +678,6 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """One connected channel, until it closes. True when the add-on closed it 4001 (unsupported version)."""
         self._channel = channel
         self._channel_ready.set()
-        self._acked = None
         self._sent_identity = json.dumps(client.identity_fields(), sort_keys=True)
         if self.link_state in ("unreachable", "auth_failed", "connecting", "nothing_applied", "addon_outdated"):
             self.async_set_link_state("ok" if self.managed else "connecting")
@@ -682,8 +686,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._first_apply.set()  # a quiet channel (nothing newer to send) is an answer too
         self.addon_send("hub", online=self.available)
         self.btm.on_addon_connect()
-        if self.managed and self.hub_accepted and self.rev:
-            self._ack_later(self.rev, "ok")  # the ack a restart or a dropped channel may have lost
+        if self._acked is not None:
+            self._send_ack(*self._acked)  # the last ack, whatever it was: a dropped channel may have lost it
+        elif self.managed and self.hub_accepted and self.rev:
+            self._ack_later(self.rev, "ok")  # the ack a restart may have lost
         try:
             async for msg in channel:
                 try:

@@ -94,6 +94,7 @@ static void t_burst(void) {
     hp_peers_arm_all(&p, t0); /* boot */
     hp_peers_arm(&p, IP(10, 0, 0, 1), t0 + 500); /* already bursting: no restart */
     CT_EQ(p.nn, 2);
+    CT_EQ(hp_peers_next_ms(&p, t0), 1000);
     CT_EQ(hp_peers_due(&p, t0 + 999, out, 8), 0);
     CT_EQ(hp_peers_due(&p, t0 + 1000, out, 8), 2); /* +1 s */
     CT_EQ(hp_peers_due(&p, t0 + 1000, out, 8), 0);
@@ -105,11 +106,19 @@ static void t_burst(void) {
     CT_EQ(hp_peers_due(&p, t0 + 6999, out, 8), 0);
     CT_EQ(hp_peers_due(&p, t0 + 7000, out, 8), 1);  /* +4 s */
     CT_EQ(hp_peers_due(&p, t0 + 15000, out, 8), 1); /* +8 s */
-    CT_EQ(hp_peers_due(&p, t0 + 31000, out, 8), 1); /* +16 s: fifth and last */
+    CT_EQ(hp_peers_due(&p, t0 + 31000, out, 8), 1); /* +16 s: fifth of the dense burst */
+    CT_EQ(p.nn, 1);
+    CT_EQ(hp_peers_due(&p, t0 + 59999, out, 8), 0);
+    CT_EQ(hp_peers_due(&p, t0 + 60000, out, 8), 1);  /* sparse tail: 60, 120, 240, 480 s after arming */
+    CT_EQ(hp_peers_due(&p, t0 + 120000, out, 8), 1);
+    CT_EQ(hp_peers_due(&p, t0 + 240000, out, 8), 1);
+    CT_EQ(hp_peers_due(&p, t0 + 479999, out, 8), 0);
+    CT_EQ(hp_peers_due(&p, t0 + 480000, out, 8), 1);
     CT_EQ(p.nn, 0);
+    CT_EQ(hp_peers_next_ms(&p, t0), -1); /* nothing armed: nothing to wake for */
     CT_EQ(hp_peers_due(&p, t0 + 1000000, out, 8), 0); /* stopped until the next event */
-    hp_peers_arm(&p, IP(10, 0, 0, 2), t0 + 40000); /* a connection loss starts a new burst */
-    CT_EQ(hp_peers_due(&p, t0 + 41000, out, 8), 1);
+    hp_peers_arm(&p, IP(10, 0, 0, 2), t0 + 600000); /* a connection loss starts a new burst */
+    CT_EQ(hp_peers_due(&p, t0 + 601000, out, 8), 1);
     CT_EQ(out[0], IP(10, 0, 0, 2));
 }
 

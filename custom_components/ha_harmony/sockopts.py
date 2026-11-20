@@ -8,6 +8,8 @@ from typing import Any
 KEEPIDLE = 60
 KEEPINTVL = 10
 KEEPCNT = 3
+USER_TIMEOUT_MS = 90000  # unacked data aborts the connection after this long
+USER_TIMEOUT_MS = 90000  # unacked data aborts the connection after this long
 
 
 def set_keepalive(sock: socket.socket | None) -> bool:
@@ -26,6 +28,12 @@ def set_keepalive(sock: socket.socket | None) -> bool:
             continue
         try:
             sock.setsockopt(socket.IPPROTO_TCP, opt, value)
+        except OSError:
+            pass
+    opt = getattr(socket, "TCP_USER_TIMEOUT", None)  # Linux only
+    if opt is not None:
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, opt, USER_TIMEOUT_MS)
         except OSError:
             pass
     return True

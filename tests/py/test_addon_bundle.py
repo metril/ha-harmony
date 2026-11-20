@@ -366,3 +366,32 @@ async def test_every_channel_route_needs_the_token_and_never_ingress(aiohttp_cli
         assert (await c.request(method, path, json={}, headers=h)).status == 401, path
         r = await c.request(method, path, json={}, headers={**h, **BEARER, **ing})
         assert r.status == 401, path
+
+
+async def test_a_bundle_applied_while_the_hello_is_answered_is_not_lost(client, monkeypatch):
+    from harmony_addon import channel
+
+    await apply(client)
+    real, calls = channel._bundle_frame, []
+
+    def building(app, hub):
+        frame = real(app, hub)
+        if not calls:  # an apply lands while the first frame is being built
+            channel.on_apply(app, hub)
+        calls.append(1)
+        return frame
+
+    monkeypatch.setattr(channel, "_bundle_frame", building)
+    ws = await connect(client, "default", known_rev=None)
+    first = await recv(ws, "bundle")
+    second = await recv(ws, "bundle")  # the push that raced the hello is delivered, not dropped
+    assert first["rev"] == second["rev"]
+    await ws.close()
+
+
+async def test_shutdown_closes_all_hub_sockets_together(client):
+    a, b = await connect(client, "default"), await connect(client, "default2")
+    await recv(a)
+    await recv(b)
+    await client.app.shutdown()
+    assert await closed(a) == 1001 and await closed(b) == 1001

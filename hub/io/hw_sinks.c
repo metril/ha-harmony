@@ -193,6 +193,12 @@ int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *h) {
     return 0;
 }
 
+int hp_hw_next_ms(const hp_hw_t *h) {
+    if (!h || !h->pending) return -1;
+    int64_t d = (int64_t)(h->deadline_ms + HP_HW_REAP_MARGIN_MS) - (int64_t)h->ops.now_ms(h->ops.ctx);
+    return d < 0 ? 0 : d > 1000000 ? 1000000 : (int)d;
+}
+
 void hp_hw_service(hp_hw_t *h) {
     if (h && h->pending && h->ops.now_ms(h->ops.ctx) >= h->deadline_ms + HP_HW_REAP_MARGIN_MS) drain_close(h);
 }

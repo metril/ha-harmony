@@ -259,8 +259,12 @@ static int kv_put(uint32_t tag, const uint8_t *v, uint32_t len) {
     memcpy(g_kv[i].v, v, len < 4 ? len : 4);
     return 0;
 }
+static void kv_del(uint32_t tag) {
+    for (int i = 0; i < g_kvn; i++)
+        if (g_kv[i].tag == tag) { g_kv[i] = g_kv[--g_kvn]; return; }
+}
 static void test_service_changed(void) {
-    static const bt_sc_store_t st = {kv_get, kv_put};
+    static const bt_sc_store_t st = {kv_get, kv_put, kv_del};
     const uint8_t A[6] = {1, 2, 3, 4, 5, 6}, B[6] = {9, 8, 7, 6, 5, 4};
     uint8_t v[4];
     bt_sc_value(v);
@@ -304,6 +308,12 @@ static void test_service_changed(void) {
     bt_sc_drop(0x46);
     bt_sc_drop(0x47);
     CT_EQ(bt_sc_ccc_get(0x47), 0);
+    /* forgetting a bond deletes its record, so a later bond for the same address starts stale */
+    int n0 = g_kvn;
+    bt_sc_forget(B, 1);
+    CT_EQ(g_kvn, n0 - 1);
+    CT_CHECK(!bt_sc_peer(0x48, B, 1) && bt_sc_ccc(0x48, 2));
+    bt_sc_drop(0x48);
 }
 
 static void test_hidq_overflow(void) {

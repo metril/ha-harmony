@@ -5,8 +5,12 @@ import { Live } from '../src/lib/live';
 import { fakeLive } from './fake-ws';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
-const mk = () => new Live('wss://ha.example/api/hassio_ingress/tok/api/v1/live');
-afterEach(() => vi.useRealTimers());
+const made: Live[] = [];
+const mk = () => made[made.push(new Live('wss://ha.example/api/hassio_ingress/tok/api/v1/live')) - 1]!;
+afterEach(() => {
+  vi.useRealTimers();
+  for (const l of made.splice(0)) (l as unknown as { shutdown(): void }).shutdown(); // drop the window listeners
+});
 
 describe('Live', () => {
   it('derives the ws/wss url relative to the ingress path', () => {
@@ -88,7 +92,7 @@ describe('Live', () => {
         t += 100;
       }
       waits.push(t);
-      expect(fakeLive.sockets.length).toBe(n + 1);
+      expect(fakeLive.sockets.length).toBeGreaterThan(n); // (other tests' Live instances also listen)
       fakeLive.sockets.at(-1)!.onclose?.(); // it failed to connect
       fakeLive.sockets.at(-1)!.closed = true;
     }
@@ -112,7 +116,24 @@ describe('Live', () => {
     expect(l.up).toBe(false);
     const n = fakeLive.sockets.length;
     window.dispatchEvent(new Event('online'));
-    expect(fakeLive.sockets.length).toBe(n + 1);
+    expect(fakeLive.sockets.length).toBeGreaterThan(n); // (other tests' Live instances also listen)
+  });
+
+  it('a wake event replaces a socket that looks open (half-open behind a proxy) with a fresh one', async () => {
+    const l = mk();
+    l.sub('hubs', () => undefined);
+    await tick();
+    const first = fakeLive.sockets[0]!;
+    for (const [target, ev] of [[document, 'visibilitychange'], [window, 'online'], [window, 'pageshow']] as const) {
+      const before = fakeLive.sockets.length;
+      const prev = fakeLive.sockets.at(-1)!;
+      target.dispatchEvent(new Event(ev));
+      expect(prev.closed).toBe(true);
+      expect(fakeLive.sockets.length).toBeGreaterThan(before);
+      await tick();
+    }
+    expect(first.closed).toBe(true);
+    expect(l.up).toBe(true);
   });
 });
 

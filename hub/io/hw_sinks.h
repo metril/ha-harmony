@@ -98,6 +98,7 @@ int hp_hw_ir_build(const uint16_t *us, size_t n, uint32_t carrier_hz, unsigned r
 /* Probes the device (write-open + close) so a held device fails at startup. Returns 0,
  * -HP_E_HALBUSY (EBUSY/EACCES: stock hal holds /dev/i2s), or -HP_E_IO / -HP_E_NOENT. */
 int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *out);
+int hp_hw_next_ms(const hp_hw_t *h); /* ms until the pending waveform may be reaped; -1 when none */
 void hp_hw_service(hp_hw_t *h); /* reap a finished waveform; call once per loop iteration */
 void hp_hw_sinks_close(hp_hw_t *h); /* drains (bounded by the waveform) and closes */
 

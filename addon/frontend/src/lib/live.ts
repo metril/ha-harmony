@@ -1,5 +1,5 @@
 // One WebSocket to `api/v1/live` for the whole editor: topic subscriptions (refcounted), a snapshot cache, resync.
-// No timers except the reconnect back-off; a visibility or online event reconnects at once. With no subscriber the socket is closed.
+// No timers except the reconnect back-off; a visibility, online or pageshow event replaces the socket at once (it may be half-open). With no subscriber the socket is closed.
 type Cb = (v: unknown) => void;
 const MAX_TOPICS = 16;
 
@@ -49,10 +49,19 @@ export class Live extends EventTarget {
     const f = on ? 'addEventListener' : 'removeEventListener';
     document[f]('visibilitychange', this.wake);
     window[f]('online', this.wake);
+    window[f]('pageshow', this.wake);
   }
   private wake = () => {
     if (typeof document !== 'undefined' && document.hidden) return;
-    if (this.subs.size && !this.ws) this.connect();
+    if (!this.subs.size) return;
+    // A socket that survived a sleep may be half-open (nothing tells us): drop it and take a fresh snapshot.
+    const old = this.ws;
+    if (old) {
+      this.ws = null;
+      this.setUp(false);
+      old.close();
+    }
+    this.connect();
   };
   private shutdown() {
     clearTimeout(this.timer);

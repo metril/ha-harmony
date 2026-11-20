@@ -25,6 +25,8 @@ log = logging.getLogger(__name__)
 
 VERSION = 1
 HELLO_TIMEOUT = 10.0
+SHUTDOWN_CLOSE_S = 2.0
+_BG: set[asyncio.Task] = set()
 MAX_FRAME = 1 << 20
 HELLO_KEY = web.AppKey("hello_timeout", float)
 CHANNEL_KEY = web.AppKey("channel", object)
@@ -282,14 +284,16 @@ async def channel(request: web.Request) -> web.StreamResponse:
             bt_routes.fail_waiting(h0, "hub_offline")
         for t in tuple(old.tasks):
             t.cancel()
-        with contextlib.suppress(ConnectionError, RuntimeError):
-            await old.ws.close(code=4002, message=b"replaced")
+        t = asyncio.ensure_future(_close_quiet(old.ws, 4002, b"replaced"))  # not awaited: a stuck old peer must not stall
+        _BG.add(t)
+        t.add_done_callback(_BG.discard)
     try:
         new = app[LINKED_KEY].seen(hub)
         app[bt_routes.BT_KEY].prune(set(app[LINKED_KEY].ids()))
         adopt = _identity(app, hub, f, new=new)
         if adopt is not None:
             await conn.send({"t": "adopt", "result": adopt})
+        conn.ready = True  # pushes now queue behind conn.lock, so a bundle applied from here on is not lost
         try:
             frame = _bundle_frame(app, hub)
         except web.HTTPException:
@@ -300,7 +304,6 @@ async def channel(request: web.Request) -> web.StreamResponse:
                 await conn.send({"t": "nothing_applied"})
             elif frame["rev"] != known:
                 await conn.send(frame)
-        conn.ready = True
         if live._bus(app).subscribers(live.LIVE, f"keys:{hub}"):
             await conn.send({"t": "listen", "on": True})
         live.touch(app, hub)
@@ -321,11 +324,19 @@ async def channel(request: web.Request) -> web.StreamResponse:
     return ws
 
 
+async def _close_quiet(ws: web.WebSocketResponse, code: int, message: bytes) -> None:
+    with contextlib.suppress(Exception):
+        await ws.close(code=code, message=message)
+
+
 def add_routes(app: web.Application, api: str) -> None:
     app.router.add_get(f"{api}/channel", channel)
 
     async def _close(_: web.Application) -> None:
-        for conn in tuple(app[CHANNEL_KEY].conns.values()):
-            await conn.ws.close(code=1001, message=b"shutdown")
+        socks = [c.ws for c in tuple(app[CHANNEL_KEY].conns.values())]
+        if socks:
+            await asyncio.wait(
+                [asyncio.ensure_future(_close_quiet(w, 1001, b"shutdown")) for w in socks], timeout=SHUTDOWN_CLOSE_S
+            )
 
     app.on_shutdown.append(_close)

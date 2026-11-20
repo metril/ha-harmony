@@ -715,6 +715,20 @@ async def test_dropped_channel_reconnects_with_the_known_rev_and_a_quiet_add_on_
     await hass.config_entries.async_unload(entry.entry_id)
 
 
+async def test_the_last_ack_is_resent_after_a_reconnect_whatever_its_result(hass, fake_hub, fake_addon, monkeypatch):
+    monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.01)
+    hub = await fake_hub(hub_handler([]))
+    fake_addon.apply(SOURCE)
+    entry = await setup(hass, hub, fake_addon.link_data())
+    entry.runtime_data._ack_later("r1", "error", "nope")
+    await fake_addon.frame("ack", lambda f: f["rev"] == "r1")
+    n = len(fake_addon.frames)
+    await fake_addon.close_socket(HUB_ID)
+    got = await fake_addon.frame("ack", start=n)
+    assert (got["rev"], got["result"], got["detail"]) == ("r1", "error", "nope")
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_ack_frame_sends_only_bounded_fields(hass, fake_hub, fake_addon):
     hub = await fake_hub(hub_handler([]))
     fake_addon.apply(SOURCE)

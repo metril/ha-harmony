@@ -47,5 +47,19 @@ def test_set_keepalive():
         assert a.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
         if hasattr(socket, "TCP_KEEPCNT"):
             assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 3
+        if hasattr(socket, "TCP_USER_TIMEOUT"):
+            assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 90000
+    finally:
+        a.close()
+
+
+def test_integration_set_keepalive_has_a_user_timeout():
+    from custom_components.ha_harmony.sockopts import set_keepalive as ha_keepalive
+
+    a = socket.socket()
+    try:
+        assert ha_keepalive(a) is True
+        if hasattr(socket, "TCP_USER_TIMEOUT"):
+            assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 90000
     finally:
         a.close()

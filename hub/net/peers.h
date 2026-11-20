@@ -7,7 +7,7 @@
  * go unanswered on the hub's Wi-Fi), but it learns the hub's MAC as soon as the hub sends it any unicast
  * frame. So the hub remembers the addresses of peers that authenticated, and when one loses its
  * authenticated connection (and once at boot, for all of them) it sends it a few small UDP datagrams to the
- * discard port with exponential back-off, then stops until the next such event (no periodic timer); the
+ * discard port with exponential back-off plus a sparse tail (60, 120, 240, 480 s), then stops until the next such event (no periodic timer); the
  * kernel ARPs for the peer to send each, and the peer learns the hub's MAC from that request. A burst is
  * cancelled when the peer authenticates again.
  *
@@ -19,12 +19,14 @@
 #include <stdint.h>
 
 #define HP_PEERS_MAX 64          /* ~1 KiB state file at most */
-#define HP_PEERS_NUDGES 5        /* nudges per burst, at +1, +3, +7, +15, +31 s (gaps 1, 2, 4, 8, 16 s) */
+#define HP_PEERS_BURST 5         /* dense nudges, at +1, +3, +7, +15, +31 s (gaps 1, 2, 4, 8, 16 s) */
+#define HP_PEERS_NUDGES 9        /* then sparse tail nudges at +60, +120, +240, +480 s after the arming event */
 #define HP_PEERS_FIRST_MS 1000   /* gap before the first nudge; doubles after each */
 
 typedef struct {
     uint32_t addr;
     int64_t at_ms; /* when the next nudge is due */
+    int64_t t0_ms; /* when the burst was armed (the tail is relative to it) */
     int step;      /* nudges already sent */
 } hp_nudge_t;
 
@@ -60,6 +62,8 @@ void hp_peers_cancel(hp_peers_t *, uint32_t addr);
 /* Writes up to `max` peers whose nudge is due at `now_ms` to out and schedules each one's next nudge (the
  * burst ends after HP_PEERS_NUDGES). Returns the count. */
 int hp_peers_due(hp_peers_t *, int64_t now_ms, uint32_t *out, int max);
+/* Ms until the earliest armed nudge (0 = due now); -1 when no burst is active (nothing to wake for). */
+int hp_peers_next_ms(const hp_peers_t *, int64_t now_ms);
 /* Peers (in list order, at most `max`) not in live[0..nlive). Returns the count written to out. */
 int hp_peers_pending(const hp_peers_t *, const uint32_t *live, int nlive, uint32_t *out, int max);
 /* One UDP datagram to addr:9, non-blocking, errors ignored. */

@@ -51,6 +51,7 @@ typedef struct {
     /* runtime */
     bool connected;
     bool settling;     /* just connected: keys wait a moment (see bt_hid.c) */
+    uint32_t settle_dl; /* when settling ends (run-loop ms), per slot */
     uint16_t cid;      /* Classic hid_cid, or BT_LE_CID_FLAG | LE handle */
     hci_con_handle_t handle;
     uint32_t last_used_ms;

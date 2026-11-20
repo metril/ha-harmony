@@ -218,10 +218,31 @@ static void flush_slot(int s) {
     }
 }
 
-static void settle_done(btstack_timer_source_t *ts) {
-    (void)ts;
+/* one timer, armed for the earliest settling slot's own deadline */
+static void settle_done(btstack_timer_source_t *ts);
+static void settle_arm(void) {
+    uint32_t now = btstack_run_loop_get_time_ms();
+    bool any = false;
+    uint32_t best = 0;
     for (int s = 0; s < g_hosts_n; s++) {
         if (!g_hosts[s].used || !g_hosts[s].settling) continue;
+        uint32_t left = (int32_t)(g_hosts[s].settle_dl - now) > 0 ? g_hosts[s].settle_dl - now : 0;
+        if (!any || left < best) best = left;
+        any = true;
+    }
+    btstack_run_loop_remove_timer(&s_settle);
+    if (!any) return;
+    btstack_run_loop_set_timer_handler(&s_settle, settle_done);
+    btstack_run_loop_set_timer(&s_settle, best);
+    btstack_run_loop_add_timer(&s_settle);
+}
+
+static void settle_done(btstack_timer_source_t *ts) {
+    (void)ts;
+    uint32_t now = btstack_run_loop_get_time_ms();
+    for (int s = 0; s < g_hosts_n; s++) {
+        if (!g_hosts[s].used || !g_hosts[s].settling) continue;
+        if ((int32_t)(now - g_hosts[s].settle_dl) < 0) continue; /* this slot's own deadline is later */
         if (g_hosts[s].transport == BT_TR_LE) { /* the CCCD never arrived: do not send into the void */
             bt_logf("slot %d: LE host did not enable the HID reports in %d ms, waiting keys dropped", s, BT_HID_CCC_MS);
             g_hosts[s].settling = false;
@@ -230,6 +251,7 @@ static void settle_done(btstack_timer_source_t *ts) {
             flush_slot(s);
         }
     }
+    settle_arm();
     tick_arm();
 }
 
@@ -239,10 +261,24 @@ void bt_hid_connected(int slot, bool wait) {
     g_hosts[slot].deadline = 0;
     if (!wait && !has_deferred(slot)) return;
     g_hosts[slot].settling = true;
-    btstack_run_loop_set_timer_handler(&s_settle, settle_done);
-    btstack_run_loop_remove_timer(&s_settle);
-    btstack_run_loop_set_timer(&s_settle, g_hosts[slot].transport == BT_TR_LE ? BT_HID_CCC_MS : BT_HID_SETTLE_MS);
-    btstack_run_loop_add_timer(&s_settle);
+    g_hosts[slot].settle_dl = btstack_run_loop_get_time_ms() + (g_hosts[slot].transport == BT_TR_LE ? BT_HID_CCC_MS : BT_HID_SETTLE_MS);
+    settle_arm();
+}
+
+#define EARLY_MAX 4
+static uint16_t s_early[EARLY_MAX];
+void bt_hid_ccc_early(uint16_t handle) {
+    int free_i = -1;
+    for (int i = 0; i < EARLY_MAX; i++) {
+        if (s_early[i] == handle) return;
+        if (!s_early[i] && free_i < 0) free_i = i;
+    }
+    if (free_i >= 0) s_early[free_i] = handle;
+}
+bool bt_hid_ccc_take(uint16_t handle) {
+    for (int i = 0; i < EARLY_MAX; i++)
+        if (s_early[i] == handle) { s_early[i] = 0; return true; }
+    return false;
 }
 
 void bt_hid_ready(int slot) {

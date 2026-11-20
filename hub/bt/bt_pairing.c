@@ -385,6 +385,7 @@ static void le_up(int s, hci_con_handle_t handle) {
     bt_logf("slot %d: LE host connected", s);
     if (bt_sc_peer(handle, h->addr, h->addr_type)) bt_sc_request(handle); /* an enabled CCCD may already be restored */
     bt_hid_connected(s, true); /* keys wait until the host subscribes to the reports */
+    if (bt_hid_ccc_take(handle)) bt_hid_ready(s); /* the CCCD was restored before the host was identified */
     bt_push_hosts();
 }
 
@@ -428,6 +429,7 @@ void bt_le_host_identified(hci_con_handle_t handle, const bd_addr_t addr, uint8_
 
 void bt_le_host_gone(hci_con_handle_t handle) {
     pending_set(handle, false);
+    (void)bt_hid_ccc_take(handle);
     int s = bt_host_find_handle(handle);
     if (s >= 0 && g_hosts[s].transport == BT_TR_LE) {
         bt_hid_disconnected(s);
@@ -472,7 +474,10 @@ void bt_forget_host(int slot) {
     bt_hid_drop_deferred(slot);
     if (h->transport == BT_TR_CLASSIC) gap_drop_link_key_for_bd_addr(h->addr);
 #ifdef HH_BT_LE
-    else gap_delete_bonding((bd_addr_type_t)h->addr_type, h->addr);
+    else {
+        gap_delete_bonding((bd_addr_type_t)h->addr_type, h->addr);
+        bt_sc_forget(h->addr, h->addr_type);
+    }
 #endif
     bt_host_free(slot);
     bt_push_hosts();

@@ -602,7 +602,10 @@ static void hids_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet,
         break;
     case HIDS_SUBEVENT_INPUT_REPORT_ENABLE: {
         int s = bt_host_find_handle(hids_subevent_input_report_enable_get_con_handle(packet));
-        if (s >= 0 && hids_subevent_input_report_enable_get_enable(packet)) bt_hid_ready(s);
+        if (hids_subevent_input_report_enable_get_enable(packet)) {
+            if (s >= 0) bt_hid_ready(s);
+            else bt_hid_ccc_early(hids_subevent_input_report_enable_get_con_handle(packet)); /* applied when the host comes up */
+        }
         bt_logf("HIDS input report notifications %s for handle 0x%04x (CCC written or restored)",
                 hids_subevent_input_report_enable_get_enable(packet) ? "enabled" : "disabled",
                 (unsigned)hids_subevent_input_report_enable_get_con_handle(packet));
@@ -616,13 +619,15 @@ static hids_device_report_t s_hids_reports[3];
 
 /* ---- Generic Attribute service (0x1801): Service Changed ---- */
 static att_service_handler_t s_gatt_svc;
-static btstack_context_callback_registration_t s_sc_cb;
+static btstack_context_callback_registration_t s_sc_cb[BT_SC_SLOTS]; /* one per connection slot: a registration is queued by address */
 
 static int sc_get(uint32_t tag, uint8_t *v, uint32_t cap) { return g_tlv ? g_tlv->get_tag(&g_tlv_ctx, tag, v, cap) : 0; }
 static int sc_put(uint32_t tag, const uint8_t *v, uint32_t len) { return bt_tlv_store_if_changed(tag, v, len); }
+static void sc_del(uint32_t tag) { if (g_tlv) g_tlv->delete_tag(&g_tlv_ctx, tag); }
 
 static void sc_send(void *ctx) {
     hci_con_handle_t h = (hci_con_handle_t)(uintptr_t)ctx;
+    int slot = bt_sc_slot(h);
     uint8_t v[4];
     bt_sc_value(v);
     uint8_t rc = att_server_indicate(h, ATT_CHARACTERISTIC_GATT_SERVICE_CHANGED_01_VALUE_HANDLE, v, sizeof v);
@@ -630,18 +635,21 @@ static void sc_send(void *ctx) {
         bt_sc_sent(h);
         bt_logf("service changed indicated to handle 0x%04x (0x0001-0xFFFF)", (unsigned)h);
     } else if (rc != ERROR_CODE_UNKNOWN_CONNECTION_IDENTIFIER && bt_sc_ccc_get(h)) { /* busy: ask again */
-        s_sc_cb.callback = sc_send;
-        s_sc_cb.context = ctx;
-        att_server_register_can_send_now_callback(&s_sc_cb, h);
+        if (slot < 0) return;
+        s_sc_cb[slot].callback = sc_send;
+        s_sc_cb[slot].context = ctx;
+        att_server_register_can_send_now_callback(&s_sc_cb[slot], h);
     }
 }
 
 /* A bonded peer's connection is up and identified, or its CCCD arrived: send Service Changed (deferred so a
  * pending write response goes first). */
 void bt_sc_request(uint16_t con) {
-    s_sc_cb.callback = sc_send;
-    s_sc_cb.context = (void *)(uintptr_t)con;
-    att_server_register_can_send_now_callback(&s_sc_cb, con);
+    int slot = bt_sc_slot(con);
+    if (slot < 0) return;
+    s_sc_cb[slot].callback = sc_send;
+    s_sc_cb[slot].context = (void *)(uintptr_t)con;
+    att_server_register_can_send_now_callback(&s_sc_cb[slot], con);
 }
 
 static void att_pkt(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
@@ -681,7 +689,7 @@ static void gatt_service_init(void) {
     s_gatt_svc.write_callback = gatt_write;
     att_server_register_service_handler(&s_gatt_svc);
     att_server_register_packet_handler(att_pkt);
-    static const bt_sc_store_t st = {sc_get, sc_put};
+    static const bt_sc_store_t st = {sc_get, sc_put, sc_del};
     uint32_t cur = bt_sc_hash(profile_data, sizeof profile_data);
     bt_sc_init(&st, cur);
     bt_logf("ATT database hash %08x", (unsigned)cur);

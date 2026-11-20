@@ -170,12 +170,18 @@ async def live(request: web.Request) -> web.StreamResponse:
     return ws
 
 
+async def _close_quiet(ws: web.WebSocketResponse) -> None:
+    with contextlib.suppress(Exception):
+        await ws.close(code=1001, message=b"shutdown")
+
+
 def add_routes(app: web.Application, api: str) -> None:
     app[SOCKETS_KEY] = set()
     app.router.add_get(f"{api}/live", live)
 
     async def _close(_: web.Application) -> None:
-        for ws in tuple(app[SOCKETS_KEY]):
-            await ws.close(code=1001, message=b"shutdown")
+        socks = tuple(app[SOCKETS_KEY])
+        if socks:
+            await asyncio.wait([asyncio.ensure_future(_close_quiet(w)) for w in socks], timeout=2.0)
 
     app.on_shutdown.append(_close)

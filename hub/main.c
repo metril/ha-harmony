@@ -74,6 +74,8 @@ static void peers_keepalive(hp_ws_server_t *srv) {
     }
 }
 
+static int peers_next(void) { return hp_peers_next_ms(&g_peers, mono_ms()); }
+
 static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     (void)user;
     hp_session_t *sess = hp_ws_conn_user(c);
@@ -502,10 +504,24 @@ int main(int argc, char **argv) {
                 hb_last = t.tv_sec;
             }
         }
-        int wait = hub_next_timeout_ms(&g_hub); /* timers never sleep: they shorten the poll */
-        if (wait < 0 || wait > 200) wait = 200;
+        /* Only real due-times shorten the poll (-1 = sleep until an fd wakes it): scheduler timers, the BT helper,
+         * a pending IR drain, the peers' nudges, the heartbeat touch and the post-OTA flush. Everything else is
+         * woken by its fd (sockets, mDNS, RF reader pipe, BT helper). */
+        int wait = hub_next_timeout_ms(&g_hub);
+#define DUE(x) do { int d_ = (x); if (d_ >= 0 && (wait < 0 || d_ < wait)) wait = d_; } while (0)
+        DUE(peers_next());
+        if (!sim) DUE(hp_hw_next_ms(&g_hw));
+        if (hb_path) {
+            struct timespec t;
+            if (clock_gettime(CLOCK_MONOTONIC, &t) == 0) {
+                long long left = hb_last + hb_secs - t.tv_sec;
+                DUE(left <= 0 ? 0 : (int)(left * 1000));
+            }
+        }
+        if (g_hub.ota.restart) DUE(100); /* a few polls to flush the ota_status reply, then exit */
+#undef DUE
 #ifdef HH_BT
-        if (bt_wait >= 0 && bt_wait < wait) wait = bt_wait;
+        if (bt_wait >= 0 && (wait < 0 || bt_wait < wait)) wait = bt_wait;
 #endif
         hp_ws_poll(srv, wait);
 #ifdef HH_BT

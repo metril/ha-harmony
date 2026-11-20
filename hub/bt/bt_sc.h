@@ -13,6 +13,7 @@
 typedef struct {
     int (*get)(uint32_t tag, uint8_t *v, uint32_t cap); /* bytes read, 0 = none */
     int (*put)(uint32_t tag, const uint8_t *v, uint32_t len);
+    void (*del)(uint32_t tag); /* may be NULL */
 } bt_sc_store_t;
 
 /* FNV-1a over the compiled ATT database image. */
@@ -31,6 +32,10 @@ bool bt_sc_ccc(uint16_t handle, uint16_t value);
 void bt_sc_sent(uint16_t handle);
 /* The peer confirmed the indication: remember the current hash for its bond. */
 void bt_sc_confirmed(uint16_t handle);
+/* The bond is forgotten: delete its record from the key store. */
+void bt_sc_forget(const uint8_t addr[6], uint8_t addr_type);
+/* Index of the connection's slot (0..BT_SC_SLOTS-1), -1 when it has none. */
+int bt_sc_slot(uint16_t handle);
 /* Connection ended. */
 void bt_sc_drop(uint16_t handle);
 /* Current CCCD value of the connection (0 = none). */

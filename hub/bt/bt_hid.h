@@ -16,6 +16,10 @@ void bt_hid_init(void);
 void bt_hid_key(int slot, uint8_t page, uint16_t usage, bool down);
 void bt_hid_connected(int slot, bool wait);
 void bt_hid_ready(int slot); /* LE: the host enabled notifications */
+/* The HID CCCD was restored for a handle that is not yet a host slot (private address, before identification):
+ * remembered per handle; bt_hid_ccc_take() reports (and clears) it when the host comes up. */
+void bt_hid_ccc_early(uint16_t handle);
+bool bt_hid_ccc_take(uint16_t handle);
 void bt_hid_disconnected(int slot);
 void bt_hid_drop_deferred(int slot);
 bool bt_hid_slot_idle(int slot); /* nothing held, nothing waiting */

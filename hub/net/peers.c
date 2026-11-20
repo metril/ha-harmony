@@ -84,7 +84,7 @@ void hp_peers_arm(hp_peers_t *p, uint32_t addr, int64_t now_ms) {
     for (int i = 0; i < p->nn; i++)
         if (p->nudge[i].addr == addr) return;
     if (p->nn >= HP_PEERS_MAX) return;
-    p->nudge[p->nn++] = (hp_nudge_t){addr, now_ms + HP_PEERS_FIRST_MS, 0};
+    p->nudge[p->nn++] = (hp_nudge_t){addr, now_ms + HP_PEERS_FIRST_MS, now_ms, 0};
 }
 
 void hp_peers_arm_all(hp_peers_t *p, int64_t now_ms) {
@@ -110,10 +110,22 @@ int hp_peers_due(hp_peers_t *p, int64_t now_ms, uint32_t *out, int max) {
             *n = p->nudge[--p->nn]; /* burst over; re-examine the swapped-in entry */
             continue;
         }
-        n->at_ms = now_ms + ((int64_t)HP_PEERS_FIRST_MS << n->step);
+        static const int tail_s[] = {60, 120, 240, 480};
+        n->at_ms = n->step < HP_PEERS_BURST ? now_ms + ((int64_t)HP_PEERS_FIRST_MS << n->step)
+                                            : n->t0_ms + (int64_t)tail_s[n->step - HP_PEERS_BURST] * 1000;
         i++;
     }
     return k;
+}
+
+int hp_peers_next_ms(const hp_peers_t *p, int64_t now_ms) {
+    int64_t best = -1;
+    for (int i = 0; i < p->nn; i++) {
+        int64_t d = p->nudge[i].at_ms - now_ms;
+        if (d < 0) d = 0;
+        if (best < 0 || d < best) best = d;
+    }
+    return best < 0 ? -1 : best > 1000000 ? 1000000 : (int)best;
 }
 
 int hp_peers_pending(const hp_peers_t *p, const uint32_t *live, int nlive, uint32_t *out, int max) {

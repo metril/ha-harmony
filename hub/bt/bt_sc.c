@@ -47,6 +47,10 @@ static bool stale(const uint8_t addr[6], uint8_t type) {
     return ((uint32_t)v[0] | ((uint32_t)v[1] << 8) | ((uint32_t)v[2] << 16) | ((uint32_t)v[3] << 24)) != s_cur;
 }
 
+void bt_sc_forget(const uint8_t addr[6], uint8_t addr_type) {
+    if (s_store.del) s_store.del(tag_for(addr, addr_type));
+}
+
 void bt_sc_bond_fresh(const uint8_t addr[6], uint8_t addr_type) { store_cur(addr, addr_type); }
 
 static int find(uint16_t handle, bool create) {
@@ -92,6 +96,8 @@ void bt_sc_confirmed(uint16_t handle) {
     int i = find(handle, false);
     if (i >= 0 && s_sc[i].known) store_cur(s_sc[i].addr, s_sc[i].type);
 }
+
+int bt_sc_slot(uint16_t handle) { return find(handle, true); }
 
 void bt_sc_drop(uint16_t handle) {
     int i = find(handle, false);
