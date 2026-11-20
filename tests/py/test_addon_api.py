@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from addon_ws import connect, drain, get_bundle, live, recv
 from test_addon import CONFIG, SMALL, H, clock, put_draft
 
 from harmony_addon.app import create_app
@@ -142,8 +143,6 @@ def test_core_parse_model_stays_fail_fast_and_validate_all_is_a_superset():
 
 # ---------------------------------------------------------------- hubs, ack, status
 TOKEN = "ab" * 32
-BEARER = {"Authorization": f"Bearer {TOKEN}"}
-JH = {"Content-Type": "application/json"}
 
 
 @pytest.fixture
@@ -158,7 +157,16 @@ async def apply(c, hub, config=CONFIG):
     ).status == 200
     r = await c.post(f"/api/v1/config/apply?hub={hub}", json={}, headers=H)
     assert r.status == 200
-    return (await c.get(f"/api/v1/bundle?hub={hub}", headers=BEARER)).headers["ETag"].strip('"')
+    return (await get_bundle(c, hub))["rev"]
+
+
+async def hub_status(c, hub):
+    """The `hub:<id>` snapshot of /live (what the removed config/status returned)."""
+    ws = await live(c, f"hub:{hub}")
+    try:
+        return (await recv(ws, "snapshot"))["topics"][f"hub:{hub}"]
+    finally:
+        await ws.close()
 
 
 async def test_hubs_lists_what_the_store_knows(feed):
@@ -195,7 +203,7 @@ async def test_hubs_ignores_junk_files_and_corrupt_state(feed, tmp_path):
 
 
 async def test_ack_roundtrip_and_status(feed, tmp_path):
-    st = await (await feed.get("/api/v1/config/status?hub=h1")).json()
+    st = await hub_status(feed, "h1")
     assert st == {
         "hub": "h1",
         "applied_rev": None,
@@ -203,25 +211,21 @@ async def test_ack_roundtrip_and_status(feed, tmp_path):
         "result": None,
         "detail": None,
         "acked_at": None,
-        "linked": False,
-        "last_seen": None,
-        "hub_last_seen": None,
-        "linked_hubs": [],
+        "connected": False,
+        "connected_at": None,
         "remotes": [],
         "theme_notices": [],
         "now": st["now"],
     }
     rev = await apply(feed, "h1")
-    st = await (await feed.get("/api/v1/config/status?hub=h1")).json()
-    assert st["applied_rev"] == rev and st["acked_rev"] is None
-    assert st["linked"] is True and isinstance(st["last_seen"], int)  # the bundle GET above
-    r = await feed.post(
-        "/api/v1/bundle/ack",
-        json={"hub": "h1", "rev": rev, "result": "error", "detail": "hub said no"},
-        headers={**BEARER, **JH},
-    )
-    assert r.status == 200
-    st = await (await feed.get("/api/v1/config/status?hub=h1")).json()
+    ws = await connect(feed, "h1")
+    await recv(ws, "bundle")
+    st = await hub_status(feed, "h1")
+    assert st["applied_rev"] == rev and st["acked_rev"] is None and st["connected"] is True
+    assert isinstance(st["connected_at"], int)
+    await ws.send_json({"t": "ack", "rev": rev, "result": "error", "detail": "hub said no"})
+    assert await drain(ws) == []
+    st = await hub_status(feed, "h1")
     assert (st["acked_rev"], st["result"], st["detail"]) == (rev, "error", "hub said no")
     assert isinstance(st["acked_at"], int)
     # persisted in the hub's store file: a fresh app on the same dir still knows it
@@ -229,95 +233,80 @@ async def test_ack_roundtrip_and_status(feed, tmp_path):
     from aiohttp.test_utils import TestClient, TestServer
 
     async with TestClient(TestServer(app2)) as c2:
-        st2 = await (await c2.get("/api/v1/config/status?hub=h1")).json()
+        st2 = await hub_status(c2, "h1")
         assert st2["result"] == "error" and st2["acked_rev"] == rev
-        assert st2["linked"] is False  # `linked` is per process lifetime
-    r = await feed.post(
-        "/api/v1/bundle/ack",
-        json={"hub": "h1", "rev": rev, "result": "ok"},
-        headers={**BEARER, **JH},
-    )
-    st = await (await feed.get("/api/v1/config/status?hub=h1")).json()
+        assert st2["connected"] is False  # `connected` is per process lifetime
+    await ws.send_json({"t": "ack", "rev": rev, "result": "ok"})
+    assert await drain(ws) == []
+    st = await hub_status(feed, "h1")
     assert st["result"] == "ok" and st["detail"] is None
-
-
-async def test_ack_needs_the_bearer_token_not_the_csrf_header(feed):
-    rev = await apply(feed, "h1")
-    body = {"hub": "h1", "rev": rev, "result": "ok"}
-    assert (await feed.post("/api/v1/bundle/ack", json=body)).status == 401
-    ing = {"X-Ingress-Path": "/api/hassio_ingress/t"}
-    assert (
-        await feed.post("/api/v1/bundle/ack", json=body, headers={**BEARER, **ing})
-    ).status == 401
-    r = await feed.post(
-        "/api/v1/bundle/ack", data="{}", headers={**BEARER, "Content-Type": "text/plain"}
-    )
-    assert r.status == 403
-    assert (await feed.post("/api/v1/bundle/ack", json=body, headers=BEARER)).status == 200
+    await ws.close()
 
 
 @pytest.mark.parametrize(
-    "body",
+    "frame",
     [
-        {"hub": "h1", "rev": "R", "result": "maybe"},
-        {"hub": "h1", "rev": "R", "result": "ok", "detail": "x" * 201},
-        {"hub": "h1", "rev": "R", "result": "ok", "extra": 1},
-        {"hub": "../x", "rev": "R", "result": "ok"},
-        {"hub": "h1", "rev": "has space", "result": "ok"},
-        {"hub": "h1", "rev": "r" * 65, "result": "ok"},
-        {"hub": "h1", "rev": 5, "result": "ok"},
-        {"hub": "h1", "rev": "R", "result": "ok", "detail": {"a": 1}},
-        {"hub": "h1", "result": "ok"},
-        [],
-        "x",
-        None,
+        {"rev": "R", "result": "maybe"},
+        {"rev": "R", "result": "ok", "detail": "x" * 201},
+        {"rev": "has space", "result": "ok"},
+        {"rev": "r" * 65, "result": "ok"},
+        {"rev": 5, "result": "ok"},
+        {"rev": "R", "result": "ok", "detail": {"a": 1}},
+        {"result": "ok"},
     ],
 )
-async def test_hostile_ack_bodies_are_400_and_change_nothing(feed, body):
+async def test_hostile_ack_frames_are_bad_frame_and_change_nothing(feed, frame):
     rev = await apply(feed, "h1")
-    if isinstance(body, dict) and body.get("rev") == "R":
-        body = {**body, "rev": rev}
-    r = await feed.post("/api/v1/bundle/ack", data=json.dumps(body), headers={**BEARER, **JH})
-    assert r.status == 400
-    st = await (await feed.get("/api/v1/config/status?hub=h1")).json()
-    assert st["acked_rev"] is None
+    ws = await connect(feed, "h1")
+    await recv(ws, "bundle")
+    if frame.get("rev") == "R":
+        frame = {**frame, "rev": rev}
+    await ws.send_json({"t": "ack", **frame})
+    assert (await recv(ws))["code"] == "bad_frame"
+    assert (await hub_status(feed, "h1"))["acked_rev"] is None
+    await ws.close()
 
 
-async def test_ack_for_a_stale_rev_or_unknown_hub_is_refused(feed):
-    rev = await apply(feed, "h1")
-    r = await feed.post(
-        "/api/v1/bundle/ack", json={"hub": "h1", "rev": "old", "result": "ok"}, headers=BEARER
-    )
-    assert r.status == 409 and (await r.json())["error"]["code"] == "stale_rev"
-    r = await feed.post(
-        "/api/v1/bundle/ack", json={"hub": "ghost", "rev": rev, "result": "ok"}, headers=BEARER
-    )
-    assert r.status == 404
+async def test_ack_for_a_stale_rev_is_refused_and_unknown_hubs_are_not_created(feed):
+    await apply(feed, "h1")
+    ws = await connect(feed, "h1")
+    await recv(ws, "bundle")
+    await ws.send_json({"t": "ack", "rev": "old", "result": "ok"})
+    assert (await recv(ws))["code"] == "stale_rev"
+    ghost = await connect(feed, "ghost")  # nothing applied there
+    await recv(ghost, "nothing_applied")
+    await ghost.send_json({"t": "ack", "rev": "old", "result": "ok"})
+    assert (await recv(ghost))["code"] == "stale_rev"
     assert [h["id"] for h in (await (await feed.get("/api/v1/hubs")).json())["hubs"]] == ["h1"]
+    await ws.close()
+    await ghost.close()
 
 
 async def test_ack_markup_in_detail_is_stored_inert(feed):
     rev = await apply(feed, "h1")
     d = "<script>alert(1)</script>"
-    await feed.post(
-        "/api/v1/bundle/ack",
-        json={"hub": "h1", "rev": rev, "result": "error", "detail": d},
-        headers=BEARER,
-    )
-    r = await feed.get("/api/v1/config/status?hub=h1")
-    assert r.content_type == "application/json" and (await r.json())["detail"] == d
-    assert "script-src 'self'" in r.headers["Content-Security-Policy"]
+    ws = await connect(feed, "h1")
+    await recv(ws, "bundle")
+    await ws.send_json({"t": "ack", "rev": rev, "result": "error", "detail": d})
+    assert await drain(ws) == []
+    assert (await hub_status(feed, "h1"))["detail"] == d  # JSON data over a WebSocket, never markup
+    await ws.close()
 
 
 async def test_repeated_identical_acks_do_not_rewrite_the_store(feed, tmp_path):
     rev = await apply(feed, "h1")
-    b = {"hub": "h1", "rev": rev, "result": "ok"}
-    await feed.post("/api/v1/bundle/ack", json=b, headers=BEARER)
+    ws = await connect(feed, "h1")
+    await recv(ws, "bundle")
+    b = {"t": "ack", "rev": rev, "result": "ok"}
+    await ws.send_json(b)
+    await drain(ws)
     f = tmp_path / "hubs" / "h1.json"
     m = f.stat().st_mtime_ns
     for _ in range(3):
-        await feed.post("/api/v1/bundle/ack", json=b, headers=BEARER)
+        await ws.send_json(b)
+    await drain(ws)
     assert f.stat().st_mtime_ns == m
+    await ws.close()
 
 
 # ---------------------------------------------------------------- history rows

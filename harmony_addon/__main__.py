@@ -16,7 +16,7 @@ from .ir_tester import default_ir_sender
 from .options import load_options
 from .supervisor import Discovery, default_supervisor
 
-SHUTDOWN_TIMEOUT = 3.0  # waiters are woken at shutdown; never sit out a ~55 s long poll
+SHUTDOWN_TIMEOUT = 3.0  # on_shutdown closes every channel and live socket; nothing waits
 
 
 def main() -> None:

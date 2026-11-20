@@ -4,6 +4,7 @@ import json
 import time
 
 import pytest
+from addon_ws import get_bundle
 from test_addon import CONFIG, H, clock, put_draft
 
 from harmony_addon import app as app_mod
@@ -224,22 +225,21 @@ async def test_editor_metadata_is_kept_but_never_leaves_the_add_on(aiohttp_clien
     assert (await c.post("/api/v1/config/apply", json={}, headers=H)).status == 200
     full = await (await c.get("/api/v1/config?full=1")).json()
     assert full["applied"]["config"]["editor"] == EDITOR  # preserved in the store
-    b1 = await (await c.get("/api/v1/bundle", headers=BEARER)).json()
+    b1 = await get_bundle(c)
     assert "editor" not in b1["config"] and b1["config"] == CONFIG
     # editor-only edit: new applied revision in the add-on, same bundle rev (no hub push)
     await put_draft(c, {**CONFIG, "editor": {"v": 2}})
     assert (await c.post("/api/v1/config/apply", json={}, headers=H)).status == 200
-    b2 = await (await c.get("/api/v1/bundle", headers=BEARER)).json()
+    b2 = await get_bundle(c)
     assert b2["rev"] == b1["rev"]
-    st = await (await c.get("/api/v1/config/status")).json()
-    assert st["applied_rev"] == b1["rev"]
+    assert (await get_bundle(c))["rev"] == b1["rev"]
     assert (await (await c.get("/api/v1/hubs")).json())["hubs"][0]["applied_rev"] == b1["rev"]
     # a config change moves the rev
     await put_draft(
         c, {**CONFIG, "devices": [{**CONFIG["devices"][0], "settle_ms": 777}], "editor": {"v": 2}}
     )
     await c.post("/api/v1/config/apply", json={}, headers=H)
-    assert (await (await c.get("/api/v1/bundle", headers=BEARER)).json())["rev"] != b1["rev"]
+    assert (await get_bundle(c))["rev"] != b1["rev"]
     # export keeps it
     text = await (await c.get("/api/v1/config/export_yaml?source=applied")).text()
     assert "editor:" in text

@@ -397,7 +397,6 @@ async def fake_addon(aiohttp_server, tmp_path):
         auth=NoAuth(),
         bundle_token=ADDON_TOKEN,
         bundle_networks=None,
-        wait_seconds=2.0,
     )
     return FakeAddon(await aiohttp_server(app), app)
 

@@ -1,7 +1,7 @@
 """Pluggable request admission. Runs before routing, so unknown paths are refused too.
 
-Two disjoint rules: ingress routes are ingress-only (Supervisor gateway peer); the bundle routes
-(`/api/v1/bundle*`, used by the integration) are bearer-only and never reachable via ingress.
+Two disjoint rules: ingress routes are ingress-only (Supervisor gateway peer); the channel routes
+(`/api/v1/channel`, used by the integration) are bearer-only and never reachable via ingress.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ INGRESS_HEADER = "X-Ingress-Path"
 USER_HEADER = "X-Remote-User-Id"  # set by the Supervisor from the ingress session; unspoofable
 USER_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 HASSIO_NETWORK = "172.30.32.0/23"
-BUNDLE_PREFIX = "/api/v1/bundle"
+CHANNEL_PREFIX = "/api/v1/channel"
 TOKEN_FILE = "bundle_token"
 
 
@@ -153,7 +153,7 @@ class RouteAuth:
 
     def check(self, request: web.Request) -> None:
         path = request.path
-        if path == BUNDLE_PREFIX or path.startswith(BUNDLE_PREFIX + "/"):
+        if path == CHANNEL_PREFIX or path.startswith(CHANNEL_PREFIX + "/"):
             self.bundle.check(request)
         else:
             self.ingress.check(request)
