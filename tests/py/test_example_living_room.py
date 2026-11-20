@@ -13,3 +13,21 @@ def test_example_validates_and_compiles():
     c = compile_config(model)
     assert {a["id"] for a in model["activities"]} == {"shield_tv", "watch_tv", "desk"}
     assert c.pages
+
+
+def test_devices_favorites_navigate_to_device_pages_and_home_has_nav():
+    model = parse_model(PATH.read_text(), "living-room.yaml")
+    pages = {p["id"]: p for p in model["pages"]}
+    assert pages["devices"]["kind"] == "favorites" and pages["home"]["kind"] == "home"
+    assert pages["home"]["title"] == "Home"
+    navs = lambda p: {w["label"]: w["nav"] for w in pages[p]["widgets"] if w.get("nav")}  # noqa: E731
+    assert navs("devices") == {
+        "TV": "dev_tv",
+        "Shield": "dev_shield",
+        "Speakers": "dev_speakers",
+        "KVM": "dev_kvm",
+    }
+    assert navs("home") == {"Lights": "lights", "Scenes": "scenes", "Blinds": "blinds"}
+    c = compile_config(model)
+    nav = [w for p in c.models for w in p.widgets if w.role == "nav"]
+    assert nav and all(w.trailing and w.shape == "row" and w.icon == 0 for w in nav)
