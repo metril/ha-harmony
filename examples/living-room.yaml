@@ -1,0 +1,324 @@
+# Living Room: Samsung TV (IR), Shield (Bluetooth + Home Assistant), Audioengine A5+ (IR), KVM and audio matrix (Home Assistant).
+# KVM, audio matrix and A5+ speakers are for the workstation only; TV and Shield sound plays on the TV's own speakers.
+# Entity ids and select options were read from the live Home Assistant. Validated by tests/py/test_example_living_room.py.
+#
+# Sources of IR codes (no network archive needed): the owner's own stock-hub backup,
+# backups/user-config/ha-harmony-pimentoblue.v2.yaml, decoded from its raw timings:
+#   Samsung TV (UN55JS9000): samsung32 addr 7 (frame 0x07 0x07), repeats 3 as the stock hub sent them.
+#   Audioengine A5+: necext, wire address bytes 0x00 0xFD (= 0xFD00), 8-bit cmd with inverse; Vol Up 9, Vol Down 7, Mute 3.
+devices:
+  - id: tv
+    name: TV
+    icon: tv
+    settle_ms: 5000
+    power:
+      'on': {proto: samsung32, addr: 7, cmd: 153, repeats: 3}
+      'off': {proto: samsung32, addr: 7, cmd: 152, repeats: 3}
+    inputs:
+      HDMI 1: {proto: samsung32, addr: 7, cmd: 233, repeats: 3}   # Shield
+      TV: {proto: samsung32, addr: 7, cmd: 27, repeats: 3}        # antenna
+    commands:
+      Volume Up: {proto: samsung32, addr: 7, cmd: 7, repeats: 3}
+      Volume Down: {proto: samsung32, addr: 7, cmd: 11, repeats: 3}
+      Mute: {proto: samsung32, addr: 7, cmd: 15, repeats: 3}
+      Channel Up: {proto: samsung32, addr: 7, cmd: 18, repeats: 3}
+      Channel Down: {proto: samsung32, addr: 7, cmd: 16, repeats: 3}
+      Up: {proto: samsung32, addr: 7, cmd: 96, repeats: 3}
+      Down: {proto: samsung32, addr: 7, cmd: 97, repeats: 3}
+      Left: {proto: samsung32, addr: 7, cmd: 101, repeats: 3}
+      Right: {proto: samsung32, addr: 7, cmd: 98, repeats: 3}
+      Select: {proto: samsung32, addr: 7, cmd: 104, repeats: 3}
+      Return: {proto: samsung32, addr: 7, cmd: 88, repeats: 3}
+      Exit: {proto: samsung32, addr: 7, cmd: 45, repeats: 3}
+      Menu: {proto: samsung32, addr: 7, cmd: 26, repeats: 3}
+      Info: {proto: samsung32, addr: 7, cmd: 31, repeats: 3}
+      Guide: {proto: samsung32, addr: 7, cmd: 79, repeats: 3}
+      Tools: {proto: samsung32, addr: 7, cmd: 75, repeats: 3}
+      Rewind: {proto: samsung32, addr: 7, cmd: 69, repeats: 3}
+      Play: {proto: samsung32, addr: 7, cmd: 71, repeats: 3}
+      Pause: {proto: samsung32, addr: 7, cmd: 74, repeats: 3}
+      Fast Forward: {proto: samsung32, addr: 7, cmd: 72, repeats: 3}
+      Stop: {proto: samsung32, addr: 7, cmd: 70, repeats: 3}
+      Red: {proto: samsung32, addr: 7, cmd: 108, repeats: 3}
+      Green: {proto: samsung32, addr: 7, cmd: 20, repeats: 3}
+      Yellow: {proto: samsung32, addr: 7, cmd: 21, repeats: 3}
+      Blue: {proto: samsung32, addr: 7, cmd: 22, repeats: 3}
+
+  - id: shield
+    kind: bt            # pair it in the editor; address is optional until then
+    name: Shield
+    transport: auto
+
+  - id: shield_ha
+    kind: ha
+    name: Shield Apps
+    entity: media_player.nvidia_shield_tv
+    power:
+      'on': {ha: {service: media_player.turn_on, target: {entity_id: media_player.nvidia_shield_tv}}}
+      'off': {ha: {service: media_player.turn_off, target: {entity_id: media_player.nvidia_shield_tv}}}
+    commands:
+      Plex: {ha: {service: script.turn_on, target: {entity_id: script.shield_launch_plex}}}
+      YouTube: {ha: {service: script.turn_on, target: {entity_id: script.shield_launch_youtube}}}
+      Show Camera: {ha: {service: script.turn_on, target: {entity_id: script.shield_show_camera}}}
+      Clear Camera: {ha: {service: script.turn_on, target: {entity_id: script.shield_clear_camera}}}
+      Garage Cam: {ha: {service: script.turn_on, target: {entity_id: script.shield_show_garage_cam}}}
+
+  - id: speakers
+    name: Speakers
+    commands:
+      Volume Up: {proto: necext, addr: 64768, cmd: 9}
+      Volume Down: {proto: necext, addr: 64768, cmd: 7}
+      Mute: {proto: necext, addr: 64768, cmd: 3}
+
+  - id: speakers_pwr
+    kind: ha
+    name: Speaker Power
+    entity: switch.speakers
+    power:
+      'on': {ha: {service: switch.turn_on, target: {entity_id: switch.speakers}}}
+      'off': {ha: {service: switch.turn_off, target: {entity_id: switch.speakers}}}
+
+  - id: kvm
+    kind: ha
+    name: KVM
+    entity: switch.kvm_controller_kvm_power
+    settle_ms: 1500
+    power:
+      'on': {ha: {service: switch.turn_on, target: {entity_id: switch.kvm_controller_kvm_power}}}
+      'off': {ha: {service: switch.turn_off, target: {entity_id: switch.kvm_controller_kvm_power}}}
+    inputs:
+      MacBook Pro: {ha: {service: select.select_option, target: {entity_id: select.kvm_source}, data: {option: MacBook Pro}}}
+      Desktop: {ha: {service: select.select_option, target: {entity_id: select.kvm_source}, data: {option: Desktop}}}
+      Work Laptop: {ha: {service: select.select_option, target: {entity_id: select.kvm_source}, data: {option: Work Laptop}}}
+      Computer 4: {ha: {service: select.select_option, target: {entity_id: select.kvm_source}, data: {option: Computer 4}}}
+
+activities:
+  - id: shield_tv
+    name: Shield TV
+    devices:
+      - {device: tv, input: HDMI 1}
+      - {device: shield_ha}
+    keys:
+      volume_up: {device: tv, command: Volume Up}
+      volume_down: {device: tv, command: Volume Down}
+      volume_mute: {device: tv, command: Mute}
+      up: {device: shield, command: DirectionUp}
+      down: {device: shield, command: DirectionDown}
+      left: {device: shield, command: DirectionLeft}
+      right: {device: shield, command: DirectionRight}
+      select: {device: shield, command: Select}
+      prev_channel: {device: shield, command: Back}
+      exit: {device: shield, command: Home}
+      menu: {device: shield, command: Menu}
+      info: {device: shield, command: Info}
+      play: {device: shield, command: PlayPause}
+      pause: {device: shield, command: Pause}
+      stop: {device: shield, command: Stop}
+      rewind: {device: shield, command: Rewind}
+      fast_forward: {device: shield, command: FastForward}
+      channel_up: {device: shield, command: PageUp}
+      channel_down: {device: shield, command: PageDown}
+      guide: {device: shield_ha, command: Show Camera}
+      dvr: {device: shield_ha, command: Clear Camera}
+      record: {device: shield_ha, command: Garage Cam}
+      red: {device: shield_ha, command: Plex}
+      green: {device: shield_ha, command: YouTube}
+      yellow: {device: shield_ha, command: Show Camera}
+      blue: {device: shield_ha, command: Clear Camera}
+
+  - id: watch_tv
+    name: Watch TV
+    devices:
+      - {device: tv, input: TV}
+    keys:
+      volume_up: {device: tv, command: Volume Up}
+      volume_down: {device: tv, command: Volume Down}
+      volume_mute: {device: tv, command: Mute}
+      up: {device: tv, command: Up}
+      down: {device: tv, command: Down}
+      left: {device: tv, command: Left}
+      right: {device: tv, command: Right}
+      select: {device: tv, command: Select}
+      prev_channel: {device: tv, command: Return}
+      exit: {device: tv, command: Exit}
+      menu: {device: tv, command: Menu}
+      info: {device: tv, command: Info}
+      guide: {device: tv, command: Guide}
+      dvr: {device: tv, command: Tools}
+      channel_up: {device: tv, command: Channel Up}
+      channel_down: {device: tv, command: Channel Down}
+      play: {device: tv, command: Play}
+      pause: {device: tv, command: Pause}
+      stop: {device: tv, command: Stop}
+      rewind: {device: tv, command: Rewind}
+      fast_forward: {device: tv, command: Fast Forward}
+      red: {device: tv, command: Red}
+      green: {device: tv, command: Green}
+      yellow: {device: tv, command: Yellow}
+      blue: {device: tv, command: Blue}
+
+  - id: desk
+    name: Desk
+    devices:
+      - {device: kvm, input: Desktop}
+      - {device: speakers_pwr}
+    steps:
+      - {ha: {service: select.select_option, target: {entity_id: select.audio_source}, data: {option: Desktop}}}
+      - {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_concentrate}}}
+    keys:
+      volume_up: {device: speakers, command: Volume Up}
+      volume_down: {device: speakers, command: Volume Down}
+      volume_mute: {device: speakers, command: Mute}
+      channel_up: {ha: {service: select.select_next, target: {entity_id: select.kvm_source}}}
+      channel_down: {ha: {service: select.select_previous, target: {entity_id: select.kvm_source}}}
+      red: {device: kvm, input: MacBook Pro}
+      green: {device: kvm, input: Desktop}
+      yellow: {device: kvm, input: Work Laptop}
+      blue: {device: kvm, input: Computer 4}
+
+# Default layer. Colour keys and volume are left to each activity (TV layers: TV, Desk: speakers).
+keys:
+  power_off_activity: {activity: "off"}
+  home_control_1: {ha: {service: light.toggle, target: {entity_id: light.living_room}}}          # bulb 1
+  home_control_2: {ha: {service: light.toggle, target: {entity_id: light.bias_light}}}           # bulb 2
+  home_control_plus: {ha: {service: script.turn_on, target: {entity_id: script.remote_adjust}, data: {variables: {direction: up}}, repeat: true}}
+  home_control_minus: {ha: {service: script.turn_on, target: {entity_id: script.remote_adjust}, data: {variables: {direction: down}}, repeat: true}}
+  home_control_3: {ha: {service: input_select.select_next, target: {entity_id: input_select.remote_adjust_target}}}   # plug 1: next adjust target
+  home_control_4: {ha: {service: switch.toggle, target: {entity_id: switch.speakers}}}           # plug 2
+
+pages:
+  - id: home
+    kind: home
+    title: Living Room
+    cols: 3
+    rows: 6
+    widgets:
+      - {type: button, id: a_shield, x: 0, y: 0, label: Shield TV, action: {activity: shield_tv}}
+      - {type: button, id: a_watch, x: 1, y: 0, label: Watch TV, action: {activity: watch_tv}}
+      - {type: button, id: a_desk, x: 2, y: 0, label: Desk, action: {activity: desk}}
+      - {type: tile, id: adj, x: 0, y: 1, w: 3, label: Adjust, entity: input_select.remote_adjust_target, tap: {ha: {service: input_select.select_next, target: {entity_id: input_select.remote_adjust_target}}}}
+      - {type: button, id: t0, x: 0, y: 2, label: Room, action: {ha: {service: input_select.select_option, target: {entity_id: input_select.remote_adjust_target}, data: {option: Living Room Lights}}}}
+      - {type: button, id: t1, x: 1, y: 2, label: Ceiling, action: {ha: {service: input_select.select_option, target: {entity_id: input_select.remote_adjust_target}, data: {option: Ceiling Lights}}}}
+      - {type: button, id: t2, x: 2, y: 2, label: Desk, action: {ha: {service: input_select.select_option, target: {entity_id: input_select.remote_adjust_target}, data: {option: Desk Lights}}}}
+      - {type: button, id: t3, x: 0, y: 3, label: Bias, action: {ha: {service: input_select.select_option, target: {entity_id: input_select.remote_adjust_target}, data: {option: Bias Light}}}}
+      - {type: button, id: t4, x: 1, y: 3, label: Window, action: {ha: {service: input_select.select_option, target: {entity_id: input_select.remote_adjust_target}, data: {option: Living Room Blinds}}}}
+      - {type: button, id: t5, x: 2, y: 3, label: Balcony, action: {ha: {service: input_select.select_option, target: {entity_id: input_select.remote_adjust_target}, data: {option: Balcony Blinds}}}}
+      - {type: tile, id: room, x: 0, y: 4, w: 2, label: Lights, entity: light.living_room}
+      - {type: button, id: n_status, x: 2, y: 4, label: Status, nav: status}
+      - {type: button, id: n_lights, x: 0, y: 5, label: Scenes, nav: lights}
+      - {type: button, id: n_blinds, x: 1, y: 5, label: Blinds, nav: blinds}
+      - {type: button, id: a_off, x: 2, y: 5, label: Power Off, action: {activity: "off"}}
+
+  - id: shield
+    activity: shield_tv
+    title: Shield TV
+    cols: 2
+    rows: 6
+    widgets:
+      - {type: button, id: plex, x: 0, y: 0, label: Plex, color: red, action: {device: shield_ha, command: Plex}}
+      - {type: button, id: yt, x: 1, y: 0, label: YouTube, color: green, action: {device: shield_ha, command: YouTube}}
+      - {type: button, id: cam, x: 0, y: 1, label: Show Camera, color: yellow, action: {device: shield_ha, command: Show Camera}}
+      - {type: button, id: camx, x: 1, y: 1, label: Clear Camera, color: blue, action: {device: shield_ha, command: Clear Camera}}
+      - {type: button, id: garage, x: 0, y: 2, w: 2, label: Garage Cam, action: {device: shield_ha, command: Garage Cam}}
+      - {type: button, id: s_relax, x: 0, y: 3, label: Relax, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_relax}}}}
+      - {type: button, id: s_dim, x: 1, y: 3, label: Dimmed, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_dimmed}}}}
+      - {type: label, x: 0, y: 4, w: 2, label: "Plex YT Cam Clear"}
+      - {type: button, id: shield_home, x: 0, y: 5, w: 2, label: Home, nav: home}
+
+  - id: watch
+    activity: watch_tv
+    title: Watch TV
+    cols: 2
+    rows: 5
+    widgets:
+      - {type: button, id: w_guide, x: 0, y: 0, label: Red, color: red, action: {device: tv, command: Red}}
+      - {type: button, id: w_info, x: 1, y: 0, label: Green, color: green, action: {device: tv, command: Green}}
+      - {type: button, id: w_tools, x: 0, y: 1, label: Yellow, color: yellow, action: {device: tv, command: Yellow}}
+      - {type: button, id: w_mute, x: 1, y: 1, label: Blue, color: blue, action: {device: tv, command: Blue}}
+      - {type: label, x: 0, y: 3, w: 2, label: "Colour keys: TV"}
+      - {type: button, id: watch_home, x: 0, y: 4, w: 2, label: Home, nav: home}
+
+  - id: desk
+    activity: desk
+    title: Desk
+    cols: 2
+    rows: 11
+    widgets:
+      - {type: tile, id: kvm_t, x: 0, y: 0, w: 2, label: KVM, entity: select.kvm_source, tap: {ha: {service: select.select_next, target: {entity_id: select.kvm_source}}}}
+      - {type: button, id: k0, x: 0, y: 1, label: MacBook Pro, color: red, action: {device: kvm, input: MacBook Pro}}
+      - {type: button, id: k1, x: 1, y: 1, label: Desktop, color: green, action: {device: kvm, input: Desktop}}
+      - {type: button, id: k2, x: 0, y: 2, label: Work Laptop, color: yellow, action: {device: kvm, input: Work Laptop}}
+      - {type: button, id: k3, x: 1, y: 2, label: Computer 4, color: blue, action: {device: kvm, input: Computer 4}}
+      - {type: tile, id: asrc_t, x: 0, y: 3, w: 2, label: Audio, entity: select.audio_source, tap: {ha: {service: select.select_next, target: {entity_id: select.audio_source}}}}
+      - {type: button, id: as0, x: 0, y: 4, label: MacBook Pro, action: {ha: {service: select.select_option, target: {entity_id: select.audio_source}, data: {option: MacBook Pro}}}}
+      - {type: button, id: as1, x: 1, y: 4, label: Desktop, action: {ha: {service: select.select_option, target: {entity_id: select.audio_source}, data: {option: Desktop}}}}
+      - {type: button, id: as2, x: 0, y: 5, label: Wiim Mini, action: {ha: {service: select.select_option, target: {entity_id: select.audio_source}, data: {option: Wiim Mini}}}}
+      - {type: button, id: as3, x: 1, y: 5, label: Input 4, action: {ha: {service: select.select_option, target: {entity_id: select.audio_source}, data: {option: Input 4}}}}
+      - {type: tile, id: mx_t, x: 0, y: 6, w: 2, label: Desk Audio, entity: select.audio_matrix_controller_matrix_output_1_source, tap: none}
+      - {type: button, id: d_conc, x: 0, y: 7, label: Concentrate, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_concentrate}}}}
+      - {type: tile, id: d_lights, x: 1, y: 7, label: Desk Lights, entity: light.remote_desk_lights}
+      - {type: tile, id: d_bias, x: 0, y: 8, w: 2, label: Bias Light, entity: light.bias_light}
+      - {type: label, x: 0, y: 9, w: 2, label: "R G Y B: KVM 1-4"}
+      - {type: button, id: desk_home, x: 0, y: 10, w: 2, label: Home, nav: home}
+
+  - id: lights
+    title: Lights
+    list: {rows: 6}
+    widgets:
+      - {type: tile, id: l_ceiling, label: Ceiling Lights, entity: light.ceiling_lights}
+      - {type: tile, id: l_desk, label: Desk Lights, entity: light.remote_desk_lights}
+      - {type: tile, id: l_bias, label: Bias Light, entity: light.bias_light}
+      - {type: button, id: sc0, label: Arctic Aurora, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_arctic_aurora}}}}
+      - {type: button, id: sc1, label: Bright, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_bright}}}}
+      - {type: button, id: sc2, label: Concentrate, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_concentrate}}}}
+      - {type: button, id: sc3, label: Dimmed, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_dimmed}}}}
+      - {type: button, id: sc4, label: Energize, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_energize}}}}
+      - {type: button, id: sc5, label: Natural Light, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_natural_light}}}}
+      - {type: button, id: sc6, label: Nightlight, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_nightlight}}}}
+      - {type: button, id: sc7, label: Read, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_read}}}}
+      - {type: button, id: sc8, label: Relax, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_relax}}}}
+      - {type: button, id: sc9, label: Rest, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_rest}}}}
+      - {type: button, id: sc10, label: Savanna Sunset, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_savanna_sunset}}}}
+      - {type: button, id: sc11, label: Spring Blossom, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_spring_blossom}}}}
+      - {type: button, id: sc12, label: Tropical Twilight, action: {ha: {service: scene.turn_on, target: {entity_id: scene.living_room_tropical_twilight}}}}
+      - {type: button, id: lights_home, label: Home, nav: home}
+
+  - id: blinds
+    title: Blinds
+    cols: 4
+    rows: 8
+    widgets:
+      - {type: tile, id: win_t, x: 0, y: 0, w: 4, label: Window, entity: cover.living_room_window_blinds_matter}
+      - {type: button, id: win_o, x: 0, y: 1, label: Open, action: {ha: {service: cover.open_cover, target: {entity_id: cover.living_room_window_blinds_matter}}}}
+      - {type: button, id: win_s, x: 1, y: 1, label: Stop, action: {ha: {service: cover.stop_cover, target: {entity_id: cover.living_room_window_blinds_matter}}}}
+      - {type: button, id: win_c, x: 2, y: 1, label: Close, action: {ha: {service: cover.close_cover, target: {entity_id: cover.living_room_window_blinds_matter}}}}
+      - {type: button, id: win_h, x: 3, y: 1, label: 50%, action: {ha: {service: cover.set_cover_position, target: {entity_id: cover.living_room_window_blinds_matter}, data: {position: 50}}}}
+      - {type: button, id: win_a, x: 0, y: 2, w: 4, label: Adjust Window, action: {ha: {service: input_select.select_option, target: {entity_id: input_select.remote_adjust_target}, data: {option: Living Room Blinds}}}}
+      - {type: tile, id: bal_t, x: 0, y: 3, w: 4, label: Balcony, entity: cover.balcony_window_blinds_matter}
+      - {type: button, id: bal_o, x: 0, y: 4, label: Open, action: {ha: {service: cover.open_cover, target: {entity_id: cover.balcony_window_blinds_matter}}}}
+      - {type: button, id: bal_s, x: 1, y: 4, label: Stop, action: {ha: {service: cover.stop_cover, target: {entity_id: cover.balcony_window_blinds_matter}}}}
+      - {type: button, id: bal_c, x: 2, y: 4, label: Close, action: {ha: {service: cover.close_cover, target: {entity_id: cover.balcony_window_blinds_matter}}}}
+      - {type: button, id: bal_h, x: 3, y: 4, label: 50%, action: {ha: {service: cover.set_cover_position, target: {entity_id: cover.balcony_window_blinds_matter}, data: {position: 50}}}}
+      - {type: button, id: bal_a, x: 0, y: 5, w: 4, label: Adjust Balcony, action: {ha: {service: input_select.select_option, target: {entity_id: input_select.remote_adjust_target}, data: {option: Balcony Blinds}}}}
+      - {type: button, id: blinds_home, x: 0, y: 7, w: 4, label: Home, nav: home}
+
+  - id: status
+    title: Status
+    list: {rows: 7}
+    widgets:
+      - {type: label, label: Workstation}
+      - {type: tile, id: st_kvm, label: KVM Source, entity: select.kvm_source, tap: none}
+      - {type: tile, id: st_kvmp, label: KVM Power, entity: switch.kvm_controller_kvm_power, tap: none}
+      - {type: tile, id: st_o1, label: Desk Audio, entity: select.audio_matrix_controller_matrix_output_1_source, tap: none}
+      - {type: tile, id: st_o2, label: Output 2, entity: select.audio_matrix_controller_matrix_output_2_source, tap: none}
+      - {type: tile, id: st_o3, label: Output 3, entity: select.audio_matrix_controller_matrix_output_3_source, tap: none}
+      - {type: tile, id: st_o4, label: Output 4, entity: select.audio_matrix_controller_matrix_output_4_source, tap: none}
+      - {type: tile, id: st_as, label: Audio Source, entity: select.audio_source, tap: none}
+      - {type: tile, id: st_spk, label: Speakers, entity: switch.speakers, tap: none}
+      - {type: label, label: Living Room}
+      - {type: tile, id: st_tv, label: TV, entity: media_player.un55js9000, tap: none}
+      - {type: tile, id: st_sh, label: Shield, entity: media_player.nvidia_shield_tv, tap: none}
+      - {type: tile, id: st_win, label: Window Blinds, entity: cover.living_room_window_blinds_matter, tap: none}
+      - {type: tile, id: st_bal, label: Balcony Blinds, entity: cover.balcony_window_blinds_matter, tap: none}
+      - {type: tile, id: st_adj, label: Adjust Target, entity: input_select.remote_adjust_target, tap: none}
+      - {type: button, id: status_home, label: Home, nav: home}
