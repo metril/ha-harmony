@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { commandNames } from '../lib/bt';
+import { fitCells, watchCells } from '../lib/fit-cells';
 import { displayCommand, PALETTE_CAP } from '../lib/key-names';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { commandIconId } from '../lib/device-art';
@@ -47,7 +48,8 @@ export class HhPalette extends LitElement {
       .hab { flex: none; font-style: normal; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; border: 1px solid var(--line); color: var(--tx2); background: var(--sf); }
       .empty { color: var(--tx3); font-size: 12.5px; padding: 12px 2px; }
       .cells { grid-template-columns: repeat(auto-fill, minmax(7.25rem, 1fr)); }
-      .cells > .wide { grid-column: span 2; }
+      .cells > [data-span="2"] { grid-column: span 2; }
+      .cells > [data-span="full"] { grid-column: 1 / -1; }
       .big { display: grid; gap: 6px; margin-top: 8px; }
       .prim { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 12px; border-radius: var(--r2); border: 1px solid var(--line); background: var(--sf2); color: var(--tx); cursor: grab; text-align: left; touch-action: pan-y; user-select: none; -webkit-user-select: none; font-weight: 600; }
       .prim[aria-pressed="true"] { background: var(--acc); color: var(--onacc); border-color: var(--acc); }
@@ -65,6 +67,7 @@ export class HhPalette extends LitElement {
   private bound: EventTarget[] = [];
   private rerender = () => this.requestUpdate();
   private ro?: ResizeObserver;
+  private stopCells?: () => void;
   /** the tab's name shows in full or not at all: hidden when it does not fit beside the icons (the icon, tooltip and aria-label name it) */
   private fitName = () => {
     const tabs = this.renderRoot.querySelector<HTMLElement>('.tabs');
@@ -81,6 +84,8 @@ export class HhPalette extends LitElement {
       this.ro.observe(tabs);
     }
     this.fitName();
+    fitCells(this.renderRoot);
+    this.stopCells ??= watchCells(this, this.renderRoot);
     const now = this.host ? [this.host.state, this.host.state.store, this.assigner] : [];
     if (now.length === this.bound.length && now.every((t, i) => t === this.bound[i])) return;
     this.bound.forEach((t) => t.removeEventListener('change', this.rerender));
@@ -99,6 +104,8 @@ export class HhPalette extends LitElement {
     window.removeEventListener('focus', this.onFocus);
     this.ro?.disconnect();
     this.ro = undefined;
+    this.stopCells?.();
+    this.stopCells = undefined;
     this.bound.forEach((t) => t.removeEventListener('change', this.rerender));
     this.bound = [];
     super.disconnectedCallback();
@@ -139,7 +146,7 @@ export class HhPalette extends LitElement {
   }
   private chip(raw: string, source: Source, used: boolean, extra: TemplateResult | typeof nothing = nothing) {
     const label = source.kind === 'activity' ? raw : displayCommand(raw);
-    return html`<button class="chip2 ${used ? 'used' : ''} ${source.kind !== 'activity' && label.length > PALETTE_CAP ? 'wide' : ''}" aria-pressed=${this.pressed(source)} title=${used ? `${label} (already on a key of this layer)` : label}
+    return html`<button class="chip2 ${used ? 'used' : ''} " aria-pressed=${this.pressed(source)} title=${used ? `${label} (already on a key of this layer)` : label}
       @pointerdown=${(e: PointerEvent) => this.down(e, source)} @keydown=${(e: KeyboardEvent) => this.key(e, source)} @click=${(e: MouseEvent) => e.preventDefault()}>${extra}<span>${label}</span></button>`;
   }
   private match(...s: string[]): boolean {

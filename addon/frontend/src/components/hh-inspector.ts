@@ -3,6 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { setStyle } from '../lib/set-style';
+import { fitCells, watchCells } from '../lib/fit-cells';
 import { displayKey, gridStyle, FREE_CAP } from '../lib/key-names';
 import { KEYS, keyTitle } from '../lib/remote-layout';
 import { STOCK_ICONS } from '../lib/stock-icons';
@@ -73,7 +74,10 @@ export class HhInspector extends LitElement {
   @state() private iconQ = '';
   private bound: EventTarget[] = [];
   private rerender = () => this.requestUpdate();
+  private stopCells?: () => void;
   protected override updated(): void {
+    fitCells(this.renderRoot);
+    this.stopCells ??= watchCells(this, this.renderRoot);
     const now = this.host ? [this.host.state, this.host.state.store, this.assigner] : [];
     if (now.length === this.bound.length && now.every((t, i) => t === this.bound[i])) return;
     this.bound.forEach((t) => t.removeEventListener('change', this.rerender));
@@ -81,6 +85,8 @@ export class HhInspector extends LitElement {
     now.forEach((t) => t.addEventListener('change', this.rerender));
   }
   override disconnectedCallback(): void {
+    this.stopCells?.();
+    this.stopCells = undefined;
     this.bound.forEach((t) => t.removeEventListener('change', this.rerender));
     this.bound = [];
     super.disconnectedCallback();
@@ -126,7 +132,7 @@ export class HhInspector extends LitElement {
         <span>Do nothing</span><span>${free.length}</span></div>
       ${act?.devices?.length ? html`<div class="sec"><h3>Who handles it</h3><div class="free cells">${act.devices.map((d) => html`<span class="chip">${(this.cfg.devices ?? []).find((x) => x.id === d.device)?.name ?? d.device}${d.input ? ` · ${d.input}` : ''}</span>`)}</div></div>` : nothing}
       <div class="sec"><h3>Free keys</h3>
-        ${free.length ? html`<div class="free cells grid" style=${setStyle({ "grid-template-columns": gridStyle(free.map(displayKey), '1.5rem', FREE_CAP) })}>${free.map((k) => html`<button title=${keyTitle(k)} class=${displayKey(k).length > FREE_CAP ? 'wide' : ''} @click=${() => this.st.set({ sel: { kind: 'key', name: k } })}>${displayKey(k)}</button>`)}</div>` : html`<p class="why">Every key does something.</p>`}
+        ${free.length ? html`<div class="free cells grid" style=${setStyle({ "grid-template-columns": gridStyle(free.map(displayKey), '1.5rem', FREE_CAP) })}>${free.map((k) => html`<button title=${keyTitle(k)} @click=${() => this.st.set({ sel: { kind: 'key', name: k } })}>${displayKey(k)}</button>`)}</div>` : html`<p class="why">Every key does something.</p>`}
       </div>
       <p class="why">Pick a command in the palette, then a key, or drag it onto a key or the screen. Click a key or a screen widget to edit it here.</p>
     </div>`;

@@ -24,7 +24,8 @@ export const shared = css`
   /* a list of pills as a grid: equal cells and heights, the label truncated with an ellipsis (give each a title) */
   .cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.25rem, 1fr)); gap: 6px; grid-auto-flow: dense; }
   .cells { container-type: inline-size; }
-  @container (min-width: 17rem) { .cells > .wide { grid-column: span 2; } }
+  .cells > [data-span="2"] { grid-column: span 2; }
+  .cells > [data-span="full"] { grid-column: 1 / -1; }
   .cells > * { box-sizing: border-box; height: 30px; min-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; justify-content: flex-start; }
   .chip.ok { background: var(--oks); color: var(--ok); }
   .chip.bad { background: var(--bads); color: var(--bad); }
