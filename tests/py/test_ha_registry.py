@@ -48,6 +48,7 @@ STATES = [
 LISTS = {
     "config/area_registry/list": AREAS,
     "config/floor_registry/list": FLOORS,
+    "config/label_registry/list": [{"label_id": "cozy", "name": "Cozy"}],
     "config/device_registry/list": DEVICES,
     "config/entity_registry/list": ENTITIES,
 }
@@ -132,6 +133,7 @@ async def test_a_command_outside_the_allow_list_is_refused_before_sending():
         "config/device_registry/list",
         "config/entity_registry/list",
         "config/floor_registry/list",
+        "config/label_registry/list",
     }
     # no public entry point takes a command
     pub = [n for n, _ in inspect.getmembers(HaWsRegistry, inspect.isfunction) if not n.startswith("_")]
@@ -216,6 +218,15 @@ async def test_floors_are_optional(aiohttp_server):
     core = FakeCore(fail=("config/floor_registry/list",))
     body = await Catalog(FakeApi(), lambda: 0.0, await serve(aiohttp_server, core)).catalog()
     assert body["registries"] is True and body["areas"] == [{"id": "lr", "name": "Living room"}]
+
+
+async def test_labels_are_optional_and_listed_when_present(aiohttp_server):
+    core = FakeCore(fail=("config/label_registry/list",))
+    body = await Catalog(FakeApi(), lambda: 0.0, await serve(aiohttp_server, core)).catalog()
+    assert body["registries"] is True and body["labels"] == []
+    core = FakeCore()
+    body = await Catalog(FakeApi(), lambda: 0.0, await serve(aiohttp_server, core)).catalog()
+    assert "config/label_registry/list" in {m["type"] for m in core.received}
 
 
 async def test_registries_are_cached_for_a_minute_and_a_failed_refresh_keeps_the_last_copy(aiohttp_server):

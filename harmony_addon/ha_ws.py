@@ -22,9 +22,10 @@ ALLOWED_COMMANDS = frozenset(
         "config/device_registry/list",
         "config/entity_registry/list",
         "config/floor_registry/list",
+        "config/label_registry/list",
     }
 )
-OPTIONAL_COMMANDS = frozenset({"config/floor_registry/list"})  # a Core without floors still works
+OPTIONAL_COMMANDS = frozenset({"config/floor_registry/list", "config/label_registry/list"})  # a Core without floors or labels still works
 MAX_MESSAGE = 8 * 1024 * 1024  # one registry list; a large install's entity registry is ~2 MB
 TIMEOUT_SECONDS = 20  # whole conversation: connect, auth and every list
 

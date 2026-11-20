@@ -127,8 +127,8 @@ Home Assistant itself cannot be read it says why and offers **Retry**.
   add-on's own token): the add-on **reads** your entity list (`GET /states`) and service list
   (`GET /services`) so the editor can offer pickers, filtered to the domains a Harmony action can
   target and cached for a few seconds. Its HTTP client can only issue GET requests. To group entities
-  by area, device, integration and label it also reads the area, device, entity and floor registries
-  over the Supervisor's WebSocket proxy; that client is limited in code to those four `*/list`
+  by area, device, integration and label it also reads the area, device, entity, floor and label registries
+  over the Supervisor's WebSocket proxy; that client is limited in code to those five `*/list`
   commands and can change nothing. It calls
   **exactly one service**: `ha_harmony.send_ir`, when you press "test" on an IR code in the editor
   (rate limited to one send per half second and 30 per minute). It calls nothing else, reads no

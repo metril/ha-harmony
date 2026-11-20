@@ -196,11 +196,11 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
 - `GET ha/services?domain=` -> `{services: [{domain, service, name, fields: [str]}]}`.
 - Both: `503 ha_unavailable` when Home Assistant cannot be read (no token, network, bad answer);
   `error.reason` is a short cause (`no_access`, `status_503`, `too_large`, `not_json`, `TimeoutError`, ...).
-- Registries: the add-on reads the area, device, entity and floor registries through the Supervisor's
+- Registries: the add-on reads the area, device, entity, floor and label registries through the Supervisor's
   WebSocket proxy (`ws://supervisor/core/websocket`, authenticated with the add-on's own token). The
-  client can send exactly four commands, enforced in code: `config/area_registry/list`,
-  `config/device_registry/list`, `config/entity_registry/list` and `config/floor_registry/list`
-  (floors are optional). Messages are capped at 8 MiB and the whole conversation at 20 s; the result is
+  client can send exactly five commands, enforced in code: `config/area_registry/list`,
+  `config/device_registry/list`, `config/entity_registry/list`, `config/floor_registry/list` and
+  `config/label_registry/list` (floors and labels are optional; all are reads). Messages are capped at 8 MiB and the whole conversation at 20 s; the result is
   cached for 60 s (a failed refresh keeps the last good copy and is not retried for 15 s) and a failure
   is logged once per cause, never with the token.
 
