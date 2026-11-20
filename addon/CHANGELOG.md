@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.19 (2026-11-20)
+
+Editor, integration and remote firmware; no hub firmware change. Update the add-on, then the integration, then flash the remote.
+
+- Config library: keep any number of named configs, each with its own draft. Save Revision takes a numbered snapshot with an optional note.
+- Revisions view (replaces History): restore, duplicate, compare, export or apply any revision to any hub. The header shows what each hub is running.
+- Switching configs happens in place. Import YAML can create a new config. A banner warns when the open config is deleted elsewhere.
+- Existing per-hub configs move into the library automatically on first start, keeping their history and draft.
+- Remote: buttons that open a page are rows with the chevron on the right.
+- Remote: tapping the running activity opens its page again.
+- Power Off now turns off every HA device (e.g. an NVIDIA Shield) even if the activity being left did not list it; a media player in standby counts as on.
+- `examples/living-room.yaml`: the Devices key lists devices; Lights, Scenes and Blinds move to Home.
+
 ## 0.3.18 (2026-11-20)
 
 Editor and integration; no hub firmware change. Update the add-on, then the integration.
