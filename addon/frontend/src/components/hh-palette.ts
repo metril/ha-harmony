@@ -2,8 +2,7 @@ import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { commandNames } from '../lib/bt';
-import { setStyle } from '../lib/set-style';
-import { displayCommand, gridStyle, PALETTE_CAP } from '../lib/key-names';
+import { displayCommand, PALETTE_CAP } from '../lib/key-names';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { commandIconId } from '../lib/device-art';
 import { chipStyles, shared } from '../lib/styles';
@@ -47,6 +46,8 @@ export class HhPalette extends LitElement {
       .grp h2 { margin: 8px 0 5px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); font-weight: 650; }
       .hab { flex: none; font-style: normal; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; border: 1px solid var(--line); color: var(--tx2); background: var(--sf); }
       .empty { color: var(--tx3); font-size: 12.5px; padding: 12px 2px; }
+      .cells { grid-template-columns: repeat(auto-fill, minmax(7.25rem, 1fr)); }
+      .cells > .wide { grid-column: span 2; }
       .big { display: grid; gap: 6px; margin-top: 8px; }
       .prim { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 12px; border-radius: var(--r2); border: 1px solid var(--line); background: var(--sf2); color: var(--tx); cursor: grab; text-align: left; touch-action: pan-y; user-select: none; -webkit-user-select: none; font-weight: 600; }
       .prim[aria-pressed="true"] { background: var(--acc); color: var(--onacc); border-color: var(--acc); }
@@ -154,9 +155,11 @@ export class HhPalette extends LitElement {
       const g = deviceChips(d);
       const q = this.st.query.trim();
       const cards = GROUPS.map((grp) => {
-        const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
+        const long = (c: { name: string }) => displayCommand(c.name).length > PALETTE_CAP ? 0 : 1;
+        // two-cell labels first: the single-cell ones then fill every row and only the last row is short
+        const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id)).sort((a, b) => long(a) - long(b));
         return chips.length
-          ? html`<h2>${pretty(grp)}</h2><div class="cells" style=${setStyle({ "grid-template-columns": gridStyle(chips.map((c) => displayCommand(c.name)), undefined, PALETTE_CAP) })} role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
+          ? html`<h2>${pretty(grp)}</h2><div class="cells" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
               ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(commandIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
             </div>`
           : nothing;

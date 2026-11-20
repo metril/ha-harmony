@@ -145,7 +145,8 @@ async def test_palette_commands_are_readable_and_sit_on_a_uniform_grid(browser, 
     wide = [g for g in groups if len(g) >= 2 and max(len(c["text"]) for c in g) <= 9]
     assert wide and all(len({c["x"] for c in g}) >= 2 for g in wide), "short palette labels sit in one column at 1600px"
     for g in groups:
-        assert len({round(c["w"]) for c in g}) == 1 and len({round(c["h"]) for c in g}) == 1, f"uneven cells: {g}"
+        one = min(round(c["w"]) for c in g)
+        assert all(round(c["w"]) in (one, 2 * one + 6) for c in g) and len({round(c["h"]) for c in g}) == 1, f"uneven cells: {g}"
         for c in g:
             assert "_" not in c["text"], c
             assert c["cut"] <= 0, f"{c['text']} is cut"

@@ -15,7 +15,7 @@ from test_addon_e2e_polish import large, open_large  # noqa: F401
 
 pytestmark = pytest.mark.skipif(not (DIST / "index.html").is_file(), reason="frontend not built")
 SHOTS = os.environ.get("HH_SHOTS")
-SIZES = [(1440, 900), (1024, 700)]
+SIZES = [(1600, 900), (1440, 900), (1024, 700)]
 
 # spills: an element whose content is wider than its box while it does not scroll or clip (ignores the tab tooltips, which hang below
 # their button on purpose); rows: direct children of a grid or flex row that should be one line but are taller than 1.7 lines
@@ -87,6 +87,13 @@ async def test_palette_tabs_inspector_and_tab_strip_under_a_wide_font(browser, l
         heights = await page.locator("hh-palette .chip2").evaluate_all("els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().height)))]")
         assert len(heights) <= 1, (tab, heights)
         assert await page.evaluate(HOLES) == [], tab
+    # every device group of the Devices tab: one-cell chips share rows (>= 2 per row), one grid for all groups (the 1024 px palette is one column)
+    await page.get_by_role("tab", name="Devices", exact=True).click()
+    bad = await page.locator("hh-palette .cells[role=group]").evaluate_all("""(g) => { const out = [];
+      for (const c of g) { const short = [...c.children].filter((k) => k.getBoundingClientRect().width < c.getBoundingClientRect().width - 10); if (short.length < 2) continue;
+        const tops = new Map(); for (const k of short) { const t = Math.round(k.getBoundingClientRect().top); tops.set(t, (tops.get(t) || 0) + 1); }
+        if (Math.max(...tops.values()) < 2) out.push(c.getAttribute("aria-label")); } return [g.length, out]; }""")
+    assert bad[0] >= 3 and (size[0] < 1440 or bad[1] == []), bad
     # the inspector's free-keys list: equal rows
     heights = await page.locator("hh-inspector .free button, hh-inspector .chip2").evaluate_all(
         "els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().height)))]"
