@@ -10,6 +10,7 @@ Set HH_SHOTS=<dir> to also write light/dark screenshots at 1280 and 400 px.
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 
 import aiohttp
@@ -828,7 +829,7 @@ async def test_library_create_save_rev_switch_restore_and_apply_to_hub(browser, 
     page = await open_editor(browser, site, problems)
     await page.get_by_text("Set up your first hub config").wait_for()
     cfg = page.get_by_role("combobox", name="Config")
-    assert await cfg.locator("option:checked").inner_text() == "Main"  # an empty library gets "Main"
+    await pw.expect(cfg.locator("option:checked")).to_have_text("Main")  # an empty library gets "Main"
 
     await page.get_by_role("button", name="Import YAML", exact=True).click()
     await page.locator("textarea").fill(YAML)
@@ -849,7 +850,7 @@ async def test_library_create_save_rev_switch_restore_and_apply_to_hub(browser, 
     await page.get_by_label("Config Name").fill("Second")
     await page.get_by_role("button", name="Create").click()
     await page.get_by_text("Set up your first hub config").wait_for()
-    assert await cfg.locator("option:checked").inner_text() == "Second"
+    await pw.expect(cfg.locator("option:checked")).to_have_text("Second")
     assert await cfg.locator("option").all_inner_texts() == ["Main", "Second"]
     assert await page.evaluate("window.__marker") == "alive"
 
@@ -857,7 +858,7 @@ async def test_library_create_save_rev_switch_restore_and_apply_to_hub(browser, 
     await cfg.select_option(label="Main")
     await bar.get_by_text("Rev 1 · No Changes").wait_for()
     assert await page.evaluate("window.__marker") == "alive"  # no reload happened
-    assert "config=main" in page.url
+    await pw.expect(page).to_have_url(re.compile(r"config=main"))
     await page.evaluate("document.querySelector('hh-app').store.edit(c => { c.devices[0].name = 'Edited'; })")
     await bar.get_by_text("Rev 1 + Unsaved Changes").wait_for()
     # Import As New Config: a third config from the YAML, opened in place
@@ -868,9 +869,9 @@ async def test_library_create_save_rev_switch_restore_and_apply_to_hub(browser, 
     await page.get_by_label("Name For A New Config").fill("Imported Copy")
     await page.locator("#import-new").click()
     await bar.get_by_text("No Revision Yet").wait_for()
-    assert await cfg.locator("option:checked").inner_text() == "Imported Copy"
+    await pw.expect(cfg.locator("option:checked")).to_have_text("Imported Copy")
     assert await page.evaluate("window.__marker") == "alive"
-    assert "config=main" not in page.url and "config=" in page.url
+    await pw.expect(page).to_have_url(re.compile(r"config=(?!main(?:&|#|$))"))
     _, lib = await api(site, "GET", "/api/v1/configs")
     assert "Imported Copy" in [c["name"] for c in lib["configs"]]
     await cfg.select_option(label="Main")
