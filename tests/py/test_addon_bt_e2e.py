@@ -414,7 +414,7 @@ activities:
     page, problems = await open_bt(browser, site, "remote")
     await page.get_by_text("Shield").first.wait_for()
     await page.get_by_text("Volume Up").first.wait_for()  # chips of the explicit set
-    await page.get_by_text("Direction Up").first.wait_for()  # the default set of "TV box" (it lists no commands)
+    await page.get_by_text("Up", exact=True).first.wait_for()  # the default set of "TV box" (it lists no commands)
     await shot(page, "19-palette-bt-commands")
     await page.evaluate("location.hash = '#/devices'")
     await page.get_by_text("Bluetooth", exact=True).first.wait_for()
