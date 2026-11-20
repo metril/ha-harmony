@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { stockIconSvg } from '../lib/icon-shapes';
+import { displayKey } from '../lib/key-names';
 import { KEYS, keyTitle } from '../lib/remote-layout';
 import { STOCK_ICONS } from '../lib/stock-icons';
 import { shared } from '../lib/styles';
@@ -56,6 +57,8 @@ export class HhInspector extends LitElement {
       .chk { display: flex; gap: 8px; align-items: center; font-weight: 500; color: var(--tx); font-size: 13px; }
       .errs { display: grid; gap: 4px; }
       .err { font-size: 12px; color: var(--bad); background: var(--bads); padding: 6px 8px; border-radius: var(--r1); }
+      .free.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .free.chips button { height: 28px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; text-align: center; white-space: nowrap; line-height: 1; }
       .free button { padding: 0 10px; border-radius: 15px; border: 1px solid var(--line); background: var(--sf2); color: var(--tx2); cursor: pointer; font-size: 12px; }
       .stat { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 13px; }
       .stat span:nth-child(even) { color: var(--tx2); font-variant-numeric: tabular-nums; }
@@ -123,7 +126,7 @@ export class HhInspector extends LitElement {
         <span>Do nothing</span><span>${free.length}</span></div>
       ${act?.devices?.length ? html`<div class="sec"><h3>Who handles it</h3><div class="free cells">${act.devices.map((d) => html`<span class="chip">${(this.cfg.devices ?? []).find((x) => x.id === d.device)?.name ?? d.device}${d.input ? ` · ${d.input}` : ''}</span>`)}</div></div>` : nothing}
       <div class="sec"><h3>Free keys</h3>
-        ${free.length ? html`<div class="free cells">${free.map((k) => html`<button title=${keyTitle(k)} @click=${() => this.st.set({ sel: { kind: 'key', name: k } })}>${keyTitle(k)}</button>`)}</div>` : html`<p class="why">Every key does something.</p>`}
+        ${free.length ? html`<div class="free chips">${free.map((k) => html`<button title=${keyTitle(k)} @click=${() => this.st.set({ sel: { kind: 'key', name: k } })}>${displayKey(k)}</button>`)}</div>` : html`<p class="why">Every key does something.</p>`}
       </div>
       <p class="why">Pick a command in the palette, then a key, or drag it onto a key or the screen. Click a key or a screen widget to edit it here.</p>
     </div>`;

@@ -144,9 +144,9 @@ describe('remote layout', () => {
   });
   it('names keys with their function and what is printed on them', () => {
     expect(keyTitle('home')).toBe('Home (ACTIVITIES)');
-    expect(keyTitle('volume_up')).toBe('Volume Up (Vol +)');
+    expect(keyTitle('volume_up')).toBe('Volume up (Vol +)');
     expect(keyTitle('play')).toBe('Play');
-    expect(keyTitle('prev_channel')).toBe('Prev Channel (Back)');
+    expect(keyTitle('prev_channel')).toBe('Previous channel (Back)');
   });
 });
 

@@ -69,6 +69,9 @@ export interface KeyGeom {
   color?: string;
   /** rect: corner radii (top-left, top-right, bottom-right, bottom-left) */
   radii?: Radii;
+  /** label centre when it is not the middle of the bounding box (polygon keys: the area centroid) */
+  lx?: number;
+  ly?: number;
   /** shape 'path': the outline */
   d?: string;
 }
@@ -114,9 +117,18 @@ const bbox = (pts: Pt[]) => {
   const x = Math.min(...xs), y = Math.min(...ys);
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 };
+const centroid = (pts: Pt[]): Pt => {
+  let a = 0, x = 0, y = 0;
+  pts.forEach((p, i) => {
+    const q = pts[(i + 1) % pts.length] as Pt;
+    const c = p[0] * q[1] - q[0] * p[1];
+    a += c; x += (p[0] + q[0]) * c; y += (p[1] + q[1]) * c;
+  });
+  return [x / (3 * a), y / (3 * a)];
+};
 const polyKey = (name: string, group: string, crop: Pt[], o: { label?: string; printed?: string } = {}): KeyGeom => {
   const pts = crop.map(([x, y]) => cp(x, y));
-  return { name, stock: stockOf(name), label: o.label ?? '', group, shape: 'path', ...bbox(pts), d: roundedPoly(pts, 5), ...(o.printed ? { printed: o.printed } : {}) };
+  return { name, stock: stockOf(name), label: o.label ?? '', group, shape: 'path', ...bbox(pts), d: roundedPoly(pts, 5), ...(o.label ? { lx: centroid(pts)[0], ly: centroid(pts)[1] } : {}), ...(o.printed ? { printed: o.printed } : {}) };
 };
 const EXIT: Pt[] = [[62, 35], [345, 35], [345, 60], [290, 113], [62, 113]];
 const MUTE: Pt[] = [[62, 503], [290, 503], [345, 558], [345, 580], [62, 580]];
@@ -162,7 +174,7 @@ const SPECIAL: Record<string, KeyGeom> = {};
 ].forEach((g) => { SPECIAL[g.name] = g; });
 
 /** Printed text beside the rocker keys: "Vol", and "Ch" over "Pg" with a rule, at mid height near the outer edge. */
-const [vx, vy] = cp(95, 308), [chx, chy] = cp(658, 318);
+const [vx, vy] = cp(107, 308), [chx, chy] = cp(653, 318);
 export const PRINTED: readonly Printed[] = [
   { text: 'Vol', x: vx, y: vy + 3 },
   { text: 'Ch', sub: 'Pg', x: chx, y: chy - 6 },
@@ -200,10 +212,10 @@ const LAYOUT: readonly (Row | string)[] = [
   ['green', 'Green', 'colour', 'rect', 0.3928, 0.800, 0.163, 0.020, { color: '#4fb56a', radii: [4, 4, 4, 4] }],
   ['yellow', 'Yellow', 'colour', 'rect', 0.6031, 0.800, 0.163, 0.020, { color: '#e6c23a', radii: [4, 4, 4, 4] }],
   ['blue', 'Blue', 'colour', 'rect', 0.8134, 0.800, 0.163, 0.020, { color: '#5b8fe0', radii: [4, 11, 11, 4] }],
-  [PK.lightUpper, '', 'home', 'rect', 0.234, 0.836, 0.266, 0.026, { printed: 'upper light', radii: [6, 6, 6, 6] }],
+  [PK.lightUpper, '', 'home', 'rect', 0.234, 0.836, 0.266, 0.026, { printed: 'upper bulb', radii: [6, 6, 6, 6] }],
   ['home_control_plus', '+', 'home', 'rock-top', 0.498, 0.840, 0.150, 0.033],
   [PK.socketUpper, '', 'home', 'rect', 0.762, 0.836, 0.266, 0.026, { printed: 'upper socket', radii: [6, 6, 6, 6] }],
-  [PK.lightLower, '', 'home', 'rect', 0.234, 0.876, 0.266, 0.027, { printed: 'lower light', radii: [6, 6, 6, 20] }],
+  [PK.lightLower, '', 'home', 'rect', 0.234, 0.876, 0.266, 0.027, { printed: 'lower bulb', radii: [6, 6, 6, 20] }],
   ['home_control_minus', '−', 'home', 'rock-bottom', 0.498, 0.873, 0.150, 0.033],
   [PK.socketLower, '', 'home', 'rect', 0.762, 0.876, 0.266, 0.027, { printed: 'lower socket', radii: [6, 6, 20, 6] }],
 ];
@@ -217,10 +229,11 @@ export const KEYS: readonly KeyGeom[] = LAYOUT.map((r) => (typeof r === 'string'
 
 export const keyByName = new Map(KEYS.map((g) => [g.name, g]));
 /** "Volume Up" style name for tooltips and announcements, plus what is printed on the real key when that differs */
+import { displayKey } from './key-names';
 export const keyTitle = (name: string): string => {
   const g = keyByName.get(name);
   if (!g) return name;
-  const t = g.stock.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  const t = displayKey(name);
   return g.printed && g.printed.toLowerCase() !== t.toLowerCase() ? `${t} (${g.printed})` : t;
 };
 
