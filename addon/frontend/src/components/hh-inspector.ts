@@ -58,7 +58,6 @@ export class HhInspector extends LitElement {
       .chk { display: flex; gap: 8px; align-items: center; font-weight: 500; color: var(--tx); font-size: 13px; }
       .errs { display: grid; gap: 4px; }
       .err { font-size: 12px; color: var(--bad); background: var(--bads); padding: 6px 8px; border-radius: var(--r1); }
-      .free.grid button.wide { grid-column: span 2; }
       .free.grid button { height: 28px; padding: 0 8px; min-width: 0; display: flex; align-items: center; justify-content: center; text-align: center; white-space: nowrap; line-height: 1; }
       .free button { padding: 0 10px; border-radius: 15px; border: 1px solid var(--line); background: var(--sf2); color: var(--tx2); cursor: pointer; font-size: 12px; }
       .stat { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 13px; }

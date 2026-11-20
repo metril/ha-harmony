@@ -43,3 +43,6 @@ export const gridStyle = (labels: readonly string[], pad = '2.6rem', cap = Infin
 };
 /** Labels longer than the column width a capped grid is sized to take two columns (rows stay aligned, nothing is cut). */
 export const FREE_CAP = 9;
+
+/** The palette's column width: labels up to this many characters stay one cell, longer ones take two. */
+export const PALETTE_CAP = 12;

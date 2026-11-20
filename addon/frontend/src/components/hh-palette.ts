@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { commandNames } from '../lib/bt';
 import { setStyle } from '../lib/set-style';
-import { displayCommand, gridStyle } from '../lib/key-names';
+import { displayCommand, gridStyle, PALETTE_CAP } from '../lib/key-names';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { commandIconId } from '../lib/device-art';
 import { chipStyles, shared } from '../lib/styles';
@@ -138,7 +138,7 @@ export class HhPalette extends LitElement {
   }
   private chip(raw: string, source: Source, used: boolean, extra: TemplateResult | typeof nothing = nothing) {
     const label = source.kind === 'activity' ? raw : displayCommand(raw);
-    return html`<button class="chip2 ${used ? 'used' : ''}" aria-pressed=${this.pressed(source)} title=${used ? `${label} (already on a key of this layer)` : label}
+    return html`<button class="chip2 ${used ? 'used' : ''} ${source.kind !== 'activity' && label.length > PALETTE_CAP ? 'wide' : ''}" aria-pressed=${this.pressed(source)} title=${used ? `${label} (already on a key of this layer)` : label}
       @pointerdown=${(e: PointerEvent) => this.down(e, source)} @keydown=${(e: KeyboardEvent) => this.key(e, source)} @click=${(e: MouseEvent) => e.preventDefault()}>${extra}<span>${label}</span></button>`;
   }
   private match(...s: string[]): boolean {
@@ -156,7 +156,7 @@ export class HhPalette extends LitElement {
       const cards = GROUPS.map((grp) => {
         const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
-          ? html`<h2>${pretty(grp)}</h2><div class="cells" style=${setStyle({ "grid-template-columns": gridStyle(chips.map((c) => displayCommand(c.name))) })} role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
+          ? html`<h2>${pretty(grp)}</h2><div class="cells" style=${setStyle({ "grid-template-columns": gridStyle(chips.map((c) => displayCommand(c.name)), undefined, PALETTE_CAP) })} role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
               ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(commandIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
             </div>`
           : nothing;

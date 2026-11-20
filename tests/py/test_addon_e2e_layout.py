@@ -57,6 +57,18 @@ async def audit(page, where):
     assert got["spill"] == [], f"{where}: content spills out of its box: {got['spill']}"
 
 
+# every row of a .cells grid but the last is filled edge to edge: no empty cell sits before a later item
+HOLES = """() => {
+  const bad = [];
+  const walk = (root) => { for (const g of root.querySelectorAll('.cells')) {
+    const kids = [...g.children].filter((k) => k.getBoundingClientRect().height > 0), W = g.getBoundingClientRect().width;
+    const rows = new Map(); for (const k of kids) { const r = k.getBoundingClientRect(); const t = Math.round(r.top); rows.set(t, (rows.get(t) || 0) + r.width); }
+    const tops = [...rows.keys()].sort((a, b) => a - b);
+    tops.slice(0, -1).forEach((t) => { const used = rows.get(t); if (W - used > used / 20 + 40) bad.push(g.getAttribute('aria-label') + ': row at ' + t + ' fills ' + Math.round(used) + ' of ' + Math.round(W)); });
+  } for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot); };
+  walk(document.querySelector('hh-app').shadowRoot); return bad; }"""
+
+
 @pytest.mark.parametrize("size", SIZES)
 async def test_palette_tabs_inspector_and_tab_strip_under_a_wide_font(browser, large, size):
     page = await open_large(browser, large, *size)
@@ -74,11 +86,13 @@ async def test_palette_tabs_inspector_and_tab_strip_under_a_wide_font(browser, l
         await page.get_by_role("tab", name=tab, exact=True).click()
         heights = await page.locator("hh-palette .chip2").evaluate_all("els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().height)))]")
         assert len(heights) <= 1, (tab, heights)
+        assert await page.evaluate(HOLES) == [], tab
     # the inspector's free-keys list: equal rows
     heights = await page.locator("hh-inspector .free button, hh-inspector .chip2").evaluate_all(
         "els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().height)))]"
     )
     assert len(heights) <= 1, heights
+    assert await page.evaluate(HOLES) == []
 
 
 @pytest.mark.parametrize("size", SIZES)
