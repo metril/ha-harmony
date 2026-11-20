@@ -19,7 +19,7 @@ const HUB_CODES: Record<string, string> = {
   bad_kind: 'That kind of device is not supported.',
   bad_page: 'That key type is not supported by this hub.',
   bad_action: 'That key action is not supported.',
-  no_le: 'This hub has no Bluetooth LE. Choose Classic (or Any) instead.',
+  no_le: 'This hub has no Bluetooth LE. Choose Bluetooth BR/EDR (or Automatic) instead.',
   no_slot: 'The hub has nothing paired in that place any more. The list will refresh; try again.',
   not_connected: 'The device is not connected right now. Wake it, make sure Bluetooth is on, and try again.',
   bt_not_ready: 'The hub’s Bluetooth is still starting. Wait a few seconds and try again.',

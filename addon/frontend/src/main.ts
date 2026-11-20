@@ -6,7 +6,7 @@ import './components/hh-app';
 
 async function boot(): Promise<void> {
   const api = new Api();
-  // ?hub= wins; else the hub id Home Assistant polls for; never `default` once a linked hub exists.
+  // ?hub= wins; else the hub id Home Assistant is linked for; never `default` once a linked hub exists.
   let hub = 'default';
   try {
     hub = pickHub(location.search, await api.hubs(), rememberedHub()).hub;

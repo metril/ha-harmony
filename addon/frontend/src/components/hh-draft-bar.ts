@@ -5,7 +5,7 @@ import { icon } from '../lib/icons';
 import { shared } from '../lib/styles';
 import { ApiError } from '../lib/api';
 import { StoreElement, confirmAction } from './base';
-import { ago, meters, statusChip } from './parts';
+import { ago, agoChangeIn, meters, statusChip } from './parts';
 
 /** Sticky draft bar: state, validation chip, meters, Discard draft, Review & apply. */
 @customElement('hh-draft-bar')
@@ -46,14 +46,17 @@ export class HhDraftBar extends StoreElement {
     `,
   ];
   @state() private usageOpen = false;
-  private timer?: ReturnType<typeof setInterval>;
-  override connectedCallback(): void {
-    super.connectedCallback();
-    this.timer = setInterval(() => this.requestUpdate(), 5000);
-  }
+  private timer?: ReturnType<typeof setTimeout>;
   override disconnectedCallback(): void {
-    clearInterval(this.timer);
+    clearTimeout(this.timer);
     super.disconnectedCallback();
+  }
+  /** "saved 3 min ago" is redrawn by one timeout to the moment its text changes, not on a clock. */
+  protected override updated(): void {
+    clearTimeout(this.timer);
+    const s = this.store;
+    const ms = s.hasDraft ? agoChangeIn(s.savedAt) : null;
+    if (ms !== null) this.timer = setTimeout(() => this.requestUpdate(), ms);
   }
 
   private applyReason(): string | null {

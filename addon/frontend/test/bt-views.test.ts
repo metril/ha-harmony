@@ -11,7 +11,8 @@ import { StudioState } from '../src/lib/studio-state';
 import { Assigner } from '../src/lib/assigner';
 import type { BtCodes, BtStatus } from '../src/lib/api';
 import type { Config } from '../src/lib/model';
-import { META, fakeApi, type Call, type Handler } from './helpers';
+import { fakeLive } from './fake-ws';
+import { META, fakeApi, type Handler } from './helpers';
 
 type El = HTMLElement & { updateComplete: Promise<unknown>; shadowRoot: ShadowRoot };
 const codes: BtCodes = {
@@ -29,7 +30,6 @@ const status = (o: Partial<BtStatus> = {}): BtStatus => ({
   state: { state: 'ready', discoverable: false, hosts: [], remotes: [], gen: 1 },
   limits: { hosts_max: 8, conn_max: 3, remotes_max: 4, le_bonds_max: 8, pages: [7, 12], le: true },
   listening: false,
-  age_s: 0,
   ...o,
 });
 const gate = () => {
@@ -38,19 +38,16 @@ const gate = () => {
   return { p, open };
 };
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
-const bodies = (calls: Call[], path: string) => calls.filter((c) => c.url.includes(path)).map((c) => JSON.parse(c.body ?? '{}') as Record<string, unknown>);
 
-async function boot(routes: Record<string, Handler> = {}, cfg: Config = {}) {
+async function boot(routes: Record<string, Handler> = {}, cfg: Config = {}, bt: BtStatus = status()) {
+  fakeLive.topics['bt:h'] = bt;
   const f = fakeApi({
     'GET api/v1/config': () => ({ body: { hub: 'h', draft: { config: cfg, updated: 1 }, ...META, applied: null } }),
     'POST api/v1/config/preview': () => ({ body: { ok: true, errors: [], usage: null } }),
     'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 2, ...META } }),
     'GET api/v1/hubs': () => ({ body: { hubs: [{ id: 'h', has_draft: true, has_applied: false, applied_rev: null, applied_at: null }] } }),
-    'GET api/v1/bt/status': () => ({ body: status() }),
     'GET api/v1/bt/codes': () => ({ body: codes }),
     'POST api/v1/bt/pair/stop': () => ({ body: { ok: true } }),
-    'POST api/v1/bt/listen': () => ({ body: { ok: true, listening: true } }),
-    'GET api/v1/bt/events': () => ({ body: { events: [], last: 0, listening: true } }),
     ...routes,
   });
   const store = new Store(f.api, 'h', 600);
@@ -72,22 +69,21 @@ beforeEach(() => {
 });
 
 describe('hh-bt-keys', () => {
-  it('leaving while learn is starting turns the listen lease off and polls nothing', async () => {
-    const g = gate();
-    const { calls, store } = await boot({ 'POST api/v1/bt/listen': async (c) => { if (JSON.parse(c.body ?? '{}').on) await g.p; return { body: { ok: true, listening: true } }; } });
-    const el = await mount('hh-bt-keys', { api: store.api, hub: 'h', codes });
+  it('learning is a keys subscription: it starts on click, takes presses, and ends when the view is left', async () => {
+    const { calls, store } = await boot();
+    const el = await mount<El & { pressed: unknown }>('hh-bt-keys', { api: store.api, hub: 'h', codes });
+    const subbed = () => fakeLive.open.some((w) => w.sent.at(-1)?.sub?.includes('keys:h'));
+    expect(subbed()).toBe(false);
     el.shadowRoot.querySelector<HTMLButtonElement>('.learn .btn.pri')!.click();
     await tick();
+    expect(subbed()).toBe(true);
+    fakeLive.push({ t: 'key', hub: 'h', seq: 1, slot: 0, page: 12, usage: 0x223, down: true });
+    await el.updateComplete;
+    expect(el.pressed).toEqual({ page: 12, usage: 0x223 });
     el.remove();
-    g.open();
-    await tick(60);
-    const listens = bodies(calls, 'bt/listen').map((b) => b['on']);
-    expect(listens[0]).toBe(true);
-    expect(listens.at(-1)).toBe(false);
-    expect(calls.filter((c) => c.url.includes('bt/events'))).toHaveLength(0);
-    const n = calls.length;
-    await tick(100); // nothing scheduled
-    expect(calls).toHaveLength(n);
+    await tick();
+    expect(fakeLive.open.some((w) => w.sent.at(-1)?.sub?.includes('keys:h'))).toBe(false);
+    expect(calls.filter((c) => /bt\/(listen|events)/.test(c.url))).toHaveLength(0);
   });
 
   it('a press on a page the hub cannot map is explained and cannot be assigned', async () => {
@@ -122,8 +118,41 @@ describe('hh-bt-pair', () => {
     expect(calls.filter((c) => c.url.includes('pair/stop'))).toHaveLength(1);
   });
 
+  it('re-rendering or re-parenting the wizard while pairing sends no pair_stop and no second pair', async () => {
+    const { calls } = await boot({ 'POST api/v1/bt/pair': () => ({ body: { ok: true, state: null } }) });
+    const el = await mount('hh-bt-pair', { mode: 'host' });
+    await vi_waitFor(() => !!el.shadowRoot.querySelector('.stage .btn.pri:not([disabled])'));
+    el.shadowRoot.querySelector<HTMLButtonElement>('.stage .btn.pri')!.click();
+    await vi_waitFor(() => !!el.shadowRoot.querySelector('.stage .pulse'));
+    const holder = document.createElement('div');
+    document.body.append(holder);
+    holder.append(el); // disconnect + connect in one task
+    (el as unknown as { addr: string }).addr = ''; // a parent re-render re-sets its properties
+    fakeLive.push({ t: 'bt', ...status({ state: { state: 'ready', discoverable: true, discoverable_secs: 118, window: 'host', hosts: [], remotes: [], gen: 2 } }) });
+    await tick(60);
+    expect(calls.filter((c) => c.url.includes('pair/stop'))).toHaveLength(0);
+    expect(calls.filter((c) => c.method === 'POST' && /bt\/pair$/.test(new URL(c.url).pathname))).toHaveLength(1);
+    el.remove();
+    await tick(30);
+    expect(calls.filter((c) => c.url.includes('pair/stop'))).toHaveLength(1); // leaving the page does stop it
+  });
+
+  it('a pair answer that lists the hub state afresh does not make an old host look newly paired', async () => {
+    const old = { addr: 'AA:BB:CC:00:00:01', name: 'TV', connected: false, slot: 0 };
+    const withHost = status({ state: { state: 'ready', discoverable: false, hosts: [old], remotes: [], gen: 1 } as never });
+    const { calls } = await boot({ 'POST api/v1/bt/pair': () => ({ body: { ok: true, state: { state: 'ready', discoverable: true, discoverable_secs: 120, window: 'host', hosts: [], remotes: [], gen: 1 } } }) }, {}, withHost);
+    const el = await mount('hh-bt-pair', { mode: 'host' });
+    await vi_waitFor(() => !!el.shadowRoot.querySelector('.stage .btn.pri:not([disabled])'));
+    el.shadowRoot.querySelector<HTMLButtonElement>('.stage .btn.pri')!.click();
+    await tick(60);
+    fakeLive.push({ t: 'bt', ...status({ state: { state: 'ready', discoverable: true, discoverable_secs: 119, window: 'host', hosts: [old], remotes: [], gen: 1 } as never }) });
+    await tick(40);
+    expect(calls.filter((c) => c.url.includes('pair/stop'))).toHaveLength(0);
+    expect(el.shadowRoot.querySelector('.stage .big')?.textContent).toContain('pair with');
+  });
+
   it('the pairing wizard keeps the countdown out of every live region', async () => {
-    await boot({ 'GET api/v1/bt/status': () => ({ body: status({ state: { state: 'ready', discoverable: true, discoverable_secs: 90, window: 'host', hosts: [], remotes: [], gen: 2 } }) }) });
+    await boot({}, {}, status({ state: { state: 'ready', discoverable: true, discoverable_secs: 90, window: 'host', hosts: [], remotes: [], gen: 2 } }));
     const el = await mount('hh-bt-pair', { mode: 'host' });
     await tick(30);
     for (const live of el.shadowRoot.querySelectorAll('[role="status"], [aria-live="polite"], [role="alert"]')) expect(live.textContent).not.toMatch(/\d:\d\d/);
@@ -132,7 +161,7 @@ describe('hh-bt-pair', () => {
 
 describe('hh-bt-panel', () => {
   it('the open-window banner announces the window, not the seconds', async () => {
-    await boot({ 'GET api/v1/bt/status': () => ({ body: status({ state: { state: 'ready', discoverable: true, discoverable_secs: 90, window: 'host', hosts: [], remotes: [], gen: 2 } }) }) });
+    await boot({}, {}, status({ state: { state: 'ready', discoverable: true, discoverable_secs: 90, window: 'host', hosts: [], remotes: [], gen: 2 } }));
     const el = await mount('hh-bt-panel');
     await tick(30);
     const live = el.shadowRoot.querySelector('.banner [role="status"]')!;

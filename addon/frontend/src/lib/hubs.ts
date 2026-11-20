@@ -1,4 +1,4 @@
-// Which hub id the editor works on, and whether Home Assistant is polling for it.
+// Which hub id the editor works on, and whether Home Assistant is connected for it.
 import type { ApplyStatus, HubsResponse } from './api';
 
 export interface HubChoice {
@@ -7,7 +7,7 @@ export interface HubChoice {
   reason: 'explicit' | 'linked' | 'newest-linked' | 'remembered' | 'stored' | 'default';
   /** every id worth offering in a switcher (linked ones first) */
   choices: string[];
-  /** true when at least one integration has polled the add-on */
+  /** true when at least one integration has linked to the add-on */
   anyLinked: boolean;
 }
 
@@ -52,35 +52,31 @@ export function hubLabel(resp: HubsResponse | null, hub: string): string {
   return n ? `${n} (${hub})` : hub;
 }
 
-/** The integration long-polls (about 55 s), so anything older than this is not polling. */
-export const POLL_FRESH_S = 150;
-
 export type LinkInfo =
   | { kind: 'unknown' }
-  | { kind: 'none' } // no integration has ever polled this add-on
-  | { kind: 'other'; ids: string[] } // integrations poll, but not for this hub id
-  | { kind: 'stale'; ids: string[]; age: number } // polled for this id once, not lately
-  | { kind: 'polling'; ids: string[] };
+  | { kind: 'none' } // no integration has ever connected to this add-on
+  | { kind: 'other'; ids: string[] } // integrations are connected, but not for this hub id
+  | { kind: 'offline'; ids: string[] } // this hub id was linked once, its channel is closed now
+  | { kind: 'connected'; ids: string[] };
 
-export function linkInfo(s: ApplyStatus | null, hub: string): LinkInfo {
-  if (!s || !s.linked_hubs || s.now === undefined) return { kind: 'unknown' };
-  const ids = s.linked_hubs.map((l) => l.id);
+/** From the `hubs` topic (who has linked) and the `hub:<id>` topic (`connected`). */
+export function linkInfo(hubs: HubsResponse | null, s: ApplyStatus | null, hub: string): LinkInfo {
+  if (!hubs || !s) return { kind: 'unknown' };
+  const ids = hubs.linked.map((l) => l.id);
+  if (s.connected) return { kind: 'connected', ids };
   if (!ids.length) return { kind: 'none' };
-  const mine = s.linked_hubs.find((l) => l.id === hub);
-  if (!mine) return { kind: 'other', ids };
-  const age = s.now - mine.last_seen;
-  return age > POLL_FRESH_S ? { kind: 'stale', ids, age } : { kind: 'polling', ids };
+  return ids.includes(hub) ? { kind: 'offline', ids } : { kind: 'other', ids };
 }
 
-/** One sentence for a link problem, or null when Home Assistant is polling for this hub (or it is unknown). */
+/** One sentence for a link problem, or null when Home Assistant is connected for this hub (or it is unknown). */
 export function linkProblem(l: LinkInfo, hub: string): string | null {
   switch (l.kind) {
     case 'none':
       return 'No Home Assistant integration is linked to this add-on yet. You can keep working on a local draft.';
     case 'other':
-      return `Home Assistant is not polling for this hub (${hub}). It polls for: ${l.ids.join(', ')}.`;
-    case 'stale':
-      return `Home Assistant is not polling for this hub (${hub}); last seen ${Math.round(l.age / 60)} min ago.`;
+      return `Home Assistant is not connected for this hub (${hub}). It is linked for: ${l.ids.join(', ')}.`;
+    case 'offline':
+      return `Home Assistant is not connected for this hub (${hub}) right now.`;
     default:
       return null;
   }

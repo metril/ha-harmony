@@ -5,9 +5,10 @@ import '../src/components/hh-import-dialog';
 import '../src/components/hh-draft-bar';
 import { Store, setStore } from '../src/lib/store';
 import { ApiError } from '../src/lib/api';
+import { fakeLive } from './fake-ws';
 import { META, fakeApi, previewBad, previewOk, status, tvConfig, type Handler } from './helpers';
 
-async function boot(opts: { draft?: boolean; applied?: boolean; errors?: boolean; hash?: string; statuses?: object[]; hubs?: { id: string }[]; routes?: Record<string, Handler>; config?: ReturnType<typeof tvConfig> } = {}) {
+async function boot(opts: { draft?: boolean; applied?: boolean; errors?: boolean; hash?: string; statuses?: object[]; hubs?: { id: string }[]; linked?: { id: string; last_seen: number; name?: string }[]; routes?: Record<string, Handler>; config?: ReturnType<typeof tvConfig> } = {}) {
   const statuses = [...(opts.statuses ?? [status()])];
   const cfg = opts.config ?? tvConfig();
   const f = fakeApi({
@@ -26,11 +27,15 @@ async function boot(opts: { draft?: boolean; applied?: boolean; errors?: boolean
     'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 1_700_000_100, ...META } }),
     'GET api/v1/hubs': () => ({ body: { hubs: (opts.hubs ?? [{ id: 'h' }]).map((h) => ({ has_draft: false, has_applied: true, applied_rev: 'aaaa1111', applied_at: 1, ...h })) } }),
     'POST api/v1/config/apply': () => ({ body: { ok: true, applied: { rev: 4, at: 1_700_000_200, hash: 'cafebabe' }, history: [META.applied, ...META.history], history_max: 5, rev: 8 } }),
-    'GET api/v1/config/status': () => ({ body: statuses.length > 1 ? statuses.shift() : statuses[0] }),
     'GET api/v1/config/history': () => ({ body: { hub: 'h', rev: 2, at: 1, hash: 'x', config: { ...tvConfig(), activities: [] } } }),
     'POST api/v1/ir/test': () => ({ body: { ok: true, action: {} } }),
     ...(opts.routes ?? {}),
   });
+  // the live topics the add-on would push: `hubs` is what `GET hubs` answers (plus who is linked), `hub:h` the config status
+  const hubsBody = ((await f.api.hubs()) as unknown) as object;
+  fakeLive.topics['hubs'] = { adopt: null, now: 1000, ...hubsBody, linked: opts.linked ?? ((hubsBody as { linked: unknown[] }).linked.length ? (hubsBody as { linked: unknown[] }).linked : [{ id: 'h', last_seen: 1 }]) };
+  fakeLive.topics['hub:h'] = statuses[0];
+  const pushStatus = (st: object) => fakeLive.push({ t: 'hub', ...st });
   const store = new Store(f.api, 'h', 600);
   setStore(store);
   await store.load();
@@ -38,7 +43,7 @@ async function boot(opts: { draft?: boolean; applied?: boolean; errors?: boolean
   const app = document.createElement('hh-app') as HTMLElement & { updateComplete: Promise<unknown> };
   document.body.append(app);
   await app.updateComplete;
-  return { app, store, ...f };
+  return { app, store, pushStatus, ...f };
 }
 const settle = async (el: HTMLElement) => {
   await (el as unknown as { updateComplete: Promise<unknown> }).updateComplete;
@@ -140,12 +145,12 @@ describe('screens render with a realistic config', () => {
   });
 
   it('history: sending, not sent, and rejected with a reason behind See why', async () => {
-    const live = { linked_hubs: [{ id: 'h', last_seen: 990 }], now: 1000 };
+    const live = { applied_rev: 'aaaa1111' };
     const a = await boot({ hash: '#/history', statuses: [status(live)] });
     const h1 = await lazyEl(a.app, 'hh-history');
     await vi.waitFor(() => expect(text(h1)).toContain('Sending…'));
     document.body.replaceChildren();
-    const b = await boot({ hash: '#/history', statuses: [status({ linked_hubs: [], now: 1000 })] });
+    const b = await boot({ hash: '#/history', statuses: [status({ connected: false })], linked: [] });
     const h2 = await lazyEl(b.app, 'hh-history');
     await vi.waitFor(() => expect(text(h2)).toContain('Not sent'));
     document.body.replaceChildren();
@@ -158,16 +163,16 @@ describe('screens render with a realistic config', () => {
     await vi.waitFor(() => expect(h3.shadowRoot!.querySelector('#why')?.textContent).toContain('bad key map'));
   });
 
-  it('header shows the hub and whether Home Assistant polls for it', async () => {
-    const { app } = await boot({ statuses: [status({ hub_last_seen: 100, now: 120, linked_hubs: [{ id: 'h', last_seen: 100 }] })] });
+  it('header shows the hub and whether Home Assistant is connected for it', async () => {
+    const { app } = await boot({ statuses: [status()] });
     const hub = app.shadowRoot!.querySelector('header .hub')!;
     expect(hub.textContent).toContain('Hub:');
     expect(hub.textContent).toContain('h');
-    await vi.waitFor(() => expect(hub.textContent).toContain('Linked, polling'));
+    await vi.waitFor(() => expect(hub.textContent).toContain('Linked, connected'));
   });
 
   it('header hub state: not linked at all', async () => {
-    const { app } = await boot({ statuses: [status({ now: 120, linked_hubs: [] })] });
+    const { app } = await boot({ statuses: [status({ connected: false })], linked: [] });
     await vi.waitFor(() => expect(app.shadowRoot!.querySelector('header .hub')!.textContent).toContain('No Home Assistant linked'));
   });
 
@@ -314,62 +319,73 @@ describe('apply dialog', () => {
     expect(store.hasDraft).toBe(false);
   });
 
-  it('moves from waiting to done when the integration acks the applied bundle rev', async () => {
-    const { app, store } = await boot({
-      draft: true,
-      statuses: [status(), status({ acked_rev: 'old00000', result: 'ok' }), status({ acked_rev: 'aaaa1111', result: 'ok' })],
-    });
+  it('moves from waiting to done when a status push carries the ack of the applied bundle rev', async () => {
+    const { app, store, pushStatus } = await boot({ draft: true, statuses: [status()] });
     store.edit((c) => (c.devices![0]!.name = 'Renamed TV'));
     await store.flush();
-    const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean; pollMs: number };
-    dlg.pollMs = 150;
+    const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean };
     dlg.open = true;
     await settle(dlg);
     ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(dlg)).toContain('Sending to the remote (pending)'));
+    pushStatus(status({ acked_rev: 'old00000', result: 'ok' })); // an ack of another rev does not count
+    await settle(dlg);
+    expect(text(dlg)).toContain('(pending)');
+    pushStatus(status({ acked_rev: 'aaaa1111', result: 'ok' }));
     await vi.waitFor(() => expect(text(dlg)).not.toContain('(pending)'));
     expect(text(dlg)).toContain('On the remote');
     expect(text(dlg)).toContain('Done');
   });
 
-  it('after the wait it says Home Assistant has not picked it up, and still completes on a late ack', async () => {
-    const { app, store } = await boot({ draft: true, statuses: [status({ linked: false })] });
+  it('a rejecting ack shows the hub detail', async () => {
+    const { app, store, pushStatus } = await boot({ draft: true });
     store.edit((c) => (c.devices![0]!.name = 'Renamed TV'));
     await store.flush();
-    const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean; pollMs: number; waitMs: number };
-    dlg.pollMs = 10;
-    dlg.waitMs = 30;
+    const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean };
     dlg.open = true;
     await settle(dlg);
     ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(text(dlg)).toContain('Is the Harmony integration set up and linked'));
+    await vi.waitFor(() => expect(text(dlg)).toContain('(pending)'));
+    pushStatus(status({ acked_rev: 'aaaa1111', result: 'error', detail: 'bad key map' }));
+    await vi.waitFor(() => expect(text(dlg)).toContain('bad key map'));
   });
 
-  it('names the hub id when Home Assistant polls for another one, instead of waiting forever', async () => {
-    const st = status({ linked_hubs: [{ id: 'living-room-hub', last_seen: 995 }], now: 1000, hub_last_seen: null });
-    const { app, store } = await boot({ draft: true, statuses: [st] });
+  it('after the UI deadline it says Home Assistant has not picked it up, and still completes on a late ack', async () => {
+    const { app, store, pushStatus } = await boot({ draft: true, statuses: [status({ connected: false })], linked: [] });
     store.edit((c) => (c.devices![0]!.name = 'Renamed TV'));
     await store.flush();
-    const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean; pollMs: number; waitMs: number };
-    dlg.pollMs = 10;
+    const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean; waitMs: number };
     dlg.waitMs = 30;
     dlg.open = true;
     await settle(dlg);
     ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(text(dlg)).toContain('Home Assistant is not polling for this hub (h)'));
+    await vi.waitFor(() => expect(text(dlg)).toContain('No Home Assistant integration is linked'));
+    pushStatus(status({ acked_rev: 'aaaa1111', result: 'ok' }));
+    await vi.waitFor(() => expect(text(dlg)).toContain('On the remote'));
+  });
+
+  it('names the hub id when Home Assistant is linked for another one, instead of waiting forever', async () => {
+    const { app, store } = await boot({ draft: true, statuses: [status({ connected: false })], linked: [{ id: 'living-room-hub', last_seen: 995 }] });
+    store.edit((c) => (c.devices![0]!.name = 'Renamed TV'));
+    await store.flush();
+    const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean; waitMs: number };
+    dlg.waitMs = 30;
+    dlg.open = true;
+    await settle(dlg);
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to hub')) as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(text(dlg)).toContain('not connected for this hub (h)'));
     expect(text(dlg)).toContain('living-room-hub');
   });
 
   it('the app shows applied vs acked after navigation, and the link problem', async () => {
-    const st = status({ linked_hubs: [{ id: 'h', last_seen: 990 }], now: 1000 });
-    const { app } = await boot({ statuses: [st] });
+    const { app } = await boot({ statuses: [status()] });
     await vi.waitFor(() => expect(app.shadowRoot!.querySelector('#link-pending')?.textContent).toContain('Rev 3 is being sent to the remote'));
     expect(app.shadowRoot!.querySelector('#link-problem')).toBeNull();
     document.body.replaceChildren();
-    const stale = await boot({ statuses: [status({ linked_hubs: [{ id: 'h', last_seen: 100 }], now: 1000 })] });
-    await vi.waitFor(() => expect(stale.app.shadowRoot!.querySelector('#link-problem')?.textContent).toContain('not polling for this hub (h)'));
+    const stale = await boot({ statuses: [status({ connected: false })] });
+    await vi.waitFor(() => expect(stale.app.shadowRoot!.querySelector('#link-problem')?.textContent).toContain('not connected for this hub (h)'));
     document.body.replaceChildren();
-    const none = await boot({ statuses: [status({ linked_hubs: [], now: 1000 })] });
+    const none = await boot({ statuses: [status({ connected: false })], linked: [] });
     await vi.waitFor(() => expect(none.app.shadowRoot!.querySelector('#link-problem')?.textContent).toContain('No Home Assistant integration is linked'));
   });
 
@@ -432,5 +448,22 @@ describe('history helpers', () => {
     expect(ago(1000, 1000 + 90000)).toBe('yesterday');
     expect(summarize([])).toBe('No changes to the config');
     expect(summarize([{ kind: 'changed', area: 'Device', label: 'TV' }, { kind: 'added', area: 'Page', label: 'P' }])).toBe('Device TV changed, +1 more');
+  });
+});
+
+describe('no polling', () => {
+  it('an idle editor makes no fetch after boot, and no XHR', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval'] });
+    try {
+      const xhr = vi.spyOn(XMLHttpRequest.prototype, 'send');
+      const { calls } = await boot({ draft: true });
+      await vi.advanceTimersByTimeAsync(1000);
+      const n = calls.length;
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+      expect(calls.length).toBe(n);
+      expect(xhr).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

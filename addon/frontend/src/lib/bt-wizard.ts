@@ -1,5 +1,5 @@
 // Pure state of the pairing wizard: from what the hub last reported and what we asked, what step the user is on.
-// The views poll `bt/status` and call `derive`; nothing here touches the network or the DOM.
+// The views follow the pushed `bt:<hub>` topic and call `derive`; nothing here touches the network or the DOM.
 import type { BtState } from './api';
 
 export interface Run {

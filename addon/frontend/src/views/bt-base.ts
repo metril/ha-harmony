@@ -1,11 +1,10 @@
-// Shared base of the Bluetooth views: polls the hub's Bluetooth status, keeps a clock, loads the add-on's code tables.
+// Shared base of the Bluetooth views: follows the pushed Bluetooth status, redraws a pairing countdown, loads the add-on's code tables.
 import { css, html, nothing, type TemplateResult } from 'lit';
 import { state } from 'lit/decorators.js';
 import { StoreElement } from '../components/base';
 import { statusChip } from '../components/parts';
 import { ApiError, type BtCodes, type BtState, type BtStatus } from '../lib/api';
-import { BT_DOWN, LINK_CHIP, bars, btError } from '../lib/bt-model';
-import { BtPoll } from '../lib/bt-poll';
+import { BT_DOWN, LINK_CHIP, bars, btError, secsLeft, type Countdown } from '../lib/bt-model';
 
 export const btCss = css`
   :host { display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 1040px; width: 100%; margin: 0 auto; }
@@ -75,32 +74,43 @@ export const signal = (rssi: number): TemplateResult => {
   return html`<span class="sig" role="img" aria-label=${`Signal ${['unknown', 'weak', 'fair', 'good', 'strong'][n]}`}>${[1, 2, 3, 4].map((i) => html`<i class=${i <= n ? 'on' : ''}></i>`)}</span>`;
 };
 
-/** Polling, a one-second clock and the code tables for every Bluetooth view. */
+/** The live Bluetooth status (pushed by the add-on), a countdown that redraws only while a pairing window is open, and the code tables. */
 export class BtElement extends StoreElement {
-  protected poll = new BtPoll(this.store.api, this.store.hub);
+  /** the `bt:<hub>` topic; null until its first snapshot */
+  @state() protected status: BtStatus | null = null;
   @state() protected now = Date.now();
   @state() protected codes: BtCodes | null = null;
   @state() protected codesErr = '';
-  private clockTimer?: ReturnType<typeof setInterval>;
-  private onPoll = () => {
-    this.requestUpdate();
-    this.onStatus();
-  };
+  /** the live socket is down (the status shown may be stale) */
+  @state() protected offline = false;
+  protected countdown: Countdown | null = null;
+  private unsub?: () => void;
+  private tickTimer?: ReturnType<typeof setTimeout>;
+  private onConn = () => (this.offline = !this.store.api.live.up);
   /** Called after every status arrives. */
   protected onStatus(): void {}
 
   override connectedCallback(): void {
     super.connectedCallback();
-    this.poll.addEventListener('change', this.onPoll);
-    this.poll.start();
-    this.clockTimer = setInterval(() => (this.now = Date.now()), 1000);
+    const live = this.store.api.live;
+    live.addEventListener('state', this.onConn);
+    this.unsub = live.sub(`bt:${this.store.hub}`, (v) => {
+      this.status = v as BtStatus;
+      this.onStatus();
+    });
     void this.loadCodes();
   }
   override disconnectedCallback(): void {
-    this.poll.removeEventListener('change', this.onPoll);
-    this.poll.stop();
-    clearInterval(this.clockTimer);
+    this.store.api.live.removeEventListener('state', this.onConn);
+    this.unsub?.();
+    clearTimeout(this.tickTimer);
     super.disconnectedCallback();
+  }
+  /** One timeout to the next whole second, and only while a countdown shows: no clock runs otherwise. */
+  protected override updated(): void {
+    clearTimeout(this.tickTimer);
+    const c = this.countdown;
+    if (c && secsLeft(c, Date.now()) > 0) this.tickTimer = setTimeout(() => (this.now = Date.now()), 1000 - ((Date.now() - c.at) % 1000));
   }
   protected async loadCodes(): Promise<void> {
     try {
@@ -111,10 +121,10 @@ export class BtElement extends StoreElement {
     }
   }
   protected get st(): BtStatus | null {
-    return this.poll.status;
+    return this.status;
   }
   protected get bt(): BtState | null {
-    return this.poll.status?.state ?? null;
+    return this.status?.state ?? null;
   }
   protected get hub(): string {
     return this.store.hub;
@@ -134,7 +144,7 @@ export class BtElement extends StoreElement {
   /** Why Bluetooth cannot be used right now, as a banner; nothing when it can. */
   protected downBanner(): TemplateResult | typeof nothing {
     const st = this.st;
-    if (this.poll.error && !st) return html`<div class="banner bad" role="alert"><span><b>Cannot reach the add-on.</b> ${btError(this.poll.error)}</span><span class="sp"></span><button class="btn sm" @click=${() => void this.poll.refresh()}>Retry</button></div>`;
+    if (this.offline && !st) return html`<div class="banner bad" role="alert"><span><b>Cannot reach the add-on.</b> Reconnecting…</span></div>`;
     if (!st || st.status === 'ok') return nothing;
     const d = BT_DOWN[st.status];
     return html`<div class="banner ${st.status === 'unsupported' ? '' : 'ir'}" role="status" id="bt-down"><span><b>${d.title}.</b> ${d.body}</span></div>`;

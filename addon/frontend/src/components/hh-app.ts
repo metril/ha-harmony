@@ -5,7 +5,7 @@ import { icon } from '../lib/icons';
 import { counts } from '../lib/model';
 import { Router, hashFor } from '../lib/router';
 import { shared } from '../lib/styles';
-import { ApiError, type ApplyStatus, type HubsResponse } from '../lib/api';
+import type { ApplyStatus, HubsResponse } from '../lib/api';
 import { hubLabel, hubName, linkInfo, linkProblem, pickHub, rememberHub } from '../lib/hubs';
 import { StoreElement, type ConfirmRequest } from './base';
 import './hh-dialog';
@@ -106,7 +106,7 @@ export class HhApp extends StoreElement {
   @state() private confirm: ConfirmRequest | null = null;
   @state() private hubs: HubsResponse | null = null;
   @state() private link: ApplyStatus | null = null;
-  private linkTimer?: ReturnType<typeof setInterval>;
+  private unsubs: (() => void)[] = [];
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -127,22 +127,14 @@ export class HhApp extends StoreElement {
       e.preventDefault();
       this.confirm = (e as CustomEvent<ConfirmRequest>).detail;
     });
-    void this.loadHubs();
-    void this.loadLink();
-    this.linkTimer = setInterval(() => void this.loadLink(), 15000);
+    // pushed by the add-on: who has linked, and this hub's applied/acked rev and connection
+    const live = this.store.api.live;
+    this.unsubs = [live.sub('hubs', (v) => (this.hubs = v as HubsResponse)), live.sub(`hub:${this.store.hub}`, (v) => (this.link = v as ApplyStatus))];
   }
   override disconnectedCallback(): void {
-    clearInterval(this.linkTimer);
+    for (const u of this.unsubs) u();
+    this.unsubs = [];
     super.disconnectedCallback();
-  }
-
-  /** Applied vs acked rev and whether Home Assistant polls for this hub: visible after navigating away from the apply dialog. */
-  private async loadLink() {
-    try {
-      this.link = await this.store.api.applyStatus(this.store.hub);
-    } catch {
-      /* transient */
-    }
   }
 
   private goHub(hub: string) {
@@ -161,14 +153,6 @@ export class HhApp extends StoreElement {
     }
   }
 
-  private async loadHubs() {
-    try {
-      this.hubs = await this.store.api.hubs();
-    } catch (e) {
-      if (!(e instanceof ApiError)) throw e; // endpoint not there yet: single hub
-    }
-  }
-
   private answer(yes: boolean) {
     this.confirm?.resolve(yes);
     this.confirm = null;
@@ -179,14 +163,14 @@ export class HhApp extends StoreElement {
     return ids.includes(this.store.hub) ? ids : [this.store.hub, ...ids];
   }
 
-  /** Always-visible "Hub: id" with whether Home Assistant is polling for it; a switcher when several hubs exist. */
+  /** Always-visible "Hub: id" with whether Home Assistant is connected for it; a switcher when several hubs exist. */
   private hubIndicator() {
     const s = this.store;
-    const info = linkInfo(this.link, s.hub);
+    const info = linkInfo(this.hubs, this.link, s.hub);
     const state: Record<string, [string, string, string]> = {
-      polling: ['ok', 'Linked, polling', 'Home Assistant is polling for this hub.'],
-      stale: ['ir', 'Not polling', 'Home Assistant is not polling for this hub right now.'],
-      other: ['ir', 'Not polling', 'Home Assistant polls for a different hub id.'],
+      connected: ['ok', 'Linked, connected', 'Home Assistant is connected for this hub.'],
+      offline: ['ir', 'Not connected', 'Home Assistant is not connected for this hub right now.'],
+      other: ['ir', 'Not connected', 'Home Assistant is linked for a different hub id.'],
       none: ['', 'No Home Assistant linked', 'No Home Assistant integration is linked to this add-on yet.'],
     };
     const st = state[info.kind];
@@ -209,9 +193,9 @@ export class HhApp extends StoreElement {
     const out = [];
     const adopt = this.hubs?.adopt;
     if (adopt)
-      out.push(html`<div class="banner ir" role="status"><span>The config under "${adopt.from}" is not the id Home Assistant polls for. Move it to:</span><span class="sp"></span>
+      out.push(html`<div class="banner ir" role="status"><span>The config under "${adopt.from}" is not the id Home Assistant is linked for. Move it to:</span><span class="sp"></span>
         ${adopt.to.map((id) => html`<button class="btn sm" @click=${() => void this.adopt(id)}>${id}</button>`)}</div>`);
-    const info = linkInfo(this.link, s.hub);
+    const info = linkInfo(this.hubs, this.link, s.hub);
     const problem = linkProblem(info, s.hub);
     if (problem) out.push(html`<div class="banner ir" role="status" id="link-problem">${problem}</div>`);
     const l = this.link;

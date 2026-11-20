@@ -63,11 +63,19 @@ export function meters(store: Store): TemplateResult {
 export function ago(sec: number | null, nowMs = Date.now()): string {
   if (sec == null) return '';
   const d = Math.max(0, Math.round(nowMs / 1000 - sec));
-  if (d < 5) return 'just now';
-  if (d < 60) return `${d} s ago`;
+  if (d < 60) return 'just now';
   if (d < 3600) return `${Math.floor(d / 60)} min ago`;
   if (d < 86400) return `${Math.floor(d / 3600)} h ago`;
   return new Date(sec * 1000).toLocaleDateString();
+}
+/** Milliseconds until `ago(sec)` reads differently (so a view can re-render once then, instead of on a clock). */
+export function agoChangeIn(sec: number | null, nowMs = Date.now()): number | null {
+  if (sec == null) return null;
+  const d = Math.max(0, nowMs / 1000 - sec);
+  if (d >= 86400) return null;
+  const unit = d < 60 ? 60 : d < 3600 ? 60 : 3600;
+  const next = d < 60 ? 60 : (Math.floor(d / unit) + 1) * unit;
+  return Math.max(1000, Math.ceil((next - d) * 1000));
 }
 export function when(sec: number): string {
   return new Date(sec * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });

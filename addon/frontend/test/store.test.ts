@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../src/lib/store';
 import { META, USAGE, fakeApi, previewBad, previewOk, tvConfig, type Handler } from './helpers';
+import { fakeLive } from './fake-ws';
 
 const draftResp = { hub: 'h', draft_updated: 1_700_000_100, ...META };
 function setup(over: Record<string, Handler> = {}, draft: unknown = null) {
@@ -219,5 +220,20 @@ describe('unsaved edits survive a reload', () => {
     await b.store.load();
     expect(b.store.stashed).toBeNull();
     expect(sessionStorage.getItem('hh-unsaved:h')).toBeNull();
+  });
+});
+
+describe('store and the live socket', () => {
+  it('loading and saving a draft opens no live socket (only views that show pushed state subscribe)', async () => {
+    const { api } = fakeApi({
+      'GET api/v1/config': () => ({ body: { hub: 'h', draft: { config: tvConfig(), updated: 1 }, ...META } }),
+      'POST api/v1/config/preview': () => ({ body: previewOk() }),
+      'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 2, ...META } }),
+    });
+    const s = new Store(api, 'h', 5);
+    await s.load();
+    s.edit((c) => (c.devices![0]!.name = 'X'));
+    await s.flush();
+    expect(fakeLive.sockets).toHaveLength(0);
   });
 });

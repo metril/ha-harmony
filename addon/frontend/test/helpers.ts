@@ -65,4 +65,4 @@ export const USAGE = {
 };
 export const previewOk = (over: object = {}) => ({ ok: true, hash: 'cafebabe', errors: [], missing_pages: [], pages: [], usage: USAGE, ...over });
 export const previewBad = (errors: unknown[]) => ({ ok: false, hash: null, errors, missing_pages: [], pages: [], usage: null });
-export const status = (over: object = {}) => ({ hub: 'h', applied_rev: 'aaaa1111', acked_rev: null, result: null, detail: null, acked_at: null, linked: true, last_seen: 1, ...over });
+export const status = (over: object = {}) => ({ hub: 'h', applied_rev: 'aaaa1111', acked_rev: null, result: null, detail: null, acked_at: null, connected: true, connected_at: 1, remotes: [], theme_notices: [], now: 1000, ...over });

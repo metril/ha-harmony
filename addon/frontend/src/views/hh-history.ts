@@ -1,6 +1,6 @@
 import { css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { ApiError, type ApplyStatus } from '../lib/api';
+import { ApiError, type ApplyStatus, type HubsResponse } from '../lib/api';
 import { diffConfig, type DiffRow } from '../lib/diff';
 import type { Config } from '../lib/model';
 import { linkInfo, linkProblem } from '../lib/hubs';
@@ -63,13 +63,21 @@ export class HhHistory extends StoreElement {
   @state() private sums: Record<number, string> = {};
   /** whether Home Assistant has taken the current version */
   @state() private link: ApplyStatus | null = null;
+  @state() private hubs: HubsResponse | null = null;
+  private unsubs: (() => void)[] = [];
   @state() private why = false;
   private sumKey = '';
 
   override connectedCallback(): void {
     super.connectedCallback();
     void this.loadSummaries();
-    this.store.api.applyStatus(this.store.hub).then((l) => (this.link = l), () => undefined);
+    const live = this.store.api.live;
+    this.unsubs = [live.sub('hubs', (v) => (this.hubs = v as HubsResponse)), live.sub(`hub:${this.store.hub}`, (v) => (this.link = v as ApplyStatus))];
+  }
+  override disconnectedCallback(): void {
+    for (const u of this.unsubs) u();
+    this.unsubs = [];
+    super.disconnectedCallback();
   }
   protected override updated(): void {
     void this.loadSummaries();
@@ -160,7 +168,7 @@ export class HhHistory extends StoreElement {
       return html`${statusChip('bad', 'Rejected by hub', { title: l.detail ?? undefined })}
         <button class="btn sm" aria-expanded=${this.why} aria-controls="why" @click=${() => (this.why = !this.why)}>See why</button>`;
     if (acked) return statusChip('ok', 'On the remote', { check: true });
-    const info = linkInfo(l, hub);
+    const info = linkInfo(this.hubs, l, hub);
     if (info.kind === 'none') return statusChip('', 'Not sent', { title: linkProblem(info, hub) ?? undefined });
     return statusChip('', 'Sending…', { title: linkProblem(info, hub) ?? 'Waiting for Home Assistant to pick it up.' });
   }

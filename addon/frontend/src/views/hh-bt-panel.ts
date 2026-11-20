@@ -5,7 +5,7 @@ import './hh-bt-test';
 import { confirmAction } from '../components/base';
 import { statusChip } from '../components/parts';
 import type { BtHost, BtRemote } from '../lib/api';
-import { CmdId, LINK_CHIP, btDevices, btError, clock, limitText, nextCountdown, remotesOf, sameAddr, secsLeft, type Countdown } from '../lib/bt-model';
+import { CmdId, LINK_CHIP, btDevices, btError, clock, limitText, nextCountdown, remotesOf, sameAddr, secsLeft } from '../lib/bt-model';
 import { commandNames } from '../lib/bt';
 import { hashFor } from '../lib/router';
 import { icon } from '../lib/icons';
@@ -17,7 +17,6 @@ export class HhBtPanel extends BtElement {
   static override styles = [shared, btCss];
   @state() private busy = '';
   @state() private notes: Record<string, string> = {};
-  private countdown: Countdown | null = null;
   private cForget = new CmdId();
 
   protected override onStatus(): void {
@@ -42,7 +41,6 @@ export class HhBtPanel extends BtElement {
       this.notes = { ...this.notes, [e.addr]: btError(err) };
     } finally {
       this.busy = '';
-      void this.poll.refresh();
     }
   }
   private async stopWindow() {
@@ -51,7 +49,6 @@ export class HhBtPanel extends BtElement {
     } catch (err) {
       this.store.toast(btError(err), 'error');
     }
-    void this.poll.refresh();
   }
 
   private hostRow(h: BtHost) {
@@ -63,7 +60,7 @@ export class HhBtPanel extends BtElement {
       <div class="who"><b title=${label}>${label}</b>
         <div class="meta">
           ${statusChip(h.connected ? 'ok' : '', h.connected ? 'Connected' : 'Not connected', { check: h.connected })}
-          <span class="chip">${h.transport === 'le' ? 'Bluetooth LE' : 'Classic'}</span>
+          <span class="chip">${h.transport === 'le' ? 'Bluetooth LE' : 'Bluetooth BR/EDR'}</span>
           ${cfg ? html`<a class="chip acc" href=${hashFor('devices', cfg.id)} aria-label="Open ${label} in Devices">In your config</a>` : statusChip('ir', 'Not in your config')}
           <span class="mono">${h.addr}</span></div></div>
       <div class="acts">
@@ -107,7 +104,7 @@ export class HhBtPanel extends BtElement {
     const adds = (cls: string) => html`${add('host', cls, 'Add Bluetooth device')}${add('remote', '', 'Add Bluetooth remote')}`;
     return html`
       <div class="head"><h1>Bluetooth</h1>${this.linkChip()}${ok ? html`<span class="muted">${limitText(st)}</span>` : nothing}<span class="sp"></span>${ok ? adds('pri') : nothing}</div>
-      ${!st && !this.poll.error ? html`<p class="muted" role="status">Checking Bluetooth…</p>` : nothing}
+      ${!st && !this.offline ? html`<p class="muted" role="status">Checking Bluetooth…</p>` : nothing}
       ${this.downBanner()}
       ${ok && link && s && s.state !== 'ready' ? html`<div class="banner ${link.tone === 'bad' ? 'bad' : 'ir'}" role="status"><span>${link.help}</span></div>` : nothing}
       ${ok && s?.window

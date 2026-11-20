@@ -1,6 +1,6 @@
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { ApiError, type ApplyStatus } from '../lib/api';
+import { ApiError, type ApplyStatus, type HubsResponse } from '../lib/api';
 import { linkInfo, linkProblem } from '../lib/hubs';
 import { icon } from '../lib/icons';
 import { shared } from '../lib/styles';
@@ -31,33 +31,46 @@ export class HhApplyDialog extends StoreElement {
     `,
   ];
   @property({ type: Boolean }) open = false;
-  @property({ type: Number }) pollMs = 2000;
   @property({ type: Number }) waitMs = 30000;
   @state() private phase: 'review' | 'applying' | 'done' | 'error' = 'review';
   @state() private rev = 0;
   @state() private message = '';
   @state() private ack: 'unknown' | 'waiting' | 'ok' | 'error' | 'timeout' = 'unknown';
-  @state() private linked = true;
   @state() private lastStatus: ApplyStatus | null = null;
+  @state() private hubs: HubsResponse | null = null;
   /** what the linked remote's firmware cannot show of the draft's colours (non-blocking; from the app's link status) */
   @property({ attribute: false }) themeMsgs: string[] = [];
-  private pollTimer?: ReturnType<typeof setTimeout>;
+  private deadline?: ReturnType<typeof setTimeout>;
+  private unsubs: (() => void)[] = [];
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    const live = this.store.api.live;
+    this.unsubs = [
+      live.sub('hubs', (v) => (this.hubs = v as HubsResponse)),
+      live.sub(`hub:${this.store.hub}`, (v) => {
+        this.lastStatus = v as ApplyStatus;
+        this.check();
+      }),
+    ];
+  }
 
   override willUpdate(changed: Map<string, unknown>): void {
     if (changed.has('open') && this.open) {
       this.phase = 'review';
       this.message = '';
       this.ack = 'unknown';
-      this.linked = true;
     }
   }
   override disconnectedCallback(): void {
-    clearTimeout(this.pollTimer);
+    clearTimeout(this.deadline);
+    for (const u of this.unsubs) u();
+    this.unsubs = [];
     super.disconnectedCallback();
   }
 
   private close() {
-    clearTimeout(this.pollTimer);
+    clearTimeout(this.deadline);
     this.dispatchEvent(new Event('hh-close', { bubbles: true, composed: true }));
   }
 
@@ -67,7 +80,12 @@ export class HhApplyDialog extends StoreElement {
       this.rev = await this.store.applyDraft();
       this.phase = 'done';
       this.ack = 'waiting';
-      void this.poll(Date.now());
+      this.check();
+      // a UI deadline only (nothing is polled): after waitMs we say Home Assistant has not picked it up, the ack can still arrive
+      clearTimeout(this.deadline);
+      this.deadline = setTimeout(() => {
+        if (this.ack === 'waiting') this.ack = 'timeout';
+      }, this.waitMs);
     } catch (e) {
       if (e instanceof ApiError && e.status === 422) {
         this.close();
@@ -80,31 +98,16 @@ export class HhApplyDialog extends StoreElement {
     }
   }
 
-  /**
-   * Polls config/status. The integration has taken the bundle when acked_rev equals applied_rev
-   * (both are bundle hashes); result says whether it worked. After waitMs we say Home Assistant has
-   * not picked it up yet but keep polling quietly: the ack can still arrive.
-   */
-  private async poll(started: number): Promise<void> {
-    if (this.phase !== 'done' || this.ack === 'ok' || this.ack === 'error') return;
-    try {
-      const s = await this.store.api.applyStatus(this.store.hub);
-      this.linked = s.linked;
-      this.lastStatus = s;
-      if (s.applied_rev !== null && s.acked_rev === s.applied_rev && s.result === 'ok') {
-        this.ack = 'ok';
-        return;
-      }
-      if (s.applied_rev !== null && s.acked_rev === s.applied_rev && s.result === 'error') {
-        this.ack = 'error';
-        this.message = s.detail ?? 'The hub rejected the config.';
-        return;
-      }
-    } catch {
-      /* transient: try again */
+  /** The integration has taken the bundle when acked_rev equals applied_rev (both are bundle hashes); result says whether it worked. */
+  private check(): void {
+    const s = this.lastStatus;
+    if (this.phase !== 'done' || (this.ack !== 'waiting' && this.ack !== 'timeout') || !s || s.applied_rev === null || s.acked_rev !== s.applied_rev) return;
+    clearTimeout(this.deadline);
+    if (s.result === 'ok') this.ack = 'ok';
+    else if (s.result === 'error') {
+      this.ack = 'error';
+      this.message = s.detail ?? 'The hub rejected the config.';
     }
-    if (this.ack !== 'timeout' && Date.now() - started >= this.waitMs) this.ack = 'timeout';
-    this.pollTimer = setTimeout(() => void this.poll(started), this.pollMs);
   }
 
   private async revertPrevious() {
@@ -163,8 +166,8 @@ export class HhApplyDialog extends StoreElement {
       ${this.ack === 'waiting' ? html`<p class="muted">You can close this: the add-on has saved the config, and the rest happens in the background.</p>` : nothing}
       ${this.ack === 'timeout'
         ? html`<div class="banner ir" role="status">Rev ${this.rev} is saved but not on the remote yet.
-            ${linkProblem(linkInfo(this.lastStatus, s.hub), s.hub) ??
-            (this.linked
+            ${linkProblem(linkInfo(this.hubs, this.lastStatus, s.hub), s.hub) ??
+            (this.lastStatus?.connected
               ? 'Home Assistant has not picked it up yet. It will be sent as soon as the integration is connected.'
               : 'Home Assistant has not picked it up yet. Is the Harmony integration set up and linked to this add-on?')}</div>`
         : nothing}
