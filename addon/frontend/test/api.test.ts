@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Api, ApiError, DraftQueue, haEntitiesOrNull } from '../src/lib/api';
 import { META, fakeApi, previewBad } from './helpers';
+import { fakeLive } from './fake-ws';
 
 describe('api client', () => {
   it('builds relative URLs under the ingress base path', async () => {
@@ -137,5 +138,13 @@ describe('draft queue', () => {
     const err = await q.enqueue({}).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.isConflict).toBe(true);
+  });
+});
+
+describe('no polling endpoints', () => {
+  it('the client has no status, events or listen calls, and the live socket opens only on subscribe', () => {
+    const api = new Api('https://ha.example/x/', (async () => new Response('{}')) as never) as unknown as Record<string, unknown>;
+    for (const name of ['applyStatus', 'btStatus', 'btEvents', 'btListen']) expect(api[name]).toBeUndefined();
+    expect(fakeLive.sockets).toHaveLength(0);
   });
 });

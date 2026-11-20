@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { ApiError, type Api, type BtCodes } from '../lib/api';
-import { btError, dropRowKey, hidCode, isMapped, keyOptions, keyRows, keyText, nameOfUsage, pageName, parseHid, setRowKey, type KeyMap, type KeyRow } from '../lib/bt-model';
+import type { Api, BtCodes } from '../lib/api';
+import { dropRowKey, hidCode, isMapped, keyOptions, keyRows, keyText, nameOfUsage, pageName, parseHid, setRowKey, type KeyMap, type KeyRow } from '../lib/bt-model';
 import { shared } from '../lib/styles';
 
 interface Pressed {
@@ -64,80 +64,35 @@ export class HhBtKeys extends LitElement {
   @state() private seen: Pressed[] = [];
   @state() private assign = '';
   @state() private err = '';
-  private seq = 0;
-  private timer?: ReturnType<typeof setTimeout>;
+  private unsub?: () => void;
 
-  private disposed = false;
-  override connectedCallback(): void {
-    this.disposed = false;
-    super.connectedCallback();
-  }
   override disconnectedCallback(): void {
-    this.disposed = true; // every await below checks it: a start still in flight ends by turning the listen lease off
-    clearTimeout(this.timer);
-    this.learning = false;
-    void this.listenOff();
+    this.stopLearn(); // dropping the `keys:` subscription is the end of the listen lease
     super.disconnectedCallback();
-  }
-  private async listenOff() {
-    try {
-      await this.api.btListen(this.hub, false);
-    } catch {
-      /* the lease lapses by itself after 30 s */
-    }
   }
   private emit(v: KeyMap) {
     this.dispatchEvent(new CustomEvent<KeyMap>('change', { detail: v }));
   }
 
   // ------------------------------------------------------------ learn mode
-  private async startLearn() {
+  /** Subscribing to `keys:<hub>` is the listen lease: the add-on tells the hub to listen while someone is subscribed. */
+  private startLearn() {
     this.err = '';
-    try {
-      await this.api.btListen(this.hub, true);
-      if (this.gone()) return void this.listenOff();
-      const last = (await this.api.btEvents(this.hub, 0)).last; // skip what is already in the ring
-      if (this.gone()) return void this.listenOff();
-      this.seq = last;
-      this.learning = true;
-      this.pressed = null;
-      this.timer = setTimeout(() => void this.poll(), 600);
-    } catch (e) {
-      if (this.gone()) return void this.listenOff();
-      this.err = btError(e);
-    }
+    if (this.learning) return;
+    this.learning = true;
+    this.pressed = null;
+    this.unsub = this.api.live.sub(`keys:${this.hub}`, (v) => this.onKey(v as { slot: number; page: number; usage: number; down: boolean }));
   }
-  private gone(): boolean {
-    return this.disposed || !this.isConnected;
+  private onKey(ev: { slot: number; page: number; usage: number; down: boolean }) {
+    if (!this.learning || !ev.down || (this.peer !== null && ev.slot !== this.peer)) return;
+    this.pressed = { page: ev.page, usage: ev.usage };
+    this.assign = '';
+    if (!this.seen.some((s) => s.page === ev.page && s.usage === ev.usage)) this.seen = [...this.seen, { page: ev.page, usage: ev.usage }].slice(-12);
   }
-  private async stopLearn() {
-    clearTimeout(this.timer);
-    if (!this.learning) return;
+  private stopLearn() {
+    this.unsub?.();
+    this.unsub = undefined;
     this.learning = false;
-    await this.listenOff();
-  }
-  private async poll() {
-    if (!this.learning || this.gone()) return;
-    try {
-      const r = await this.api.btEvents(this.hub, this.seq);
-      if (this.gone() || !this.learning) return;
-      this.seq = r.last;
-      for (const ev of r.events) {
-        if (!ev.down || (this.peer !== null && ev.slot !== this.peer)) continue;
-        this.pressed = { page: ev.page, usage: ev.usage };
-        this.assign = '';
-        if (!this.seen.some((s) => s.page === ev.page && s.usage === ev.usage)) this.seen = [...this.seen, { page: ev.page, usage: ev.usage }].slice(-12);
-      }
-      if (!r.listening) {
-        await this.api.btListen(this.hub, true);
-        if (this.gone() || !this.learning) return void this.listenOff();
-      }
-    } catch (e) {
-      if (this.gone() || !this.learning) return;
-      this.err = btError(e);
-      if (e instanceof ApiError && e.code !== 'hub_timeout') return void (this.learning = false);
-    }
-    if (this.learning && !this.gone()) this.timer = setTimeout(() => void this.poll(), 700);
   }
 
   // ------------------------------------------------------------ edits
@@ -187,7 +142,7 @@ export class HhBtKeys extends LitElement {
         <h3>Press a button on the remote</h3>
         <p>${this.learning ? 'Listening. Press any button on the remote; it appears here.' : 'Not sure which usage a button sends? Start listening, press it, then choose its key.'}</p>
         <div class="row">
-          ${this.learning ? html`<button class="btn" @click=${() => void this.stopLearn()}>Stop listening</button><span class="pulse" aria-hidden="true"></span>` : html`<button class="btn pri" @click=${() => void this.startLearn()}>Learn a button</button>`}
+          ${this.learning ? html`<button class="btn" @click=${() => this.stopLearn()}>Stop listening</button><span class="pulse" aria-hidden="true"></span>` : html`<button class="btn pri" @click=${() => this.startLearn()}>Learn a button</button>`}
         </div>
         <div role="status" aria-live="polite">
           ${p

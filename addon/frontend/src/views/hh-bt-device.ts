@@ -48,7 +48,7 @@ export class HhBtDevice extends BtElement {
         ${free.length ? html`<label class="f">Use a paired device<select aria-label="Pick a paired device" @change=${(e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) this.patch({ address: v }); (e.target as HTMLSelectElement).value = ''; }}><option value="">Choose…</option>${free.map((h) => html`<option value=${h.addr}>${h.name ?? 'Unnamed device'} · ${h.addr}</option>`)}</select></label>` : nothing}
         <label class="f">Link type
           <select aria-label="Link type" @change=${(e: Event) => this.patch({ transport: (e.target as HTMLSelectElement).value as 'auto' | 'classic' | 'le' })}>
-            ${(['auto', 'classic', 'le'] as const).map((t) => html`<option value=${t} ?selected=${(d.transport ?? 'auto') === t}>${{ auto: 'Automatic', classic: 'Classic Bluetooth', le: 'Bluetooth LE' }[t]}</option>`)}</select></label>
+            ${(['auto', 'classic', 'le'] as const).map((t) => html`<option value=${t} ?selected=${(d.transport ?? 'auto') === t}>${{ auto: 'Automatic', classic: 'Bluetooth BR/EDR', le: 'Bluetooth LE' }[t]}</option>`)}</select></label>
       </section>
       <section class="card" aria-label="Test a command">
         <hh-bt-test .api=${this.store.api} hub=${this.hub} .peer=${live?.slot ?? null} .codes=${this.codes} .commands=${this.cmdMap()} label=${d.name ?? d.id} ?disabled=${!live?.connected} reason=${live ? 'Not connected right now. Wake the device and make sure its Bluetooth is on.' : ''}></hh-bt-test>

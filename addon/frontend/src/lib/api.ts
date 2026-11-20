@@ -1,5 +1,6 @@
 // Typed client for the add-on API. All URLs are relative to document.baseURI (ingress prefix).
 import type { Config, Device, IrAction, ValidationError } from './model';
+import { Live } from './live';
 
 export interface Meta {
   applied: { rev: number; at: number; hash: string } | null;
@@ -111,7 +112,7 @@ export interface Preview {
   pages: PreviewPage[];
   usage: Usage | null;
 }
-/** config/status: the integration has applied the bundle once acked_rev === applied_rev. */
+/** The `hub:<id>` live topic: the integration has applied the bundle once acked_rev === applied_rev. */
 export interface ApplyStatus {
   hub: string;
   applied_rev: string | null;
@@ -119,11 +120,9 @@ export interface ApplyStatus {
   result: 'ok' | 'error' | null;
   detail: string | null;
   acked_at: number | null;
-  linked: boolean;
-  last_seen: number | null;
-  /** when an integration last polled for THIS hub id (older add-ons omit the three fields below) */
-  hub_last_seen?: number | null;
-  linked_hubs?: { id: string; last_seen: number; name?: string }[];
+  /** the integration's channel for this hub is open */
+  connected: boolean;
+  connected_at?: number | null;
   /** add-on clock, unix seconds */
   now?: number;
   /** what the linked remote's firmware cannot show (colours / custom themes), when the integration reports it */
@@ -301,18 +300,11 @@ export interface BtStatus {
   state: BtState | null;
   limits: BtLimits | null;
   listening: boolean;
-  age_s: number | null;
 }
 export interface BtCodes {
   builtins: { name: string; page: number; usage: number; default: boolean }[];
   remote_keys: { name: string; page: number; usage: number; key: string }[];
   keys: string[];
-}
-export interface BtEvents {
-  events: { seq: number; slot: number; page: number; usage: number; down: boolean; t: number }[];
-  last: number;
-  listening: boolean;
-  dropped: boolean;
 }
 
 export const KEEPALIVE_MAX = 60 * 1024;
@@ -345,6 +337,11 @@ type Fetch = typeof fetch;
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export class Api {
+  private _live?: Live;
+  /** the one editor WebSocket (opens when something subscribes) */
+  get live(): Live {
+    return (this._live ??= new Live(() => this.href('api/v1/live').replace(/^http/, 'ws')));
+  }
   constructor(
     private base: string = document.baseURI,
     private doFetch: Fetch = (...a) => fetch(...a),
@@ -445,7 +442,6 @@ export class Api {
       headers: rev != null ? { 'If-Match': String(rev) } : {},
     });
   exportUrl = (hub: string, source?: 'draft' | 'applied') => this.href('api/v1/config/export_yaml', { hub, source });
-  applyStatus = (hub: string) => this.request<ApplyStatus>('GET', 'api/v1/config/status', { query: { hub } });
   /** 503 ha_unavailable means Home Assistant cannot be read; callers fall back to typed ids. */
   haEntities = (domain?: string, diagnostic = false, state = false) =>
     this.request<HaCatalog>('GET', 'api/v1/ha/entities', { query: { domain, diagnostic: diagnostic ? '1' : undefined, state: state ? '1' : undefined } });
@@ -460,7 +456,6 @@ export class Api {
   irParse = (kind: 'pronto' | 'flipper' | 'smartir', text: string) =>
     this.request<IrParsed>('POST', 'api/v1/ir/parse', { body: { kind, text } });
   // Bluetooth relay (docs/addon-api.md "Bluetooth relay"). Commands answer once the integration has run them on the hub.
-  btStatus = (hub: string) => this.request<BtStatus>('GET', 'api/v1/bt/status', { query: { hub } });
   btCodes = () => this.request<BtCodes>('GET', 'api/v1/bt/codes');
   // `cmdId` is one id per user action: re-send the same one when retrying after a timeout so the command never runs twice.
   btPair = (hub: string, mode: 'host' | 'remote', transport: 'any' | 'classic' | 'le' = 'any', secs = 120, cmdId?: string) =>
@@ -471,8 +466,6 @@ export class Api {
     this.request<{ ok: true }>('POST', 'api/v1/bt/forget', { body: { hub, slot, kind, ...(cmdId ? { cmd_id: cmdId } : {}) } });
   btKey = (hub: string, slot: number, page: number, usage: number, action: 'down' | 'up' | 'press' = 'press', cmdId?: string) =>
     this.request<{ ok: true }>('POST', 'api/v1/bt/key', { body: { hub, slot, page, usage, action, ...(cmdId ? { cmd_id: cmdId } : {}) } });
-  btListen = (hub: string, on: boolean) => this.request<{ ok: true; listening: boolean }>('POST', 'api/v1/bt/listen', { body: { hub, on } });
-  btEvents = (hub: string, after: number) => this.request<BtEvents>('GET', 'api/v1/bt/events', { query: { hub, after: String(after) } });
   /** Fire one inline code through Home Assistant. 429 carries retry_after_ms. */
   irTest = (hub: string, ir: IrAction, portMask?: number) =>
     this.request<{ ok: true; action: IrAction }>('POST', 'api/v1/ir/test', {

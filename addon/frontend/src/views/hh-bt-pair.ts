@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { signal, BtElement, btCss } from './bt-base';
 import './hh-bt-commands';
 import './hh-bt-keys';
-import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, clock, outcome, remoteNameProblem, remotesOf, secsLeft, nextCountdown, sameAddr, type Countdown } from '../lib/bt-model';
+import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, clock, outcome, remoteNameProblem, remotesOf, secsLeft, nextCountdown, sameAddr } from '../lib/bt-model';
 import { announce, derive, observe, startRun, type Phase, type Run } from '../lib/bt-wizard';
 import { byteCounter, trimBytes } from '../lib/codes';
 import { capProblem } from '../lib/device-edit';
@@ -34,12 +34,14 @@ export class HhBtPair extends BtElement {
   private cStart = new CmdId();
   private cStop = new CmdId();
   private cPick = new CmdId();
-  private countdown: Countdown | null = null;
   private focusKey = '';
   private defaultsApplied = false;
 
   override disconnectedCallback(): void {
-    if (this.step === 'pair' && this.run) this.closeWindow();
+    // Only leaving the page stops the window: a re-parent or re-render disconnects and reconnects in the same task.
+    queueMicrotask(() => {
+      if (!this.isConnected && this.step === 'pair' && this.run) this.closeWindow();
+    });
     super.disconnectedCallback();
   }
   protected override willUpdate(): void {
@@ -84,14 +86,14 @@ export class HhBtPair extends BtElement {
   private async start() {
     this.err = '';
     this.busy = true;
+    const baseline = this.bt; // what the hub held before this window: the pair answer may already list the new state
     try {
       const r = await this.store.api.btPair(this.hub, this.mode, this.mode === 'host' ? this.transport : 'le', 120, this.cStart.id('pair', { mode: this.mode, transport: this.mode === 'host' ? this.transport : 'le' }));
       this.cStart.settle();
       if (!this.isConnected) return void this.closeWindow(); // left while the request was in flight: the hub opened a window nobody watches
-      this.run = startRun(this.mode, r.state ?? this.bt, Date.now());
+      this.run = startRun(this.mode, baseline ?? r.state, Date.now());
       this.countdown = null;
       this.step = 'pair';
-      void this.poll.refresh();
     } catch (e) {
       this.cStart.settle(e);
       if (!this.isConnected) return void this.closeWindow(); // a timeout may still have opened it
@@ -113,7 +115,6 @@ export class HhBtPair extends BtElement {
     }
     this.run = null;
     this.step = 'start';
-    void this.poll.refresh();
   }
   private async pick(addr: string) {
     if (!this.run) return;
@@ -130,7 +131,6 @@ export class HhBtPair extends BtElement {
       this.err = btError(e);
     } finally {
       this.picking = '';
-      void this.poll.refresh();
     }
   }
   private retry() {
@@ -179,7 +179,7 @@ export class HhBtPair extends BtElement {
       <div class="stage">
         ${host && le
           ? html`<fieldset class="opts bare"><legend class="vh">Connection type</legend>
-              ${(['any', 'classic', 'le'] as const).map((t) => html`<label class="opt"><input type="radio" name="tr" .checked=${this.transport === t} @change=${() => (this.transport = t)} /><b>${{ any: 'Any (recommended)', classic: 'Classic Bluetooth', le: 'Bluetooth LE' }[t]}</b><small>${{ any: 'Let the device choose. Works with almost everything.', classic: 'For older TVs, boxes and speakers.', le: 'For phones and newer devices that look for low-energy keyboards.' }[t]}</small></label>`)}</fieldset>`
+              ${(['any', 'classic', 'le'] as const).map((t) => html`<label class="opt"><input type="radio" name="tr" .checked=${this.transport === t} @change=${() => (this.transport = t)} /><b>${{ any: 'Automatic (recommended)', classic: 'Bluetooth BR/EDR', le: 'Bluetooth LE' }[t]}</b><small>${{ any: 'Let the device choose. Works with almost everything.', classic: 'For older TVs, boxes and speakers.', le: 'For phones and newer devices that look for low-energy keyboards.' }[t]}</small></label>`)}</fieldset>`
           : nothing}
         ${host ? nothing : html`<p class="hint narrow">Put the remote in pairing mode first (usually hold its Home and Back buttons, or a pairing button, until the light blinks). Bluetooth LE remotes only.</p>`}
         <button class="btn pri" ?disabled=${!!block || this.busy} @click=${() => void this.start()}>${this.busy ? 'Opening…' : host ? 'Start pairing' : 'Scan for remotes'}</button>
@@ -224,7 +224,7 @@ export class HhBtPair extends BtElement {
     const slot = (host ? this.bt?.hosts : this.bt?.remotes)?.find((e) => sameAddr(e.addr, p.addr))?.slot ?? null;
     const dup = host ? (this.store.config.devices ?? []).find((d) => d.kind === 'bt' && sameAddr(d.address, p.addr)) : remotesOf(this.store.config).find((r) => sameAddr(r.address, p.addr));
     return html`<h1 id="step-title" tabindex="-1">${host ? 'Name it and choose its commands' : 'Choose what its buttons do'}</h1>
-      <p class="lead">${outcome('ok', host ? 'device' : 'remote', p.name).title}. <span class="mono">${p.addr}</span>${p.transport ? ` · ${p.transport === 'le' ? 'Bluetooth LE' : 'Classic'}` : ''}</p>
+      <p class="lead">${outcome('ok', host ? 'device' : 'remote', p.name).title}. <span class="mono">${p.addr}</span>${p.transport ? ` · ${p.transport === 'le' ? 'Bluetooth LE' : 'Bluetooth BR/EDR'}` : ''}</p>
       ${dup ? html`<div class="banner ir" role="status">This address is already in your config${'name' in dup && dup.name ? ` as ${dup.name}` : ''}. Adding it again creates a second entry.</div>` : nothing}
       <div class="twocol">
         <div class="form">

@@ -145,14 +145,15 @@ describe('hub selection', () => {
     expect([c.hub, c.anyLinked]).toEqual(['default', false]);
     expect(pickHub('?hub=../x', null).hub).toBe('default');
   });
-  it('link info: none, other, stale, polling', () => {
-    const s = (linked_hubs: { id: string; last_seen: number }[]) => ({ linked_hubs, now: 1000 }) as never;
-    expect(linkInfo(s([]), 'h').kind).toBe('none');
-    expect(linkInfo(s([{ id: 'x', last_seen: 999 }]), 'h').kind).toBe('other');
-    expect(linkInfo(s([{ id: 'h', last_seen: 500 }]), 'h').kind).toBe('stale');
-    expect(linkInfo(s([{ id: 'h', last_seen: 990 }]), 'h').kind).toBe('polling');
-    expect(linkInfo({} as never, 'h').kind).toBe('unknown');
-    expect(linkProblem(linkInfo(s([{ id: 'x', last_seen: 999 }]), 'h'), 'h')).toContain('not polling for this hub (h)');
-    expect(linkProblem({ kind: 'polling', ids: [] }, 'h')).toBeNull();
+  it('link info: none, other, offline, connected', () => {
+    const hubs = (ids: string[]) => ({ hubs: [], linked: ids.map((id) => ({ id, last_seen: 1 })), adopt: null }) as never;
+    const st = (connected: boolean) => ({ connected }) as never;
+    expect(linkInfo(hubs([]), st(false), 'h').kind).toBe('none');
+    expect(linkInfo(hubs(['x']), st(false), 'h').kind).toBe('other');
+    expect(linkInfo(hubs(['h']), st(false), 'h').kind).toBe('offline');
+    expect(linkInfo(hubs(['h']), st(true), 'h').kind).toBe('connected');
+    expect(linkInfo(null, st(true), 'h').kind).toBe('unknown');
+    expect(linkProblem(linkInfo(hubs(['x']), st(false), 'h'), 'h')).toContain('not connected for this hub (h)');
+    expect(linkProblem({ kind: 'connected', ids: [] }, 'h')).toBeNull();
   });
 });

@@ -6,8 +6,6 @@ import { announce, derive, observe, startRun } from '../src/lib/bt-wizard';
 import { deviceChips } from '../src/lib/studio-model';
 import { capProblem, irTotals } from '../src/lib/device-edit';
 import { counts } from '../src/lib/model';
-import { BtPoll } from '../src/lib/bt-poll';
-import { vi } from 'vitest';
 import { resolveIr } from '../src/lib/studio-model';
 import type { Config, Device } from '../src/lib/model';
 
@@ -248,40 +246,5 @@ describe('command ids bound to the action', () => {
   it('key order of the body does not matter', () => {
     const c = new CmdId();
     expect(c.id('key', { page: 7, usage: 1 })).toBe(c.id('key', { usage: 1, page: 7 }));
-  });
-});
-
-describe('BtPoll', () => {
-  const st = (gen: number, tag = '') => ({ hub: 'h', status: 'ok' as const, state: { ...state({ gen }), tag } as BtState, limits: null, listening: false, age_s: 0 });
-  it('keeps one timer and drops a response that was overtaken', async () => {
-    vi.useFakeTimers();
-    try {
-      const pending: ((s: ReturnType<typeof st>) => void)[] = [];
-      const api = { btStatus: () => new Promise((res) => pending.push(res as never)) } as never;
-      const p = new BtPoll(api, 'h', 1000);
-      p.start(); // fetch 1
-      const r2 = p.refresh(); // manual refresh while 1 is in flight: fetch 2
-      pending[1]!(st(8)); // the newer one answers first
-      await r2;
-      expect(p.status?.state?.gen).toBe(8);
-      pending[0]!(st(7)); // the older one arrives late
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(p.status?.state?.gen).toBe(8);
-      expect(vi.getTimerCount()).toBe(1); // a single timer
-      p.stop();
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-  it('prefers the higher gen once, then follows a hub that restarted', async () => {
-    const seq = [st(9), st(3), st(3)];
-    const p = new BtPoll({ btStatus: async () => seq.shift() } as never, 'h');
-    await p.refresh();
-    await p.refresh();
-    expect(p.status?.state?.gen).toBe(9);
-    await p.refresh();
-    expect(p.status?.state?.gen).toBe(3);
   });
 });
