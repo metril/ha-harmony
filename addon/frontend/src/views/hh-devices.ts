@@ -259,7 +259,7 @@ export class HhDevices extends StoreElement {
     const p = d.power ?? {};
     return (['on', 'off', 'toggle'] as const).filter((k) => p[k]).map(
       (k) => html`<div class="key"><button class="k" aria-label="Edit power ${k}" @click=${() => (this.edit = { where: 'power', name: k, code: JSON.parse(JSON.stringify(p[k])) as IrAction })}>
-        <b>${stockIconSvg(commandIconId('power'))}<span>Power ${k}</span></b><small>${summarize(p[k])}</small></button>
+        <b>${stockIconSvg(commandIconId('power'))}<span>Power ${k === 'on' ? 'On' : k === 'off' ? 'Off' : 'Toggle'}</span></b><small>${summarize(p[k])}</small></button>
         <hh-send-ir variant="round" ?ha=${d.kind === 'ha'} .code=${p[k]} name="power ${k}"></hh-send-ir></div>`,
     );
   }
@@ -348,7 +348,7 @@ export class HhDevices extends StoreElement {
       <h2>Power</h2>
       <div class="seg" role="group" aria-label="Power control">${modes.map(([m, label]) => html`<button aria-pressed=${mode === m} @click=${() => this.put(setPowerMode(this.store.config, d.id, m))}>${label}</button>`)}</div>
       <p class="why mt">${mode === 'both' ? 'Separate on and off codes: the hub always knows what it sends.' : mode === 'toggle' ? 'One code switches it on and off. It can get out of step if you use the original remote.' : 'The hub will not switch this device on or off.'}</p>
-      ${(['on', 'off', 'toggle'] as const).filter((k) => d.power?.[k]).map((k) => html`<div class="row"><span class="l"><b>${k === 'toggle' ? 'Toggle' : `Power ${k}`}</b><small>${summarize(d.power?.[k])}</small></span><span><button class="btn sm" @click=${() => (this.edit = { where: 'power', name: k, code: JSON.parse(JSON.stringify(d.power?.[k])) as IrAction })}>Edit</button> <hh-send-ir variant="round" ?ha=${d.kind === 'ha'} .code=${d.power?.[k]} name="power ${k}"></hh-send-ir></span></div>`)}
+      ${(['on', 'off', 'toggle'] as const).filter((k) => d.power?.[k]).map((k) => html`<div class="row"><span class="l"><b>${k === 'toggle' ? 'Toggle' : `Power ${k === 'on' ? 'On' : 'Off'}`}</b><small>${summarize(d.power?.[k])}</small></span><span><button class="btn sm" @click=${() => (this.edit = { where: 'power', name: k, code: JSON.parse(JSON.stringify(d.power?.[k])) as IrAction })}>Edit</button> <hh-send-ir variant="round" ?ha=${d.kind === 'ha'} .code=${d.power?.[k]} name="power ${k}"></hh-send-ir></span></div>`)}
     </section>`;
   }
   private settingsPanel(d: Device) {
@@ -388,7 +388,7 @@ export class HhDevices extends StoreElement {
           <datalist id="hh-dev-ents">${(st.entities ?? []).slice(0, 300).map((e) => html`<option value=${e.entity_id}>${e.name ?? ''}</option>`)}</datalist>
           <span class="hint">Power shows as on unless this entity is off, standby, unavailable or unknown.</span></label></section>
       <section class="card" aria-label="Power control"><h2>Power</h2>
-        ${(['on', 'off'] as const).map((k) => this.haAction(`Power ${k}`, d.power?.[k], (a) => set(setPowerCode(this.store.config, d.id, k, a))))}</section>
+        ${(['on', 'off'] as const).map((k) => this.haAction(`Power ${k === 'on' ? 'On' : 'Off'}`, d.power?.[k], (a) => set(setPowerCode(this.store.config, d.id, k, a))))}</section>
       ${(['inputs', 'commands'] as const).map((where) => html`<section class="card" aria-label=${pretty(where)}><h2>${pretty(where)}</h2>
         ${Object.entries(d[where] ?? {}).map(([n, a]) => this.haAction(n, a, (x) => { if (x) set((where === 'inputs' ? setInput : setCommand)(this.store.config, d.id, n, x)); }, html`<button class="btn sm danger" @click=${() => void this.removeItem(d, where, n)}>Delete</button>`))}
         ${add?.where === where

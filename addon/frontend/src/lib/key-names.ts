@@ -5,12 +5,14 @@ const NAMES: Record<string, string> = {
   home_control_1: 'Upper Bulb', home_control_2: 'Lower Bulb', home_control_3: 'Upper Socket', home_control_4: 'Lower Socket',
   home_control_plus: 'Home Control +', home_control_minus: 'Home Control −',
   prev_channel: 'Previous Channel', power_off_activity: 'Power Off Activity',
-  select: 'OK', ok: 'OK', dvr: 'DVR', tv: 'TV', fast_forward: 'Fast Forward',
+  select: 'OK', ok: 'OK', dvr: 'DVR', tv: 'TV', fast_forward: 'Fast Forward', play_pause: 'Play/Pause',
+  arrowup: 'Arrow Up', arrowdown: 'Arrow Down', arrowleft: 'Arrow Left', arrowright: 'Arrow Right', arrow_up: 'Arrow Up', arrow_down: 'Arrow Down', arrow_left: 'Arrow Left', arrow_right: 'Arrow Right',
+  capslock: 'Caps Lock', caps_lock: 'Caps Lock',
 };
 /** What a screen reader and the palette search get for names that are printed as a symbol. */
 const SPOKEN: Record<string, string> = { home_control_plus: 'Home Control Plus', home_control_minus: 'Home Control Minus' };
-const ACRONYMS = new Set(['ok', 'dvr', 'tv', 'hdmi', 'usb', 'ir', 'av', 'dvd', 'cd', 'hd', 'uhd', 'sd', 'epg', 'ui', 'hdr', 'arc', 'pip', 'bt', 'ha', 'am', 'fm', 'cec', 'rf', 'led', 'lcd', 'osd', 'pc', 'vcr', 'pvr', 'dpad', 'dts', 'cc', 'vod', 'kvm']);
-const BRAND: Record<string, string> = { earc: 'eARC' };
+const ACRONYMS = new Set(['ok', 'dvr', 'tv', 'hdmi', 'usb', 'ir', 'av', 'dvd', 'cd', 'hd', 'uhd', 'sd', 'epg', 'ui', 'hdr', 'arc', 'pip', 'bt', 'ha', 'am', 'fm', 'cec', 'rf', 'led', 'lcd', 'osd', 'pc', 'vcr', 'pvr', 'nec', 'sirc', 'dts', 'cc', 'vod', 'kvm']);
+const BRAND: Record<string, string> = { earc: 'eARC', dpad: 'D-Pad', necext: 'NECext' };
 /** Joining words that stay lower-case in a Title Case name unless they come first. */
 export const SMALL_WORDS = new Set(['a', 'an', 'and', 'of', 'the', 'to', 'in', 'on', 'at', 'for']);
 // in a command or key name "On"/"In" are the verb ("Power On", "Zoom In"), so they stay capitalised there
@@ -22,7 +24,7 @@ const DIGIT = /^key_10([0-9])$/;
 const lookup = (k: string): string => k.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/([A-Za-z])(\d)/g, '$1_$2').replace(/[\s-]+/g, '_').toLowerCase();
 
 /** Short forms spelled out wherever a name is shown ("vol_up" -> "Volume Up"). */
-const CMD_WORDS: Record<string, string> = { vol: 'volume', ch: 'channel', chan: 'channel', pwr: 'power', prev: 'previous' };
+const CMD_WORDS: Record<string, string> = { vol: 'volume', ch: 'channel', chan: 'channel', pwr: 'power', prev: 'previous', pct: 'percent' };
 const bare = (t: string): boolean => /^[a-z]+[+-]*$/.test(t);
 /** Break a name into words. A token that is a code (letter+digit or digit+letter run: A1, 1A, 4K, F12) stays one uppercase token. */
 function tokens(name: string): string[] {
@@ -73,6 +75,7 @@ export function displayKey(name: string): string {
   if (d) return d[1] as string;
   const n = /^key_(\d+)$/.exec(c);
   if (n) return `Key ${n[1]}`;
+  if (/^[A-Za-z]+\+[A-Za-z0-9]+$/.test(name)) return name.split('+').map((x) => (x.length <= 1 ? x.toUpperCase() : cap(x.toLowerCase()))).join('+');
   const words = tokens(name);
   return words.length ? title(words) : name;
 }

@@ -363,7 +363,7 @@ async def test_ha_actions_have_no_test_fire_and_read_as_name_dot_command(browser
     long = [t for t in texts if t.startswith("Living room ceiling")]
     assert long and long[0].endswith("…") and len(long[0]) <= 26, texts
     titles = await remote.locator("text.xl title").all_text_contents()
-    assert any(t == "Living room ceiling shield · Play Pause" for t in titles), titles
+    assert any(t == "Living room ceiling shield · Play/Pause" for t in titles), titles
     if SHOTS:
         Path(SHOTS).mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=f"{SHOTS}/xray-ha.png")

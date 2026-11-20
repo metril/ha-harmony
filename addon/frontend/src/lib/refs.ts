@@ -61,7 +61,7 @@ export function refHref(r: Ref): string {
 export function describeRef(r: Ref): string {
   switch (r.kind) {
     case 'key':
-      return `Key ${r.key.replace(/_/g, ' ')} (${r.layerName} layer)`;
+      return `Key ${r.key.replace(/_/g, ' ')} (${r.layerName} Layer)`;
     case 'widget':
       return `Widget "${r.label}" on page ${r.pageName}`;
     case 'step':

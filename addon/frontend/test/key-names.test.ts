@@ -26,6 +26,11 @@ describe('displayKey: codes and acronyms', () => {
     for (const n of ['Watch TV', 'Living Room', 'Clock Set', 'Input B2', 'Shelf low', 'J-Tech AV Switch', 'NVIDIA SHIELD']) expect(displayKey(n)).toBe(n);
     expect(displayKey('watch tv')).toBe('Watch tv');
   });
+  it('spells the special cases', () => {
+    const want: [string, string][] = [['PlayPause', 'Play/Pause'], ['play_pause', 'Play/Pause'], ['arrowup', 'Arrow Up'], ['ArrowLeft', 'Arrow Left'], ['capslock', 'Caps Lock'],
+      ['DPAD_CENTER', 'D-Pad Center'], ['brightness_pct', 'Brightness Percent'], ['necext', 'NECext'], ['nec', 'NEC'], ['rc5', 'RC5'], ['sirc12', 'SIRC 12'], ['ctrl+c', 'Ctrl+C']];
+    for (const [raw, shown] of want) expect(displayKey(raw)).toBe(shown);
+  });
   it('shows ids and codes as they are', () => {
     expect(displayKey('light.corner_lamp')).toBe('light.corner_lamp');
     expect(displayKey('HID:0C:0223')).toBe('HID:0C:0223');
@@ -34,7 +39,7 @@ describe('displayKey: codes and acronyms', () => {
     expect(displayKey('BACK')).toBe('Back');
     expect(displayKey('CAPTIONS')).toBe('Captions');
     expect(displayKey('DTS')).toBe('DTS');
-    expect(displayKey('DPAD_UP')).toBe('DPAD Up');
+    expect(displayKey('DPAD_UP')).toBe('D-Pad Up');
   });
 });
 

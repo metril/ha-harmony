@@ -68,7 +68,7 @@ const ra_theme_t ra_themes[RA_THEME_COUNT] = {
          {0x8040B0, 0xE8ECF0, 0x986CC0}, /* purple */
          {0xB03080, 0xE8ECF0, 0xC060A0}, /* pink */
      }},
-    {3, "high_contrast", "High contrast",
+    {3, "high_contrast", "High Contrast",
      0x000000, 0x202020, 0x303030, 0x585858, 0xF8FCF8, 0xD8D8D8, 0xA0A0A0, 0xF8E000, 0x000000, 0xF8A000, 0x000000, 0xF86060, 0x000000,
      {
          {0xF83838, 0x000000, 0xB82C28}, /* red */

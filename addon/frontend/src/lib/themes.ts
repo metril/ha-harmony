@@ -144,7 +144,7 @@ export const THEMES: readonly Theme[] = [
   {
     id: 3,
     key: 'high_contrast',
-    name: 'High contrast',
+    name: 'High Contrast',
     tokens: {
       bg: 0x000000,
       s1: 0x202020,

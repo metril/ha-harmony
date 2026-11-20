@@ -4,7 +4,7 @@
 export const ORDER: readonly (readonly string[])[] = [
   ['up', 'down'], ['left', 'right'], ['ok'], ['back', 'menu'], ['exit'], ['home'], ['guide', 'info'], ['options'],
   ['volume_up', 'volume_down'], ['mute'], ['channel_up', 'channel_down'], ['prev_channel'],
-  ['play', 'pause'], ['rewind', 'fast_forward'], ['skip_back', 'skip_forward'], ['stop', 'record'],
+  ['play', 'pause'], ['play_pause'], ['rewind', 'fast_forward'], ['skip_back', 'skip_forward'], ['stop', 'record'],
   ['red', 'green'], ['yellow', 'blue'],
   ['1'], ['2'], ['3'], ['4'], ['5'], ['6'], ['7'], ['8'], ['9'], ['0'], ['enter'], ['dash'],
   ['power_on', 'power_off'], ['power_toggle'],

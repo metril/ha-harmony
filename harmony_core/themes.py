@@ -133,7 +133,7 @@ THEMES: tuple[Theme, ...] = (
     Theme(
         3,
         'high_contrast',
-        'High contrast',
+        'High Contrast',
         {
             'bg': 0x000000,
             's1': 0x202020,

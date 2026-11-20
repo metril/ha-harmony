@@ -32,7 +32,7 @@ def summarize(action: dict[str, Any]) -> dict[str, Any]:
         return {
             "kind": "activity",
             "activity": action["activity"],
-            "label": f"Start {action['activity']}" if action["activity"] != "off" else "Power off",
+            "label": f"Start {action['activity']}" if action["activity"] != "off" else "Power Off",
         }
     if kind == "ha_call":
         return ha_actions.summary(action)

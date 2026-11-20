@@ -26,6 +26,9 @@ describe('canonical key order', () => {
     const u = orderUnits(['fast_forward', 'mute', 'play', 'rewind', 'pause', 'ch_down', 'ch_up'], (x) => x);
     expect(u.map((x) => x.join('|'))).toEqual(['mute', 'ch_up|ch_down', 'play|pause', 'rewind|fast_forward']);
   });
+  it('puts play_pause on its own row after the Play|Pause pair', () => {
+    expect(orderUnits(['stop', 'play_pause', 'pause', 'play'], (x) => x).map((x) => x.join('|'))).toEqual(['play|pause', 'play_pause', 'stop']);
+  });
   it('does not pair a member with a stranger', () => {
     expect(orderUnits(['volume_up', 'mute'], (x) => x).map((x) => x.length)).toEqual([1, 1]);
     expect(orderUnits(['pause', 'stop'], (x) => x).map((x) => x.join('|'))).toEqual(['pause', 'stop']);

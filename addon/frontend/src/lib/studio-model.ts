@@ -572,7 +572,7 @@ export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { en
     case 'activities': {
       const acts = (cfg.activities ?? []).slice(0, 5);
       const widgets = acts.map((a, i) => btn(0, i, a.name ?? a.id, { activity: a.id }, {}, 4));
-      widgets.push(btn(0, Math.min(acts.length, 5), 'All off', { activity: 'off' }, { role: 'danger' }, 4));
+      widgets.push(btn(0, Math.min(acts.length, 5), 'All Off', { activity: 'off' }, { role: 'danger' }, 4));
       const hasHome = (cfg.pages ?? []).some((p) => p.kind === 'home');
       return { id: pid, cols: 4, rows: 6, ...(hasHome ? {} : { kind: 'home' as const }), title: 'Activities', widgets };
     }

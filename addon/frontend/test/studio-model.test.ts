@@ -194,7 +194,7 @@ describe('pages', () => {
     expect(d.pages![1]!.kind).toBeUndefined();
     expect(d.pages![1]!.widgets[0]!.id).not.toBe('a');
     const t = templatePage(cfg(), 'activities');
-    expect(t.widgets.map((w) => w.label)).toEqual(['Watch TV', 'Stream', 'All off']);
+    expect(t.widgets.map((w) => w.label)).toEqual(['Watch TV', 'Stream', 'All Off']);
     expect(templatePage(cfg(), 'lights', { entities: [{ entity_id: 'light.a', name: 'A' }, { entity_id: 'switch.b' }] }).widgets).toHaveLength(1);
     expect(templatePage(cfg(), 'numbers').widgets).toHaveLength(1);
   });

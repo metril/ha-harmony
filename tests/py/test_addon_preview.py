@@ -317,7 +317,7 @@ async def test_keymap_layers_and_inheritance(c):
         "activity": "watch",
         "label": "Start watch",
     }
-    assert dflt["exit"]["action"]["label"] == "Power off"
+    assert dflt["exit"]["action"]["label"] == "Power Off"
     assert dflt["volume_up"]["action"]["kind"] == "ha" and dflt["play"]["source"] == "none"
     assert dflt["play"]["action"] is None
     watch = {r["key"]: r for r in body["activities"][0]["keys"]}

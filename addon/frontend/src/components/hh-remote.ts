@@ -337,7 +337,7 @@ export class HhRemote extends LitElement {
     const layer = this.st.layerName(this.st.layer);
     const what = !row || row.source === 'none' ? 'does nothing' : row.action?.kind === 'none' ? 'switched off' : row.action ? this.st.actionLabel(row.action) : undefined;
     const how = !row ? '' : this.st.layer === DEFAULT_LAYER ? (row.source === 'none' ? '' : ', assigned') : row.source === 'activity' ? ', override' : row.source === 'default' ? ', from Default' : '';
-    return `${keyTitle(g.name)}, ${layer} layer: ${what}${how}`;
+    return `${keyTitle(g.name)}, ${layer} Layer: ${what}${how}`;
   }
   private keyGlyph(g: KeyGeom): TemplateResult | typeof nothing {
     const cx = g.x + g.w / 2;

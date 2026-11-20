@@ -31,7 +31,7 @@ describe('themes view', () => {
   it('lists the four presets, marks the active one, and shows the degradation notice only when told', async () => {
     const { el } = await mount();
     const cards = [...el.shadowRoot!.querySelectorAll('article')].map((a) => a.getAttribute('aria-label'));
-    expect(cards).toEqual(['Cards', 'Midnight', 'Daylight', 'High contrast']);
+    expect(cards).toEqual(['Cards', 'Midnight', 'Daylight', 'High Contrast']);
     expect(el.shadowRoot!.querySelector('#theme-notice')).toBeNull();
     el.notices = ['page home: custom colours snapped to the palette'];
     await settle(el);

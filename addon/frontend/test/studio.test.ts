@@ -55,7 +55,7 @@ describe('remote studio', () => {
     await tick(remote, studio);
     const keys = remote.shadowRoot.querySelectorAll('[data-key]');
     expect(keys).toHaveLength(35);
-    expect(remote.shadowRoot.querySelector('[data-key="menu"]')?.getAttribute('aria-label')).toMatch(/Menu, Default layer: tv/);
+    expect(remote.shadowRoot.querySelector('[data-key="menu"]')?.getAttribute('aria-label')).toMatch(/Menu, Default Layer: tv/);
     expect(remote.shadowRoot.querySelector('svg.scr text')?.textContent).toBeTruthy(); // the page renders
     expect(remote.shadowRoot.querySelectorAll('.wh')).toHaveLength(1); // one widget overlay for the config page
   });

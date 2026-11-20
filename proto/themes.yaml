@@ -23,6 +23,6 @@ themes:
     palette: {red: "#c02828", orange: "#a84808", amber: "#f0b020", yellow: "#e8d030", lime: "#487008", green: "#187840", teal: "#087068", cyan: "#006c98", blue: "#2858c8", indigo: "#4848c0", purple: "#8040b0", pink: "#b03080"}
   - key: high_contrast # black ground, white text, pure saturated fills
     id: 3
-    name: High contrast
+    name: High Contrast
     tokens: {bg: "#000000", s1: "#202020", s2: "#303030", s3: "#585858", tx: "#f8fcf8", tx2: "#d8d8d8", tx3: "#a0a0a0", acc: "#f8e000", onacc: "#000000", warm: "#f8a000", onwarm: "#000000", bad: "#f86060", onbad: "#000000"}
     palette: {red: "#f83838", orange: "#f88000", amber: "#f8b800", yellow: "#f8f800", lime: "#90f800", green: "#00e050", teal: "#00e8c8", cyan: "#00d8f8", blue: "#5898f8", indigo: "#9090f8", purple: "#c068f8", pink: "#f868c8"}
