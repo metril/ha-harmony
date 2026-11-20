@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.15 (2026-11-20)
+
 - The Home Assistant tab can now group and filter by label: the add-on also reads Home Assistant's label list (read-only, like the other registries).
 - Fixed the filter buttons switching to icons only when a group was expanded, and the list overlapping the filter row after changing Group by.
 
