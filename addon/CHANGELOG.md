@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.17 (2026-11-20)
+
+Editor only; no hub firmware change. Update the add-on, then the integration.
+
+- Readable names everywhere in Title Case: "Power On", "Channel Up", "Previous Channel", "Input A1", "1A", "HDMI 1", "Play/Pause", "Home Control +". Codes and acronyms stay whole and upper case; names you typed are shown in Title Case but stored as you wrote them.
+- Buttons, tabs and headings in Title Case ("Review & Apply", "Free Keys", "Default Layer"); IR protocols in upper case ("NEC 9/2").
+- Keys and commands follow one order, with pairs side by side: Up | Down, Left | Right, Play | Pause, Rewind | Fast Forward, Volume Up | Volume Down, Channel Up | Channel Down, Red | Green, Yellow | Blue, keypad order for numbers. A pair never splits or gets cut off.
+- The "High Contrast" theme and the remote's generated "Power Off" / "All Off" labels use Title Case.
+
 ## 0.3.16 (2026-11-20)
 
 **Upgrade order: hub firmware first, then this add-on, then the integration, all in the same sitting.**
