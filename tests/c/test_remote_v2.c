@@ -238,6 +238,23 @@ static void test_activity_page_and_power_off_home(void) {
   app_destroy(&app);
 }
 
+static void test_tap_running_activity_returns_to_its_page(void) {
+  start();
+  push_set(3, 0);
+  settle();
+  state(0, 1);
+  settle();
+  CT_EQ(shown(), 0);
+  press_key(0, KEY_HOME_);
+  settle();
+  CT_EQ(shown(), 1);
+  int sent = lk.nsent;
+  tap_widget(1); /* "TV" (bind 0) is the running activity: no state change comes back, so go there locally */
+  CT_EQ(shown(), 0);
+  CT_CHECK(lk.nsent > sent); /* the start is still sent */
+  app_destroy(&app);
+}
+
 static void test_highlight_is_a_partial_redraw(void) {
   start();
   push_set(3, 0);
@@ -577,6 +594,7 @@ int main(void) {
   CT_RUN(test_no_home_shows_page_zero_and_new_gen_clears);
   CT_RUN(test_rerender_only_when_visible_page_replaced);
   CT_RUN(test_activity_page_and_power_off_home);
+  CT_RUN(test_tap_running_activity_returns_to_its_page);
   CT_RUN(test_highlight_is_a_partial_redraw);
   CT_RUN(test_nav_widget_switches_locally);
   CT_RUN(test_paged_up_down_are_local);

@@ -118,7 +118,15 @@ static bool local_key(app_t *a, uint8_t code, uint8_t action) {
 
 static bool sink_widget(void *ctx, const hp_widget_t *w) {
   app_t *a = ctx;
-  if (!a->v2 || !on_stored_page(a) || w->role != HP_ROLE_NAV || !w->has_bind) return false;
+  if (!a->v2 || !on_stored_page(a) || !w->has_bind) return false;
+  if (w->role != HP_ROLE_NAV) {
+    /* tapping the already-running activity: the hub sees a redundant start and sends no state change, so show its act page here */
+    if (w->kind == HP_WIDGET_BUTTON && a->ui.act_on && w->bind == a->ui.act_idx) {
+      int pg = hp_store_find_act(&a->store, (uint8_t)(w->bind + 1));
+      if (pg >= 0) goto_page(a, pg);
+    }
+    return false;
+  }
   goto_page(a, w->bind);
   return true;
 }
