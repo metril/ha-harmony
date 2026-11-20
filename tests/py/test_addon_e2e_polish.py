@@ -464,7 +464,7 @@ async def test_palette_chips_form_an_aligned_grid(browser, large, size):
           const body = {PALETTE}.querySelector('.body'), bb = body.getBoundingClientRect(), out = [];
           if (body.scrollWidth > body.clientWidth) out.push('horizontal overflow');
           for (const grp of {PALETTE}.querySelectorAll('.cells')) {{
-            const cs = [...grp.children].map(c => c.getBoundingClientRect());
+            const cs = [...grp.children].flatMap(c => c.matches('.pair[data-span=stack]') ? [...c.children] : [c]).map(c => c.getBoundingClientRect());
             if (!cs.length) continue;
             const lefts = new Set(cs.map(r => Math.round(r.left))), hs = new Set(cs.map(r => Math.round(r.height)));
             if (lefts.size > 3) out.push('ragged left edges ' + [...lefts]);
@@ -652,7 +652,7 @@ async def test_inspector_free_keys_form_an_aligned_grid(browser, large, size):
       const root = {STUDIO}.querySelector('hh-inspector').shadowRoot, out = [];
       const ir = root.host.getBoundingClientRect();
       for (const grp of root.querySelectorAll('.cells')) {{
-        const cs = [...grp.children].map(c => c.getBoundingClientRect());
+        const cs = [...grp.children].flatMap(c => c.matches('.pair[data-span=stack]') ? [...c.children] : [c]).map(c => c.getBoundingClientRect());
         if (new Set(cs.map(r => Math.round(r.height))).size > 1) out.push('unequal heights');
         if (new Set(cs.map(r => Math.round(r.left))).size > 3) out.push('ragged left edges');
         if (cs.some(r => r.right > ir.right + 0.5)) out.push('overflow');

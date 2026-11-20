@@ -23,8 +23,14 @@ describe('displayKey: codes and acronyms', () => {
     expect(displayKey('Play/Pause')).toBe('Play/Pause');
   });
   it('shows a name that is already written for people as written', () => {
-    for (const n of ['Watch TV', 'Living Room', 'Clock Set', 'Input B2', 'Shelf low', 'J-Tech AV Switch', 'NVIDIA SHIELD']) expect(displayKey(n)).toBe(n);
-    expect(displayKey('watch tv')).toBe('Watch tv');
+    for (const n of ['Watch TV', 'Living Room', 'Clock Set', 'Input B2', 'J-Tech AV Switch', 'NVIDIA SHIELD']) expect(displayKey(n)).toBe(n);
+    expect(displayKey('watch tv')).toBe('Watch Tv');
+    expect(displayKey('Shelf low')).toBe('Shelf Low');
+    expect(displayKey('Power on')).toBe('Power On');
+    expect(displayKey('App a')).toBe('App A');
+    expect(displayKey('Tropical twilight')).toBe('Tropical Twilight');
+    expect(displayKey('Back to tv')).toBe('Back to Tv');
+    expect(displayKey('iPlayer app')).toBe('iPlayer App');
   });
   it('spells the special cases', () => {
     const want: [string, string][] = [['PlayPause', 'Play/Pause'], ['play_pause', 'Play/Pause'], ['arrowup', 'Arrow Up'], ['ArrowLeft', 'Arrow Left'], ['capslock', 'Caps Lock'],

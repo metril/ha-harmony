@@ -137,7 +137,7 @@ async def test_bluetooth_panel_wizards_and_key_map_under_a_wide_font(browser, bt
 
 @pytest.mark.parametrize("size", [(1600, 900), (1280, 800)])
 async def test_palette_pairs_share_a_row_left_then_right(browser, large, size):
-    """Play|Pause, Rewind|Fast Forward and Volume Up|Down sit side by side in that order; never split across rows."""
+    """Pairs sit side by side, left then right; one whose labels need more than a half stacks full width. Never cut."""
     page = await open_large(browser, large, *size)
     await wide(page, size, "22-pairs")
     await page.get_by_role("tab", name="Devices", exact=True).click()
@@ -154,6 +154,11 @@ async def test_palette_pairs_share_a_row_left_then_right(browser, large, size):
             if name != left or f"{dev}|{right}" not in pos:
                 continue
             (lt, ll), (rt, rl) = pos[k], pos[f"{dev}|{right}"]
-            assert lt == rt and ll < rl, (dev, left, right, pos[k], pos[f"{dev}|{right}"])
+            assert (lt == rt and ll < rl) or (ll == rl and lt < rt), (dev, left, right, pos[k], pos[f"{dev}|{right}"])
             checked += 1
     assert checked >= 5, (checked, keys[:20])
+    await page.wait_for_timeout(400)
+    cut = await page.evaluate("""() => { const out = []; const walk = (root) => { for (const p of root.querySelectorAll('.pair')) for (const b of p.children) {
+        const t = (b.textContent || '').trim(); if (b.scrollWidth > b.clientWidth + 1 || [...b.querySelectorAll('span')].some((x) => x.scrollWidth > x.clientWidth + 1) || t.includes('\u2026')) out.push(t); }
+      for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot); }; walk(document.querySelector('hh-app').shadowRoot); return out; }""")
+    assert cut == [], cut

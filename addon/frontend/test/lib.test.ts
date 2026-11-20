@@ -59,8 +59,8 @@ describe('code validation per protocol', () => {
   });
   it('flags kinds the editor cannot edit yet and summarizes codes', () => {
     expect(validateCode({ flipper: { file: 'a.ir' } }).errors.kind).toBeDefined();
-    expect(summarize({ proto: 'nec', addr: 4, cmd: 2 })).toBe('nec 4/2');
-    expect(summarize({ pronto: '0000 006D 0001 0000 0018 0018' })).toBe('pronto, 6 words');
+    expect(summarize({ proto: 'nec', addr: 4, cmd: 2 })).toBe('NEC 4/2');
+    expect(summarize({ pronto: '0000 006D 0001 0000 0018 0018' })).toBe('Pronto, 6 words');
   });
 });
 

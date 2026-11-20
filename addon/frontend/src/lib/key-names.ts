@@ -63,11 +63,23 @@ const title = (words: string[]): string => words.map((w, i) => (!bare(w) ? w : i
 /** Already written for people (has a space): shown as written, only tidied. */
 const isHuman = (n: string): boolean => /\S\s+\S/.test(n.trim());
 
+/** A name written with spaces: each plain lower-case word gets a capital (single letters are upper-cased), the rest is kept as written. */
+export function titleHuman(name: string): string {
+  const words = name.trim().split(/\s+/);
+  return words.map((w, i) => {
+    const m = /^([^A-Za-z]*)([a-z]+)([^A-Za-z]*)$/.exec(w);
+    if (!m) return w;
+    const [, pre, word, post] = m as unknown as [string, string, string, string];
+    if (word.length === 1) return pre + word.toUpperCase() + post;
+    return i > 0 && NAME_SMALL.has(word) ? w : pre + cap(word) + post;
+  }).join(' ');
+}
+
 /** "Volume Down", "Previous Channel", "OK", "Input A1", "Upper Bulb", "5" for Num5 / key_105, "Key 7" for key_7. */
 export function displayKey(name: string): string {
   if (/[:.]/.test(name) && !isHuman(name)) return name; // ids and codes ("light.lamp", "HID:0C:0223") are shown as they are
   if (name.includes('/') && !isHuman(name)) return name.split('/').map(displayKey).join('/');
-  if (isHuman(name)) return cap(name.trim().replace(/\s+/g, ' '));
+  if (isHuman(name)) return titleHuman(name);
   const c = lookup(name);
   const hit = NAMES[c];
   if (hit) return hit;

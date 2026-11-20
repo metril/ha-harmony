@@ -28,7 +28,8 @@ export const shared = css`
   .cells > [data-span="full"] { grid-column: 1 / -1; }
   /* a left|right pair always shares one row: two equal halves, the whole row when a label needs more than a half */
   .cells > .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; grid-column: span 2; overflow: visible; height: 30px; }
-  .cells > .pair[data-span="full"] { grid-column: 1 / -1; }
+  .cells > .pair[data-span="full"], .cells > .pair[data-span="stack"] { grid-column: 1 / -1; }
+  .cells > .pair[data-span="stack"] { grid-template-columns: 1fr; height: auto; }
   @container (max-width: 17rem) { .cells > .pair { grid-column: 1 / -1; } }
   .cells > .pair > * { box-sizing: border-box; height: 30px; min-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; justify-content: flex-start; }
   .cells > .pair > .chip2 { justify-content: center; text-align: center; }

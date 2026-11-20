@@ -81,20 +81,23 @@ export function validateCode(a: IrAction): CodeCheck {
   return { ok: Object.keys(errors).length === 0, errors };
 }
 
+const PROTO_NAME: Record<string, string> = { necext: 'NECext', nec: 'NEC', nec2: 'NEC2', rc5: 'RC5', rc6: 'RC6', rc5x: 'RC5X', sirc: 'SIRC', sirc12: 'SIRC12', sirc15: 'SIRC15', sirc20: 'SIRC20', samsung32: 'Samsung32', kaseikyo: 'Kaseikyo', rca: 'RCA' };
+/** A protocol id as people write it: "nec" -> "NEC", "necext" -> "NECext". */
+export const protoName = (p: string | undefined): string => (p ? (PROTO_NAME[p.toLowerCase()] ?? p.toUpperCase()) : '?');
 export function summarize(a: IrAction | undefined): string {
   switch (kindOf(a)) {
     case 'proto':
-      return `${a?.proto ?? '?'} ${a?.addr ?? '?'}/${a?.cmd ?? '?'}`;
+      return `${protoName(a?.proto)} ${a?.addr ?? '?'}/${a?.cmd ?? '?'}`;
     case 'pronto':
-      return `pronto, ${(a?.pronto ?? '').trim().split(/\s+/).length} words`;
+      return `Pronto, ${(a?.pronto ?? '').trim().split(/\s+/).length} words`;
     case 'raw':
-      return `raw, ${a?.raw?.us?.length ?? 0} pulses @ ${a?.raw?.hz ?? '?'} Hz`;
+      return `Raw, ${a?.raw?.us?.length ?? 0} pulses @ ${a?.raw?.hz ?? '?'} Hz`;
     case 'flipper':
-      return `flipper ${a?.flipper?.file ?? ''}`;
+      return `Flipper ${a?.flipper?.file ?? ''}`;
     case 'smartir':
-      return `smartir ${a?.smartir?.command ?? ''}`;
+      return `SmartIR ${a?.smartir?.command ?? ''}`;
     default:
-      return 'no code';
+      return 'No code';
   }
 }
 

@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { commandNames } from '../lib/bt';
 import { fitCells, watchCells } from '../lib/fit-cells';
-import { displayCommand } from '../lib/key-names';
+import { displayCommand, titleHuman } from '../lib/key-names';
 import { orderedCells } from './parts';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { commandIconId } from '../lib/device-art';
@@ -146,7 +146,7 @@ export class HhPalette extends LitElement {
     return !!cur && sourceKey(cur) === sourceKey(s);
   }
   private chip(raw: string, source: Source, used: boolean, extra: TemplateResult | typeof nothing = nothing) {
-    const label = source.kind === 'activity' ? raw : displayCommand(raw);
+    const label = source.kind === 'activity' ? titleHuman(raw) : displayCommand(raw);
     return html`<button class="chip2 ${used ? 'used' : ''} " aria-pressed=${this.pressed(source)} title=${used ? `${label} (already on a key of this layer)` : label}
       @pointerdown=${(e: PointerEvent) => this.down(e, source)} @keydown=${(e: KeyboardEvent) => this.key(e, source)} @click=${(e: MouseEvent) => e.preventDefault()}>${extra}<span>${label}</span></button>`;
   }

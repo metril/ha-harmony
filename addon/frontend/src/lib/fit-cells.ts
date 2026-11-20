@@ -11,7 +11,11 @@ export function fitCells(root: ParentNode): void {
     const wide = kids.filter(cut);
     wide.forEach((k) => k.setAttribute('data-span', cols > 1 ? '2' : 'full'));
     wide.filter(cut).forEach((k) => k.setAttribute('data-span', 'full'));
-    for (const p of pairs) if (cols < 2 || [...p.children].some((c) => c instanceof HTMLElement && cut(c))) p.setAttribute('data-span', 'full');
+    for (const p of pairs) {
+      const members = [...p.children].filter((c): c is HTMLElement => c instanceof HTMLElement);
+      if (cols < 2 || members.some(cut)) p.setAttribute('data-span', 'full');
+      if (members.some(cut)) p.setAttribute('data-span', 'stack'); // two half rows are still too narrow: one member per line, full width
+    }
   }
 }
 
