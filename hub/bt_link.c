@@ -400,7 +400,11 @@ static bool proc_name(const char *root, long pid, char *name, size_t cap) {
         fclose(f);
         buf[n] = 0; /* argv[0] ends at the first NUL */
         const char *base = strrchr(buf, '/');
-        snprintf(name, cap, "%s", base ? base + 1 : buf);
+        base = base ? base + 1 : buf;
+        size_t bl = strlen(base);
+        if (bl >= cap) bl = cap ? cap - 1 : 0; /* a name longer than the caller's buffer is cut, never an error */
+        memcpy(name, base, bl);
+        name[bl] = 0;
         return name[0] != 0;
     }
     return false;

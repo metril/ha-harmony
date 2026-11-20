@@ -5,7 +5,8 @@
 
 #define BT_HID_SAFETY_MS 10000 /* a key held this long is released */
 #define BT_HID_DEFER_MS 5000   /* a key for a host that is not connected waits this long */
-#define BT_HID_SETTLE_MS 1500  /* a host that just woke gets its waiting keys after this */
+#define BT_HID_SETTLE_MS 1500  /* a classic host that just woke gets its waiting keys after this */
+#define BT_HID_CCC_MS 3000     /* an LE host that has not enabled the report CCCD by then loses the waiting keys */
 
 extern const uint8_t bt_hid_descriptor[];
 extern const size_t bt_hid_descriptor_len;

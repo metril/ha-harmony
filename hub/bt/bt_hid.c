@@ -220,8 +220,16 @@ static void flush_slot(int s) {
 
 static void settle_done(btstack_timer_source_t *ts) {
     (void)ts;
-    for (int s = 0; s < g_hosts_n; s++)
-        if (g_hosts[s].used && g_hosts[s].settling) flush_slot(s);
+    for (int s = 0; s < g_hosts_n; s++) {
+        if (!g_hosts[s].used || !g_hosts[s].settling) continue;
+        if (g_hosts[s].transport == BT_TR_LE) { /* the CCCD never arrived: do not send into the void */
+            bt_logf("slot %d: LE host did not enable the HID reports in %d ms, waiting keys dropped", s, BT_HID_CCC_MS);
+            g_hosts[s].settling = false;
+            bt_hid_drop_deferred(s);
+        } else {
+            flush_slot(s);
+        }
+    }
     tick_arm();
 }
 
@@ -233,7 +241,7 @@ void bt_hid_connected(int slot, bool wait) {
     g_hosts[slot].settling = true;
     btstack_run_loop_set_timer_handler(&s_settle, settle_done);
     btstack_run_loop_remove_timer(&s_settle);
-    btstack_run_loop_set_timer(&s_settle, BT_HID_SETTLE_MS);
+    btstack_run_loop_set_timer(&s_settle, g_hosts[slot].transport == BT_TR_LE ? BT_HID_CCC_MS : BT_HID_SETTLE_MS);
     btstack_run_loop_add_timer(&s_settle);
 }
 

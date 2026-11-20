@@ -615,9 +615,11 @@ static void hids_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet,
 static hids_device_report_t s_hids_reports[3];
 
 /* ---- Generic Attribute service (0x1801): Service Changed ---- */
-#define BT_TAG_DBHASH 0x48485343u /* "HHSC": FNV-1a of the ATT database the last run served */
 static att_service_handler_t s_gatt_svc;
 static btstack_context_callback_registration_t s_sc_cb;
+
+static int sc_get(uint32_t tag, uint8_t *v, uint32_t cap) { return g_tlv ? g_tlv->get_tag(&g_tlv_ctx, tag, v, cap) : 0; }
+static int sc_put(uint32_t tag, const uint8_t *v, uint32_t len) { return bt_tlv_store_if_changed(tag, v, len); }
 
 static void sc_send(void *ctx) {
     hci_con_handle_t h = (hci_con_handle_t)(uintptr_t)ctx;
@@ -634,6 +636,28 @@ static void sc_send(void *ctx) {
     }
 }
 
+/* A bonded peer's connection is up and identified, or its CCCD arrived: send Service Changed (deferred so a
+ * pending write response goes first). */
+void bt_sc_request(uint16_t con) {
+    s_sc_cb.callback = sc_send;
+    s_sc_cb.context = (void *)(uintptr_t)con;
+    att_server_register_can_send_now_callback(&s_sc_cb, con);
+}
+
+static void att_pkt(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
+    (void)channel; (void)size;
+    if (packet_type != HCI_EVENT_PACKET || hci_event_packet_get_type(packet) != ATT_EVENT_HANDLE_VALUE_INDICATION_COMPLETE) return;
+    if (att_event_handle_value_indication_complete_get_attribute_handle(packet) != ATT_CHARACTERISTIC_GATT_SERVICE_CHANGED_01_VALUE_HANDLE) return;
+    hci_con_handle_t h = att_event_handle_value_indication_complete_get_conn_handle(packet);
+    if (att_event_handle_value_indication_complete_get_status(packet) == ATT_ERROR_SUCCESS) {
+        bt_sc_confirmed(h);
+        bt_logf("service changed confirmed by handle 0x%04x; hash stored for the bond", (unsigned)h);
+    } else {
+        bt_logf("service changed not confirmed by handle 0x%04x (status 0x%02x)", (unsigned)h,
+                (unsigned)att_event_handle_value_indication_complete_get_status(packet));
+    }
+}
+
 static uint16_t gatt_read(hci_con_handle_t con, uint16_t handle, uint16_t off, uint8_t *buf, uint16_t size) {
     if (handle != ATT_CHARACTERISTIC_GATT_SERVICE_CHANGED_01_CLIENT_CONFIGURATION_HANDLE) return 0;
     uint8_t v[2] = {(uint8_t)bt_sc_ccc_get(con), (uint8_t)(bt_sc_ccc_get(con) >> 8)};
@@ -646,11 +670,7 @@ static int gatt_write(hci_con_handle_t con, uint16_t handle, uint16_t mode, uint
     if (handle != ATT_CHARACTERISTIC_GATT_SERVICE_CHANGED_01_CLIENT_CONFIGURATION_HANDLE || size < 2) return 0;
     uint16_t v = (uint16_t)(buf[0] | (buf[1] << 8));
     bt_logf("CCC restored/written for handle 0x%04x: service changed = 0x%04x", (unsigned)con, (unsigned)v);
-    if (bt_sc_ccc(con, v)) { /* deferred: the write response goes out first */
-        s_sc_cb.callback = sc_send;
-        s_sc_cb.context = (void *)(uintptr_t)con;
-        att_server_register_can_send_now_callback(&s_sc_cb, con);
-    }
+    if (bt_sc_ccc(con, v)) bt_sc_request(con);
     return 0;
 }
 
@@ -660,14 +680,11 @@ static void gatt_service_init(void) {
     s_gatt_svc.read_callback = gatt_read;
     s_gatt_svc.write_callback = gatt_write;
     att_server_register_service_handler(&s_gatt_svc);
+    att_server_register_packet_handler(att_pkt);
+    static const bt_sc_store_t st = {sc_get, sc_put};
     uint32_t cur = bt_sc_hash(profile_data, sizeof profile_data);
-    uint8_t st[4] = {0};
-    int have = g_tlv ? g_tlv->get_tag(&g_tlv_ctx, BT_TAG_DBHASH, st, sizeof st) : 0;
-    bool changed = bt_sc_db_changed(cur, st, have > 0 ? (size_t)have : 0);
-    bt_sc_set_changed(changed);
-    uint8_t nv[4] = {(uint8_t)cur, (uint8_t)(cur >> 8), (uint8_t)(cur >> 16), (uint8_t)(cur >> 24)};
-    bt_tlv_store_if_changed(BT_TAG_DBHASH, nv, sizeof nv);
-    bt_logf("ATT database %s since the last run (hash %08x)", changed ? "changed" : "unchanged", (unsigned)cur);
+    bt_sc_init(&st, cur);
+    bt_logf("ATT database hash %08x", (unsigned)cur);
 }
 #endif
 

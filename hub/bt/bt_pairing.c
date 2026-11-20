@@ -3,6 +3,8 @@
 #include "bt_pairing.h"
 
 #include "bt_hid.h"
+#include "bt_sc.h"
+#include "bt_main.h"
 #include "bt_hid_queue.h"
 #include "bt_reconnect_queue.h"
 #include "bt_remote.h"
@@ -381,6 +383,7 @@ static void le_up(int s, hci_con_handle_t handle) {
     h->last_used_ms = now_ms();
     s_le_reconn_until = 0;
     bt_logf("slot %d: LE host connected", s);
+    if (bt_sc_peer(handle, h->addr, h->addr_type)) bt_sc_request(handle); /* an enabled CCCD may already be restored */
     bt_hid_connected(s, true); /* keys wait until the host subscribes to the reports */
     bt_push_hosts();
 }
@@ -415,6 +418,7 @@ void bt_le_host_identified(hci_con_handle_t handle, const bd_addr_t addr, uint8_
             return;
         }
         bt_host_save(s);
+        bt_sc_bond_fresh(g_hosts[s].addr, g_hosts[s].addr_type); /* it just discovered the current database */
         le_up(s, handle);
         bt_pair_finish(BT_KIND_HOST, BT_PR_OK, s);
         return;

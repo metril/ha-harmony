@@ -244,29 +244,66 @@ static void test_att_db_gatt_service(void) {
     CT_EQ(ATT_CHARACTERISTIC_ORG_BLUETOOTH_CHARACTERISTIC_REPORT_MAP_01_VALUE_HANDLE, 0x002c);
     CT_EQ(ATT_CHARACTERISTIC_ORG_BLUETOOTH_CHARACTERISTIC_HID_CONTROL_POINT_01_VALUE_HANDLE, 0x0035);
 }
+static struct { uint32_t tag; uint8_t v[4]; } g_kv[8];
+static int g_kvn;
+static int kv_get(uint32_t tag, uint8_t *v, uint32_t cap) {
+    for (int i = 0; i < g_kvn; i++)
+        if (g_kv[i].tag == tag && cap >= 4) { memcpy(v, g_kv[i].v, 4); return 4; }
+    return 0;
+}
+static int kv_put(uint32_t tag, const uint8_t *v, uint32_t len) {
+    int i = 0;
+    while (i < g_kvn && g_kv[i].tag != tag) i++;
+    if (i == g_kvn) g_kvn++;
+    g_kv[i].tag = tag;
+    memcpy(g_kv[i].v, v, len < 4 ? len : 4);
+    return 0;
+}
 static void test_service_changed(void) {
+    static const bt_sc_store_t st = {kv_get, kv_put};
+    const uint8_t A[6] = {1, 2, 3, 4, 5, 6}, B[6] = {9, 8, 7, 6, 5, 4};
     uint8_t v[4];
     bt_sc_value(v);
     CT_EQ(v[0] | (v[1] << 8), 1);
     CT_EQ(v[2] | (v[3] << 8), 0xFFFF);
     uint32_t h = bt_sc_hash(profile_data, sizeof profile_data);
-    uint8_t st[4] = {(uint8_t)h, (uint8_t)(h >> 8), (uint8_t)(h >> 16), (uint8_t)(h >> 24)};
-    CT_CHECK(!bt_sc_db_changed(h, st, 4));
-    CT_CHECK(bt_sc_db_changed(h + 1, st, 4));
-    CT_CHECK(bt_sc_db_changed(h, NULL, 0)); /* first run of this firmware */
-    bt_sc_set_changed(false);
-    CT_CHECK(!bt_sc_ccc(0x40, 2)); /* database unchanged: nothing to send */
-    bt_sc_drop(0x40);
-    bt_sc_set_changed(true);
-    CT_CHECK(!bt_sc_ccc(0x40, 0));    /* CCCD off: no indication */
-    CT_CHECK(bt_sc_ccc(0x40, 2));     /* restored/enabled: once */
+    g_kvn = 0;
+    bt_sc_init(&st, h);
+    /* a bond from before the record existed: indicated once, after its CCCD is enabled */
+    CT_CHECK(!bt_sc_peer(0x40, A, 1));
+    CT_CHECK(!bt_sc_ccc(0x40, 0));
+    CT_CHECK(bt_sc_ccc(0x40, 2));
     bt_sc_sent(0x40);
-    CT_CHECK(!bt_sc_ccc(0x40, 2));    /* not again on this connection */
-    CT_EQ(bt_sc_ccc_get(0x40), 2);
+    CT_CHECK(!bt_sc_ccc(0x40, 2)); /* never twice on a connection */
     bt_sc_drop(0x40);
-    CT_EQ(bt_sc_ccc_get(0x40), 0);
-    CT_CHECK(bt_sc_ccc(0x41, 2));     /* a new connection gets its own */
+    /* not confirmed (link lost): the next connection asks again */
+    CT_CHECK(!bt_sc_ccc(0x41, 2));       /* the CCCD is restored before the peer is identified */
+    CT_CHECK(bt_sc_peer(0x41, A, 1));
+    bt_sc_sent(0x41);
+    bt_sc_confirmed(0x41);               /* the handle value confirmation */
     bt_sc_drop(0x41);
+    /* once per bond: later connections, and a helper restart (state kept in the store), stay quiet */
+    CT_CHECK(!bt_sc_peer(0x42, A, 1) && !bt_sc_ccc(0x42, 2));
+    bt_sc_drop(0x42);
+    bt_sc_init(&st, h);
+    CT_CHECK(!bt_sc_peer(0x43, A, 1) && !bt_sc_ccc(0x43, 2));
+    bt_sc_drop(0x43);
+    /* a fresh pairing has discovered the current database: no indication */
+    bt_sc_bond_fresh(B, 1);
+    CT_CHECK(!bt_sc_peer(0x44, B, 1) && !bt_sc_ccc(0x44, 2));
+    bt_sc_drop(0x44);
+    /* a new firmware database: every bond is told once more, and only once */
+    bt_sc_init(&st, h + 1);
+    CT_CHECK(!bt_sc_peer(0x45, B, 1) && bt_sc_ccc(0x45, 2));
+    bt_sc_sent(0x45);
+    bt_sc_confirmed(0x45);
+    bt_sc_drop(0x45);
+    CT_CHECK(!bt_sc_peer(0x46, B, 1) && !bt_sc_ccc(0x46, 2));
+    CT_CHECK(bt_sc_peer(0x47, A, 1) == false && bt_sc_ccc(0x47, 2)); /* A has not been told about the new one */
+    CT_EQ(bt_sc_ccc_get(0x47), 2);
+    bt_sc_drop(0x46);
+    bt_sc_drop(0x47);
+    CT_EQ(bt_sc_ccc_get(0x47), 0);
 }
 
 static void test_hidq_overflow(void) {
