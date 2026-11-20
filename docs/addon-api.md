@@ -1,13 +1,13 @@
 # Harmony Editor add-on: HTTP API
 
-The contract for the editor frontend (and the integration's bundle feed). Source of truth is the
+The contract for the editor frontend (and the integration's channel). Source of truth is the
 code in `harmony_addon/`; `tests/py/test_addon_api_doc.py` fails if a served route is missing from
-the table below.
+the table below. There is no polling anywhere: the add-on pushes over two WebSockets (`/channel`, `/live`).
 
 ## Conventions
 
 - **Ingress** routes are reachable only through Home Assistant ingress (the Supervisor gateway
-  peer). Pages additionally need `X-Ingress-Path`. **Bearer** routes (`/api/v1/bundle*`) need
+  peer). Pages additionally need `X-Ingress-Path`. **Bearer** routes (`/api/v1/channel`) need
   `Authorization: Bearer <token>` from the Supervisor network, and are refused via ingress.
 - Every ingress request that changes state (POST/PUT) needs `Content-Type: application/json`
   (`text/yaml` or `application/yaml` for `import_yaml`), the header `X-HH-CSRF: 1`, and a same-origin
@@ -36,8 +36,7 @@ the table below.
 | POST | `/api/v1/config/revert` | ingress | Discard the draft, or re-apply the previous version |
 | POST | `/api/v1/config/import_yaml` | ingress | Upload YAML as the draft |
 | GET | `/api/v1/config/export_yaml` | ingress | Draft or applied config as YAML |
-| GET | `/api/v1/config/status` | ingress | Did the integration apply it? |
-| GET | `/api/v1/hubs` | ingress | Hubs known to the store, hub ids integrations poll for, adoptable stores |
+| GET | `/api/v1/hubs` | ingress | Hubs known to the store, hub ids integrations are connected for, adoptable stores |
 | POST | `/api/v1/hubs/adopt` | ingress | Move a store (default: `default`) to a linked hub id |
 | GET | `/api/v1/ha/entities` | ingress | Home Assistant entities for pickers, with area, device, integration and labels |
 | GET | `/api/v1/ha/services` | ingress | Home Assistant services for pickers |
@@ -47,19 +46,14 @@ the table below.
 | GET | `/api/v1/ir/device` | ingress | A converted device block |
 | GET | `/api/v1/ir/candidates` | ingress | Power code candidates |
 | POST | `/api/v1/ir/parse` | ingress | Parse pasted Pronto / Flipper / SmartIR |
-| GET | `/api/v1/bt/status` | ingress | Bluetooth: the hub's latest `bt_state` and limits, or why there is none |
 | GET | `/api/v1/bt/codes` | ingress | Bluetooth: built-in command names, default command set, default remote key map, key names |
 | POST | `/api/v1/bt/pair` | ingress | Bluetooth: open a pairing window (host or remote) |
 | POST | `/api/v1/bt/pair/stop` | ingress | Bluetooth: close the pairing window |
 | POST | `/api/v1/bt/pick` | ingress | Bluetooth: bond a scanned remote by address |
 | POST | `/api/v1/bt/forget` | ingress | Bluetooth: remove a bond |
 | POST | `/api/v1/bt/key` | ingress | Bluetooth: test-fire a key at a paired host |
-| POST | `/api/v1/bt/listen` | ingress | Bluetooth: start or stop receiving remote keys |
-| GET | `/api/v1/bt/events` | ingress | Bluetooth: recent remote keys (bounded ring, polled) |
-| GET | `/api/v1/bundle` | bearer | The applied config for the integration |
-| POST | `/api/v1/bundle/bt` | bearer | The integration's Bluetooth relay round trip |
-| GET | `/api/v1/bundle/wait` | bearer | Long poll for a newer bundle |
-| POST | `/api/v1/bundle/ack` | bearer | The integration reports what it did |
+| GET | `/api/v1/live` | ingress | WebSocket push to the editor: hubs, config status, Bluetooth state, remote keys |
+| GET | `/api/v1/channel` | bearer | WebSocket to the integration: bundle push, acks, Bluetooth relay |
 
 Query/body details follow. `hub` is a query parameter wherever a hub applies.
 
@@ -114,7 +108,7 @@ when the draft has errors elsewhere:
          config_bytes, config_budget, soft_keys, soft_keys_max} | null}
  # the *_max of json, pool, commands and inputs are null on a current hub (no such limit): it has one
  # memory budget, config_bytes of config_budget. They come from the limits the hub's integration
- # reported (header `X-Hub-Limits` on its bundle polls); a hub that never did gets the old numbers.
+ # reported (`limits` in its channel `hello`); a hub that never did gets the old numbers.
 ```
 
 `pages` has one entry per **config** page. `page` is the page-format-v2 model of its first wire page
@@ -146,15 +140,10 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
 
 ### Status and hubs
 
-- `GET config/status?hub=` -> `{hub, applied_rev, acked_rev, result: "ok"|"error"|null, detail, acked_at,
-  linked, last_seen, hub_last_seen, linked_hubs, now}`. `applied_rev` is the bundle rev (a content
-  hash). `linked` is true once any authenticated bundle request was seen since the add-on started.
-  `hub_last_seen` is when an integration last polled for **this** hub id (null: never), `linked_hubs`
-  is every id polled for, `[{id, last_seen}]` newest first, and `now` the add-on clock (unix seconds),
-  so a client can judge freshness without its own clock. The integration long-polls (about 55 s), so
-  a `hub_last_seen` older than a few minutes means nothing is polling for that id.
-- Linked hub ids: every authenticated `GET bundle` or `bundle/wait` with a valid `hub` records the id
-  and the time (404s included), in memory and in `/data/linked_hubs.json` (at most 32 ids).
+- Status is pushed, not polled: see `Live (editor WebSocket)` (`hub:<id>` topic = the old `config/status` payload; `hub_last_seen`
+  and `linked_hubs` are replaced by `connected`, below).
+- Linked hub ids: every authenticated channel `hello` with a valid `hub` records the id and the time, in memory and in
+  `/data/linked_hubs.json` (at most 32 ids). A hub is `connected` while its channel socket is open.
 - `GET hubs` -> `{hubs: [{id, has_draft, has_applied, applied_rev, applied_at}], linked: [{id,
   last_seen, name?}], now, adopt: {from: "default", to: [id]}|null}`. `adopt` is set when a store exists
   under `default` and some linked hub id has no store of its own (the editor offers the move).
@@ -163,7 +152,7 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
   logged, repeating it does nothing), so a config applied under `default` is servable to the
   integration without re-importing. With several linked ids it only offers it (`adopt` above).
 - `POST hubs/adopt` body `{from?: "default", to}` -> `{ok:true, hub}`; `409 not_linked` (no integration
-  polls for `to`), `409 hub_exists` (`to` already has a store), `404 nothing_to_adopt`.
+  has connected for `to`), `409 hub_exists` (`to` already has a store), `404 nothing_to_adopt`.
   Optional `theme_notices: [string]` (not sent by this add-on yet): what the linked remote's firmware cannot show of the
   config's colours or theme (the compiler's `theme_notices`). The editor shows one non-blocking notice in the Themes view
   and the apply dialog when it is non-empty.
@@ -233,71 +222,127 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
 whole add-on). The add-on calls exactly `POST /services/ha_harmony/send_ir` with
 `{config_entry: <hub>, ir}` and nothing else.
 
-### Bundle (integration)
+### Channel (integration)
 
-- `GET bundle?hub=` -> `{schema, core_version, hub_id, applied_at, rev, config}` with `ETag`;
-  `If-None-Match` -> `304`; `404 nothing_applied`. `config` never contains `editor`.
-  Also `remotes: [{remote, caps, tier: "none"|"palette"|"custom", notices: [str]}]` and `theme_notices: [str]`
-  (every remote's notices, once each): what the integration last reported (header `X-Hub-Remotes`, below) about the
-  hub's linked remotes and what their colour support costs the applied config. Both are empty until a poll carried
-  the header, and the editor's Themes view and apply dialog show `theme_notices` (a remote with no notices shows none).
-- `GET bundle/wait?hub=&rev=` -> the bundle when its rev differs from `rev`, else `204` after about
-  55 s (or at once on shutdown).
-- `POST bundle/ack` body `{hub, rev, result: "ok"|"error", detail?: str (<= 200)}` -> `{ok:true}`;
-  `404 nothing_applied`; `409 stale_rev` (with the current `rev`) when `rev` is not the applied one.
-- **Renamed hubs.** A poll (`GET bundle`, `GET bundle/wait`) may say which hub it is with three optional headers
-  (an add-on that does not know them ignores them): `X-Hub-Hw` (the hub's stable hardware id, `[A-Za-z0-9._:-]`, 1 to
-  64), `X-Hub-Prev` (the id the hub had before a rename, a valid hub id other than `default`) and `X-Hub-Name` (the
-  display name, percent-encoded UTF-8, at most 48 bytes, no control characters; empty clears it). The add-on records
-  the hardware id and name per linked hub (`linked_hubs.json`, `hw` and `names`). When the polled `hub` has no store of
-  its own and a store exists under `X-Hub-Prev`, or under a linked id with the same hardware id, that store (draft,
-  applied revisions, history, ack) is moved to `hub` in one atomic rename (the generalisation of the `default`
-  adoption; the old id is dropped from the linked list). A `prev` whose recorded hardware id differs is another hub and
-  is skipped. It never overwrites: if `hub` already has a store nothing moves. The response carries
-  `X-HH-Adopt: moved | exists | none` whenever one of the headers was sent (`exists`: refused because `hub` already has
-  a store; `none`: nothing to move, which is also the answer to a repeat). Moving back is the same call the other way
-  round (`hub=<old>`, `X-Hub-Prev: <new>`), which the integration uses to undo a rename.
-- **Linked remotes.** A poll may carry `X-Hub-Remotes`: compact ASCII JSON, at most 4000 characters, a list of
-  `{remote: int, caps: int (the remote_info caps), tier: "none"|"palette"|"custom", notices: [str <= 200]}` (at most 8
-  remotes, 8 notices each; the integration drops notices from the end to fit). `tier` is the colour support: `none`
-  (no colours), `palette` (palette colours and presets) or `custom` (free colours and user themes). The add-on keeps
-  the last well-formed report per hub in memory (a malformed or oversized one is ignored) and shows it in
-  `config/status`. Additive: an add-on that does not know the header ignores it, an integration that does not send it
-  leaves `remotes` and `theme_notices` empty.
-- Failed bearer attempts are rate limited (`429`); a valid token never is. `401 unauthorized` for
-  every other miss.
+`GET /api/v1/channel?hub=<id>` upgrades to a WebSocket (bearer auth, Supervisor network only, refused via ingress; a failed
+bearer is `401`/`429` before the upgrade). One socket per hub id; a second socket for the same id replaces the first (old one
+closed `4002 replaced`). Frames are text JSON `{"t": <type>, ...}`; unknown `t` and unknown fields are ignored (debug log).
+Replaces the removed `GET bundle`, `GET bundle/wait`, `POST bundle/ack`, `POST bundle/bt`.
+
+**Liveness.** No application ping, no aiohttp `heartbeat`. Both ends set kernel TCP keepalive on the socket (`SO_KEEPALIVE`,
+`TCP_KEEPIDLE=60`, `TCP_KEEPINTVL=10`, `TCP_KEEPCNT=3`; helper `harmony_addon.sockopts.set_keepalive`), so a dead peer is
+detected within about 90 s and the socket errors/closes. On close the add-on marks the hub not connected (`connected:false`
+pushed to `/live`) and fails pending Bluetooth commands with `hub_offline`.
+
+**Reconnect.** The integration reconnects with jittered exponential back-off (1 s doubling to 60 s, +-25 % jitter, reset after a
+socket lived 30 s) and always starts with a `hello`. No timers run while connected.
+
+Integration -> add-on:
+
+| `t` | Fields | Meaning |
+| --- | --- | --- |
+| `hello` | `v: 1`, `hub`, `known_rev?: str\|null`, `hw?`, `prev?`, `name?`, `remotes?`, `limits?` | first frame; must arrive within 10 s of the upgrade or the add-on closes `4000`. `hw`, `prev`, `name`, `remotes` have exactly the rules of the former `X-Hub-Hw/Prev/Name/Remotes` headers (below). `known_rev` is the applied rev the integration already holds. `limits` is the hub's `hello_ack.limits` (the former `X-Hub-Limits` header) |
+| `identity` | same fields as `hello` minus `v`/`known_rev` (all optional) | the hub's name, hardware id or linked remotes changed (e.g. a rename); replaces the stored values, may trigger a store move |
+| `ack` | `rev`, `result: "ok"\|"error"`, `detail?: str (<= 200)` | what the integration did with a `bundle` |
+| `bt_state` | `online: bool`, `supported: bool`, `state?`, `limits?` | the hub's Bluetooth state changed (also sent once after `hello`); `state` is the hub's `bt_state` |
+| `bt_result` | `id`, `ok: bool`, `code?`, `msg?`, `state?` | outcome of a `bt_cmd` (sent as soon as it finishes) |
+| `bt_key` | `slot`, `page`, `usage`, `down: bool` | a remote key, only while the add-on asked `listen on` |
+| `hub` | `online: bool` | the hub link went up or down (also sent once after `hello`) |
+
+Add-on -> integration:
+
+| `t` | Fields | Meaning |
+| --- | --- | --- |
+| `bundle` | `rev`, `body` | `body` = `{schema, core_version, hub_id, applied_at, rev, config, ...}` (`config` never contains `editor`); sent when a config is applied, and right after `hello` when `rev != known_rev` |
+| `nothing_applied` | | answer to `hello` when no config is applied (sent once; a later apply sends `bundle`) |
+| `bt_cmd` | `id`, `op: "pair"\|"pair_stop"\|"pick"\|"forget"\|"key"`, op fields | a validated editor command, delivered once. `id` matches `[A-Za-z0-9_-]{1,16}` |
+| `listen` | `on: bool` | opt the hub's remote keys in or out (sent after `hello` when a `keys:<hub>` subscriber exists, then on change) |
+| `error` | `code`, `msg?` | `bad_hello`, `bad_frame`, `stale_rev`, `hub_mismatch`, `store_error` |
+
+Close codes: `4000` no/invalid hello, `4001` `v` unsupported (add-on closes after sending `error unsupported_version`; the integration
+reports `addon_outdated` or `integration_outdated` and does not retry for 10 minutes), `4002` replaced. A `404` on the upgrade (an
+add-on without `/channel`) makes the integration set link_state `addon_outdated` and raise a repair issue; there is no fallback.
+
+- **`known_rev`/dedupe.** The add-on keeps no per-socket bundle cursor: after `hello` it sends `bundle` once if the rev differs,
+  then one per apply. `ack` for a rev other than the applied one gets `error stale_rev`.
+- **Renamed hubs.** The identity fields in `hello`/`identity`: `hw` (stable hardware id, `[A-Za-z0-9._:-]`, 1 to 64), `prev` (the id
+  the hub had before a rename, a valid hub id other than `default`), `name` (display name, plain UTF-8, at most 48 bytes, no
+  control characters; empty clears it). The add-on records hardware id and name per linked hub (`linked_hubs.json`). When `hub`
+  has no store of its own and a store exists under `prev`, or under a linked id with the same hardware id, that store (draft,
+  applied revisions, history, ack) is moved to `hub` in one atomic rename (the generalisation of the `default` adoption; the old
+  id is dropped from the linked list). A `prev` whose recorded hardware id differs is another hub and is skipped. It never
+  overwrites. The add-on answers with `{"t":"adopt","result":"moved"|"exists"|"none"}` whenever `prev`/`hw` was sent
+  (`exists`: `hub` already has a store; `none`: nothing to move, also the answer to a repeat). Moving back is the same call the
+  other way round, which the integration uses to undo a rename.
+- **Linked remotes.** `remotes`: a list of `{remote: int, caps: int, tier: "none"|"palette"|"custom", notices: [str <= 200]}` (at
+  most 8 remotes, 8 notices each). `tier` is the colour support: `none`, `palette` (palette colours and presets) or `custom` (free
+  colours and user themes). The add-on keeps the last well-formed report per hub in memory (a malformed one is ignored), derives
+  `theme_notices` (every remote's notices, once each) and shows both in the `hub:<id>` topic of `/live`. Also exposed on the
+  editor's Themes view and apply dialog.
+- Failed bearer attempts are rate limited (`429`); a valid token never is.
+
+### Live (editor WebSocket)
+
+`GET /api/v1/live` upgrades to a WebSocket through ingress (ingress auth plus same-origin `Origin`/`Sec-Fetch-Site` checked at
+the upgrade; `403` otherwise). Replaces `GET config/status`, `GET bt/status`, `GET bt/events` and every editor poll. No ping
+timers; the server sets TCP keepalive on the accepted socket (as above) and the browser relies on `onclose`, then reconnects
+with jittered exponential back-off (1 s to 30 s) and re-sends its subscription.
+
+Client -> server: `{"sub": ["hubs", "hub:<id>", "bt:<id>", "keys:<id>"]}` (replaces the whole subscription set; the topics are
+validated, at most 16, unknown are ignored). Topics:
+
+| Topic | Delivers |
+| --- | --- |
+| `hubs` | the `GET hubs` payload |
+| `hub:<id>` | config status of one hub |
+| `bt:<id>` | Bluetooth status of one hub |
+| `keys:<id>` | remote keys of one hub; being subscribed is the **listen lease** |
+
+Server -> client, all `{"t": ...}`:
+
+- `snapshot` `{topics: {"hubs": {...}, "hub:<id>": {...}, "bt:<id>": {...}}}`: sent right after every `sub` for the newly added
+  topics, and after a `resync` (below). `keys:` has no snapshot.
+- `hubs` (payload as `GET hubs`), `hub` `{hub, ...status}`, `bt` `{hub, ...status}`, `key` `{hub, seq, slot, page, usage, down, t}`:
+  deltas, each carrying the full new payload (no patches) except `key`.
+- `resync` `{topic}`: the server's per-socket queue overflowed and dropped the oldest messages; a fresh snapshot of that topic
+  follows. `key` events lost this way are not replayed.
+- `error` `{code}` for a bad `sub`.
+
+Payloads (same shapes as the removed endpoints):
+
+- `hub:<id>` -> `{hub, applied_rev, acked_rev, result: "ok"|"error"|null, detail, acked_at, connected: bool, connected_at,
+  remotes, theme_notices, now}`. `applied_rev` is the bundle rev (a content hash), `connected` is whether the integration's
+  channel for that hub is open, `now` the add-on clock (unix seconds).
+- `bt:<id>` -> `{hub, status: "ok"|"unsupported"|"offline"|"unknown", state, limits, listening}`. `unknown`: no integration has
+  connected (or an integration without Bluetooth); `offline`: the hub is disconnected or the channel is closed; `unsupported`:
+  the hub has no Bluetooth. `state` and `limits` as in Bluetooth below. No `age_s`: freshness is push-driven.
+
+**Listen lease.** There is no 30 s lease or renewal. The add-on sends `listen {on:true}` on the channel when the first socket
+subscribes to `keys:<id>`, and `listen {on:false}` when the last one unsubscribes or closes, and after a channel reconnect
+re-asserts the current state. Keys flow `bt_key` (channel) -> `key` (live) with no ring and no replay.
 
 ### Bluetooth relay
 
 The hub's Bluetooth pairing and key learning (protocol: `docs/proto/bluetooth.md`; user guide: `docs/bluetooth.md`) reach the
-editor through the integration: the add-on never talks to the hub. Editor requests are queued per hub; the integration
-collects them with its next `POST bundle/bt` (about every 5 s, every 1 s while a pairing window or key listen is active or the
-command), runs them against the hub and reports the outcome with the new `bt_state` in its next
-exchange. Every queue is bounded (16 commands, 8 per exchange, 32 results, a 64-key ring, 32 hubs); the integration
-validates every command again against the hub's limits.
+editor through the integration: the add-on never talks to the hub. An editor command POST becomes a `bt_cmd` on the hub's channel,
+the integration runs it against the hub and answers `bt_result` at once, and the new `bt_state` is pushed as `bt_state`. Every
+queue is bounded (16 commands in flight per hub, 32 hubs); the integration validates every command again against the hub's
+limits. No cadence, no fast mode.
 
-- **Cadence.** The integration exchanges every 5 s, and every 1 s only while a pairing window is open, a listen lease holds, or
-  within 10 s of a command (or while one is in flight). A plain `bt/status` poll does not speed it up, so status is fresh to
-  within about 5 s when idle. After a command it is within about 1 s.
 - **Command ids.** Every command POST (`pair`, `pair/stop`, `pick`, `forget`, `key`) takes an optional `cmd_id`
   (`[A-Za-z0-9_-]{1,16}`; generated when absent) and returns it as `id` (also in error bodies). Re-posting a `cmd_id` that is in
   flight joins it, and one that has finished (the last 32 per hub) returns the stored result: a retry after a timeout never runs
-  the command twice. A command is delivered to the integration once. The integration reports each result as soon as its
-  command finishes.
-- `GET bt/status?hub=` -> `{hub, status: "ok"|"unsupported"|"offline"|"unknown", state, limits, listening, age_s}`.
-  `unknown`: the integration has never reported (not linked, or an integration without Bluetooth support);
-  `offline`: the hub is disconnected or the last report is over 30 s old; `unsupported`: the hub has no Bluetooth.
-  `state` is the hub's `bt_state` as last reported, cleaned (`{state, discoverable, discoverable_secs?, le?, gen?, window?,
-  pairing?: {result, addr?, name?, transport?, kind?}, hosts: [{slot, addr, name?, transport, connected, configured?}],
-  remotes: [{slot, addr, name?, connected, battery?, configured?}], candidates?: [{addr, name?, rssi}]}`, addresses upper-case);
-  it is `null` when none is known. `limits` is `hello_ack.bt`: `{hosts_max, conn_max, remotes_max, le_bonds_max, pages, le}`.
-  The editor may poll this about every 2 s while its Bluetooth view is open (see Cadence).
+  the command twice. A command is delivered once. If the channel closes with a command in flight it is failed `409 hub_offline`.
 - `GET bt/codes` -> `{builtins: [{name, page, usage, default}], remote_keys: [{name, page, usage, key}], keys: [str]}`: static
   tables from `harmony_core.bt_codes` / `keys` (needs no hub): every built-in command name with its HID code (`default`: part of
   the default command set), the default usage -> key map of a remote (`name` is the built-in whose code it is), and the key
   names a remote's `keys` may map to (`key_<n>`, n < 128, also works).
-- Commands, each `{hub?, ...}`, answered `200 {ok: true, state}` once the integration has run it against the hub (up to 20 s;
-  `state` is the snapshot reported with the outcome, the pairing result itself arrives later in `bt/status`):
+- `state` (in `bt:<id>`, `bt_state`) is the hub's `bt_state`, cleaned: `{state, discoverable, discoverable_secs?, le?, gen?, window?,
+  pairing?: {result, addr?, name?, transport?, kind?}, hosts: [{slot, addr, name?, transport, connected, configured?}],
+  remotes: [{slot, addr, name?, connected, battery?, configured?}], candidates?: [{addr, name?, rssi}]}`, addresses upper-case;
+  `null` when none is known. `limits` is `hello_ack.bt`: `{hosts_max, conn_max, remotes_max, le_bonds_max, pages, le}`.
+- Commands, each `{hub?, ...}`, answered `200 {ok: true, state}` once `bt_result` arrives (up to 20 s; the pairing result itself
+  arrives later in the `bt:<id>` topic):
   - `POST bt/pair` `{mode?: "host"|"remote" (host), transport?: "any"|"classic"|"le" (any), secs?: 1..300 (120)}`.
     Remote mode scans: found devices appear as `state.candidates`; nothing is bonded until `bt/pick`.
   - `POST bt/pair/stop` `{}`.
@@ -306,18 +351,25 @@ validates every command again against the hub's limits.
   - `POST bt/key` `{slot: 0..254, page: 7|12, usage: 0..65535, action: "down"|"up"|"press"}` test-fires a key at a paired host.
   - Errors: `400 bad_request` (schema), `422 invalid_bt` (`error.bt_code`, e.g. a slot beyond the hub's limits, `no_le`), `409
     bt_unknown | hub_offline | bt_unsupported`, `429 bt_busy` (too many waiting), `502 hub_refused` (`error.hub_code` is the hub's
-    code: `no_candidate`, `no_slot`, `bt_not_ready`, `bt_busy`, ...; `msg` a sentence), `504 hub_timeout` (the integration did
-    not answer in 20 s; if it was never delivered it is withdrawn, if it was delivered a retry with the same `cmd_id` gets its result).
-- `POST bt/listen` `{hub?, on: bool}` -> `{ok, listening}`: a 30 s lease. While it holds, the integration opts in to the hub's
-  remote keys and forwards them; the lease is renewed by `GET bt/events` and `listen on`, and lapses when the editor stops
-  asking (or on `on: false`). Nothing is listened to otherwise.
-- `GET bt/events?hub=&after=<seq>` -> `{events: [{seq, slot, page, usage, down, t}], last, listening, dropped}`. A ring of the last
-  64 keys (`seq` counts from 1 for the process); poll with `after = last`. `dropped` is true when the ring overwrote keys the
-  caller had not read.
-- `POST bundle/bt` (bearer, integration only) body `{hub, supported: bool, online: bool, state?, limits?, results: [{id, ok, code?,
-  msg?}] (<= 32), events: [{slot, page, usage, down}] (<= 64)}` -> `{commands: [{id, op: "pair"|"pair_stop"|"pick"|"forget"|"key",
-  ...fields}] (<= 8), listen: bool, fast: bool}`. `404 not_linked` for a hub id nothing polls for. A command is delivered once;
-  its `id` (`[A-Za-z0-9_-]{1,16}`) comes back in `results`. `fast` asks the integration to exchange every second.
+    code: `no_candidate`, `no_slot`, `bt_not_ready`, `bt_busy`, ...; `msg` a sentence), `504 hub_timeout` (no `bt_result` in 20 s; a
+    retry with the same `cmd_id` gets its result).
+- `POST bt/listen` is removed: listening is the `keys:<id>` subscription (see Live).
+- Messages for the channel are as listed under Channel; `bt_result` carries `{id, ok, code?, msg?, state?}` with the same
+  `code`/`msg` the old `results` entries had.
+
+### Cadence
+
+None. Nothing polls and nothing renews: the integration and editor hold WebSockets, state changes are pushed, and a dead peer is
+found by TCP keepalive (60 s idle, 10 s interval, 3 probes), then reconnected with back-off and resynced from `hello` /
+`snapshot`.
+
+### Implementer notes (routes)
+
+- Remove `GET config/status`, `GET bt/status`, `GET bt/events`, `POST bt/listen`, `GET bundle`, `GET bundle/wait`, `POST bundle/ack`,
+  `POST bundle/bt` and their schemas/constants (`WAIT_SECONDS`, `BT_POLL_*`, `fast`).
+- Add `GET /api/v1/channel` (bearer) and `GET /api/v1/live` (ingress). `tests/py/test_addon_api_doc.py` and `test_addon.py`
+  classify auth by `path.startswith("/api/v1/bundle")` / `_is_bundle`: change both to `/api/v1/channel`. `/health.capabilities`
+  gains `"channel": 1`.
 
 ## Decisions
 
@@ -335,12 +387,8 @@ validates every command again against the hub's limits.
 - `GET /hubs` returns `{hubs:[{id,has_draft,has_applied,applied_rev,applied_at}]}`. Here `applied_rev`
   and the status endpoint's `applied_rev` are the bundle rev (content hash), the same string the
   integration acks.
-- `POST /bundle/ack` takes `{hub,rev,result:"ok"|"error",detail?<=200}`. It is bearer-only with no
-  CSRF header; the content type must still be JSON. It returns 404 if the hub has nothing applied and 409
-  `stale_rev` if `rev` is not the currently applied one.
-- `GET /config/status?hub=` returns `{hub,applied_rev,acked_rev,result,detail,acked_at,linked,last_seen}` (and the
-  fields listed under Status and hubs, among them `remotes` and `theme_notices`).
-  `linked` is process-lifetime.
+- Acks travel as `ack` messages on the channel (see Channel). The add-on answers an `ack` for a rev that is not the applied one with `error stale_rev`.
+- Config status is the `hub:<id>` topic of `/live` (fields under Live).
 - IR routes: brands `{brands:[{name,slug,count}]}` at most 50; models `{brand,total,offset,limit,
   models:[{file,name,id}]}` limit 1-200; device `{device,forms,notes,skipped:[{name,reason}],
   skipped_total,device_type:{id,name}|null,source}`; candidates `{candidates:[{kind,action,form,count,

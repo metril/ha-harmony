@@ -728,7 +728,10 @@ async def ha_entities(request: web.Request) -> web.Response:
     except HaUnavailable as exc:
         raise _ha_unavailable(exc.reason) from None
     headers = {"ETag": etag, "Cache-Control": "no-cache"}
-    sent = [t.strip().removeprefix("W/").strip('"') for t in request.headers.get("If-None-Match", "").split(",")]
+    sent = [
+        t.strip().removeprefix("W/").strip('"')
+        for t in request.headers.get("If-None-Match", "").split(",")
+    ]
     if etag.strip('"') in sent or "*" in sent:
         return web.Response(status=304, headers=headers)
     return web.Response(text=text, content_type="application/json", headers=headers)

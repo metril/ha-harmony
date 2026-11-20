@@ -52,3 +52,14 @@ An unreadable or invalid file is ignored. Delete both files to go back to the de
 The hub only changes its own answer. The Home Assistant integration moves every record keyed by the id (see
 `docs/ha-config.md`, "Naming your hub") and tells the add-on (`docs/addon-api.md`, "Renamed hubs"); it matches the
 same hub across ids by `hw_id`.
+
+## hello_ack: `tcp_keepalive`
+
+`tcp_keepalive: true` (optional) says the hub sets `SO_KEEPALIVE` with `TCP_KEEPIDLE=60`, `TCP_KEEPINTVL=10`, `TCP_KEEPCNT=3` on every
+accepted socket and does not close an authenticated client for being silent (the old 90 s idle close). Clients that see it send no
+application `ping`; clients that do not (older firmware) keep their 30 s `ping`. See `compat.md`.
+
+## Peer ARP nudge
+
+The hub no longer re-ARPs its peers every 30 s. The nudge (`peers.c`) is event-driven: once at boot and whenever a peer's
+connection is lost it sends a few ARP requests with back-off (about 1, 2, 4, 8 s), then stops until the next event.

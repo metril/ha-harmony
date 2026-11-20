@@ -200,7 +200,9 @@ class Catalog:
         if self._registry is None:
             return None
         hit = self._reg_cache
-        if hit and self._clock() - hit[0] < (REGISTRY_SECONDS if hit[1] is not None else FAILED_RETRY_SECONDS):
+        if hit and self._clock() - hit[0] < (
+            REGISTRY_SECONDS if hit[1] is not None else FAILED_RETRY_SECONDS
+        ):
             return hit[1]
         return await self._once("registry", self._load_registries)
 
@@ -225,7 +227,11 @@ class Catalog:
         for a in _dict_rows(raw.get("config/area_registry/list")):
             if aid := _text(a.get("area_id")):
                 fid = _text(a.get("floor_id"))
-                areas[aid] = (_text(a.get("name")) or aid, fid if fid in floors else None, floors.get(fid))
+                areas[aid] = (
+                    _text(a.get("name")) or aid,
+                    fid if fid in floors else None,
+                    floors.get(fid),
+                )
         labels = {
             lid: _text(lb.get("name")) or lid
             for lb in _dict_rows(raw.get("config/label_registry/list"))
@@ -240,7 +246,9 @@ class Catalog:
                     _ids(d.get("labels")),
                 )
         entities = {
-            eid: e for e in _dict_rows(raw.get("config/entity_registry/list")) if (eid := _text(e.get("entity_id")))
+            eid: e
+            for e in _dict_rows(raw.get("config/entity_registry/list"))
+            if (eid := _text(e.get("entity_id")))
         }
         data = {"areas": areas, "devices": devices, "entities": entities, "labels": labels}
         self._reg_cache = (now, data)
@@ -277,7 +285,11 @@ class Catalog:
     ) -> tuple[str, str]:
         """The serialised catalog and its ETag, memoised per query until the sources change."""
         states, reg = await self._sources()
-        if self._memo_src is None or self._memo_src[0] is not states or self._memo_src[1] is not reg:
+        if (
+            self._memo_src is None
+            or self._memo_src[0] is not states
+            or self._memo_src[1] is not reg
+        ):
             self._memo_src, self._memo = (states, reg), {}
         key = (domain, q, area, diagnostic, state)
         hit = self._memo.get(key)
@@ -358,7 +370,11 @@ class Catalog:
             for r in out:
                 if (a := r.get("area_id")) and a not in areas:
                     name, fid, floor = reg["areas"][a]
-                    areas[a] = {"id": a, "name": name, **({"floor_id": fid, "floor": floor} if fid else {})}
+                    areas[a] = {
+                        "id": a,
+                        "name": name,
+                        **({"floor_id": fid, "floor": floor} if fid else {}),
+                    }
                 if (d := r.get("device_id")) and d not in devices:
                     devices[d] = {"id": d, "name": reg["devices"][d][0]}
                 for lid in r.get("label_ids", []):

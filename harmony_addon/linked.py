@@ -35,10 +35,16 @@ class LinkedHubs:
         self._path = Path(data_dir) / "linked_hubs.json"
         self._clock = clock
         self._seen: dict[str, int] = {}
-        self._limits: dict[str, dict[str, int]] = {}  # hub -> the limits its integration reported (wire form; {} = legacy)
-        self._hw: dict[str, str] = {}  # hub -> its stable hardware id, as its integration reported it
+        self._limits: dict[
+            str, dict[str, int]
+        ] = {}  # hub -> the limits its integration reported (wire form; {} = legacy)
+        self._hw: dict[
+            str, str
+        ] = {}  # hub -> its stable hardware id, as its integration reported it
         self._names: dict[str, str] = {}  # hub -> display name (absent = none)
-        self._remotes: dict[str, list[dict[str, Any]]] = {}  # hub -> its remotes as the integration last reported (memory only)
+        self._remotes: dict[
+            str, list[dict[str, Any]]
+        ] = {}  # hub -> its remotes as the integration last reported (memory only)
         self._persisted = 0
         try:
             raw = json.loads(self._path.read_bytes())
@@ -121,7 +127,9 @@ class LinkedHubs:
         if hub not in self._seen or not isinstance(wire, dict):
             return
         lim = HubLimits.from_hello(wire)
-        clean = {} if lim.legacy else {k: v for k, v in lim.to_wire().items() if k != "flash_free"}  # free flash moves: only the integration checks it, at push time; "none left" (flash_low) is passed on so the editor can say so
+        clean = (
+            {} if lim.legacy else {k: v for k, v in lim.to_wire().items() if k != "flash_free"}
+        )  # free flash moves: only the integration checks it, at push time; "none left" (flash_low) is passed on so the editor can say so
         if self._limits.get(hub) != clean:
             self._limits[hub] = clean
             self._persist(int(self._clock()))
@@ -139,9 +147,19 @@ class LinkedHubs:
             if not isinstance(r, dict):
                 continue
             rem, caps, tier, notes = r.get("remote"), r.get("caps"), r.get("tier"), r.get("notices")
-            if type(rem) is not int or type(caps) is not int or not 0 <= rem <= 255 or not 0 <= caps <= 255 or tier not in ("none", "palette", "custom"):
+            if (
+                type(rem) is not int
+                or type(caps) is not int
+                or not 0 <= rem <= 255
+                or not 0 <= caps <= 255
+                or tier not in ("none", "palette", "custom")
+            ):
                 continue
-            msgs = [m[:200] for m in notes if isinstance(m, str)][:8] if isinstance(notes, list) else []
+            msgs = (
+                [m[:200] for m in notes if isinstance(m, str)][:8]
+                if isinstance(notes, list)
+                else []
+            )
             rows.append({"remote": rem, "caps": caps, "tier": tier, "notices": msgs})
         if raw and not rows:
             return  # nothing in it made sense: keep the last good report
@@ -162,9 +180,18 @@ class LinkedHubs:
 
     def _persist(self, now: int) -> None:
         try:
-            atomic_write(self._path, json.dumps(
-                    {"v": VERSION, "hubs": self._seen, "limits": self._limits, "hw": self._hw, "names": self._names}
-                ).encode())
+            atomic_write(
+                self._path,
+                json.dumps(
+                    {
+                        "v": VERSION,
+                        "hubs": self._seen,
+                        "limits": self._limits,
+                        "hw": self._hw,
+                        "names": self._names,
+                    }
+                ).encode(),
+            )
             self._persisted = now
         except OSError:
             log.warning("could not save the linked hub ids")

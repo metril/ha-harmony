@@ -55,8 +55,12 @@ class HubBt:
     queue: collections.deque[dict[str, Any]] = field(default_factory=collections.deque)
     waiting: dict[str, asyncio.Future[dict[str, Any]]] = field(default_factory=dict)
     born: dict[str, float] = field(default_factory=dict)  # command id -> when it was queued
-    done: collections.OrderedDict[str, dict[str, Any]] = field(default_factory=collections.OrderedDict)  # recent results by id
-    events: collections.deque[dict[str, Any]] = field(default_factory=lambda: collections.deque(maxlen=EVENTS_MAX))
+    done: collections.OrderedDict[str, dict[str, Any]] = field(
+        default_factory=collections.OrderedDict
+    )  # recent results by id
+    events: collections.deque[dict[str, Any]] = field(
+        default_factory=lambda: collections.deque(maxlen=EVENTS_MAX)
+    )
     seq: int = 0
     listen_until: float = 0.0
     active_until: float = 0.0
@@ -120,7 +124,10 @@ EXCHANGE = vol.Schema(
 )
 _HUB_ONLY = {vol.Optional("hub", default="default"): _hub}
 STATUS_QUERY = vol.Schema(_HUB_ONLY, extra=vol.PREVENT_EXTRA)
-_CMD = {**_HUB_ONLY, vol.Optional("cmd_id"): vol.All(str, vol.Match(_ID))}  # the caller's id: a re-post is not a second command
+_CMD = {
+    **_HUB_ONLY,
+    vol.Optional("cmd_id"): vol.All(str, vol.Match(_ID)),
+}  # the caller's id: a re-post is not a second command
 EVENTS_QUERY = vol.Schema(
     {**_HUB_ONLY, vol.Optional("after", default="0"): vol.All(str, vol.Match(r"^[0-9]{1,12}$"))},
     extra=vol.PREVENT_EXTRA,
@@ -214,7 +221,11 @@ async def exchange(request: web.Request) -> web.Response:
             "commands": commands,
             "listen": now < h.listen_until,
             # fast only for a reason: a pairing window, a listen lease, or a command recently asked for or in flight
-            "fast": window or now < h.listen_until or now < h.active_until or bool(h.queue) or bool(h.waiting),
+            "fast": window
+            or now < h.listen_until
+            or now < h.active_until
+            or bool(h.queue)
+            or bool(h.waiting),
         }
     )
 
@@ -225,7 +236,9 @@ def _state_or_refuse(request: web.Request, hub: str) -> HubBt:
     h = relay.hub(hub)
     st = relay.status(h, now)
     if st == "unknown":
-        raise error(409, "bt_unknown", "the integration has not reported Bluetooth for this hub yet")
+        raise error(
+            409, "bt_unknown", "the integration has not reported Bluetooth for this hub yet"
+        )
     if st == "offline":
         raise error(409, "hub_offline", "the hub is offline")
     if st == "unsupported":
@@ -238,7 +251,11 @@ def _state_or_refuse(request: web.Request, hub: str) -> HubBt:
 def _answer(h: HubBt, cid: str, res: dict[str, Any]) -> dict[str, Any]:
     if not res["ok"]:
         raise error(
-            502, "hub_refused", str(res.get("msg") or "the hub refused")[:200], hub_code=res.get("code", "failed"), id=cid
+            502,
+            "hub_refused",
+            str(res.get("msg") or "the hub refused")[:200],
+            hub_code=res.get("code", "failed"),
+            id=cid,
         )
     return {"ok": True, "id": cid, "state": h.state}
 
@@ -249,10 +266,14 @@ def _expire(h: HubBt, now: float) -> None:
         fut = h.waiting.pop(cid, None)
         h.born.pop(cid, None)
         if fut is not None and not fut.done():
-            fut.set_result({"ok": False, "code": "expired", "msg": "the integration never answered"})
+            fut.set_result(
+                {"ok": False, "code": "expired", "msg": "the integration never answered"}
+            )
 
 
-async def _run(request: web.Request, hub: str, cmd: dict[str, Any], cid: str | None = None) -> dict[str, Any]:
+async def _run(
+    request: web.Request, hub: str, cmd: dict[str, Any], cid: str | None = None
+) -> dict[str, Any]:
     """Validate, queue for the integration's next exchange, wait for the outcome. `cid` (the caller's command id) makes a
     re-post of the same command safe: it joins the one in flight or gets the stored result, and never runs twice."""
     known = _relay(request).hub(hub)
@@ -285,7 +306,9 @@ async def _wait(h: HubBt, cid: str) -> dict[str, Any]:
         res = await asyncio.wait_for(asyncio.shield(fut), RESULT_WAIT_S)
     except TimeoutError:
         queued = [c for c in h.queue if c.get("id") == cid]
-        for c in queued:  # never delivered: withdraw it. A delivered one stays, so a retry finds its result.
+        for c in (
+            queued
+        ):  # never delivered: withdraw it. A delivered one stays, so a retry finds its result.
             h.queue.remove(c)
             h.waiting.pop(cid, None)
             h.born.pop(cid, None)
@@ -297,7 +320,9 @@ async def status(request: web.Request) -> web.Response:
     q = query(request, STATUS_QUERY)
     relay, now = _relay(request), _now(request)
     h = relay.hub(q["hub"])
-    st = relay.status(h, now)  # a plain status poll does not speed the integration up: it is fresh to within 5 s
+    st = relay.status(
+        h, now
+    )  # a plain status poll does not speed the integration up: it is fresh to within 5 s
     return jresp(
         {
             "hub": q["hub"],
@@ -321,10 +346,12 @@ async def codes(request: web.Request) -> web.Response:
         from harmony_core.keys import KEY_CODES
 
         _CODES["builtins"] = [
-            {"name": n, "page": p, "usage": u, "default": n in DEFAULT_COMMANDS} for n, (p, u) in BUILTINS.items()
+            {"name": n, "page": p, "usage": u, "default": n in DEFAULT_COMMANDS}
+            for n, (p, u) in BUILTINS.items()
         ]
         _CODES["remote_keys"] = [
-            {"name": n, "page": BUILTINS[n][0], "usage": BUILTINS[n][1], "key": k} for n, k in DEFAULT_REMOTE_KEYS
+            {"name": n, "page": BUILTINS[n][0], "usage": BUILTINS[n][1], "key": k}
+            for n, k in DEFAULT_REMOTE_KEYS
         ]
         _CODES["keys"] = [*KEY_CODES, *(f"key_{n}" for n in range(100, 110))]
     return jresp(_CODES)
@@ -343,7 +370,9 @@ async def pair_stop(request: web.Request) -> web.Response:
 
 async def pick(request: web.Request) -> web.Response:
     body = await read_body(request, PICK)
-    return jresp(await _run(request, body["hub"], {"op": "pick", "addr": body["addr"]}, body.get("cmd_id")))
+    return jresp(
+        await _run(request, body["hub"], {"op": "pick", "addr": body["addr"]}, body.get("cmd_id"))
+    )
 
 
 async def forget(request: web.Request) -> web.Response:
@@ -385,7 +414,8 @@ async def events(request: web.Request) -> web.Response:
             "events": out,
             "last": h.seq,
             "listening": now < h.listen_until,
-            "dropped": after + 1 < first and h.seq > after,  # the ring overwrote events the caller never saw
+            "dropped": after + 1 < first
+            and h.seq > after,  # the ring overwrote events the caller never saw
         }
     )
 

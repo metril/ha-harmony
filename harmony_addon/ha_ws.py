@@ -25,7 +25,9 @@ ALLOWED_COMMANDS = frozenset(
         "config/label_registry/list",
     }
 )
-OPTIONAL_COMMANDS = frozenset({"config/floor_registry/list", "config/label_registry/list"})  # a Core without floors or labels still works
+OPTIONAL_COMMANDS = frozenset(
+    {"config/floor_registry/list", "config/label_registry/list"}
+)  # a Core without floors or labels still works
 MAX_MESSAGE = 8 * 1024 * 1024  # one registry list; a large install's entity registry is ~2 MB
 TIMEOUT_SECONDS = 20  # whole conversation: connect, auth and every list
 
@@ -61,7 +63,9 @@ class HaWsRegistry:
     async def _recv(ws: aiohttp.ClientWebSocketResponse) -> dict[str, Any]:
         msg = await ws.receive()
         if msg.type != aiohttp.WSMsgType.TEXT:
-            raise RegistryUnavailable("ws_closed" if msg.type != aiohttp.WSMsgType.ERROR else "ws_error")
+            raise RegistryUnavailable(
+                "ws_closed" if msg.type != aiohttp.WSMsgType.ERROR else "ws_error"
+            )
         try:
             data = msg.json()
         except ValueError:
