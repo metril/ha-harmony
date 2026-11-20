@@ -30,8 +30,13 @@ ALLOWED_DOMAINS = frozenset(
         "button",
         "number",
         "select",
+        "input_select",
     }
 )
+# Per-domain service restriction (domains not listed allow any service).
+DOMAIN_SERVICES: dict[str, frozenset[str]] = {
+    "input_select": frozenset({"select_option", "select_next", "select_previous"}),
+}
 SERVICE_RE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 ENTITY_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 MAX_ENTITIES = 8
@@ -60,7 +65,10 @@ DEFAULT_TAP: dict[str, str] = {
 
 def allowed(service: str) -> bool:
     """True for a well-formed `domain.service` whose domain is on the allow-list."""
-    return bool(SERVICE_RE.match(service)) and service.split(".", 1)[0] in ALLOWED_DOMAINS
+    if not SERVICE_RE.match(service):
+        return False
+    dom, name = service.split(".", 1)
+    return dom in ALLOWED_DOMAINS and name in DOMAIN_SERVICES.get(dom, {name})
 
 
 @dataclass(frozen=True)
@@ -168,6 +176,9 @@ def validate_ha(v: Any) -> dict[str, Any]:
             f"service domain {svc.split('.', 1)[0]!r} is not allowed; use one of "
             f"{', '.join(sorted(ALLOWED_DOMAINS))}"
         )
+    dom, name = svc.split(".", 1)
+    if name not in DOMAIN_SERVICES.get(dom, {name}):
+        raise vol.Invalid(f"{dom} allows only {', '.join(sorted(DOMAIN_SERVICES[dom]))}")
     target = v.get("target")
     if not isinstance(target, dict) or set(target) != {"entity_id"}:
         raise vol.Invalid("target must be `{entity_id: <id or list of ids>}`")

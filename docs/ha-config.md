@@ -194,7 +194,8 @@ action kind that runs in **Home Assistant**, not on the hub. It is accepted wher
 keys (default and per-activity layers), page buttons, tile taps, and the `steps` / `off` of an activity.
 
 - `service` is `domain.service` (`^[a-z_]+\.[a-z0-9_]+$`) with the domain in the allow-list: `light switch scene
-  script media_player remote fan cover climate input_boolean input_button button number select`
+  script media_player remote fan cover climate input_boolean input_button button number select input_select`
+  (`input_select` only allows `select_option`, `select_next`, `select_previous`)
   (`remote.send_command` covers Android TV / Roku style remotes; `homeassistant.toggle` and
   `shell_command` are not allowed). `target.entity_id` is required (1..8 ids). `data` is small JSON only:
   at most 1 KiB, 64 values, 4 levels deep, strings up to 200 characters, and **no templates** (any string
@@ -299,7 +300,7 @@ already has, and one link-up causes at most one push. Pages are only pushed for 
 backpressure); a newer config cancels the running push and the new set starts only after it has stopped.
 The *Remote N page format* diagnostic sensor shows `unknown` / `v1` / `v2` with the capabilities. For a remote
 with the `tile_state` capability a tile also carries a state (on / off / unavailable / value) and a short
-formatted value (units, rounded numbers, brightness as a percentage, at most 31 bytes); other remotes get the
+formatted value (units, rounded numbers, brightness as a percentage, an open cover's position as a percentage, at most 31 bytes); other remotes get the
 legacy text. Only entities on pages are watched, bursts are coalesced (about 100 ms, latest value wins), only a
 changed rendering is sent, every tile is sent again after a page push, and nothing is sent while no remote is
 attached.

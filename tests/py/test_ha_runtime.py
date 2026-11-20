@@ -369,6 +369,9 @@ def S(entity, state, **attrs):
         (S("sensor.d", "2026-11-18T10:30:00+00:00", device_class="timestamp"), (0, "2026-11-18 10:30")),
         (S("scene.x", "2026-11-18T10:30:00+00:00"), (0, "")),
         (S("lock.l", "closed"), (1, "Closed")),
+        (S("cover.c", "open", current_position=40), (2, "40%")),
+        (S("cover.c", "open"), (2, "Open")),
+        (S("cover.c", "closed", current_position=0), (1, "Closed")),
     ],
 )
 def test_tile_state_values(state, want):
@@ -693,3 +696,14 @@ async def test_ha_device_buttons_and_send_command_call_the_service_not_the_hub(h
     with pytest.raises(Exception, match="Home Assistant device"):
         await c.async_set_device_state("shield", power=True)
     assert hass.states.get("binary_sensor.shield_power") is not None or True
+
+
+def test_input_select_set_options_is_rejected():
+    from harmony_core import ha_actions
+
+    assert not ha_actions.allowed("input_select.set_options")
+    assert ha_actions.allowed("input_select.select_next")
+    with pytest.raises(Exception, match="input_select allows only"):
+        ha_actions.validate_ha(
+            {"service": "input_select.set_options", "target": {"entity_id": "input_select.x"}}
+        )

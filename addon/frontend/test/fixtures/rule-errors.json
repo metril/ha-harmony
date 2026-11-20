@@ -234,7 +234,7 @@
    "keys",
    "play"
   ],
-  "msg": "service domain 'shell_command' is not allowed; use one of button, climate, cover, fan, input_boolean, input_button, light, media_player, number, remote, scene, "
+  "msg": "service domain 'shell_command' is not allowed; use one of button, climate, cover, fan, input_boolean, input_button, input_select, light, media_player, number, r"
  },
  {
   "rule": "ha max 8 entities",
