@@ -227,11 +227,11 @@ off; `lock` unlocked / unlocking / open = on, locked / locking = off; `media_pla
 unknown power. Everything else works as for IR devices:
 `{device: shield, command: ok}` on a key or button becomes that service call, the device gets its buttons,
 `remote.send_command` and a power sensor, and activities may list it with an `input`. It does not count
-against the hub's device limits and never reaches the hub.
+against the hub's device limits and never reaches the hub. Turn HDMI-CEC power control off on these devices (and on TVs they connect to): it fights Harmony's own power handling.
 
 **Order when an activity starts or stops** (the hub runs its IR sequence as always; Home Assistant runs its
 steps once the hub *reports the result*, so they come after the TV's settle time): when the hub reports
-activity B running, Home Assistant (1) powers off the HA devices of the previous activity that B does not use,
+activity B running, Home Assistant (1) powers off (always sent, whatever the entity reads: states can lag the device) the HA devices of the previous activity that B does not use,
 (2) when everything went off, runs the previous activity's HA `off` steps, then for B (3) powers on its HA
 devices that are not already on (the entity is the truth), (4) selects their inputs, waiting the device's
 `settle_ms` first if it was just powered on, and (5) runs B's HA `steps`. The first `state_update` after a

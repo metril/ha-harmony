@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.21 (2026-11-20)
+
+Off always sends power-off to HA devices, even when their state still reads off.
+
 ## 0.3.20 (2026-11-20)
 
 Release fix; no functional change from 0.3.19. The integration 0.3.19 release was never published because CI failed (lint and the add-on image smoke test); this version carries the same changes.

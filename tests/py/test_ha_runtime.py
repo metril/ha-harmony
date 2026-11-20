@@ -683,15 +683,15 @@ async def test_off_powers_down_ha_devices_the_leaving_activity_did_not_list(hass
     assert len(off) == 1
 
 
-async def test_off_leaves_an_off_shield_alone(hass, rig, clock):
-    hass.states.async_set("media_player.shield", "off")
+async def test_off_sends_power_off_even_when_the_shield_still_reads_off(hass, rig, clock):
+    hass.states.async_set("media_player.shield", "off")  # entity states lag the real device
     hub, _c = await rig()
     off = async_mock_service(hass, "remote", "turn_off")
     await hub.push("state_update", {"activity": 0, "power": True})
     await settle(hass)
     await hub.push("state_update", {"activity": 0, "power": False})
-    await settle(hass)
-    assert off == []
+    await settle(hass, lambda: off)
+    assert len(off) == 1  # turn_off on an off device is a no-op; skipping a lagging one is not
 
 
 async def test_first_state_after_connect_is_a_baseline_not_a_transition(hass, rig, clock):

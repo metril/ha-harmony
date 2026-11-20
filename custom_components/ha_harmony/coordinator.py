@@ -1763,8 +1763,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             state = self._ha_power(step.device) if step.device else None
             if step.kind == "power_on" and state is True:
                 continue  # already on: the entity is the truth
-            if step.kind == "power_off" and state is False:
-                continue
+            # power_off is never skipped on a read state: entity states lag the real device
             if step.kind == "power_on":
                 ran_power.add(step.device)
             if step.wait_ms and (step.kind != "input" or step.device in ran_power):
