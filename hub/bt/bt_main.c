@@ -538,8 +538,12 @@ static void sm_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, u
     bd_addr_t a;
     switch (hci_event_packet_get_type(packet)) {
     case SM_EVENT_PAIRING_STARTED:
-        sm_event_pairing_started_get_address(packet, a);
-        bt_logf("pairing start: transport le, peer %s", bd_addr_to_str(a));
+        { /* the event's address is still unknown (zeros): the connection's own peer address is the one to show */
+            hci_con_handle_t ph = sm_event_pairing_started_get_handle(packet);
+            hci_connection_t *pc = hci_connection_for_handle(ph);
+            if (pc) bt_logf("pairing start: transport le, peer %s (type %u)", bd_addr_to_str(pc->address), (unsigned)pc->address_type);
+            else bt_logf("pairing start: transport le, handle 0x%04x", (unsigned)ph);
+        }
         break;
     case SM_EVENT_JUST_WORKS_REQUEST: {
         hci_con_handle_t h = sm_event_just_works_request_get_handle(packet);

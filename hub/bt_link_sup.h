@@ -16,6 +16,9 @@ struct bt_link_hooks {
     int unavailable;                /* --sim without --bt-helper: behave as a hub without Bluetooth (bt_link_available() false) */
 };
 void bt_link_configure(const struct bt_link_hooks *);
+/* Finds the stock `bluetoothd` among the entries of a /proc-like directory (the name from comm, else stat, else cmdline; the
+ * hub's kernel has no comm). Stores up to max pids, returns how many exist; `self` is skipped. */
+int bt_link_find_bluetoothd(const char *proc_root, long self, long *pids, int max);
 
 /* Counters for diagnostics and tests. */
 struct bt_link_stats {

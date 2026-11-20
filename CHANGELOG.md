@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Hub: the stock `bluetoothd` is now really stopped before the Bluetooth helper starts: it was never found because the hub's kernel has no `/proc/<pid>/comm` (the name now comes from `stat`, else `cmdline`). `hciattach` is left alone. The log says stopped / not found / ignored SIGKILL. The LE "pairing start" line shows the connection's peer address instead of zeros.
+
 - Hub: Bluetooth LE now uses its own random static address (made once, kept in `le_addr` next to the bond file) instead of the controller's public address, so a host that already knows the hub over Classic cannot pair "LE" onto BR/EDR. LE bonds made before this change must be paired again. LE Secure Connections (Just Works, software P-256 from vendored micro-ecc) with legacy fallback. The advertising flags follow the pairing window even while advertising is already on.
 - Hub: the Bluetooth helper logs Classic connection requests/completions, LE connection complete/failed (role, peer, status), every LE pairing result with its reason, link disconnections with the reason, and the status of the LE advertising commands. Optional HCI packet trace to a size-capped file in RAM: create `bt/hci_trace` in the data directory and restart the helper (see `docs/proto/bluetooth.md`).
 

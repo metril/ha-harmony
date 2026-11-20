@@ -53,7 +53,7 @@ that is not bonded has no entry in `hosts`; `bt_key` / `bt_forget` for its slot 
 The hub runs the Bluetooth helper as a child process (`hub bt-helper`, `hub/bt/bt_ipc.h`) only while it is needed: the loaded
 config has `bt_hosts` or `bt_remotes`, or a pairing window is open (or closed less than 60 s ago, so a fresh bond stays
 visible). Before the first start of a boot the stock `bluetoothd` is stopped if it is running (nothing is changed on disk, so
-the stock firmware gets it back at the next boot). The hub pings every 5 s and kills a helper that has been silent for 15 s,
+the stock firmware gets it back at the next boot). It is found by the name in `/proc/<pid>/comm`, else `stat`, else `cmdline` (the hub's 2.6.31 kernel has no `comm`); only `bluetoothd` is stopped, `hciattach` (which attaches the UART controller) stays. The log says whether it was stopped, not found or survived SIGKILL. The hub pings every 5 s and kills a helper that has been silent for 15 s,
 or that sends a malformed frame; it restarts it after 5, 30, then 120 s, at most 5 times a boot, after which `state` is
 `disabled` until the hub restarts. A helper death is not a boot failure: `state` leaves `ready`, `hosts` / `remotes` /
 `candidates` / `pairing` / `window` are cleared, `gen` changes, a key held down for a host is released and every connected

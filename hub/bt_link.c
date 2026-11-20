@@ -369,26 +369,68 @@ static void reap(uint64_t now) {
     }
 }
 
-static int default_bluetoothd_signal(int sig) {
-    DIR *d = opendir("/proc");
+/* The process name of /proc/<pid>: comm when the kernel has it (2.6.31 does not), else the 2nd field of stat "(name)", else the
+ * basename of the first cmdline word. */
+static bool proc_name(const char *root, long pid, char *name, size_t cap) {
+    char path[96], buf[512];
+    name[0] = 0;
+    snprintf(path, sizeof path, "%s/%ld/comm", root, pid);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        if (fgets(name, (int)cap, f)) name[strcspn(name, "\n")] = 0;
+        fclose(f);
+        if (name[0]) return true;
+    }
+    snprintf(path, sizeof path, "%s/%ld/stat", root, pid);
+    f = fopen(path, "r");
+    if (f) {
+        size_t n = fread(buf, 1, sizeof buf - 1, f);
+        fclose(f);
+        buf[n] = 0;
+        char *o = strchr(buf, '('), *c = strrchr(buf, ')'); /* the name may hold spaces or parentheses: first '(' .. last ')' */
+        if (o && c && c > o + 1) {
+            snprintf(name, cap, "%.*s", (int)(c - o - 1), o + 1);
+            return true;
+        }
+    }
+    snprintf(path, sizeof path, "%s/%ld/cmdline", root, pid);
+    f = fopen(path, "r");
+    if (f) {
+        size_t n = fread(buf, 1, sizeof buf - 1, f);
+        fclose(f);
+        buf[n] = 0; /* argv[0] ends at the first NUL */
+        const char *base = strrchr(buf, '/');
+        snprintf(name, cap, "%s", base ? base + 1 : buf);
+        return name[0] != 0;
+    }
+    return false;
+}
+
+/* pids of every stock `bluetoothd` under the /proc-like directory root; returns how many (at most max are stored) */
+int bt_link_find_bluetoothd(const char *root, long self, long *pids, int max) {
+    DIR *d = opendir(root);
     if (!d) return 0;
     int n = 0;
     struct dirent *e;
     while ((e = readdir(d))) {
         char *end;
         long pid = strtol(e->d_name, &end, 10);
-        if (*end || pid <= 1 || pid == (long)getpid()) continue;
-        char path[64], comm[32] = "";
-        snprintf(path, sizeof path, "/proc/%ld/comm", pid);
-        FILE *f = fopen(path, "r");
-        if (!f) continue;
-        if (fgets(comm, sizeof comm, f)) comm[strcspn(comm, "\n")] = 0;
-        fclose(f);
-        if (strcmp(comm, "bluetoothd") != 0) continue;
-        if (kill((pid_t)pid, sig) == 0) n++;
+        if (*end || pid <= 1 || pid == self) continue;
+        char name[64];
+        if (!proc_name(root, pid, name, sizeof name) || strcmp(name, "bluetoothd") != 0) continue;
+        if (n < max) pids[n] = pid;
+        n++;
     }
     closedir(d);
     return n;
+}
+
+static int default_bluetoothd_signal(int sig) {
+    long pids[16];
+    int n = bt_link_find_bluetoothd("/proc", (long)getpid(), pids, 16), sent = 0;
+    for (int i = 0; i < n && i < 16; i++)
+        if (kill((pid_t)pids[i], sig) == 0) sent++;
+    return sent;
 }
 
 /* Non-blocking stop of the stock daemon before the first spawn of a boot. Returns true when the spawn may go ahead. */
@@ -396,20 +438,31 @@ static bool bluetoothd_clear(uint64_t now) {
     if (L.hk.skip_bluetoothd || L.bz == 3) return true;
     int (*sig)(int) = L.hk.bluetoothd_signal ? L.hk.bluetoothd_signal : default_bluetoothd_signal;
     if (L.bz == 0) {
-        if (sig(0) == 0) { L.bz = 3; return true; }
+        if (sig(0) == 0) {
+            fprintf(stderr, "hub: bluetooth: stock bluetoothd not found, nothing to stop\n");
+            L.bz = 3;
+            return true;
+        }
+        fprintf(stderr, "hub: bluetooth: stopping stock bluetoothd (SIGTERM); hciattach is left running (it attaches the controller)\n");
         sig(SIGTERM);
         L.bz = 1;
         L.bz_deadline = now + 3000;
         return false;
     }
-    if (sig(0) == 0) { L.bz = 3; return true; }
+    if (sig(0) == 0) {
+        fprintf(stderr, "hub: bluetooth: stock bluetoothd stopped\n");
+        L.bz = 3;
+        return true;
+    }
     if (now < L.bz_deadline) return false;
     if (L.bz == 1) {
+        fprintf(stderr, "hub: bluetooth: bluetoothd ignored SIGTERM, sending SIGKILL\n");
         sig(SIGKILL);
         L.bz = 2;
         L.bz_deadline = now + 1000;
         return false;
     }
+    fprintf(stderr, "hub: bluetooth: bluetoothd still running after SIGKILL, starting the helper anyway\n");
     L.bz = 3; /* gave up waiting: spawn anyway, the helper reports no_adapter if the controller is still taken */
     return true;
 }
