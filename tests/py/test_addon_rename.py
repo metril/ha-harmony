@@ -1,11 +1,10 @@
 """A renamed hub: the add-on moves its store (draft, applied revisions, history, ack) to the new id when the
 integration polls with the previous id and/or the stable hardware id. Never overwrites an existing store."""
 
-from urllib.parse import quote
-
 import pytest
+from addon_ws import connect, drain
 from test_addon import CONFIG, H
-from test_addon_linked import BEARER, make
+from test_addon_linked import make
 
 HW_A, HW_B = "aabbccddee01", "aabbccddee02"
 
@@ -15,19 +14,17 @@ async def c(aiohttp_client, tmp_path):
     return await aiohttp_client(make(tmp_path))
 
 
-def hdr(hw=None, prev=None, name=None):
-    h = dict(BEARER)
-    if hw:
-        h["X-Hub-Hw"] = hw
-    if prev:
-        h["X-Hub-Prev"] = prev
-    if name is not None:
-        h["X-Hub-Name"] = quote(name, safe="")
-    return h
-
-
-async def poll(c, hub, **kw):
-    return await c.get(f"/api/v1/bundle?hub={hub}", headers=hdr(**kw))
+async def poll(c, hub, hw=None, prev=None, name=None):
+    """Connect, say hello (with what the integration knows), disconnect. -> {adopt, frame}: the `adopt` answer
+    (None when the add-on sent none) and the first other frame (`bundle` / `nothing_applied`)."""
+    f = {k: v for k, v in (("hw", hw), ("prev", prev), ("name", name)) if v is not None}
+    ws = await connect(c, hub, **f)
+    try:
+        frames = await drain(ws)
+    finally:
+        await ws.close()
+    adopt = next((x["result"] for x in frames if x["t"] == "adopt"), None)
+    return {"adopt": adopt, "frame": next(x for x in frames if x["t"] != "adopt")}
 
 
 async def apply(c, hub, config=CONFIG):
@@ -61,13 +58,13 @@ async def full(c, hub):
 
 
 async def test_store_moves_with_the_previous_id_and_hardware_id(c):
-    assert (await poll(c, "old-id", hw=HW_A)).status == 404
+    assert (await poll(c, "old-id", hw=HW_A))["frame"]["t"] == "nothing_applied"
     await two_applies(c, "old-id")
     before = await full(c, "old-id")
     assert before["draft"] and before["applied"] and before["history"]
     r = await poll(c, "new-id", hw=HW_A, prev="old-id", name="Living room é")
-    assert r.status == 200 and r.headers["X-HH-Adopt"] == "moved"
-    assert (await r.json())["hub_id"] == "new-id"
+    assert r["adopt"] == "moved" and r["frame"]["t"] == "bundle"
+    assert r["frame"]["body"]["hub_id"] == "new-id"
     assert ids(await hubs(c)) == ["new-id"]
     after = await full(c, "new-id")
     assert (after["draft"], after["applied"], after["history"]) == (
@@ -85,15 +82,13 @@ async def test_idempotent_and_the_header_is_only_on_renames(c):
     await apply(c, "old-id")
     await poll(c, "old-id", hw=HW_A)
     r = await poll(c, "new-id", hw=HW_A, prev="old-id")
-    assert r.headers["X-HH-Adopt"] == "moved"
+    assert r["adopt"] == "moved"
     again = await poll(
         c, "new-id", hw=HW_A, prev="old-id"
     )  # the integration repeats it until it has an answer
-    assert again.status == 200 and again.headers["X-HH-Adopt"] == "none"
+    assert again["adopt"] == "none" and again["frame"]["t"] == "bundle"
     assert ids(await hubs(c)) == ["new-id"]
-    assert (
-        "X-HH-Adopt" not in (await poll(c, "new-id")).headers
-    )  # an ordinary poll says nothing about it
+    assert (await poll(c, "new-id"))["adopt"] is None  # an ordinary hello says nothing about it
 
 
 async def test_hardware_id_alone_finds_the_old_store(c):
@@ -101,7 +96,7 @@ async def test_hardware_id_alone_finds_the_old_store(c):
     await poll(c, "old-id", hw=HW_A)
     await apply(c, "old-id")
     r = await poll(c, "new-id", hw=HW_A)
-    assert r.headers["X-HH-Adopt"] == "moved" and ids(await hubs(c)) == ["new-id"]
+    assert r["adopt"] == "moved" and ids(await hubs(c)) == ["new-id"]
 
 
 async def test_never_overwrites_an_existing_store(c):
@@ -111,7 +106,7 @@ async def test_never_overwrites_an_existing_store(c):
     mine = await full(c, "old-id")
     theirs = await full(c, "new-id")
     r = await poll(c, "new-id", hw=HW_A, prev="old-id")
-    assert r.status == 200 and r.headers["X-HH-Adopt"] == "exists"
+    assert r["adopt"] == "exists" and r["frame"]["t"] == "bundle"
     assert ids(await hubs(c)) == ["new-id", "old-id"]  # both stay
     assert await full(c, "old-id") == mine and await full(c, "new-id") == theirs
 
@@ -124,7 +119,7 @@ async def test_two_hubs_each_move_only_their_own_store(c):
     # hub A renames; a claim of B's id as the previous one is refused by the hardware id
     r = await poll(c, "hub-a2", hw=HW_A, prev="hub-b")
     assert (
-        r.headers["X-HH-Adopt"] == "moved"
+        r["adopt"] == "moved"
     )  # found hub-a through the hardware id, not hub-b through prev
     assert ids(await hubs(c)) == ["hub-a2", "hub-b"]
     assert await full(c, "hub-a2") == {**a_before, "hub": "hub-a2"}
@@ -132,7 +127,7 @@ async def test_two_hubs_each_move_only_their_own_store(c):
     r = await poll(
         c, "hub-b2", hw=HW_B, prev="hub-a2"
     )  # B renames but names A as previous: still moves B's
-    assert r.headers["X-HH-Adopt"] == "moved" and ids(await hubs(c)) == ["hub-a2", "hub-b2"]
+    assert r["adopt"] == "moved" and ids(await hubs(c)) == ["hub-a2", "hub-b2"]
     assert {h["id"] for h in (await hubs(c))["linked"]} == {"hub-a2", "hub-b2"}
 
 
@@ -142,7 +137,7 @@ async def test_a_previous_id_that_is_another_hub_is_not_moved(c):
     r = await poll(
         c, "hub-x", hw=HW_B, prev="hub-a"
     )  # hub-a is known to be a different piece of hardware
-    assert r.headers["X-HH-Adopt"] == "none" and ids(await hubs(c)) == ["hub-a"]
+    assert r["adopt"] == "none" and ids(await hubs(c)) == ["hub-a"]
 
 
 async def test_previous_id_without_a_known_hardware_id_is_accepted(c):
@@ -150,7 +145,7 @@ async def test_previous_id_without_a_known_hardware_id_is_accepted(c):
     await poll(c, "old-id")
     await apply(c, "old-id")
     r = await poll(c, "new-id", hw=HW_A, prev="old-id")
-    assert r.headers["X-HH-Adopt"] == "moved" and ids(await hubs(c)) == ["new-id"]
+    assert r["adopt"] == "moved" and ids(await hubs(c)) == ["new-id"]
 
 
 async def test_moving_back_restores_the_old_id(c):
@@ -159,25 +154,25 @@ async def test_moving_back_restores_the_old_id(c):
     await apply(c, "old-id")
     await poll(c, "new-id", hw=HW_A, prev="old-id")
     r = await poll(c, "old-id", hw=HW_A, prev="new-id")
-    assert r.headers["X-HH-Adopt"] == "moved" and ids(await hubs(c)) == ["old-id"]
+    assert r["adopt"] == "moved" and ids(await hubs(c)) == ["old-id"]
 
 
 async def test_rename_without_a_store_just_forgets_the_old_id(c):
     await poll(c, "old-id", hw=HW_A)
     assert [h["id"] for h in (await hubs(c))["linked"]] == ["old-id"]
     r = await poll(c, "new-id", hw=HW_A, prev="old-id")
-    assert r.status == 404 and r.headers["X-HH-Adopt"] == "none"
+    assert r["frame"]["t"] == "nothing_applied" and r["adopt"] == "none"
     assert [h["id"] for h in (await hubs(c))["linked"]] == ["new-id"]
 
 
-async def test_garbage_headers_are_ignored(c):
+async def test_garbage_identity_fields_are_ignored(c):
     await apply(c, "old-id")
     for bad in ({"hw": "not valid!"}, {"hw": "x" * 80}, {"prev": "../etc"}, {"prev": "default"}):
         r = await poll(c, "new-id", **bad)
-        assert r.status in (200, 404) and ids(await hubs(c)) == ["old-id"]
-    r = await poll(c, "new-id", name="x" * 49)  # over 48 bytes: the name is dropped, the poll works
+        assert r["frame"]["t"] in ("bundle", "nothing_applied") and ids(await hubs(c)) == ["old-id"]
+    r = await poll(c, "new-id", name="x" * 49)  # over 48 bytes: the name is dropped, the hello works
     assert [h.get("name") for h in (await hubs(c))["linked"]] == [None]
-    assert (await poll(c, "new-id", name="tab\t")).status in (200, 404)
+    assert (await poll(c, "new-id", name="tab\t"))["frame"]
 
 
 async def test_names_and_hardware_ids_survive_a_restart(aiohttp_client, tmp_path):
@@ -187,7 +182,7 @@ async def test_names_and_hardware_ids_survive_a_restart(aiohttp_client, tmp_path
     c2 = await aiohttp_client(make(tmp_path))  # same data dir
     assert [(h["id"], h.get("name")) for h in (await hubs(c2))["linked"]] == [("old-id", "Den")]
     r = await poll(c2, "new-id", hw=HW_A)  # the hardware id was remembered
-    assert r.headers["X-HH-Adopt"] == "moved"
+    assert r["adopt"] == "moved"
     c3 = await aiohttp_client(make(tmp_path))
     assert [h["id"] for h in (await hubs(c3))["linked"]] == ["new-id"]
 

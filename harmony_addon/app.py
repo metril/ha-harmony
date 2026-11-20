@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 import aiohttp
 import voluptuous as vol
@@ -33,15 +33,15 @@ from harmony_core.config_model import (
     validate_ir,
     validate_pages,
 )
-from harmony_core.hub_limits import LEGACY, LIMITS_HEADER, HubLimits
+from harmony_core.hub_limits import LEGACY, HubLimits
 from harmony_core.keymap import resolve_keymaps
 from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, page_to_dict
 from harmony_core.theme_build import theme_warnings
 from harmony_irdb.archive import IrdbArchive
 
-from . import __version__, bt_routes, ir_routes, schemas
+from . import __version__, bt_routes, channel, ir_routes, live, schemas
 from .auth import (
-    BUNDLE_PREFIX,
+    CHANNEL_PREFIX,
     HASSIO_NETWORK,
     Auth,
     BundleAuth,
@@ -49,10 +49,11 @@ from .auth import (
     RouteAuth,
     load_or_create_token,
 )
+from .bus import Bus
 from .ha_client import Catalog, HaApi, HaUnavailable
 from .ha_ws import HaRegistryApi
 from .ir_tester import IrSender, SendLimiter, SendRefused
-from .linked import HW_ID, LinkedHubs, clean_name
+from .linked import HW_ID, LinkedHubs
 from .options import Options, load_options
 from .store import HISTORY_MAX, HUB_ID, RevConflict, Store, StoreError
 from .supervisor import Discovery
@@ -74,21 +75,13 @@ CSRF_HEADER = "X-HH-CSRF"
 OPTIONS_KEY = web.AppKey("options", Options)
 STORE_KEY = web.AppKey("store", Store)
 NOTIFIER_KEY = web.AppKey("notifier", object)
-WAIT_KEY = web.AppKey("wait_s", float)
 CATALOG_KEY = web.AppKey("catalog", Catalog)
-SEEN_KEY = web.AppKey("bundle_seen", dict)
+BUS_KEY = web.AppKey("bus", Bus)
 LINKED_KEY = web.AppKey("linked_hubs", LinkedHubs)
-HW_HEADER = "X-Hub-Hw"  # a poll names which hub it is: stable hardware id, previous id, display name (docs/addon-api.md)
-PREV_HEADER = "X-Hub-Prev"
-NAME_HEADER = "X-Hub-Name"
-REMOTES_HEADER = (
-    "X-Hub-Remotes"  # the linked remotes' caps tier and theme notices (docs/addon-api.md)
-)
 ACKS_KEY = web.AppKey("acks", dict)
 MEMO_KEY = web.AppKey("preview_memo", dict)
 SENDER_KEY = web.AppKey("ir_sender", object)
 LIMITER_KEY = web.AppKey("ir_limiter", SendLimiter)
-WAIT_SECONDS = 55.0
 
 
 # ------------------------------------------------------------------ middlewares
@@ -123,8 +116,6 @@ def _harden(request: web.Request, resp: web.StreamResponse) -> None:
     resp.headers["Content-Security-Policy"] = CSP
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"
-    if (adopt := request.get("adopt")) is not None:  # the answer to a poll that named a renamed hub
-        resp.headers["X-HH-Adopt"] = adopt
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     elif request.path.startswith("/assets/") and resp.status == 200:
@@ -147,44 +138,7 @@ def make_auth_mw(auth: Auth):
             raise error(
                 429, "rate_limited", "too many attempts", headers={"Retry-After": "60"}
             ) from None
-        bundle = request.path == BUNDLE_PREFIX or request.path.startswith(BUNDLE_PREFIX + "/")
-        if bundle:  # authenticated (auth.check passed): remember that the integration is linked
-            request.app[SEEN_KEY]["last_seen"] = int(request.app[CLOCK_KEY]())
-            # only a poll names its hub in the query (an ack carries it in the body): no fallback
-            hub = request.query.get("hub")
-            polling = request.method == "GET" and request.path in (
-                BUNDLE_PREFIX,
-                BUNDLE_PREFIX + "/wait",
-            )
-            if polling and hub:
-                linked = request.app[LINKED_KEY]
-                hw = request.headers.get(HW_HEADER)
-                prev = request.headers.get(PREV_HEADER)
-                raw_name = request.headers.get(NAME_HEADER)
-                new = linked.seen(hub)
-                if prev is not None or hw is not None:
-                    request["adopt"] = _adopt_renamed(request.app, hub, prev, hw)
-                linked.note_identity(
-                    hub, hw, None if raw_name is None else clean_name(unquote(raw_name))
-                )
-                if new:
-                    _auto_adopt(request.app)
-                raw_remotes = request.headers.get(REMOTES_HEADER)
-                if (
-                    raw_remotes is not None and len(raw_remotes) <= 4000
-                ):  # the remotes' caps tier and theme notices
-                    try:
-                        linked.set_remotes(hub, json.loads(raw_remotes))
-                    except ValueError:
-                        pass
-                raw_limits = request.headers.get(LIMITS_HEADER)
-                if (
-                    raw_limits is not None and len(raw_limits) <= 2000
-                ):  # the hub's own limits, as its integration knows them
-                    try:
-                        linked.set_limits(hub, json.loads(raw_limits))
-                    except ValueError:
-                        pass
+        bundle = request.path == CHANNEL_PREFIX or request.path.startswith(CHANNEL_PREFIX + "/")
         if request.method in MUTATING:
             if bundle:  # bearer-authenticated machine client: no ambient credential, so no CSRF
                 if request.content_type not in JSON_TYPES:
@@ -204,7 +158,7 @@ def make_auth_mw(auth: Auth):
 
 # ------------------------------------------------------------------ helpers
 def _adopt_renamed(app: web.Application, hub: str, prev: str | None, hw: str | None) -> str:
-    """The integration polls for `hub` and says which hub that is: its previous id (`prev`) and/or its stable
+    """The integration connects for `hub` and says which hub that is: its previous id (`prev`) and/or its stable
     hardware id (`hw`). When that hub is one the add-on knows under another id, its store (draft, applied
     revisions, history, ack) moves to `hub` in one atomic rename. Returns the answer for X-HH-Adopt:
     `moved`, `exists` (a store under `hub` already exists: nothing is overwritten) or `none`."""
@@ -248,17 +202,17 @@ def _adopt_renamed(app: web.Application, hub: str, prev: str | None, hw: str | N
         log.exception("could not move the config of a renamed hub to %s", hub)
         return "none"
     if prev and prev != hub and prev in linked.ids() and (not hw or linked.hw(prev) in (None, hw)):
-        linked.rename(
-            prev, hub
-        )  # no config under the old id: just stop listing it as a hub that is polled
+        linked.rename(prev, hub)  # no config under the old id: just stop listing it
     return "none"
 
 
 def _auto_adopt(app: web.Application) -> None:
-    """A store that exists only under `default` moves to the one hub id an integration polls for."""
+    """A store that exists only under `default` moves to the one hub id an integration connects for."""
     linked = app[LINKED_KEY].ids()
     ids = [h for h in linked if h != "default"]
-    if len(ids) != 1 or "default" in linked:  # something polls for `default` itself: it is in use
+    if (
+        len(ids) != 1 or "default" in linked
+    ):  # something is linked as `default` itself: it is in use
         return
     try:
         moved = app[STORE_KEY].adopt("default", ids[0])
@@ -266,7 +220,9 @@ def _auto_adopt(app: web.Application) -> None:
         log.exception("could not move the config of hub default to %s", ids[0])
         return
     if moved:
-        log.info("moved the config of hub default to %s (the id Home Assistant polls for)", ids[0])
+        log.info(
+            "moved the config of hub default to %s (the id Home Assistant is linked as)", ids[0]
+        )
         app[NOTIFIER_KEY].notify(ids[0])
 
 
@@ -352,6 +308,7 @@ def _capabilities() -> dict[str, Any]:
     return {
         "ha_actions": not validate_data(_HA_ACTION_PROBE),
         "page_format": 2,
+        "channel": 1,
     }
 
 
@@ -395,6 +352,7 @@ async def put_draft(request: web.Request) -> web.Response:
     state = _store_call(
         request.app[STORE_KEY].set_draft, q["hub"], body["config"], now, _if_match(request)
     )
+    live.touch(request.app, q["hub"])
     return jresp({"hub": q["hub"], "draft_updated": now, **_meta(state)})
 
 
@@ -630,6 +588,8 @@ async def revert(request: web.Request) -> web.Response:
     state = _store_call(request.app[STORE_KEY].revert, q["hub"], body["target"])
     if body["target"] == "previous":  # discarding a draft changes nothing the integration sees
         request.app[NOTIFIER_KEY].notify(q["hub"])
+    else:
+        live.touch(request.app, q["hub"])
     _audit(request, f"revert:{body['target']}", q["hub"])
     return jresp({"ok": True, **_meta(state)})
 
@@ -698,6 +658,7 @@ async def import_yaml(request: web.Request) -> web.Response:
         raise error(422, "invalid_config", "the YAML is not a valid config", errors=errors)
     now = int(request.app[CLOCK_KEY]())
     state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], config, now, if_rev)
+    live.touch(request.app, q["hub"])
     _audit(request, "import_yaml", q["hub"])
     return jresp({"ok": True, "hub": q["hub"], "draft_updated": now, **_meta(state)})
 
@@ -785,8 +746,8 @@ async def ir_test(request: web.Request) -> web.Response:
 
 
 # ------------------------------------------------------------------ hubs and apply status
-async def list_hubs(request: web.Request) -> web.Response:
-    store = request.app[STORE_KEY]
+def hubs_payload(app: web.Application) -> dict[str, Any]:
+    store = app[STORE_KEY]
     out = []
     for hub in store.hubs():
         state = _store_call(store.load, hub)
@@ -800,26 +761,28 @@ async def list_hubs(request: web.Request) -> web.Response:
                 "applied_at": None if a is None else a["at"],
             }
         )
-    linked = request.app[LINKED_KEY]
+    linked = app[LINKED_KEY]
     have = set(store.hubs())
     targets = [h for h in linked.ids() if h != "default" and h not in have]
     adopt = {"from": "default", "to": targets} if "default" in have and targets else None
-    return jresp(
-        {
-            "hubs": out,
-            "linked": linked.entries(),
-            "now": int(request.app[CLOCK_KEY]()),
-            "adopt": adopt,
-        }
-    )
+    return {
+        "hubs": out,
+        "linked": linked.entries(),
+        "now": int(app[CLOCK_KEY]()),
+        "adopt": adopt,
+    }
+
+
+async def list_hubs(request: web.Request) -> web.Response:
+    return jresp(hubs_payload(request.app))
 
 
 async def adopt_hub(request: web.Request) -> web.Response:
-    """Explicit move of a store (default: `default`) to a hub id an integration polls for."""
+    """Explicit move of a store (default: `default`) to a hub id an integration connects for."""
     body = await read_body(request, schemas.ADOPT)
     store, src, dst = request.app[STORE_KEY], body["from"], body["to"]
     if dst not in request.app[LINKED_KEY].ids():
-        raise error(409, "not_linked", "no Home Assistant integration polls for that hub id")
+        raise error(409, "not_linked", "no Home Assistant integration is linked for that hub id")
     if dst in store.hubs():
         raise error(409, "hub_exists", "that hub already has a config")
     if not _store_call(store.adopt, src, dst):
@@ -837,76 +800,38 @@ def _theme_notices(remotes: list[dict[str, Any]]) -> list[str]:
     return out
 
 
-async def config_status(request: web.Request) -> web.Response:
-    q = query(request, schemas.QUERY)
-    state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    bundle = _bundle(q["hub"], state)
-    ack = request.app[ACKS_KEY].get(q["hub"]) or state["ack"] or {}
-    last_seen = request.app[SEEN_KEY].get("last_seen")
-    return jresp(
-        {
-            "hub": q["hub"],
-            "applied_rev": None if bundle is None else bundle["rev"],
-            "acked_rev": ack.get("rev"),
-            "result": ack.get("result"),
-            "detail": ack.get("detail"),
-            "acked_at": ack.get("at"),
-            "linked": last_seen is not None,
-            "last_seen": last_seen,
-            "hub_last_seen": request.app[LINKED_KEY].last_seen(q["hub"]),
-            "linked_hubs": request.app[LINKED_KEY].entries(),
-            "remotes": request.app[LINKED_KEY].remotes(q["hub"]),
-            "theme_notices": _theme_notices(request.app[LINKED_KEY].remotes(q["hub"])),
-            "now": int(request.app[CLOCK_KEY]()),
-        }
-    )
-
-
-async def post_ack(request: web.Request) -> web.Response:
-    """The integration reports what it did with a pulled bundle (bearer auth, like the feed)."""
-    body = await read_body(request, schemas.ACK)
-    store, hub = request.app[STORE_KEY], body["hub"]
-    state = _store_call(store.load, hub)
+def hub_status(app: web.Application, hub: str) -> dict[str, Any]:
+    """The `hub:<id>` topic of /live: config status of one hub."""
+    state = _store_call(app[STORE_KEY].load, hub)
     bundle = _bundle(hub, state)
-    if bundle is None:
-        raise _nothing_applied()
-    if body["rev"] != bundle["rev"]:  # an answer about an older bundle: not what is applied now
-        raise error(409, "stale_rev", "that rev is not the applied one", rev=bundle["rev"])
-    ack = {"rev": body["rev"], "result": body["result"], "at": int(request.app[CLOCK_KEY]())}
-    if "detail" in body:
-        ack["detail"] = body["detail"]
-    prev = state["ack"] or {}
-    if any(prev.get(k) != ack.get(k) for k in ("rev", "result", "detail")):  # no write per repeat
-        _store_call(store.set_ack, hub, ack)
-        request.app[ACKS_KEY][hub] = ack
-    return jresp({"ok": True})
+    ack = app[ACKS_KEY].get(hub) or state["ack"] or {}
+    conn = app[channel.CHANNEL_KEY].conns.get(hub)
+    remotes = app[LINKED_KEY].remotes(hub)
+    return {
+        "hub": hub,
+        "applied_rev": None if bundle is None else bundle["rev"],
+        "acked_rev": ack.get("rev"),
+        "result": ack.get("result"),
+        "detail": ack.get("detail"),
+        "acked_at": ack.get("at"),
+        "connected": conn is not None,
+        "connected_at": None if conn is None else conn.at,
+        "remotes": remotes,
+        "theme_notices": _theme_notices(remotes),
+        "now": int(app[CLOCK_KEY]()),
+    }
 
 
 # ------------------------------------------------------------------ bundle (integration feed)
 class ApplyNotifier:
-    """Wakes long-poll waiters when a hub's applied config changes."""
+    """A hub's applied config changed: tell the listeners (the channel pushes a bundle, /live updates)."""
 
     def __init__(self) -> None:
-        self._events: dict[str, asyncio.Event] = {}
-        self.closing = False
-
-    def event(self, hub: str) -> asyncio.Event:
-        if self.closing:
-            ev = asyncio.Event()
-            ev.set()
-            return ev
-        return self._events.setdefault(hub, asyncio.Event())
-
-    def close(self) -> None:
-        """Shutdown: wake every waiter now (they answer 204) so stop never waits out a poll."""
-        self.closing = True
-        for hub in list(self._events):
-            self.notify(hub)
+        self.listeners: list[Callable[[str], None]] = []
 
     def notify(self, hub: str) -> None:
-        ev = self._events.pop(hub, None)
-        if ev is not None:
-            ev.set()
+        for fn in self.listeners:
+            fn(hub)
 
 
 def _public(config: dict[str, Any]) -> dict[str, Any]:
@@ -933,48 +858,6 @@ def _bundle(hub: str, state: dict[str, Any]) -> dict[str, Any] | None:
         "rev": _rev(a["config"]),
         "config": _public(a["config"]),
     }
-
-
-def _bundle_response(bundle: dict[str, Any]) -> web.Response:
-    return web.json_response(bundle, headers={"ETag": f'"{bundle["rev"]}"'})
-
-
-def _nothing_applied() -> web.HTTPException:
-    return error(404, "nothing_applied", "no config has been applied for this hub")
-
-
-async def get_bundle(request: web.Request) -> web.Response:
-    q = query(request, schemas.QUERY)
-    bundle = _bundle(q["hub"], _store_call(request.app[STORE_KEY].load, q["hub"]))
-    if bundle is None:
-        raise _nothing_applied()
-    if request.headers.get("If-None-Match") == f'"{bundle["rev"]}"':
-        return web.Response(status=304, headers={"ETag": f'"{bundle["rev"]}"'})
-    return _bundle_response(bundle)
-
-
-async def wait_bundle(request: web.Request) -> web.Response:
-    """Long-poll: answer when the applied rev differs from `rev`; 204 after the bounded wait."""
-    q = query(request, schemas.WAIT_QUERY)
-    app, hub, known = request.app, q["hub"], q["rev"]
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + app[WAIT_KEY]
-    while True:
-        ev = app[NOTIFIER_KEY].event(hub)  # taken before the read: no lost wake-up
-        if app[NOTIFIER_KEY].closing:
-            return web.Response(status=204)
-        bundle = _bundle(hub, _store_call(app[STORE_KEY].load, hub))
-        if bundle is not None and bundle["rev"] != known:
-            return _bundle_response(bundle)
-        if bundle is None and known:
-            raise _nothing_applied()
-        left = deadline - loop.time()
-        if left <= 0:
-            return web.Response(status=204)
-        try:
-            await asyncio.wait_for(ev.wait(), left)
-        except TimeoutError:
-            return web.Response(status=204)
 
 
 STATIC_KEY = web.AppKey("static_dir", Path)
@@ -1010,7 +893,9 @@ def create_app(
     bundle_networks: Collection[str] | None = (HASSIO_NETWORK,),
     bundle_auth: BundleAuth | None = None,
     discovery: Discovery | None = None,
-    wait_seconds: float = WAIT_SECONDS,
+    hello_timeout: float = channel.HELLO_TIMEOUT,
+    bt_result_wait: float = bt_routes.RESULT_WAIT_S,
+    live_queue: int = 256,
     ha_api: HaApi | None = None,
     ha_registry: HaRegistryApi | None = None,
     irdb: IrdbArchive | None = None,
@@ -1036,9 +921,11 @@ def create_app(
     app[STORE_KEY] = Store(data_dir)
     app[CLOCK_KEY] = clock
     app[NOTIFIER_KEY] = ApplyNotifier()
-    app[WAIT_KEY] = wait_seconds
     app[CATALOG_KEY] = Catalog(ha_api, clock, ha_registry)
-    app[SEEN_KEY] = {}
+    app[BUS_KEY] = Bus()
+    app[channel.HELLO_KEY] = hello_timeout
+    app[live.QUEUE_KEY] = live_queue
+    app[channel.CHANNEL_KEY] = channel.Channels()
     app[LINKED_KEY] = LinkedHubs(data_dir, clock)
     _auto_adopt(app)
     app[MEMO_KEY] = {}
@@ -1057,10 +944,7 @@ def create_app(
         app.cleanup_ctx.append(_irdb_ctx)
     app[ACKS_KEY] = {}
 
-    async def _wake_waiters(_: web.Application) -> None:
-        app[NOTIFIER_KEY].close()
-
-    app.on_shutdown.append(_wake_waiters)
+    app[NOTIFIER_KEY].listeners.append(lambda hub: channel.on_apply(app, hub))
     if discovery is not None:
 
         async def _announce(_: web.Application) -> None:
@@ -1094,12 +978,10 @@ def create_app(
     app.router.add_get(f"{api}/ha/entities", ha_entities)
     app.router.add_get(f"{api}/ha/services", ha_services)
     ir_routes.add_routes(app, api)
-    bt_routes.add_routes(app, api)
+    bt_routes.add_routes(app, api, bt_result_wait)
+    channel.add_routes(app, api)
+    live.add_routes(app, api)
     app.router.add_post(f"{api}/ir/test", ir_test)
     app.router.add_get(f"{api}/hubs", list_hubs)
     app.router.add_post(f"{api}/hubs/adopt", adopt_hub)
-    app.router.add_get(f"{api}/config/status", config_status)
-    app.router.add_post(f"{api}/bundle/ack", post_ack)
-    app.router.add_get(f"{api}/bundle", get_bundle)
-    app.router.add_get(f"{api}/bundle/wait", wait_bundle)
     return app

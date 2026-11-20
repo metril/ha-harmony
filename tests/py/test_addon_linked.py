@@ -1,16 +1,16 @@
-"""Linked hub ids (which ids integrations poll for) and adopting a `default` store."""
+"""Linked hub ids (which ids have an integration channel) and adopting a `default` store."""
 
 import json
 
 import pytest
+from addon_ws import BEARER, TOKEN, connect, drain, live, recv
+from aiohttp import WSServerHandshakeError
 from test_addon import CONFIG, H
 
 from harmony_addon.app import create_app
 from harmony_addon.auth import NoAuth
 from harmony_addon.options import Options
 
-TOKEN = "ab" * 32
-BEARER = {"Authorization": f"Bearer {TOKEN}"}
 NOW = [1000.0]
 
 
@@ -22,7 +22,7 @@ def make(tmp_path):
         auth=NoAuth(),
         bundle_token=TOKEN,
         bundle_networks=None,
-        wait_seconds=0.2,
+        hello_timeout=0.3,
     )
 
 
@@ -39,31 +39,62 @@ async def apply(c, hub):
     assert r.status == 200
 
 
-async def poll(c, hub, path="bundle"):
-    return await c.get(f"/api/v1/{path}?hub={hub}", headers=BEARER)
+async def hello(c, hub, **fields):
+    """Connect and send hello; returns (socket, the frames the add-on answered with)."""
+    ws = await connect(c, hub, **fields)
+    return ws, await drain(ws)
+
+
+async def poll(c, hub, **fields):
+    """Connect, say hello, return the first answer, disconnect (the hub id stays linked)."""
+    ws = await connect(c, hub, **fields)
+    try:
+        return await recv(ws)
+    finally:
+        await ws.close()
 
 
 async def hubs(c):
     return await (await c.get("/api/v1/hubs")).json()
 
 
-async def test_poll_records_hub_even_on_404_and_status_reports_it(c):
+async def hub_status(c, hub):
+    ws = await live(c, f"hub:{hub}")
+    try:
+        return (await recv(ws, "snapshot"))["topics"][f"hub:{hub}"]
+    finally:
+        await ws.close()
+
+
+async def test_hello_records_the_hub_even_with_nothing_applied_and_status_reports_it(c):
     assert (await hubs(c))["linked"] == []
-    assert (await poll(c, "living-room-hub")).status == 404
-    NOW[0] = 1005.0
-    assert (await poll(c, "living-room-hub", "bundle/wait")).status == 204
+    ws, frames = await hello(c, "living-room-hub")
+    assert frames == [{"t": "nothing_applied"}]
     body = await hubs(c)
-    assert body["linked"] == [{"id": "living-room-hub", "last_seen": 1005}]
-    assert body["now"] == 1005
-    st = await (await c.get("/api/v1/config/status?hub=living-room-hub")).json()
-    assert st["hub_last_seen"] == 1005 and st["linked_hubs"] == body["linked"] and st["now"] == 1005
-    st = await (await c.get("/api/v1/config/status?hub=other")).json()
-    assert st["hub_last_seen"] is None
+    assert body["linked"] == [{"id": "living-room-hub", "last_seen": 1000}]
+    st = await hub_status(c, "living-room-hub")
+    assert st["connected"] is True and st["connected_at"] == 1000
+    lv = await live(c, "hub:living-room-hub")
+    await recv(lv, "snapshot")
+    NOW[0] = 1005.0
+    await ws.close()
+    assert (await recv(lv, "hub"))["connected"] is False  # pushed when the socket closes
+    await lv.close()
+    assert (await hubs(c))["linked"] == [{"id": "living-room-hub", "last_seen": 1005}]
+    assert (await hub_status(c, "other"))["connected"] is False
+    assert (await hubs(c))["now"] == 1005
 
 
 async def test_unauthenticated_or_invalid_ids_are_not_recorded(c):
-    assert (await c.get("/api/v1/bundle?hub=evil", headers={})).status == 401
-    assert (await c.get("/api/v1/bundle?hub=../x", headers=BEARER)).status == 400
+    with pytest.raises(WSServerHandshakeError) as e:
+        await c.ws_connect("/api/v1/channel?hub=evil", headers={})
+    assert e.value.status == 401
+    with pytest.raises(WSServerHandshakeError) as e:
+        await c.ws_connect("/api/v1/channel?hub=../x", headers=BEARER)
+    assert e.value.status == 400
+    ws = await connect(c, "evil", hello=False)
+    await ws.send_json({"t": "hello", "v": 1, "hub": "another"})  # names a different hub than the URL
+    assert (await recv(ws))["code"] == "hub_mismatch"
     assert (await hubs(c))["linked"] == []
 
 
@@ -85,14 +116,13 @@ async def test_damaged_linked_file_is_ignored(aiohttp_client, tmp_path):
 async def test_default_store_is_adopted_by_the_single_linked_hub(c, tmp_path):
     await apply(c, "default")
     before = (tmp_path / "hubs" / "default.json").read_bytes()
-    r = await poll(c, "living-room-hub")
-    assert r.status == 200  # servable at once, no re-import
-    assert (await r.json())["hub_id"] == "living-room-hub"
+    first = await poll(c, "living-room-hub")
+    assert first["t"] == "bundle"  # servable at once, no re-import
+    assert first["body"]["hub_id"] == "living-room-hub"
     assert not (tmp_path / "hubs" / "default.json").exists()
     assert (tmp_path / "hubs" / "living-room-hub.json").read_bytes() == before
     assert (await hubs(c))["adopt"] is None
-    # idempotent: polling again changes nothing
-    assert (await poll(c, "living-room-hub")).status == 200
+    assert (await poll(c, "living-room-hub"))["t"] == "bundle"  # idempotent
     assert [h["id"] for h in (await hubs(c))["hubs"]] == ["living-room-hub"]
 
 
@@ -130,7 +160,7 @@ async def test_several_linked_hubs_offer_an_explicit_adoption(c):
     assert "default" in [h["id"] for h in body["hubs"]]
     r = await c.post("/api/v1/hubs/adopt", json={"to": "hub-b"}, headers=H)
     assert r.status == 200 and (await r.json()) == {"ok": True, "hub": "hub-b"}
-    assert (await poll(c, "hub-b")).status == 200
+    assert (await poll(c, "hub-b"))["t"] == "bundle"
     assert (await hubs(c))["adopt"] is None
     r = await c.post("/api/v1/hubs/adopt", json={"to": "hub-b"}, headers=H)
     assert r.status == 409  # it has a config now
@@ -146,28 +176,26 @@ async def test_explicit_adoption_errors(c):
     assert r.status == 400
 
 
-async def test_adopted_waiter_gets_the_bundle(c):
+async def test_an_explicit_adoption_pushes_the_bundle_to_the_connected_hub(c):
     await apply(c, "default")
-    r = await poll(c, "living-room-hub", "bundle/wait")
-    assert r.status == 200 and (await r.json())["hub_id"] == "living-room-hub"
+    await poll(c, "hub-a")  # adopts the default store...
+    await apply(c, "default")  # ...a second default store appears
+    await poll(c, "hub-b")
+    ws, frames = await hello(c, "hub-b")
+    assert [f["t"] for f in frames] == ["nothing_applied"]
+    r = await c.post("/api/v1/hubs/adopt", json={"to": "hub-b"}, headers=H)
+    assert r.status == 200
+    pushed = await recv(ws, "bundle")
+    assert pushed["body"]["hub_id"] == "hub-b"
+    await ws.close()
 
 
-async def test_no_automatic_move_while_something_polls_for_default(c):
+async def test_no_automatic_move_while_something_is_linked_as_default(c):
     await apply(c, "default")
     await poll(c, "default")
     await poll(c, "hub-a")
     assert [h["id"] for h in (await hubs(c))["hubs"]] == ["default"]
     assert (await hubs(c))["adopt"] == {"from": "default", "to": ["hub-a"]}
-
-
-async def test_ack_and_other_requests_do_not_record_a_hub(c):
-    await apply(c, "living-room-hub")
-    r = await poll(c, "living-room-hub")
-    rev = (await r.json())["rev"]
-    body = {"hub": "living-room-hub", "rev": rev, "result": "ok"}
-    assert (await c.post("/api/v1/bundle/ack", json=body, headers=BEARER)).status == 200
-    assert (await c.get("/api/v1/bundle", headers=BEARER)).status == 404  # no hub param: not a poll
-    assert [e["id"] for e in (await hubs(c))["linked"]] == ["living-room-hub"]
 
 
 async def test_old_linked_file_version_is_ignored(aiohttp_client, tmp_path):
@@ -176,37 +204,43 @@ async def test_old_linked_file_version_is_ignored(aiohttp_client, tmp_path):
     assert (await hubs(c))["linked"] == []
 
 
-async def test_poll_reports_the_remotes_and_status_exposes_their_notices(c):
-    report = [
-        {"remote": 1, "caps": 7, "tier": "palette", "notices": ["theme 'dusk' replaced by its base preset 'midnight'"]},
-        {"remote": 2, "caps": 15, "tier": "custom", "notices": []},
-    ]
-    assert (await poll(c, "hub-a")).status == 404
-    st = await (await c.get("/api/v1/config/status?hub=hub-a")).json()
+REPORT = [
+    {"remote": 1, "caps": 7, "tier": "palette", "notices": ["theme 'dusk' replaced by its base preset 'midnight'"]},
+    {"remote": 2, "caps": 15, "tier": "custom", "notices": []},
+]
+
+
+async def test_hello_and_identity_report_the_remotes_and_live_exposes_their_notices(c):
+    ws, _ = await hello(c, "hub-a")
+    st = await hub_status(c, "hub-a")
     assert st["remotes"] == [] and st["theme_notices"] == []
-    hdr = {**BEARER, "X-Hub-Remotes": json.dumps(report)}
-    assert (await c.get("/api/v1/bundle?hub=hub-a", headers=hdr)).status == 404
-    st = await (await c.get("/api/v1/config/status?hub=hub-a")).json()
-    assert st["remotes"] == [{**r} for r in report]
-    assert st["theme_notices"] == ["theme 'dusk' replaced by its base preset 'midnight'"]
-    other = await (await c.get("/api/v1/config/status?hub=hub-b")).json()
+    lv = await live(c, "hub:hub-a")
+    await recv(lv, "snapshot")
+    await ws.send_json({"t": "identity", "remotes": REPORT})
+    d = await recv(lv, "hub")  # pushed, not polled
+    assert d["remotes"] == REPORT
+    assert d["theme_notices"] == ["theme 'dusk' replaced by its base preset 'midnight'"]
+    other = await hub_status(c, "hub-b")
     assert other["remotes"] == [] and other["theme_notices"] == []  # per hub
     # garbage and oversized reports are ignored and keep the last good one
-    for bad in ("not json", json.dumps({"a": 1}), json.dumps([{"remote": "1", "caps": 7, "tier": "x"}]), "[" + "1," * 3000 + "1]"):
-        await c.get("/api/v1/bundle?hub=hub-a", headers={**BEARER, "X-Hub-Remotes": bad})
-    st = await (await c.get("/api/v1/config/status?hub=hub-a")).json()
-    assert st["remotes"] == report and len(st["theme_notices"]) == 1
+    for bad in ("not a list", {"a": 1}, [{"remote": "1", "caps": 7, "tier": "x"}], [1] * 3000):
+        await ws.send_json({"t": "identity", "remotes": bad})
+    await drain(ws)
+    assert (await hub_status(c, "hub-a"))["remotes"] == REPORT
     for bad_row in ({"remote": 256, "caps": 7}, {"remote": 1, "caps": -1}, {"remote": -1, "caps": 7}, {"remote": 1, "caps": 300}):
-        row = {"tier": "palette", "notices": [], **bad_row}
-        await c.get("/api/v1/bundle?hub=hub-a", headers={**BEARER, "X-Hub-Remotes": json.dumps([row])})
-    st = await (await c.get("/api/v1/config/status?hub=hub-a")).json()
-    assert st["remotes"] == report  # out-of-range ids and caps are refused
-    await c.get("/api/v1/bundle?hub=hub-a", headers={**BEARER, "X-Hub-Remotes": "[]"})
-    st = await (await c.get("/api/v1/config/status?hub=hub-a")).json()
+        await ws.send_json({"t": "identity", "remotes": [{"tier": "palette", "notices": [], **bad_row}]})
+    await drain(ws)
+    assert (await hub_status(c, "hub-a"))["remotes"] == REPORT  # out-of-range ids and caps are refused
+    await ws.send_json({"t": "identity", "remotes": []})
+    await drain(ws)
+    st = await hub_status(c, "hub-a")
     assert st["remotes"] == [] and st["theme_notices"] == []  # an empty report clears it
-    await c.get("/api/v1/bundle?hub=hub-a", headers={**BEARER, "X-Hub-Remotes": json.dumps(report)})
-    # a later poll with nothing wrong replaces it (the remote was updated: no notices left)
-    hdr = {**BEARER, "X-Hub-Remotes": json.dumps([{"remote": 1, "caps": 15, "tier": "custom", "notices": []}])}
-    await c.get("/api/v1/bundle?hub=hub-a", headers=hdr)
-    st = await (await c.get("/api/v1/config/status?hub=hub-a")).json()
+    await ws.send_json({"t": "identity", "remotes": [{"remote": 1, "caps": 15, "tier": "custom", "notices": []}]})
+    await drain(ws)
+    st = await hub_status(c, "hub-a")
     assert st["theme_notices"] == [] and st["remotes"][0]["tier"] == "custom"
+    await ws.close()
+    await lv.close()
+    ws2, _ = await hello(c, "hub-c", remotes=REPORT)  # hello carries them too
+    assert (await hub_status(c, "hub-c"))["remotes"] == REPORT
+    await ws2.close()

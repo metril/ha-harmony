@@ -302,7 +302,7 @@ Server -> client, all `{"t": ...}`:
 
 - `snapshot` `{topics: {"hubs": {...}, "hub:<id>": {...}, "bt:<id>": {...}}}`: sent right after every `sub` for the newly added
   topics, and after a `resync` (below). `keys:` has no snapshot.
-- `hubs` (payload as `GET hubs`), `hub` `{hub, ...status}`, `bt` `{hub, ...status}`, `key` `{hub, seq, slot, page, usage, down, t}`:
+- `hubs` (payload as `GET hubs`), `hub` `{hub, ...status}`, `bt` `{hub, ...status}`, `key` `{hub, seq, slot, page, usage, down, ts}`:
   deltas, each carrying the full new payload (no patches) except `key`.
 - `resync` `{topic}`: the server's per-socket queue overflowed and dropped the oldest messages; a fresh snapshot of that topic
   follows. `key` events lost this way are not replayed.

@@ -181,8 +181,8 @@ def router_routes(app) -> list[tuple[str, str]]:
     )
 
 
-def _is_bundle(path: str) -> bool:
-    return path == "/api/v1/bundle" or path.startswith("/api/v1/bundle/")
+def _is_channel(path: str) -> bool:
+    return path == "/api/v1/channel" or path.startswith("/api/v1/channel/")
 
 
 def all_routes() -> list[tuple[str, str]]:
@@ -195,8 +195,8 @@ def all_routes() -> list[tuple[str, str]]:
 
 
 _ALL = all_routes()
-ROUTES = [("GET", "/"), ("GET", "/nope")] + [r for r in _ALL if not _is_bundle(r[1])]
-BUNDLE_ROUTES = [r for r in _ALL if _is_bundle(r[1])]
+ROUTES = [("GET", "/"), ("GET", "/nope")] + [r for r in _ALL if not _is_channel(r[1])]
+CHANNEL_ROUTES = [r for r in _ALL if _is_channel(r[1])]
 
 
 async def test_s1_non_ingress_peer_is_forbidden_everywhere(aiohttp_client, tmp_path):

@@ -58,13 +58,6 @@ VALIDATE_QUERY = vol.Schema(
     },
     extra=vol.PREVENT_EXTRA,
 )
-WAIT_QUERY = vol.Schema(
-    {
-        vol.Optional("hub", default="default"): _hub,
-        vol.Optional("rev", default=""): vol.All(str, vol.Length(max=64)),
-    },
-    extra=vol.PREVENT_EXTRA,
-)
 GET_CONFIG_QUERY = vol.Schema(
     {
         vol.Optional("hub", default="default"): _hub,
@@ -112,12 +105,11 @@ HA_SERVICES_QUERY = vol.Schema(
 _REV = vol.All(str, vol.Match(r"^[A-Za-z0-9._-]{1,64}$"))
 ACK = vol.Schema(
     {
-        vol.Required("hub"): _hub,
         vol.Required("rev"): _REV,
         vol.Required("result"): vol.In(["ok", "error"]),
         vol.Optional("detail"): vol.All(str, vol.Length(max=200)),
     },
-    extra=vol.PREVENT_EXTRA,
+    extra=vol.ALLOW_EXTRA,  # a channel frame: unknown fields are ignored
 )
 
 TEST_IR = vol.Schema(
