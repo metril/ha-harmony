@@ -412,15 +412,16 @@ static void test_slow_reader(void) {
 }
 
 /* a kernel without /proc/<pid>/comm (the hub's 2.6.31): the name comes from stat or cmdline */
-static void put(const char *dir, long pid, const char *file, const char *text) {
+static void put_n(const char *dir, long pid, const char *file, const char *text, size_t len) {
     char d[160], p[200];
     snprintf(d, sizeof d, "%s/%ld", dir, pid);
     mkdir(d, 0700);
     snprintf(p, sizeof p, "%s/%s", d, file);
     FILE *f = fopen(p, "w");
-    fputs(text, f);
+    fwrite(text, 1, len, f); /* explicit length: cmdline holds NULs */
     fclose(f);
 }
+#define put(d, pid, file, text) put_n(d, pid, file, text, sizeof(text) - 1)
 
 static void test_bluetoothd_find(void) {
     char root[] = "/tmp/hh_proc_XXXXXX";
@@ -432,13 +433,15 @@ static void test_bluetoothd_find(void) {
     put(root, 500, "stat", "500 (blue (toothd)) S 1 500 500 0");       /* odd name, not it */
     put(root, 600, "stat", "600 (bluetoothd-x) S 1 600 600 0");        /* a prefix is not it */
     put(root, 700, "stat", "700 (bluetoothd) S 1 700 700 0");          /* skipped as self */
+    put(root, 800, "stat", "800 (bluetoothd) Z 1 800 800 0");          /* zombie: not running */
+    put(root, 900, "stat", "900 (bluetoothd) X 1 900 900 0");          /* dead */
     long pids[16];
     CT_EQ(bt_link_find_bluetoothd(root, 700, pids, 16), 3);
     CT_CHECK(pids[0] + pids[1] + pids[2] == 200 + 300 + 400);
     CT_EQ(bt_link_find_bluetoothd("/nonexistent_hh_proc", 1, pids, 16), 0);
-    static const long ids[] = {100, 200, 300, 400, 500, 600, 700};
-    static const char *const fs[] = {"stat", "stat", "cmdline", "comm", "stat", "stat", "stat"};
-    for (int i = 0; i < 7; i++) {
+    static const long ids[] = {100, 200, 300, 400, 500, 600, 700, 800, 900};
+    static const char *const fs[] = {"stat", "stat", "cmdline", "comm", "stat", "stat", "stat", "stat", "stat"};
+    for (int i = 0; i < 9; i++) {
         char p[200];
         snprintf(p, sizeof p, "%s/%ld/%s", root, ids[i], fs[i]);
         unlink(p);

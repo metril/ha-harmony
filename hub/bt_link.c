@@ -406,6 +406,19 @@ static bool proc_name(const char *root, long pid, char *name, size_t cap) {
     return false;
 }
 
+/* a zombie or dead process (state Z / X in stat) is not a running daemon */
+static bool proc_gone(const char *root, long pid) {
+    char path[96], buf[512];
+    snprintf(path, sizeof path, "%s/%ld/stat", root, pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    const char *c = strrchr(buf, ')');
+    return c && c[1] == ' ' && (c[2] == 'Z' || c[2] == 'X');
+}
+
 /* pids of every stock `bluetoothd` under the /proc-like directory root; returns how many (at most max are stored) */
 int bt_link_find_bluetoothd(const char *root, long self, long *pids, int max) {
     DIR *d = opendir(root);
@@ -418,6 +431,7 @@ int bt_link_find_bluetoothd(const char *root, long self, long *pids, int max) {
         if (*end || pid <= 1 || pid == self) continue;
         char name[64];
         if (!proc_name(root, pid, name, sizeof name) || strcmp(name, "bluetoothd") != 0) continue;
+        if (proc_gone(root, pid)) continue;
         if (n < max) pids[n] = pid;
         n++;
     }
