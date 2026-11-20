@@ -38,6 +38,7 @@ static int utf8_valid(const uint8_t *s, size_t n) {
 #define HAS_ICON 0x20
 #define HAS_BIND 0x40
 #define STYLE_ICON_ONLY 0x20
+#define STYLE_TRAILING 0x40
 #define PF_BACK 4
 #define PF_THEME_SHIFT 3
 #define PF_THEME_MASK 0x38u
@@ -98,10 +99,11 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
             if (len - off < need) return -HP_E_INVAL;
             if (kind & HAS_STYLE) {
                 unsigned s = d[off++];
-                if ((s & 7) > HP_ROLE_NAV || (s & 0xC0)) return -HP_E_INVAL;
+                if ((s & 7) > HP_ROLE_NAV || (s & 0x80) || ((s & STYLE_TRAILING) && (s & 7) != HP_ROLE_NAV)) return -HP_E_INVAL;
                 w->role = (uint8_t)(s & 7);
                 w->shape = (uint8_t)((s >> 3) & 3);
                 w->icon_only = (s & STYLE_ICON_ONLY) != 0;
+                w->trailing = (s & STYLE_TRAILING) != 0;
             }
             if (kind & HAS_ICON) {
                 w->icon = d[off++];

@@ -482,6 +482,8 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
     int lw = big ? bw - 24 : bw - 8;
     if (row && ic) lw = bw - 12 - px - 8 - 8;
     else if (row) lw = bw - 24;
+    if (row && w->trailing) lw -= 24 + 4; /* room for the chevron */
+    if (lw < 0) lw = 0;
     l = make_label(o, txt, ts, tf, lw);
     if (!l) return -1;
   }
@@ -490,6 +492,11 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
     lv_obj_align(ic, LV_ALIGN_CENTER, 0, 0);
     if (l) { lv_obj_delete(l); l = NULL; }
   } else if (row) {
+    if (w->trailing) {
+      lv_obj_t *ch = make_label(o, RA_GLYPH_CHEV_RIGHT, &ra_st_txt_cap, icon_font(24), 28);
+      if (!ch) return -1;
+      lv_obj_align(ch, LV_ALIGN_RIGHT_MID, -8, 0);
+    }
     if (ic) lv_obj_align(ic, LV_ALIGN_LEFT_MID, 12, 0);
     if (l) {
       lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_LEFT, 0);

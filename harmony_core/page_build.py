@@ -47,7 +47,7 @@ _DOMAIN_ICON = {
     "media_player": "tv",
     "sun": "sun",
 }
-_NAV_ICON = {"next": "chev_right", "prev": "chev_left", "home": "home"}
+_NAV_ICON_LEAD = {"prev": "chev_left", "home": "home"}
 
 
 class CompileError(ValueError):
@@ -104,6 +104,11 @@ class _Spec:
     w: int = 1
     h: int = 1
 
+    @property
+    def trailing(self) -> bool:
+        """Forward nav (next / a page id) draws a trailing chevron; prev and home keep a leading icon."""
+        return self.nav is not None and self.nav not in _NAV_ICON_LEAD
+
 
 @dataclass
 class _Unit:
@@ -137,8 +142,8 @@ def _spec(
     nav = w.get("nav")
     if nav is not None:
         role = "nav"
-        if icon is None:
-            icon = ICON_IDS[_NAV_ICON.get(nav, "chev_right")]
+        if icon is None and nav in _NAV_ICON_LEAD:
+            icon = ICON_IDS[_NAV_ICON_LEAD[nav]]
     elif kind == "button":
         action = w["action"]
         target = action["activity"] if action["type"] == "activity" else None
@@ -165,7 +170,7 @@ def _spec(
         kind,
         label,
         role,
-        w.get("shape", "row" if in_list else "card"),
+        w.get("shape", "row" if in_list or nav is not None else "card"),
         bool(w.get("icon_only", False)),
         icon or 0,
         bind,
@@ -195,6 +200,7 @@ def _probe(s: _Spec) -> Widget:
         s.bind,
         s.color,
         s.on_color,
+        s.trailing,
     )
 
 
@@ -352,6 +358,7 @@ def build_pages(
                     bind,
                     s.color,
                     s.on_color,
+                    s.trailing,
                 )
             )
         pages.append(

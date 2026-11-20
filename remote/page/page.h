@@ -43,6 +43,7 @@ typedef struct {
 typedef struct {
     uint8_t kind, id, x, y, w, h;
     uint8_t role, shape, icon_only; /* v2; v1: default / card / 0 */
+    uint8_t trailing;               /* nav row: chevron at the right edge */
     uint8_t icon;                   /* 0 none, 1..159 stock, 160..254 custom */
     uint8_t has_bind, bind;         /* role nav: target page id; else the activity index that makes it "active" */
     uint8_t tstate;                 /* live tile state (hp_tile_state_t), not on the wire in the page */

@@ -173,7 +173,7 @@ def test_labels_and_nav_take_no_soft_key_and_binds_resolve():
     h, s = c.models
     assert (h.kind, s.back, s.act, h.total, s.total) == ("home", True, 2, 2, 2)
     nav = [w for w in h.widgets if w.role == "nav"]
-    assert nav[0].bind == 1 and nav[0].icon == ICON_IDS["chev_right"]
+    assert nav[0].bind == 1 and nav[0].icon == 0 and nav[0].trailing and nav[0].shape == "row"
     assert [(w.role, w.bind, w.icon) for w in s.widgets if w.role == "nav"] == [
         ("nav", 0, ICON_IDS["chev_left"]),
         ("nav", 0, ICON_IDS["star"]),

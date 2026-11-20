@@ -2342,6 +2342,11 @@
    "name": "v2c_max_252_bytes_with_colour",
    "hex": "0200040820000128000000000100110081021011fffac9265600000320110081043011fffac9265600000501110081061111fffac9265600000721110081083111fffac92656000009021100810a1211fffac9265600000b221100810c3211fffac9265600000d031100810e1311fffac9265600000f23110081103311fffac9265600001104110081121411fffac9265600001324110081143411fffac9265600001505110081161511fffac9265600001725110081183511fffac92656000019061100811a1611fffac9265600001b261100811c3611fffac9265600001d071100811e1711fffac9265600001f27110081203711fffac926560000",
    "error": "toobig"
+  },
+  {
+   "name": "v2_trailing_on_non_nav",
+   "hex": "020004060100010000000050010011480002476f",
+   "error": "inval"
   }
  ],
  "valid_v2c": [
@@ -3925,6 +3930,43 @@
       "bind": null,
       "color": "#F85848",
       "on_color": "#20C8B0"
+     }
+    ]
+   }
+  },
+  {
+   "name": "v2c_nav_trailing",
+   "hex": "0200040601000100000000500100114c0002476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 4,
+    "rows": 6,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 1,
+      "h": 1,
+      "label": "Go",
+      "role": "nav",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 0,
+      "bind": 0,
+      "color": null,
+      "on_color": null,
+      "trailing": true
      }
     ]
    }
