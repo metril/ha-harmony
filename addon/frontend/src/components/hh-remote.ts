@@ -48,13 +48,13 @@ export class HhRemote extends LitElement {
     .g-strip .cap { fill: #030405; stroke: #e8edf0; stroke-width: 1.3; }
     .g-strip:hover .cap { fill: #151a1e; }
     .glow { fill: none; stroke: none; pointer-events: none; transition: fill 140ms ease-out, stroke 140ms ease-out; }
-    .lab { fill: #f1f4f6; font: 700 11px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
-    .lab.sm { font-size: 9px; letter-spacing: 0.4px; }
+    .lab { fill: #f1f4f6; font: 700 11px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+    .g-power .lab { font-size: 9px; letter-spacing: 0.4px; }
     .g-strip .lab { font-size: 9px; letter-spacing: 0.5px; fill: #fff; }
     .g-home .lab { font-size: 15px; }
     /* the legend between two keys sits on its own plate-coloured backing, so a selected neighbour's outline and glow never run through it */
     .pbk { fill: #4d5257; pointer-events: none; }
-    .pr { fill: #eef1f3; font: 700 11px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
+    .pr { fill: #eef1f3; font: 700 11px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
     .prl { stroke: #eef1f3; stroke-width: 1.2; pointer-events: none; }
     .gl { fill: #eef1f3; pointer-events: none; }
     .gs { fill: none; stroke: #eef1f3; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
@@ -392,7 +392,7 @@ export class HhRemote extends LitElement {
       ${g.color ? svg`<path class="tint" d=${tintPath(g)} stroke=${g.color}></path>` : nothing}
       <path class="glow" d=${path}></path>
       ${this.keyGlyph(g)}
-      ${!g.label ? nothing : svg`<text class=${g.label.length > 5 || g.group === 'power' ? 'lab sm' : 'lab'} x=${g.x + g.w / 2} y=${g.y + g.h / 2 + (g.group === 'home' ? 5.2 : 3.4)}>${g.label}</text>`}
+      ${!g.label ? nothing : svg`<text class="lab" x=${g.lx ?? g.x + g.w / 2} y=${g.ly ?? g.y + g.h / 2}>${g.label}</text>`}
       ${inh ? svg`<circle class="dot" cx=${g.x + g.w - 8} cy=${g.y + 8} r="2.6"></circle>` : nothing}
     </g>`;
   }
@@ -506,7 +506,7 @@ export class HhRemote extends LitElement {
       <rect class=${frame ? 'screen-frame tgt' : 'screen-frame'} x=${SCREEN.x - 2} y=${SCREEN.y - 2} width=${SCREEN.w + 4} height=${SCREEN.h + 4} rx="4"></rect>
       ${PLATES.map((d) => svg`<path class="plate" d=${d}></path>`)}
       ${KEYS.map((g) => this.keyEl(g, byKey.get(g.name), errKeys))}
-      ${PRINTED.map((p) => svg`<rect class="pbk" x=${p.x - (Math.max(p.text.length, p.sub?.length ?? 0) * 7 + 8) / 2} y=${p.y - 11} width=${Math.max(p.text.length, p.sub?.length ?? 0) * 7 + 8} height=${p.sub ? 31 : 16} rx="4"></rect><text class="pr" x=${p.x} y=${p.y}>${p.text}</text>${p.sub ? svg`<path class="prl" d=${`M${p.x - 8} ${p.y + 4}h16`}></path><text class="pr" x=${p.x} y=${p.y + 15}>${p.sub}</text>` : nothing}`)}
+      ${PRINTED.map((p) => { const n = Math.max(p.text.length, p.sub?.length ?? 0) * 7 + 8; return svg`<rect class="pbk" x=${p.x - n / 2} y=${p.sub ? p.y - 17 : p.y - 9} width=${n} height=${p.sub ? 34 : 18} rx="4"></rect><text class="pr" x=${p.x} y=${p.sub ? p.y - 8 : p.y}>${p.text}</text>${p.sub ? svg`<path class="prl" d=${`M${p.x - 8} ${p.y}h16`}></path><text class="pr" x=${p.x} y=${p.y + 8}>${p.sub}</text>` : nothing}`; })}
     </svg>`;
   }
 }

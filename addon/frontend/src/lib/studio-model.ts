@@ -60,6 +60,7 @@ export function deviceChips(d: Device): Record<Group, Chip[]> {
 
 // ---------------------------------------------------------------- actions
 export const isNone = (a: unknown): boolean => !!a && typeof a === 'object' && 'none' in (a as object);
+import { displayCommand } from './key-names';
 export const pretty = (s: string): string => s.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 /** One-line summary of a config action. */
@@ -69,7 +70,7 @@ export function describeAction(cfg: Config, a: unknown, names?: ReadonlyMap<stri
   if ('device' in x) {
     const d = (cfg.devices ?? []).find((v) => v.id === x['device']);
     const dn = d?.name ?? String(x['device']);
-    return 'command' in x ? `${dn} · ${x['command']}` : `${dn} · input ${x['input']}`;
+    return 'command' in x ? `${dn} · ${displayCommand(String(x['command']))}` : `${dn} · input ${displayCommand(String(x['input']))}`;
   }
   if ('activity' in x) {
     if (x['activity'] === 'off') return 'All off';
@@ -114,8 +115,11 @@ export function keyActionLabel(a: { kind: string; label: string } & Record<strin
   }
   if (a.kind === 'device' && cfg) {
     const d = (cfg.devices ?? []).find((v) => v.id === a['device']);
-    if (d?.kind === 'ha') return `${d.name ?? d.id} \u00B7 ${typeof a['command'] === 'string' ? a['command'] : `input ${String(a['input'])}`}`;
+    if (d?.kind === 'ha') return `${d.name ?? d.id} \u00B7 ${typeof a['command'] === 'string' ? displayCommand(a['command']) : `input ${displayCommand(String(a['input']))}`}`;
   }
+  // the short "tv: vol_up" form from the key map, with the command part made readable
+  const cmd = a.kind === 'device' && typeof a['command'] === 'string' ? a['command'] : '';
+  if (cmd && a.label.endsWith(cmd)) return a.label.slice(0, -cmd.length) + displayCommand(cmd);
   return a.label;
 }
 

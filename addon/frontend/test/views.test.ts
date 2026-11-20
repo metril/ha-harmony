@@ -197,7 +197,7 @@ describe('screens render with a realistic config', () => {
     await settle(av as HTMLElement);
     expect(av.shadowRoot!.querySelectorAll('.acard').length).toBe(1);
     expect(text(av)).toContain('Watch TV');
-    expect(av.shadowRoot!.querySelector('hh-chain-mini')!.shadowRoot!.textContent).toContain('port1');
+    expect(av.shadowRoot!.querySelector('hh-chain-mini')!.shadowRoot!.textContent).toContain('Port 1');
     expect(text(av)).toContain('New activity');
     location.hash = '#/activities/watch_tv';
     await vi.waitFor(() => expect(text(av)).toContain('Signal chain'));
@@ -227,7 +227,7 @@ describe('screens render with a realistic config', () => {
     expect(store.config.activities![0]!.keys).toMatchObject({ volume_up: { device: 'tv', command: 'vol_up' }, volume_down: { device: 'tv', command: 'vol_down' } });
     expect((store.config.editor as { activities: Record<string, { handlers: object }> }).activities['watch_tv']!.handlers).toEqual({ volume: 'tv' });
     await settle(av as HTMLElement);
-    expect(text(av)).toContain('No match for Volume Mute');
+    expect(text(av)).toContain('No match for Volume mute');
     const step = av.shadowRoot!.querySelector<HTMLElement>('.step[data-step="0"]')!;
     step.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }));
     expect(store.config.activities![0]!.steps!.map((x) => x['command'])).toEqual(['cmd_2', 'cmd_1']);

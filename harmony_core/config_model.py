@@ -404,6 +404,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             vol.Required("kind"): "ha",
             vol.Optional("name"): _name,
             vol.Optional("aliases", default=list): [_name],
+            vol.Optional("icon"): vol.In(list(ICON_IDS), msg="unknown icon"),
             # The entity whose state is the device's state (on = not off/standby/unavailable).
             vol.Optional("entity"): vol.All(str, vol.Match(_ENTITY, msg="not an entity id")),
             vol.Optional("power"): vol.All(
@@ -423,6 +424,8 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         # (e.g. the stock hub's numeric device id, so existing automations keep working).
         # Resolved in Home Assistant; never sent to the hub.
         vol.Optional("aliases", default=list): [_name],
+        # Stock icon shown for the device in the editor and the default for widgets that target it.
+        vol.Optional("icon"): vol.In(list(ICON_IDS), msg="unknown icon"),
         vol.Optional("power"): power,
         vol.Optional("inputs", default=dict): {_name: ir},
         vol.Optional("settle_ms"): _int(0, 60000),
@@ -437,6 +440,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             vol.Required("kind"): "bt",
             vol.Optional("name"): _name,
             vol.Optional("aliases", default=list): [_name],
+            vol.Optional("icon"): vol.In(list(ICON_IDS), msg="unknown icon"),
             vol.Optional("address"): _bt_address,  # none until the host is paired
             vol.Optional("transport", default="auto"): vol.In(TRANSPORTS),
             vol.Optional("commands"): {_cmd_name: _bt_command},  # default: every built-in

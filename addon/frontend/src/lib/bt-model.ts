@@ -2,6 +2,7 @@
 // config edits (a `kind: bt` device, a `bt_remotes` entry) and the remote key table. No DOM; loaded with the views.
 import { ApiError, type BtCodes, type BtHost, type BtRemote, type BtState, type BtStatus } from './api';
 import { byteCounter, trimBytes } from './codes';
+import { displayKey } from './key-names';
 import { deviceIdFor } from './device-edit';
 import type { Config, Device } from './model';
 
@@ -292,14 +293,7 @@ export const KEY_GROUPS = ['Navigation', 'Transport', 'Volume and channel', 'Col
 export type KeyGroup = (typeof KEY_GROUPS)[number];
 const DIGIT = /^key_10([0-9])$/;
 /** "Digit 0", "Volume up", "Key 5"; the id stays available as a tooltip. */
-export function keyLabel(k: string): string {
-  const d = DIGIT.exec(k);
-  if (d) return `Digit ${d[1]}`;
-  const n = /^key_(\d+)$/.exec(k);
-  if (n) return `Key ${n[1]}`;
-  const t = k.replace(/_/g, ' ');
-  return t.charAt(0).toUpperCase() + t.slice(1);
-}
+export const keyLabel = (k: string): string => (DIGIT.test(k) ? `Digit ${DIGIT.exec(k)?.[1]}` : displayKey(k));
 export function keyGroup(k: string): KeyGroup {
   if (DIGIT.test(k)) return 'Digits';
   if (/^(volume|channel)_|^(mute)$/.test(k)) return 'Volume and channel';

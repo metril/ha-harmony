@@ -1,7 +1,8 @@
 import { LitElement, css, html, nothing } from 'lit';
+import { displayCommand } from '../lib/key-names';
 import { customElement, property } from 'lit/decorators.js';
 import { chainOrder } from '../lib/activity-edit';
-import { art, deviceKind } from '../lib/device-art';
+import { deviceArt } from '../lib/device-art';
 import type { Config } from '../lib/model';
 
 /** An activity's devices left to right with the input on each wire (cards in galleries and the overview). */
@@ -27,7 +28,7 @@ export class HhChainMini extends LitElement {
     return html`<div class="mini" role="img" aria-label="Devices in order: ${order.map((d) => this.cfg.devices?.find((x) => x.id === d)?.name ?? d).join(', then ')}">${order.map((dv, i) => {
       const d = this.cfg.devices?.find((x) => x.id === dv);
       const input = a?.devices?.find((x) => x.device === dv)?.input;
-      return html`${i > 0 ? html`<span class="w"><span>${input ?? ''}</span><i></i></span>` : nothing}<span class="d">${art(d ? deviceKind(d) : 'other')}<small>${d?.name ?? dv}</small></span>`;
+      return html`${i > 0 ? html`<span class="w"><span>${input ? displayCommand(input) : ''}</span><i></i></span>` : nothing}<span class="d">${deviceArt(d)}<small>${d?.name ?? dv}</small></span>`;
     })}${order.length === 0 ? html`<span class="none">No devices yet</span>` : nothing}</div>`;
   }
 }

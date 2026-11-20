@@ -99,13 +99,13 @@ describe('device edits', () => {
 describe('activity timeline', () => {
   it('generates locked steps with settle gaps, then user steps', () => {
     const t = timeline(full(), 'watch_tv', 'start');
-    expect(t.items.map((i) => (i.kind === 'gap' ? `gap${i.ms}` : i.label))).toEqual(['Power on Living room TV', 'gap2000', 'Living room TV → hdmi1', 'gap2000', 'HDMI switch (toggle)'.replace('HDMI switch (toggle)', 'Power HDMI switch (toggle)'), 'HDMI switch → port1', 'Living room TV · vol_up']);
+    expect(t.items.map((i) => (i.kind === 'gap' ? `gap${i.ms}` : i.label))).toEqual(['Power on Living room TV', 'gap2000', 'Living room TV → hdmi1', 'gap2000', 'HDMI switch (toggle)'.replace('HDMI switch (toggle)', 'Power HDMI switch (toggle)'), 'HDMI switch → port1', 'Living room TV · Volume up']);
     expect(t.totalMs).toBe(4000);
     expect(t.items.filter((i) => i.kind === 'auto')).toHaveLength(4);
   });
   it('stop runs own steps then powers off in reverse', () => {
     const c = addStep(full(), 'watch_tv', 'stop', { device: 'tv', command: 'ok' }) as Config;
-    expect(timeline(c, 'watch_tv', 'stop').items.map((i) => (i.kind === 'gap' ? '' : i.label))).toEqual(['Living room TV · ok', 'Power HDMI switch (toggle)', 'Power on Living room TV'.replace('on ', 'off ')]);
+    expect(timeline(c, 'watch_tv', 'stop').items.map((i) => (i.kind === 'gap' ? '' : i.label))).toEqual(['Living room TV · OK', 'Power HDMI switch (toggle)', 'Power on Living room TV'.replace('on ', 'off ')]);
   });
   it('reorders own steps and refuses bad moves', () => {
     let c = full();
@@ -330,15 +330,15 @@ describe('key map labels', () => {
     expect(keyActionLabel({ kind: 'ha', service: 'light.toggle', entity: 'light.lamp', label: 'light.toggle light.lamp' }, ha, names)).toBe('Lamp \u00B7 toggle');
     expect(keyActionLabel({ kind: 'ha', service: 'light.toggle', entity: 'light.k', label: 'light.toggle light.k (repeats)' }, ha, names)).toBe('light.k \u00B7 toggle \u21BB');
     expect(keyActionLabel({ kind: 'ha', service: 'scene.turn_on', entity: 'scene.a +1', label: 'x' }, ha, names)).toBe('scene.a +1 \u00B7 turn_on');
-    expect(keyActionLabel({ kind: 'device', device: 'shield', command: 'DPAD_UP', label: 'shield: DPAD_UP' }, ha)).toBe('Shield \u00B7 DPAD_UP');
+    expect(keyActionLabel({ kind: 'device', device: 'shield', command: 'DPAD_UP', label: 'shield: DPAD_UP' }, ha)).toBe('Shield \u00B7 Dpad up');
   });
   it('leaves events, IR devices and the rest alone', () => {
     expect(keyActionLabel({ kind: 'ha', event: 'tv', label: 'HA event tv' }, ha)).toBe('HA event tv');
-    expect(keyActionLabel({ kind: 'device', device: 'tv', command: 'mute', label: 'tv: mute' }, ha)).toBe('tv: mute');
+    expect(keyActionLabel({ kind: 'device', device: 'tv', command: 'mute', label: 'tv: mute' }, ha)).toBe('tv: Mute');
   });
   it('describeAction (key popover) uses the same form; long labels clip with an ellipsis', () => {
     expect(describeAction(ha, { ha: { service: 'light.toggle', target: { entity_id: 'light.lamp' }, repeat: true } }, names)).toBe('Lamp \u00B7 toggle \u21BB');
-    expect(describeAction(ha, { device: 'shield', command: 'DPAD_UP' })).toBe('Shield \u00B7 DPAD_UP');
+    expect(describeAction(ha, { device: 'shield', command: 'DPAD_UP' })).toBe('Shield \u00B7 Dpad up');
     expect(haLabel('light.x', 0, 'light.toggle', false)).toBe('light.x \u00B7 toggle');
     const long = 'Living room ceiling spotlights \u00B7 turn_on';
     expect(clip(long)).toHaveLength(26);

@@ -6,6 +6,7 @@ import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { HA_DOMAINS } from '../lib/studio-state';
 import { ACTION_DOMAINS, haProblem } from '../lib/ha-rules';
+import { displayCommand } from '../lib/key-names';
 import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, isHaAction, fieldData, groupCommand, pretty, resolveIr, type Source } from '../lib/studio-model';
 import './hh-send-ir';
 
@@ -80,7 +81,7 @@ export class HhActionPicker extends LitElement {
     const out: { label: string; source: Source }[] = [];
     for (const d of this.cfg.devices ?? []) {
       for (const c of Object.values(deviceChips(d)).flat())
-        if (`${d.name ?? d.id} ${c.name}`.toLowerCase().includes(q)) out.push({ label: `${d.name ?? d.id} · ${c.name}`, source: { kind: c.kind, device: d.id, name: c.name } });
+        if (`${d.name ?? d.id} ${c.name}`.toLowerCase().includes(q)) out.push({ label: `${d.name ?? d.id} · ${displayCommand(c.name)}`, source: { kind: c.kind, device: d.id, name: c.name } });
     }
     for (const a of this.cfg.activities ?? []) if (`${a.name ?? a.id}`.toLowerCase().includes(q)) out.push({ label: `Start ${a.name ?? a.id}`, source: { kind: 'activity', id: a.id } });
     for (const e of this.host.state.entities ?? []) if (`${e.name ?? ''} ${e.entity_id}`.toLowerCase().includes(q) && out.length < 40) out.push({ label: e.name ?? e.entity_id, source: { kind: 'entity', entity_id: e.entity_id, name: e.name } });
@@ -133,9 +134,9 @@ export class HhActionPicker extends LitElement {
           ${this.kind === 'command' && d
             ? GROUPS.map((g) => {
                 const list = [...(d.power ? ['power_on', 'power_off'] : []), ...names].filter((n) => groupCommand(n) === g || (g === 'power' && (n === 'power_on' || n === 'power_off')));
-                return list.length ? html`<optgroup label=${pretty(g)}>${[...new Set(list)].map((n) => html`<option value=${n} ?selected=${n === this.name}>${n}</option>`)}</optgroup>` : nothing;
+                return list.length ? html`<optgroup label=${pretty(g)}>${[...new Set(list)].map((n) => html`<option value=${n} ?selected=${n === this.name}>${displayCommand(n)}</option>`)}</optgroup>` : nothing;
               })
-            : names.map((n) => html`<option value=${n} ?selected=${n === this.name}>${n}</option>`)}
+            : names.map((n) => html`<option value=${n} ?selected=${n === this.name}>${displayCommand(n)}</option>`)}
         </select>
       </label>`;
   }

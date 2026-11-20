@@ -325,7 +325,7 @@ async def test_studio_import_assign_drag_inspect_apply(browser, site):
 
     # click-click: pick a command, then a hard key of the Stream layer
     await page.get_by_role("tab", name="Stream", exact=True).click()
-    await page.locator("hh-palette .chip2", has_text="vol_down").first.click()
+    await page.locator("hh-palette .chip2", has_text="Volume down").first.click()
     await page.locator(".banner2", has_text="Click a key").wait_for()
     await page.locator("hh-remote [data-key=volume_down]").click()
     key = page.locator("hh-remote [data-key=volume_down]")
@@ -334,11 +334,11 @@ async def test_studio_import_assign_drag_inspect_apply(browser, site):
         ".querySelector('hh-remote').shadowRoot.querySelector('[data-key=volume_down]')"
         ".getAttribute('aria-label').includes('override')"
     )
-    assert "avr: vol_down" in (await key.get_attribute("aria-label"))
+    assert "avr: Volume down" in (await key.get_attribute("aria-label"))
 
     # X-ray labels every key with its action
     await page.get_by_role("button", name="X-ray").click()
-    await page.locator("hh-remote text.xl", has_text="avr: vol_down").wait_for()
+    await page.locator("hh-remote text.xl", has_text="avr: Volume down").wait_for()
     await page.get_by_role("button", name="X-ray").click()
 
     # drag a command from the palette onto the screen: a button appears, the byte meter moves
@@ -347,11 +347,12 @@ async def test_studio_import_assign_drag_inspect_apply(browser, site):
     widgets = page.locator("hh-remote [data-widget]")
     n = await widgets.count()
     chip = page.locator("hh-palette .chip2", has_text="mute").first
+    await chip.scroll_into_view_if_needed()
     cb = await chip.bounding_box()
     sb = await screen.bounding_box()
-    await page.mouse.move(cb["x"] + 10, cb["y"] + 10)
+    await page.mouse.move(cb["x"] + cb["width"] / 2, cb["y"] + cb["height"] / 2)
     await page.mouse.down()
-    await page.mouse.move(cb["x"] + 60, cb["y"] + 40, steps=5)
+    await page.mouse.move(cb["x"] + cb["width"] / 2 + 50, cb["y"] + cb["height"] / 2 + 30, steps=5)
     await page.mouse.move(sb["x"] + sb["width"] / 2, sb["y"] + sb["height"] * 0.75, steps=10)
     if SHOTS:
         await shots(page, "studio-mid-drag")
@@ -465,7 +466,7 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
     # X-ray in the studio shows an activity key from the archive device
     await page.get_by_role("link", name="Open on remote").click()
     await page.get_by_role("button", name="X-ray").click()
-    await page.locator("hh-remote").get_by_text("vol_up", exact=False).first.wait_for()
+    await page.locator("hh-remote").get_by_text("Volume up", exact=False).first.wait_for()
     bar = page.get_by_role("region", name="Draft")
     await bar.get_by_text("Valid").wait_for()
     await bar.get_by_role("button", name="Review & apply").click()

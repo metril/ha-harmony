@@ -63,7 +63,7 @@ describe('remote studio', () => {
   it('click-then-click assigns a palette command to a hard key and announces it; undo reverts', async () => {
     const { remote, palette, studio, store } = await boot();
     await tick(palette, remote);
-    const chip = [...palette.shadowRoot.querySelectorAll('.chip2')].find((c) => c.textContent?.trim() === 'cmd_5') as HTMLElement;
+    const chip = [...palette.shadowRoot.querySelectorAll('.chip2')].find((c) => c.textContent?.trim() === 'Cmd 5') as HTMLElement;
     chip.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, composed: true }));
     await tick(studio, remote, palette);
     expect(studio.shadowRoot.querySelector('.banner2')?.textContent).toContain('Click a key');
@@ -93,7 +93,7 @@ describe('remote studio', () => {
   it('keyboard: arrows move the cursor between keys and Enter drops', async () => {
     const { palette, studio, store, remote } = await boot();
     await tick(palette);
-    const chip = [...palette.shadowRoot.querySelectorAll('.chip2')].find((c) => c.textContent?.trim() === 'cmd_7') as HTMLElement;
+    const chip = [...palette.shadowRoot.querySelectorAll('.chip2')].find((c) => c.textContent?.trim() === 'Cmd 7') as HTMLElement;
     chip.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, composed: true }));
     await tick(studio, remote);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' })); // select -> down
@@ -248,7 +248,7 @@ describe('remote studio', () => {
     const send = picker.shadowRoot.querySelector('hh-send-ir') as El;
     expect(send).toBeTruthy();
     await send.updateComplete;
-    expect(send.shadowRoot.querySelector('button')!.getAttribute('aria-label')).toBe('Send IR for Living room TV · cmd_1');
+    expect(send.shadowRoot.querySelector('button')!.getAttribute('aria-label')).toBe('Send IR for Living room TV · Cmd 1');
     await tick(palette);
     expect(palette.shadowRoot.querySelectorAll('.chip2 svg.sic').length).toBeGreaterThan(5);
   });

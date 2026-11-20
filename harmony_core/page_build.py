@@ -121,7 +121,13 @@ class _Unit:
     seq: tuple[int, int] = (0, 0)
 
 
-def _spec(w: dict[str, Any], act_ids: list[str], act_names: dict[str, str], in_list: bool) -> _Spec:
+def _spec(
+    w: dict[str, Any],
+    act_ids: list[str],
+    act_names: dict[str, str],
+    in_list: bool,
+    dev_icons: dict[str, str] | None = None,
+) -> _Spec:
     kind, label = w["type"], w["label"]
     role = w.get("role", "default")
     icon: int | None = None
@@ -146,6 +152,10 @@ def _spec(w: dict[str, Any], act_ids: list[str], act_names: dict[str, str], in_l
             )  # unknown: validated elsewhere
             if icon is None:
                 icon = icon_for_text(f"{act_names.get(target, target)} {target}")
+        if icon is None and action["type"] == "device" and dev_icons:
+            named = dev_icons.get(action["device"])  # the device's own icon is the default
+            if named:
+                icon = ICON_IDS[named]
         if icon is None:
             icon = icon_for_text(label)
     elif kind == "tile" and icon is None:
@@ -202,10 +212,11 @@ def _lead_title(specs: list[_Spec], cols: int) -> _Spec | None:
 
 def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     names = {a["id"]: a.get("name", a["id"]) for a in model["activities"]}
+    dev_icons = {d["id"]: d["icon"] for d in model["devices"] if d.get("icon")}
     units: list[_Unit] = []
     for pi, p in enumerate(model["pages"]):
         in_list = "list" in p
-        specs = [_spec(w, act_ids, names, in_list) for w in p["widgets"]]
+        specs = [_spec(w, act_ids, names, in_list, dev_icons) for w in p["widgets"]]
         cols, rows = p["cols"], p["rows"]
         title = p.get("title", "")
         if not title and not in_list and rows >= 2:

@@ -2,6 +2,8 @@ import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { commandNames } from '../lib/bt';
+import { setStyle } from '../lib/set-style';
+import { displayCommand, gridStyle } from '../lib/key-names';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { commandIconId } from '../lib/device-art';
 import { chipStyles, shared } from '../lib/styles';
@@ -134,7 +136,8 @@ export class HhPalette extends LitElement {
     const cur = this.assigner.source;
     return !!cur && sourceKey(cur) === sourceKey(s);
   }
-  private chip(label: string, source: Source, used: boolean, extra: TemplateResult | typeof nothing = nothing) {
+  private chip(raw: string, source: Source, used: boolean, extra: TemplateResult | typeof nothing = nothing) {
+    const label = source.kind === 'activity' ? raw : displayCommand(raw);
     return html`<button class="chip2 ${used ? 'used' : ''}" aria-pressed=${this.pressed(source)} title=${used ? `${label} (already on a key of this layer)` : label}
       @pointerdown=${(e: PointerEvent) => this.down(e, source)} @keydown=${(e: KeyboardEvent) => this.key(e, source)} @click=${(e: MouseEvent) => e.preventDefault()}>${extra}<span>${label}</span></button>`;
   }
@@ -153,12 +156,12 @@ export class HhPalette extends LitElement {
       const cards = GROUPS.map((grp) => {
         const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
-          ? html`<h2>${pretty(grp)}</h2><div class="cells" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
+          ? html`<h2>${pretty(grp)}</h2><div class="cells" style=${setStyle({ "grid-template-columns": gridStyle(chips.map((c) => displayCommand(c.name))) })} role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
               ${chips.map((c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(commandIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
             </div>`
           : nothing;
       });
-      return html`<details open><summary>${stockIconSvg(1)}<span title=${d.name ?? d.id}>${d.name ?? d.id}</span>${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant device">HA</i>` : nothing}<small>${commandNames(d).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
+      return html`<details open><summary>${d.icon && stockIconByName(d.icon) ? stockIconSvg(stockIconByName(d.icon)?.id ?? 1) : stockIconSvg(1)}<span title=${d.name ?? d.id}>${d.name ?? d.id}</span>${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant device">HA</i>` : nothing}<small>${commandNames(d).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
     });
   }
   private activities() {
