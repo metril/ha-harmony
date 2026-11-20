@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { signal, BtElement, btCss } from './bt-base';
 import './hh-bt-commands';
 import './hh-bt-keys';
-import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, clock, outcome, remoteNameProblem, remotesOf, secsLeft, nextCountdown, sameAddr } from '../lib/bt-model';
+import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, patchHost, clock, outcome, remoteNameProblem, remotesOf, secsLeft, nextCountdown, sameAddr } from '../lib/bt-model';
 import { announce, derive, observe, startRun, type Phase, type Run } from '../lib/bt-wizard';
 import { byteCounter, trimBytes } from '../lib/codes';
 import { capProblem } from '../lib/device-edit';
@@ -36,6 +36,7 @@ export class HhBtPair extends BtElement {
   private cPick = new CmdId();
   private focusKey = '';
   private defaultsApplied = false;
+  private devId = ''; // the draft entry made the moment a device paired (host mode)
 
   override disconnectedCallback(): void {
     // Only leaving the page stops the window: a re-parent or re-render disconnects and reconnects in the same task.
@@ -51,7 +52,8 @@ export class HhBtPair extends BtElement {
     }
     if (this.step === 'setup' && !this.defaultsApplied && this.codes && this.mode === 'host' && !Object.keys(this.commands).length) {
       this.defaultsApplied = true;
-      this.commands = Object.fromEntries(this.codes.builtins.filter((b) => b.default).map((b) => [b.name, b.name]));
+      this.commands = this.defaultCommands();
+      if (this.devId) queueMicrotask(() => this.store.replace(patchHost(this.store.config, this.devId, { commands: this.commands })));
     }
   }
   protected override onStatus(): void {
@@ -82,6 +84,28 @@ export class HhBtPair extends BtElement {
     this.paired = p;
     this.name = trimBytes(p.name ?? (this.mode === 'host' ? 'Bluetooth device' : 'Bluetooth remote'));
     this.step = 'setup';
+    if (this.mode === 'host') this.persist(p);
+  }
+  private defaultCommands(): Record<string, string> {
+    return Object.fromEntries((this.codes?.builtins ?? []).filter((b) => b.default).map((b) => [b.name, b.name]));
+  }
+  /** A paired device goes into the draft at once (address and the transport it paired on), so it is never lost between the
+   *  hub keeping its bond and the user finishing the form. The form then edits that entry. */
+  private persist(p: { addr: string; name?: string; transport?: 'classic' | 'le' }) {
+    const cfg = this.store.config;
+    const dup = (cfg.devices ?? []).find((d) => d.kind === 'bt' && sameAddr(d.address, p.addr));
+    if (dup) {
+      this.devId = dup.id;
+      return;
+    }
+    if (capProblem(cfg, 'device')) return;
+    if (this.codes && !this.defaultsApplied) {
+      this.defaultsApplied = true;
+      this.commands = this.defaultCommands();
+    }
+    const r = addHostDevice(cfg, { name: this.name, address: p.addr, transport: p.transport ?? (this.transport === 'any' ? 'auto' : this.transport), commands: this.commands });
+    this.store.replace(r.config);
+    this.devId = r.id;
   }
   private async start() {
     this.err = '';
@@ -92,7 +116,7 @@ export class HhBtPair extends BtElement {
       this.cStart.settle();
       if (!this.isConnected) return void this.closeWindow(); // left while the request was in flight: the hub opened a window nobody watches
       this.run = startRun(this.mode, baseline ?? r.state, Date.now());
-      this.countdown = null;
+      this.countdown = nextCountdown(null, this.bt, Date.now()); // the pushed status with the open window may have come before this answer
       this.step = 'pair';
     } catch (e) {
       this.cStart.settle(e);
@@ -146,12 +170,17 @@ export class HhBtPair extends BtElement {
     const cfg = this.store.config;
     const name = trimBytes(this.name.trim());
     if (this.mode === 'host') {
-      const full = capProblem(cfg, 'device') ?? capProblem(cfg, 'command', Object.keys(this.commands).length);
+      const full = capProblem(cfg, 'command', Object.keys(this.commands).length) ?? (this.devId ? null : capProblem(cfg, 'device'));
       if (full) return void this.store.toast(full, 'error');
-      const r = addHostDevice(cfg, { name, address: p.addr, transport: this.transport === 'any' ? 'auto' : this.transport, commands: this.commands });
-      this.store.replace(r.config);
+      let id = this.devId;
+      if (id) this.store.replace(patchHost(cfg, id, { name, commands: this.commands }));
+      else {
+        const r = addHostDevice(cfg, { name, address: p.addr, transport: p.transport ?? (this.transport === 'any' ? 'auto' : this.transport), commands: this.commands });
+        this.store.replace(r.config);
+        id = r.id;
+      }
       this.store.toast(`Added ${name} to the draft (${Object.keys(this.commands).length} commands). Nothing is applied yet.`, 'info', true);
-      location.hash = hashFor('devices', r.id);
+      location.hash = hashFor('devices', id);
     } else {
       this.store.replace(addRemote(cfg, { name, address: p.addr, ...(Object.keys(this.keys).length ? { keys: this.keys } : {}) }));
       this.store.toast(`Added the remote ${name} to the draft. Nothing is applied yet.`, 'info', true);
@@ -222,7 +251,7 @@ export class HhBtPair extends BtElement {
     const prob = this.nameProblem();
     const bytes = byteCounter(this.name);
     const slot = (host ? this.bt?.hosts : this.bt?.remotes)?.find((e) => sameAddr(e.addr, p.addr))?.slot ?? null;
-    const dup = host ? (this.store.config.devices ?? []).find((d) => d.kind === 'bt' && sameAddr(d.address, p.addr)) : remotesOf(this.store.config).find((r) => sameAddr(r.address, p.addr));
+    const dup = host ? undefined : remotesOf(this.store.config).find((r) => sameAddr(r.address, p.addr));
     return html`<h1 id="step-title" tabindex="-1">${host ? 'Name it and choose its commands' : 'Choose what its buttons do'}</h1>
       <p class="lead">${outcome('ok', host ? 'device' : 'remote', p.name).title}. <span class="mono">${p.addr}</span>${p.transport ? ` · ${p.transport === 'le' ? 'Bluetooth LE' : 'Bluetooth BR/EDR'}` : ''}</p>
       ${dup ? html`<div class="banner ir" role="status">This address is already in your config${'name' in dup && dup.name ? ` as ${dup.name}` : ''}. Adding it again creates a second entry.</div>` : nothing}
@@ -238,7 +267,7 @@ export class HhBtPair extends BtElement {
           <span class="hint">${bytes.used} of ${bytes.max} bytes (the hub stores at most ${bytes.max})</span>
           ${prob ? html`<span class="err" role="alert">${prob}</span>` : nothing}
           <button class="btn pri" ?disabled=${!!prob || !this.codes} @click=${() => this.save()}>${host ? 'Add device' : 'Add remote'}</button>
-          <span class="hint">Adds to the draft only. Review and apply it from the bar at the top.</span>
+          <span class="hint">${host ? 'The device is already in the draft.' : 'Adds to the draft only.'} Review and apply it from the bar at the top.</span>
         </aside>
       </div>`;
   }

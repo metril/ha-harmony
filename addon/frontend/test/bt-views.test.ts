@@ -221,3 +221,22 @@ async function vi_waitFor(f: () => boolean | Promise<boolean>, ms = 1500) {
   }
   throw new Error('timeout waiting');
 }
+
+describe('hh-bt-pair saves a paired device at once', () => {
+  it('a device that pairs is in the draft with its address and transport before the form is finished', async () => {
+    const { store } = await boot({ 'POST api/v1/bt/pair': () => ({ body: { ok: true, state: null } }) });
+    const el = await mount('hh-bt-pair', { mode: 'host' });
+    await vi_waitFor(() => !!el.shadowRoot.querySelector('.stage .btn.pri:not([disabled])'));
+    el.shadowRoot.querySelector<HTMLButtonElement>('.stage .btn.pri')!.click();
+    await vi_waitFor(() => !!el.shadowRoot.querySelector('.stage .pulse'));
+    const host = { addr: 'AA:BB:CC:00:00:09', name: 'Box', connected: true, slot: 0, transport: 'le' as const };
+    fakeLive.push({ t: 'bt', ...status({ state: { state: 'ready', discoverable: false, window: undefined, hosts: [host], remotes: [], gen: 5 } as never }) });
+    await vi_waitFor(() => !!el.shadowRoot.querySelector('.twocol'));
+    const dev = (store.config.devices ?? []).find((d) => d.kind === 'bt') as unknown as { address: string; transport: string; name: string; commands: Record<string, string> };
+    expect(dev).toMatchObject({ address: 'AA:BB:CC:00:00:09', transport: 'le', name: 'Box' });
+    await vi_waitFor(() => Object.keys((store.config.devices?.[0] as unknown as { commands: object }).commands).length > 0);
+    // finishing the form edits that entry instead of adding a second one
+    el.shadowRoot.querySelector<HTMLButtonElement>('.side .btn.pri')!.click();
+    expect((store.config.devices ?? []).filter((d) => d.kind === 'bt')).toHaveLength(1);
+  });
+});
