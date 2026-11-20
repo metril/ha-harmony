@@ -1,4 +1,5 @@
 import { css, html, nothing, type TemplateResult } from 'lit';
+import { keyed } from 'lit/directives/keyed.js';
 import { customElement, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { icon } from '../lib/icons';
@@ -116,6 +117,8 @@ export class HhApp extends StoreElement {
   @state() private applyRev: number | null = null;
   @state() private configs: ConfigSummary[] | null = null;
   @state() private cfgMenu = false;
+  /** bumped on a config switch: the view is rebuilt so no element keeps the old config's selection */
+  @state() private epoch = 0;
   @state() private nameDlg: { mode: 'new' | 'duplicate' | 'rename'; value: string; busy: boolean; problem: string } | null = null;
   @state() private confirm: ConfirmRequest | null = null;
   @state() private hubs: HubsResponse | null = null;
@@ -134,6 +137,7 @@ export class HhApp extends StoreElement {
       this.applyOpen = true;
     });
     this.addEventListener('hh-import', () => this.openImport());
+    this.addEventListener('hh-imported-new', this.afterImportAsNew);
     this.addEventListener('hh-close', () => {
       this.applyOpen = false;
       this.importOpen = false;
@@ -149,6 +153,7 @@ export class HhApp extends StoreElement {
       live.sub('configs', (v) => {
         this.configs = (v as { configs: ConfigSummary[] }).configs;
         const mine = this.configs.find((c) => c.id === this.store.configId);
+        if (!mine) void this.store.checkDeleted();
         if (mine && mine.name !== this.store.configName) void this.store.refreshRevs();
         else if (mine && mine.rev_count !== this.store.revs.length) void this.store.refreshRevs();
       }),
@@ -171,13 +176,54 @@ export class HhApp extends StoreElement {
     u.searchParams.set('hub', hub);
     location.href = u.toString();
   }
-  /** Switching config reloads the editor on that config (a fresh store, draft queue and stash). */
-  private goConfig(id: string | null) {
+  /** Switching config is in place: the store swaps its state, the URL follows, the route stays. */
+  private async goConfig(id: string): Promise<void> {
+    this.cfgMenu = false;
+    const s = this.store;
+    try {
+      await s.switchTo(id);
+    } catch (e) {
+      s.toast(e instanceof Error ? e.message : String(e), 'error');
+      return;
+    }
     const u = new URL(location.href);
-    if (id) u.searchParams.set('config', id);
-    else u.searchParams.delete('config');
-    location.href = u.toString();
+    u.searchParams.set('config', id);
+    history.replaceState(history.state, '', u.toString());
+    this.epoch++;
   }
+  /** Open any config but the current one; an empty library gets "Main". */
+  private async openAnother(): Promise<void> {
+    const s = this.store;
+    try {
+      const rows = ((await s.api.configs()).configs ?? []).filter((c) => c.id !== s.configId);
+      const id = rows[0]?.id ?? (await s.api.createConfig({ name: 'Main' })).id;
+      await this.goConfig(id);
+    } catch (e) {
+      s.toast(e instanceof Error ? e.message : String(e), 'error');
+    }
+  }
+  private async saveAsNew(): Promise<void> {
+    const s = this.store;
+    try {
+      const id = await s.saveAsNew(`${s.configName || 'Config'} Restored`.slice(0, 80));
+      const u = new URL(location.href);
+      u.searchParams.set('config', id);
+      history.replaceState(history.state, '', u.toString());
+      this.epoch++;
+      s.toast('Saved as a new config.');
+    } catch (e) {
+      s.toast(e instanceof Error ? e.message : String(e), 'error');
+    }
+  }
+  /** Import As New Config finished: the store already switched. */
+  private afterImportAsNew = (e: Event) => {
+    const id = (e as CustomEvent<{ id: string }>).detail.id;
+    const u = new URL(location.href);
+    u.searchParams.set('config', id);
+    history.replaceState(history.state, '', u.toString());
+    this.epoch++;
+    this.importOpen = false;
+  };
 
   private openName(mode: 'new' | 'duplicate' | 'rename') {
     const s = this.store;
@@ -202,7 +248,8 @@ export class HhApp extends StoreElement {
       }
       await s.flush();
       const r = await s.api.createConfig(d.mode === 'new' ? { name } : { name, from: { id: s.configId } });
-      this.goConfig(r.id);
+      this.nameDlg = null;
+      await this.goConfig(r.id);
     } catch (e) {
       this.nameDlg = { ...d, busy: false, problem: e instanceof ApiError ? e.message : String(e) };
     }
@@ -216,8 +263,9 @@ export class HhApp extends StoreElement {
     });
     if (!ok) return;
     try {
+      s.leaving = true;
       await s.api.deleteConfig(s.configId);
-      this.goConfig(null);
+      await this.openAnother();
     } catch (e) {
       s.toast(e instanceof Error ? e.message : String(e), 'error');
     }
@@ -229,7 +277,7 @@ export class HhApp extends StoreElement {
     const list = rows.some((c) => c.id === s.configId) ? rows : [...rows, { id: s.configId, name: s.configName || s.configId } as ConfigSummary];
     return html`<div class="cfg" role="group" aria-label="Config">
       <span class="hl muted">Config:</span>
-      <select aria-label="Config" @change=${(e: Event) => this.goConfig((e.target as HTMLSelectElement).value)}>
+      <select aria-label="Config" @change=${(e: Event) => void this.goConfig((e.target as HTMLSelectElement).value)}>
         ${list.map((c) => html`<option value=${c.id} ?selected=${c.id === s.configId}>${c.id === s.configId && s.configName ? s.configName : c.name}</option>`)}
       </select>
       <button class="btn ghost" aria-label="Config Actions" aria-haspopup="menu" aria-expanded=${this.cfgMenu} @click=${() => (this.cfgMenu = !this.cfgMenu)}>${icon('menu')}</button>
@@ -238,6 +286,7 @@ export class HhApp extends StoreElement {
             <button role="menuitem" @click=${() => this.openName('new')}>New</button>
             <button role="menuitem" @click=${() => this.openName('duplicate')}>Duplicate</button>
             <button role="menuitem" @click=${() => this.openName('rename')}>Rename</button>
+            <button role="menuitem" @click=${() => { this.cfgMenu = false; this.openImport(); }}>Import As New Config</button>
             <button role="menuitem" class="danger" @click=${() => void this.deleteConfig()}>Delete</button>
           </div>`
         : nothing}
@@ -395,6 +444,13 @@ export class HhApp extends StoreElement {
           <hh-draft-bar></hh-draft-bar>
           <main id="main" tabindex="-1" class=${classMap({ wide: sec === 'remote' })}>
             ${this.linkBanners()}
+            ${s.deleted
+              ? html`<div class="banner bad" role="alert" id="config-deleted">
+                  <span>This Config Was Deleted</span><span class="sp"></span>
+                  <button class="btn sm" @click=${() => void this.saveAsNew()}>Save As New Config</button>
+                  <button class="btn sm" @click=${() => void this.openAnother()}>Open Another Config</button>
+                </div>`
+              : nothing}
             ${s.saveState === 'conflict'
               ? html`<div class="banner ir" role="alert">
                   <span>Changed in another tab or session.</span><span class="sp"></span>
@@ -416,7 +472,7 @@ export class HhApp extends StoreElement {
               ? html`<div class="banner bad" role="alert">${s.errorSummary.unlocated.map((u) => html`<span>${u.msg}</span>`)}</div>`
               : nothing}
             <h1 class="vh">${this.sectionTitle()}</h1>
-            ${!s.loaded ? html`<p class="muted" role="status">Loading…</p>` : this.view()}
+            ${!s.loaded ? html`<p class="muted" role="status">Loading…</p>` : keyed(this.epoch, this.view())}
           </main>
         </div>
       </div>

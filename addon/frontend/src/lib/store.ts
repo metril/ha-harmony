@@ -78,6 +78,13 @@ export class Store extends EventTarget {
     this.queue = new DraftQueue(api, configId);
   }
 
+  /** The open config was deleted elsewhere: autosave is off and the edits stay here. */
+  deleted = false;
+  /** This tab is deleting the open config itself (no "deleted" banner). */
+  leaving = false;
+  /** bumped on every config switch: late replies of the old config are dropped */
+  private gen = 0;
+
   /** Unsaved edits from a moment ago, offered after a reload when the server never received them. */
   stashed: Stash | null = null;
   private store_(): Storage | null {
@@ -92,13 +99,17 @@ export class Store extends EventTarget {
       this.store_()?.removeItem(stashKey(this.configId));
     } catch { /* storage unavailable */ }
   }
-  /** Page is going away (pagehide / tab hidden): send a pending draft save now and keep a copy in sessionStorage. */
-  flushOnUnload(): void {
-    if (this.saveState !== 'dirty' && this.saveState !== 'error' && this.saveState !== 'saving') return;
+  private writeStash(): void {
     const stash: Stash = { config: this.config, rev: this.queue.rev, at: Date.now() };
     try {
       this.store_()?.setItem(stashKey(this.configId), JSON.stringify(stash));
     } catch { /* quota or private mode: the keepalive save still goes */ }
+  }
+  /** Page is going away (pagehide / tab hidden): send a pending draft save now and keep a copy in sessionStorage. */
+  flushOnUnload(): void {
+    if (this.saveState !== 'dirty' && this.saveState !== 'error' && this.saveState !== 'saving') return;
+    this.writeStash();
+    if (this.deleted) return;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -289,6 +300,7 @@ export class Store extends EventTarget {
 
   /** Save now (used by Apply and tests). */
   async flush(): Promise<void> {
+    if (this.deleted) return;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -298,12 +310,15 @@ export class Store extends EventTarget {
 
   private async save(force = false): Promise<void> {
     this.timer = null;
+    if (this.deleted) return;
     if (this.saveState === 'conflict' && !force) return;
+    const gen = this.gen;
     const sent = clone(this.config);
     this.saveState = 'saving';
     this.emit();
     try {
       const r = await this.queue.enqueue(sent, { force });
+      if (gen !== this.gen) return;
       this.baseRev = r.base_rev;
       this.confirmed = sent;
       this.confirmedHasDraft = true;
@@ -320,6 +335,11 @@ export class Store extends EventTarget {
       this.emit();
       if (this.saveState === 'saved') await this.check();
     } catch (e) {
+      if (gen !== this.gen) return;
+      if (e instanceof ApiError && e.status === 404 && e.code === 'not_found') {
+        void this.checkDeleted();
+        return;
+      }
       if (e instanceof ApiError && e.isConflict) {
         this.saveState = 'conflict';
         this.emit();
@@ -465,11 +485,95 @@ export class Store extends EventTarget {
     await this.swapWith(clone(this.config), this.hasDraft, what, () => this.api.restoreRev(this.configId, rev));
   }
 
+  /** Switch to another library config in place: stash/save the old one's edits, then reset every per-config field and load the new one. */
+  async switchTo(id: string): Promise<void> {
+    if (id === this.configId) return;
+    try {
+      await this.flush();
+    } catch { /* the stash below keeps the edits */ }
+    if (!this.deleted && ['dirty', 'error', 'saving', 'conflict'].includes(this.saveState)) this.writeStash();
+    for (const t of [this.timer, this.retryTimer, this.previewTimer]) if (t) clearTimeout(t);
+    this.timer = this.retryTimer = this.previewTimer = null;
+    this.gen++;
+    this.seq++;
+    this.configId = id;
+    this.queue = new DraftQueue(this.api, id);
+    this.deleted = false;
+    this.leaving = false;
+    this.loaded = false;
+    this.loadError = null;
+    this.config = {};
+    this.confirmed = {};
+    this.confirmedHasDraft = false;
+    this.hasDraft = false;
+    this.configName = '';
+    this.baseRev = null;
+    this.revs = [];
+    this.baseline = null;
+    this.saveState = 'clean';
+    this.savedAt = null;
+    this.errors = [];
+    this.warnings = [];
+    this.usage = null;
+    this.hash = null;
+    this.pages = [];
+    this.missingPages = [];
+    this.past = [];
+    this.future = [];
+    this.lastEditKey = null;
+    this.offline = false;
+    this.retries = 0;
+    this.stashed = null;
+    this.emit();
+    await this.load();
+  }
+
+  /** The `configs` push no longer lists the open config: confirm with the server, then stop autosaving. */
+  async checkDeleted(): Promise<void> {
+    if (this.deleted || this.leaving || !this.loaded) return;
+    const gen = this.gen;
+    try {
+      await this.api.getConfig(this.configId);
+    } catch (e) {
+      if (gen !== this.gen || this.leaving) return;
+      if (e instanceof ApiError && e.status === 404) this.markDeleted();
+    }
+  }
+  markDeleted(): void {
+    this.deleted = true;
+    for (const t of [this.timer, this.retryTimer, this.previewTimer]) if (t) clearTimeout(t);
+    this.timer = this.retryTimer = null;
+    this.writeStash();
+    this.emit();
+  }
+  /** Create a config from YAML text and switch to it. */
+  async importAsNew(name: string, yaml: string): Promise<string> {
+    const r = await this.api.createConfig({ name, yaml });
+    await this.switchTo(r.id);
+    return r.id;
+  }
+  /** Deleted banner: keep the current edits as a new config and open it. */
+  async saveAsNew(name: string): Promise<string> {
+    const config = clone(this.config);
+    const r = await this.api.createConfig({ name });
+    await this.api.putDraft(r.id, config);
+    this.clearStash();
+    await this.switchTo(r.id);
+    return r.id;
+  }
+
   async rename(name: string): Promise<void> {
     const r = await this.api.renameConfig(this.configId, name);
     this.configName = r.name;
     this.emit();
   }
+}
+
+/** "my-home_setup.yaml" -> "My Home Setup" */
+export function nameFromFile(file: string): string {
+  const base = file.replace(/\.[^.]*$/, '').replace(/[-_.\s]+/g, ' ').trim();
+  const t = base.replace(/\b([a-z])/g, (_m, c: string) => c.toUpperCase());
+  return (t || 'Imported Config').slice(0, 80);
 }
 
 let current: Store | null = null;

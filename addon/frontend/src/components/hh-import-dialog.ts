@@ -1,6 +1,7 @@
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { ApiError } from '../lib/api';
+import { nameFromFile } from '../lib/store';
 import { shared } from '../lib/styles';
 import { StoreElement, confirmAction } from './base';
 import './hh-dialog';
@@ -19,27 +20,42 @@ export class HhImportDialog extends StoreElement {
   ];
   @property({ type: Boolean }) open = false;
   @state() private text = '';
+  @state() private name = '';
   @state() private busy = false;
   @state() private problem: { msg: string; items: string[] } | null = null;
 
   override willUpdate(changed: Map<string, unknown>): void {
     if (changed.has('open') && this.open) {
       this.text = '';
+      this.name = '';
       this.problem = null;
     }
   }
 
   private async pick(e: Event) {
     const f = (e.target as HTMLInputElement).files?.[0];
-    if (f) this.text = await f.text();
+    if (f) {
+      this.text = await f.text();
+      this.name = nameFromFile(f.name);
+    }
   }
 
-  private async submit() {
+  private fail(e: unknown) {
+    if (e instanceof ApiError) {
+      if (e.code === 'ir_files_unresolvable')
+        this.problem = { msg: 'The YAML points to IR files the add-on cannot read. Put the codes in the YAML itself, then import again.', items: e.files };
+      else if (e.code === 'invalid_config')
+        this.problem = { msg: 'The YAML is not a valid config.', items: e.errors.map((x) => `${x.path.join('.') || 'config'}: ${x.msg}`) };
+      else this.problem = { msg: e.message, items: [] };
+    } else this.problem = { msg: String(e), items: [] };
+  }
+
+  private async submit(asNew: boolean) {
     if (!this.text.trim()) {
       this.problem = { msg: 'Choose a YAML file or paste its contents first.', items: [] };
       return;
     }
-    if (this.store.hasDraft) {
+    if (!asNew && this.store.hasDraft) {
       const ok = await confirmAction(this, {
         title: 'Replace Draft?',
         body: 'You have unapplied changes. Importing replaces them with the YAML.',
@@ -51,17 +67,17 @@ export class HhImportDialog extends StoreElement {
     this.busy = true;
     this.problem = null;
     try {
+      if (asNew) {
+        const id = await this.store.importAsNew(this.name.trim() || 'Imported Config', this.text);
+        this.dispatchEvent(new CustomEvent('hh-imported-new', { detail: { id }, bubbles: true, composed: true }));
+        this.store.toast('YAML imported as a new config. Review it, then apply.');
+        return;
+      }
       await this.store.importYaml(this.text);
       this.close();
       this.store.toast('YAML imported as a draft. Review it, then apply.');
     } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.code === 'ir_files_unresolvable')
-          this.problem = { msg: 'The YAML points to IR files the add-on cannot read. Put the codes in the YAML itself, then import again.', items: e.files };
-        else if (e.code === 'invalid_config')
-          this.problem = { msg: 'The YAML is not a valid config.', items: e.errors.map((x) => `${x.path.join('.') || 'config'}: ${x.msg}`) };
-        else this.problem = { msg: e.message, items: [] };
-      } else this.problem = { msg: String(e), items: [] };
+      this.fail(e);
     } finally {
       this.busy = false;
     }
@@ -82,11 +98,16 @@ export class HhImportDialog extends StoreElement {
         <label for="txt">Or Paste YAML</label>
         <textarea id="txt" spellcheck="false" .value=${this.text} @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}></textarea>
       </div>
+      <div>
+        <label for="nm">Name For A New Config</label>
+        <input id="nm" maxlength="80" .value=${this.name} placeholder="Imported Config" @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)} />
+      </div>
       ${p
         ? html`<div class="banner bad" role="alert"><div>${p.msg}${p.items.length ? html`<ul>${p.items.map((i) => html`<li class="mono">${i}</li>`)}</ul>` : nothing}</div></div>`
         : nothing}
       <button slot="footer" class="btn" @click=${() => this.close()}>Cancel</button>
-      <button slot="footer" class="btn pri" aria-disabled=${this.busy} @click=${() => (this.busy ? undefined : void this.submit())}>${this.busy ? 'Importing…' : 'Import As Draft'}</button>
+      <button slot="footer" class="btn" id="import-new" aria-disabled=${this.busy} @click=${() => (this.busy ? undefined : void this.submit(true))}>Import As New Config</button>
+      <button slot="footer" class="btn pri" aria-disabled=${this.busy} @click=${() => (this.busy ? undefined : void this.submit(false))}>${this.busy ? 'Importing…' : 'Import As Draft'}</button>
     </hh-dialog>`;
   }
 }
