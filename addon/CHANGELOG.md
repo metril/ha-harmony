@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The add-on is no longer marked experimental in the add-on store.
+
 ## 0.3.15 (2026-11-20)
 
 - The Home Assistant tab can now group and filter by label: the add-on also reads Home Assistant's label list (read-only, like the other registries).
