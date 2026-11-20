@@ -251,3 +251,34 @@ async def test_error_envelope_with_unhashable_id_is_ignored():
     c = HarmonyHubClient("127.0.0.1", 1, TOKEN, None)
     c._dispatch({"v": 1, "id": [1], "t": "error", "d": {"code": "x", "message": "y"}})
     c._dispatch({"v": 1, "id": True, "t": "error", "d": {"code": "x", "message": "y"}})
+
+
+async def test_hub_with_tcp_keepalive_gets_no_ping_timer_and_the_socket_has_keepalive(fake_hub):
+    import socket
+
+    pinged = asyncio.Event()
+
+    async def handler(ws, env):
+        if env["t"] == "hello":
+            ack = _ack(env)
+            await ws.send_json({**ack, "d": {**ack["d"], "tcp_keepalive": True}})
+        elif env["t"] == "ping":
+            pinged.set()
+
+    hub = await fake_hub(handler)
+    c, session = await _client(hub, heartbeat_interval=0.05, pong_timeout=0.05)
+    await c.async_connect()
+    try:
+        assert c.tcp_keepalive is True
+        sock = c._ws._response.connection.transport.get_extra_info("socket")
+        assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 60
+            assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 10
+            assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 3
+        with pytest.raises(TimeoutError):  # six old-firmware heartbeat periods pass without a single ping
+            await asyncio.wait_for(pinged.wait(), 0.3)
+        assert hub.connections == 1
+    finally:
+        await c.async_close()
+        await session.close()

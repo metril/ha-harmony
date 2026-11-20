@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import logging
+import random
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -29,8 +31,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from . import const
 from .addon_link import (
     AddonAuthError,
+    AddonChannel,
     AddonClient,
     AddonError,
+    AddonOutdated,
+    AddonUnreachable,
     Bundle,
     BundleRejected,
     NothingApplied,
@@ -106,6 +111,7 @@ ISSUE_INVALID = "config_invalid"
 ISSUE_REJECTED = "config_rejected"
 ISSUE_SCHEMA = "bundle_schema"
 ISSUE_YAML = "yaml_unused"
+ISSUE_ADDON_OUTDATED = "addon_outdated"  # the add-on has no /channel
 ISSUE_OTA_DEV_KEY = "ota_dev_key"  # + _<hub>: the hub trusts the public dev key
 ISSUE_OTA_ROLLBACK = "ota_rolled_back"  # + _<hub>_<build>: the hub restored its previous firmware
 
@@ -118,6 +124,8 @@ LINK_STATES = (
     "auth_failed",
     "nothing_applied",
     "rejected",
+    "addon_outdated",
+    "integration_outdated",
 )
 
 
@@ -258,7 +266,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._link: AddonClient | None = None
         self._apply_lock = asyncio.Lock()
         self.first_sync: asyncio.Task[None] | None = None
-        self._first_apply = asyncio.Event()  # the link loop's first pull has been handled
+        self._first_apply = asyncio.Event()  # the channel's first answer (bundle, nothing_applied, failure) arrived
+        self._channel: AddonChannel | None = None  # the open add-on channel, None while it is down
+        self._channel_ready = asyncio.Event()  # set while `_channel` is open
+        self._reconnect_now = False  # the channel was closed on purpose (reload_config): reconnect without back-off
+        self._refreshing: list[asyncio.Future[None]] = []  # reload_config calls waiting for the add-on's answer
+        self._sent_identity: str | None = None  # the last identity (hw/name/remotes/limits) the add-on was given
         self.last_error: str | None = None
         self.timings: dict[str, float] = {}  # last compile / set_config round trip, in ms (diagnostics)
         # firmware update (ota.py): idle | uploading | applying | restarting | installed | failed | rolled_back
@@ -454,7 +467,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._apply_compiled(compiled)
         return True
 
-    async def async_process_raw(self, raw: bytes) -> Bundle | None:
+    async def async_process_raw(self, raw: bytes | dict[str, Any] | None) -> Bundle | None:
         """Validate + compile a pulled bundle and, only if it is good, make it the config.
         A bad bundle changes nothing (cache, entities, hub); raises BundleRejected."""
         async with self._apply_lock:
@@ -479,28 +492,34 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._apply_compiled(bundle.compiled)
             self.async_set_link_state("ok")
             self._first_apply.set()
+        self.push_identity()  # the notices follow the config
         await self.async_sync_config()
         return bundle
 
     def _ack_later(self, rev: str | None, result: str, detail: str | None = None) -> None:
-        """Report to the add-on what became of a bundle. Background, deduplicated, never fatal."""
-        if self._link is None or rev is None or self._acked == (rev, result, detail):
+        """Report to the add-on what became of a bundle (an `ack` frame). Deduplicated, never fatal; with no open
+        channel nothing is sent and the next sync (or the next connect) tries again."""
+        if self._channel is None or rev is None or self._acked == (rev, result, detail):
             return
-        client = self._link
+        fields: dict[str, Any] = {"rev": rev, "result": result}
+        if detail:
+            fields["detail"] = detail[:200]
+        self._acked = (rev, result, detail)
+        self.addon_send("ack", **fields)
+
+    def addon_send(self, t: str, **fields: Any) -> None:
+        """Send one frame on the add-on channel in the background; dropped when it is down. Never raises."""
+        channel = self._channel
+        if channel is None:
+            return
 
         async def _send() -> None:
             try:
-                await client.ack(self.hub_id, rev, result, detail)
+                await channel.send(t, **fields)
             except AddonError as exc:
-                _LOGGER.debug("Could not acknowledge config %s to the add-on: %s", rev, exc)
-            except Exception:
-                _LOGGER.debug("Unexpected error acknowledging config %s", rev, exc_info=True)
-            else:
-                self._acked = (rev, result, detail)
+                _LOGGER.debug("Could not send %s to the add-on: %s", t, exc)
 
-        self.config_entry.async_create_background_task(
-            self.hass, _send(), f"{DOMAIN} add-on ack {self.hub_id}"
-        )
+        self.config_entry.async_create_background_task(self.hass, _send(), f"{DOMAIN} add-on send {t}")
 
     def _reject(self, exc: BundleRejected) -> None:
         _LOGGER.error("Rejected the add-on config, keeping the previous one: %s", exc)
@@ -518,13 +537,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         client.remotes_provider = self._remotes_report
         client.identity = self._link_identity()
         self.link_state = "connecting"
-        self.btm.start_relay(client)
         self.config_entry.async_create_background_task(
             self.hass, self._link_loop(client), f"{DOMAIN} add-on link {self.hub_id}"
         )
 
     def _link_identity(self) -> dict[str, str]:
-        """Which hub this is, for the add-on's polls: the hardware id, the id before a rename (until the
+        """Which hub this is, for the add-on's hello: the hardware id, the id before a rename (until the
         add-on has answered once) and the display name."""
         data = self.config_entry.data
         out: dict[str, str] = {}
@@ -536,8 +554,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return out
 
     def _prev_id_seen(self) -> None:
-        """The add-on answered a poll that carried the previous id: it has moved (or refused) the store. An add-on
-        that ignores the rename headers (no adopt answer) has seen nothing: the previous id stays."""
+        """The add-on answered (`adopt`) a hello that carried the previous id: it has moved (or refused) the store.
+        Without an adopt answer it has seen nothing: the previous id stays."""
         if self._link is None or self._link.last_adopt is None:
             return
         data = self.config_entry.data
@@ -557,25 +575,46 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             await asyncio.wait_for(self._first_apply.wait(), timeout or const.FIRST_APPLY_WAIT)
 
     async def async_refresh_from_addon(self) -> None:
-        """Service entry point: pull now, apply, push what changed; raises with the reason."""
+        """Service entry point: ask the add-on for the applied config again (a fresh hello on a new channel),
+        apply it, push what changed; raises with the reason."""
         if self._link is None:
             raise ha_error("not_linked")
+        waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._refreshing.append(waiter)
+        self._known_rev = None  # the add-on sends the bundle even when its rev is the one held
         try:
-            await self.async_process_raw(await self._link.fetch(self.hub_id))
+            async with asyncio.timeout(const.LINK_REFRESH_TIMEOUT):
+                if self._channel is None:  # connecting (or down): a failure to connect settles the waiter too
+                    ready = asyncio.ensure_future(self._channel_ready.wait())
+                    await asyncio.wait({waiter, ready}, return_when=asyncio.FIRST_COMPLETED)
+                    ready.cancel()
+                if not waiter.done() and self._channel is not None:
+                    self._reconnect_now = True  # a fresh hello: a quiet add-on answers nothing to the old one
+                    await self._channel.close()
+                await waiter
+        except TimeoutError:
+            raise AddonUnreachable("the add-on did not answer") from None
         except NothingApplied:
             self.async_set_link_state("nothing_applied")
             raise
-        except AddonError as exc:
-            if not isinstance(exc, BundleRejected):
-                self._note_link_failure(exc)
-            raise
+        finally:
+            if waiter in self._refreshing:
+                self._refreshing.remove(waiter)
         if self.last_error:
             raise ha_error("config_rejected", error=self.last_error)
+
+    def _settle_refresh(self, exc: Exception | None = None) -> None:
+        waiters, self._refreshing = self._refreshing, []
+        for w in waiters:
+            if not w.done():
+                w.set_result(None) if exc is None else w.set_exception(exc)
 
     def _note_link_failure(self, exc: AddonError) -> bool:
         """Record a failed pull; True when this changed the state (so it is logged once)."""
         if isinstance(exc, AddonAuthError):
             state = "auth_failed"
+        elif isinstance(exc, AddonOutdated):
+            state = "addon_outdated"
         elif isinstance(exc, NothingApplied):
             state = "nothing_applied"
         elif isinstance(exc, BundleRejected):
@@ -585,7 +624,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         first = state != self.link_state
         self._first_apply.set()  # a first answer, even a failed one: setup need not wait longer
         self.async_set_link_state(state)
-        if first and state in ("unreachable", "auth_failed"):
+        if state == "addon_outdated":
+            self._set_issue(ISSUE_ADDON_OUTDATED, str(exc))
+        else:
+            self._clear_issue(ISSUE_ADDON_OUTDATED)
+        if first and state in ("unreachable", "auth_failed", "addon_outdated"):
             _LOGGER.warning(
                 "Harmony Editor add-on: %s. Staying on the %s config",
                 exc,
@@ -594,58 +637,124 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return first
 
     async def _link_loop(self, client: AddonClient) -> None:
-        """Long-poll the add-on for newer applied configs; back off while it is unavailable."""
+        """Hold the add-on channel: receive what it pushes, reconnect with jittered back-off when it is gone.
+        Nothing here polls or waits on a timer while the channel is up."""
         loop = asyncio.get_running_loop()
-        self._known_rev = self.rev  # last rev handled (applied or rejected); "" = none applied
+        self._known_rev = self.rev  # last rev handled (applied or rejected)
         delay = const.LINK_BACKOFF_MIN
         while True:
-            started = loop.time()
-            client.identity = self._link_identity()
+            opened: float | None = None
             try:
-                if self._known_rev is None:
-                    raw: bytes | None = await client.fetch(self.hub_id)
-                else:
-                    raw = await client.wait(self.hub_id, self._known_rev)
-                    if raw is None and not self._known_rev:
-                        # the add-on holds the wait open when nothing is applied for this hub id, so
-                        # a quiet poll says nothing: ask once per cycle (404 -> "nothing_applied")
-                        raw = await client.fetch(self.hub_id)
-                if self.link_state in ("unreachable", "auth_failed"):
-                    _LOGGER.info("Harmony Editor add-on is reachable again")
-                self._prev_id_seen()
-                if raw is not None:
-                    try:
-                        bundle = await self.async_process_raw(raw)
-                    except BundleRejected as exc:
-                        if exc.rev is None:
-                            raise
-                        self._known_rev = exc.rev  # wait for the next apply, not re-pulling this one
-                    else:
-                        if bundle:
-                            self._known_rev = bundle.rev
-                elif loop.time() - started < 0.5:
-                    await asyncio.sleep(1)  # an add-on answering instantly with nothing
-                if self.link_state in (
-                    "unreachable",
-                    "auth_failed",
-                    "connecting",
-                    "nothing_applied",
-                ):
-                    self.async_set_link_state("ok" if self.managed else "connecting")
-                delay = const.LINK_BACKOFF_MIN
-            except NothingApplied as exc:
-                self._prev_id_seen()
-                self._note_link_failure(exc)
-                self._known_rev = ""
-                await asyncio.sleep(delay)
+                client.identity = self._link_identity()
+                channel = await client.connect(self.hub_id, self._known_rev)
             except AddonError as exc:
                 self._note_link_failure(exc)
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, const.LINK_BACKOFF_MAX)
+                self._settle_refresh(exc)
             except Exception:
                 _LOGGER.exception("Unexpected error in the add-on link; retrying")
                 self._first_apply.set()
-                await asyncio.sleep(const.LINK_BACKOFF_MAX)
+            else:
+                opened = loop.time()
+                try:
+                    if await self._serve_channel(client, channel):
+                        return  # the add-on cannot speak to this integration: no retry until a reload
+                except Exception:
+                    _LOGGER.exception("Unexpected error in the add-on link; reconnecting")
+                    self._first_apply.set()
+            if opened is not None and loop.time() - opened >= const.LINK_STABLE:
+                delay = const.LINK_BACKOFF_MIN
+            if self._reconnect_now:
+                self._reconnect_now = False
+                continue
+            await asyncio.sleep(delay * (0.75 + 0.5 * random.random()))
+            delay = min(delay * 2, const.LINK_BACKOFF_MAX)
+
+    async def _serve_channel(self, client: AddonClient, channel: AddonChannel) -> bool:
+        """One connected channel, until it closes. True when the add-on closed it 4001 (unsupported version)."""
+        self._channel = channel
+        self._channel_ready.set()
+        self._acked = None
+        self._sent_identity = json.dumps(client.identity_fields(), sort_keys=True)
+        if self.link_state in ("unreachable", "auth_failed", "connecting", "nothing_applied", "addon_outdated"):
+            self.async_set_link_state("ok" if self.managed else "connecting")
+        self._clear_issue(ISSUE_ADDON_OUTDATED)
+        if self.managed:
+            self._first_apply.set()  # a quiet channel (nothing newer to send) is an answer too
+        self.addon_send("hub", online=self.available)
+        self.btm.on_addon_connect()
+        if self.managed and self.hub_accepted and self.rev:
+            self._ack_later(self.rev, "ok")  # the ack a restart or a dropped channel may have lost
+        try:
+            async for msg in channel:
+                try:
+                    await self._on_channel_frame(client, msg)
+                except Exception:
+                    _LOGGER.exception("Could not handle the add-on frame %r", str(msg.get("t"))[:32])
+        finally:
+            self._channel = None
+            self._channel_ready.clear()
+            self.btm.on_addon_gone()
+            await channel.close()
+        code = channel.close_code
+        if code == 4001:
+            _LOGGER.error("The add-on does not support this integration's channel version; update the integration")
+            self.async_set_link_state("integration_outdated")
+            self._first_apply.set()
+            self._settle_refresh(AddonError("the add-on does not support this integration"))
+            return True
+        if code == 1009:
+            self._reject(BundleRejected("bundle is too large"))
+            self._settle_refresh(BundleRejected("bundle is too large"))
+        elif not self._reconnect_now:
+            self._note_link_failure(AddonUnreachable("the add-on closed the link"))
+            self._settle_refresh(AddonUnreachable("the add-on closed the link"))
+        return False
+
+    async def _on_channel_frame(self, client: AddonClient, msg: dict[str, Any]) -> None:
+        t = msg["t"]
+        if t == "bundle":
+            body = msg.get("body")
+            rev = body.get("rev") if isinstance(body, dict) else None
+            if isinstance(rev, str) and rev == self._known_rev and self.managed and not self._refreshing:
+                return  # the add-on pushes on every apply, even an unchanged rev: nothing to redo
+            try:
+                bundle = await self.async_process_raw(msg.get("body"))
+            except BundleRejected as exc:
+                if exc.rev is not None:
+                    self._known_rev = exc.rev
+                self._settle_refresh(exc)
+            else:
+                if bundle:
+                    self._known_rev = bundle.rev
+                self._settle_refresh()
+        elif t == "nothing_applied":
+            self._known_rev = None
+            self._first_apply.set()
+            self.async_set_link_state("nothing_applied")
+            self._settle_refresh(NothingApplied(f"no config has been applied for hub {self.hub_id} in the add-on"))
+        elif t == "adopt":
+            res = msg.get("result")
+            client.last_adopt = res if isinstance(res, str) else None
+            self._prev_id_seen()
+        elif t == "bt_cmd":
+            self.btm.on_command(msg)
+        elif t == "listen":
+            await self.btm.on_listen(msg.get("on") is True)
+        elif t == "error":
+            _LOGGER.debug("The add-on reported %s: %s", str(msg.get("code"))[:32], str(msg.get("msg"))[:200])
+        else:
+            _LOGGER.debug("Ignoring the add-on frame %r", t[:32])
+
+    def push_identity(self) -> None:
+        """The hub's name, hardware id, limits or linked remotes (and so the theme notices) may have changed: tell the
+        add-on, once per distinct value."""
+        if self._channel is None or self._link is None:
+            return
+        fields = self._link.identity_fields()
+        key = json.dumps(fields, sort_keys=True)
+        if key != self._sent_identity:
+            self._sent_identity = key
+            self.addon_send("identity", **fields)
 
     def _apply_compiled(self, compiled: Compiled) -> None:
         """Record the newest config; it becomes the runtime one at once only when the hub already
@@ -1102,6 +1211,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 self._request_push(remote, wait=False)
         if changed:
             self._notify(topic_remote(remote))
+            self.push_identity()  # the remotes' caps and notices
 
     def _prune_registry(self) -> None:
         """Remove entities/devices of this entry that the current config no longer defines."""
@@ -1288,7 +1398,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     @callback
     def _on_state(self, connected: bool, err: HarmonyError | None) -> None:
         self.available = connected
+        self.addon_send("hub", online=connected)
+        self.btm.send_state()
         if connected:
+            self.push_identity()  # the hub may have come back with other limits
             self.note_ota_key()
             if self.client.hub_id and self.client.hub_id != self.hub_id:
                 # the hub answers under another id (renamed on the device): setup follows it by hardware id
@@ -1356,9 +1469,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     self.device_states[data["device"]] = new
                     self._notify(topic_device(data["device"]))
         elif mtype is MsgType.BT_STATE:
-            self.btm.on_state(data)
+            self.btm.on_state(data)  # forwarded to the add-on as bt_state when it changed
         elif mtype is MsgType.BT_REMOTE_KEY:
-            self.btm.on_key(data)
+            self.btm.on_key(data)  # forwarded to the add-on as bt_key while it listens
         elif mtype is MsgType.OTA_STATUS:
             self._on_ota_status(data)
         elif mtype is MsgType.REMOTE_ATTACHED:

@@ -36,11 +36,13 @@ CONF_ADDON_SLUG = "addon_slug"
 CONF_ADDON_UUID = "addon_uuid"
 ADDON_SLUG = "ha_harmony_editor"
 BUNDLE_MAX_BYTES = 4 * 1024 * 1024  # the source of a config as large as a hub takes (its memory budget), with headroom
-LINK_FETCH_TIMEOUT = 20.0  # seconds, whole request
-LINK_WAIT_TIMEOUT = 70.0  # the add-on holds a wait for 55 s
+LINK_CONNECT_TIMEOUT = 10.0  # seconds to open the channel (or to get a one-shot hello answered)
+LINK_REFRESH_TIMEOUT = 20.0  # the reload_config service waits this long for the add-on's answer
 FIRST_APPLY_WAIT = 5.0  # setup waits at most this long for the first config when nothing is cached
-LINK_BACKOFF_MIN = 5.0
-LINK_BACKOFF_MAX = 120.0
+LINK_BACKOFF_MIN = 1.0  # jittered +-25 %, doubling
+LINK_BACKOFF_MAX = 60.0
+LINK_STABLE = 30.0  # a channel that lived this long resets the back-off
+BT_MAX_INFLIGHT = 8  # bt_cmd frames run at once; more are answered `busy`
 STORE_VERSION = 1
 TILE_DEBOUNCE = 0.1  # one tile flush per this many seconds (bursts coalesce); tests shorten it
 TILE_WINDOW = 8  # tile_update requests in flight at once during a flush
@@ -80,7 +82,4 @@ CLIENT_KWARGS: dict[str, Any] = {
 
 # Bluetooth (bluetooth.py)
 EVENT_BT_REMOTE_KEY = "ha_harmony_bt_remote_key"
-BT_RELAY_MAX_BYTES = 64 * 1024  # the add-on's answer to a relay exchange
-BT_POLL_FAST = 1.0  # seconds between relay exchanges while a pairing window or a key listen is active
-BT_POLL_IDLE = 5.0
 BT_LISTEN_DEFAULT = 60  # `ha_harmony.bt_listen` lease, seconds (max 300)

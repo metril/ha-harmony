@@ -96,8 +96,6 @@ async def async_get_config_entry_diagnostics(
             "state": async_redact_data(c.btm.state, TO_REDACT_BT) if c.btm.state else None,
             "gen": c.btm.gen,
             "listening": c.btm.listening(),
-            "relay_exchanges": c.btm.exchanges,
-            "events_dropped": c.btm.events_dropped,
             "events_rate_dropped": c.btm.events_rate_dropped,
         },
         "counters": {

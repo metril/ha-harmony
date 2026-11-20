@@ -20,7 +20,6 @@ from test_ha_runtime import YAML
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
 from custom_components.ha_harmony import const, rename
 from custom_components.ha_harmony.const import DOMAIN
-from harmony_addon.app import ACKS_KEY, LINKED_KEY
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
 
@@ -145,8 +144,8 @@ async def test_rename_moves_everything_and_keeps_entity_ids(hass, hub, fake_addo
     assert await Store(hass, const.STORE_VERSION, f"{DOMAIN}.bundle.{HUB_ID}").async_load() is None
     assert await Store(hass, const.STORE_VERSION, f"{DOMAIN}.bundle.{NEW}").async_load() is not None
     assert fake_addon.store.hubs() == [NEW]
-    assert [h["id"] for h in fake_addon.app[LINKED_KEY].entries()] == [NEW]
-    assert fake_addon.app[LINKED_KEY].entries()[0]["name"] == "Living room"
+    assert [h["id"] for h in fake_addon.linked_entries()] == [NEW]
+    assert fake_addon.linked_entries()[0]["name"] == "Living room"
     assert const.CONF_PREV_ID not in entry.data  # the add-on has seen the move
 
 
@@ -498,10 +497,10 @@ async def test_rename_then_apply_a_config_end_to_end(hass, hub, fake_addon):
     assert ack["config_hash"] == coord.compiled.config_hash and "Extra" in ack["activities"]
     assert fake_addon.store.hubs() == [NEW]
     state = fake_addon.store.load(NEW)
-    assert state["applied"] is not None and len(state["history"]) == 1  # the history came along too
+    assert state["applied"] is not None and state["applied"]["hub_id"] == NEW  # the store came along
     # the integration told the add-on it worked, under the new key
     async with asyncio.timeout(10):
-        while (fake_addon.app[ACKS_KEY].get(NEW) or {}).get("result") != "ok":
+        while (fake_addon.acks.get(NEW) or {}).get("result") != "ok":
             await asyncio.sleep(0.05)
             await hass.async_block_till_done()
 
@@ -514,11 +513,9 @@ async def test_dotted_new_ids_are_refused(hass, hub, fake_addon):
 
 
 async def test_old_addon_refuses_the_rename(hass, hub, fake_addon, monkeypatch):
-    from custom_components.ha_harmony import addon_link
-
     entry = await set_up(hass, hub, fake_addon)
     before = snapshot(hass, entry)
-    monkeypatch.setattr(addon_link, "ADOPT_HEADER", "X-Not-Answered")  # an add-on that ignores the headers
+    fake_addon.no_adopt = True  # an add-on that ignores the rename fields
     res = await reconfigure(hass, entry)
     assert res["errors"] == {"base": "addon_too_old"}
     await settle(hass, entry)
@@ -526,20 +523,30 @@ async def test_old_addon_refuses_the_rename(hass, hub, fake_addon, monkeypatch):
     assert fake_addon.store.hubs() == [HUB_ID]
 
 
-async def test_previous_id_is_kept_until_the_addon_answers_the_adopt_header(
+async def test_addon_without_a_channel_refuses_the_rename(hass, hub, fake_addon):
+    entry = await set_up(hass, hub, fake_addon)
+    before = snapshot(hass, entry)
+    fake_addon.refuse = 404  # an add-on from before the channel
+    res = await reconfigure(hass, entry)
+    assert res["errors"] == {"base": "addon_too_old"}
+    await settle(hass, entry, link="addon_outdated")
+    after = snapshot(hass, entry)
+    assert after["entities"] == before["entities"] and after["unique_id"] == HUB_ID
+    assert fake_addon.store.hubs() == [HUB_ID] and (await hub_says(hub))["hub_id"] == HUB_ID
+
+
+async def test_previous_id_is_kept_until_the_addon_answers_adopt(
     hass, hub, fake_addon, monkeypatch
 ):
-    from custom_components.ha_harmony import addon_link
-
     entry = await set_up(hass, hub, fake_addon)
     await hass.config_entries.async_unload(entry.entry_id)
     await raw_rename(hub, "from-hub-conf")
-    monkeypatch.setattr(addon_link, "ADOPT_HEADER", "X-Not-Answered")
+    fake_addon.no_adopt = True
     assert await hass.config_entries.async_setup(entry.entry_id)
     async with asyncio.timeout(30):  # under load the first poll can be late
-        while entry.runtime_data.link_state != "ok":
+        while entry.runtime_data.link_state not in ("ok", "nothing_applied"):
             await asyncio.sleep(0.05)
-    await asyncio.sleep(0.3)  # another poll with the previous id
+    await fake_addon.frame("hello", lambda f: f.get("prev") == HUB_ID)  # the hello still carries the previous id
     assert entry.unique_id == "from-hub-conf" and entry.data[const.CONF_PREV_ID] == HUB_ID
     assert entry.runtime_data._link.identity["prev"] == HUB_ID
 

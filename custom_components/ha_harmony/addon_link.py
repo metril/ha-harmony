@@ -1,17 +1,18 @@
-"""Client for the Harmony Editor add-on's bundle feed. The add-on is never trusted.
+"""Client for the Harmony Editor add-on's channel (docs/addon-api.md "Channel"). The add-on is never trusted.
 
-Everything pulled is size-capped and time-bounded, then re-validated and recompiled here with the
-shared `harmony_core` (no IR file references: `base_dir=None`) before anything is used.
+One WebSocket per hub carries everything both ways; nothing polls. Every bundle is size-capped, then re-validated and
+recompiled here with the shared `harmony_core` (no IR file references: `base_dir=None`) before anything is used.
+Liveness is TCP keepalive on the socket (no aiohttp heartbeat, no application ping).
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote
 
 import aiohttp
 from homeassistant.exceptions import HomeAssistantError
@@ -20,13 +21,12 @@ from . import const
 from .harmony_core import BUNDLE_SCHEMA
 from .harmony_core.compiler import Compiled, CompileError, compile_config
 from .harmony_core.config_model import ConfigError, parse_data
-from .harmony_core.hub_limits import CURRENT, LIMITS_HEADER, HubLimits
+from .harmony_core.hub_limits import CURRENT, HubLimits
+from .sockopts import keepalive_ws
 
-HW_HEADER = "X-Hub-Hw"  # the hub's stable hardware id
-PREV_HEADER = "X-Hub-Prev"  # the id the hub had before a rename
-NAME_HEADER = "X-Hub-Name"  # display name, percent-encoded UTF-8
-REMOTES_HEADER = "X-Hub-Remotes"  # JSON: the linked remotes' caps tier and current theme notices (docs/addon-api.md)
-ADOPT_HEADER = "X-HH-Adopt"  # the add-on's answer to a rename: moved | exists | none
+CHANNEL_VERSION = 1
+CLOSE_UNSUPPORTED_VERSION = 4001
+CLOSE_TOO_BIG = 1009
 ENVELOPE_KEYS = frozenset({"schema", "core_version", "hub_id", "applied_at", "rev", "config"})
 _REV = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -49,6 +49,10 @@ class AddonRejected(AddonError):
 
 class NothingApplied(AddonError):
     pass
+
+
+class AddonOutdated(AddonError):
+    """The add-on has no /channel (404): it must be updated; there is no fallback."""
 
 
 class BundleRejected(AddonError):
@@ -83,14 +87,18 @@ def compile_source(source: Any, hub_id: str, limits: HubLimits | None = None) ->
         raise BundleRejected("config is not valid JSON data") from None
 
 
-def parse_bundle(raw: bytes, hub_id: str, limits: HubLimits | None = None) -> Bundle:
-    """Pure: bytes from the add-on -> validated Bundle, or BundleRejected. Blocking (CPU)."""
-    if len(raw) > const.BUNDLE_MAX_BYTES:
-        raise BundleRejected("bundle is too large")
-    try:
-        data = json.loads(raw)
-    except ValueError, RecursionError:
-        raise BundleRejected("bundle is not valid JSON") from None
+def parse_bundle(raw: bytes | dict[str, Any], hub_id: str, limits: HubLimits | None = None) -> Bundle:
+    """Pure: the bundle (bytes, or the channel's already decoded `body`) -> validated Bundle, or BundleRejected.
+    Blocking (CPU)."""
+    if isinstance(raw, dict):
+        data: Any = raw
+    else:
+        if len(raw) > const.BUNDLE_MAX_BYTES:
+            raise BundleRejected("bundle is too large")
+        try:
+            data = json.loads(raw)
+        except ValueError, RecursionError:
+            raise BundleRejected("bundle is not valid JSON") from None
     if not isinstance(data, dict):
         raise BundleRejected("bundle is not an object")
     rev = data.get("rev")
@@ -117,149 +125,144 @@ def parse_bundle(raw: bytes, hub_id: str, limits: HubLimits | None = None) -> Bu
     return Bundle(rev, applied_at, data["config"], compiled)
 
 
-REMOTES_HEADER_MAX = 4000
+REMOTES_MAX_BYTES = 4000
 
 
-def encode_remotes(remotes: list[dict[str, Any]]) -> str:
-    """The header value: compact ASCII JSON, notices dropped from the end until it fits."""
+def clean_remotes(remotes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The `remotes` field: at most 8 remotes, 8 notices of 200 chars each, notices dropped from the end until the
+    JSON fits REMOTES_MAX_BYTES."""
     rows = [{**r, "notices": [str(m)[:200] for m in r.get("notices", [])][:8]} for r in remotes[:8]]
     while True:
-        out = json.dumps(rows, separators=(",", ":"))
-        if len(out) <= REMOTES_HEADER_MAX:
-            return out
+        if len(json.dumps(rows, separators=(",", ":"))) <= REMOTES_MAX_BYTES:
+            return rows
         victim = max(rows, key=lambda r: len(r["notices"]))
         if not victim["notices"]:
-            return "[]"
+            return []
         victim["notices"].pop()
+
+
+class AddonChannel:
+    """One open channel socket: `send` frames, iterate the add-on's frames. Iteration ends when the socket closes
+    (`close_code` says how); a frame that is not a JSON object with a string `t` is skipped."""
+
+    def __init__(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        self._ws = ws
+
+    @property
+    def close_code(self) -> int | None:
+        return self._ws.close_code
+
+    async def send(self, t: str, **fields: Any) -> None:
+        try:
+            await self._ws.send_str(json.dumps({"t": t, **fields}, separators=(",", ":"), allow_nan=False))
+        except (aiohttp.ClientError, OSError, TimeoutError, ConnectionError, ValueError) as exc:
+            raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None
+
+    async def close(self) -> None:
+        try:
+            await self._ws.close()
+        except (aiohttp.ClientError, OSError, TimeoutError):
+            pass
+
+    def __aiter__(self) -> AsyncIterator[dict[str, Any]]:
+        return self._frames()
+
+    async def _frames(self) -> AsyncIterator[dict[str, Any]]:
+        try:
+            async for msg in self._ws:
+                if msg.type is not aiohttp.WSMsgType.TEXT:
+                    continue
+                try:
+                    data = json.loads(msg.data)
+                except ValueError, RecursionError:
+                    continue
+                if isinstance(data, dict) and isinstance(data.get("t"), str):
+                    yield data
+        except (aiohttp.ClientError, OSError, TimeoutError):
+            return
 
 
 class AddonClient:
     def __init__(self, session: aiohttp.ClientSession, host: str, port: int, token: str) -> None:
         self._session = session
-        self._base = f"http://{host}:{port}/api/v1/bundle"
+        self._url = f"http://{host}:{port}/api/v1/channel"
         self._headers = {"Authorization": f"Bearer {token}"}
-        # the connected hub's limits, sent with every poll so the editor shows ITS caps (an add-on
-        # that does not know the header ignores it)
+        # the connected hub's limits (hello_ack.limits), sent in `hello` so the editor shows ITS caps
         self.limits_provider: Callable[[], HubLimits | None] | None = None
-        # the linked remotes (caps tier, theme notices), sent with every poll so the editor can say what a remote cannot show
+        # the linked remotes (caps tier, theme notices), sent in `hello` so the editor can say what a remote cannot show
         self.remotes_provider: Callable[[], list[dict[str, Any]]] | None = None
-        # which hub this is, sent with every poll (docs/addon-api.md "Renamed hubs"): the stable hardware id, the
-        # previous id after a rename and the display name. Empty = send none (an old add-on ignores them anyway).
+        # which hub this is (docs/addon-api.md "Renamed hubs"): the stable hardware id, the previous id after a
+        # rename and the display name. Empty = send none.
         self.identity: dict[str, str] = {}
-        self.last_adopt: str | None = None  # the add-on's X-HH-Adopt answer to the last poll: moved | exists | none
+        self.last_adopt: str | None = None  # the add-on's `adopt` answer: moved | exists | none
 
-    def _poll_headers(self) -> dict[str, str]:
-        headers = dict(self._headers)
-        if (hw := self.identity.get("hw")) is not None:
-            headers[HW_HEADER] = hw
-        if (prev := self.identity.get("prev")) is not None:
-            headers[PREV_HEADER] = prev
-        if (name := self.identity.get("name")) is not None:
-            headers[NAME_HEADER] = quote(name, safe="")  # HTTP headers are not UTF-8: percent-encoded
+    def identity_fields(self) -> dict[str, Any]:
+        """hw / prev / name / remotes / limits, as `hello` and `identity` carry them."""
+        out: dict[str, Any] = {k: v for k in ("hw", "prev", "name") if (v := self.identity.get(k)) is not None}
         lim = self.limits_provider() if self.limits_provider else None
         if lim is not None:
-            headers[LIMITS_HEADER] = json.dumps(lim.to_wire(), separators=(",", ":"))
+            out["limits"] = lim.to_wire()
         rem = self.remotes_provider() if self.remotes_provider else None
         if rem is not None:  # an empty list too: it clears what the add-on kept
-            headers[REMOTES_HEADER] = encode_remotes(rem)
-        return headers
+            out["remotes"] = clean_remotes(rem)
+        return out
 
-    async def _get(self, path: str, params: dict[str, str], wait: float) -> bytes | None:
-        timeout = aiohttp.ClientTimeout(total=wait, sock_connect=5, sock_read=wait)
+    async def connect(self, hub_id: str, known_rev: str | None, *, hello: bool = True) -> AddonChannel:
+        """Open the channel and (by default) send `hello`. Raises AddonAuthError, AddonOutdated (404) or AddonUnreachable."""
         try:
-            async with self._session.get(
-                self._base + path,
-                params=params,
-                headers=self._poll_headers(),
-                timeout=timeout,
-                allow_redirects=False,
-            ) as resp:
-                self.last_adopt = resp.headers.get(ADOPT_HEADER)
-                if resp.status in (204, 304):
-                    return None
-                if resp.status == 429:  # throttled by the add-on: back off, the token may be fine
-                    raise AddonUnreachable("the add-on is rate limiting requests")
-                if resp.status in (401, 403):
-                    raise AddonAuthError("the add-on refused the token")
-                if resp.status == 404:
-                    raise NothingApplied(f"no config has been applied for hub {params.get('hub', '?')} in the add-on")
-                if resp.status != 200:
-                    raise AddonUnreachable(f"the add-on answered HTTP {resp.status}")
-                if (resp.content_length or 0) > const.BUNDLE_MAX_BYTES:
-                    raise BundleRejected("bundle is too large")
-                body = bytearray()
-                async for chunk in resp.content.iter_chunked(65536):
-                    body += chunk
-                    if len(body) > const.BUNDLE_MAX_BYTES:
-                        raise BundleRejected("bundle is too large")
-                return bytes(body)
+            async with asyncio.timeout(const.LINK_CONNECT_TIMEOUT):
+                ws = await self._session.ws_connect(
+                    self._url,
+                    params={"hub": hub_id},
+                    headers=self._headers,
+                    heartbeat=None,  # liveness is TCP keepalive
+                    autoping=True,
+                    max_msg_size=const.BUNDLE_MAX_BYTES + 65536,
+                    timeout=aiohttp.ClientWSTimeout(ws_close=5),
+                )
+        except aiohttp.WSServerHandshakeError as exc:
+            if exc.status in (401, 403):
+                raise AddonAuthError("the add-on refused the token") from None
+            if exc.status == 404:
+                raise AddonOutdated("the add-on has no channel; update it") from None
+            if exc.status == 429:  # throttled by the add-on: back off, the token may be fine
+                raise AddonUnreachable("the add-on is rate limiting requests") from None
+            raise AddonUnreachable(f"the add-on answered HTTP {exc.status}") from None
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None
+        keepalive_ws(ws)
+        channel = AddonChannel(ws)
+        if hello:
+            try:
+                await channel.send(
+                    "hello", v=CHANNEL_VERSION, hub=hub_id, known_rev=known_rev, **self.identity_fields()
+                )
+            except BaseException:
+                await channel.close()
+                raise
+        return channel
 
-    async def fetch(self, hub_id: str) -> bytes:
-        """Raw bundle bytes; parse them with `parse_bundle` (CPU-bound: use an executor)."""
-        raw = await self._get("", {"hub": hub_id}, const.LINK_FETCH_TIMEOUT)
-        if raw is None:
-            raise AddonUnreachable("the add-on sent an empty answer")
-        return raw
+    async def probe(self, hub_id: str) -> None:
+        """Does the add-on answer at this address and token? (config flow). No hello: it is closed at once."""
+        channel = await self.connect(hub_id, None, hello=False)
+        await channel.close()
 
-    async def wait(self, hub_id: str, rev: str) -> bytes | None:
-        """Long-poll: bytes of a newer bundle, or None when the add-on's wait ran out."""
-        timeout = const.LINK_WAIT_TIMEOUT
-        return await self._get("/wait", {"hub": hub_id, "rev": rev}, timeout)
-
-    async def ack(self, hub_id: str, rev: str, result: str, detail: str | None = None) -> None:
-        """Tell the add-on what became of a pulled bundle. Raises AddonError; callers ignore it."""
-        body: dict[str, str] = {"hub": hub_id, "rev": rev, "result": result}
-        if detail:
-            body["detail"] = detail[:200]
-        timeout = aiohttp.ClientTimeout(total=10, sock_connect=5)
+    async def hello_once(self, hub_id: str) -> None:
+        """Send one hello carrying the identity and read the add-on's answer, to learn its `adopt` verdict
+        (`last_adopt`; stays None when none came). Used by a rename, which runs without a live link."""
+        self.last_adopt = None
+        channel = await self.connect(hub_id, None)
         try:
-            async with self._session.post(
-                self._base + "/ack",
-                json=body,
-                headers=self._headers,
-                timeout=timeout,
-                allow_redirects=False,
-            ) as resp:
-                if resp.status in (401, 403):
-                    raise AddonAuthError("the add-on refused the token")
-                if resp.status != 200:
-                    raise AddonUnreachable(f"the add-on answered HTTP {resp.status}")
-        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
-            raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None
-
-    async def bt_exchange(self, body: dict[str, Any]) -> dict[str, Any]:
-        """The Bluetooth relay round trip (docs/addon-api.md): report, collect the editor's queued commands. The answer
-        is untrusted: size-capped here, and every command in it is validated by the caller. Raises AddonError."""
-        timeout = aiohttp.ClientTimeout(total=10, sock_connect=5)
-        try:
-            async with self._session.post(
-                self._base + "/bt",
-                json=body,
-                headers=self._headers,
-                timeout=timeout,
-                allow_redirects=False,
-            ) as resp:
-                if resp.status in (401, 403):
-                    raise AddonAuthError("the add-on refused the token")
-                if resp.status == 400:
-                    raise AddonRejected("the add-on refused the Bluetooth report")
-                if resp.status in (404, 405):  # an add-on without the relay (older), or no poll recorded yet
-                    raise AddonUnreachable("the add-on has no Bluetooth relay")
-                if resp.status != 200:
-                    raise AddonUnreachable(f"the add-on answered HTTP {resp.status}")
-                if (resp.content_length or 0) > const.BT_RELAY_MAX_BYTES:
-                    raise AddonUnreachable("the add-on's Bluetooth answer is too large")
-                raw = await resp.content.read(const.BT_RELAY_MAX_BYTES + 1)
-                if len(raw) > const.BT_RELAY_MAX_BYTES:
-                    raise AddonUnreachable("the add-on's Bluetooth answer is too large")
-        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
-            raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None
-        try:
-            data = json.loads(raw)
-        except ValueError, RecursionError:
-            raise AddonUnreachable("the add-on's Bluetooth answer is not JSON") from None
-        if not isinstance(data, dict):
-            raise AddonUnreachable("the add-on's Bluetooth answer is not an object")
-        return data
+            async with asyncio.timeout(const.LINK_CONNECT_TIMEOUT):
+                async for msg in channel:
+                    t = msg.get("t")
+                    if t == "adopt":
+                        res = msg.get("result")
+                        self.last_adopt = res if isinstance(res, str) else None
+                        return
+                    if t in ("error", "bundle", "nothing_applied"):  # `adopt`, when sent, comes before these
+                        return
+        except TimeoutError:
+            raise AddonUnreachable("the add-on did not answer") from None
+        finally:
+            await channel.close()

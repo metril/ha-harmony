@@ -2,10 +2,11 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 import aiohttp
 import pytest
-from aiohttp import web
+from aiohttp import WSMsgType, web
 from conftest import ADDON_TOKEN, HUB_ID, free_port, make_entry
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
@@ -15,15 +16,15 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
-from custom_components.ha_harmony import const
+from custom_components.ha_harmony import const, coordinator
 from custom_components.ha_harmony.addon_link import (
     AddonAuthError,
     AddonClient,
+    AddonOutdated,
     AddonUnreachable,
     BundleRejected,
     parse_bundle,
 )
-from harmony_addon.app import LINKED_KEY
 from harmony_core import BUNDLE_SCHEMA
 
 pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client")
@@ -184,21 +185,28 @@ def preseed(hass_storage, source=SOURCE, rev="cached"):
 
 @pytest.fixture
 async def raw_addon(aiohttp_server):
-    """An add-on that answers whatever the test says (status, body, or a slow dribble)."""
-    state = {"status": 200, "body": b"", "dribble": False}
+    """An add-on channel that says whatever the test scripts: an HTTP `status` for the upgrade, `frames` to send after
+    `hello`, then optionally close with `close`. `hits` counts the upgrade attempts, `seen` queues each one."""
+    state = {"status": None, "frames": [], "close": None, "hits": 0, "seen": asyncio.Queue(), "hold": False}
 
     async def handler(request):
-        if state["dribble"]:
-            resp = web.StreamResponse()
-            await resp.prepare(request)
-            while True:
-                await resp.write(b"{")
-                await asyncio.sleep(0.05)
-        return web.Response(status=state["status"], body=state["body"])
+        state["hits"] += 1
+        state["seen"].put_nowait(state["hits"])
+        if state["status"] is not None:
+            return web.Response(status=state["status"])
+        ws = web.WebSocketResponse(heartbeat=None)
+        await ws.prepare(request)
+        async for msg in ws:
+            if msg.type is WSMsgType.TEXT and json.loads(msg.data).get("t") == "hello":
+                for frame in state["frames"]:
+                    await ws.send_str(json.dumps(frame))
+                if state["close"] is not None:
+                    await ws.close(code=state["close"])
+                    break
+        return ws
 
     app = web.Application()
-    app.router.add_get("/api/v1/bundle", handler)
-    app.router.add_get("/api/v1/bundle/wait", handler)
+    app.router.add_get("/api/v1/channel", handler)
     server = await aiohttp_server(app)
     state["data"] = {
         "addon_host": "127.0.0.1",
@@ -206,6 +214,11 @@ async def raw_addon(aiohttp_server):
         "addon_token": ADDON_TOKEN,
     }
     return state
+
+
+def bundle_frame(raw):
+    body = json.loads(raw) if isinstance(raw, bytes) else raw
+    return {"t": "bundle", "rev": "x", "body": body}
 
 
 # ------------------------------------------------------------------ hostile bundles end to end
@@ -239,11 +252,11 @@ async def test_hostile_bundles_never_touch_cache_hub_or_entities(
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_oversized_body_is_cut_off_while_streaming(hass, fake_hub, raw_addon, monkeypatch):
+async def test_oversized_frame_is_cut_off_by_the_socket(hass, fake_hub, raw_addon, monkeypatch):
     sets = []
     hub = await fake_hub(hub_handler(sets))
-    raw_addon["status"], raw_addon["body"] = 200, b"a" * 5000
     monkeypatch.setattr(const, "BUNDLE_MAX_BYTES", 1000)
+    raw_addon["frames"] = [bundle_frame({"x": "a" * 200_000})]
     entry = await setup(hass, hub, raw_addon["data"])
     with pytest.raises(BundleRejected, match="too large"):
         await entry.runtime_data.async_refresh_from_addon()
@@ -251,16 +264,14 @@ async def test_oversized_body_is_cut_off_while_streaming(hass, fake_hub, raw_add
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_slow_loris_times_out_without_changing_anything(
+async def test_a_silent_addon_times_the_refresh_out_without_changing_anything(
     hass, fake_hub, raw_addon, hass_storage, monkeypatch
 ):
     sets = []
     hub = await fake_hub(hub_handler(sets))
     preseed(hass_storage)
-    raw_addon["dribble"] = True
-    monkeypatch.setattr(const, "LINK_FETCH_TIMEOUT", 0.3)
-    monkeypatch.setattr(const, "LINK_WAIT_TIMEOUT", 0.3)
-    entry = await setup(hass, hub, raw_addon["data"])
+    monkeypatch.setattr(const, "LINK_REFRESH_TIMEOUT", 0.3)
+    entry = await setup(hass, hub, raw_addon["data"])  # hello is answered with nothing
     coord = entry.runtime_data
     with pytest.raises(AddonUnreachable):
         await coord.async_refresh_from_addon()
@@ -273,7 +284,7 @@ async def test_schema_mismatch_raises_a_repair_issue(hass, fake_hub, raw_addon, 
     sets = []
     hub = await fake_hub(hub_handler(sets))
     preseed(hass_storage)
-    raw_addon["body"] = HOSTILE["wrong_schema"]
+    raw_addon["frames"] = [bundle_frame(HOSTILE["wrong_schema"])]
     entry = await setup(hass, hub, raw_addon["data"])
     coord = entry.runtime_data
     with pytest.raises(BundleRejected):
@@ -281,7 +292,7 @@ async def test_schema_mismatch_raises_a_repair_issue(hass, fake_hub, raw_addon, 
     issue = ir.async_get(hass).async_get_issue(const.DOMAIN, f"bundle_schema_{HUB_ID}")
     assert issue and "update the add-on" in coord.last_error
     assert coord.rev == "cached" and len(sets) == 1
-    raw_addon["body"] = GOOD  # a matching add-on clears it
+    raw_addon["frames"] = [bundle_frame(GOOD)]  # a matching add-on clears it
     await coord.async_refresh_from_addon()
     assert ir.async_get(hass).async_get_issue(const.DOMAIN, f"bundle_schema_{HUB_ID}") is None
     await hass.config_entries.async_unload(entry.entry_id)
@@ -297,7 +308,7 @@ async def test_apply_in_addon_reaches_hub_promptly_and_is_cached_versioned(
     entry = await setup(hass, hub, fake_addon.link_data())
     coord = entry.runtime_data
     assert coord.link_state == "ok" and len(sets) == 1
-    fake_addon.apply(SOURCE2)  # no polling: the long-poll wakes
+    fake_addon.apply(SOURCE2)  # pushed on the open channel: no polling
     await until(lambda: len(sets) == 2 and coord.compiled.activities == ["Movie"])  # after the ack
     saved = hass_storage[STORE_KEY]
     assert saved["version"] == const.STORE_VERSION and saved["data"]["config"] == SOURCE2
@@ -311,13 +322,23 @@ async def test_addon_down_at_start_runs_on_cache_with_one_log_line(
     sets = []
     hub = await fake_hub(hub_handler(sets))
     preseed(hass_storage)
-    monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.05)
-    monkeypatch.setattr(const, "LINK_BACKOFF_MAX", 0.1)
+    monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.01)
+    monkeypatch.setattr(const, "LINK_BACKOFF_MAX", 0.02)
+    tries, enough = [], asyncio.Event()
+    real = AddonClient.connect
+
+    async def counting(self, *a, **kw):
+        tries.append(1)
+        if len(tries) >= 5:
+            enough.set()
+        return await real(self, *a, **kw)
+
+    monkeypatch.setattr(AddonClient, "connect", counting)
     data = {"addon_host": "127.0.0.1", "addon_port": free_port(), "addon_token": ADDON_TOKEN}
     entry = await setup(hass, hub, data)
     coord = entry.runtime_data
-    await until(lambda: coord.link_state == "unreachable")
-    await asyncio.sleep(0.5)  # many retries
+    await asyncio.wait_for(enough.wait(), 5)  # many retries
+    assert coord.link_state == "unreachable"
     assert coord.managed and coord.compiled.activities == ["Watch"] and len(sets) == 1
     assert caplog.text.count("Harmony Editor add-on:") == 1  # not one line per retry
     state = hass.states.get("sensor.harmony_hub_sim_hub_add_on_link")
@@ -345,17 +366,22 @@ async def test_corrupt_cache_is_ignored(hass, fake_hub, hass_storage):
 
 
 async def test_client_maps_statuses(aiohttp_server):
-    async def h401(request):
-        return web.Response(status=401)
+    status = {"v": 401}
+
+    async def handler(request):
+        return web.Response(status=status["v"])
 
     app = web.Application()
-    app.router.add_get("/api/v1/bundle", h401)
+    app.router.add_get("/api/v1/channel", handler)
     server = await aiohttp_server(app)
-    async with aiohttp.ClientSession() as s:
-        with pytest.raises(AddonAuthError):
-            await AddonClient(s, "127.0.0.1", server.port, "t").fetch(HUB_ID)
+    async with aiohttp.ClientSession() as sess:
+        client = AddonClient(sess, "127.0.0.1", server.port, "t")
+        for code, exc in ((401, AddonAuthError), (403, AddonAuthError), (404, AddonOutdated), (429, AddonUnreachable), (500, AddonUnreachable)):
+            status["v"] = code
+            with pytest.raises(exc):
+                await client.connect(HUB_ID, None)
         with pytest.raises(AddonUnreachable):
-            await AddonClient(s, "127.0.0.1", free_port(), "t").fetch(HUB_ID)
+            await AddonClient(sess, "127.0.0.1", free_port(), "t").connect(HUB_ID, None)
 
 
 # ------------------------------------------------------------------ YAML removal
@@ -565,7 +591,8 @@ async def test_ignored_hub_entry_never_gets_the_token(hass, fake_addon):
     assert res["type"] is FlowResultType.ABORT and res["reason"] == "no_hub"
 
 
-async def test_429_is_backoff_not_an_auth_failure(hass, fake_hub, raw_addon, hass_storage):
+async def test_429_is_backoff_not_an_auth_failure(hass, fake_hub, raw_addon, hass_storage, monkeypatch):
+    monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.01)
     hub = await fake_hub(hub_handler([]))
     preseed(hass_storage)
     raw_addon["status"] = 429
@@ -576,21 +603,20 @@ async def test_429_is_backoff_not_an_auth_failure(hass, fake_hub, raw_addon, has
     assert coord.link_state == "unreachable"
     raw_addon["status"] = 401
     with pytest.raises(AddonAuthError):
-        await coord._link.fetch(HUB_ID)
+        await coord._link.connect(HUB_ID, None)
     await hass.config_entries.async_unload(entry.entry_id)
 
 
 # ------------------------------------------------------------------ apply acknowledgements
-def ack_of(fake_addon):
-    return fake_addon.store.load(HUB_ID)["ack"]
+async def ack_of(fake_addon):
+    return await fake_addon.frame("ack")
 
 
 async def test_successful_push_is_acked_ok(hass, fake_hub, fake_addon):
     hub = await fake_hub(hub_handler([]))
     fake_addon.apply(SOURCE)
     entry = await setup(hass, hub, fake_addon.link_data())
-    await hass.async_block_till_done()
-    ack = ack_of(fake_addon)
+    ack = await ack_of(fake_addon)
     assert ack["result"] == "ok" and ack["rev"] == entry.runtime_data.rev
     await hass.config_entries.async_unload(entry.entry_id)
 
@@ -599,8 +625,7 @@ async def test_invalid_config_is_acked_as_error_with_a_short_reason(hass, fake_h
     hub = await fake_hub(hub_handler([]))
     fake_addon.apply({"devices": [{"id": "BAD ID"}]})
     entry = await setup(hass, hub, fake_addon.link_data())
-    await hass.async_block_till_done()
-    ack = ack_of(fake_addon)
+    ack = await ack_of(fake_addon)
     assert ack["result"] == "error" and ack["detail"].startswith("invalid config")
     assert len(ack["detail"]) <= 200
     await hass.config_entries.async_unload(entry.entry_id)
@@ -621,8 +646,7 @@ async def test_hub_rejection_is_acked_as_error(hass, fake_hub, fake_addon):
     hub = await fake_hub(reject)
     fake_addon.apply(SOURCE)
     entry = await setup(hass, hub, fake_addon.link_data())
-    await hass.async_block_till_done()
-    ack = ack_of(fake_addon)
+    ack = await ack_of(fake_addon)
     assert ack["result"] == "error" and "too big" in ack["detail"]
     await hass.config_entries.async_unload(entry.entry_id)
 
@@ -632,43 +656,74 @@ async def test_schema_mismatch_is_acked_as_error(hass, fake_hub, fake_addon, mon
     fake_addon.apply(SOURCE)
     monkeypatch.setattr("custom_components.ha_harmony.addon_link.BUNDLE_SCHEMA", BUNDLE_SCHEMA + 1)
     entry = await setup(hass, hub, fake_addon.link_data())
-    await hass.async_block_till_done()
-    ack = ack_of(fake_addon)
+    ack = await ack_of(fake_addon)
     assert ack["result"] == "error" and ack["detail"] == "schema not supported"
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_ack_failure_is_not_fatal(hass, fake_hub, raw_addon, hass_storage):
+async def test_addon_without_a_channel_is_outdated_with_a_repair_issue_and_keeps_retrying(
+    hass, fake_hub, raw_addon, hass_storage, monkeypatch
+):
+    monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.01)
     sets = []
     hub = await fake_hub(hub_handler(sets))
     preseed(hass_storage)
-    raw_addon["status"] = 404  # POST is not even routed in the raw add-on: the ack fails
+    raw_addon["status"] = 404  # an add-on from before the channel
     entry = await setup(hass, hub, raw_addon["data"])
-    await hass.async_block_till_done()
-    assert len(sets) == 1 and entry.state is ConfigEntryState.LOADED
-    assert entry.runtime_data._acked is None  # will be retried on the next sync
+    coord = entry.runtime_data
+    for _ in range(3):  # retried with the normal back-off: the add-on's update restarts it
+        await asyncio.wait_for(raw_addon["seen"].get(), 5)
+    assert coord.link_state == "addon_outdated" and entry.state is ConfigEntryState.LOADED
+    assert ir.async_get(hass).async_get_issue(const.DOMAIN, f"addon_outdated_{HUB_ID}")
+    assert len(sets) == 1 and coord.managed  # the cached config keeps running
+    raw_addon["status"] = None  # updated and restarted
+    await until(lambda: coord.link_state == "ok")
+    assert ir.async_get(hass).async_get_issue(const.DOMAIN, f"addon_outdated_{HUB_ID}") is None
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_ack_client_sends_only_bounded_fields(aiohttp_server):
-    seen = {}
+async def test_close_4001_is_integration_outdated_and_not_retried(hass, fake_hub, raw_addon, monkeypatch):
+    monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.01)
+    hub = await fake_hub(hub_handler([]))
+    raw_addon["frames"] = [{"t": "error", "code": "unsupported_version"}]
+    raw_addon["close"] = 4001
+    backoffs = []
+    monkeypatch.setattr(coordinator, "random", SimpleNamespace(random=lambda: backoffs.append(1) or 0.5))
+    entry = await setup(hass, hub, raw_addon["data"])
+    await until(lambda: entry.runtime_data.link_state == "integration_outdated")
+    # the loop ended in the same step that set the state: it never computed a back-off, so nothing reconnects
+    assert backoffs == [] and raw_addon["hits"] == 1
+    assert hass.states.get("sensor.harmony_hub_sim_hub_add_on_link").state == "integration_outdated"
+    await hass.config_entries.async_unload(entry.entry_id)
 
-    async def handler(request):
-        seen["body"] = await request.json()
-        seen["auth"] = request.headers["Authorization"]
-        return web.json_response({"ok": True})
 
-    app = web.Application()
-    app.router.add_post("/api/v1/bundle/ack", handler)
-    srv = await aiohttp_server(app)
-    async with aiohttp.ClientSession() as s:
-        c = AddonClient(s, "127.0.0.1", srv.port, "tok")
-        await c.ack("h", "r1", "error", "x" * 500)
-    assert seen["auth"] == "Bearer tok"
-    assert (
-        set(seen["body"]) == {"hub", "rev", "result", "detail"}
-        and len(seen["body"]["detail"]) == 200
-    )
+async def test_dropped_channel_reconnects_with_the_known_rev_and_a_quiet_add_on_changes_nothing(
+    hass, fake_hub, fake_addon, monkeypatch
+):
+    monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.01)
+    sets = []
+    hub = await fake_hub(hub_handler(sets))
+    rev = fake_addon.apply(SOURCE)
+    entry = await setup(hass, hub, fake_addon.link_data())
+    coord = entry.runtime_data
+    n = len(fake_addon.frames)
+    await fake_addon.close_socket(HUB_ID)
+    hello = await fake_addon.frame("hello", start=n)
+    assert hello["known_rev"] == rev and hello["v"] == 1 and hello["hub"] == HUB_ID
+    await until(lambda: coord.link_state == "ok" and fake_addon.connects == 2)
+    assert len(sets) == 1 and coord.rev == rev  # nothing was resent or re-applied
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_ack_frame_sends_only_bounded_fields(hass, fake_hub, fake_addon):
+    hub = await fake_hub(hub_handler([]))
+    fake_addon.apply(SOURCE)
+    entry = await setup(hass, hub, fake_addon.link_data())
+    n = len(fake_addon.frames)
+    entry.runtime_data._ack_later("r1", "error", "x" * 500)
+    got = await fake_addon.frame("ack", lambda f: f["rev"] == "r1", start=n)
+    assert set(got) == {"t", "rev", "result", "detail"} and len(got["detail"]) == 200
+    await hass.config_entries.async_unload(entry.entry_id)
 
 
 async def test_send_ir_selects_the_hub_by_its_id_as_the_add_on_sends_it(hass, fake_hub):
@@ -699,45 +754,31 @@ async def test_first_link_confirm_shows_what_is_linked(hass, fake_addon):
     }
 
 
-async def test_link_says_nothing_applied_after_a_quiet_poll(hass, fake_hub, fake_addon):
-    """The add-on holds a wait open for a hub with nothing applied (204). That must not read as
-    `connecting`: the integration asks once per cycle and the state stays `nothing_applied`; the
-    add-on also learns the hub id from those polls."""
+async def test_link_says_nothing_applied_and_a_later_apply_arrives_on_the_same_socket(hass, fake_hub, fake_addon):
+    """The add-on answers `hello` with `nothing_applied` once. That must not read as `connecting`, and nothing polls:
+    a later apply is pushed down the same socket."""
     hub = await fake_hub(hub_handler([]))
     entry = await setup(hass, hub, fake_addon.link_data())
     coord = entry.runtime_data
-    await until(lambda: coord.link_state == "nothing_applied")
-    await asyncio.sleep(2.6)  # past the add-on's 2 s wait (the fake's `wait_seconds`)
-    assert coord.link_state == "nothing_applied"
-    assert HUB_ID in fake_addon.app[LINKED_KEY].ids()
+    assert coord.link_state == "nothing_applied" and coord._first_apply.is_set()
+    assert HUB_ID in fake_addon.linked  # the add-on learned the hub id from the hello
     fake_addon.apply(SOURCE)
-    await until(lambda: coord.link_state in ("ok", "connecting") and coord.rev is not None)
+    await until(lambda: coord.link_state == "ok" and coord.rev is not None)
+    assert fake_addon.connects == 1
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_poll_carries_the_remotes_tier_and_notices_and_they_are_bounded(aiohttp_server):
-    seen = {}
-
-    async def handler(request):
-        seen["h"] = request.headers.get("X-Hub-Remotes")
-        return web.Response(status=204)
-
-    app = web.Application()
-    app.router.add_get("/api/v1/bundle/wait", handler)
-    srv = await aiohttp_server(app)
+async def test_hello_carries_identity_limits_and_bounded_remotes():
     rows = [{"remote": 1, "caps": 7, "tier": "palette", "notices": ["n" * 900] * 12}]
-    async with aiohttp.ClientSession() as s:
-        c = AddonClient(s, "127.0.0.1", srv.port, "tok")
-        await c.wait("h", "r1")
-        assert seen["h"] is None  # nothing known: no header
-        c.remotes_provider = list
-        await c.wait("h", "r1")
-        assert seen["h"] == "[]"  # no remote known: still sent, so the add-on drops what it kept
-        c.remotes_provider = lambda: rows * 12
-        await c.wait("h", "r1")
-        assert len(json.loads(seen["h"])) == 8  # at most 8 rows
-        c.remotes_provider = lambda: rows
-        await c.wait("h", "r1")
-    got = json.loads(seen["h"])
-    assert len(seen["h"]) <= 4000 and got[0]["tier"] == "palette" and got[0]["caps"] == 7
+    c = AddonClient(None, "127.0.0.1", 1, "tok")
+    assert c.identity_fields() == {}  # nothing known: nothing sent
+    c.identity = {"hw": "aa:bb", "name": "Den"}
+    assert c.identity_fields() == {"hw": "aa:bb", "name": "Den"}
+    c.remotes_provider = list
+    assert c.identity_fields()["remotes"] == []  # no remote known: still sent, so the add-on drops what it kept
+    c.remotes_provider = lambda: rows * 12
+    assert len(c.identity_fields()["remotes"]) == 8  # at most 8 rows
+    c.remotes_provider = lambda: rows
+    got = c.identity_fields()["remotes"]
+    assert len(json.dumps(got, separators=(",", ":"))) <= 4000 and got[0]["tier"] == "palette" and got[0]["caps"] == 7
     assert 0 < len(got[0]["notices"]) < 12 and all(len(m) <= 200 for m in got[0]["notices"])

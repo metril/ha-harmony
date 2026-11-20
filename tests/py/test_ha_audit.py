@@ -481,16 +481,16 @@ async def test_first_setup_with_a_slow_addon_returns_within_the_bound(
 
     monkeypatch.setattr(const, "FIRST_APPLY_WAIT", 0.3)
     fetches = []
-    real = AddonClient.fetch
+    real = AddonClient.connect
 
     gate = asyncio.Event()
 
-    async def slow_fetch(self, hub_id):
+    async def slow_connect(self, hub_id, known_rev, **kw):
         fetches.append(hub_id)
         await gate.wait()  # the add-on never answers until the test lets it: no timing involved
-        return await real(self, hub_id)
+        return await real(self, hub_id, known_rev, **kw)
 
-    monkeypatch.setattr(AddonClient, "fetch", slow_fetch)
+    monkeypatch.setattr(AddonClient, "connect", slow_connect)
     hub = ScriptHub()
     server = await fake_hub(hub.handler)
     fake_addon.apply_yaml(YAML)
@@ -503,7 +503,7 @@ async def test_first_setup_with_a_slow_addon_returns_within_the_bound(
     assert c.compiled.devices == {} and hass.states.get("sensor.tv_input") is None
     await settle(hass, lambda: c.managed, timeout=5)  # the same single pull fills everything in
     await settle(hass, lambda: hass.states.get("sensor.tv_input") is not None)
-    assert len(fetches) == 1  # not one from setup and one from the link loop
+    assert len(fetches) == 1  # one channel, not one from setup and one from the link loop
     await settle(hass, lambda: any(t == "set_config" for t, _ in hub.got))
     assert [t for t, _ in hub.got].count("set_config") == 1
     await hass.config_entries.async_unload(entry.entry_id)
