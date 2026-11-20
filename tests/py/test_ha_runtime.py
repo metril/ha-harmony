@@ -666,6 +666,34 @@ async def test_leaving_runs_power_off_and_off_steps_only_on_off(hass, rig, clock
     assert len(bye) == 1 and len(off) == 2
 
 
+@pytest.mark.parametrize("shield", ["idle", "standby", "playing", "paused"])
+async def test_off_powers_down_ha_devices_the_leaving_activity_did_not_list(hass, rig, clock, shield):
+    async_mock_service(hass, "light", "turn_off")
+    async_mock_service(hass, "remote", "turn_on")
+    async_mock_service(hass, "remote", "send_command")
+    hass.states.async_set("media_player.shield", "off")
+    hub, c = await rig()
+    off = async_mock_service(hass, "remote", "turn_off")
+    await hub.push("state_update", {"activity": 0, "power": True})  # tv_on: no shield in it
+    await settle(hass)
+    hass.states.async_set("media_player.shield", shield)  # started by hand, hub does not know
+    await settle(hass)
+    await hub.push("state_update", {"activity": 0, "power": False})  # Off
+    await settle(hass, lambda: off)
+    assert len(off) == 1
+
+
+async def test_off_leaves_an_off_shield_alone(hass, rig, clock):
+    hass.states.async_set("media_player.shield", "off")
+    hub, _c = await rig()
+    off = async_mock_service(hass, "remote", "turn_off")
+    await hub.push("state_update", {"activity": 0, "power": True})
+    await settle(hass)
+    await hub.push("state_update", {"activity": 0, "power": False})
+    await settle(hass)
+    assert off == []
+
+
 async def test_first_state_after_connect_is_a_baseline_not_a_transition(hass, rig, clock):
     hass.states.async_set("media_player.shield", "off")
     hub, c = await rig()
@@ -707,3 +735,50 @@ def test_input_select_set_options_is_rejected():
         ha_actions.validate_ha(
             {"service": "input_select.set_options", "target": {"entity_id": "input_select.x"}}
         )
+
+
+async def _shield_started_by_hand(hass, rig):
+    async_mock_service(hass, "light", "turn_off")
+    async_mock_service(hass, "remote", "turn_on")
+    async_mock_service(hass, "remote", "send_command")
+    hass.states.async_set("media_player.shield", "off")
+    hub, c = await rig()
+    off = async_mock_service(hass, "remote", "turn_off")
+    await hub.push("state_update", {"activity": 0, "power": True})
+    await settle(hass)
+    hass.states.async_set("media_player.shield", "playing")
+    return hub, c, off
+
+
+async def test_power_on_with_unknown_index_is_not_off(hass, rig, clock):
+    hub, c, off = await _shield_started_by_hand(hass, rig)
+    await hub.push("state_update", {"activity": 99, "power": True})  # reload race: list not known yet
+    await settle(hass)
+    assert c.current_activity_id is None and off == []
+
+
+async def test_reconnect_reporting_off_is_a_baseline_not_a_sweep(hass, rig, clock):
+    hub, c, off = await _shield_started_by_hand(hass, rig)
+    c._on_state(True, None)  # hub came back (OTA / power blip)
+    await hub.push("state_update", {"activity": 0, "power": False})
+    await settle(hass)
+    assert off == []
+
+
+async def test_off_list_already_turning_off_shield_gives_one_turn_off(hass, rig, clock):
+    hub, c, off = await _shield_started_by_hand(hass, rig)
+    acts = {k: v for k, v in c.compiled.ha_activities.items()}
+    old = acts["tv_on"] if "tv_on" in acts else next(iter(acts.values()))
+    import dataclasses
+
+    from harmony_core.compiler import HaActivity, HaStep
+    from harmony_core.ha_actions import HaCall
+
+    step = HaStep(HaCall("remote.turn_off", ("remote.shield",)))
+    ha = dict(acts)
+    ha["tv_on"] = HaActivity("tv_on", old.devices, old.start, (step,))
+    c.compiled = dataclasses.replace(c.compiled, ha_activities=ha)
+    await hub.push("state_update", {"activity": 0, "power": False})
+    await settle(hass, lambda: off)
+    await settle(hass)
+    assert len(off) == 1

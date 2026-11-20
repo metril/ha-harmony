@@ -189,8 +189,8 @@ _ON_OFF_STATES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "cover": (frozenset({"open", "opening"}), frozenset({"closed", "closing"})),
     "lock": (frozenset({"unlocked", "unlocking", "open", "opening"}), frozenset({"locked", "locking"})),
 }
-_OFF_STATES = {"media_player": frozenset({"off", "standby"})}  # on = anything else known
-_DEFAULT_OFF = frozenset({"off"})  # light, switch, fan, remote, climate (hvac mode off), ...
+_DEFAULT_OFF = frozenset({"off"})  # media_player (idle / standby / paused are on), light, switch, fan, remote, climate (hvac mode off), ...
+_OFF_STATES: dict[str, frozenset[str]] = {}
 
 
 def _ha_device_state(state: State | None) -> DeviceState:
@@ -295,6 +295,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._ha_task: asyncio.Task[None] | None = None
         self._calls: dict[tuple[str, tuple[str, ...]], int] = {}  # key-started calls in flight
         self._released: set[int] = set()  # keys whose last event was a release: no more repeats
+        self._resync = False
         self._act_known = False  # the first state_update after HA starts is only a baseline
         self._warned: set[tuple[str, ...]] = set()
         self._unsubs = [
@@ -1398,6 +1399,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # its remotes (remote_info) right after hello_ack. The next state_update is compared
             # with the activity known before the drop: a change while disconnected still runs its
             # Home Assistant steps (only the very first report after HA starts is a baseline).
+            self._resync = True  # the first report after (re)connecting runs the leaving activity's steps but never sweeps other HA devices (an OTA/power blip)
             self._accepted = False  # the hub may have rebooted: the resync confirms its config
             self.btm.on_connect()
             for link in self.links.values():
@@ -1429,7 +1431,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 # Stored even when beyond the activity list we know: after a reload that inserts an
                 # activity the hub's re-report can precede the new list (_activity_name range-checks).
                 self._last_idx = self._current_idx = idx
-            self._note_activity(before, self.current_activity_id)
+            self._note_activity(before, self.current_activity_id, bool(data["power"]))
             if idx_before != (self._current_idx, self._last_idx):
                 self._notify(TOPIC_ACTIVITY)
         elif mtype is MsgType.KEY_EVENT:
@@ -1700,45 +1702,64 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         st = self.device_states.get(device)
         return st.power if st else None
 
-    def _note_activity(self, before: str | None, after: str | None) -> None:
+    def _note_activity(self, before: str | None, after: str | None, power: bool = True) -> None:
         if not self._act_known:
-            self._act_known = True
+            self._act_known, self._resync = True, False
             return
+        sweep, self._resync = not self._resync, False
         if before == after:
             return
         c = self.compiled
-        if before not in c.ha_activities and after not in c.ha_activities:
+        everything_off = not power and before is not None  # Off powers every HA device down
+        if not everything_off and before not in c.ha_activities and after not in c.ha_activities:
             return
         if self._ha_task is not None and not self._ha_task.done():
             self._ha_task.cancel()
         self._ha_task = self.config_entry.async_create_background_task(
-            self.hass, self._run_transition(before, after), name=f"{DOMAIN} activity steps"
+            self.hass, self._run_transition(before, after, everything_off, sweep), name=f"{DOMAIN} activity steps"
         )
 
-    def _transition_steps(self, before: str | None, after: str | None) -> list[HaStep]:
+    def _transition_steps(self, before: str | None, after: str | None, everything_off: bool | None = None, sweep: bool = True) -> list[HaStep]:
         """What Home Assistant does once the hub reports `after` running (or everything off):
         power off the HA devices `before` used that `after` does not, then (on Off) before's `off`
         steps, then after's power-on steps, inputs and extra steps (docs/ha-config.md)."""
         c = self.compiled
+        off_all = after is None if everything_off is None else everything_off
         steps: list[HaStep] = []
         new = c.ha_activities.get(after)
         keep = set(new.devices) if new else set()
         old = c.ha_activities.get(before)
+        covered: set[str] = set()  # devices an `off:` service call already turns off
+        if old is not None and off_all:
+            for st in old.off:
+                if st.call.service.endswith(".turn_off"):
+                    covered |= {
+                        n for n, d in c.ha_devices.items() if d.off and set(d.off.entities) & set(st.call.entities)
+                    }
         if old is not None:
             for dev in old.devices:
                 off = c.ha_devices[dev].off
-                if dev not in keep and off is not None:
+                if dev not in keep and off is not None and dev not in covered:
                     steps.append(HaStep(off, dev, 0, "power_off"))
-            if after is None:
+            if off_all:
                 steps += old.off
+        if off_all and sweep:
+            # Off: every HA device with a power-off action, whatever `before` listed (the hub never
+            # powers them)
+            done = {s.device for s in steps if s.kind == "power_off"} | covered
+            steps += [
+                HaStep(d.off, name, 0, "power_off")
+                for name, d in c.ha_devices.items()
+                if d.off is not None and name not in done
+            ]
         if new is not None:
             steps += new.start
         return steps
 
-    async def _run_transition(self, before: str | None, after: str | None) -> None:
+    async def _run_transition(self, before: str | None, after: str | None, everything_off: bool | None = None, sweep: bool = True) -> None:
         """Sequential and cancellable: a newer transition replaces it."""
         ran_power: set[str | None] = set()
-        for step in self._transition_steps(before, after):
+        for step in self._transition_steps(before, after, everything_off, sweep):
             state = self._ha_power(step.device) if step.device else None
             if step.kind == "power_on" and state is True:
                 continue  # already on: the entity is the truth

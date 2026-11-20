@@ -127,12 +127,12 @@ pages:
   domain with no such default is an error. The tap is the tile's soft key (`tap_<id>`), so an `ha:` tap runs in
   Home Assistant and any other action runs on the hub.
 - **Widget keys**: `icon: <name>|none` (`proto/icons.yaml`), `role: default|primary|secondary|danger`,
-  `shape: card|row|pill|monogram` (list pages default `row`), `icon_only: true` (label kept, not drawn),
+  `shape: card|row|pill|monogram` (list pages and `nav` default `row`), `icon_only: true` (label kept, not drawn),
   `nav: next|prev|home|<page id>` (button without `action`; handled on the remote, no key event).
 - **Inference** (compiler only; explicit keys always win): `{activity: off}` or a label like "power
   off"/"all off" -> role `danger`, icon `power`; `{activity: X}` -> `bind` X (active highlight) and an
   icon from X's name keywords; else an icon from the label's words; tile -> icon from the entity
-  domain (light bulb, climate thermo, ...); `nav` -> chevron/home icon. A page over 251 bytes fails
+  domain (light bulb, climate thermo, ...); `nav: prev|home` -> chevron/home leading icon; `nav: next|<page id>` -> shape `row` and a trailing chevron (style bit 6). A page over 251 bytes fails
   with `page 'x': N bytes over; shorten labels, use icon_only, or make it a list`.
 - **Hub limits** (`hub/engine/mapping.h`, reported by the hub in `hello_ack.limits`; see
   `docs/proto/config-format-2.md` "Limits"): current firmware has one memory budget instead of command,
@@ -221,8 +221,8 @@ keys (default and per-activity layers), page buttons, tile taps, and the `steps`
 A device with `kind: ha` has no IR: its `power` (`on` and `off`), `inputs` and `commands` are `ha:` actions,
 and the optional `entity` is where its state comes from (the `source` attribute is the input; the entity may be
 renamed in Home Assistant, the device follows). Power by domain: `cover` open / opening = on, closed / closing =
-off; `lock` unlocked / unlocking / open = on, locked / locking = off; `media_player` anything but `off` and
-`standby` = on; every other domain (light, switch, fan, `climate` whose state is its hvac mode, ...) on unless
+off; `lock` unlocked / unlocking / open = on, locked / locking = off; `media_player` anything but `off` (standby, idle, paused, playing)
+= on; every other domain (light, switch, fan, `climate` whose state is its hvac mode, ...) on unless
 `off`. `unavailable` and `unknown` (and a state a `cover` or `lock` has no rule for, such as `jammed`) are an
 unknown power. Everything else works as for IR devices:
 `{device: shield, command: ok}` on a key or button becomes that service call, the device gets its buttons,

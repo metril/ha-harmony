@@ -576,7 +576,7 @@ async def test_twenty_tiles_flush_pipelined_within_the_window(hass, rig, clock):
         ("media_player.tv", "idle", True),
         ("media_player.tv", "on", True),
         ("media_player.tv", "off", False),
-        ("media_player.tv", "standby", False),
+        ("media_player.tv", "standby", True),
         ("media_player.tv", "unavailable", None),
         ("media_player.tv", "unknown", None),
         ("climate.hvac", "heat", True),
