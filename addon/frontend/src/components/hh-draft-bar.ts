@@ -33,7 +33,9 @@ export class HhDraftBar extends StoreElement {
       .meters .meter { min-width: 92px; }
       .chipbtn { border: 0; cursor: pointer; }
       .short { display: none; }
-      .actions { display: flex; gap: 8px; margin-left: auto; }
+      .actions { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+      .noterow { display: flex; gap: 6px; align-items: center; }
+      .noterow input { height: 32px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 8px; min-width: 0; width: 22ch; }
       @media (max-width: 720px) {
         :host { position: fixed; top: auto; bottom: 0; left: 0; right: 0; padding-bottom: env(safe-area-inset-bottom, 0px); border-top: 1px solid var(--line); }
         .db { padding: 8px 16px; flex-wrap: nowrap; gap: 8px; }
@@ -46,6 +48,9 @@ export class HhDraftBar extends StoreElement {
     `,
   ];
   @state() private usageOpen = false;
+  @state() private noteOpen = false;
+  @state() private note = '';
+  @state() private saving = false;
   private timer?: ReturnType<typeof setTimeout>;
   override disconnectedCallback(): void {
     clearTimeout(this.timer);
@@ -71,7 +76,7 @@ export class HhDraftBar extends StoreElement {
   private async discard() {
     const ok = await confirmAction(this, {
       title: 'Discard Draft?',
-      body: 'Your unapplied changes will be deleted and the applied config shown again.',
+      body: 'Your unsaved changes will be deleted and the last saved revision shown again.',
       ok: 'Discard Draft',
       danger: true,
     });
@@ -83,15 +88,32 @@ export class HhDraftBar extends StoreElement {
     }
   }
 
+  private async saveRev() {
+    if (this.saving) return;
+    this.saving = true;
+    try {
+      const rev = await this.store.saveRevision(this.note.trim());
+      this.noteOpen = false;
+      this.note = '';
+      this.store.toast(`Rev ${rev} saved.`);
+    } catch (e) {
+      this.store.toast(e instanceof ApiError ? e.message : 'Could not save the revision.', 'error');
+    } finally {
+      this.saving = false;
+    }
+  }
+
   protected override render() {
     const s = this.store;
     const n = s.diff.length;
     const reason = this.applyReason();
     const errs = s.errors.length;
+    const dirty = s.dirty;
+    const base = s.baseRev;
     let text: string;
-    if (s.hasDraft) text = n === 0 ? 'Draft · same as applied' : `Draft · ${n} change${n === 1 ? '' : 's'} not applied`;
-    else text = s.applied ? `No changes since rev ${s.applied.rev}` : 'Nothing applied yet';
-    const short = s.hasDraft ? `${n} change${n === 1 ? '' : 's'}` : s.applied ? `Rev ${s.applied.rev}` : 'Empty';
+    if (s.hasDraft) text = base === null ? 'Unsaved Draft · No Revision Yet' : dirty ? `Rev ${base} + Unsaved Changes${n ? ` · ${n} change${n === 1 ? '' : 's'}` : ''}` : `Rev ${base} · No Changes`;
+    else text = s.revs.length ? `Rev ${s.revs[s.revs.length - 1]?.rev}` : 'Empty Config';
+    const short = s.hasDraft ? (base === null ? 'Unsaved Draft' : dirty ? `Rev ${base} + Unsaved` : `Rev ${base}`) : 'Empty';
     const saveText =
       s.saveState === 'saving' || s.saveState === 'dirty'
         ? 'saving…'
@@ -121,7 +143,12 @@ export class HhDraftBar extends StoreElement {
       </div>
       <span class="sp"></span>
       <div class="actions">
-        <button class="btn ghost" ?hidden=${!s.hasDraft} @click=${() => this.discard()}>${icon('undo')}<span class="long">Discard Draft</span><span class="vh">Discard Draft</span></button>
+        ${this.noteOpen
+          ? html`<span class="noterow"><input id="rev-note" aria-label="Revision Note" placeholder="Note (optional)" maxlength="200" .value=${this.note} @input=${(e: Event) => (this.note = (e.target as HTMLInputElement).value)} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this.saveRev(); else if (e.key === 'Escape') this.noteOpen = false; }} />
+              <button class="btn sm pri" id="rev-save" aria-disabled=${this.saving} @click=${() => void this.saveRev()}>Save</button>
+              <button class="btn sm ghost" @click=${() => (this.noteOpen = false)}>Cancel</button></span>`
+          : html`<button class="btn" id="save-rev" ?hidden=${!s.hasDraft || !dirty} title="Keep the draft as the next numbered revision" @click=${() => { this.noteOpen = true; this.updateComplete.then(() => this.renderRoot.querySelector<HTMLInputElement>('#rev-note')?.focus()); }}>Save Revision</button>`}
+        <button class="btn ghost" ?hidden=${!s.hasDraft || !dirty || s.baseRev === null} @click=${() => this.discard()}>${icon('undo')}<span class="long">Discard Draft</span><span class="vh">Discard Draft</span></button>
         <button
           class="btn pri"
           aria-disabled=${reason ? 'true' : 'false'}

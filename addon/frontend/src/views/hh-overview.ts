@@ -156,7 +156,7 @@ export class HhOverview extends StoreElement {
                 : html`<p class="muted">No activities yet. <a href=${hashFor('activities')}>Create One</a>.</p>`}
             </section>
       <section class="card" aria-labelledby="hc">
-              <h2 id="hc">${applied ? `Since rev ${s.applied?.rev}` : 'Changes in This Draft'}</h2>
+              <h2 id="hc">${applied ? `Since Rev ${s.baseRev}` : 'Changes in This Draft'}</h2>
               ${diff.length
                 ? html`
                   <div class="chg">${pages.length ? html`<hh-page-diff></hh-page-diff>` : nothing}

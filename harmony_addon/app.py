@@ -53,6 +53,7 @@ from .bus import Bus
 from .ha_client import Catalog, HaApi, HaUnavailable
 from .ha_ws import HaRegistryApi
 from .ir_tester import IrSender, SendLimiter, SendRefused
+from .library import Library, NotFound, migrate_v1
 from .linked import HW_ID, LinkedHubs
 from .options import Options, load_options
 from .store import HISTORY_MAX, HUB_ID, RevConflict, Store, StoreError
@@ -74,6 +75,7 @@ CSRF_HEADER = "X-HH-CSRF"
 
 OPTIONS_KEY = web.AppKey("options", Options)
 STORE_KEY = web.AppKey("store", Store)
+LIB_KEY = web.AppKey("library", Library)
 NOTIFIER_KEY = web.AppKey("notifier", object)
 CATALOG_KEY = web.AppKey("catalog", Catalog)
 BUS_KEY = web.AppKey("bus", Bus)
@@ -144,7 +146,7 @@ def make_auth_mw(auth: Auth):
                 if request.content_type not in JSON_TYPES:
                     raise error(403, "csrf", "forbidden")
             else:
-                allowed = YAML_TYPES if request.path == "/api/v1/config/import_yaml" else JSON_TYPES
+                allowed = YAML_TYPES if request.path.endswith("/import_yaml") else JSON_TYPES
                 if (
                     request.content_type not in allowed
                     or request.headers.get(CSRF_HEADER) != "1"
@@ -196,6 +198,7 @@ def _adopt_renamed(app: web.Application, hub: str, prev: str | None, hw: str | N
                 acks[hub] = acks.pop(src)
             linked.rename(src, hub)
             app[NOTIFIER_KEY].notify(hub)
+            live.publish_configs(app)
             log.info("moved the config of hub %s to %s (the hub was renamed)", src, hub)
             return "moved"
     except OSError, StoreError:
@@ -224,6 +227,7 @@ def _auto_adopt(app: web.Application) -> None:
             "moved the config of hub default to %s (the id Home Assistant is linked as)", ids[0]
         )
         app[NOTIFIER_KEY].notify(ids[0])
+        live.publish_configs(app)
 
 
 MAX_ERRORS = 100
@@ -253,21 +257,20 @@ def _err(exc: ConfigError) -> dict[str, Any]:
     return {"path": list(exc.path), "msg": exc.msg[:300], "line": None}
 
 
-def _pick_config(state: dict[str, Any], given: dict[str, Any] | None) -> dict[str, Any]:
-    if given is not None:
-        return given
-    if state["draft"] is None:
-        raise error(409, "no_draft", "there is no draft; send a config")
-    return state["draft"]["config"]
+def _need_config(body: dict[str, Any]) -> dict[str, Any]:
+    return body["config"]
 
 
-def _meta(state: dict[str, Any]) -> dict[str, Any]:
-    a = state["applied"]
+def _snap(a: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A hub's applied/history row without its config."""
+    return None if a is None else {k: a[k] for k in ("config_id", "rev", "name", "at", "hash")}
+
+
+def _hub_meta(state: dict[str, Any]) -> dict[str, Any]:
     return {
-        "applied": None if a is None else {k: a[k] for k in ("rev", "at", "hash")},
-        "history": [{k: h[k] for k in ("rev", "at", "hash")} for h in state["history"]],
+        "applied": _snap(state["applied"]),
+        "history": [_snap(h) for h in state["history"]],
         "history_max": HISTORY_MAX,
-        "rev": state["draft_rev"],
     }
 
 
@@ -282,11 +285,13 @@ def _if_match(request: web.Request) -> int | None:
     return int(m.group(1))
 
 
-def _store_call(fn, *args):
+def _store_call(fn, *args, **kw):
     try:
-        return fn(*args)
+        return fn(*args, **kw)
     except RevConflict as exc:
         raise error(409, "conflict", str(exc), rev=exc.rev) from None
+    except NotFound as exc:
+        raise error(404, "not_found", str(exc)) from None
     except StoreError as exc:
         raise error(409, "store", str(exc)) from None
     except OSError:
@@ -324,43 +329,157 @@ async def health(request: web.Request) -> web.Response:
     )
 
 
+def _rev_arg(request: web.Request) -> int:
+    try:
+        n = int(request.match_info["n"])
+    except ValueError:
+        raise error(404, "unknown_rev", "unknown rev") from None
+    return n
+
+
+def _running(app: web.Application, cid: str) -> list[dict[str, Any]]:
+    """The hubs whose current config is (a revision of) library config `cid`."""
+    store = app[STORE_KEY]
+    out = []
+    for hub in store.hubs():
+        a = _store_call(store.load, hub)["applied"]
+        if a is not None and a["config_id"] == cid:
+            out.append({"hub": hub, "rev": a["rev"]})
+    return out
+
+
+def _config_doc(app: web.Application, meta: dict[str, Any]) -> dict[str, Any]:
+    draft = meta["draft"]
+    return {
+        **Library.summary(meta),
+        "draft": None if draft is None else {k: draft[k] for k in ("config", "updated", "base_rev")},
+        "revs": [{k: r[k] for k in ("rev", "at", "note", "hash", "parent")} for r in meta["revs"]],
+        "hubs": _running(app, meta["id"]),
+    }
+
+
+def configs_payload(app: web.Application) -> dict[str, Any]:
+    rows = _store_call(app[LIB_KEY].list)
+    running: dict[str, list[dict[str, Any]]] = {}
+    store = app[STORE_KEY]
+    for hub in store.hubs():
+        a = _store_call(store.load, hub)["applied"]
+        if a is not None:
+            running.setdefault(a["config_id"], []).append({"hub": hub, "rev": a["rev"]})
+    return {"configs": [{**r, "hubs": running.get(r["id"], [])} for r in rows]}
+
+
+async def list_configs(request: web.Request) -> web.Response:
+    return jresp(configs_payload(request.app))
+
+
+def _checked_yaml(raw: bytes) -> dict[str, Any]:
+    config = _yaml_to_config(raw)
+    refs = _ir_file_refs(config)
+    if refs:
+        raise error(
+            422,
+            "ir_files_unresolvable",
+            "IR file references cannot be resolved here; inline the codes or import them in the "
+            "editor",
+            files=refs,
+        )
+    _, errors = _check(config)
+    if errors:
+        raise error(422, "invalid_config", "the YAML is not a valid config", errors=errors)
+    return config
+
+
+async def create_config(request: web.Request) -> web.Response:
+    body = await read_body(request, schemas.CREATE_CONFIG)
+    lib, now = request.app[LIB_KEY], int(request.app[CLOCK_KEY]())
+    if "from" in body:
+        src = body["from"]
+        meta = _store_call(lib.duplicate, src["id"], src.get("rev"), body["name"], now)
+    elif "yaml" in body:
+        config = _checked_yaml(body["yaml"].encode())
+        meta = _store_call(lib.create, body["name"], config, now)
+    else:
+        meta = _store_call(lib.create, body["name"], None, now)
+    live.publish_configs(request.app)
+    _audit(request, f"config_create:{meta['id']}", "-")
+    return jresp({"ok": True, **_config_doc(request.app, meta)}, 201)
+
+
 async def get_config(request: web.Request) -> web.Response:
-    q = query(request, schemas.GET_CONFIG_QUERY)
-    state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    out = {"hub": q["hub"], "draft": state["draft"], **_meta(state)}
-    if q["full"] == "1" and state["applied"]:
-        out["applied"] = state["applied"]
-    return jresp(out)
+    meta = _store_call(request.app[LIB_KEY].get, request.match_info["id"])
+    return jresp(_config_doc(request.app, meta))
 
 
-async def get_history_entry(request: web.Request) -> web.Response:
-    """The source config of one applied version (the applied one or a history row), by its rev."""
-    q = query(request, schemas.HISTORY_QUERY)
-    state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    rev = int(q["rev"])
-    rows = [state["applied"], *state["history"]]
-    row = next((r for r in rows if r is not None and r["rev"] == rev), None)
-    if row is None:
-        raise error(404, "unknown_rev", "no applied or history version has that rev")
-    return jresp({"hub": q["hub"], **{k: row[k] for k in ("rev", "at", "hash", "config")}})
+async def rename_config(request: web.Request) -> web.Response:
+    body = await read_body(request, schemas.RENAME)
+    now = int(request.app[CLOCK_KEY]())
+    meta = _store_call(request.app[LIB_KEY].rename, request.match_info["id"], body["name"], now)
+    live.publish_configs(request.app)
+    return jresp({"ok": True, **_config_doc(request.app, meta)})
+
+
+async def delete_config(request: web.Request) -> web.Response:
+    cid = request.match_info["id"]
+    _store_call(request.app[LIB_KEY].delete, cid)  # hubs keep their own snapshot
+    live.publish_configs(request.app)
+    _audit(request, f"config_delete:{cid}", "-")
+    return jresp({"ok": True})
+
+
+def _draft_resp(meta: dict[str, Any]) -> dict[str, Any]:
+    s = Library.summary(meta)
+    return {
+        "id": meta["id"],
+        "draft_updated": meta["draft"]["updated"],
+        "draft_rev": s["draft_rev"],
+        "base_rev": s["base_rev"],
+        "dirty": s["dirty"],
+    }
 
 
 async def put_draft(request: web.Request) -> web.Response:
-    q = query(request, schemas.QUERY)
     body = await read_body(request, schemas.PUT_DRAFT)
     now = int(request.app[CLOCK_KEY]())
-    state = _store_call(
-        request.app[STORE_KEY].set_draft, q["hub"], body["config"], now, _if_match(request)
+    meta = _store_call(
+        request.app[LIB_KEY].set_draft,
+        request.match_info["id"],
+        body["config"],
+        now,
+        _if_match(request),
     )
-    live.touch(request.app, q["hub"])
-    return jresp({"hub": q["hub"], "draft_updated": now, **_meta(state)})
+    live.publish_configs(request.app)
+    return jresp(_draft_resp(meta))
+
+
+async def save_rev(request: web.Request) -> web.Response:
+    body = await read_body(request, schemas.SAVE_REV)
+    now = int(request.app[CLOCK_KEY]())
+    meta, row = _store_call(request.app[LIB_KEY].save_rev, request.match_info["id"], body["note"], now)
+    live.publish_configs(request.app)
+    return jresp({"ok": True, "rev": {k: row[k] for k in ("rev", "at", "note", "hash", "parent")}, **_draft_resp(meta)}, 201)
+
+
+async def get_rev(request: web.Request) -> web.Response:
+    cid = request.match_info["id"]
+    row = _store_call(request.app[LIB_KEY].get_rev, cid, _rev_arg(request))
+    meta = _store_call(request.app[LIB_KEY].get, cid)
+    parent = next((r["parent"] for r in meta["revs"] if r["rev"] == row["rev"]), None)
+    return jresp({"id": cid, **row, "parent": parent})
+
+
+async def restore_rev(request: web.Request) -> web.Response:
+    body = await read_body(request, schemas.RESTORE)
+    now = int(request.app[CLOCK_KEY]())
+    meta = _store_call(request.app[LIB_KEY].restore, request.match_info["id"], body["rev"], now)
+    live.publish_configs(request.app)
+    return jresp({"ok": True, **_draft_resp(meta)})
 
 
 async def validate(request: web.Request) -> web.Response:
     q = query(request, schemas.VALIDATE_QUERY)
-    body = await read_body(request, schemas.OPT_CONFIG)
-    state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    model, errors = _check(_pick_config(state, body.get("config")), all_errors=q["all"] == "1")
+    body = await read_body(request, schemas.NEED_CONFIG)
+    model, errors = _check(_need_config(body), all_errors=q["all"] == "1")
     if model is not None:  # warnings never fail validation: they carry severity "warning"
         errors = [*errors, *_warnings(theme_warnings(model))]
     return jresp({"ok": not any(e.get("severity") != "warning" for e in errors), "errors": errors})
@@ -527,9 +646,8 @@ def _preview(config: dict[str, Any], limits: HubLimits = CURRENT) -> dict[str, A
 
 async def preview(request: web.Request) -> web.Response:
     q = query(request, schemas.QUERY)
-    body = await read_body(request, schemas.OPT_CONFIG)
-    state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    config = _pick_config(state, body.get("config"))
+    body = await read_body(request, schemas.NEED_CONFIG)
+    config = _need_config(body)
     # editor metadata cannot change a preview: leave it out of the memo key
     limits = request.app[LINKED_KEY].limits(q["hub"])
     key = hashlib.sha256(
@@ -556,10 +674,9 @@ def _keymap_sync(config: dict[str, Any]):
 
 async def keymap(request: web.Request) -> web.Response:
     """Per layer, every hard key's effective action, from the one lookup rule in harmony_core."""
-    q = query(request, schemas.QUERY)
-    body = await read_body(request, schemas.OPT_CONFIG)
-    state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    config = _pick_config(state, body.get("config"))
+    query(request, schemas.QUERY)
+    body = await read_body(request, schemas.NEED_CONFIG)
+    config = _need_config(body)
     maps, errors = await asyncio.get_running_loop().run_in_executor(None, _keymap_sync, config)
     if errors:
         return jresp({"ok": False, "errors": errors}, 422)
@@ -567,31 +684,69 @@ async def keymap(request: web.Request) -> web.Response:
 
 
 async def apply(request: web.Request) -> web.Response:
-    q = query(request, schemas.QUERY)
-    await read_body(request, schemas.EMPTY)
-    store = request.app[STORE_KEY]
-    state = _store_call(store.load, q["hub"])
-    config = _pick_config(state, None)
-    _, compiled, errors = _compile(config, request.app[LINKED_KEY].limits(q["hub"]))
+    """Make a library config revision the hub's running config (validated and compiled: strict)."""
+    hub = request.match_info["hub"]
+    body = await read_body(request, schemas.APPLY)
+    lib, store, cid = request.app[LIB_KEY], request.app[STORE_KEY], body["config_id"]
+    meta = _store_call(lib.get, cid)
+    limits = request.app[LINKED_KEY].limits(hub)
+    now = int(request.app[CLOCK_KEY]())
+    if "rev" in body:
+        config = _store_call(lib.get_rev, cid, body["rev"])["config"]
+    else:
+        if meta["draft"] is None:
+            raise error(409, "no_draft", "that config has no draft; save one first")
+        config = meta["draft"]["config"]
+    _, compiled, errors = _compile(config, limits)
     if errors:
         return jresp({"ok": False, "errors": errors}, 422)
-    now = int(request.app[CLOCK_KEY]())
-    state = _store_call(store.apply, q["hub"], config, compiled.config_hash, now)
-    request.app[NOTIFIER_KEY].notify(q["hub"])
-    _audit(request, "apply", q["hub"])
-    return jresp({"ok": True, **_meta(state)})
+    if "rev" in body:
+        rev = body["rev"]
+    else:  # the draft becomes a revision first (the newest one when nothing changed since)
+        meta, row = _store_call(lib.save_rev, cid, f"Applied to {hub}", now, reuse=True)
+        rev = row["rev"]
+        live.publish_configs(request.app)
+    entry = {
+        "config_id": cid,
+        "rev": rev,
+        "name": meta["name"],
+        "at": now,
+        "hash": compiled.config_hash,
+        "config": config,
+    }
+    state = _store_call(store.apply, hub, entry)
+    request.app[NOTIFIER_KEY].notify(hub)
+    live.publish_configs(request.app)
+    _audit(request, f"apply:{cid}@{rev}", hub)
+    return jresp({"ok": True, "hub": hub, **_hub_meta(state)})
 
 
 async def revert(request: web.Request) -> web.Response:
-    q = query(request, schemas.QUERY)
-    body = await read_body(request, schemas.REVERT)
-    state = _store_call(request.app[STORE_KEY].revert, q["hub"], body["target"])
-    if body["target"] == "previous":  # discarding a draft changes nothing the integration sees
-        request.app[NOTIFIER_KEY].notify(q["hub"])
-    else:
-        live.touch(request.app, q["hub"])
-    _audit(request, f"revert:{body['target']}", q["hub"])
-    return jresp({"ok": True, **_meta(state)})
+    hub = request.match_info["hub"]
+    await read_body(request, schemas.EMPTY)
+    state = _store_call(request.app[STORE_KEY].revert, hub, "previous")
+    request.app[NOTIFIER_KEY].notify(hub)
+    live.publish_configs(request.app)
+    _audit(request, "revert", hub)
+    return jresp({"ok": True, "hub": hub, **_hub_meta(state)})
+
+
+async def get_hub(request: web.Request) -> web.Response:
+    hub = request.match_info["hub"]
+    if not HUB_ID.fullmatch(hub):
+        raise error(404, "not_found", "unknown hub")
+    state = _store_call(request.app[STORE_KEY].load, hub)
+    lib = request.app[LIB_KEY]
+    exists = set(lib.ids())
+    a = state["applied"]
+    return jresp(
+        {
+            "hub": hub,
+            **_hub_meta(state),
+            "config_exists": a is not None and a["config_id"] in exists,
+            "ack": request.app[ACKS_KEY].get(hub) or state["ack"],
+        }
+    )
 
 
 def _ir_file_refs(data: Any) -> list[str]:
@@ -641,36 +796,27 @@ def _yaml_to_config(raw: bytes) -> dict[str, Any]:
 
 
 async def import_yaml(request: web.Request) -> web.Response:
-    q = query(request, schemas.QUERY)
     if_rev = _if_match(request)
-    config = _yaml_to_config(await request.read())
-    refs = _ir_file_refs(config)
-    if refs:
-        raise error(
-            422,
-            "ir_files_unresolvable",
-            "IR file references cannot be resolved here; inline the codes or import them in the "
-            "editor",
-            files=refs,
-        )
-    _, errors = _check(config)
-    if errors:
-        raise error(422, "invalid_config", "the YAML is not a valid config", errors=errors)
+    config = _checked_yaml(await request.read())
     now = int(request.app[CLOCK_KEY]())
-    state = _store_call(request.app[STORE_KEY].set_draft, q["hub"], config, now, if_rev)
-    live.touch(request.app, q["hub"])
-    _audit(request, "import_yaml", q["hub"])
-    return jresp({"ok": True, "hub": q["hub"], "draft_updated": now, **_meta(state)})
+    cid = request.match_info["id"]
+    meta = _store_call(request.app[LIB_KEY].set_draft, cid, config, now, if_rev)
+    live.publish_configs(request.app)
+    _audit(request, f"import_yaml:{cid}", "-")
+    return jresp({"ok": True, **_draft_resp(meta)})
 
 
 async def export_yaml(request: web.Request) -> web.Response:
     q = query(request, schemas.EXPORT_QUERY)
-    state = _store_call(request.app[STORE_KEY].load, q["hub"])
-    src = q.get("source") or ("draft" if state["draft"] else "applied")
-    entry = state[src]
-    if entry is None:
-        raise error(404, "empty", f"there is no {src} config")
-    text = yaml.safe_dump(entry["config"], sort_keys=False, allow_unicode=True)
+    lib, cid = request.app[LIB_KEY], request.match_info["id"]
+    if q["source"] == "draft":
+        draft = _store_call(lib.get, cid)["draft"]
+        if draft is None:
+            raise error(404, "empty", "there is no draft")
+        config = draft["config"]
+    else:
+        config = _store_call(lib.get_rev, cid, int(q["source"][4:]))["config"]
+    text = yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
     return web.Response(text=text, content_type="text/yaml", charset="utf-8")
 
 
@@ -755,8 +901,10 @@ def hubs_payload(app: web.Application) -> dict[str, Any]:
         out.append(
             {
                 "id": hub,
-                "has_draft": state["draft"] is not None,
                 "has_applied": a is not None,
+                "config_id": None if a is None else a["config_id"],
+                "config_name": None if a is None else a["name"],
+                "rev": None if a is None else a["rev"],
                 "applied_rev": None if a is None else _rev(a["config"]),
                 "applied_at": None if a is None else a["at"],
             }
@@ -810,6 +958,9 @@ def hub_status(app: web.Application, hub: str) -> dict[str, Any]:
     return {
         "hub": hub,
         "applied_rev": None if bundle is None else bundle["rev"],
+        "config_id": None if state["applied"] is None else state["applied"]["config_id"],
+        "config_name": None if state["applied"] is None else state["applied"]["name"],
+        "rev": None if state["applied"] is None else state["applied"]["rev"],
         "acked_rev": ack.get("rev"),
         "result": ack.get("result"),
         "detail": ack.get("detail"),
@@ -919,6 +1070,8 @@ def create_app(
         Path(options_path) if options_path else data_dir / "options.json"
     )
     app[STORE_KEY] = Store(data_dir)
+    app[LIB_KEY] = Library(data_dir)
+    migrate_v1(data_dir, app[LIB_KEY])
     app[CLOCK_KEY] = clock
     app[NOTIFIER_KEY] = ApplyNotifier()
     app[CATALOG_KEY] = Catalog(ha_api, clock, ha_registry)
@@ -965,16 +1118,24 @@ def create_app(
     else:
         app.router.add_get("/", index)
     app.router.add_get(f"{api}/health", health)
-    app.router.add_get(f"{api}/config", get_config)
-    app.router.add_get(f"{api}/config/history", get_history_entry)
-    app.router.add_put(f"{api}/config/draft", put_draft)
     app.router.add_post(f"{api}/config/validate", validate)
     app.router.add_post(f"{api}/config/preview", preview)
     app.router.add_post(f"{api}/config/keymap", keymap)
-    app.router.add_post(f"{api}/config/apply", apply)
-    app.router.add_post(f"{api}/config/revert", revert)
-    app.router.add_post(f"{api}/config/import_yaml", import_yaml)
-    app.router.add_get(f"{api}/config/export_yaml", export_yaml)
+    cfg = f"{api}/configs/{{id}}"
+    app.router.add_get(f"{api}/configs", list_configs)
+    app.router.add_post(f"{api}/configs", create_config)
+    app.router.add_get(cfg, get_config)
+    app.router.add_patch(cfg, rename_config)
+    app.router.add_delete(cfg, delete_config)
+    app.router.add_put(f"{cfg}/draft", put_draft)
+    app.router.add_post(f"{cfg}/revs", save_rev)
+    app.router.add_get(f"{cfg}/revs/{{n}}", get_rev)
+    app.router.add_post(f"{cfg}/restore", restore_rev)
+    app.router.add_get(f"{cfg}/export_yaml", export_yaml)
+    app.router.add_post(f"{cfg}/import_yaml", import_yaml)
+    app.router.add_get(f"{api}/hubs/{{hub}}", get_hub)
+    app.router.add_post(f"{api}/hubs/{{hub}}/apply", apply)
+    app.router.add_post(f"{api}/hubs/{{hub}}/revert", revert)
     app.router.add_get(f"{api}/ha/entities", ha_entities)
     app.router.add_get(f"{api}/ha/services", ha_services)
     ir_routes.add_routes(app, api)

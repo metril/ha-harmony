@@ -1,6 +1,6 @@
 // Draft store: working copy, ~600 ms debounced autosave through the single PUT queue,
 // optimistic edits with rollback, validation + usage via preview, conflict handling.
-import { Api, ApiError, DraftQueue, type Meta, type Preview, type Usage } from './api';
+import { Api, ApiError, DraftQueue, type ConfigDetail, type HubState, type Preview, type RevInfo, type Usage } from './api';
 import { boundEditor } from './activity-edit';
 import { primeBtDefaults } from './bt';
 import { diffConfig, type DiffRow } from './diff';
@@ -15,7 +15,6 @@ export interface Toast {
   /** offer an Undo button (studio edits) */
   undo?: boolean;
 }
-type Applied = NonNullable<Meta['applied']> & { config?: Config };
 
 export const clone = <T>(v: T): T => (v == null ? v : (JSON.parse(JSON.stringify(v)) as T));
 
@@ -25,7 +24,7 @@ export interface Stash {
   rev: number | null;
   at: number;
 }
-const stashKey = (hub: string) => `hh-unsaved:${hub}`;
+const stashKey = (configId: string) => `hh-unsaved:${configId}`;
 
 export class Store extends EventTarget {
   loaded = false;
@@ -35,9 +34,15 @@ export class Store extends EventTarget {
   confirmed: Config = {};
   confirmedHasDraft = false;
   hasDraft = false;
-  applied: Applied | null = null;
-  history: Meta['history'] = [];
-  historyMax = 5;
+  /** the library config being edited, its name, and the revision the draft started from */
+  configName = '';
+  baseRev: number | null = null;
+  /** revisions of the config, oldest first */
+  revs: RevInfo[] = [];
+  /** the config of revision `baseRev`: what "changes" are measured against */
+  baseline: Config | null = null;
+  /** the selected hub: what it runs and the versions it can revert to */
+  hubState: HubState | null = null;
   saveState: SaveState = 'clean';
   savedAt: number | null = null;
   errors: ValidationError[] = [];
@@ -66,10 +71,11 @@ export class Store extends EventTarget {
   constructor(
     public api: Api,
     public hub: string,
+    public configId: string,
     private debounceMs = 600,
   ) {
     super();
-    this.queue = new DraftQueue(api, hub);
+    this.queue = new DraftQueue(api, configId);
   }
 
   /** Unsaved edits from a moment ago, offered after a reload when the server never received them. */
@@ -83,7 +89,7 @@ export class Store extends EventTarget {
   }
   private clearStash() {
     try {
-      this.store_()?.removeItem(stashKey(this.hub));
+      this.store_()?.removeItem(stashKey(this.configId));
     } catch { /* storage unavailable */ }
   }
   /** Page is going away (pagehide / tab hidden): send a pending draft save now and keep a copy in sessionStorage. */
@@ -91,19 +97,19 @@ export class Store extends EventTarget {
     if (this.saveState !== 'dirty' && this.saveState !== 'error' && this.saveState !== 'saving') return;
     const stash: Stash = { config: this.config, rev: this.queue.rev, at: Date.now() };
     try {
-      this.store_()?.setItem(stashKey(this.hub), JSON.stringify(stash));
+      this.store_()?.setItem(stashKey(this.configId), JSON.stringify(stash));
     } catch { /* quota or private mode: the keepalive save still goes */ }
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    void this.api.putDraftOnUnload(this.hub, this.config, this.queue.rev);
+    void this.api.putDraftOnUnload(this.configId, this.config, this.queue.rev);
   }
   /** Read a stash left by the previous page; keep it only when the server's draft is older than it. */
   private readStash(serverRev: number | null) {
     this.stashed = null;
     try {
-      const raw = this.store_()?.getItem(stashKey(this.hub));
+      const raw = this.store_()?.getItem(stashKey(this.configId));
       if (!raw) return;
       const s = JSON.parse(raw) as Stash;
       const sameAsServer = JSON.stringify(s.config) === JSON.stringify(this.config);
@@ -142,40 +148,76 @@ export class Store extends EventTarget {
     this.emit();
   }
 
+  get applied(): HubState['applied'] {
+    return this.hubState?.applied ?? null;
+  }
+  get history(): HubState['history'] {
+    return this.hubState?.history ?? [];
+  }
+  get historyMax(): number {
+    return this.hubState?.history_max ?? 5;
+  }
+  /** the config of the revision the draft is based on (null: never saved as a revision) */
   get appliedConfig(): Config | null {
-    return this.applied?.config ?? null;
+    return this.baseline;
+  }
+  /** the draft differs from its base revision (or has none) */
+  get dirty(): boolean {
+    if (!this.hasDraft) return false;
+    return this.baseRev === null || !this.baseline || JSON.stringify(this.baseline) !== JSON.stringify(this.config);
   }
   get diff(): DiffRow[] {
-    return this.hasDraft ? diffConfig(this.appliedConfig, this.config) : [];
+    return this.hasDraft ? diffConfig(this.baseline, this.config) : [];
   }
   get errorSummary() {
     return summarizeErrors(this.errors, this.config);
   }
   get isFirstRun(): boolean {
-    return this.loaded && !this.hasDraft && !this.applied;
+    return this.loaded && !this.hasDraft && this.revs.length === 0;
+  }
+
+  /** Take a config response's revision data (summary, base revision's config). */
+  private async takeDetail(r: ConfigDetail): Promise<void> {
+    this.configName = r.name;
+    this.revs = r.revs;
+    this.baseRev = r.base_rev;
+    this.baseline = r.base_rev !== null ? clone((await this.api.getRev(this.configId, r.base_rev)).config) : null;
+  }
+  async refreshHub(): Promise<void> {
+    try {
+      this.hubState = await this.api.hubState(this.hub);
+    } catch {
+      this.hubState = null;
+    }
+    this.emit();
+  }
+  /** Reload the revision list and base (another tab saved a revision, or the library changed). */
+  async refreshRevs(): Promise<void> {
+    try {
+      await this.takeDetail(await this.api.getConfig(this.configId));
+      this.emit();
+    } catch { /* keep what is shown */ }
   }
 
   async load(): Promise<void> {
     this.loadError = null;
     try {
-      const r = await this.api.getConfig(this.hub, true);
-      this.applied = r.applied;
-      this.history = r.history;
-      this.historyMax = r.history_max;
+      const [r] = await Promise.all([this.api.getConfig(this.configId), this.refreshHub()]);
+      await this.takeDetail(r);
       this.hasDraft = r.draft !== null;
-      this.config = clone(r.draft?.config ?? r.applied?.config ?? {});
+      this.config = clone(r.draft?.config ?? {});
       this.confirmed = clone(this.config);
       this.past = [];
       this.future = [];
       this.confirmedHasDraft = this.hasDraft;
-      this.queue.rev = r.rev;
+      this.queue.rev = r.draft_rev;
       this.savedAt = r.draft?.updated ?? null;
       this.saveState = 'clean';
-      this.readStash(r.rev);
+      this.readStash(r.draft_rev);
       this.loaded = true;
       this.emit();
       void primeBtDefaults(this.api, this.config, () => this.emit());
-      if (this.hasDraft || this.applied) await this.check();
+      if (this.hasDraft) await this.check();
       else {
         this.errors = [];
         this.usage = null;
@@ -262,8 +304,7 @@ export class Store extends EventTarget {
     this.emit();
     try {
       const r = await this.queue.enqueue(sent, { force });
-      this.history = r.history;
-      this.applied = this.applied && r.applied ? { ...this.applied, ...r.applied } : this.applied;
+      this.baseRev = r.base_rev;
       this.confirmed = sent;
       this.confirmedHasDraft = true;
       this.savedAt = r.draft_updated;
@@ -307,9 +348,8 @@ export class Store extends EventTarget {
   async check(live = false): Promise<void> {
     const seq = ++this.seq;
     try {
-      // no saved draft: the add-on has nothing to default to (409 no_draft), so send the applied config;
-      // a live check (right after an edit) sends the in-memory config so the canvas does not wait for the save
-      const p = await this.api.preview(this.hub, live || !this.hasDraft ? clone(this.config) : undefined);
+      void live; // the preview is stateless: it always checks the in-memory config
+      const p = await this.api.preview(this.hub, clone(this.config));
       if (seq !== this.seq) return;
       this.errors = p.errors.filter((e) => e.severity !== 'warning');
       this.warnings = p.errors.filter((e) => e.severity === 'warning');
@@ -348,24 +388,44 @@ export class Store extends EventTarget {
     }
   }
 
+  /** Drop the unsaved changes: back to the base revision. */
   async discard(): Promise<void> {
-    await this.swapWith(clone(this.config), this.hasDraft, 'Draft discarded.', () => this.api.revert(this.hub, 'applied'));
+    if (this.baseRev === null) return;
+    await this.restoreRev(this.baseRev, 'Changes discarded.');
   }
 
-  /** Saves pending edits, then applies the saved draft. Throws ApiError (422 carries errors). */
-  async applyDraft(): Promise<number> {
+  /** Save the draft as the next numbered revision. */
+  async saveRevision(note = ''): Promise<number> {
+    await this.flush();
+    if (this.saveState === 'conflict' || this.saveState === 'error') throw new ApiError(409, 'conflict', 'Resolve the save problem first.');
+    if (!this.hasDraft) {
+      // a blank config has no draft yet: store the (empty) editing state first
+      await this.api.putDraft(this.configId, this.config, this.queue.rev).then((r) => (this.queue.rev = r.draft_rev));
+      this.hasDraft = true;
+    }
+    const r = await this.api.saveRev(this.configId, note);
+    this.queue.rev = r.draft_rev;
+    this.baseRev = r.rev.rev;
+    this.baseline = clone(this.config);
+    this.revs = [...this.revs, r.rev];
+    this.confirmed = clone(this.config);
+    this.confirmedHasDraft = true;
+    this.emit();
+    return r.rev.rev;
+  }
+
+  private recordApplied(m: HubState): void {
+    if (m.hub === this.hub) this.hubState = m;
+  }
+  /** Saves pending edits, then applies the draft (as a new revision, or the newest when unchanged) to `hub`. Throws ApiError (422 carries errors). */
+  async applyDraft(hub = this.hub): Promise<number> {
     await this.flush();
     if (this.saveState === 'conflict' || this.saveState === 'error') throw new ApiError(409, 'conflict', 'Resolve the save problem first.');
     try {
-      const m = await this.api.apply(this.hub);
+      const m = await this.api.applyToHub(hub, this.configId);
       if (!m.applied) throw new ApiError(500, 'bad_response', 'The add-on did not confirm the apply.');
-      this.applied = { ...m.applied, config: clone(this.config) };
-      this.history = m.history;
-      this.queue.rev = m.rev;
-      this.hasDraft = false;
-      this.confirmed = clone(this.config);
-      this.confirmedHasDraft = false;
-      this.saveState = 'clean';
+      this.recordApplied(m);
+      await this.refreshRevs();
       this.errors = [];
       this.emit();
       return m.applied.rev;
@@ -377,23 +437,38 @@ export class Store extends EventTarget {
       throw e;
     }
   }
+  /** Apply a saved revision of this config to `hub`. */
+  async applyRev(hub: string, rev: number): Promise<number> {
+    const m = await this.api.applyToHub(hub, this.configId, rev);
+    if (!m.applied) throw new ApiError(500, 'bad_response', 'The add-on did not confirm the apply.');
+    this.recordApplied(m);
+    this.emit();
+    return m.applied.rev;
+  }
 
-  async revertTo(target: 'previous'): Promise<void> {
-    await this.swapWith(clone(this.config), this.hasDraft, 'Reverted to the previous version.', () => this.api.revert(this.hub, target));
+  async revertTo(hub = this.hub): Promise<HubState> {
+    const m = await this.api.revertHub(hub);
+    this.recordApplied(m);
+    this.emit();
+    return m;
   }
 
   async importYaml(text: string): Promise<void> {
     // the user already confirmed replacing the draft: only a live conflict check applies
     await this.swapWith(clone(this.config), this.hasDraft, 'Draft replaced by the imported file.', () =>
-      this.api.importYaml(this.hub, text, this.saveState === 'conflict' ? null : this.queue.rev),
+      this.api.importYaml(this.configId, text, this.saveState === 'conflict' ? null : this.queue.rev),
     );
   }
 
-  /** Restore an applied version as the draft: fetch its source config, then replace the draft with it. */
-  async restoreAsDraft(rev: number): Promise<void> {
-    const h = await this.api.historyEntry(this.hub, rev);
-    this.replace(clone(h.config));
-    await this.flush();
+  /** Copy a revision into the draft (the old draft stays one Undo away). */
+  async restoreRev(rev: number, what = `Rev ${rev} restored to the draft.`): Promise<void> {
+    await this.swapWith(clone(this.config), this.hasDraft, what, () => this.api.restoreRev(this.configId, rev));
+  }
+
+  async rename(name: string): Promise<void> {
+    const r = await this.api.renameConfig(this.configId, name);
+    this.configName = r.name;
+    this.emit();
   }
 }
 

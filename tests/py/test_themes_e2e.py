@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 import pytest
-from test_addon_e2e import DIST, PREFIX, H, api, browser, link, open_editor, site  # noqa: F401
+from test_addon_e2e import ensure_cfg, DIST, PREFIX, H, api, browser, link, open_editor, site  # noqa: F401
 
 from harmony_core.config_model import load_source
 
@@ -42,7 +42,8 @@ pages:
 
 
 async def put(origin, cfg):
-    status, _ = await api(origin, "PUT", "/api/v1/config/draft", json={"config": cfg}, headers=H)
+    await ensure_cfg(origin)
+    status, _ = await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": cfg}, headers=H)
     assert status == 200
 
 
@@ -61,8 +62,8 @@ async def draft_yaml(origin):
     async with (
         aiohttp.ClientSession() as s,
         s.get(
-            f"{origin}/api/v1/config/export_yaml",
-            params={"hub": "default", "source": "draft"},
+            f"{origin}/api/v1/configs/main/export_yaml",
+            params={"source": "draft"},
             headers={"X-Remote-User-Id": "t"},
         ) as r,
     ):

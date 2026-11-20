@@ -8,6 +8,7 @@ import stat
 import pytest
 from addon_ws import BEARER, TOKEN, closed, connect, drain, live, recv
 from aiohttp import WSServerHandshakeError
+from cfgapi import put_apply
 from test_addon import CONFIG, H, clock, put_draft
 
 import harmony_core
@@ -32,9 +33,7 @@ async def client(aiohttp_client, tmp_path):
 
 
 async def apply(c, config=CONFIG, hub="default"):
-    q = f"?hub={hub}"
-    assert (await c.put(f"/api/v1/config/draft{q}", json={"config": config}, headers=H)).status == 200
-    r = await c.post(f"/api/v1/config/apply{q}", json={}, headers=H)
+    r = await put_apply(c, config, hub)
     assert r.status == 200, await r.text()
 
 
@@ -114,9 +113,7 @@ async def test_revert_pushes_only_when_the_applied_config_changes(client):
     await apply(client, {**CONFIG, "keys": {}})
     ws = await connect(client, "default")
     await recv(ws, "bundle")
-    r = await client.post("/api/v1/config/revert", json={"target": "applied"}, headers=H)
-    assert r.status == 200 and await drain(ws) == []  # discarding a draft is no apply
-    await client.post("/api/v1/config/revert", json={"target": "previous"}, headers=H)
+    await client.post("/api/v1/hubs/default/revert", json={}, headers=H)
     assert (await recv(ws, "bundle"))["body"]["config"] == CONFIG
     await ws.close()
 
@@ -187,7 +184,7 @@ async def test_channel_is_bearer_only_and_ingress_routes_ingress_only(aiohttp_cl
     assert await refused(c, "/api/v1/channel", ing) == 401  # ingress without the token...
     assert await refused(c, "/api/v1/channel", {**ing, **BEARER}) == 401  # ...and the token through ingress
     strict = await aiohttp_client(create_app(tmp_path / "s", bundle_token=TOKEN, bundle_networks=None))
-    for path in ("/api/v1/health", "/api/v1/config", "/", "/api/v1/live"):
+    for path in ("/api/v1/health", "/api/v1/configs", "/", "/api/v1/live"):
         assert (await strict.get(path, headers={**BEARER, **ing})).status == 403
     ws = await strict.ws_connect("/api/v1/channel", headers=BEARER)  # authed: the bearer needs no ingress peer
     await ws.close()
@@ -254,10 +251,10 @@ async def test_token_never_in_logs_or_other_responses(aiohttp_client, tmp_path, 
     for method, path in [
         ("GET", "/"),
         ("GET", "/api/v1/health"),
-        ("GET", "/api/v1/config?full=1"),
-        ("GET", "/api/v1/config/export_yaml"),
-        ("POST", "/api/v1/config/apply"),
-        ("GET", "/api/v1/config?full=1"),
+        ("GET", "/api/v1/configs/main"),
+        ("GET", "/api/v1/configs/main/export_yaml"),
+        ("POST", "/api/v1/hubs/default/apply"),
+        ("GET", "/api/v1/hubs/default"),
         ("GET", "/api/v1/nope"),
     ]:
         r = await c.request(method, path, headers=H, json={} if method == "POST" else None)

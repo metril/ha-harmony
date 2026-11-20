@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Store, setStore } from '../src/lib/store';
-import { fakeApi, tvConfig } from './helpers';
+import { fakeApi, libRoutes, tvConfig } from './helpers';
 import '../src/views/hh-themes';
 import { HhColourField } from '../src/components/hh-colour-field';
 import { presetTheme } from '../src/lib/theme-model';
@@ -12,11 +12,10 @@ const settle = async (el: { updateComplete: Promise<unknown> }) => {
 };
 async function mount(cfg = tvConfig()) {
   const f = fakeApi({
-    'GET api/v1/config': () => ({ body: { hub: 'h', draft: { config: cfg, updated: 1 }, applied: null, history: [], history_max: 5, rev: 1 } }),
+    ...libRoutes({ config: cfg }),
     'POST api/v1/config/preview': () => ({ body: { ok: true, hash: 'h', errors: [], missing_pages: [], pages: [], usage: null } }),
-    'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 2, applied: null, history: [], history_max: 5, rev: 2 } }),
   });
-  const store = new Store(f.api, 'h', 20);
+  const store = new Store(f.api, 'h', 'c', 20);
   setStore(store);
   await store.load();
   const el = document.createElement('hh-themes') as HTMLElement & { updateComplete: Promise<unknown>; selected: string; notices: string[] };

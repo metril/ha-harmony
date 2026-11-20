@@ -5,8 +5,8 @@ import { icon } from '../lib/icons';
 import { counts } from '../lib/model';
 import { Router, hashFor } from '../lib/router';
 import { shared } from '../lib/styles';
-import type { ApplyStatus, HubsResponse } from '../lib/api';
-import { hubLabel, hubName, linkInfo, linkProblem, pickHub, rememberHub } from '../lib/hubs';
+import { ApiError, type ApplyStatus, type ConfigSummary, type HubsResponse } from '../lib/api';
+import { hubLabel, hubName, linkInfo, linkProblem, pickHub, rememberHub, runningLabel } from '../lib/hubs';
 import { StoreElement, type ConfirmRequest } from './base';
 import './hh-dialog';
 import './hh-draft-bar';
@@ -38,6 +38,14 @@ export class HhApp extends StoreElement {
       .hub .hn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 18ch; font-weight: 600; }
       .hub .hid2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16ch; font-family: var(--mono); font-size: 11px; color: var(--tx3); }
       .hub select { max-width: 22ch; }
+      .cfg { display: flex; align-items: center; gap: 6px; min-width: 0; position: relative; }
+      .cfg select { max-width: 22ch; }
+      .running { color: var(--tx3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28ch; }
+      .menu-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 12; background: var(--sf); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--lift); padding: 4px; display: grid; min-width: 160px; }
+      .menu-pop button { text-align: left; border: 0; background: transparent; color: var(--tx); padding: 8px 10px; border-radius: var(--r1); cursor: pointer; font: inherit; }
+      .menu-pop button:hover, .menu-pop button:focus-visible { background: var(--sf2); }
+      .menu-pop button.danger { color: var(--bad); }
+      .namebox { width: 100%; box-sizing: border-box; height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 8px; }
       select { height: 32px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 8px; }
       .layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: calc(100vh - 48px); }
       @media (min-width: 721px) {
@@ -82,6 +90,8 @@ export class HhApp extends StoreElement {
         .hub .hn { max-width: 10ch; }
         .hub .hid2 { display: none; }
         .hub select { max-width: 12ch; }
+        .cfg select { max-width: 12ch; }
+        .running { display: none; }
         .hub .chip { padding: 0 6px; font-size: 11px; }
         .hdr-btn span { display: none; }
         .toasts { bottom: 76px; }
@@ -103,6 +113,10 @@ export class HhApp extends StoreElement {
   }
   @state() private applyOpen = false;
   @state() private importOpen = false;
+  @state() private applyRev: number | null = null;
+  @state() private configs: ConfigSummary[] | null = null;
+  @state() private cfgMenu = false;
+  @state() private nameDlg: { mode: 'new' | 'duplicate' | 'rename'; value: string; busy: boolean; problem: string } | null = null;
   @state() private confirm: ConfirmRequest | null = null;
   @state() private hubs: HubsResponse | null = null;
   @state() private link: ApplyStatus | null = null;
@@ -114,8 +128,9 @@ export class HhApp extends StoreElement {
       this.railOpen = false;
       this.requestUpdate();
     });
-    this.addEventListener('hh-review', () => {
+    this.addEventListener('hh-review', (e) => {
       void import('./hh-apply-dialog');
+      this.applyRev = (e as CustomEvent<{ rev?: number } | null>).detail?.rev ?? null;
       this.applyOpen = true;
     });
     this.addEventListener('hh-import', () => this.openImport());
@@ -129,7 +144,20 @@ export class HhApp extends StoreElement {
     });
     // pushed by the add-on: who has linked, and this hub's applied/acked rev and connection
     const live = this.store.api.live;
-    this.unsubs = [live.sub('hubs', (v) => (this.hubs = v as HubsResponse)), live.sub(`hub:${this.store.hub}`, (v) => (this.link = v as ApplyStatus))];
+    this.unsubs = [
+      live.sub('hubs', (v) => (this.hubs = v as HubsResponse)),
+      live.sub('configs', (v) => {
+        this.configs = (v as { configs: ConfigSummary[] }).configs;
+        const mine = this.configs.find((c) => c.id === this.store.configId);
+        if (mine && mine.name !== this.store.configName) void this.store.refreshRevs();
+        else if (mine && mine.rev_count !== this.store.revs.length) void this.store.refreshRevs();
+      }),
+      live.sub(`hub:${this.store.hub}`, (v) => {
+        const l = (this.link = v as ApplyStatus);
+        const a = this.store.applied;
+        if (this.store.loaded && ((l.config_id ?? null) !== (a?.config_id ?? null) || (l.rev ?? null) !== (a?.rev ?? null))) void this.store.refreshHub();
+      }),
+    ];
   }
   override disconnectedCallback(): void {
     for (const u of this.unsubs) u();
@@ -142,6 +170,78 @@ export class HhApp extends StoreElement {
     const u = new URL(location.href);
     u.searchParams.set('hub', hub);
     location.href = u.toString();
+  }
+  /** Switching config reloads the editor on that config (a fresh store, draft queue and stash). */
+  private goConfig(id: string | null) {
+    const u = new URL(location.href);
+    if (id) u.searchParams.set('config', id);
+    else u.searchParams.delete('config');
+    location.href = u.toString();
+  }
+
+  private openName(mode: 'new' | 'duplicate' | 'rename') {
+    const s = this.store;
+    this.cfgMenu = false;
+    this.nameDlg = { mode, value: mode === 'new' ? '' : mode === 'rename' ? s.configName : `${s.configName} Copy`, busy: false, problem: '' };
+  }
+  private async submitName() {
+    const d = this.nameDlg;
+    const s = this.store;
+    if (!d || d.busy) return;
+    const name = d.value.trim();
+    if (!name) {
+      this.nameDlg = { ...d, problem: 'Enter a name.' };
+      return;
+    }
+    this.nameDlg = { ...d, busy: true, problem: '' };
+    try {
+      if (d.mode === 'rename') {
+        await s.rename(name);
+        this.nameDlg = null;
+        return;
+      }
+      await s.flush();
+      const r = await s.api.createConfig(d.mode === 'new' ? { name } : { name, from: { id: s.configId } });
+      this.goConfig(r.id);
+    } catch (e) {
+      this.nameDlg = { ...d, busy: false, problem: e instanceof ApiError ? e.message : String(e) };
+    }
+  }
+  private async deleteConfig() {
+    this.cfgMenu = false;
+    const s = this.store;
+    const run = s.hub ? (s.hubState?.applied?.config_id === s.configId ? ' The hub keeps running its own copy.' : '') : '';
+    const ok = await new Promise<boolean>((resolve) => {
+      this.confirm = { title: 'Delete Config?', body: `"${s.configName}" and all its revisions will be deleted.${run}`, ok: 'Delete Config', danger: true, resolve };
+    });
+    if (!ok) return;
+    try {
+      await s.api.deleteConfig(s.configId);
+      this.goConfig(null);
+    } catch (e) {
+      s.toast(e instanceof Error ? e.message : String(e), 'error');
+    }
+  }
+
+  private configPicker() {
+    const s = this.store;
+    const rows = this.configs ?? [];
+    const list = rows.some((c) => c.id === s.configId) ? rows : [...rows, { id: s.configId, name: s.configName || s.configId } as ConfigSummary];
+    return html`<div class="cfg" role="group" aria-label="Config">
+      <span class="hl muted">Config:</span>
+      <select aria-label="Config" @change=${(e: Event) => this.goConfig((e.target as HTMLSelectElement).value)}>
+        ${list.map((c) => html`<option value=${c.id} ?selected=${c.id === s.configId}>${c.id === s.configId && s.configName ? s.configName : c.name}</option>`)}
+      </select>
+      <button class="btn ghost" aria-label="Config Actions" aria-haspopup="menu" aria-expanded=${this.cfgMenu} @click=${() => (this.cfgMenu = !this.cfgMenu)}>${icon('menu')}</button>
+      ${this.cfgMenu
+        ? html`<div class="menu-pop" role="menu" aria-label="Config Actions" @keydown=${(e: KeyboardEvent) => e.key === 'Escape' && (this.cfgMenu = false)}>
+            <button role="menuitem" @click=${() => this.openName('new')}>New</button>
+            <button role="menuitem" @click=${() => this.openName('duplicate')}>Duplicate</button>
+            <button role="menuitem" @click=${() => this.openName('rename')}>Rename</button>
+            <button role="menuitem" class="danger" @click=${() => void this.deleteConfig()}>Delete</button>
+          </div>`
+        : nothing}
+    </div>`;
   }
 
   private async adopt(to: string) {
@@ -185,6 +285,7 @@ export class HhApp extends StoreElement {
           ? html`<strong class="hn" title=${hubName(this.hubs, s.hub)}>${hubName(this.hubs, s.hub)}</strong><span class="hid2" title=${s.hub}>${s.hub}</span>`
           : html`<strong class="hid" title=${s.hub}>${s.hub}</strong>`}
       ${st ? html`<span class="chip ${st[0]}" id="hub-state" title=${st[2]}>${st[1]}</span>` : nothing}
+      ${runningLabel(this.hubs, s.hub) ? html`<span class="running" id="running" title="What this hub runs">Running: ${runningLabel(this.hubs, s.hub)}</span>` : nothing}
     </div>`;
   }
 
@@ -206,7 +307,7 @@ export class HhApp extends StoreElement {
 
   private rail(): RailItem[] {
     const c = counts(this.store.config);
-    const hist = this.store.history.length + (this.store.applied ? 1 : 0);
+    const hist = this.store.revs.length;
     return [
       { id: 'remote', label: 'Remote', icon: 'keys' },
       { id: 'overview', label: 'Overview', icon: 'overview' },
@@ -215,12 +316,12 @@ export class HhApp extends StoreElement {
       { id: 'themes', label: 'Themes', icon: 'palette' },
       { id: 'bluetooth', label: 'Bluetooth', icon: 'bluetooth' },
       { id: '-', label: '', icon: '' },
-      { id: 'history', label: 'History', icon: 'history', count: hist },
+      { id: 'history', label: 'Revisions', icon: 'history', count: hist },
     ];
   }
 
   private sectionTitle(): string {
-    const names: Record<string, string> = { remote: 'Remote Studio', overview: 'Overview', devices: 'Devices', ir: 'Add a Device', activities: 'Activities', themes: 'Themes', bluetooth: 'Bluetooth', history: 'History' };
+    const names: Record<string, string> = { remote: 'Remote Studio', overview: 'Overview', devices: 'Devices', ir: 'Add a Device', activities: 'Activities', themes: 'Themes', bluetooth: 'Bluetooth', history: 'Revisions' };
     return names[this.router.route.section] ?? 'Harmony Editor';
   }
 
@@ -275,9 +376,10 @@ export class HhApp extends StoreElement {
         <button class="btn ghost icon menu" aria-label="Menu" aria-expanded=${this.railOpen} @click=${() => (this.railOpen = !this.railOpen)}>${icon('menu')}</button>
         <span class="brand">${icon('hub')} Harmony Editor</span>
         ${this.hubIndicator()}
+        ${this.configPicker()}
         <span class="sp"></span>
         <button class="btn ghost hdr-btn" aria-label="Import YAML" @click=${() => this.openImport()}>${icon('upload')}<span>Import YAML</span></button>
-        <a class="btn ghost hdr-btn" aria-label="Export YAML" aria-disabled=${s.isFirstRun ? 'true' : 'false'} href=${s.isFirstRun ? '#/overview' : s.api.exportUrl(s.hub)} download="harmony-${s.hub}.yaml">${icon('download')}<span>Export YAML</span></a>
+        <a class="btn ghost hdr-btn" aria-label="Export YAML" aria-disabled=${s.isFirstRun ? 'true' : 'false'} href=${s.isFirstRun ? '#/overview' : s.api.exportUrl(s.configId)} download="${s.configId}.yaml">${icon('download')}<span>Export YAML</span></a>
       </header>
       <div class=${classMap({ layout: true, slim: this.slim })}>
         <nav aria-label="Sections" class=${classMap({ open: this.railOpen })}>
@@ -318,8 +420,17 @@ export class HhApp extends StoreElement {
           </main>
         </div>
       </div>
-      <hh-apply-dialog .open=${this.applyOpen} .themeMsgs=${this.link?.theme_notices ?? []}></hh-apply-dialog>
+      <hh-apply-dialog .open=${this.applyOpen} .rev=${this.applyRev} .themeMsgs=${this.link?.theme_notices ?? []}></hh-apply-dialog>
       <hh-import-dialog .open=${this.importOpen}></hh-import-dialog>
+      <hh-dialog .open=${this.nameDlg !== null} heading=${this.nameDlg?.mode === 'rename' ? 'Rename Config' : this.nameDlg?.mode === 'duplicate' ? 'Duplicate Config' : 'New Config'} @close=${() => (this.nameDlg = null)}>
+        ${this.nameDlg
+          ? html`<label for="cfg-name" class="muted">Config Name</label>
+        <input id="cfg-name" class="namebox" maxlength="80" .value=${this.nameDlg?.value ?? ''} @input=${(e: Event) => this.nameDlg && (this.nameDlg = { ...this.nameDlg, value: (e.target as HTMLInputElement).value })} @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && void this.submitName()} />
+        ${this.nameDlg.problem ? html`<div class="banner bad" role="alert">${this.nameDlg.problem}</div>` : nothing}`
+          : nothing}
+        <button slot="footer" class="btn" @click=${() => (this.nameDlg = null)}>Cancel</button>
+        <button slot="footer" class="btn pri" @click=${() => void this.submitName()}>${this.nameDlg?.mode === 'rename' ? 'Rename' : this.nameDlg?.mode === 'duplicate' ? 'Duplicate' : 'Create'}</button>
+      </hh-dialog>
       <hh-dialog .open=${this.confirm !== null} heading=${this.confirm?.title ?? ''} @close=${() => this.answer(false)}>
         <p>${this.confirm?.body}</p>
         <button slot="footer" class="btn" @click=${() => this.answer(false)}>Cancel</button>

@@ -3,6 +3,7 @@ integration polls with the previous id and/or the stable hardware id. Never over
 
 import pytest
 from addon_ws import connect, drain
+from cfgapi import put_apply
 from test_addon import CONFIG, H
 from test_addon_linked import make
 
@@ -28,11 +29,7 @@ async def poll(c, hub, hw=None, prev=None, name=None):
 
 
 async def apply(c, hub, config=CONFIG):
-    q = f"?hub={hub}"
-    assert (
-        await c.put(f"/api/v1/config/draft{q}", json={"config": config}, headers=H)
-    ).status == 200
-    assert (await c.post(f"/api/v1/config/apply{q}", json={}, headers=H)).status == 200
+    assert (await put_apply(c, config, hub)).status == 200
 
 
 async def hubs(c):
@@ -44,31 +41,26 @@ def ids(body):
 
 
 async def two_applies(c, hub):
-    """A store with applied, history and a draft on top."""
+    """A store with applied and history."""
     await apply(c, hub)
     await apply(c, hub, {**CONFIG, "keys": {}})  # a second apply: the first goes to history
-    q = f"?hub={hub}"
-    assert (
-        await c.put(f"/api/v1/config/draft{q}", json={"config": CONFIG}, headers=H)
-    ).status == 200
 
 
 async def full(c, hub):
-    return await (await c.get(f"/api/v1/config?hub={hub}&full=1")).json()
+    return await (await c.get(f"/api/v1/hubs/{hub}")).json()
 
 
 async def test_store_moves_with_the_previous_id_and_hardware_id(c):
     assert (await poll(c, "old-id", hw=HW_A))["frame"]["t"] == "nothing_applied"
     await two_applies(c, "old-id")
     before = await full(c, "old-id")
-    assert before["draft"] and before["applied"] and before["history"]
+    assert before["applied"] and before["history"]
     r = await poll(c, "new-id", hw=HW_A, prev="old-id", name="Living room é")
     assert r["adopt"] == "moved" and r["frame"]["t"] == "bundle"
     assert r["frame"]["body"]["hub_id"] == "new-id"
     assert ids(await hubs(c)) == ["new-id"]
     after = await full(c, "new-id")
-    assert (after["draft"], after["applied"], after["history"]) == (
-        before["draft"],
+    assert (after["applied"], after["history"]) == (
         before["applied"],
         before["history"],
     )
@@ -192,3 +184,16 @@ async def test_clearing_the_name(c):
     assert (await hubs(c))["linked"][0]["name"] == "Den"
     await poll(c, "h", name="")
     assert "name" not in (await hubs(c))["linked"][0]
+
+
+async def test_adopt_pushes_the_configs_list(c):
+    from addon_ws import live, recv
+
+    await apply(c, "old-id")
+    lv = await live(c, "configs")
+    await recv(lv, "snapshot")
+    r = await poll(c, "new-id", prev="old-id")
+    assert r["adopt"] == "moved"
+    msg = await recv(lv, "configs")
+    assert "new-id" in str(msg) and "old-id" not in str([h["id"] for h in msg.get("hubs", [])])
+    await lv.close()

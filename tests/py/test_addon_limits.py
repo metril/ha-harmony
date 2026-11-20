@@ -3,6 +3,7 @@
 import json
 
 from addon_ws import connect, drain
+from cfgapi import apply_draft, put_draft
 from test_addon import H, clock
 
 from harmony_addon.app import create_app
@@ -74,10 +75,10 @@ async def test_reported_limits_survive_an_add_on_restart(aiohttp_client, tmp_pat
 async def test_apply_uses_the_same_limits(aiohttp_client, tmp_path):
     c = await aiohttp_client(_app(tmp_path))
     cfg = _many_commands(900)
-    await c.put("/api/v1/config/draft?hub=hub-a", json={"config": cfg}, headers=H)
+    await put_draft(c, cfg)
     await hello(c, "hub-a", {**CURRENT.to_wire(), "budget": 128 * 1024})
-    r = await c.post("/api/v1/config/apply?hub=hub-a", json={}, headers=H)
+    r = await apply_draft(c, "hub-a")
     assert r.status == 422
     await hello(c, "hub-a", CURRENT.to_wire())
-    r = await c.post("/api/v1/config/apply?hub=hub-a", json={}, headers=H)
+    r = await apply_draft(c, "hub-a")
     assert r.status == 200

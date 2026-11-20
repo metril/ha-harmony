@@ -35,7 +35,7 @@ export class HhPageDiff extends StoreElement {
 
   protected override willUpdate(): void {
     const s = this.store;
-    const key = s.applied?.hash ?? '';
+    const key = String(s.baseRev ?? '');
     if (!s.hasDraft || !s.appliedConfig || key === this.beforeFor) return;
     this.beforeFor = key;
     void s.api.preview(s.hub, s.appliedConfig).then((p) => (this.beforePages = p.pages)).catch(() => (this.beforePages = null));

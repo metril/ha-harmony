@@ -13,7 +13,7 @@ from pathlib import Path
 
 import playwright.async_api as pw
 import pytest
-from test_addon_e2e import DIST, PREFIX, TOKEN, WIDE_CSS, H, _stress, api, browser  # noqa: F401
+from test_addon_e2e import ensure_cfg, DIST, PREFIX, TOKEN, WIDE_CSS, H, _stress, api, browser  # noqa: F401
 from test_addon_e2e_polish import LARGE, STORE, open_large
 
 from harmony_addon.app import create_app
@@ -108,7 +108,8 @@ async def site_for(aiohttp_server, tmp_path, ha, reg):
     )
     server = await aiohttp_server(app)
     origin = f"http://127.0.0.1:{server.port}"
-    assert (await api(origin, "PUT", "/api/v1/config/draft", json={"config": LARGE}, headers=H))[0] == 200
+    await ensure_cfg(origin)
+    assert (await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": LARGE}, headers=H))[0] == 200
     return origin
 
 

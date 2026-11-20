@@ -9,7 +9,7 @@ the table below. There is no polling anywhere: the add-on pushes over two WebSoc
 - **Ingress** routes are reachable only through Home Assistant ingress (the Supervisor gateway
   peer). Pages additionally need `X-Ingress-Path`. **Bearer** routes (`/api/v1/channel`) need
   `Authorization: Bearer <token>` from the Supervisor network, and are refused via ingress.
-- Every ingress request that changes state (POST/PUT) needs `Content-Type: application/json`
+- Every ingress request that changes state (POST/PUT/PATCH/DELETE; a DELETE sends `{}`) needs `Content-Type: application/json`
   (`text/yaml` or `application/yaml` for `import_yaml`), the header `X-HH-CSRF: 1`, and a same-origin
   `Origin`/`Sec-Fetch-Site`; otherwise `403 csrf`. Bearer POSTs need only the JSON content type.
 - Bodies and query strings are schema-validated, unknown keys and repeated query params are
@@ -26,18 +26,25 @@ the table below. There is no polling anywhere: the add-on pushes over two WebSoc
 | GET | `/` | ingress | The editor UI (`index.html`; placeholder page when the frontend is not built) |
 | GET | `/assets` | ingress | Hashed UI assets under /assets/… (immutable cache; only present when the frontend is built) |
 | GET | `/api/v1/health` | ingress | Versions and `capabilities` (`ha_actions` probed from the schema, `page_format: 2`) |
-| GET | `/api/v1/config` | ingress | Draft, applied metadata, history, draft `rev` |
-| GET | `/api/v1/config/history` | ingress | Source config of one applied or history version |
-| PUT | `/api/v1/config/draft` | ingress | Store the draft (honours `If-Match`) |
-| POST | `/api/v1/config/validate` | ingress | All validation errors |
-| POST | `/api/v1/config/preview` | ingress | Decoded pages, usage meters; error tolerant |
-| POST | `/api/v1/config/keymap` | ingress | Effective hard-key action per layer |
-| POST | `/api/v1/config/apply` | ingress | Make the draft the applied config (strict) |
-| POST | `/api/v1/config/revert` | ingress | Discard the draft, or re-apply the previous version |
-| POST | `/api/v1/config/import_yaml` | ingress | Upload YAML as the draft |
-| GET | `/api/v1/config/export_yaml` | ingress | Draft or applied config as YAML |
-| GET | `/api/v1/hubs` | ingress | Hubs known to the store, hub ids integrations are connected for, adoptable stores |
-| POST | `/api/v1/hubs/adopt` | ingress | Move a store (default: `default`) to a linked hub id |
+| GET | `/api/v1/configs` | ingress | The config library: every named config with draft/revision summary and the hubs running it |
+| POST | `/api/v1/configs` | ingress | Create a config: blank, a duplicate of another config (or one of its revisions) or from YAML |
+| GET | `/api/v1/configs/{id}` | ingress | One config: draft, revision list, hubs running it |
+| PATCH | `/api/v1/configs/{id}` | ingress | Rename |
+| DELETE | `/api/v1/configs/{id}` | ingress | Delete a config with its draft and all revisions (hubs keep their own snapshot) |
+| PUT | `/api/v1/configs/{id}/draft` | ingress | Store the config's draft (honours `If-Match`) |
+| POST | `/api/v1/configs/{id}/revs` | ingress | Save the draft as the next immutable numbered revision |
+| GET | `/api/v1/configs/{id}/revs/{n}` | ingress | One revision with its config |
+| POST | `/api/v1/configs/{id}/restore` | ingress | Copy a revision into the draft |
+| POST | `/api/v1/configs/{id}/import_yaml` | ingress | Upload YAML as the draft |
+| GET | `/api/v1/configs/{id}/export_yaml` | ingress | Draft or a revision as YAML |
+| POST | `/api/v1/config/validate` | ingress | All validation errors (stateless: config in the body) |
+| POST | `/api/v1/config/preview` | ingress | Decoded pages, usage meters; error tolerant (stateless) |
+| POST | `/api/v1/config/keymap` | ingress | Effective hard-key action per layer (stateless) |
+| GET | `/api/v1/hubs` | ingress | Hubs known to the store with the config and revision each runs, hub ids integrations are connected for, adoptable stores |
+| GET | `/api/v1/hubs/{hub}` | ingress | One hub: running config and revision, history, ack |
+| POST | `/api/v1/hubs/{hub}/apply` | ingress | Run a config revision on the hub (no `rev`: save the draft as a revision first) |
+| POST | `/api/v1/hubs/{hub}/revert` | ingress | Re-apply the hub's previous version |
+| POST | `/api/v1/hubs/adopt` | ingress | Move a hub's store (default: `default`) to a linked hub id |
 | GET | `/api/v1/ha/entities` | ingress | Home Assistant entities for pickers, with area, device, integration and labels |
 | GET | `/api/v1/ha/services` | ingress | Home Assistant services for pickers |
 | POST | `/api/v1/ir/test` | ingress | Fire one IR code through `ha_harmony.send_ir` |
@@ -55,7 +62,8 @@ the table below. There is no polling anywhere: the add-on pushes over two WebSoc
 | GET | `/api/v1/live` | ingress | WebSocket push to the editor: hubs, config status, Bluetooth state, remote keys |
 | GET | `/api/v1/channel` | bearer | WebSocket to the integration: bundle push, acks, Bluetooth relay |
 
-Query/body details follow. `hub` is a query parameter wherever a hub applies.
+Query/body details follow. `hub` is a query parameter on `config/validate|preview|keymap` (it selects the hub limits the integration reported) and a path
+segment on `hubs/{hub}/...`. Config ids are `[A-Za-z0-9][A-Za-z0-9._-]{0,62}` (generated lowercase slugs).
 
 ### Health
 
@@ -65,29 +73,61 @@ config schema accepts a Home Assistant service action (`ha: {service, target: {e
 probed from the schema itself; `page_format` is the page format the compiler and editor speak. The
 editor disables the Home Assistant action picker (with a reason) when `ha_actions` is false.
 
-### Config
+### Config library
 
-- `GET config?hub=&full=0|1` -> `{hub, draft: {config, updated}|null, applied: {rev, at, hash}|null,
-  history: [{rev, at, hash}], history_max, rev}`. `full=1` returns `applied` with its `config`.
-  `rev` is the integer **draft revision**; it is separate from `applied.rev`.
-- `GET config/history?hub=&rev=<int>` -> `{hub, rev, at, hash, config}` for the applied version or one
-  history row (the integer `rev` those rows carry); `404 unknown_rev`. Used for "restore as draft" and diffs.
-- `PUT config/draft?hub=` body `{config}`; optional `If-Match: 3` (also `"3"`, `W/"3"`). Stale ->
-  `409 conflict` with `error.rev` set to the current revision. No header = unconditional.
-  -> `{hub, draft_updated, applied, history, history_max, rev}`. Import and revert also bump `rev`.
-- `POST config/validate?hub=&all=1|0` body `{config?}` (default: the draft) -> `{ok, errors}`;
+Configs are a global library, independent of hubs. Each has an id (slug generated from its name, unique), a free name, **one autosaved
+draft** and any number of **immutable numbered revisions** (1, 2, 3, ... never reused, never edited, no cap; saved on demand). Any
+revision of any config can be applied to any hub. A hub records which config and revision it runs and keeps its own **snapshot** of
+that config, so deleting or renaming a config never changes or breaks a hub. Library changes are pushed on the `configs` topic of `/live`.
+
+Summary object (the `configs[]` rows, and the head of every config response):
+`{id, name, created, updated, latest_rev: int|null, rev_count, draft_rev, has_draft, draft_updated: int|null,
+base_rev: int|null, dirty}`. `draft_rev` is the integer **draft revision** (autosave counter, used by `If-Match`), unrelated to
+revision numbers. `base_rev` is the revision the draft started from (set by `restore` and `revs`; null for a never-saved draft).
+`dirty` is true when the draft differs from revision `base_rev` (or has no base). Times are Unix seconds.
+
+- `GET configs` -> `{configs: [{...summary, hubs: [{hub, rev}]}]}` (`hubs`: the hubs whose current version is a revision of that config).
+- `GET configs/{id}` -> `{...summary, draft: {config, updated, base_rev}|null, revs: [{rev, at, note, hash, parent: int|null}],
+  hubs: [{hub, rev}]}` (`revs` oldest first, no configs; `hash` is a content hash of the config). `404 not_found`.
+- `POST configs` body `{name, from?: {id, rev?}, yaml?: str}` (`from` and `yaml` are mutually exclusive) -> `201 {ok:true, ...GET configs/{id}}`.
+  No source: a blank config (no draft). `from`: its draft becomes the new config's draft (`from.rev`: that revision's config; `404 not_found`
+  when unknown; `409 store` when the source has no draft). `yaml`: parsed and checked like `import_yaml` (`400 bad_yaml | yaml_alias`,
+  `422 ir_files_unresolvable | invalid_config`). `name` is 1-80 chars after trimming/collapsing whitespace, no control characters.
+- `PATCH configs/{id}` body `{name}` -> `{ok:true, ...GET configs/{id}}`. The id never changes; hub snapshots keep the name they were applied with.
+- `DELETE configs/{id}` -> `{ok:true}`; `404 not_found`. Allowed while hubs run it.
+- `PUT configs/{id}/draft` body `{config}`; optional `If-Match: 3` (also `"3"`, `W/"3"`). Stale -> `409 conflict` with `error.rev`
+  set to the current `draft_rev`. No header = unconditional. -> `{id, draft_updated, draft_rev, base_rev, dirty}`. `import_yaml`
+  and `restore` also bump `draft_rev`; `revs` does not.
+- `POST configs/{id}/revs` body `{note?: str <= 200}` -> `201 {ok:true, rev: {rev, at, note, hash, parent}, id, draft_updated, draft_rev,
+  base_rev, dirty}`. Saves the draft as revision `latest+1` (`parent` = the draft's `base_rev`); the draft stays and now has
+  `base_rev` = the new revision (`dirty:false`). `409 store` when there is no draft.
+- `GET configs/{id}/revs/{n}` -> `{id, rev, at, note, hash, parent, config}`; `404 not_found`.
+- `POST configs/{id}/restore` body `{rev}` -> `{ok:true, id, draft_updated, draft_rev, base_rev: rev, dirty:false}`. Replaces the draft with
+  that revision's config (the old draft is lost; save a revision first to keep it).
+- `POST configs/{id}/import_yaml` YAML body (max 1 MB, no anchors; `Content-Type: text/yaml` or `application/yaml`) ->
+  `{ok:true, id, draft_updated, draft_rev, base_rev, dirty}`; `422 ir_files_unresolvable | invalid_config`; `400 bad_yaml | yaml_alias | too_large`.
+  Honours `If-Match`.
+- `GET configs/{id}/export_yaml?source=draft|rev:N` (default `draft`) -> `text/yaml`; `404 empty` (no draft) or `404 not_found`.
+- `POST config/validate?hub=&all=1|0` body `{config}` (required; stateless) -> `{ok, errors}`;
   `all=0` returns only the first error. After a valid parse, `errors` may also hold non-blocking warnings
   `{path, msg, line:null, severity:"warning"}` (theme contrast, weak-ink free colours); they never make `ok` false, and
   errors carry no `severity` key. `config/preview` adds the same warnings to its `errors` (its `ok` ignores them).
   The editor keeps them apart from errors (a "N warnings" chip; they never block Apply).
-- `POST config/apply?hub=` body `{}` -> `{ok:true, ...meta}`; `409 no_draft`; `422 {ok:false, errors}`.
-  Apply is strict; the preview's tolerance does not apply to it.
-- `POST config/revert?hub=` body `{target: "applied"|"previous"}` -> `{ok, ...meta}`; `409 store`
-  when there is no previous version. `previous` pushes the config it replaces onto `history` (cap
-  `history_max`), so a revert can itself be reverted.
-- `POST config/import_yaml?hub=` YAML body (max 1 MB, no anchors) -> `{ok, hub, draft_updated, ...meta}`;
-  `422 ir_files_unresolvable | invalid_config`; `400 bad_yaml | yaml_alias | too_large`. Honours `If-Match`.
-- `GET config/export_yaml?hub=&source=draft|applied` -> `text/yaml`; `404 empty`.
+- `POST config/keymap?hub=` body `{config}` (stateless), see Keymap below.
+- `GET hubs/{hub}` -> `{hub, applied: {config_id, rev, name, at, hash}|null, history: [{config_id, rev, name, at, hash}] (newest
+  first), history_max: 5, config_exists: bool, ack: {rev, result, at, detail?}|null}`. `applied` is what the hub runs; `name` is the
+  config's name when it was applied, `hash` the compiler's config hash, `at` the apply time. `config_exists` is false once the config
+  was deleted from the library (the hub still runs its snapshot).
+- `POST hubs/{hub}/apply` body `{config_id, rev?}` -> `{ok:true, hub, applied, history, history_max}`. With `rev`: that revision of
+  that config. Without `rev`: the config's draft is validated and compiled, saved as a new revision with note `Applied to <hub>`
+  (the newest revision is reused instead when the draft is unchanged since it), then applied; `409 no_draft`. `404 not_found` for
+  an unknown config or revision. `422 {ok:false, errors}` when the config does not validate or compile (strict; the preview's tolerance
+  does not apply; no revision is created). The previous version goes to `history` (cap `history_max`). The integration is then pushed the new bundle.
+- `POST hubs/{hub}/revert` body `{}` -> `{ok:true, hub, applied, history, history_max}`. Re-applies the newest `history` entry; the version
+  left goes on top of `history`, so a revert can itself be reverted. `409 store` when there is no previous version.
+- Migration: a hub state file written by an older add-on (one config per hub) is converted once at start-up. It becomes a library config
+  named after the hub id whose revisions are its old history and applied versions (oldest first, note `Migrated`), with its old draft
+  as the draft; the hub then runs the newest of them.
 - `editor:` is an optional top-level mapping of opaque editor metadata (depth <= 8, <= 5000 nodes,
   <= 64 KiB, plain JSON). It is stored, exported and imported with the config, ignored by the
   compiler, and **stripped from the bundle**, so editor-only changes never change the bundle `rev` or
@@ -95,7 +135,7 @@ editor disables the Home Assistant action picker (with a reason) when `ha_action
 
 ### Preview
 
-`POST config/preview?hub=` body `{config?}` (without `config` it uses the saved draft: `409 no_draft` when there is none, so send the applied config to preview that) always answers `200`, with every page that compiles even
+`POST config/preview?hub=` body `{config}` (required; the editor sends its current text) always answers `200`, with every page that compiles even
 when the draft has errors elsewhere:
 
 ```
@@ -130,7 +170,7 @@ Page-level compile problems (a list too long, a nav target that does not exist, 
 budget) are reported with the path of the config page (`["pages", i, ...]`); the other pages are still
 returned.
 
-`POST config/keymap?hub=` body `{config?}` -> `{ok:true, default: [row], activities: [{id, name, keys: [row]}]}`
+`POST config/keymap?hub=` body `{config}` -> `{ok:true, default: [row], activities: [{id, name, keys: [row]}]}`
 with one row per hard key (35, ordered by code): `{key, code, source: "default"|"activity"|"none",
 action: null | {kind, label, ...}}`. Lookup is the hub's: activity keys, then the default layer, else
 none (`source:"none"`, `action:null`). Default-layer rows use `source:"default"`. `action.kind` is
@@ -144,7 +184,7 @@ or `service` + `entity` for a Home Assistant service action; `entity` is the fir
   and `linked_hubs` are replaced by `connected`, below).
 - Linked hub ids: every authenticated channel `hello` with a valid `hub` records the id and the time, in memory and in
   `/data/linked_hubs.json` (at most 32 ids). A hub is `connected` while its channel socket is open.
-- `GET hubs` -> `{hubs: [{id, has_draft, has_applied, applied_rev, applied_at}], linked: [{id,
+- `GET hubs` -> `{hubs: [{id, has_applied, config_id, config_name, rev, applied_rev, applied_at}], linked: [{id,
   last_seen, name?}], now, adopt: {from: "default", to: [id]}|null}`. `adopt` is set when a store exists
   under `default` and some linked hub id has no store of its own (the editor offers the move).
 - **Adoption.** When exactly one hub id other than `default` is linked and has no store, and `default`
@@ -268,8 +308,8 @@ add-on without `/channel`) makes the integration set link_state `addon_outdated`
 - **Renamed hubs.** The identity fields in `hello`/`identity`: `hw` (stable hardware id, `[A-Za-z0-9._:-]`, 1 to 64), `prev` (the id
   the hub had before a rename, a valid hub id other than `default`), `name` (display name, plain UTF-8, at most 48 bytes, no
   control characters; empty clears it). The add-on records hardware id and name per linked hub (`linked_hubs.json`). When `hub`
-  has no store of its own and a store exists under `prev`, or under a linked id with the same hardware id, that store (draft,
-  applied revisions, history, ack) is moved to `hub` in one atomic rename (the generalisation of the `default` adoption; the old
+  has no store of its own and a store exists under `prev`, or under a linked id with the same hardware id, that store (applied version,
+  history, ack) is moved to `hub` in one atomic rename (the generalisation of the `default` adoption; the old
   id is dropped from the linked list). A `prev` whose recorded hardware id differs is another hub and is skipped. It never
   overwrites. The add-on answers with `{"t":"adopt","result":"moved"|"exists"|"none"}` whenever `prev`/`hw` was sent
   (`exists`: `hub` already has a store; `none`: nothing to move, also the answer to a repeat). Moving back is the same call the
@@ -288,21 +328,22 @@ the upgrade; `403` otherwise). Replaces `GET config/status`, `GET bt/status`, `G
 timers; the server sets TCP keepalive on the accepted socket (as above) and the browser relies on `onclose`, then reconnects
 with jittered exponential back-off (1 s to 30 s) and re-sends its subscription.
 
-Client -> server: `{"sub": ["hubs", "hub:<id>", "bt:<id>", "keys:<id>"]}` (replaces the whole subscription set; the topics are
+Client -> server: `{"sub": ["hubs", "configs", "hub:<id>", "bt:<id>", "keys:<id>"]}` (replaces the whole subscription set; the topics are
 validated, at most 16, unknown are ignored). Topics:
 
 | Topic | Delivers |
 | --- | --- |
 | `hubs` | the `GET hubs` payload |
+| `configs` | the `GET configs` payload (any library change: create, rename, delete, draft, revision, apply) |
 | `hub:<id>` | config status of one hub |
 | `bt:<id>` | Bluetooth status of one hub |
 | `keys:<id>` | remote keys of one hub; being subscribed is the **listen lease** |
 
 Server -> client, all `{"t": ...}`:
 
-- `snapshot` `{topics: {"hubs": {...}, "hub:<id>": {...}, "bt:<id>": {...}}}`: sent right after every `sub` for the newly added
+- `snapshot` `{topics: {"hubs": {...}, "configs": {...}, "hub:<id>": {...}, "bt:<id>": {...}}}`: sent right after every `sub` for the newly added
   topics, and after a `resync` (below). `keys:` has no snapshot.
-- `hubs` (payload as `GET hubs`), `hub` `{hub, ...status}`, `bt` `{hub, ...status}`, `key` `{hub, seq, slot, page, usage, down, ts}`:
+- `hubs` (payload as `GET hubs`), `configs` (payload as `GET configs`), `hub` `{hub, ...status}`, `bt` `{hub, ...status}`, `key` `{hub, seq, slot, page, usage, down, ts}`:
   deltas, each carrying the full new payload (no patches) except `key`.
 - `resync` `{topic}`: the server's per-socket queue overflowed and dropped the oldest messages; a fresh snapshot of that topic
   follows. `key` events lost this way are not replayed.
@@ -310,7 +351,7 @@ Server -> client, all `{"t": ...}`:
 
 Payloads (same shapes as the removed endpoints):
 
-- `hub:<id>` -> `{hub, applied_rev, acked_rev, result: "ok"|"error"|null, detail, acked_at, connected: bool, connected_at,
+- `hub:<id>` -> `{hub, applied_rev, config_id, config_name, rev, acked_rev, result: "ok"|"error"|null, detail, acked_at, connected: bool, connected_at,
   remotes, theme_notices, now}`. `applied_rev` is the bundle rev (a content hash), `connected` is whether the integration's
   channel for that hub is open, `now` the add-on clock (unix seconds).
 - `bt:<id>` -> `{hub, status: "ok"|"unsupported"|"offline"|"unknown", state, limits, listening}`. `unknown`: no integration has
@@ -376,15 +417,15 @@ found by TCP keepalive (60 s idle, 10 s interval, 3 probes), then reconnected wi
 - Errors keep the nested envelope `{error:{code,msg,...}}`: 503 `{error:{code:"ha_unavailable"}}`; 409
   draft conflict `{error:{code:"conflict",msg,rev}}`; 429 `{error:{code:"rate_limited",msg,retry_after_ms}}`
   plus a `Retry-After` header.
-- Draft rev is an integer counter. It appears as top-level `rev` in GET config and in the PUT, apply,
-  revert and import responses; `If-Match` takes `3`, `"3"` or `W/"3"`. `rev` is separate from `applied.rev`.
+- Draft rev (`draft_rev`) is an integer counter per config, returned by the draft, import, restore and revision calls; `If-Match`
+  takes `3`, `"3"` or `W/"3"`. It is separate from the numbered revisions (`rev`) of a config.
 - `GET /ha/entities` returns `{entities:[{entity_id,name,domain,device_class?,area_id?,device_id?,platform?,label_ids?,diag?,state?}],areas,devices,labels,registries,total}` and
   `GET /ha/services` returns `{services:[{domain,service,name,fields:[...]}]}`. Both reject repeated
   query params.
 - Validation: `errors:[{path:[...],msg,line:null}]` (up to 100). `POST validate?all=0` gives the first
   error only. `harmony_core.config_model.validate_all()` / `validate_data()` are new; `parse_model` is
   unchanged and still fail-fast.
-- `GET /hubs` returns `{hubs:[{id,has_draft,has_applied,applied_rev,applied_at}]}`. Here `applied_rev`
+- `GET /hubs` returns `{hubs:[{id,has_applied,config_id,config_name,rev,applied_rev,applied_at}]}`. Here `rev` is the library revision, `applied_rev`
   and the status endpoint's `applied_rev` are the bundle rev (content hash), the same string the
   integration acks.
 - Acks travel as `ack` messages on the channel (see Channel). The add-on answers an `ack` for a rev that is not the applied one with `error stale_rev`.

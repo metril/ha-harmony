@@ -19,7 +19,7 @@ describe('loading the Home Assistant list', () => {
       },
       'GET api/v1/ha/services': () => ({ body: { services: [] } }),
     });
-    const st = new StudioState(new Store(f.api, 'h', 600));
+    const st = new StudioState(new Store(f.api, 'h', 'c', 600));
     const first = st.loadHa();
     st.setHaDiag(true); // while the first request is still in flight
     release();
@@ -33,7 +33,7 @@ describe('loading the Home Assistant list', () => {
   });
   it('refreshHa reloads only when the list is older than the limit; the state flag is off unless asked', async () => {
     const f = fakeApi({ 'GET api/v1/ha/entities': () => ({ body: cat(1) }), 'GET api/v1/ha/services': () => ({ body: { services: [] } }) });
-    const st = new StudioState(new Store(f.api, 'h', 600));
+    const st = new StudioState(new Store(f.api, 'h', 'c', 600));
     await st.loadHa();
     st.refreshHa(60000);
     await settle();

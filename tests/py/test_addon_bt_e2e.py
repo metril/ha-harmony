@@ -168,7 +168,7 @@ async def open_bt(browser, site, route="bluetooth"):
 
 
 async def draft(site):
-    _, got = await api(site, "GET", "/api/v1/config")
+    _, got = await api(site, "GET", "/api/v1/configs/main")
     return (got["draft"] or {}).get("config", {})
 
 

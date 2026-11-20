@@ -1,21 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../src/lib/store';
-import { META, USAGE, fakeApi, previewBad, previewOk, tvConfig, type Handler } from './helpers';
+import { DRAFT_REV, PUTRESP, USAGE, libRoutes, fakeApi, previewBad, previewOk, tvConfig, type Handler } from './helpers';
 import { fakeLive } from './fake-ws';
 
-const draftResp = { hub: 'h', draft_updated: 1_700_000_100, ...META };
+const draftResp = PUTRESP;
 function setup(over: Record<string, Handler> = {}, draft: unknown = null) {
   const puts: unknown[] = [];
   const f = fakeApi({
-    'GET api/v1/config': () => ({ body: { hub: 'h', draft, ...META, applied: { ...META.applied, config: tvConfig() } } }),
-    'PUT api/v1/config/draft': (c) => {
+    ...libRoutes((draft as { config: ReturnType<typeof tvConfig> } | null) ?? { config: tvConfig() }),
+    'PUT api/v1/configs/c/draft': (c) => {
       puts.push(JSON.parse(c.body ?? '{}').config);
       return { body: draftResp };
     },
     'POST api/v1/config/preview': () => ({ body: previewOk({ usage: { ...USAGE, json_bytes: 2048 } }) }),
     ...over,
   });
-  const store = new Store(f.api, 'h', 600);
+  const store = new Store(f.api, 'h', 'c', 600);
   return { store, puts, ...f };
 }
 
@@ -44,7 +44,7 @@ describe('draft store', () => {
     let up = false;
     const puts: unknown[] = [];
     const { store } = setup({
-      'PUT api/v1/config/draft': (c) => {
+      'PUT api/v1/configs/c/draft': (c) => {
         if (!up) return { status: 503, body: { error: { code: 'unavailable', msg: 'starting' } } };
         puts.push(JSON.parse(c.body ?? '{}').config);
         return { body: draftResp };
@@ -70,7 +70,7 @@ describe('draft store', () => {
 
   it('keeps a discarded draft one Undo away', async () => {
     const draft = { config: { ...tvConfig(), keys: { play: { none: true } } }, updated: 1_700_000_000 };
-    const { store } = setup({ 'POST api/v1/config/revert': () => ({ body: { ...META, hub: 'h' } }) }, draft);
+    const { store } = setup({ 'POST api/v1/configs/c/restore': () => ({ body: { ok: true, ...PUTRESP, dirty: false } }) }, draft);
     await store.load();
     expect(store.config.keys).toEqual({ play: { none: true } });
     await store.discard();
@@ -79,13 +79,13 @@ describe('draft store', () => {
   });
 
   it('shows an optimistic edit at once and rolls back with a toast when the PUT fails', async () => {
-    const { store } = setup({ 'PUT api/v1/config/draft': () => ({ status: 500, body: { error: { code: 'x', msg: 'disk full' } } }) });
+    const { store } = setup({ 'PUT api/v1/configs/c/draft': () => ({ status: 500, body: { error: { code: 'x', msg: 'disk full' } } }) });
     await store.load();
     store.edit((c) => (c.devices![0]!.name = 'Changed'));
     expect(store.config.devices![0]!.name).toBe('Changed');
     await vi.advanceTimersByTimeAsync(700);
     expect(store.config.devices![0]!.name).toBe('Living room TV');
-    expect(store.hasDraft).toBe(false);
+    expect(store.hasDraft).toBe(true);
     expect(store.saveState).toBe('error');
     expect(store.toasts[0]?.kind).toBe('error');
   });
@@ -93,7 +93,7 @@ describe('draft store', () => {
   it('enters the conflict state on 409 and keeps local edits; Overwrite resends', async () => {
     let conflict = true;
     const { store, calls } = setup({
-      'PUT api/v1/config/draft': () => (conflict ? { status: 409, body: { error: { code: 'conflict', msg: 'stale' } } } : { body: { ...draftResp, rev: 9 } }),
+      'PUT api/v1/configs/c/draft': () => (conflict ? { status: 409, body: { error: { code: 'conflict', msg: 'stale' } } } : { body: { ...draftResp, draft_rev: 9 } }),
     });
     await store.load();
     store.edit((c) => (c.devices![0]!.name = 'Mine'));
@@ -117,9 +117,9 @@ describe('draft store', () => {
     expect(store.errorSummary.bySection['devices']).toBe(1);
   });
 
-  it('sends the rev from GET config as If-Match, then the rev each PUT returned', async () => {
+  it('sends the draft_rev from GET configs/{id} as If-Match, then the rev each PUT returned', async () => {
     let n = 7;
-    const { store, calls } = setup({ 'PUT api/v1/config/draft': () => ({ body: { ...draftResp, rev: ++n } }) });
+    const { store, calls } = setup({ 'PUT api/v1/configs/c/draft': () => ({ body: { ...draftResp, draft_rev: ++n } }) });
     await store.load();
     store.edit((c) => (c.devices![0]!.name = 'A'));
     await vi.advanceTimersByTimeAsync(700);
@@ -129,17 +129,42 @@ describe('draft store', () => {
     expect(puts).toEqual(['7', '8']);
   });
 
-  it('restores a history version as the draft from GET config/history', async () => {
-    const old = { ...tvConfig(), activities: [] };
-    const { store, puts, calls } = setup({ 'GET api/v1/config/history': () => ({ body: { hub: 'h', rev: 2, at: 1, hash: 'x', config: old } }) });
+  it('restores a revision into the draft through POST restore, then reloads', async () => {
+    const { store, calls } = setup({ 'POST api/v1/configs/c/restore': () => ({ body: { ok: true, ...PUTRESP, dirty: false } }) });
     await store.load();
-    await store.restoreAsDraft(2);
-    expect(calls.find((c) => c.url.includes('config/history'))?.url).toContain('rev=2');
-    expect(puts.at(-1)).toEqual(old);
-    expect(store.hasDraft).toBe(true);
+    await store.restoreRev(2);
+    const r = calls.find((c) => c.url.includes('/restore'))!;
+    expect(JSON.parse(r.body!)).toEqual({ rev: 2 });
+    expect(r.headers['X-HH-CSRF']).toBe('1');
   });
 
-  it('previews the applied config explicitly when there is no draft (the add-on would answer 409 no_draft)', async () => {
+  it('saves a revision with its note and tracks the base revision', async () => {
+    const { store, calls } = setup(
+      { 'POST api/v1/configs/c/revs': () => ({ status: 201, body: { ok: true, ...PUTRESP, base_rev: 4, dirty: false, rev: { rev: 4, at: 5, note: 'Hi', hash: 'h4', parent: 3 } } }) },
+      { config: tvConfig(), updated: 1 },
+    );
+    await store.load();
+    store.edit((c) => (c.devices![0]!.name = 'A'));
+    expect(store.dirty).toBe(true);
+    expect(await store.saveRevision('Hi')).toBe(4);
+    expect(JSON.parse(calls.find((c) => c.url.endsWith('/revs'))!.body!)).toEqual({ note: 'Hi' });
+    expect(store.baseRev).toBe(4);
+    expect(store.dirty).toBe(false);
+    expect(store.revs.at(-1)?.rev).toBe(4);
+  });
+
+  it('applies the draft to the chosen hub with no rev (the add-on saves it as a revision)', async () => {
+    const { store, calls } = setup(
+      { 'POST api/v1/hubs/other/apply': () => ({ body: { ok: true, hub: 'other', applied: { config_id: 'c', rev: 4, name: 'Main', at: 9, hash: 'x' }, history: [], history_max: 5 } }) },
+      { config: tvConfig(), updated: 1 },
+    );
+    await store.load();
+    expect(await store.applyDraft('other')).toBe(4);
+    expect(JSON.parse(calls.find((c) => c.url.endsWith('/hubs/other/apply'))!.body!)).toEqual({ config_id: 'c' });
+    expect(store.applied?.rev).toBe(3); // the selected hub 'h' is unchanged
+  });
+
+  it('previews the in-memory config (the preview route is stateless)', async () => {
     const { store, calls } = setup();
     await store.load();
     const body = JSON.parse(calls.find((c) => c.url.includes('config/preview'))!.body!);
@@ -162,7 +187,7 @@ describe('draft store', () => {
   });
 
   it('is first-run when nothing is applied and there is no draft', async () => {
-    const { store } = setup({ 'GET api/v1/config': () => ({ body: { hub: 'h', draft: null, applied: null, history: [], history_max: 5, rev: 0 } }) });
+    const { store } = setup(libRoutes(null, { revs: false, applied: false }));
     await store.load();
     expect(store.isFirstRun).toBe(true);
   });
@@ -178,27 +203,27 @@ describe('unsaved edits survive a reload', () => {
     await vi.advanceTimersByTimeAsync(0);
     const put = calls.find((c) => c.method === 'PUT')!;
     expect(put.headers['X-HH-CSRF']).toBe('1');
-    expect(put.headers['If-Match']).toBe(String(META.rev));
+    expect(put.headers['If-Match']).toBe(String(DRAFT_REV));
     expect(JSON.parse(put.body!).config.devices[0].name).toBe('Quick');
-    expect(JSON.parse(sessionStorage.getItem('hh-unsaved:h')!).config.devices[0].name).toBe('Quick');
-    expect(localStorage.getItem('hh-unsaved:h')).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem('hh-unsaved:c')!).config.devices[0].name).toBe('Quick');
+    expect(localStorage.getItem('hh-unsaved:c')).toBeNull();
     await vi.advanceTimersByTimeAsync(700); // the debounce was cancelled; a later edit saves normally and clears the stash
     store.edit((c) => (c.devices![0]!.name = 'Later'));
     await vi.advanceTimersByTimeAsync(700);
     expect(store.saveState).toBe('saved');
-    expect(sessionStorage.getItem('hh-unsaved:h')).toBeNull();
+    expect(sessionStorage.getItem('hh-unsaved:c')).toBeNull();
   });
   it('a clean store stashes and sends nothing', async () => {
     const { store, calls } = setup();
     await store.load();
     store.flushOnUnload();
     expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(0);
-    expect(sessionStorage.getItem('hh-unsaved:h')).toBeNull();
+    expect(sessionStorage.getItem('hh-unsaved:c')).toBeNull();
   });
   it('a later load offers the stash when the server draft is older, and restoring brings the edit back as a draft', async () => {
     const edited = tvConfig();
     edited.devices![0]!.name = 'Quick';
-    sessionStorage.setItem('hh-unsaved:h', JSON.stringify({ config: edited, rev: META.rev, at: 1 }));
+    sessionStorage.setItem('hh-unsaved:c', JSON.stringify({ config: edited, rev: DRAFT_REV, at: 1 }));
     const { store } = setup({}, { config: tvConfig(), updated: 1 });
     await store.load();
     expect(store.stashed?.config.devices![0]!.name).toBe('Quick');
@@ -206,31 +231,30 @@ describe('unsaved edits survive a reload', () => {
     expect(store.config.devices![0]!.name).toBe('Quick');
     expect(store.saveState).toBe('dirty');
     expect(store.stashed).toBeNull();
-    expect(sessionStorage.getItem('hh-unsaved:h')).toBeNull();
+    expect(sessionStorage.getItem('hh-unsaved:c')).toBeNull();
   });
   it('drops the stash when the server already has it or is newer', async () => {
     const edited = tvConfig();
     edited.devices![0]!.name = 'Quick';
-    sessionStorage.setItem('hh-unsaved:h', JSON.stringify({ config: edited, rev: META.rev - 1, at: 1 }));
+    sessionStorage.setItem('hh-unsaved:c', JSON.stringify({ config: edited, rev: DRAFT_REV - 1, at: 1 }));
     const a = setup({}, { config: tvConfig(), updated: 1 });
     await a.store.load();
     expect(a.store.stashed).toBeNull();
-    sessionStorage.setItem('hh-unsaved:h', JSON.stringify({ config: edited, rev: META.rev, at: 1 }));
+    sessionStorage.setItem('hh-unsaved:c', JSON.stringify({ config: edited, rev: DRAFT_REV, at: 1 }));
     const b = setup({}, { config: edited, updated: 1 });
     await b.store.load();
     expect(b.store.stashed).toBeNull();
-    expect(sessionStorage.getItem('hh-unsaved:h')).toBeNull();
+    expect(sessionStorage.getItem('hh-unsaved:c')).toBeNull();
   });
 });
 
 describe('store and the live socket', () => {
   it('loading and saving a draft opens no live socket (only views that show pushed state subscribe)', async () => {
     const { api } = fakeApi({
-      'GET api/v1/config': () => ({ body: { hub: 'h', draft: { config: tvConfig(), updated: 1 }, ...META } }),
+      ...libRoutes({ config: tvConfig() }),
       'POST api/v1/config/preview': () => ({ body: previewOk() }),
-      'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 2, ...META } }),
     });
-    const s = new Store(api, 'h', 5);
+    const s = new Store(api, 'h', 'c', 5);
     await s.load();
     s.edit((c) => (c.devices![0]!.name = 'X'));
     await s.flush();

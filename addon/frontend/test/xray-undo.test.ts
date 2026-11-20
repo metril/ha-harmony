@@ -3,7 +3,7 @@ import keymap from './fixtures/keymap.json';
 import { KEYS } from '../src/lib/remote-layout';
 import { xrayLabels } from '../src/lib/xray';
 import { Store } from '../src/lib/store';
-import { META, fakeApi, previewOk, tvConfig } from './helpers';
+import { libRoutes, fakeApi, previewOk, tvConfig } from './helpers';
 
 describe('x-ray labels', () => {
   const all = KEYS.map((k) => ({ key: k.name, text: `label of ${k.name}` }));
@@ -30,11 +30,10 @@ describe('x-ray labels', () => {
 describe('undo history', () => {
   const mk = async () => {
     const f = fakeApi({
-      'GET api/v1/config': () => ({ body: { hub: 'h', draft: { config: tvConfig(), updated: 1 }, ...META } }),
+      ...libRoutes({ config: tvConfig() }),
       'POST api/v1/config/preview': () => ({ body: previewOk() }),
-      'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 2, ...META } }),
-    });
-    const s = new Store(f.api, 'h', 5000);
+      });
+    const s = new Store(f.api, 'h', 'c', 5000);
     await s.load();
     return s;
   };
@@ -66,11 +65,10 @@ describe('undo history', () => {
   });
   it('previews the in-memory config right after an edit, without waiting for the save', async () => {
     const f = fakeApi({
-      'GET api/v1/config': () => ({ body: { hub: 'h', draft: { config: tvConfig(), updated: 1 }, ...META } }),
+      ...libRoutes({ config: tvConfig() }),
       'POST api/v1/config/preview': () => ({ body: previewOk() }),
-      'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 2, ...META } }),
-    });
-    const s = new Store(f.api, 'h', 5000);
+      });
+    const s = new Store(f.api, 'h', 'c', 5000);
     await s.load();
     const before = f.calls.filter((c) => c.url.includes('preview')).length;
     s.edit((c) => (c.keys = {}));

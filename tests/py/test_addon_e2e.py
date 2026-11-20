@@ -238,16 +238,24 @@ async def hub_status(origin, hub="default"):
                 return m["topics"][f"hub:{hub}"]
 
 
+async def ensure_cfg(origin, cid="main"):
+    """Create library config `cid` (name = id) unless it exists. e2e: pending the library frontend."""
+    if (await api(origin, "GET", f"/api/v1/configs/{cid}"))[0] == 404:
+        await api(origin, "POST", "/api/v1/configs", json={"name": cid}, headers=H)
+
+
 async def seed(origin, *configs):
     """Apply each config in turn through the API (so history fills)."""
     from harmony_core.config_model import load_source
 
     for text in configs:
         cfg = load_source(text)
-        assert (await api(origin, "PUT", "/api/v1/config/draft", json={"config": cfg}, headers=H))[
+        await ensure_cfg(origin)
+        assert (await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": cfg}, headers=H))[
             0
         ] == 200
-        assert (await api(origin, "POST", "/api/v1/config/apply", json={}, headers=H))[0] == 200
+        body = {"config_id": "main"}
+        assert (await api(origin, "POST", "/api/v1/hubs/default/apply", json=body, headers=H))[0] == 200
 
 
 async def test_import_preview_apply_ack_under_an_ingress_prefix(browser, site):
@@ -259,13 +267,13 @@ async def test_import_preview_apply_ack_under_an_ingress_prefix(browser, site):
     await page.locator("textarea").fill(YAML)
     await page.get_by_role("button", name="Import As Draft").click()
     bar = page.get_by_role("region", name="Draft")
-    await bar.get_by_text("1 change not applied").wait_for()
+    await bar.get_by_text("No Revision Yet").wait_for()
     await bar.get_by_text("Valid").wait_for()  # preview reported no errors
     await bar.get_by_role("group", name="Config", exact=False).wait_for()  # meter fed by usage
     assert "KiB" in await bar.locator(".meter").first.inner_text()
 
     await bar.get_by_role("button", name="Review & Apply").click()
-    await page.get_by_role("button", name="Apply to Hub").click()
+    await page.get_by_role("button", name="Apply To Hub").click()
     await page.get_by_text("Saved as rev 1").wait_for()
     await page.get_by_text("Sending to the Remote").wait_for()
     assert await page.get_by_text("(pending)").count() == 1
@@ -276,7 +284,7 @@ async def test_import_preview_apply_ack_under_an_ingress_prefix(browser, site):
     await page.get_by_text("(pending)").wait_for(state="detached", timeout=8000)
     await page.get_by_text("On the Remote").wait_for()
     await page.get_by_role("button", name="Done").click()
-    await bar.get_by_text("No changes since rev 1").wait_for()
+    await bar.get_by_text("Rev 1 · No Changes").wait_for()
     # 404s for the favicon are fine; CSP violations and script errors are not
     assert [p for p in problems if "Failed to load resource" not in p] == []
 
@@ -286,7 +294,7 @@ async def test_a_second_tab_editing_the_draft_shows_the_conflict_banner(browser,
     a = await open_editor(browser, site)
     b = await open_editor(browser, site)
     for p in (a, b):
-        await p.get_by_text("No changes since rev 1").wait_for()
+        await p.get_by_text("Rev 1 · No Changes").wait_for()
     edit = "document.querySelector('hh-app').store.edit(c => { c.devices[0].name = '%s'; })"
     await b.evaluate(edit % "From tab B")
     await b.get_by_text("saved just now").wait_for()
@@ -297,7 +305,7 @@ async def test_a_second_tab_editing_the_draft_shows_the_conflict_banner(browser,
         await shots(a, "conflict")
     await banner.get_by_role("button", name="Reload").click()
     await banner.wait_for(state="detached")
-    _, got = await api(site, "GET", "/api/v1/config")
+    _, got = await api(site, "GET", "/api/v1/configs/main")
     assert got["draft"]["config"]["devices"][0]["name"] == "From tab B"
 
 
@@ -308,7 +316,7 @@ async def test_waiting_message_after_30s_is_reachable_and_late_ack_still_complet
     ch = await Channel(site).open()  # the integration is connected
     await ch.bundle()
     page = await open_editor(browser, site)
-    await page.get_by_text("No changes since rev 1").wait_for()
+    await page.get_by_text("Rev 1 · No Changes").wait_for()
     # an edit through the store, then apply it from the UI with a shortened wait
     await page.evaluate(
         "document.querySelector('hh-app').store.edit(c => { c.devices[0].settle_ms = 250; })"
@@ -318,7 +326,7 @@ async def test_waiting_message_after_30s_is_reachable_and_late_ack_still_complet
         "document.querySelector('hh-app').shadowRoot.querySelector('hh-apply-dialog').waitMs = 500"
     )
     await page.get_by_role("button", name="Review & Apply").click()
-    await page.get_by_role("button", name="Apply to Hub").click()
+    await page.get_by_role("button", name="Apply To Hub").click()
     await page.get_by_text("Home Assistant has not picked it up yet").wait_for(timeout=8000)
     await ch.ack()
     await page.get_by_text("On the Remote").wait_for(timeout=8000)
@@ -342,7 +350,7 @@ async def test_screenshots(browser, site):
         pytest.skip("set HH_SHOTS to write screenshots")
     await seed(site, YAML, SMALL)
     page = await open_editor(browser, site)
-    await page.get_by_text("No changes since rev 2").wait_for()
+    await page.get_by_text("Rev 2 · No Changes").wait_for()
     await shots(page, "overview")
     await page.goto(f"{site}{PREFIX}/#/history")
     await page.get_by_role("button", name="Restore rev 1").wait_for()
@@ -474,7 +482,7 @@ async def test_studio_import_assign_drag_inspect_apply(browser, site):
     if SHOTS:
         await shots(page, "studio-inspector")
     await page.wait_for_timeout(900)  # autosave
-    _, got = await api(site, "GET", "/api/v1/config")
+    _, got = await api(site, "GET", "/api/v1/configs/main")
     wid = got["draft"]["config"]["pages"][1]["widgets"][-1]
     assert wid["role"] == "primary" and wid["icon"] == "vol_down"
     assert wid["action"] == {"device": "avr", "command": "mute"}
@@ -488,7 +496,7 @@ async def test_studio_import_assign_drag_inspect_apply(browser, site):
     await page.wait_for_timeout(200)
 
     await page.get_by_role("button", name="Review & Apply").click()
-    await page.get_by_role("button", name="Apply to Hub").click()
+    await page.get_by_role("button", name="Apply To Hub").click()
     await page.get_by_text("Saved as rev").wait_for()
     assert [p for p in problems if "Failed to load resource" not in p] == []
 
@@ -527,8 +535,9 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
         "devices:\n  - id: avr\n    name: AV receiver\n    power: {toggle: {proto: rc5, addr: 16, cmd: 12}}\n"
         "    commands: {vol_up: {proto: rc5, addr: 16, cmd: 16}, vol_down: {proto: rc5, addr: 16, cmd: 17}, mute: {proto: rc5, addr: 16, cmd: 13}}\n"
     )
+    await ensure_cfg(site)
     assert (
-        await api(site, "PUT", "/api/v1/config/draft", json={"config": load_source(avr)}, headers=H)
+        await api(site, "PUT", "/api/v1/configs/main/draft", json={"config": load_source(avr)}, headers=H)
     )[0] == 200
     page = await open_editor(browser, site, problems)
     await page.goto(f"{site}{PREFIX}/#/devices/new")
@@ -567,7 +576,7 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
     bar = page.get_by_role("region", name="Draft")
     await bar.get_by_text("Valid").wait_for()
     await bar.get_by_role("button", name="Review & Apply").click()
-    await page.get_by_role("button", name="Apply to Hub").click()
+    await page.get_by_role("button", name="Apply To Hub").click()
     await page.get_by_text("Saved as rev 1").wait_for()
     assert [p for p in problems if "Failed to load resource" not in p] == []
 
@@ -575,8 +584,9 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
 async def test_draft_survives_a_page_reload(browser, site):
     from harmony_core.config_model import load_source
 
+    await ensure_cfg(site)
     status, _ = await api(
-        site, "PUT", "/api/v1/config/draft", json={"config": load_source(YAML)}, headers=H
+        site, "PUT", "/api/v1/configs/main/draft", json={"config": load_source(YAML)}, headers=H
     )
     assert status == 200
     page = await open_editor(browser, site)
@@ -591,14 +601,16 @@ async def test_draft_survives_a_page_reload(browser, site):
     await page.get_by_label("Device Name").wait_for()
     assert await page.get_by_label("Device Name").input_value() == "Den TV"
     assert await page.evaluate("() => document.querySelector('hh-app').store.hasDraft") is True
-    _, got = await api(site, "GET", "/api/v1/config")
+    _, got = await api(site, "GET", "/api/v1/configs/main")
     assert got["draft"]["config"]["devices"][0]["name"] == "Den TV"
 
 
 async def test_edit_then_immediate_reload_keeps_the_edit(browser, site):
     from harmony_core.config_model import load_source
 
-    await api(site, "PUT", "/api/v1/config/draft", json={"config": load_source(YAML)}, headers=H)
+    await ensure_cfg(site)
+
+    await api(site, "PUT", "/api/v1/configs/main/draft", json={"config": load_source(YAML)}, headers=H)
     page = await open_editor(browser, site)
     await page.goto(f"{site}{PREFIX}/#/devices/tv")
     name = page.get_by_label("Device Name")
@@ -615,7 +627,7 @@ async def test_edit_then_immediate_reload_keeps_the_edit(browser, site):
     await page.wait_for_function(
         "() => document.querySelector('hh-app').store.saveState === 'saved'", timeout=8000
     )
-    _, got = await api(site, "GET", "/api/v1/config")
+    _, got = await api(site, "GET", "/api/v1/configs/main")
     assert got["draft"]["config"]["devices"][0]["name"] == "Quick TV"
 
 
@@ -723,7 +735,7 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
     await page.mouse.up()
     await insp.get_by_text("Automatic: a tap runs light.toggle").wait_for()
     await page.wait_for_timeout(900)  # autosave
-    _, got = await api(site, "GET", "/api/v1/config")
+    _, got = await api(site, "GET", "/api/v1/configs/main")
     cfg = got["draft"]["config"]
     tiles = [w for p in cfg["pages"] for w in p["widgets"] if w["type"] == "tile"]
     assert [t["entity"] for t in tiles] == ["light.kitchen"] and "tap" not in tiles[0]
@@ -735,7 +747,7 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
     bar = page.get_by_role("region", name="Draft")
     await bar.get_by_text("Valid").wait_for()
     await bar.get_by_role("button", name="Review & Apply").click()
-    await page.get_by_role("button", name="Apply to Hub").click()
+    await page.get_by_role("button", name="Apply To Hub").click()
     await page.get_by_text("Saved as rev 1").wait_for()
 
     ch = await Channel(site).open()
@@ -765,9 +777,9 @@ async def test_editor_follows_the_hub_id_the_integration_uses(browser, site):
     await page.locator("textarea").fill(YAML)
     await page.get_by_role("button", name="Import As Draft").click()
     bar = page.get_by_role("region", name="Draft")
-    await bar.get_by_text("1 change not applied").wait_for()
+    await bar.get_by_text("No Revision Yet").wait_for()
     await bar.get_by_role("button", name="Review & Apply").click()
-    await page.get_by_role("button", name="Apply to Hub").click()
+    await page.get_by_role("button", name="Apply To Hub").click()
     await page.get_by_text("Saved as rev 1").wait_for()
 
     ch = await Channel(site, hub).open()
@@ -789,7 +801,7 @@ async def test_history_status_follows_the_remote(browser, site):
     await ch.bundle()
     page = await open_editor(browser, site)
     await page.goto(f"{site}{PREFIX}/#/history")
-    status = page.locator("hh-history li").first.locator(".chip")
+    status = page.locator("hh-history #hub-runs .chip")
     await status.get_by_text("Sending…").wait_for()
     assert await page.get_by_role("button", name="Restore rev 1").count() == 1
     await page.get_by_text("is being sent to the remote").wait_for()
@@ -809,3 +821,57 @@ async def test_history_status_follows_the_remote(browser, site):
     if SHOTS:
         await shots(page, "history-rejected")
     await ch.close()
+
+async def test_library_create_save_rev_switch_restore_and_apply_to_hub(browser, site):
+    """Config library in the editor: import, Save Revision, New config, switch back, Restore To Draft, Apply To Hub."""
+    problems: list[str] = []
+    page = await open_editor(browser, site, problems)
+    await page.get_by_text("Set up your first hub config").wait_for()
+    cfg = page.get_by_role("combobox", name="Config")
+    assert await cfg.locator("option:checked").inner_text() == "Main"  # an empty library gets "Main"
+
+    await page.get_by_role("button", name="Import YAML", exact=True).click()
+    await page.locator("textarea").fill(YAML)
+    await page.get_by_role("button", name="Import As Draft").click()
+    bar = page.get_by_role("region", name="Draft")
+    await bar.get_by_text("No Revision Yet").wait_for()
+    await bar.get_by_role("button", name="Save Revision").click()
+    await bar.get_by_label("Revision Note").fill("First import")
+    await bar.get_by_role("button", name="Save", exact=True).click()
+    await bar.get_by_text("Rev 1 · No Changes").wait_for()
+    _, got = await api(site, "GET", "/api/v1/configs/main")
+    assert [(r["rev"], r["note"]) for r in got["revs"]] == [(1, "First import")]
+
+    # a new config: the page reloads on it, empty, and the picker lists both
+    await page.get_by_role("button", name="Config Actions").click()
+    await page.get_by_role("menuitem", name="New", exact=True).click()
+    await page.get_by_label("Config Name").fill("Second")
+    await page.get_by_role("button", name="Create").click()
+    await page.get_by_text("Set up your first hub config").wait_for()
+    assert await cfg.locator("option:checked").inner_text() == "Second"
+    assert await cfg.locator("option").all_inner_texts() == ["Main", "Second"]
+
+    # back to Main, edit, then restore rev 1 over the edit
+    await cfg.select_option(label="Main")
+    await bar.get_by_text("Rev 1 · No Changes").wait_for()
+    await page.evaluate("document.querySelector('hh-app').store.edit(c => { c.devices[0].name = 'Edited'; })")
+    await bar.get_by_text("Rev 1 + Unsaved Changes").wait_for()
+    await page.goto(f"{site}{PREFIX}/?config=main#/history")
+    await page.get_by_role("button", name="Restore rev 1 to draft").click()
+    await page.get_by_role("button", name="Replace Draft").click()
+    await bar.get_by_text("Rev 1 · No Changes").wait_for()
+    _, got = await api(site, "GET", "/api/v1/configs/main")
+    assert got["draft"]["config"]["devices"][0]["name"] == "TV"
+
+    # apply rev 1 to the selected hub (default)
+    await page.goto(f"{site}{PREFIX}/?config=main#/history")
+    await page.get_by_role("button", name="Apply rev 1 to hub").click()
+    assert await page.get_by_role("combobox", name="Target Hub").input_value() == "default"
+    await page.get_by_role("button", name="Apply To Hub").click()
+    await page.get_by_text("Saved as rev 1").wait_for()
+    await page.get_by_role("button", name="Keep Waiting in Background").click()
+    _, hub = await api(site, "GET", "/api/v1/hubs/default")
+    assert hub["applied"]["config_id"] == "main" and hub["applied"]["rev"] == 1
+    await page.get_by_text("Applied On default").wait_for()
+    await page.get_by_text("Running: Main Rev 1").wait_for()
+    assert [p for p in problems if "Failed to load resource" not in p] == []

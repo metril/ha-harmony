@@ -17,7 +17,7 @@ export class Live extends EventTarget {
     super();
   }
 
-  /** Subscribe to `topic` (`hubs`, `hub:<id>`, `bt:<id>`, `keys:<id>`); the cached snapshot, if any, is delivered at once. Returns the unsubscribe. */
+  /** Subscribe to `topic` (`hubs`, `configs`, `hub:<id>`, `bt:<id>`, `keys:<id>`); the cached snapshot, if any, is delivered at once. Returns the unsubscribe. */
   sub(topic: string, cb: Cb): () => void {
     let set = this.subs.get(topic);
     const first = !set;
@@ -131,7 +131,8 @@ export class Live extends EventTarget {
         for (const [k, v] of Object.entries(m.topics ?? {})) this.set(k, v);
         break;
       case 'hubs':
-        this.set('hubs', rest);
+      case 'configs':
+        this.set(t, rest);
         break;
       case 'hub':
       case 'bt':

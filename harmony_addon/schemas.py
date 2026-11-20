@@ -58,33 +58,40 @@ VALIDATE_QUERY = vol.Schema(
     },
     extra=vol.PREVENT_EXTRA,
 )
-GET_CONFIG_QUERY = vol.Schema(
-    {
-        vol.Optional("hub", default="default"): _hub,
-        vol.Optional("full", default="0"): vol.In(["0", "1"]),
-    },
-    extra=vol.PREVENT_EXTRA,
-)
-HISTORY_QUERY = vol.Schema(
-    {
-        vol.Optional("hub", default="default"): _hub,
-        vol.Required("rev"): vol.All(str, vol.Match(r"^[0-9]{1,12}$")),
-    },
-    extra=vol.PREVENT_EXTRA,
-)
 EXPORT_QUERY = vol.Schema(
-    {
-        vol.Optional("hub", default="default"): _hub,
-        vol.Optional("source"): vol.In(["draft", "applied"]),
-    },
+    {vol.Optional("source", default="draft"): vol.All(str, vol.Match(r"^(draft|rev:[0-9]{1,12})$"))},
     extra=vol.PREVENT_EXTRA,
 )
 
 PUT_DRAFT = vol.Schema({vol.Required("config"): bounded_config}, extra=vol.PREVENT_EXTRA)
-OPT_CONFIG = vol.Schema({vol.Optional("config"): bounded_config}, extra=vol.PREVENT_EXTRA)
+NEED_CONFIG = vol.Schema({vol.Required("config"): bounded_config}, extra=vol.PREVENT_EXTRA)
 EMPTY = vol.Schema({}, extra=vol.PREVENT_EXTRA)
-REVERT = vol.Schema(
-    {vol.Required("target"): vol.In(["applied", "previous"])}, extra=vol.PREVENT_EXTRA
+
+
+def _name(v: object) -> str:
+    if not isinstance(v, str) or not v.strip() or len(v) > 200 or any(ord(c) < 32 for c in v):
+        raise vol.Invalid("invalid name")
+    return v
+
+
+_INT = vol.All(int, vol.Range(min=1, max=10**9))
+CREATE_CONFIG = vol.Schema(
+    {
+        vol.Required("name"): _name,
+        vol.Exclusive("from", "src"): vol.Schema(
+            {vol.Required("id"): _hub, vol.Optional("rev"): _INT}, extra=vol.PREVENT_EXTRA
+        ),
+        vol.Exclusive("yaml", "src"): vol.All(str, vol.Length(max=YAML_MAX)),
+    },
+    extra=vol.PREVENT_EXTRA,
+)
+RENAME = vol.Schema({vol.Required("name"): _name}, extra=vol.PREVENT_EXTRA)
+SAVE_REV = vol.Schema(
+    {vol.Optional("note", default=""): vol.All(str, vol.Length(max=200))}, extra=vol.PREVENT_EXTRA
+)
+RESTORE = vol.Schema({vol.Required("rev"): _INT}, extra=vol.PREVENT_EXTRA)
+APPLY = vol.Schema(
+    {vol.Required("config_id"): _hub, vol.Optional("rev"): _INT}, extra=vol.PREVENT_EXTRA
 )
 
 _Q = vol.All(str, vol.Length(max=64))

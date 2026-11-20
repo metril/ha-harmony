@@ -56,7 +56,26 @@ export function tvConfig(): Config {
   };
 }
 
-export const META = { applied: { rev: 3, at: 1_700_000_000, hash: 'abcdef0123456789' }, history: [{ rev: 2, at: 1_699_990_000, hash: '1111222233334444' }], history_max: 5, rev: 7 };
+export const REVS = [
+  { rev: 1, at: 1_699_980_000, note: 'First', hash: 'a1', parent: null },
+  { rev: 2, at: 1_699_990_000, note: '', hash: 'a2', parent: 1 },
+  { rev: 3, at: 1_700_000_000, note: 'Evening scene', hash: 'a3', parent: 2 },
+];
+/** the library routes for config `c` (3 revisions, draft based on rev 3) and hub `h` (running Main Rev 3) */
+export function libRoutes(draft: { config: Config } | null, o: { revs?: boolean; applied?: boolean; base?: Config } = {}): Record<string, Handler> {
+  const revs = o.revs === false ? [] : REVS;
+  const base = o.revs === false ? null : 3;
+  const sum = { id: 'c', name: 'Main', created: 1, updated: 2, latest_rev: revs.length || null, rev_count: revs.length, draft_rev: 7, has_draft: draft !== null, draft_updated: draft ? 1 : null, base_rev: base, dirty: false };
+  const applied = o.applied === false ? null : { config_id: 'c', rev: 3, name: 'Main', at: 1_700_000_000, hash: 'abcdef0123456789' };
+  return {
+    'GET api/v1/configs/c': () => ({ body: { ...sum, hubs: [], revs, draft: draft ? { ...draft, updated: 1, base_rev: base } : null } }),
+    'GET api/v1/configs/c/revs/3': () => ({ body: { ...REVS[2], id: 'c', config: o.base ?? tvConfig() } }),
+    'GET api/v1/hubs/h': () => ({ body: { hub: 'h', applied, history: applied ? [{ ...applied, rev: 2, at: 1_699_990_000 }] : [], history_max: 5, config_exists: true, ack: null } }),
+    'PUT api/v1/configs/c/draft': () => ({ body: PUTRESP }),
+  };
+}
+export const PUTRESP = { id: 'c', draft_updated: 1_700_000_100, draft_rev: 8, base_rev: 3, dirty: true };
+export const DRAFT_REV = 7;
 
 export const USAGE = {
   json_bytes: 9000, pool_words: 900, keys: 1, keys_max: 35,

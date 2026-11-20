@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 from aiohttp import FormData
 
+from cfgapi import apply_draft, ensure, put_apply
+from cfgapi import put_draft as _put_draft
+
 from harmony_addon import schemas
 from harmony_addon.app import MAX_BODY, create_app
 from harmony_addon.auth import IngressAuth, NoAuth
@@ -55,7 +58,7 @@ async def client(aiohttp_client, tmp_path):
 
 
 async def put_draft(c, config=CONFIG):
-    return await c.put("/api/v1/config/draft", json={"config": config}, headers=H)
+    return await _put_draft(c, config)
 
 
 # ---------------------------------------------------------------- routes
@@ -70,55 +73,58 @@ async def test_health_and_placeholder(client):
 
 
 async def test_draft_validate_preview_apply_revert(client):
-    assert (await (await client.get("/api/v1/config")).json())["draft"] is None
-    assert (await client.post("/api/v1/config/apply", json={}, headers=H)).status == 409
+    assert (await client.get("/api/v1/configs/main")).status == 404
+    assert (await apply_draft(client)).status == 404  # unknown config
     assert (await put_draft(client)).status == 200
-    got = await (await client.get("/api/v1/config")).json()
-    assert got["draft"]["config"] == CONFIG and got["applied"] is None
+    got = await (await client.get("/api/v1/configs/main")).json()
+    assert got["draft"]["config"] == CONFIG and got["revs"] == [] and got["hubs"] == []
+    assert (await apply_draft(client, cid="main", rev=1)).status == 404  # unknown rev
 
-    v = await (await client.post("/api/v1/config/validate", json={}, headers=H)).json()
+    v = await (await client.post("/api/v1/config/validate", json={"config": CONFIG}, headers=H)).json()
     assert v == {"ok": True, "errors": []}
     bad = {**CONFIG, "activities": [{"id": "x"}]}
     v = await (await client.post("/api/v1/config/validate", json={"config": bad}, headers=H)).json()
     assert v["ok"] is False and v["errors"][0]["path"]
 
-    p = await (await client.post("/api/v1/config/preview", json={}, headers=H)).json()
+    p = await (await client.post("/api/v1/config/preview", json={"config": CONFIG}, headers=H)).json()
     assert p["ok"] and p["pages"][0]["page"]["widgets"] and p["usage"]["json_bytes"] > 0
     v2 = p["pages"][0]["page"]
     assert v2["version"] == 2 and v2["total"] == len(p["pages"]) and v2["widgets"]
     assert {"role", "shape", "icon", "bind", "icon_only"} <= set(v2["widgets"][0])
     assert p["usage"]["config_budget"] > 0
 
-    a = await (await client.post("/api/v1/config/apply", json={}, headers=H)).json()
-    assert a["applied"]["rev"] == 1 and a["applied"]["hash"] == p["hash"]
-    got = await (await client.get("/api/v1/config?full=1")).json()
-    assert got["draft"] is None and got["applied"]["config"] == CONFIG
-
-    await put_draft(client, {**CONFIG, "activities": []})
-    r = await client.post("/api/v1/config/revert", json={"target": "applied"}, headers=H)
-    assert (await r.json())["applied"]["rev"] == 1
-    assert (await (await client.get("/api/v1/config")).json())["draft"] is None
+    a = await (await apply_draft(client)).json()  # no rev: the draft is saved as rev 1 first
+    assert a["applied"]["rev"] == 1 and a["applied"]["config_id"] == "main"
+    assert a["applied"]["hash"] == p["hash"] and a["applied"]["name"] == "main"
+    got = await (await client.get("/api/v1/configs/main")).json()
+    assert got["revs"][0]["note"] == "Applied to default" and got["hubs"] == [{"hub": "default", "rev": 1}]
+    assert got["draft"]["base_rev"] == 1 and got["dirty"] is False
+    hub = await (await client.get("/api/v1/hubs/default")).json()
+    assert hub["applied"]["rev"] == 1 and hub["config_exists"] is True and hub["history"] == []
+    assert (await apply_draft(client)).status == 200  # unchanged draft: still rev 1, no new rev
+    assert (await (await client.get("/api/v1/configs/main")).json())["latest_rev"] == 1
 
 
 async def test_apply_refuses_invalid_draft(client):
     await put_draft(client, {"devices": [{"id": "BAD ID"}]})
-    r = await client.post("/api/v1/config/apply", json={}, headers=H)
+    r = await apply_draft(client)
     body = await r.json()
     assert r.status == 422 and body["ok"] is False and body["errors"]
-    assert (await (await client.get("/api/v1/config")).json())["applied"] is None
+    got = await (await client.get("/api/v1/configs/main")).json()
+    assert got["revs"] == []  # no revision was created
+    assert (await (await client.get("/api/v1/hubs/default")).json())["applied"] is None
 
 
 async def test_history_cap_and_previous_revert(client):
     for i in range(HISTORY_MAX + 3):
-        await put_draft(
+        r = await put_apply(
             client, {**CONFIG, "devices": [{**CONFIG["devices"][0], "settle_ms": 100 + i}]}
         )
-        r = await client.post("/api/v1/config/apply", json={}, headers=H)
         assert r.status == 200, await r.text()
-    meta = await (await client.get("/api/v1/config")).json()
+    meta = await (await client.get("/api/v1/hubs/default")).json()
     assert len(meta["history"]) == HISTORY_MAX
     assert [h["rev"] for h in meta["history"]] == list(range(HISTORY_MAX + 2, 2, -1))
-    r = await client.post("/api/v1/config/revert", json={"target": "previous"}, headers=H)
+    r = await client.post("/api/v1/hubs/default/revert", json={}, headers=H)
     meta = await r.json()
     assert meta["applied"]["rev"] == HISTORY_MAX + 2 and len(meta["history"]) == HISTORY_MAX
     assert meta["history"][0]["rev"] == HISTORY_MAX + 3  # the version left is on top: a redo
@@ -127,44 +133,48 @@ async def test_history_cap_and_previous_revert(client):
 async def test_revert_previous_can_itself_be_reverted(client):
     revs = []
     for i in range(3):
-        await put_draft(
+        r = await put_apply(
             client, {**CONFIG, "devices": [{**CONFIG["devices"][0], "settle_ms": 100 + i}]}
         )
-        r = await client.post("/api/v1/config/apply", json={}, headers=H)
         revs.append((await r.json())["applied"]["rev"])
     for want in (revs[1], revs[2], revs[1]):  # back, forward again, back
-        r = await client.post("/api/v1/config/revert", json={"target": "previous"}, headers=H)
+        r = await client.post("/api/v1/hubs/default/revert", json={}, headers=H)
         meta = await r.json()
         assert meta["applied"]["rev"] == want
     assert sorted(h["rev"] for h in meta["history"]) == [revs[0], revs[2]]
 
 
 async def test_revert_previous_without_history(client):
-    r = await client.post("/api/v1/config/revert", json={"target": "previous"}, headers=H)
+    r = await client.post("/api/v1/hubs/default/revert", json={}, headers=H)
     assert r.status == 409
 
 
 async def test_yaml_roundtrip_through_core(client):
     hy = {**H, "Content-Type": "text/yaml"}
-    r = await client.post("/api/v1/config/import_yaml", data=SMALL, headers=hy)
+    await ensure(client)
+    r = await client.post("/api/v1/configs/main/import_yaml", data=SMALL, headers=hy)
     assert r.status == 200, await r.text()
-    out = await client.get("/api/v1/config/export_yaml")
+    out = await client.get("/api/v1/configs/main/export_yaml")
     assert out.content_type == "text/yaml"
     assert parse_model(await out.text()) == parse_model(SMALL)
     assert load_source(await out.text()) == CONFIG
-    got = await (await client.get("/api/v1/config")).json()
+    got = await (await client.get("/api/v1/configs/main")).json()
     assert got["draft"]["config"] == CONFIG
+    r = await client.post("/api/v1/configs", json={"name": "From YAML", "yaml": SMALL}, headers=H)
+    body = await r.json()
+    assert r.status == 201 and body["id"] == "from-yaml" and body["draft"]["config"] == CONFIG
 
 
 async def test_import_yaml_rejects_ir_file_refs_and_bad_yaml(client):
     hy = {**H, "Content-Type": "application/yaml"}
     text = SMALL.replace("{proto: nec, addr: 4, cmd: 16}", "{flipper: {file: tv.ir, signal: Vol}}")
-    r = await client.post("/api/v1/config/import_yaml", data=text, headers=hy)
+    await ensure(client)
+    r = await client.post("/api/v1/configs/main/import_yaml", data=text, headers=hy)
     body = await r.json()
     assert r.status == 422 and body["error"]["files"] == ["flipper:tv.ir"]
-    r = await client.post("/api/v1/config/import_yaml", data="devices: [", headers=hy)
+    r = await client.post("/api/v1/configs/main/import_yaml", data="devices: [", headers=hy)
     assert r.status == 400
-    r = await client.post("/api/v1/config/import_yaml", data="a: &x [1]\nb: *x", headers=hy)
+    r = await client.post("/api/v1/configs/main/import_yaml", data="a: &x [1]\nb: *x", headers=hy)
     assert r.status == 400
 
 
@@ -230,16 +240,21 @@ async def test_s1_every_ingress_route_needs_the_supervisor_user_id(aiohttp_clien
     # with an id the actions work, and the audit line names the user (and nothing secret)
     hdr = {**H, **ing, "X-Remote-User-Id": "abc123"}
     caplog.set_level(logging.INFO, logger="harmony_addon.app")
-    assert (await c.put("/api/v1/config/draft", json={"config": CONFIG}, headers=hdr)).status == 200
-    assert (await c.post("/api/v1/config/apply", json={}, headers=hdr)).status == 200
-    assert (await c.post("/api/v1/config/revert", json={"target": "applied"}, headers=hdr)).status == 200
+    assert (await c.post("/api/v1/configs", json={"name": "main"}, headers=hdr)).status == 201
+    assert (await c.put("/api/v1/configs/main/draft", json={"config": CONFIG}, headers=hdr)).status == 200
+    body = {"config_id": "main"}
+    assert (await c.post("/api/v1/hubs/default/apply", json=body, headers=hdr)).status == 200
+    assert (await c.post("/api/v1/hubs/default/apply", json=body, headers=hdr)).status == 200
+    assert (await c.post("/api/v1/hubs/default/revert", json={}, headers=hdr)).status == 200
     hy = {**hdr, "Content-Type": "text/yaml"}
-    assert (await c.post("/api/v1/config/import_yaml", data=SMALL, headers=hy)).status == 200
+    assert (await c.post("/api/v1/configs/main/import_yaml", data=SMALL, headers=hy)).status == 200
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("audit ")]
     assert lines == [
-        "audit user=abc123 action=apply hub=default",
-        "audit user=abc123 action=revert:applied hub=default",
-        "audit user=abc123 action=import_yaml hub=default",
+        "audit user=abc123 action=config_create:main hub=-",
+        "audit user=abc123 action=apply:main@1 hub=default",
+        "audit user=abc123 action=apply:main@1 hub=default",
+        "audit user=abc123 action=revert hub=default",
+        "audit user=abc123 action=import_yaml:main hub=-",
     ]
 
 
@@ -281,11 +296,11 @@ async def test_s2_content_type_and_csrf_header_required(client):
 
 async def test_s2_json_type_not_accepted_for_yaml_and_vice_versa(client):
     r = await client.post(
-        "/api/v1/config/import_yaml", data="{}", headers={**H, "Content-Type": "application/json"}
+        "/api/v1/configs/main/import_yaml", data="{}", headers={**H, "Content-Type": "application/json"}
     )
     assert r.status == 403
     r = await client.post(
-        "/api/v1/config/apply", data="{}", headers={**H, "Content-Type": "text/yaml"}
+        "/api/v1/hubs/default/apply", data="{}", headers={**H, "Content-Type": "text/yaml"}
     )
     assert r.status == 403
 
@@ -293,37 +308,44 @@ async def test_s2_json_type_not_accepted_for_yaml_and_vice_versa(client):
 async def test_s2_same_origin_is_accepted(client):
     host = f"{client.host}:{client.port}"
     r = await client.post(
-        "/api/v1/config/apply",
-        json={},
+        "/api/v1/hubs/default/apply",
+        json={"config_id": "main"},
         headers={**H, "Origin": f"http://{host}", "Sec-Fetch-Site": "same-origin"},
     )
-    assert r.status == 409  # passed CSRF; just no draft yet
+    assert r.status == 404  # passed CSRF; just no such config yet
 
 
 # ---------------------------------------------------------------- S3
 async def test_s3_unknown_keys_and_bad_bodies_are_400(client):
     for path, body in [
         ("/api/v1/config/validate", {"extra": 1}),
-        ("/api/v1/config/apply", {"x": 1}),
-        ("/api/v1/config/revert", {"target": "nope"}),
-        ("/api/v1/config/revert", {}),
+        ("/api/v1/config/validate", {}),
+        ("/api/v1/hubs/default/apply", {"x": 1}),
+        ("/api/v1/hubs/default/apply", {}),
+        ("/api/v1/hubs/default/revert", {"target": "nope"}),
+        ("/api/v1/configs", {}),
+        ("/api/v1/configs", {"name": "a", "from": {"id": "x"}, "yaml": "a: 1"}),
+        ("/api/v1/configs/main/revs", {"x": 1}),
+        ("/api/v1/configs/main/restore", {}),
         ("/api/v1/config/validate", {"config": []}),
     ]:
         r = await client.post(path, json=body, headers=H)
         assert r.status == 400, (path, body)
-    r = await client.put("/api/v1/config/draft", json={"config": {}, "x": 1}, headers=H)
+    await ensure(client)
+    r = await client.put("/api/v1/configs/main/draft", json={"config": {}, "x": 1}, headers=H)
     assert r.status == 400
     r = await client.post(
-        "/api/v1/config/apply", data="{nope", headers={**H, "Content-Type": "application/json"}
+        "/api/v1/hubs/default/apply", data="{nope", headers={**H, "Content-Type": "application/json"}
     )
     assert r.status == 400
     for q in ("?hub=../x", "?bogus=1", "?hub=a%20b"):
-        assert (await client.get("/api/v1/config" + q)).status == 400
+        assert (await client.post("/api/v1/config/validate" + q, json={"config": {}}, headers=H)).status == 400
 
 
 async def test_s3_caps(client):
+    await ensure(client)
     r = await client.put(
-        "/api/v1/config/draft", json={"config": {f"k{i}": 1 for i in range(17)}}, headers=H
+        "/api/v1/configs/main/draft", json={"config": {f"k{i}": 1 for i in range(17)}}, headers=H
     )
     assert r.status == 400
     deep = cur = {}
@@ -331,15 +353,15 @@ async def test_s3_caps(client):
         cur["a"] = {}
         cur = cur["a"]
     assert (
-        await client.put("/api/v1/config/draft", json={"config": deep}, headers=H)
+        await client.put("/api/v1/configs/main/draft", json={"config": deep}, headers=H)
     ).status == 400
     wide = {"a": list(range(schemas.MAX_NODES + 10))}
     assert (
-        await client.put("/api/v1/config/draft", json={"config": wide}, headers=H)
+        await client.put("/api/v1/configs/main/draft", json={"config": wide}, headers=H)
     ).status == 400
     big = json.dumps({"config": {"a": "x" * (MAX_BODY + 100_000)}})
     r = await client.put(
-        "/api/v1/config/draft", data=big, headers={**H, "Content-Type": "application/json"}
+        "/api/v1/configs/main/draft", data=big, headers={**H, "Content-Type": "application/json"}
     )
     assert r.status == 413
     assert (await r.json())["error"]["msg"]
@@ -358,9 +380,11 @@ async def test_security_headers(client):
 
 async def test_errors_do_not_echo_raw_input(client):
     evil = "<script>alert(1)</script>"
-    r = await client.get("/api/v1/config", params={evil: "1"})
+    r = await client.get("/api/v1/configs/main/export_yaml", params={evil: "1"})
     assert r.status == 400 and evil not in await r.text()
-    r = await client.get("/api/v1/config", params={"hub": evil})
+    r = await client.get("/api/v1/hubs/default", params={"hub": evil})
+    assert evil not in await r.text()
+    r = await client.get(f"/api/v1/configs/{evil}")
     assert evil not in await r.text()
     r = await client.post("/api/v1/config/validate", json={evil: 1}, headers=H)
     assert evil not in await r.text()
@@ -394,9 +418,10 @@ def test_atomic_write_crash_keeps_old_file(tmp_path, monkeypatch):
 
 def test_store_roundtrip_and_corruption(tmp_path):
     s = Store(tmp_path)
-    s.set_draft("default", {"a": 1}, 5)
-    assert Store(tmp_path).load("default")["draft"] == {"config": {"a": 1}, "updated": 5}
-    assert json.loads((tmp_path / "hubs" / "default.json").read_text())["v"] == 1
+    entry = {"config_id": "c", "rev": 1, "name": "C", "at": 5, "hash": "h", "config": {"a": 1}}
+    s.apply("default", entry)
+    assert Store(tmp_path).load("default")["applied"] == entry
+    assert json.loads((tmp_path / "hubs" / "default.json").read_text())["v"] == 2
     (tmp_path / "hubs" / "default.json").write_text("{nope")
     with pytest.raises(StoreError):
         s.load("default")
@@ -408,16 +433,24 @@ def test_store_roundtrip_and_corruption(tmp_path):
 
 
 async def test_storage_only_under_data_dir(client, tmp_path):
-    await put_draft(client)
+    await put_apply(client, CONFIG)
     files = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
-    assert files == {"hubs/default.json", "bundle_token"}
+    assert files == {
+        "hubs/default.json",
+        "bundle_token",
+        "library/main/meta.json",
+        "library/main/revs/1.json",
+    }
 
 
 async def test_yaml_export_is_plain_yaml(client):
     await put_draft(client)
-    text = await (await client.get("/api/v1/config/export_yaml?source=draft")).text()
+    text = await (await client.get("/api/v1/configs/main/export_yaml?source=draft")).text()
     assert load_source(text) == CONFIG
-    assert (await client.get("/api/v1/config/export_yaml?source=applied")).status == 404
+    assert (await client.get("/api/v1/configs/main/export_yaml?source=rev:1")).status == 404
+    await client.post("/api/v1/configs/main/revs", json={"note": "n"}, headers=H)
+    text = await (await client.get("/api/v1/configs/main/export_yaml?source=rev:1")).text()
+    assert load_source(text) == CONFIG
 
 
 # ---------------------------------------------------------------- import_yaml hardening
@@ -425,7 +458,8 @@ YH = {**H, "Content-Type": "text/yaml"}
 
 
 async def imp(client, text):
-    r = await client.post("/api/v1/config/import_yaml", data=text, headers=YH)
+    await ensure(client)
+    r = await client.post("/api/v1/configs/main/import_yaml", data=text, headers=YH)
     body = await r.text()
     assert "Traceback" not in body
     return r
@@ -436,8 +470,7 @@ async def test_import_enforces_bounds_like_put_draft(client):
     assert r.status == 400
     deep = "x: " + "[" * 30 + "]" * 30
     assert (await imp(client, deep)).status == 400
-    assert (await client.get("/api/v1/config")).status == 200
-    assert (await (await client.get("/api/v1/config")).json())["draft"] is None
+    assert (await (await client.get("/api/v1/configs/main")).json())["draft"] is None
 
 
 async def test_import_non_json_yaml_types_are_400(client):
@@ -455,12 +488,12 @@ async def test_import_int_keys_match_apply(client):
     text = SMALL.replace("keys:\n  menu:", "keys:\n  5: {activity: watch}\n  menu:")
     r = await imp(client, text)
     # import and apply must agree: either both accept or import rejects (never import-OK, apply-422)
-    a = await client.post("/api/v1/config/apply", json={}, headers=H)
+    a = await apply_draft(client)
     if r.status == 200:
         assert a.status == 200
     else:
         assert r.status == 422 and a.status == 409
-    got = await (await client.get("/api/v1/config")).json()
+    got = await (await client.get("/api/v1/configs/main")).json()
     draft = got["draft"] or {"config": {}}
     assert all(isinstance(k, str) for k in draft["config"].get("keys", {}))
 

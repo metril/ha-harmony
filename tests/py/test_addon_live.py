@@ -5,6 +5,7 @@ import socket
 import pytest
 from addon_ws import TOKEN, bt_online, connect, drain, live, recv
 from aiohttp import WSServerHandshakeError
+from cfgapi import apply_draft, put_apply, put_draft
 from test_addon import CONFIG, H
 
 from harmony_addon import channel as channel_mod
@@ -25,11 +26,7 @@ async def c(aiohttp_client, tmp_path):
 
 
 async def apply(c, hub="h1"):
-    q = f"?hub={hub}"
-    assert (
-        await c.put(f"/api/v1/config/draft{q}", json={"config": CONFIG}, headers=H)
-    ).status == 200
-    assert (await c.post(f"/api/v1/config/apply{q}", json={}, headers=H)).status == 200
+    assert (await put_apply(c, CONFIG, hub)).status == 200
 
 
 async def test_subscribe_sends_a_snapshot_of_each_new_topic(c):
@@ -82,19 +79,8 @@ async def test_bad_subscriptions_are_answered_and_unknown_topics_ignored(c):
 async def test_changes_are_pushed_as_full_payload_deltas(c):
     lv = await live(c, "hubs", "hub:h1")
     await recv(lv, "snapshot")
-    assert (
-        await c.put("/api/v1/config/draft?hub=h1", json={"config": CONFIG}, headers=H)
-    ).status == 200
-    d = await recv(lv, "hubs")
-    assert d["hubs"][0] == {
-        "id": "h1",
-        "has_draft": True,
-        "has_applied": False,
-        "applied_rev": None,
-        "applied_at": None,
-    }
-    assert (await recv(lv, "hub"))["hub"] == "h1"
-    assert (await c.post("/api/v1/config/apply?hub=h1", json={}, headers=H)).status == 200
+    assert (await put_draft(c, CONFIG)).status == 200
+    assert (await apply_draft(c, "h1")).status == 200
     d = await recv(lv, "hubs")
     assert d["hubs"][0]["has_applied"] is True
     st = await recv(lv, "hub")

@@ -12,7 +12,7 @@ import { Assigner } from '../src/lib/assigner';
 import type { BtCodes, BtStatus } from '../src/lib/api';
 import type { Config } from '../src/lib/model';
 import { fakeLive } from './fake-ws';
-import { META, fakeApi, type Handler } from './helpers';
+import { libRoutes, fakeApi, type Handler } from './helpers';
 
 type El = HTMLElement & { updateComplete: Promise<unknown>; shadowRoot: ShadowRoot };
 const codes: BtCodes = {
@@ -42,15 +42,14 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 async function boot(routes: Record<string, Handler> = {}, cfg: Config = {}, bt: BtStatus = status()) {
   fakeLive.topics['bt:h'] = bt;
   const f = fakeApi({
-    'GET api/v1/config': () => ({ body: { hub: 'h', draft: { config: cfg, updated: 1 }, ...META, applied: null } }),
+    ...libRoutes({ config: cfg }),
     'POST api/v1/config/preview': () => ({ body: { ok: true, errors: [], usage: null } }),
-    'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 2, ...META } }),
     'GET api/v1/hubs': () => ({ body: { hubs: [{ id: 'h', has_draft: true, has_applied: false, applied_rev: null, applied_at: null }] } }),
     'GET api/v1/bt/codes': () => ({ body: codes }),
     'POST api/v1/bt/pair/stop': () => ({ body: { ok: true } }),
     ...routes,
   });
-  const store = new Store(f.api, 'h', 600);
+  const store = new Store(f.api, 'h', 'c', 600);
   setStore(store);
   await store.load();
   return { store, ...f };

@@ -5,7 +5,7 @@ import '../src/components/hh-app';
 import keymap from './fixtures/keymap.json';
 import vectors from '../../../tests/vectors/pages.json';
 import { Store, setStore } from '../src/lib/store';
-import { META, fakeApi, previewOk, tvConfig } from './helpers';
+import { libRoutes, fakeApi, previewOk, tvConfig } from './helpers';
 
 const page = (vectors.valid_v2 as { name: string; dict: unknown }[]).find((v) => v.name === 'v2_all_options')!.dict;
 type El = HTMLElement & { updateComplete: Promise<unknown>; shadowRoot: ShadowRoot };
@@ -14,16 +14,15 @@ async function boot(ha: 'ok' | 'down' = 'ok', caps: { ha_actions?: boolean } = {
   const cfg = tvConfig();
   cfg.pages = [{ id: 'main', cols: 4, rows: 4, title: 'Main', widgets: [{ type: 'button', id: 'b', x: 0, y: 0, w: 2, h: 1, label: 'Go', action: { none: true } }] }];
   const f = fakeApi({
-    'GET api/v1/config': () => ({ body: { hub: 'h', draft: { config: cfg, updated: 1 }, ...META, applied: { ...META.applied, config: tvConfig() } } }),
+    ...libRoutes({ config: cfg }),
     'POST api/v1/config/preview': () => ({ body: previewOk({ pages: [{ index: 0, id: 'main', ok: true, error: null, page, wire_pages: [{ page_id: 0, seq: null, bytes: 40, bytes_v1: 30, widgets: 1, page }], bytes: 40, bytes_v1: 30, limit: 251, widgets: 1, widget_limit: 32 }] }) }),
-    'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 2, ...META } }),
     'POST api/v1/config/keymap': () => ({ body: keymap }),
     'GET api/v1/hubs': () => ({ body: { hubs: [{ id: 'h', has_draft: true, has_applied: true, applied_rev: 'a', applied_at: 1 }] } }),
     'GET api/v1/health': () => ({ body: { ok: true, addon_version: '1', capabilities: caps } }),
     'GET api/v1/ha/entities': () => (ha === 'ok' ? { body: { entities: [{ entity_id: 'light.lamp', name: 'Lamp', domain: 'light', state: 'on' }, { entity_id: 'scene.movie', name: 'Movie', domain: 'scene' }] } } : { status: 503, body: { error: { code: 'ha_unavailable', msg: 'x', reason: 'status_503' } } }),
     'GET api/v1/ha/services': () => ({ body: { services: [{ domain: 'light', service: 'toggle', name: 'Toggle', fields: [] }, { domain: 'light', service: 'turn_on', name: 'Turn on', fields: ['brightness_pct'] }] } }),
   });
-  const store = new Store(f.api, 'h', 600);
+  const store = new Store(f.api, 'h', 'c', 600);
   setStore(store);
   await store.load();
   location.hash = '#/remote';

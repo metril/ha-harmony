@@ -5,7 +5,8 @@ import time
 
 import pytest
 from addon_ws import get_bundle
-from test_addon import CONFIG, H, clock, put_draft
+from cfgapi import put_apply
+from test_addon import CONFIG, H, clock
 
 from harmony_addon import app as app_mod
 from harmony_addon.app import create_app
@@ -79,10 +80,8 @@ async def c(aiohttp_client, tmp_path):
     return await aiohttp_client(create_app(tmp_path, auth=NoAuth(), clock=clock))
 
 
-async def preview(c, config=None):
-    r = await c.post(
-        "/api/v1/config/preview", json={} if config is None else {"config": config}, headers=H
-    )
+async def preview(c, config):
+    r = await c.post("/api/v1/config/preview", json={"config": config}, headers=H)
     return r.status, await r.json()
 
 
@@ -159,8 +158,7 @@ async def test_over_budget_page_reports_bytes_and_stays_missing(c):
     assert body["pages"][0]["ok"] and body["missing_pages"] == [{"index": 1, "id": "fat"}]
     assert not body["ok"] and body["errors"][0]["path"] == ["pages", 1]
     # and apply stays strict
-    await put_draft(c, cfg)
-    assert (await c.post("/api/v1/config/apply", json={}, headers=H)).status == 422
+    assert (await put_apply(c, cfg)).status == 422
 
 
 # ---------------------------------------------------------------- error tolerance
@@ -220,31 +218,28 @@ async def test_editor_metadata_is_kept_but_never_leaves_the_add_on(aiohttp_clien
     app = create_app(tmp_path, auth=NoAuth(), clock=clock, bundle_token=TOKEN, bundle_networks=None)
     c = await aiohttp_client(app)
     cfg = {**CONFIG, "editor": EDITOR}
-    assert (await put_draft(c, cfg)).status == 200
-    assert (await c.post("/api/v1/config/apply", json={}, headers=H)).status == 200
-    full = await (await c.get("/api/v1/config?full=1")).json()
-    assert full["applied"]["config"]["editor"] == EDITOR  # preserved in the store
+    assert (await put_apply(c, cfg)).status == 200
+    rev = await (await c.get("/api/v1/configs/main/revs/1")).json()
+    assert rev["config"]["editor"] == EDITOR  # preserved in the store
     b1 = await get_bundle(c)
     assert "editor" not in b1["config"] and b1["config"] == CONFIG
     # editor-only edit: new applied revision in the add-on, same bundle rev (no hub push)
-    await put_draft(c, {**CONFIG, "editor": {"v": 2}})
-    assert (await c.post("/api/v1/config/apply", json={}, headers=H)).status == 200
+    assert (await put_apply(c, {**CONFIG, "editor": {"v": 2}})).status == 200
     b2 = await get_bundle(c)
     assert b2["rev"] == b1["rev"]
     assert (await get_bundle(c))["rev"] == b1["rev"]
     assert (await (await c.get("/api/v1/hubs")).json())["hubs"][0]["applied_rev"] == b1["rev"]
     # a config change moves the rev
-    await put_draft(
+    await put_apply(
         c, {**CONFIG, "devices": [{**CONFIG["devices"][0], "settle_ms": 777}], "editor": {"v": 2}}
     )
-    await c.post("/api/v1/config/apply", json={}, headers=H)
     assert (await get_bundle(c))["rev"] != b1["rev"]
     # export keeps it
-    text = await (await c.get("/api/v1/config/export_yaml?source=applied")).text()
+    text = await (await c.get("/api/v1/configs/main/export_yaml?source=rev:3")).text()
     assert "editor:" in text
     hy = {**H, "Content-Type": "text/yaml"}
-    assert (await c.post("/api/v1/config/import_yaml", data=text, headers=hy)).status == 200
-    assert (await (await c.get("/api/v1/config")).json())["draft"]["config"]["editor"] == {"v": 2}
+    assert (await c.post("/api/v1/configs/main/import_yaml", data=text, headers=hy)).status == 200
+    assert (await (await c.get("/api/v1/configs/main")).json())["draft"]["config"]["editor"] == {"v": 2}
 
 
 def test_compiler_ignores_editor_and_integration_accepts_it():
@@ -341,14 +336,13 @@ async def test_keymap_layers_and_inheritance(c):
     assert vd["source"] == "default" and vd["action"]["input"] == "hdmi1"
 
 
-async def test_keymap_needs_a_valid_config_and_uses_the_draft_by_default(c):
+async def test_keymap_needs_a_valid_config(c):
     r = await c.post(
         "/api/v1/config/keymap", json={"config": {"devices": [{"id": "BAD ID"}]}}, headers=H
     )
     assert r.status == 422 and (await r.json())["errors"]
-    assert (await c.post("/api/v1/config/keymap", json={}, headers=H)).status == 409
-    await put_draft(c)
-    r = await c.post("/api/v1/config/keymap", json={}, headers=H)
+    assert (await c.post("/api/v1/config/keymap", json={}, headers=H)).status == 400
+    r = await c.post("/api/v1/config/keymap", json={"config": CONFIG}, headers=H)
     assert r.status == 200 and len((await r.json())["default"]) == 35
 
 
@@ -390,7 +384,7 @@ async def test_preview_carries_the_v2_model_and_both_byte_counts(c):
     m = home["page"]
     assert m["version"] == 2 and m["kind"] == "home" and m["title"] == "Home"
     nav = m["widgets"][0]
-    assert nav["role"] == "nav" and nav["bind"] == lst["wire_pages"][0]["page_id"] and nav["icon"]
+    assert nav["role"] == "nav" and nav["bind"] == lst["wire_pages"][0]["page_id"] and nav.get("trailing") and not nav["icon"]
     assert home["bytes"] > home["bytes_v1"] - 100 and home["limit"] == MAX_BYTES
     assert [w["page_id"] for w in home["wire_pages"]] == [0]
     # a 40-row list on 4-row pages becomes 10 wire pages, numbered 1/10 .. 10/10

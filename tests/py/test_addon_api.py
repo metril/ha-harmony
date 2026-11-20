@@ -4,6 +4,7 @@ import json
 
 import pytest
 from addon_ws import connect, drain, get_bundle, live, recv
+from cfgapi import apply_draft, ensure, put_apply
 from test_addon import CONFIG, SMALL, H, clock, put_draft
 
 from harmony_addon.app import create_app
@@ -20,59 +21,46 @@ async def client(aiohttp_client, tmp_path):
 
 
 # ---------------------------------------------------------------- draft revisions
+D = "/api/v1/configs/main/draft"
+
+
 async def test_draft_rev_conflict_and_unconditional_writes(client):
-    got = await (await client.get("/api/v1/config")).json()
-    assert got["rev"] == 0
-    r = await client.put(
-        "/api/v1/config/draft", json={"config": CONFIG}, headers={**H, "If-Match": "0"}
-    )
-    assert r.status == 200 and (await r.json())["rev"] == 1
-    r = await client.put(
-        "/api/v1/config/draft", json={"config": {}}, headers={**H, "If-Match": '"0"'}
-    )
+    await ensure(client)
+    got = await (await client.get("/api/v1/configs/main")).json()
+    assert got["draft_rev"] == 0
+    r = await client.put(D, json={"config": CONFIG}, headers={**H, "If-Match": "0"})
+    assert r.status == 200 and (await r.json())["draft_rev"] == 1
+    r = await client.put(D, json={"config": {}}, headers={**H, "If-Match": '"0"'})
     body = await r.json()
     assert r.status == 409 and body["error"]["code"] == "conflict" and body["error"]["rev"] == 1
-    assert (await (await client.get("/api/v1/config")).json())["draft"]["config"] == CONFIG
-    r = await client.put(
-        "/api/v1/config/draft", json={"config": CONFIG}, headers={**H, "If-Match": 'W/"1"'}
-    )
-    assert r.status == 200 and (await r.json())["rev"] == 2
+    assert (await (await client.get("/api/v1/configs/main")).json())["draft"]["config"] == CONFIG
+    r = await client.put(D, json={"config": CONFIG}, headers={**H, "If-Match": 'W/"1"'})
+    assert r.status == 200 and (await r.json())["draft_rev"] == 2
     assert (await put_draft(client)).status == 200  # no header = unconditional
-    assert (await (await client.get("/api/v1/config")).json())["rev"] == 3
+    assert (await (await client.get("/api/v1/configs/main")).json())["draft_rev"] == 3
 
 
 @pytest.mark.parametrize("val", ["abc", "-1", "1 2", "9" * 20, '"'])
 async def test_if_match_garbage_is_400(client, val):
-    r = await client.put(
-        "/api/v1/config/draft", json={"config": CONFIG}, headers={**H, "If-Match": val}
-    )
+    await ensure(client)
+    r = await client.put(D, json={"config": CONFIG}, headers={**H, "If-Match": val})
     assert r.status == 400
 
 
-async def test_import_revert_and_apply_bump_the_rev(client):
+async def test_import_and_restore_bump_the_draft_rev(client):
+    await ensure(client)
     hy = {**H, "Content-Type": "text/yaml"}
-    r = await client.post("/api/v1/config/import_yaml", data=SMALL, headers=hy)
-    assert (await r.json())["rev"] == 1
-    r = await client.post("/api/v1/config/import_yaml", data=SMALL, headers={**hy, "If-Match": "0"})
+    r = await client.post("/api/v1/configs/main/import_yaml", data=SMALL, headers=hy)
+    assert (await r.json())["draft_rev"] == 1
+    url = "/api/v1/configs/main/import_yaml"
+    r = await client.post(url, data=SMALL, headers={**hy, "If-Match": "0"})
     assert r.status == 409 and (await r.json())["error"]["rev"] == 1
-    r = await client.post("/api/v1/config/revert", json={"target": "applied"}, headers=H)
-    assert (await r.json())["rev"] == 2
-    await put_draft(client)
-    r = await client.post("/api/v1/config/apply", json={}, headers=H)
-    assert (await r.json())["rev"] == 4
-    r = await client.put(
-        "/api/v1/config/draft", json={"config": CONFIG}, headers={**H, "If-Match": "3"}
-    )
-    assert r.status == 409  # a stale writer cannot resurrect a draft over the applied state
-
-
-async def test_state_files_from_before_revisions_still_load(client, tmp_path):
-    await put_draft(client)
-    f = tmp_path / "hubs" / "default.json"
-    d = json.loads(f.read_text())
-    del d["draft_rev"]
-    f.write_text(json.dumps(d))
-    assert (await (await client.get("/api/v1/config")).json())["rev"] == 0
+    r = await client.post("/api/v1/configs/main/revs", json={"note": "x"}, headers=H)
+    assert (await r.json())["draft_rev"] == 1  # saving a revision leaves the draft alone
+    r = await client.post("/api/v1/configs/main/restore", json={"rev": 1}, headers=H)
+    assert (await r.json())["draft_rev"] == 2
+    r = await client.put(D, json={"config": CONFIG}, headers={**H, "If-Match": "1"})
+    assert r.status == 409  # a stale writer cannot overwrite a restored draft
 
 
 # ---------------------------------------------------------------- all validation errors
@@ -120,7 +108,7 @@ async def test_validate_reports_every_dangling_reference(client):
 
 async def test_apply_refusal_lists_all_errors(client):
     await put_draft(client, BAD)
-    body = await (await client.post("/api/v1/config/apply", json={}, headers=H)).json()
+    body = await (await apply_draft(client)).json()
     assert len(body["errors"]) >= 3
 
 
@@ -152,10 +140,7 @@ async def feed(aiohttp_client, tmp_path):
 
 
 async def apply(c, hub, config=CONFIG):
-    assert (
-        await c.put(f"/api/v1/config/draft?hub={hub}", json={"config": config}, headers=H)
-    ).status == 200
-    r = await c.post(f"/api/v1/config/apply?hub={hub}", json={}, headers=H)
+    r = await put_apply(c, config, hub)
     assert r.status == 200
     return (await get_bundle(c, hub))["rev"]
 
@@ -171,28 +156,18 @@ async def hub_status(c, hub):
 
 async def test_hubs_lists_what_the_store_knows(feed):
     assert (await (await feed.get("/api/v1/hubs")).json())["hubs"] == []
-    await put_draft_hub(feed, "b-hub")
-    rev = await apply(feed, "a-hub")
+    rev = await apply(feed, "b-hub")
+    await apply(feed, "a-hub")
     hubs = (await (await feed.get("/api/v1/hubs")).json())["hubs"]
     assert [h["id"] for h in hubs] == ["a-hub", "b-hub"]
     a, b = hubs
-    assert a["has_applied"] and not a["has_draft"] and a["applied_rev"] == rev
-    assert isinstance(a["applied_at"], int)
-    assert b == {
-        "id": "b-hub",
-        "has_draft": True,
-        "has_applied": False,
-        "applied_rev": None,
-        "applied_at": None,
-    }
-
-
-async def put_draft_hub(c, hub):
-    await c.put(f"/api/v1/config/draft?hub={hub}", json={"config": CONFIG}, headers=H)
+    assert a["has_applied"] and a["applied_rev"] == rev and isinstance(a["applied_at"], int)
+    assert (a["config_id"], a["config_name"], a["rev"]) == ("main", "main", 1)
+    assert b["rev"] == 1  # both run revision 1 of the same library config
 
 
 async def test_hubs_ignores_junk_files_and_corrupt_state(feed, tmp_path):
-    await put_draft_hub(feed, "good")
+    await apply(feed, "good")
     d = tmp_path / "hubs"
     (d / "bad name.json").write_text("{}")
     (d / "corrupt.json").write_text("not json")
@@ -207,6 +182,9 @@ async def test_ack_roundtrip_and_status(feed, tmp_path):
     assert st == {
         "hub": "h1",
         "applied_rev": None,
+        "config_id": None,
+        "config_name": None,
+        "rev": None,
         "acked_rev": None,
         "result": None,
         "detail": None,
@@ -309,26 +287,20 @@ async def test_repeated_identical_acks_do_not_rewrite_the_store(feed, tmp_path):
     await ws.close()
 
 
-# ---------------------------------------------------------------- history rows
-async def test_history_entry_returns_the_source_config_by_rev(client):
+# ---------------------------------------------------------------- revisions
+async def test_rev_returns_the_source_config(client):
     NEWER = json.loads(json.dumps(CONFIG))
     NEWER["devices"][0]["settle_ms"] = 250
-    await put_draft(client)
-    await client.post("/api/v1/config/apply", json={}, headers=H)
-    await client.put("/api/v1/config/draft", json={"config": NEWER}, headers=H)
-    await client.post("/api/v1/config/apply", json={}, headers=H)
-    meta = await (await client.get("/api/v1/config")).json()
-    old, cur = meta["history"][0], meta["applied"]
-    r = await client.get("/api/v1/config/history", params={"rev": str(old["rev"])})
+    await put_apply(client, CONFIG)
+    await put_apply(client, NEWER)
+    r = await client.get("/api/v1/configs/main/revs/1")
     body = await r.json()
-    assert r.status == 200 and body["rev"] == old["rev"] and body["config"] == CONFIG
-    assert set(body) == {"hub", "rev", "at", "hash", "config"}
-    r = await client.get("/api/v1/config/history", params={"rev": str(cur["rev"])})
-    assert (await r.json())["config"] == NEWER
-    r = await client.get("/api/v1/config/history", params={"rev": "99"})
-    assert r.status == 404 and (await r.json())["error"]["code"] == "unknown_rev"
-    for bad in ({}, {"rev": "x"}, {"rev": "-1"}):
-        assert (await client.get("/api/v1/config/history", params=bad)).status == 400
+    assert r.status == 200 and body["rev"] == 1 and body["config"] == CONFIG
+    assert set(body) == {"id", "rev", "at", "note", "hash", "parent", "config"}
+    assert (await (await client.get("/api/v1/configs/main/revs/2")).json())["config"] == NEWER
+    r = await client.get("/api/v1/configs/main/revs/99")
+    assert r.status == 404 and (await r.json())["error"]["code"] == "not_found"
+    assert (await client.get("/api/v1/configs/main/revs/x")).status == 404
 
 
 async def test_ha_actions_in_validate_and_keymap_and_hostile_ones_refused(client):

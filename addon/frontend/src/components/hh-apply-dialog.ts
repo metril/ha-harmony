@@ -1,7 +1,7 @@
 import { css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { ApiError, type ApplyStatus, type HubsResponse } from '../lib/api';
-import { linkInfo, linkProblem } from '../lib/hubs';
+import { hubLabel, linkInfo, linkProblem, pickHub } from '../lib/hubs';
 import { icon } from '../lib/icons';
 import { shared } from '../lib/styles';
 import { StoreElement } from './base';
@@ -27,13 +27,21 @@ export class HhApplyDialog extends StoreElement {
       .steps li.active { color: var(--tx); font-weight: 600; }
       .steps .dot { width: 18px; height: 18px; border-radius: 9px; border: 2px solid var(--line); flex: none; }
       .steps li.pending .dot { border-style: dashed; }
+      .hubpick { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--tx2); }
+      .hubpick select { height: 32px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 8px; font-weight: 400; }
       .hash { font-family: var(--mono); font-size: 12px; color: var(--tx3); }
     `,
   ];
   @property({ type: Boolean }) open = false;
   @property({ type: Number }) waitMs = 30000;
+  /** apply this saved revision instead of the draft (null: the draft) */
+  @property({ attribute: false }) rev: number | null = null;
+  /** the hub being applied to (defaults to the selected hub each time the dialog opens) */
+  @state() private target = '';
+  @state() private prevRev: number | null = null;
+  private hubUnsub?: () => void;
   @state() private phase: 'review' | 'applying' | 'done' | 'error' = 'review';
-  @state() private rev = 0;
+  @state() private appliedRev = 0;
   @state() private message = '';
   @state() private ack: 'unknown' | 'waiting' | 'ok' | 'error' | 'timeout' = 'unknown';
   @state() private lastStatus: ApplyStatus | null = null;
@@ -46,13 +54,22 @@ export class HhApplyDialog extends StoreElement {
   override connectedCallback(): void {
     super.connectedCallback();
     const live = this.store.api.live;
-    this.unsubs = [
-      live.sub('hubs', (v) => (this.hubs = v as HubsResponse)),
-      live.sub(`hub:${this.store.hub}`, (v) => {
-        this.lastStatus = v as ApplyStatus;
-        this.check();
-      }),
-    ];
+    this.target = this.store.hub;
+    this.unsubs = [live.sub('hubs', (v) => (this.hubs = v as HubsResponse))];
+    this.watchTarget();
+  }
+  /** Follow the `hub:<id>` topic of the target hub. */
+  private watchTarget(): void {
+    this.hubUnsub?.();
+    this.lastStatus = null;
+    this.hubUnsub = this.store.api.live.sub(`hub:${this.target}`, (v) => {
+      this.lastStatus = v as ApplyStatus;
+      this.check();
+    });
+  }
+  private hubChoices(): string[] {
+    const ids = pickHub(`?hub=${encodeURIComponent(this.store.hub)}`, this.hubs).choices;
+    return ids.includes(this.store.hub) ? ids : [this.store.hub, ...ids];
   }
 
   override willUpdate(changed: Map<string, unknown>): void {
@@ -60,10 +77,15 @@ export class HhApplyDialog extends StoreElement {
       this.phase = 'review';
       this.message = '';
       this.ack = 'unknown';
+      if (this.target !== this.store.hub) {
+        this.target = this.store.hub;
+        this.watchTarget();
+      }
     }
   }
   override disconnectedCallback(): void {
     clearTimeout(this.deadline);
+    this.hubUnsub?.();
     for (const u of this.unsubs) u();
     this.unsubs = [];
     super.disconnectedCallback();
@@ -77,7 +99,8 @@ export class HhApplyDialog extends StoreElement {
   private async apply() {
     this.phase = 'applying';
     try {
-      this.rev = await this.store.applyDraft();
+      this.appliedRev = this.rev === null ? await this.store.applyDraft(this.target) : await this.store.applyRev(this.target, this.rev);
+      this.prevRev = (await this.store.api.hubState(this.target).catch(() => null))?.history[0]?.rev ?? null;
       this.phase = 'done';
       this.ack = 'waiting';
       this.check();
@@ -112,7 +135,7 @@ export class HhApplyDialog extends StoreElement {
 
   private async revertPrevious() {
     try {
-      await this.store.revertTo('previous');
+      await this.store.revertTo(this.target);
       this.close();
     } catch (e) {
       this.message = e instanceof Error ? e.message : String(e);
@@ -123,31 +146,38 @@ export class HhApplyDialog extends StoreElement {
     const w = this.ack === 'ok' ? 'done' : this.ack === 'error' ? 'todo' : 'pending';
     return [
       { label: 'Validated', state: 'done' },
-      { label: `Saved as rev ${this.rev}`, state: 'done' },
+      { label: `Saved as rev ${this.appliedRev}`, state: 'done' },
       { label: this.ack === 'ok' ? 'On the Remote' : this.ack === 'error' ? 'Rejected By Hub' : 'Sending to the Remote', state: w },
     ];
   }
 
   protected override render() {
     const s = this.store;
-    const hub = s.hub === 'default' ? 'the hub' : s.hub;
-    const diff = s.diff;
+    const hub = this.target === 'default' ? 'the hub' : this.target;
+    const diff = this.rev === null ? s.diff : [];
+    const choices = this.hubChoices();
     if (this.phase === 'review' || this.phase === 'applying') {
-      return html`<hh-dialog .open=${this.open} heading="Apply Draft to ${hub}?" @close=${() => this.close()}>
-        ${diff.length
+      return html`<hh-dialog .open=${this.open} heading=${this.rev === null ? `Apply Draft to ${hub}?` : `Apply Rev ${this.rev} to ${hub}?`} @close=${() => this.close()}>
+        <label class="hubpick">Target Hub
+          <select id="apply-hub" aria-label="Target Hub" ?disabled=${this.phase === 'applying'} @change=${(e: Event) => { this.target = (e.target as HTMLSelectElement).value; this.watchTarget(); }}>
+            ${choices.map((id) => html`<option value=${id} ?selected=${id === this.target}>${hubLabel(this.hubs, id)}</option>`)}
+          </select>
+        </label>
+        ${this.rev !== null ? html`<p class="muted">${s.configName} Rev ${this.rev} replaces what ${hub} runs now.</p>` : nothing}
+        ${this.rev !== null ? nothing : diff.length
           ? html`<ul class="diff" aria-label="Changes">
               ${diff.map((r) => html`<li><span class="k ${r.kind}">${r.kind}</span><span><strong>${r.area}</strong> ${r.label}</span>${r.detail ? html`<span class="muted">${r.detail}</span>` : nothing}</li>`)}
             </ul>`
-          : html`<p class="muted">The draft is identical to the applied config.</p>`}
-        <hh-page-diff scale="0.4"></hh-page-diff>
+          : html`<p class="muted">The draft is identical to its base revision.</p>`}
+        ${this.rev === null ? html`<hh-page-diff scale="0.4"></hh-page-diff>` : nothing}
         ${themeNotice(this.themeMsgs)}
-        <div class="meters">${meters(s)}</div>
+        ${this.rev === null ? html`<div class="meters">${meters(s)}</div>` : nothing}
         <p class="muted">Activities that are running keep going until they stop; the new config takes effect for the next one.</p>
-        ${s.hash ? html`<div class="hash">Config hash ${s.hash}</div>` : nothing}
+        ${this.rev === null && s.hash ? html`<div class="hash">Config hash ${s.hash}</div>` : nothing}
         ${this.message ? html`<div class="banner bad" role="alert">${this.message}</div>` : nothing}
         <button slot="footer" class="btn" @click=${() => this.close()}>Cancel</button>
         <button slot="footer" class="btn pri" aria-disabled=${this.phase === 'applying'} @click=${() => (this.phase === 'applying' ? undefined : void this.apply())}>
-          ${this.phase === 'applying' ? 'Applying…' : 'Apply to Hub'}
+          ${this.phase === 'applying' ? 'Applying…' : 'Apply To Hub'}
         </button>
       </hh-dialog>`;
     }
@@ -157,7 +187,7 @@ export class HhApplyDialog extends StoreElement {
         <button slot="footer" class="btn" @click=${() => this.close()}>Close</button>
       </hh-dialog>`;
     }
-    return html`<hh-dialog .open=${this.open} heading="Rev ${this.rev} saved" @close=${() => this.close()}>
+    return html`<hh-dialog .open=${this.open} heading="Rev ${this.appliedRev} applied to ${hub}" @close=${() => this.close()}>
       <ul class="steps" aria-live="polite" aria-label="Progress">
         ${this.steps().map(
           (st) => html`<li class=${st.state}>${st.state === 'done' ? icon('check') : html`<span class="dot"></span>`}${st.label}${st.state === 'pending' ? html` <span class="muted">(pending)</span>` : nothing}</li>`,
@@ -165,8 +195,8 @@ export class HhApplyDialog extends StoreElement {
       </ul>
       ${this.ack === 'waiting' ? html`<p class="muted">You can close this: the add-on has saved the config, and the rest happens in the background.</p>` : nothing}
       ${this.ack === 'timeout'
-        ? html`<div class="banner ir" role="status">Rev ${this.rev} is saved but not on the remote yet.
-            ${linkProblem(linkInfo(this.hubs, this.lastStatus, s.hub), s.hub) ??
+        ? html`<div class="banner ir" role="status">Rev ${this.appliedRev} is saved but not on the remote yet.
+            ${linkProblem(linkInfo(this.hubs, this.lastStatus, this.target), this.target) ??
             (this.lastStatus?.connected
               ? 'Home Assistant has not picked it up yet. It will be sent as soon as the integration is connected.'
               : 'Home Assistant has not picked it up yet. Is the Harmony integration set up and linked to this add-on?')}</div>`
@@ -174,8 +204,8 @@ export class HhApplyDialog extends StoreElement {
       ${this.ack === 'error'
         ? html`<div class="banner bad" role="alert">${this.message} The hub keeps the old rev.</div>`
         : nothing}
-      ${this.ack === 'error' && s.history.length
-        ? html`<button slot="footer" class="btn danger" @click=${() => void this.revertPrevious()}>Revert to rev ${s.history[0]?.rev}</button>`
+      ${this.ack === 'error' && this.prevRev !== null
+        ? html`<button slot="footer" class="btn danger" @click=${() => void this.revertPrevious()}>Revert to rev ${this.prevRev}</button>`
         : nothing}
       <button slot="footer" class="btn pri" @click=${() => this.close()}>${this.ack === 'ok' || this.ack === 'error' ? 'Done' : 'Keep Waiting in Background'}</button>
     </hh-dialog>`;

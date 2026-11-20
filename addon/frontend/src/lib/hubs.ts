@@ -1,5 +1,5 @@
 // Which hub id the editor works on, and whether Home Assistant is connected for it.
-import type { ApplyStatus, HubsResponse } from './api';
+import type { ApplyStatus, ConfigSummary, HubsResponse } from './api';
 
 export interface HubChoice {
   hub: string;
@@ -80,4 +80,19 @@ export function linkProblem(l: LinkInfo, hub: string): string | null {
     default:
       return null;
   }
+}
+
+const CFG_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
+/** Which library config to open: an explicit ?config=, else the one the hub runs, else the most recently updated; null = the library is empty. */
+export function pickConfig(search: string, configs: ConfigSummary[], hubs: HubsResponse | null, hub: string): string | null {
+  const explicit = new URLSearchParams(search).get('config');
+  if (explicit !== null && CFG_ID.test(explicit) && configs.some((c) => c.id === explicit)) return explicit;
+  const running = hubs?.hubs.find((h) => h.id === hub)?.config_id;
+  if (running && configs.some((c) => c.id === running)) return running;
+  return [...configs].sort((a, b) => b.updated - a.updated)[0]?.id ?? null;
+}
+/** "Config Name Rev N" for a hub row, or '' when the hub runs nothing. */
+export function runningLabel(hubs: HubsResponse | null, hub: string): string {
+  const h = hubs?.hubs.find((x) => x.id === hub);
+  return h?.has_applied && h.config_name ? `${h.config_name} Rev ${h.rev ?? '?'}` : '';
 }

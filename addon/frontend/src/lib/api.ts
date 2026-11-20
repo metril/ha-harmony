@@ -2,21 +2,60 @@
 import type { Config, Device, IrAction, ValidationError } from './model';
 import { Live } from './live';
 
-export interface Meta {
-  applied: { rev: number; at: number; hash: string } | null;
-  history: { rev: number; at: number; hash: string }[];
-  history_max: number;
-  /** integer draft revision (separate from applied.rev); sent back as If-Match */
+/** A config library row (`GET configs`, and the head of every config response). */
+export interface ConfigSummary {
+  id: string;
+  name: string;
+  created: number;
+  updated: number;
+  latest_rev: number | null;
+  rev_count: number;
+  /** autosave counter, sent back as If-Match; unrelated to revision numbers */
+  draft_rev: number;
+  has_draft: boolean;
+  draft_updated: number | null;
+  base_rev: number | null;
+  dirty: boolean;
+  hubs?: { hub: string; rev: number }[];
+}
+export interface RevInfo {
   rev: number;
+  at: number;
+  note: string;
+  hash: string;
+  parent: number | null;
 }
-export interface ConfigResponse extends Meta {
-  hub: string;
-  draft: { config: Config; updated: number } | null;
-  applied: (NonNullable<Meta['applied']> & { config?: Config }) | null;
+export interface ConfigDetail extends ConfigSummary {
+  draft: { config: Config; updated: number; base_rev: number | null } | null;
+  revs: RevInfo[];
+  hubs: { hub: string; rev: number }[];
 }
-export interface PutResponse extends Meta {
-  hub: string;
+export interface RevDetail extends RevInfo {
+  id: string;
+  config: Config;
+}
+export interface PutResponse {
+  id: string;
   draft_updated: number;
+  draft_rev: number;
+  base_rev: number | null;
+  dirty: boolean;
+}
+export interface AppliedVersion {
+  config_id: string;
+  rev: number;
+  name: string;
+  at: number;
+  hash: string;
+}
+/** `GET hubs/{hub}` and the answer of apply / revert */
+export interface HubState {
+  hub: string;
+  applied: AppliedVersion | null;
+  history: AppliedVersion[];
+  history_max: number;
+  config_exists?: boolean;
+  ack?: { rev: string; result: string; at: number; detail?: string } | null;
 }
 export interface Usage {
   json_bytes: number;
@@ -111,6 +150,9 @@ export interface Preview {
 export interface ApplyStatus {
   hub: string;
   applied_rev: string | null;
+  config_id?: string | null;
+  config_name?: string | null;
+  rev?: number | null;
   acked_rev: string | null;
   result: 'ok' | 'error' | null;
   detail: string | null;
@@ -135,17 +177,16 @@ export interface HubsResponse {
 }
 export interface HubInfo {
   id: string;
-  has_draft: boolean;
   has_applied: boolean;
+  config_id?: string | null;
+  config_name?: string | null;
+  /** revision of the config the hub runs */
+  rev?: number | null;
   applied_rev: string | null;
   applied_at: number | null;
 }
-export interface HistoryEntry {
-  hub: string;
-  rev: number;
-  at: number;
-  hash: string;
-  config: Config;
+export interface ConfigsResponse {
+  configs: ConfigSummary[];
 }
 export interface HaEntity {
   entity_id: string;
@@ -396,47 +437,47 @@ export class Api {
     return { linked: [], adopt: null, ...r };
   };
   adoptHub = (to: string, from = 'default') => this.request<{ ok: true; hub: string }>('POST', 'api/v1/hubs/adopt', { body: { from, to } });
-  getConfig = (hub: string, full = false) =>
-    this.request<ConfigResponse>('GET', 'api/v1/config', { query: { hub, full: full ? '1' : undefined } });
-  /** The source config of the applied version or one history row, by its integer rev. */
-  historyEntry = (hub: string, rev: number) =>
-    this.request<HistoryEntry>('GET', 'api/v1/config/history', { query: { hub, rev: String(rev) } });
-  putDraft = (hub: string, config: Config, rev?: number | null) =>
-    this.request<PutResponse>('PUT', 'api/v1/config/draft', {
-      query: { hub },
+  configs = () => this.request<ConfigsResponse>('GET', 'api/v1/configs');
+  getConfig = (id: string) => this.request<ConfigDetail>('GET', `api/v1/configs/${encodeURIComponent(id)}`);
+  createConfig = (body: { name: string; from?: { id: string; rev?: number }; yaml?: string }) =>
+    this.request<ConfigDetail & { ok: true }>('POST', 'api/v1/configs', { body });
+  renameConfig = (id: string, name: string) => this.request<ConfigDetail & { ok: true }>('PATCH', `api/v1/configs/${encodeURIComponent(id)}`, { body: { name } });
+  deleteConfig = (id: string) => this.request<{ ok: true }>('DELETE', `api/v1/configs/${encodeURIComponent(id)}`);
+  getRev = (id: string, rev: number) => this.request<RevDetail>('GET', `api/v1/configs/${encodeURIComponent(id)}/revs/${rev}`);
+  saveRev = (id: string, note = '') =>
+    this.request<PutResponse & { ok: true; rev: RevInfo }>('POST', `api/v1/configs/${encodeURIComponent(id)}/revs`, { body: note ? { note } : {} });
+  restoreRev = (id: string, rev: number) => this.request<PutResponse & { ok: true }>('POST', `api/v1/configs/${encodeURIComponent(id)}/restore`, { body: { rev } });
+  putDraft = (id: string, config: Config, rev?: number | null) =>
+    this.request<PutResponse>('PUT', `api/v1/configs/${encodeURIComponent(id)}/draft`, {
       body: { config },
       headers: rev != null ? { 'If-Match': String(rev) } : {},
     });
   /** Fire-and-forget PUT for page unload: `keepalive` lets it outlive the page. Over KEEPALIVE_MAX bytes browsers refuse
    *  keepalive bodies (64 KiB), so a normal fetch is used and may be cut off. */
-  putDraftOnUnload = (hub: string, config: Config, rev?: number | null): Promise<unknown> =>
-    this.request<PutResponse>('PUT', 'api/v1/config/draft', {
-      query: { hub },
+  putDraftOnUnload = (id: string, config: Config, rev?: number | null): Promise<unknown> =>
+    this.request<PutResponse>('PUT', `api/v1/configs/${encodeURIComponent(id)}/draft`, {
       body: { config },
       headers: rev != null ? { 'If-Match': String(rev) } : {},
       keepalive: JSON.stringify(config).length < KEEPALIVE_MAX,
     }).catch(() => undefined);
-  validate = (hub: string, config?: Config) =>
-    this.request<{ ok: boolean; errors: ValidationError[] }>('POST', 'api/v1/config/validate', {
-      query: { hub },
-      body: config ? { config } : {},
-    });
-  /** Always 200; look at `ok` and `errors`. Without `config` it checks the saved draft. */
-  preview = (hub: string, config?: Config) =>
-    this.request<Preview>('POST', 'api/v1/config/preview', { query: { hub }, body: config ? { config } : {} });
-  /** Effective hard-key action per layer; 422 when the config does not validate. */
-  keymap = (hub: string, config?: Config) =>
-    this.request<Keymap>('POST', 'api/v1/config/keymap', { query: { hub }, body: config ? { config } : {} });
-  apply = (hub: string) => this.request<Meta & { ok: true }>('POST', 'api/v1/config/apply', { query: { hub } });
-  revert = (hub: string, target: 'applied' | 'previous') =>
-    this.request<Meta & { ok: true }>('POST', 'api/v1/config/revert', { query: { hub }, body: { target } });
-  importYaml = (hub: string, yaml: string, rev?: number | null) =>
-    this.request<PutResponse & { ok: true }>('POST', 'api/v1/config/import_yaml', {
-      query: { hub },
+  importYaml = (id: string, yaml: string, rev?: number | null) =>
+    this.request<PutResponse & { ok: true }>('POST', `api/v1/configs/${encodeURIComponent(id)}/import_yaml`, {
       yaml,
       headers: rev != null ? { 'If-Match': String(rev) } : {},
     });
-  exportUrl = (hub: string, source?: 'draft' | 'applied') => this.href('api/v1/config/export_yaml', { hub, source });
+  exportUrl = (id: string, source: 'draft' | `rev:${number}` = 'draft') => this.href(`api/v1/configs/${encodeURIComponent(id)}/export_yaml`, { source });
+  // stateless: the config is always in the body; `hub` only picks the limits the hub's integration reported
+  validate = (hub: string, config: Config) =>
+    this.request<{ ok: boolean; errors: ValidationError[] }>('POST', 'api/v1/config/validate', { query: { hub }, body: { config } });
+  /** Always 200; look at `ok` and `errors`. */
+  preview = (hub: string, config: Config) => this.request<Preview>('POST', 'api/v1/config/preview', { query: { hub }, body: { config } });
+  /** Effective hard-key action per layer; 422 when the config does not validate. */
+  keymap = (hub: string, config: Config) => this.request<Keymap>('POST', 'api/v1/config/keymap', { query: { hub }, body: { config } });
+  hubState = (hub: string) => this.request<HubState>('GET', `api/v1/hubs/${encodeURIComponent(hub)}`);
+  /** Without `rev` the config's draft is saved as a revision (or the newest reused) and applied. */
+  applyToHub = (hub: string, configId: string, rev?: number) =>
+    this.request<HubState & { ok: true }>('POST', `api/v1/hubs/${encodeURIComponent(hub)}/apply`, { body: { config_id: configId, ...(rev !== undefined ? { rev } : {}) } });
+  revertHub = (hub: string) => this.request<HubState & { ok: true }>('POST', `api/v1/hubs/${encodeURIComponent(hub)}/revert`, { body: {} });
   /** 503 ha_unavailable means Home Assistant cannot be read; callers fall back to typed ids. */
   haEntities = (domain?: string, diagnostic = false, state = false) =>
     this.request<HaCatalog>('GET', 'api/v1/ha/entities', { query: { domain, diagnostic: diagnostic ? '1' : undefined, state: state ? '1' : undefined } });
@@ -506,7 +547,7 @@ export class DraftQueue {
   private pending: { config: Config; waiters: { ok: (r: PutResponse) => void; fail: (e: unknown) => void }[] } | null = null;
   constructor(
     private api: Api,
-    private hub: string,
+    private id: string,
   ) {}
 
   enqueue(config: Config, opts: { force?: boolean } = {}): Promise<PutResponse> {
@@ -527,8 +568,8 @@ export class DraftQueue {
       const job = this.pending;
       this.pending = null;
       try {
-        const res = await this.api.putDraft(this.hub, job.config, force ? null : this.rev);
-        this.rev = res.rev;
+        const res = await this.api.putDraft(this.id, job.config, force ? null : this.rev);
+        this.rev = res.draft_rev;
         job.waiters.forEach((w) => w.ok(res));
       } catch (e) {
         job.waiters.forEach((w) => w.fail(e));

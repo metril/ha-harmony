@@ -1,4 +1,4 @@
-"""Config store: draft / applied / history per hub id, one versioned JSON file per hub.
+"""Hub state: what each hub runs (a snapshot of a library config revision) and its history, one JSON file per hub.
 
 All state lives under the data dir given at construction (never anywhere else). A hub's file is
 replaced atomically (temp file + fsync + rename + dir fsync), so a crash leaves the old file.
@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 HISTORY_MAX = 5
 HUB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")  # the hub's own ids, e.g. ha-harmony-abc
 
@@ -53,15 +53,7 @@ def atomic_write(path: Path, data: bytes) -> None:
 
 
 def _empty() -> dict[str, Any]:
-    return {
-        "v": SCHEMA_VERSION,
-        "next_rev": 1,
-        "draft_rev": 0,
-        "ack": None,
-        "draft": None,
-        "applied": None,
-        "history": [],
-    }
+    return {"v": SCHEMA_VERSION, "ack": None, "applied": None, "history": []}
 
 
 class Store:
@@ -85,8 +77,6 @@ class Store:
             raise StoreError("stored state is corrupt") from None
         if not isinstance(state, dict) or state.get("v") != SCHEMA_VERSION:
             raise StoreError("stored state has an unsupported version")
-        if not isinstance(state.get("draft_rev"), int):
-            state["draft_rev"] = 0  # files written before draft revisions existed
         state.setdefault("ack", None)
         return state
 
@@ -121,46 +111,25 @@ class Store:
     def _save(self, hub: str, state: dict[str, Any]) -> None:
         atomic_write(self._path(hub), json.dumps(state, separators=(",", ":")).encode())
 
-    def set_draft(
-        self, hub: str, config: dict[str, Any], now: int, if_rev: int | None = None
-    ) -> dict[str, Any]:
-        """`if_rev` set: refuse (RevConflict) unless the draft is still at that revision."""
-        state = self.load(hub)
-        if if_rev is not None and if_rev != state["draft_rev"]:
-            raise RevConflict(state["draft_rev"])
-        state["draft_rev"] += 1
-        state["draft"] = {"config": config, "updated": now}
-        self._save(hub, state)
-        return state
-
-    def apply(self, hub: str, config: dict[str, Any], cfg_hash: str, now: int) -> dict[str, Any]:
-        """Make `config` the applied config (draft cleared); the previous one goes to history."""
+    def apply(self, hub: str, entry: dict[str, Any]) -> dict[str, Any]:
+        """`entry` {config_id, rev, name, at, hash, config} becomes what the hub runs; the previous one goes to history."""
         state = self.load(hub)
         if state["applied"] is not None:
             state["history"] = [state["applied"], *state["history"]][:HISTORY_MAX]
-        state["applied"] = {"rev": state["next_rev"], "at": now, "hash": cfg_hash, "config": config}
-        state["next_rev"] += 1
-        state["draft_rev"] += 1
-        state["draft"] = None
+        state["applied"] = entry
         self._save(hub, state)
         return state
 
-    def revert(self, hub: str, target: str) -> dict[str, Any]:
-        """`applied`: discard the draft. `previous`: re-apply the newest history entry; the applied
-        config it replaces becomes the newest history entry (so it can be reverted again)."""
-        state = self.load(hub)
-        state["draft_rev"] += 1
-        if target == "applied":
-            state["draft"] = None
-        elif target == "previous":
-            if not state["history"]:
-                raise StoreError("no previous version to revert to")
-            current = state["applied"]
-            state["applied"], *rest = state["history"]
-            # the version being left goes onto history (cap applies): a revert can itself be reverted
-            state["history"] = ([current, *rest] if current is not None else rest)[:HISTORY_MAX]
-            state["draft"] = None
-        else:
+    def revert(self, hub: str, target: str = "previous") -> dict[str, Any]:
+        """Re-apply the newest history entry; the entry it replaces becomes the newest history entry
+        (so it can be reverted again)."""
+        if target != "previous":
             raise StoreError("unknown revert target")
+        state = self.load(hub)
+        if not state["history"]:
+            raise StoreError("no previous version to revert to")
+        current = state["applied"]
+        state["applied"], *rest = state["history"]
+        state["history"] = ([current, *rest] if current is not None else rest)[:HISTORY_MAX]
         self._save(hub, state)
         return state

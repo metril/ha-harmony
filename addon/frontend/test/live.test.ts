@@ -41,6 +41,15 @@ describe('Live', () => {
     u1();
   });
 
+  it('delivers a pushed `configs` delta to its subscribers', async () => {
+    const l = mk();
+    const got: unknown[] = [];
+    l.sub('configs', (v) => got.push(v));
+    await tick();
+    fakeLive.push({ t: 'configs', configs: [{ id: 'main', hubs: [{ hub: 'h', rev: 2 }] }] });
+    expect(got.at(-1)).toEqual({ configs: [{ id: 'main', hubs: [{ hub: 'h', rev: 2 }] }] });
+  });
+
   it('closes the socket when the last subscriber leaves, and stays closed', async () => {
     vi.useFakeTimers();
     const l = mk();

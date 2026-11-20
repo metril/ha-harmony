@@ -1,6 +1,6 @@
 """Editor WebSocket `GET /api/v1/live` (docs/addon-api.md "Live"): subscribe, snapshot, deltas from the bus.
 
-State changes are published on the bus under the hub key `live` with the topic names of the protocol (`hubs`, `hub:<id>`,
+State changes are published on the bus under the hub key `live` with the topic names of the protocol (`hubs`, `configs`, `hub:<id>`,
 `bt:<id>`, `keys:<id>`); every socket holds one bounded subscription. A `keys:<id>` subscription is the listen lease."""
 
 from __future__ import annotations
@@ -54,6 +54,13 @@ def publish_hub(app: web.Application, hub: str) -> None:
         _bus(app).publish(LIVE, f"hub:{hub}", {"t": "hub", **p})
 
 
+def publish_configs(app: web.Application) -> None:
+    from .app import configs_payload
+
+    if _bus(app).subscribers(LIVE, "configs") and (p := _safe(configs_payload, app)) is not None:
+        _bus(app).publish(LIVE, "configs", {"t": "configs", **p})
+
+
 def publish_bt(app: web.Application, hub: str) -> None:
     from .bt_routes import bt_payload
 
@@ -75,17 +82,19 @@ def touch(app: web.Application, hub: str) -> None:
 def _topic(raw: object) -> str | None:
     if not isinstance(raw, str) or len(raw) > 80:
         return None
-    if raw == "hubs":
+    if raw in ("hubs", "configs"):
         return raw
     kind, _, hub = raw.partition(":")
     return raw if kind in ("hub", "bt", "keys") and HUB_ID.fullmatch(hub) else None
 
 
 def _snapshot(app: web.Application, topic: str) -> Any:
-    from .app import hub_status, hubs_payload
+    from .app import configs_payload, hub_status, hubs_payload
     from .bt_routes import bt_payload
 
     kind, _, hub = topic.partition(":")
+    if kind == "configs":
+        return _safe(configs_payload, app)
     if kind == "hubs":
         return _safe(hubs_payload, app)
     if kind == "hub":

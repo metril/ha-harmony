@@ -5,6 +5,7 @@ import json
 import pytest
 from addon_ws import BEARER, TOKEN, connect, drain, live, recv
 from aiohttp import WSServerHandshakeError
+from cfgapi import put_apply
 from test_addon import CONFIG, H
 
 from harmony_addon.app import create_app
@@ -32,10 +33,7 @@ async def c(aiohttp_client, tmp_path):
 
 
 async def apply(c, hub):
-    q = f"?hub={hub}"
-    r = await c.put(f"/api/v1/config/draft{q}", json={"config": CONFIG}, headers=H)
-    assert r.status == 200
-    r = await c.post(f"/api/v1/config/apply{q}", json={}, headers=H)
+    r = await put_apply(c, CONFIG, hub)
     assert r.status == 200
 
 

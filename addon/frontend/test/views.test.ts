@@ -6,28 +6,20 @@ import '../src/components/hh-draft-bar';
 import { Store, setStore } from '../src/lib/store';
 import { ApiError } from '../src/lib/api';
 import { fakeLive } from './fake-ws';
-import { META, fakeApi, previewBad, previewOk, status, tvConfig, type Handler } from './helpers';
+import { REVS, fakeApi, libRoutes, previewBad, previewOk, status, tvConfig, type Handler } from './helpers';
 
 async function boot(opts: { draft?: boolean; applied?: boolean; errors?: boolean; hash?: string; statuses?: object[]; hubs?: { id: string }[]; linked?: { id: string; last_seen: number; name?: string }[]; routes?: Record<string, Handler>; config?: ReturnType<typeof tvConfig> } = {}) {
   const statuses = [...(opts.statuses ?? [status()])];
   const cfg = opts.config ?? tvConfig();
   const f = fakeApi({
-    'GET api/v1/config': () => ({
-      body: {
-        hub: 'h',
-        draft: opts.draft ? { config: cfg, updated: 1_700_000_050 } : null,
-        ...META,
-        ...(opts.applied === false ? { applied: null, history: [] } : { applied: { ...META.applied, config: tvConfig() } }),
-      },
-    }),
+    ...libRoutes(opts.draft ? { config: cfg } : opts.applied !== false ? { config: tvConfig() } : null, { revs: opts.applied !== false, applied: opts.applied !== false }),
     'POST api/v1/config/preview': () =>
       opts.errors
         ? { body: previewBad([{ path: ['devices', 0, 'commands', 'cmd_3'], msg: 'nec cmd 999 outside 0..255', line: null }]) }
         : { body: previewOk() },
-    'PUT api/v1/config/draft': () => ({ body: { hub: 'h', draft_updated: 1_700_000_100, ...META } }),
     'GET api/v1/hubs': () => ({ body: { hubs: (opts.hubs ?? [{ id: 'h' }]).map((h) => ({ has_draft: false, has_applied: true, applied_rev: 'aaaa1111', applied_at: 1, ...h })) } }),
-    'POST api/v1/config/apply': () => ({ body: { ok: true, applied: { rev: 4, at: 1_700_000_200, hash: 'cafebabe' }, history: [META.applied, ...META.history], history_max: 5, rev: 8 } }),
-    'GET api/v1/config/history': () => ({ body: { hub: 'h', rev: 2, at: 1, hash: 'x', config: { ...tvConfig(), activities: [] } } }),
+    'POST api/v1/hubs/h/apply': () => ({ body: { ok: true, hub: 'h', applied: { config_id: 'c', rev: 4, name: 'Main', at: 1_700_000_200, hash: 'cafebabe' }, history: [{ config_id: 'c', rev: 3, name: 'Main', at: 1_700_000_000, hash: 'abcdef0123456789' }], history_max: 5 } }),
+    'GET api/v1/configs/c/revs/2': () => ({ body: { ...REVS[1], id: 'c', config: { ...tvConfig(), activities: [] } } }),
     'POST api/v1/ir/test': () => ({ body: { ok: true, action: {} } }),
     ...(opts.routes ?? {}),
   });
@@ -35,8 +27,9 @@ async function boot(opts: { draft?: boolean; applied?: boolean; errors?: boolean
   const hubsBody = ((await f.api.hubs()) as unknown) as object;
   fakeLive.topics['hubs'] = { adopt: null, now: 1000, ...hubsBody, linked: opts.linked ?? ((hubsBody as { linked: unknown[] }).linked.length ? (hubsBody as { linked: unknown[] }).linked : [{ id: 'h', last_seen: 1 }]) };
   fakeLive.topics['hub:h'] = statuses[0];
+  fakeLive.topics['configs'] = { configs: [{ id: 'c', name: 'Main', created: 1, updated: 2, latest_rev: 3, rev_count: 3, draft_rev: 7, has_draft: true, draft_updated: 1, base_rev: 3, dirty: false, hubs: [{ hub: 'h', rev: 3 }] }] };
   const pushStatus = (st: object) => fakeLive.push({ t: 'hub', ...st });
-  const store = new Store(f.api, 'h', 600);
+  const store = new Store(f.api, 'h', 'c', 600);
   setStore(store);
   await store.load();
   location.hash = opts.hash ?? '#/overview';
@@ -72,7 +65,7 @@ describe('screens render with a realistic config', () => {
     expect(t).toContain('sensor.living_room_temperature');
     expect(text(app)).toContain('Overview');
     const bar = app.shadowRoot!.querySelector('hh-draft-bar')!;
-    expect(text(bar)).toContain('No changes since rev 3');
+    expect(text(bar)).toContain('Rev 3 · No Changes');
     expect(text(bar)).toContain('Valid');
   });
 
@@ -128,20 +121,23 @@ describe('screens render with a realistic config', () => {
     expect(dv.shadowRoot!.querySelector('a.add')!.getAttribute('href')).toBe('#/devices/new');
   });
 
-  it('history: one status chip on the newest rev, earlier revs have exactly Compare and Restore', async () => {
+  it('revisions: the hub status sits above the list, the applied rev has an Applied On badge, every rev has its actions', async () => {
     const { app } = await boot({ hash: '#/history', statuses: [status({ applied_rev: 'a', acked_rev: 'a', result: 'ok' })] });
     const h = await lazyEl(app, 'hh-history');
     await settle(h as HTMLElement);
     expect(text(h)).toContain('Rev 3');
     await vi.waitFor(() => expect(text(h)).toContain('On the Remote'));
-    for (const old of ['Applied', 'Acknowledged', 'Current']) expect(text(h)).not.toContain(old);
+    for (const old of ['Acknowledged', 'Current']) expect(text(h)).not.toContain(old);
+    expect(h.shadowRoot!.querySelectorAll('#hub-runs .chip').length).toBe(1);
     const rows = [...h.shadowRoot!.querySelectorAll('li')];
-    expect(rows[0]!.querySelectorAll('button').length).toBe(0);
-    expect(rows[0]!.querySelectorAll('.chip').length).toBe(1);
-    expect(rows[0]!.querySelector('.acts')!.getAttribute('role')).toBe('status');
-    expect(rows[1]!.querySelectorAll('.chip').length).toBe(0);
-    expect([...rows[1]!.querySelectorAll('button')].map((b) => b.textContent!.trim())).toEqual(['Compare', 'Restore']);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]!.textContent).toContain('Rev 3'); // newest first
+    expect(rows[0]!.textContent).toContain('Applied On h');
+    expect(rows[0]!.textContent).toContain('Evening scene');
+    expect(rows[1]!.textContent).not.toContain('Applied On');
+    expect([...rows[1]!.querySelectorAll('.acts > *')].map((b) => b.textContent!.trim())).toEqual(['Compare', 'Restore To Draft', 'Duplicate As New Config', 'Apply To Hub', 'Export YAML']);
     expect(rows[1]!.querySelector('time')!.getAttribute('title')).toBeTruthy();
+    expect(rows[1]!.querySelector('a')!.getAttribute('href')).toContain('/configs/c/export_yaml?source=rev%3A2');
   });
 
   it('history: sending, not sent, and rejected with a reason behind See Why', async () => {
@@ -180,9 +176,9 @@ describe('screens render with a realistic config', () => {
     const { app, calls } = await boot({ hash: '#/history' });
     const h = await lazyEl(app, 'hh-history');
     await settle(h as HTMLElement);
-    ([...h.shadowRoot!.querySelectorAll('button')].find((b) => b.textContent?.includes('Compare')) as HTMLButtonElement).click();
+    (h.shadowRoot!.querySelector('button[aria-label="Compare rev 2"]') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(h)).toContain('Watch TV'));
-    expect(calls.some((c) => c.url.includes('config/history') && c.url.includes('rev=2'))).toBe(true);
+    expect(calls.some((c) => c.url.endsWith('/configs/c/revs/2'))).toBe(true);
     expect(text(h)).toContain('added');
   });
 
@@ -310,13 +306,13 @@ describe('apply dialog', () => {
     await settle(dlg);
     expect(dlg.shadowRoot!.querySelector('hh-dialog')?.getAttribute('heading')).toBe('Apply Draft to h?');
     expect(text(dlg)).toContain('Renamed TV');
-    const apply = [...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement;
+    const apply = [...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply To Hub')) as HTMLButtonElement;
     apply.click();
-    await vi.waitFor(() => expect(dlg.shadowRoot!.querySelector('hh-dialog')?.getAttribute('heading')).toBe('Rev 4 saved'));
+    await vi.waitFor(() => expect(dlg.shadowRoot!.querySelector('hh-dialog')?.getAttribute('heading')).toBe('Rev 4 applied to h'));
     expect(text(dlg)).toContain('Saved as rev 4');
     expect(store.api).toBeDefined();
     expect(text(dlg)).toContain('Sending to the Remote (pending)');
-    expect(store.hasDraft).toBe(false);
+    expect(store.errors).toEqual([]);
   });
 
   it('moves from waiting to done when a status push carries the ack of the applied bundle rev', async () => {
@@ -326,7 +322,7 @@ describe('apply dialog', () => {
     const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean };
     dlg.open = true;
     await settle(dlg);
-    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement).click();
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply To Hub')) as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(dlg)).toContain('Sending to the Remote (pending)'));
     pushStatus(status({ acked_rev: 'old00000', result: 'ok' })); // an ack of another rev does not count
     await settle(dlg);
@@ -344,7 +340,7 @@ describe('apply dialog', () => {
     const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean };
     dlg.open = true;
     await settle(dlg);
-    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement).click();
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply To Hub')) as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(dlg)).toContain('(pending)'));
     pushStatus(status({ acked_rev: 'aaaa1111', result: 'error', detail: 'bad key map' }));
     await vi.waitFor(() => expect(text(dlg)).toContain('bad key map'));
@@ -358,7 +354,7 @@ describe('apply dialog', () => {
     dlg.waitMs = 30;
     dlg.open = true;
     await settle(dlg);
-    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement).click();
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply To Hub')) as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(dlg)).toContain('No Home Assistant integration is linked'));
     pushStatus(status({ acked_rev: 'aaaa1111', result: 'ok' }));
     await vi.waitFor(() => expect(text(dlg)).toContain('On the Remote'));
@@ -372,7 +368,7 @@ describe('apply dialog', () => {
     dlg.waitMs = 30;
     dlg.open = true;
     await settle(dlg);
-    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply to Hub')) as HTMLButtonElement).click();
+    ([...dlg.shadowRoot!.querySelectorAll('hh-dialog button')].find((b) => b.textContent?.includes('Apply To Hub')) as HTMLButtonElement).click();
     await vi.waitFor(() => expect(text(dlg)).toContain('not connected for this hub (h)'));
     expect(text(dlg)).toContain('living-room-hub');
   });
@@ -418,7 +414,7 @@ describe('apply dialog', () => {
 
   it('a 422 on apply closes the dialog and records the errors', async () => {
     const { store } = await boot({ draft: true });
-    store.api.apply = () => Promise.reject(new ApiError(422, 'x', 'bad', [{ path: ['devices', 0, 'id'], msg: 'bad id' }]));
+    store.api.applyToHub = () => Promise.reject(new ApiError(422, 'x', 'bad', [{ path: ['devices', 0, 'id'], msg: 'bad id' }]));
     await expect(store.applyDraft()).rejects.toBeInstanceOf(ApiError);
     expect(store.errors).toHaveLength(1);
   });

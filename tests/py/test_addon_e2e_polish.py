@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from test_addon_e2e import (  # noqa: F401
     DIST,
+    ensure_cfg,
     INGRESS_HEADERS,
     PREFIX,
     TOKEN,
@@ -87,7 +88,8 @@ async def large(aiohttp_server, tmp_path):
     )
     server = await aiohttp_server(app)
     origin = f"http://127.0.0.1:{server.port}"
-    status, _ = await api(origin, "PUT", "/api/v1/config/draft", json={"config": LARGE}, headers=H)
+    await ensure_cfg(origin)
+    status, _ = await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": LARGE}, headers=H)
     assert status == 200
     return origin
 
@@ -288,7 +290,7 @@ async def test_keyboard_only_assign_a_command_to_a_key_then_apply(browser, large
     # review and apply with the keyboard
     await page.get_by_role("button", name="Review & Apply").focus()
     await page.keyboard.press("Enter")
-    await page.get_by_role("button", name="Apply to Hub").focus()
+    await page.get_by_role("button", name="Apply To Hub").focus()
     await page.keyboard.press("Enter")
     await page.get_by_text("Saved as rev 1").wait_for()
 

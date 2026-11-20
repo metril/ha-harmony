@@ -8,6 +8,7 @@ import json
 import pytest
 from addon_ws import live, recv
 from conftest import ADDON_TOKEN, HUB_ID, make_entry
+from cfgapi import put_apply
 from test_addon import H
 from test_ha_bluetooth import CFG, BtHub, state, until
 
@@ -44,9 +45,7 @@ async def apply_yaml(addon, text):
     from harmony_core.config_model import load_source
 
     cfg = json.loads(json.dumps(load_source(text) or {}))
-    q = f"?hub={HUB_ID}"
-    assert (await addon.put(f"/api/v1/config/draft{q}", json={"config": cfg}, headers=H)).status == 200
-    r = await addon.post(f"/api/v1/config/apply{q}", json={}, headers=H)
+    r = await put_apply(addon, cfg, HUB_ID)
     assert r.status == 200, await r.text()
 
 
