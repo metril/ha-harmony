@@ -29,7 +29,7 @@ endif()
 
 add_library(hp_bt STATIC
   hub/bt/bt_main.c hub/bt/bt_bonds.c hub/bt/bt_state.c hub/bt/bt_pairing.c hub/bt/bt_remote.c hub/bt/bt_hid.c hub/bt/bt_hid_queue.c
-  hub/bt/bt_reconnect_queue.c hub/bt/hci_transport_linux.c hub/bt/bt_leaddr.c hub/bt/bt_trace.c)
+  hub/bt/bt_reconnect_queue.c hub/bt/hci_transport_linux.c hub/bt/bt_leaddr.c hub/bt/bt_trace.c hub/bt/bt_sc.c)
 target_include_directories(hp_bt PUBLIC ${CMAKE_SOURCE_DIR})
 target_compile_definitions(hp_bt PRIVATE _GNU_SOURCE)
 target_compile_options(hp_bt PRIVATE -ffunction-sections -fdata-sections)

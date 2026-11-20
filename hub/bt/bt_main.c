@@ -19,6 +19,7 @@
 #include "bt_remote.h"
 #include "bt_win.h"
 #include "bt_leaddr.h"
+#include "bt_sc.h"
 #include "bt_trace.h"
 #include "bt_hid_queue.h"
 #include "btstack_memory.h"
@@ -492,6 +493,7 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
 #ifdef HH_BT_LE
         bt_le_host_gone(h);
         bt_remote_gone(h);
+        bt_sc_drop(h);
 #endif
         break;
     }
@@ -601,6 +603,9 @@ static void hids_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet,
     case HIDS_SUBEVENT_INPUT_REPORT_ENABLE: {
         int s = bt_host_find_handle(hids_subevent_input_report_enable_get_con_handle(packet));
         if (s >= 0 && hids_subevent_input_report_enable_get_enable(packet)) bt_hid_ready(s);
+        bt_logf("HIDS input report notifications %s for handle 0x%04x (CCC written or restored)",
+                hids_subevent_input_report_enable_get_enable(packet) ? "enabled" : "disabled",
+                (unsigned)hids_subevent_input_report_enable_get_con_handle(packet));
         break;
     }
     default:
@@ -608,6 +613,62 @@ static void hids_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet,
     }
 }
 static hids_device_report_t s_hids_reports[3];
+
+/* ---- Generic Attribute service (0x1801): Service Changed ---- */
+#define BT_TAG_DBHASH 0x48485343u /* "HHSC": FNV-1a of the ATT database the last run served */
+static att_service_handler_t s_gatt_svc;
+static btstack_context_callback_registration_t s_sc_cb;
+
+static void sc_send(void *ctx) {
+    hci_con_handle_t h = (hci_con_handle_t)(uintptr_t)ctx;
+    uint8_t v[4];
+    bt_sc_value(v);
+    uint8_t rc = att_server_indicate(h, ATT_CHARACTERISTIC_GATT_SERVICE_CHANGED_01_VALUE_HANDLE, v, sizeof v);
+    if (rc == ERROR_CODE_SUCCESS) {
+        bt_sc_sent(h);
+        bt_logf("service changed indicated to handle 0x%04x (0x0001-0xFFFF)", (unsigned)h);
+    } else if (rc != ERROR_CODE_UNKNOWN_CONNECTION_IDENTIFIER && bt_sc_ccc_get(h)) { /* busy: ask again */
+        s_sc_cb.callback = sc_send;
+        s_sc_cb.context = ctx;
+        att_server_register_can_send_now_callback(&s_sc_cb, h);
+    }
+}
+
+static uint16_t gatt_read(hci_con_handle_t con, uint16_t handle, uint16_t off, uint8_t *buf, uint16_t size) {
+    if (handle != ATT_CHARACTERISTIC_GATT_SERVICE_CHANGED_01_CLIENT_CONFIGURATION_HANDLE) return 0;
+    uint8_t v[2] = {(uint8_t)bt_sc_ccc_get(con), (uint8_t)(bt_sc_ccc_get(con) >> 8)};
+    return att_read_callback_handle_blob(v, sizeof v, off, buf, size);
+}
+
+/* Also called by BTstack with the stored value when an encrypted bonded peer reconnects (CCC restore). */
+static int gatt_write(hci_con_handle_t con, uint16_t handle, uint16_t mode, uint16_t off, uint8_t *buf, uint16_t size) {
+    (void)mode; (void)off;
+    if (handle != ATT_CHARACTERISTIC_GATT_SERVICE_CHANGED_01_CLIENT_CONFIGURATION_HANDLE || size < 2) return 0;
+    uint16_t v = (uint16_t)(buf[0] | (buf[1] << 8));
+    bt_logf("CCC restored/written for handle 0x%04x: service changed = 0x%04x", (unsigned)con, (unsigned)v);
+    if (bt_sc_ccc(con, v)) { /* deferred: the write response goes out first */
+        s_sc_cb.callback = sc_send;
+        s_sc_cb.context = (void *)(uintptr_t)con;
+        att_server_register_can_send_now_callback(&s_sc_cb, con);
+    }
+    return 0;
+}
+
+static void gatt_service_init(void) {
+    s_gatt_svc.start_handle = ATT_SERVICE_GATT_SERVICE_START_HANDLE;
+    s_gatt_svc.end_handle = ATT_SERVICE_GATT_SERVICE_END_HANDLE;
+    s_gatt_svc.read_callback = gatt_read;
+    s_gatt_svc.write_callback = gatt_write;
+    att_server_register_service_handler(&s_gatt_svc);
+    uint32_t cur = bt_sc_hash(profile_data, sizeof profile_data);
+    uint8_t st[4] = {0};
+    int have = g_tlv ? g_tlv->get_tag(&g_tlv_ctx, BT_TAG_DBHASH, st, sizeof st) : 0;
+    bool changed = bt_sc_db_changed(cur, st, have > 0 ? (size_t)have : 0);
+    bt_sc_set_changed(changed);
+    uint8_t nv[4] = {(uint8_t)cur, (uint8_t)(cur >> 8), (uint8_t)(cur >> 16), (uint8_t)(cur >> 24)};
+    bt_tlv_store_if_changed(BT_TAG_DBHASH, nv, sizeof nv);
+    bt_logf("ATT database %s since the last run (hash %08x)", changed ? "changed" : "unchanged", (unsigned)cur);
+}
 #endif
 
 /* ---- start-up ---- */
@@ -739,6 +800,7 @@ int bt_helper_main(int argc, char **argv) {
     sm_set_io_capabilities(IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
     sm_set_authentication_requirements(SM_AUTHREQ_BONDING | SM_AUTHREQ_SECURE_CONNECTION); /* Just Works; SC (software ECC), legacy when the peer has none */
     att_server_init(profile_data, NULL, NULL);
+    gatt_service_init();
     battery_service_server_init(100);
     device_information_service_server_init();
     device_information_service_server_set_pnp_id(2 /* USB */, 0x046D, 0xC52B, 0x0100);

@@ -19,6 +19,8 @@
 #include <sys/stat.h>
 #include "hub/bt/bt_ipc.h"
 #include "hub/bt/bt_remote.h"
+#include "hub/bt/bt_sc.h"
+#include "hub/bt/hh_bt_gatt.h"
 
 static void test_keyboard_reports(void) {
     bt_hid_keys_t k;
@@ -221,6 +223,52 @@ static uint8_t q_send(uint16_t cid, const uint8_t *r, uint16_t len) {
 }
 static void q_req(uint16_t cid) { (void)cid; }
 static void q_log(const char *l) { (void)l; }
+/* ---- ATT database: Generic Attribute service, stable HID handles; Service Changed bookkeeping ---- */
+static const uint8_t *att_find(uint16_t handle) {
+    for (const uint8_t *p = profile_data + 1; p[0] || p[1]; p += p[0] | (p[1] << 8))
+        if ((uint16_t)(p[4] | (p[5] << 8)) == handle) return p;
+    return NULL;
+}
+static void test_att_db_gatt_service(void) {
+    const uint8_t *svc = att_find(ATT_SERVICE_GATT_SERVICE_START_HANDLE);
+    CT_CHECK(svc && svc[6] == 0x00 && svc[7] == 0x28 && svc[8] == 0x01 && svc[9] == 0x18); /* primary service 0x1801 */
+    const uint8_t *decl = att_find(0x0037), *val = att_find(ATT_CHARACTERISTIC_GATT_SERVICE_CHANGED_01_VALUE_HANDLE);
+    CT_CHECK(decl && decl[8] == 0x20 && decl[9] == 0x38 && decl[11] == 0x05 && decl[12] == 0x2a); /* indicate, 0x2A05 */
+    CT_CHECK(val && val[6] == 0x05 && val[7] == 0x2a);
+    const uint8_t *ccc = att_find(ATT_CHARACTERISTIC_GATT_SERVICE_CHANGED_01_CLIENT_CONFIGURATION_HANDLE);
+    CT_CHECK(ccc && ccc[6] == 0x02 && ccc[7] == 0x29);
+    CT_EQ(ATT_SERVICE_GATT_SERVICE_END_HANDLE, 0x0039);
+    /* GAP: name + appearance; the HID handles did not move (a bonded host's cache stays valid) */
+    CT_CHECK(att_find(0x0003) && att_find(0x0005));
+    CT_EQ(ATT_CHARACTERISTIC_ORG_BLUETOOTH_CHARACTERISTIC_REPORT_01_VALUE_HANDLE, 0x0021);
+    CT_EQ(ATT_CHARACTERISTIC_ORG_BLUETOOTH_CHARACTERISTIC_REPORT_MAP_01_VALUE_HANDLE, 0x002c);
+    CT_EQ(ATT_CHARACTERISTIC_ORG_BLUETOOTH_CHARACTERISTIC_HID_CONTROL_POINT_01_VALUE_HANDLE, 0x0035);
+}
+static void test_service_changed(void) {
+    uint8_t v[4];
+    bt_sc_value(v);
+    CT_EQ(v[0] | (v[1] << 8), 1);
+    CT_EQ(v[2] | (v[3] << 8), 0xFFFF);
+    uint32_t h = bt_sc_hash(profile_data, sizeof profile_data);
+    uint8_t st[4] = {(uint8_t)h, (uint8_t)(h >> 8), (uint8_t)(h >> 16), (uint8_t)(h >> 24)};
+    CT_CHECK(!bt_sc_db_changed(h, st, 4));
+    CT_CHECK(bt_sc_db_changed(h + 1, st, 4));
+    CT_CHECK(bt_sc_db_changed(h, NULL, 0)); /* first run of this firmware */
+    bt_sc_set_changed(false);
+    CT_CHECK(!bt_sc_ccc(0x40, 2)); /* database unchanged: nothing to send */
+    bt_sc_drop(0x40);
+    bt_sc_set_changed(true);
+    CT_CHECK(!bt_sc_ccc(0x40, 0));    /* CCCD off: no indication */
+    CT_CHECK(bt_sc_ccc(0x40, 2));     /* restored/enabled: once */
+    bt_sc_sent(0x40);
+    CT_CHECK(!bt_sc_ccc(0x40, 2));    /* not again on this connection */
+    CT_EQ(bt_sc_ccc_get(0x40), 2);
+    bt_sc_drop(0x40);
+    CT_EQ(bt_sc_ccc_get(0x40), 0);
+    CT_CHECK(bt_sc_ccc(0x41, 2));     /* a new connection gets its own */
+    bt_sc_drop(0x41);
+}
+
 static void test_hidq_overflow(void) {
     hidq_init(q_send, q_req, q_log);
     uint8_t press[10] = {0xA1, 1, 0, 0, 4, 0, 0, 0, 0, 0}, rel[10] = {0xA1, 1};
@@ -420,6 +468,8 @@ int main(void) {
     CT_RUN(test_txq);
     CT_RUN(test_backoff);
     CT_RUN(test_bonds);
+    CT_RUN(test_att_db_gatt_service);
+    CT_RUN(test_service_changed);
     CT_RUN(test_hidq_overflow);
     CT_RUN(test_window_transport);
     CT_RUN(test_pair_fail_line);
