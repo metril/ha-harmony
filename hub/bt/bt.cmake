@@ -9,7 +9,7 @@ set(_bts_src
   platform/posix/btstack_run_loop_posix.c platform/posix/btstack_tlv_posix.c)
 if(HH_BT_LE)
   list(APPEND _bts_src
-    src/btstack_crypto.c 3rd-party/rijndael/rijndael.c
+    src/btstack_crypto.c 3rd-party/rijndael/rijndael.c 3rd-party/micro-ecc/uECC.c
     src/ble/att_db.c src/ble/att_dispatch.c src/ble/att_server.c src/ble/gatt_client.c
     src/ble/le_device_db_tlv.c src/ble/sm.c
     src/ble/gatt-service/hids_device.c src/ble/gatt-service/hids_host.c
@@ -20,7 +20,7 @@ add_library(btstack STATIC ${_bts_src})
 target_include_directories(btstack SYSTEM PUBLIC
   ${CMAKE_SOURCE_DIR}/hub/bt
   ${_bts}/src ${_bts}/src/classic ${_bts}/src/ble ${_bts}/src/ble/gatt-service
-  ${_bts}/platform/posix ${_bts}/3rd-party/rijndael)
+  ${_bts}/platform/posix ${_bts}/3rd-party/rijndael ${_bts}/3rd-party/micro-ecc)
 target_compile_definitions(btstack PRIVATE _GNU_SOURCE)
 target_compile_options(btstack PRIVATE -w -Wno-error -ffunction-sections -fdata-sections)  # third-party, patched copy
 if(HH_BT_LE)
@@ -29,7 +29,7 @@ endif()
 
 add_library(hp_bt STATIC
   hub/bt/bt_main.c hub/bt/bt_bonds.c hub/bt/bt_state.c hub/bt/bt_pairing.c hub/bt/bt_remote.c hub/bt/bt_hid.c hub/bt/bt_hid_queue.c
-  hub/bt/bt_reconnect_queue.c hub/bt/hci_transport_linux.c)
+  hub/bt/bt_reconnect_queue.c hub/bt/hci_transport_linux.c hub/bt/bt_leaddr.c hub/bt/bt_trace.c)
 target_include_directories(hp_bt PUBLIC ${CMAKE_SOURCE_DIR})
 target_compile_definitions(hp_bt PRIVATE _GNU_SOURCE)
 target_compile_options(hp_bt PRIVATE -ffunction-sections -fdata-sections)

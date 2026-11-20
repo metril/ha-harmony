@@ -81,6 +81,28 @@ peer ...`), each refusal (`pairing refused: ...`) and each failure (`pairing fai
 `HCI status 0x..` / `auth status 0x..`). Routine HID back-pressure lines ("refused by the stack ... waiting to send") are debug
 level: set `HH_BT_DEBUG` in the helper's environment to see them.
 
+## LE address, Secure Connections, diagnostics
+
+- **LE address.** The helper advertises and connects over LE with a random static address (top two bits 11), not the
+  controller's public BD_ADDR that Classic hosts inquire and page, so a host's "pair" on that listing cannot fall onto
+  BR/EDR. It is generated once from `/dev/urandom` and kept in `le_addr` next to `keys.tlv` (6 bytes, written atomically,
+  reused at every start so LE bonds reconnect; an invalid file is replaced; if it cannot be stored LE keeps the public
+  address). It is logged at start (`LE address (static random) ...`), not part of `bt_state`. Changing the LE address
+  invalidates LE bonds made under the old one (the first start with this change: re-pair LE hosts and remotes).
+- **Advertising data.** The Flags byte is general discoverable (0x06) only while a window takes LE bonds (else 0x04). When a
+  window opens or closes while advertising is already on, the data is replaced in place.
+- **LE Secure Connections** (Just Works, IO capability NoInputNoOutput, bonding) with software P-256 (vendored micro-ecc,
+  BSD-2, `vendor/btstack/3rd-party/micro-ecc`; the controller has no HCI ECC), falling back to legacy pairing when the peer
+  has no SC. Keys stay 16 bytes. The first SC pairing spends some seconds of CPU on the hub's MIPS core.
+- **Info-level helper log** (besides the pairing lines above): Classic connection request / complete (peer, link type,
+  status), LE connection complete (role, peer, type, status), LE pairing complete for every status (SMP reason or HCI status),
+  link disconnection (handle, status, reason) and the status of LE Set Advertising Parameters / Data / Enable (failures
+  always, success once).
+- **HCI trace** (bench diagnosis only): create the file `hci_trace` in the helper's data directory (next to `keys.tlv`, e.g.
+  `/data/ha-harmony/bt/hci_trace`; contents ignored) and restart the helper (it restarts itself after being killed). Packets go, one
+  text line each (first 48 bytes in hex), to `/tmp/bt-hci.log` (RAM, never flash), which restarts when it reaches 512 KiB.
+  Delete the file and restart the helper to turn it off.
+
 ## Picking a remote
 
 The hub never bonds the first advertiser. `bt_pair {on: true, mode: "remote"}` without `addr` opens the window and

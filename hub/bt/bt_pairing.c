@@ -293,6 +293,7 @@ void bt_classic_acl_gone(hci_con_handle_t handle) {
 #ifdef HH_BT_LE
 static btstack_timer_source_t s_adv_timer;
 static bool s_adv_on;
+static uint8_t s_adv_flags;
 static uint32_t s_le_reconn_until;
 #define UNIDENTIFIED_MS 10000 /* an LE central that is neither a known host nor pairing is dropped */
 static struct {
@@ -319,16 +320,22 @@ void bt_adv_update(void) {
         btstack_run_loop_set_timer(&s_adv_timer, s_le_reconn_until - now_ms());
         btstack_run_loop_add_timer(&s_adv_timer);
     }
-    if (want == s_adv_on) return;
-    if (want) {
+    uint8_t flags = bt_win_adv_flags(bt_pair_le_open()); /* general discoverable only inside the window */
+    int act = bt_win_adv_action(s_adv_on, want, s_adv_flags, flags);
+    if (act == BT_ADV_NONE) return;
+    if (act == BT_ADV_START) {
         bd_addr_t null_addr = {0};
-        s_adv_data[2] = bt_pair_le_open() ? 0x06 : 0x04; /* general discoverable only inside the window */
         gap_advertisements_set_params(0x30, 0x30, 0, 0, null_addr, 0x07, 0x00);
+    }
+    if (act == BT_ADV_START || act == BT_ADV_REFRESH) {
+        s_adv_data[2] = flags;
+        s_adv_flags = flags;
         gap_advertisements_set_data(sizeof s_adv_data, s_adv_data);
     }
-    gap_advertisements_enable(want);
+    if (act != BT_ADV_REFRESH) gap_advertisements_enable(want);
     s_adv_on = want;
-    bt_logf("LE advertising %s", want ? "on" : "off");
+    if (act == BT_ADV_REFRESH) bt_logf("LE advertising data refreshed (flags 0x%02x)", flags);
+    else bt_logf("LE advertising %s (flags 0x%02x)", want ? "on" : "off", want ? flags : 0);
 }
 
 static void pending_check(btstack_timer_source_t *ts) {

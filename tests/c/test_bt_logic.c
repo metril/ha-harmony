@@ -13,6 +13,10 @@
 #include "hub/bt/bt_hid_queue.h"
 #include "hub/bt/bt_txq.h"
 #include "hub/bt/bt_win.h"
+#include "hub/bt/bt_leaddr.h"
+#include "hub/bt/bt_trace.h"
+#include "hci_dump.h"
+#include <sys/stat.h>
 #include "hub/bt/bt_ipc.h"
 #include "hub/bt/bt_remote.h"
 
@@ -278,6 +282,83 @@ static void test_hidq_log_levels(void) {
     CT_EQ(s_log_n, 0);
 }
 
+/* ---- LE static random address: valid, persisted, reused ---- */
+static bool rnd_fixed(uint8_t *b, size_t n) {
+    static const uint8_t v[6] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC}; /* top bits not 11: generate forces them */
+    memcpy(b, v, n);
+    return true;
+}
+static bool rnd_zero(uint8_t *b, size_t n) { memset(b, 0, n); return true; }
+static bool rnd_fail(uint8_t *b, size_t n) { (void)b; (void)n; return false; }
+
+static void test_leaddr(void) {
+    uint8_t a[6], b[6];
+    CT_CHECK(bt_leaddr_generate(a, NULL) && bt_leaddr_valid(a)); /* real urandom: top two bits 11 */
+    CT_EQ(a[0] & 0xC0, 0xC0);
+    CT_CHECK(bt_leaddr_generate(a, rnd_fixed) && a[0] == 0xD2 && a[5] == 0xBC);
+    uint8_t bad1[6] = {0x3F, 1, 2, 3, 4, 5}, bad2[6] = {0xC0, 0, 0, 0, 0, 0}, bad3[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    CT_CHECK(!bt_leaddr_valid(bad1) && !bt_leaddr_valid(bad2) && !bt_leaddr_valid(bad3));
+    CT_CHECK(!bt_leaddr_generate(a, rnd_zero)); /* an all-zero random part is never accepted, 0xC0 forced or not */
+    CT_CHECK(!bt_leaddr_generate(a, rnd_fail));
+
+    char dir[] = "/tmp/hh_leaddr_XXXXXX", path[80];
+    CT_CHECK(mkdtemp(dir) != NULL);
+    snprintf(path, sizeof path, "%s/le_addr", dir);
+    CT_EQ(bt_leaddr_load_or_create(path, a, NULL), 1); /* created */
+    CT_CHECK(bt_leaddr_valid(a));
+    CT_EQ(bt_leaddr_load_or_create(path, b, rnd_fixed), 0); /* reused, never regenerated */
+    CT_CHECK(!memcmp(a, b, 6));
+    FILE *fp = fopen(path, "w"); /* a damaged file is replaced by a valid address */
+    fputs("xx", fp);
+    fclose(fp);
+    CT_EQ(bt_leaddr_load_or_create(path, b, rnd_fixed), 1);
+    CT_CHECK(bt_leaddr_valid(b) && b[0] == 0xD2);
+    CT_EQ(bt_leaddr_load_or_create(path, a, NULL), 0);
+    CT_CHECK(!memcmp(a, b, 6));
+    char tmp[90];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    CT_CHECK(access(tmp, F_OK) != 0); /* the atomic write leaves no temp file */
+    unlink(path);
+    CT_EQ(bt_leaddr_load_or_create("/nonexistent_dir_hh/le_addr", a, NULL), -1); /* cannot persist: not to be used */
+    rmdir(dir);
+}
+
+/* ---- advertising flags / data refresh when the window changes while advertising ---- */
+static void test_adv_action(void) {
+    CT_EQ(bt_win_adv_flags(true), 0x06);
+    CT_EQ(bt_win_adv_flags(false), 0x04);
+    CT_EQ(bt_win_adv_action(false, true, 0, 0x06), BT_ADV_START);
+    CT_EQ(bt_win_adv_action(true, false, 0x06, 0x04), BT_ADV_STOP);
+    CT_EQ(bt_win_adv_action(true, true, 0x04, 0x06), BT_ADV_REFRESH); /* a window opened under reconnect advertising */
+    CT_EQ(bt_win_adv_action(true, true, 0x06, 0x04), BT_ADV_REFRESH); /* the window closed, a reconnect keeps advertising */
+    CT_EQ(bt_win_adv_action(true, true, 0x06, 0x06), BT_ADV_NONE);
+    CT_EQ(bt_win_adv_action(false, false, 0x06, 0x04), BT_ADV_NONE);
+}
+
+/* ---- HCI trace: line format and the size cap ---- */
+static void test_trace(void) {
+    char l[256];
+    uint8_t pkt[4] = {0x0E, 0x04, 0x01, 0x0A};
+    size_t n = bt_trace_format(l, sizeof l, 12, 1, 4, pkt, 4);
+    CT_CHECK(n == strlen(l) && !strcmp(l, "12 < type=4 len=4 0e 04 01 0a"));
+    uint8_t big[100] = {0};
+    bt_trace_format(l, sizeof l, 1, 0, 2, big, 100);
+    CT_CHECK(strstr(l, "...") && strlen(l) < 200);
+
+    char dir[] = "/tmp/hh_trace_XXXXXX";
+    CT_CHECK(mkdtemp(dir) != NULL);
+    static char path[80];
+    snprintf(path, sizeof path, "%s/t.log", dir);
+    CT_EQ(bt_trace_start(path, 2000), 0);
+    for (int i = 0; i < 200; i++) hci_dump_packet(1, 1, pkt, 4);
+    bt_trace_stop();
+    struct stat st;
+    CT_EQ(stat(path, &st), 0);
+    CT_CHECK(st.st_size > 0 && st.st_size <= 2000); /* capped: the file restarted instead of growing */
+    unlink(path);
+    rmdir(dir);
+}
+
 int main(void) {
     CT_RUN(test_keyboard_reports);
     CT_RUN(test_six_key_rollover);
@@ -291,5 +372,8 @@ int main(void) {
     CT_RUN(test_window_transport);
     CT_RUN(test_pair_fail_line);
     CT_RUN(test_hidq_log_levels);
+    CT_RUN(test_leaddr);
+    CT_RUN(test_adv_action);
+    CT_RUN(test_trace);
     return CT_DONE();
 }
