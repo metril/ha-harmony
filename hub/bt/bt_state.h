@@ -84,6 +84,8 @@ extern bool g_bt_le;       /* LE usable (built in and the controller supports it
 extern uint8_t g_window; /* 0 closed, 1 host window, 2 remote window */
 
 void log_msg(const char *msg);
+extern bool g_bt_debug;      /* HH_BT_DEBUG set: bt_dbg() lines are logged */
+void bt_dbg(const char *msg); /* debug level (off by default) */
 void bt_logf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 int bt_tlv_store_if_changed(uint32_t tag, const uint8_t *value, uint32_t len);
 

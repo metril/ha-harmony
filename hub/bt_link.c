@@ -91,7 +91,7 @@ static struct {
     unsigned rk_pass;     /* RKEY frames handled in this pass */
     bool backlog;         /* complete frames are still buffered: run again at once */
     bool pend_pair;       /* a pair request waiting for the helper to be ready */
-    uint8_t pend_mode;
+    uint8_t pend_mode, pend_tr; /* the pair request that waits for the helper: mode and BT_PAIR_TR_* */
     uint16_t pend_secs;
     enum bt_link_window window; /* optimistic until the helper's STATE says */
     uint64_t win_deadline;      /* host window only */
@@ -528,7 +528,7 @@ static bool bad(void) { return false; }
 
 /* Sends the pair request that waited for the helper; a full control queue leaves it pending (retried every pass). */
 static bool try_pend_pair(void) {
-    uint8_t f[4] = {1, (uint8_t)(L.pend_secs >> 8), (uint8_t)L.pend_secs, L.pend_mode};
+    uint8_t f[5] = {1, (uint8_t)(L.pend_secs >> 8), (uint8_t)L.pend_secs, L.pend_mode, L.pend_tr};
     if (send_ctl(BT_IPC_PAIR, f, sizeof f) != BT_LINK_OK) return false;
     L.pend_pair = false;
     return true;
@@ -802,7 +802,6 @@ void bt_link_set_config(const struct bt_link_cfg_entry *hosts, unsigned nh, cons
 }
 
 int bt_link_pair(bool on, unsigned secs, enum bt_link_transport transport, enum bt_link_pair_mode mode) {
-    (void)transport;
     if (L.disabled) return BT_LINK_E_NOT_READY;
     if (!on) {
         L.pend_pair = false;
@@ -819,15 +818,18 @@ int bt_link_pair(bool on, unsigned secs, enum bt_link_transport transport, enum 
     }
     if (L.st.status == BT_NO_ADAPTER) return BT_LINK_E_NOT_READY;
     uint8_t m = mode == BT_MODE_REMOTE ? 1 : 0;
+    /* which radio takes a new host bond (a remote window is always LE; the helper ignores it there) */
+    uint8_t tr = transport == BT_TRANSPORT_CLASSIC ? BT_PAIR_TR_CLASSIC : transport == BT_TRANSPORT_LE ? BT_PAIR_TR_LE : BT_PAIR_TR_ANY;
     clear_pairing(); /* rebuild() below bumps gen and fires the listener, so a poller sees the result go */
     L.n_cand = 0;
     if (L.st.status == BT_READY) {
-        uint8_t f[4] = {1, (uint8_t)(secs >> 8), (uint8_t)secs, m};
+        uint8_t f[5] = {1, (uint8_t)(secs >> 8), (uint8_t)secs, m, tr};
         int rc = send_ctl(BT_IPC_PAIR, f, sizeof f);
         if (rc != BT_LINK_OK) return rc;
     } else {
         L.pend_pair = true; /* sent when the helper reports ready */
         L.pend_mode = m;
+        L.pend_tr = tr;
         L.pend_secs = (uint16_t)secs;
         if (!running() && L.st.status == BT_OFF) L.st.status = BT_STARTING;
     }

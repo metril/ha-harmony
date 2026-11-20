@@ -22,7 +22,7 @@ typedef struct {
 static hidq_host_t s_hosts[HIDQ_HOSTS];
 static hidq_send_fn s_send;
 static hidq_request_fn s_request;
-static hidq_log_fn s_log;
+static hidq_log_fn s_log, s_dbg;
 static unsigned s_waits;
 static unsigned s_dropped;
 
@@ -36,6 +36,19 @@ static void logf_line(const char *fmt, ...) {
     va_end(ap);
     s_log(line);
 }
+
+static void dbgf_line(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void dbgf_line(const char *fmt, ...) {
+    if (!s_dbg) return;
+    char line[160];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    s_dbg(line);
+}
+
+void hidq_set_debug_log(hidq_log_fn log) { s_dbg = log; }
 
 void hidq_init(hidq_send_fn send, hidq_request_fn request, hidq_log_fn log) {
     memset(s_hosts, 0, sizeof(s_hosts));
@@ -123,7 +136,7 @@ static void flush(hidq_host_t *h, uint32_t now_ms) {
                 char what[40];
                 describe(r->data, r->len, what, sizeof(what));
                 h->refused_logged = 1;
-                logf_line("HID %s for cid 0x%04x refused by the stack (status 0x%02x): waiting to send %u report(s)",
+                dbgf_line("HID %s for cid 0x%04x refused by the stack (status 0x%02x): waiting to send %u report(s)",
                           what, (unsigned)h->cid, (unsigned)status, (unsigned)h->count);
             }
             if (s_request) s_request(h->cid);
@@ -132,7 +145,7 @@ static void flush(hidq_host_t *h, uint32_t now_ms) {
         if (h->refused_logged) {
             char what[40];
             describe(r->data, r->len, what, sizeof(what));
-            logf_line("HID %s for cid 0x%04x sent after waiting %u ms (%u still waiting)",
+            dbgf_line("HID %s for cid 0x%04x sent after waiting %u ms (%u still waiting)",
                       what, (unsigned)h->cid, (unsigned)(now_ms - r->queued_ms), (unsigned)(h->count - 1));
         }
         h->head = (uint8_t)((h->head + 1) % HIDQ_DEPTH);

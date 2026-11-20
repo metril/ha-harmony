@@ -184,6 +184,7 @@ static bool has_deferred(int slot) {
 void bt_hid_init(void) {
     if (s_hidq_ready) return;
     hidq_init(hidq_btstack_send, hidq_btstack_request, log_msg);
+    hidq_set_debug_log(bt_dbg); /* the stack refusing a report and the later send: routine back-pressure */
     btstack_run_loop_set_timer_handler(&s_tick, tick);
     s_hidq_ready = true;
 }

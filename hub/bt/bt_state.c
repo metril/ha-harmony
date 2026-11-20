@@ -15,6 +15,11 @@ uint8_t g_window;
 
 void log_msg(const char *msg) { fprintf(stderr, "bt-helper: %s\n", msg); }
 
+bool g_bt_debug;
+void bt_dbg(const char *msg) {
+    if (g_bt_debug) fprintf(stderr, "bt-helper: [debug] %s\n", msg);
+}
+
 void bt_logf(const char *fmt, ...) {
     char b[200];
     va_list ap;

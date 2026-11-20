@@ -12,6 +12,7 @@
 #include "hub/bt/bt_hid.h"
 #include "hub/bt/bt_hid_queue.h"
 #include "hub/bt/bt_txq.h"
+#include "hub/bt/bt_win.h"
 #include "hub/bt/bt_ipc.h"
 #include "hub/bt/bt_remote.h"
 
@@ -229,6 +230,54 @@ static void test_hidq_overflow(void) {
     CT_CHECK(hidq_is_release(s_sent[s_sent_n - 1], 10)); /* the last thing the host sees is a release */
 }
 
+/* ---- window transport -> scan / advertising decision, failure line ---- */
+static void test_window_transport(void) {
+    /* no window: nothing discoverable, no pairing, page scan on (the prior state) */
+    for (uint8_t tr = 0; tr <= 2; tr++) {
+        CT_CHECK(!bt_win_classic_pairing(0, tr) && !bt_win_le_pairing(0, tr));
+        CT_CHECK(bt_win_classic_connectable(0, tr, false));
+        CT_CHECK(!bt_win_classic_pairing(2, tr) && !bt_win_le_pairing(2, tr)); /* a remote window opens no host pairing */
+    }
+    CT_CHECK(bt_win_classic_pairing(1, BT_PAIR_TR_ANY) && bt_win_le_pairing(1, BT_PAIR_TR_ANY)); /* auto: both */
+    CT_CHECK(!bt_win_classic_pairing(1, BT_PAIR_TR_LE) && bt_win_le_pairing(1, BT_PAIR_TR_LE));   /* le: no classic */
+    CT_CHECK(bt_win_classic_pairing(1, BT_PAIR_TR_CLASSIC) && !bt_win_le_pairing(1, BT_PAIR_TR_CLASSIC)); /* classic: no adv */
+    CT_CHECK(!bt_win_classic_connectable(1, BT_PAIR_TR_LE, false)); /* LE-only, no classic bond: no page scan */
+    CT_CHECK(bt_win_classic_connectable(1, BT_PAIR_TR_LE, true));   /* a bonded classic host may still reconnect */
+    CT_CHECK(bt_win_classic_connectable(1, BT_PAIR_TR_CLASSIC, false) && bt_win_classic_connectable(1, BT_PAIR_TR_ANY, false));
+}
+
+static void test_pair_fail_line(void) {
+    char l[120];
+    bt_pair_fail_line(l, sizeof l, "le", "AA:BB:CC:DD:EE:FF", "SMP reason", 0x05);
+    CT_CHECK(!strcmp(l, "pairing failed: transport le, peer AA:BB:CC:DD:EE:FF, SMP reason 0x05"));
+    bt_pair_fail_line(l, sizeof l, "classic", "11:22:33:44:55:66", "HCI status", 0x18);
+    CT_CHECK(!strcmp(l, "pairing failed: transport classic, peer 11:22:33:44:55:66, HCI status 0x18"));
+    CT_CHECK(!strchr(l, '\n'));
+}
+
+/* the refused / sent-after-waiting lines are debug level: the default log stays silent */
+static int s_log_n, s_dbg_n;
+static void c_log(const char *l) { (void)l; s_log_n++; }
+static void c_dbg(const char *l) { (void)l; s_dbg_n++; }
+static void test_hidq_log_levels(void) {
+    uint8_t rel[10] = {0xA1, 1};
+    s_sent_n = 0;
+    hidq_init(q_send, q_req, c_log);
+    hidq_set_debug_log(c_dbg);
+    s_accept = 0;
+    hidq_send(9, rel, 10, 0); /* refused, queued */
+    s_accept = 1;
+    hidq_service(9, 1); /* sent after waiting */
+    CT_EQ(s_log_n, 0);
+    CT_CHECK(s_dbg_n >= 2);
+    hidq_set_debug_log(NULL); /* default: dropped, no crash */
+    s_accept = 0;
+    hidq_send(9, rel, 10, 2);
+    s_accept = 1;
+    hidq_service(9, 3);
+    CT_EQ(s_log_n, 0);
+}
+
 int main(void) {
     CT_RUN(test_keyboard_reports);
     CT_RUN(test_six_key_rollover);
@@ -239,5 +288,8 @@ int main(void) {
     CT_RUN(test_backoff);
     CT_RUN(test_bonds);
     CT_RUN(test_hidq_overflow);
+    CT_RUN(test_window_transport);
+    CT_RUN(test_pair_fail_line);
+    CT_RUN(test_hidq_log_levels);
     return CT_DONE();
 }

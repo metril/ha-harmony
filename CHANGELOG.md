@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Hub: a Bluetooth pairing window now honours `transport`. `le` is LE-only (no Classic inquiry or page scan for new bonds, Classic PIN/SSP refused; page scan stays on only while a Classic bond exists so that host can reconnect), `classic` does not advertise LE, `any` keeps both; the previous scan and advertising state returns when the window closes. Before, the helper ignored `transport` and a host could bond over Classic in an `le` window.
+- Hub: the Bluetooth helper logs, at the default level, the start, any refusal and every failure of a pairing with transport, peer address and the stack's reason (SMP reason, HCI or authentication status), one line each, no key material. The repeated "HID ... refused by the stack (status 0x57): waiting to send" lines are now debug level (`HH_BT_DEBUG`); behaviour unchanged.
+
 ## 0.3.15 (2026-11-20)
 
 - Hub: ARP keepalive for peers on the hub's own segment. After a reboot a peer such as Home Assistant could fail to ARP for the hub (broadcast ARP missed on the hub's Wi-Fi) and its connection failed at once. The hub now remembers the IPv4 address of each peer that authenticated (newest 64, private addresses only, `peers` file next to `state.json`, atomic, written only when a new address appears) and, at startup and every 30 s, sends one UDP byte to port 9 of each remembered peer that has no live authenticated connection; the kernel ARPs for the peer, which learns the hub's MAC. Stripped hub grows by about 3 KiB. See `docs/runbooks/phase4-persistence.md`.

@@ -9,8 +9,12 @@
 #define BT_CLASSIC_ATTEMPTS 25   /* page attempts (1-2 s apart) before a Classic host is given up */
 
 /* pairing window (mode: BT_KIND_HOST = discoverable/advertise, BT_KIND_REMOTE = scan and bond) */
-void bt_pair_window(bool on, uint16_t secs, uint8_t mode);
+void bt_pair_window(bool on, uint16_t secs, uint8_t mode, uint8_t transport); /* transport: BT_PAIR_TR_* (host mode) */
 bool bt_pair_host_open(void);
+bool bt_pair_classic_open(void); /* host window that accepts a new Classic bond */
+bool bt_pair_le_open(void);      /* host window that accepts a new LE bond (and advertises for it) */
+void bt_classic_scan_update(void);
+extern uint8_t g_win_tr;
 bool bt_pair_remote_open(void);
 /* ends the open window with a result (also pushes PAIRRES); slot BT_SLOT_NONE when there is none */
 void bt_pair_finish(uint8_t kind, uint8_t result, int slot);

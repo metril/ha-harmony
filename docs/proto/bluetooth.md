@@ -7,7 +7,7 @@ gets the normal `unauthorized` `error`. Compatibility rules: [compat.md](compat.
 
 | Code | Type | Direction | Fields |
 |---|---|---|---|
-| 35 | `bt_pair` | client -> hub | `on: bool`, `secs: u16?` (default 120, 1..300), `transport: "any"\|"classic"\|"le"?` (default any), `mode: "host"\|"remote"?` (default host), `addr: str?` (`AA:BB:CC:DD:EE:FF`, either case; see "Picking a remote") |
+| 35 | `bt_pair` | client -> hub | `on: bool`, `secs: u16?` (default 120, 1..300), `transport: "any"\|"classic"\|"le"?` (default any; which radio takes a new host bond, see "Window transport"), `mode: "host"\|"remote"?` (default host), `addr: str?` (`AA:BB:CC:DD:EE:FF`, either case; see "Picking a remote") |
 | 36 | `bt_state` | hub -> client | see below; also the reply to `bt_pair` / `bt_forget` (same id), and pushed (id 0) on any change |
 | 37 | `bt_forget` | client -> hub | `slot: u8`, `kind: "host"\|"remote"?` (default host) |
 | 38 | `bt_key` | client -> hub | `slot: u8`, `page: 7\|12`, `usage: u16`, `action: "down"\|"up"\|"press"` (test-fire at a host) |
@@ -58,6 +58,28 @@ or that sends a malformed frame; it restarts it after 5, 30, then 120 s, at most
 `disabled` until the hub restarts. A helper death is not a boot failure: `state` leaves `ready`, `hosts` / `remotes` /
 `candidates` / `pairing` / `window` are cleared, `gen` changes, a key held down for a host is released and every connected
 remote is reported lost to the key mapping; IR and RF are unaffected. Config bt slots are bound to the helper's bonds by address.
+
+## Window transport
+
+`bt_pair {transport}` decides which radio takes a new host bond while the window is open (`mode: host`; a remote window is
+always LE):
+
+| transport | Classic inquiry / page scan | LE advertising |
+|---|---|---|
+| `any` | discoverable | on, general discoverable |
+| `classic` | discoverable | off (a bonded LE host asked to connect may still get a short reconnect advertisement) |
+| `le` | not discoverable; page scan off unless a Classic bond exists | on, general discoverable |
+
+In an `le` window Classic cannot bond: the PIN / SSP requests are refused and an unknown Classic host's HID channel is
+dropped. Page scan stays on only when at least one Classic host is bonded, so that host can still reconnect (an unbonded
+host cannot find or pair with the hub). In a `classic` window an LE central's pairing request is declined. When the window
+closes the usual state returns (connectable, not discoverable, no pairing advertising). Without LE support an `le` window
+falls back to `any` in the helper (the hub already answers `no_le`).
+
+The helper logs one line (default level, no key material) for the start of each pairing (`pairing start: transport le|classic,
+peer ...`), each refusal (`pairing refused: ...`) and each failure (`pairing failed: transport ..., peer ..., SMP reason 0x..` /
+`HCI status 0x..` / `auth status 0x..`). Routine HID back-pressure lines ("refused by the stack ... waiting to send") are debug
+level: set `HH_BT_DEBUG` in the helper's environment to see them.
 
 ## Picking a remote
 

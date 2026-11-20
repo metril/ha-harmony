@@ -17,6 +17,7 @@
 #include "bt_txq.h"
 #include "bt_pairing.h"
 #include "bt_remote.h"
+#include "bt_win.h"
 #include "bt_hid_queue.h"
 #include "btstack_memory.h"
 #include "btstack_run_loop_posix.h"
@@ -242,7 +243,10 @@ static void ipc_handle(uint8_t type, const uint8_t *p, size_t n) {
         if (n >= 5) bt_hid_key(p[0], p[1], (uint16_t)((p[2] << 8) | p[3]), p[4] != 0);
         break;
     case BT_IPC_PAIR:
-        if (n >= 3) bt_pair_window(p[0] != 0, (uint16_t)((p[1] << 8) | p[2]), n >= 4 && p[3] == BT_KIND_REMOTE ? BT_KIND_REMOTE : BT_KIND_HOST);
+        if (n >= 3)
+            bt_pair_window(p[0] != 0, (uint16_t)((p[1] << 8) | p[2]),
+                           n >= 4 && p[3] == BT_KIND_REMOTE ? BT_KIND_REMOTE : BT_KIND_HOST,
+                           n >= 5 ? p[4] : BT_PAIR_TR_ANY);
         break;
     case BT_IPC_FORGET:
         if (n >= 2) {
@@ -327,6 +331,13 @@ static void on_working(void) {
     bt_remote_scan_update();
 }
 
+/* one line per pairing failure (default log level): transport, peer, the stack's reason; never key material */
+static void log_pair_fail(const char *transport, const bd_addr_t addr, const char *what, uint8_t code) {
+    char line[120];
+    bt_pair_fail_line(line, sizeof line, transport, bd_addr_to_str(addr), what, code);
+    log_msg(line);
+}
+
 static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel; (void)size;
     if (packet_type != HCI_EVENT_PACKET) return;
@@ -337,21 +348,27 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
     case HCI_EVENT_PIN_CODE_REQUEST: {
         bd_addr_t a;
         hci_event_pin_code_request_get_bd_addr(packet, a);
-        if (bt_pair_host_open()) gap_pin_code_response(a, "0000");
+        bool ok = bt_pair_classic_open();
+        bt_logf("pairing start: transport classic, peer %s, PIN request%s", bd_addr_to_str(a), ok ? "" : " (refused: no window for classic)");
+        if (ok) gap_pin_code_response(a, "0000");
         else gap_pin_code_negative(a);
         break;
     }
     case HCI_EVENT_USER_CONFIRMATION_REQUEST: {
         bd_addr_t a;
         hci_event_user_confirmation_request_get_bd_addr(packet, a);
-        if (bt_pair_host_open()) gap_ssp_confirmation_response(a);
+        bool ok = bt_pair_classic_open();
+        if (!ok) bt_logf("pairing refused: transport classic, peer %s, confirmation outside a classic window", bd_addr_to_str(a));
+        if (ok) gap_ssp_confirmation_response(a);
         else gap_ssp_confirmation_negative(a);
         break;
     }
     case HCI_EVENT_USER_PASSKEY_REQUEST: {
         bd_addr_t a;
         hci_event_user_passkey_request_get_bd_addr(packet, a);
-        if (bt_pair_host_open()) gap_ssp_passkey_response(a, 0);
+        bool ok = bt_pair_classic_open();
+        if (!ok) bt_logf("pairing refused: transport classic, peer %s, passkey outside a classic window", bd_addr_to_str(a));
+        if (ok) gap_ssp_passkey_response(a, 0);
         else gap_ssp_passkey_negative(a);
         break;
     }
@@ -361,10 +378,28 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
         bt_classic_link_key(a);
         break;
     }
-    case HCI_EVENT_SIMPLE_PAIRING_COMPLETE:
-        if (hci_event_simple_pairing_complete_get_status(packet) != ERROR_CODE_SUCCESS && bt_pair_host_open())
-            bt_push_pairres(BT_KIND_HOST, BT_PR_FAILED, -1);
+    case HCI_EVENT_IO_CAPABILITY_REQUEST: {
+        bd_addr_t a;
+        hci_event_io_capability_request_get_bd_addr(packet, a);
+        bt_logf("pairing start: transport classic, peer %s, SSP%s", bd_addr_to_str(a), bt_pair_classic_open() ? "" : " (no classic window open)");
         break;
+    }
+    case HCI_EVENT_SIMPLE_PAIRING_COMPLETE: {
+        uint8_t st = hci_event_simple_pairing_complete_get_status(packet);
+        if (st == ERROR_CODE_SUCCESS) break;
+        bd_addr_t a;
+        hci_event_simple_pairing_complete_get_bd_addr(packet, a);
+        log_pair_fail("classic", a, "HCI status", st);
+        if (bt_pair_classic_open()) bt_push_pairres(BT_KIND_HOST, BT_PR_FAILED, -1);
+        break;
+    }
+    case HCI_EVENT_AUTHENTICATION_COMPLETE: {
+        uint8_t st = hci_event_authentication_complete_get_status(packet);
+        if (st == ERROR_CODE_SUCCESS) break;
+        hci_connection_t *c = hci_connection_for_handle(hci_event_authentication_complete_get_connection_handle(packet));
+        if (c) log_pair_fail("classic", c->address, "auth status", st);
+        break;
+    }
     case HCI_EVENT_REMOTE_NAME_REQUEST_COMPLETE: {
         if (hci_event_remote_name_request_complete_get_status(packet) != ERROR_CODE_SUCCESS) break;
         bd_addr_t a;
@@ -438,17 +473,27 @@ static void sm_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, u
     if (packet_type != HCI_EVENT_PACKET) return;
     bd_addr_t a;
     switch (hci_event_packet_get_type(packet)) {
+    case SM_EVENT_PAIRING_STARTED:
+        sm_event_pairing_started_get_address(packet, a);
+        bt_logf("pairing start: transport le, peer %s", bd_addr_to_str(a));
+        break;
     case SM_EVENT_JUST_WORKS_REQUEST: {
         hci_con_handle_t h = sm_event_just_works_request_get_handle(packet);
         if (bt_remote_owns_handle(h)) bt_remote_just_works(h);
-        else if (bt_pair_host_open()) sm_just_works_confirm(h);
-        else sm_bonding_decline(h); /* pairing only inside the window */
+        else if (bt_pair_le_open()) sm_just_works_confirm(h);
+        else {
+            bt_logf("pairing refused: transport le, handle 0x%04x, no le window open", (unsigned)h);
+            sm_bonding_decline(h); /* pairing only inside the window */
+        }
         break;
     }
     case SM_EVENT_NUMERIC_COMPARISON_REQUEST: {
         hci_con_handle_t h = sm_event_numeric_comparison_request_get_handle(packet);
-        if (!bt_remote_owns_handle(h) && bt_pair_host_open()) sm_numeric_comparison_confirm(h);
-        else sm_bonding_decline(h);
+        if (!bt_remote_owns_handle(h) && bt_pair_le_open()) sm_numeric_comparison_confirm(h);
+        else {
+            bt_logf("pairing refused: transport le, handle 0x%04x, numeric comparison outside an le window", (unsigned)h);
+            sm_bonding_decline(h);
+        }
         break;
     }
     case SM_EVENT_PAIRING_COMPLETE: {
@@ -456,9 +501,13 @@ static void sm_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, u
         uint8_t st = sm_event_pairing_complete_get_status(packet);
         sm_event_pairing_complete_get_address(packet, a);
         uint8_t at = sm_event_pairing_complete_get_addr_type(packet);
+        if (st != ERROR_CODE_SUCCESS) {
+            if (st == ERROR_CODE_AUTHENTICATION_FAILURE) log_pair_fail("le", a, "SMP reason", sm_event_pairing_complete_get_reason(packet));
+            else log_pair_fail("le", a, "HCI status", st);
+        }
         if (bt_remote_owns_handle(h)) bt_remote_pairing_complete(h, a, at, st);
         else if (st == ERROR_CODE_SUCCESS) bt_le_host_identified(h, a, at, true);
-        else if (bt_pair_host_open()) bt_push_pairres(BT_KIND_HOST, BT_PR_FAILED, -1);
+        else if (bt_pair_le_open()) bt_push_pairres(BT_KIND_HOST, BT_PR_FAILED, -1);
         break;
     }
     case SM_EVENT_REENCRYPTION_COMPLETE: {
@@ -563,6 +612,7 @@ int bt_helper_main(int argc, char **argv) {
 #endif
     if (nice(5) == -1 && errno) log_msg("nice failed");
 
+    g_bt_debug = getenv("HH_BT_DEBUG") != NULL;
     signal(SIGPIPE, SIG_IGN);
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);

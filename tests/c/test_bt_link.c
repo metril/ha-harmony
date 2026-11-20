@@ -523,6 +523,11 @@ static void test_pairing_windows(void) {
     CT_EQ(bt_link_pair(false, 0, BT_TRANSPORT_ANY, BT_MODE_HOST), BT_LINK_OK);
     CT_EQ(st()->window, BT_WIN_NONE);
     CT_CHECK(PUMP(log_count("PAIR 0") == 1, 2000));
+    CT_CHECK(PUMP(log_count("PAIRTR 1") == 1, 2000)); /* the classic window carried its transport to the helper */
+    CT_EQ(bt_link_pair(true, 30, BT_TRANSPORT_LE, BT_MODE_HOST), BT_LINK_OK);
+    CT_CHECK(PUMP(log_count("PAIRTR 2") == 1, 2000));
+    CT_EQ(bt_link_pair(true, 30, BT_TRANSPORT_ANY, BT_MODE_HOST), BT_LINK_OK);
+    CT_CHECK(PUMP(log_count("PAIRTR 0") == 1, 2000));
     bt_link_reset();
 }
 
