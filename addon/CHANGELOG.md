@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.18 (2026-11-20)
+
+Editor and integration; no hub firmware change. Update the add-on, then the integration.
+
+- Direction keys read "Up", "Down", "Left", "Right" instead of "Direction Up".
+- Inherited keys show their marker dot inside the key, with a tooltip and a legend entry.
+- Rules can now call `input_select` (`select_option`, `select_next`, `select_previous` only).
+- Cover tiles show the current position.
+- New example config: `examples/living-room.yaml`.
+
 ## 0.3.17 (2026-11-20)
 
 Editor only; no hub firmware change. Update the add-on, then the integration.
