@@ -103,6 +103,23 @@ async def test_page_tour_screenshots(browser, large):
         await page.context.close()
 
 
+async def test_device_icon_picker_sets_the_icon_in_the_draft(browser, large):
+    from test_addon_e2e import PREFIX
+
+    page = await open_large(browser, large, 1440, 900)
+    await page.goto(f"{large}{PREFIX}/#/devices/tv")
+    await page.locator("details.iconpick summary").wait_for()
+    await page.locator("details.iconpick summary").click()
+    picker = page.locator("hh-icon-picker")
+    await picker.locator("input[type=search]").fill("music")
+    await picker.get_by_role("button", name="music", exact=True).click()
+    icon = await page.evaluate("document.querySelector('hh-app').store.config.devices.find(d => d.id === 'tv').icon")
+    assert icon == "music"
+    await picker.get_by_role("button", name="Use the default icon").click()
+    assert await page.evaluate("document.querySelector('hh-app').store.config.devices.find(d => d.id === 'tv').icon") is None
+    await page.context.close()
+
+
 PALETTE = """() => {
   const find = (n) => { for (const el of n.querySelectorAll('*')) { if (el.tagName === 'HH-PALETTE') return el.shadowRoot; if (el.shadowRoot) { const x = find(el.shadowRoot); if (x) return x; } } return null; };
   return [...find(document.querySelector('hh-app').shadowRoot).querySelectorAll('.cells')].map((g) => [...g.querySelectorAll('.chip2')].map((b) => {

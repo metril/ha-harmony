@@ -37,6 +37,14 @@ const ART: Record<Kind, TemplateResult> = {
   disc: svg`<rect x="4" y="16" width="56" height="18" rx="3"></rect><path d="M12 25h20"></path><circle cx="46" cy="25" r="5"></circle><path d="M8 38v3M56 38v3"></path>`,
   other: svg`<rect x="8" y="10" width="48" height="28" rx="4"></rect>${P('M24 24h16M32 16v16')}`,
 };
+import { iconInner } from './icon-shapes';
+/** The device's own icon when it has one, else the drawing guessed from its name. */
+export const deviceArt = (d: Pick<Device, 'id' | 'name' | 'entity' | 'icon'> | undefined, cls = 'art'): TemplateResult => {
+  const ic = d?.icon ? stockIconByName(d.icon) : undefined;
+  return ic
+    ? svg`<svg class=${cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconInner(ic.id)}</svg>`
+    : art(d ? deviceKind(d) : 'other', cls);
+};
 export const art = (k: Kind, cls = 'art'): TemplateResult =>
   svg`<svg class=${cls} viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ART[k]}</svg>`;
 

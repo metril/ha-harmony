@@ -321,3 +321,39 @@ def test_more_than_32_pages_is_a_compile_error():
     with pytest.raises(CompileError, match="at most 32"):
         comp(many)
     comp("pages:\n" + "".join(f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(32)))
+
+
+# ---------------------------------------------------------------- device icons
+ICON_BASE = BASE.replace("  - id: tv\n", "  - id: tv\n    icon: music\n")
+
+
+def test_device_icon_is_the_default_for_widgets_that_target_it_and_widget_icon_wins():
+    c = comp(
+        page(
+            ",".join(
+                [
+                    btn("a", 0, 0, "Mute"),
+                    btn("b", 1, 0, "Mute", ", icon: star"),
+                    btn("c", 2, 0, "Mute", ", icon: none"),
+                ]
+            )
+        ),
+        ICON_BASE,
+    )
+    a, b, n = c.models[0].widgets
+    assert (a.icon, b.icon, n.icon) == (ICON_IDS["music"], ICON_IDS["star"], 0)
+
+
+def test_device_without_icon_keeps_the_label_based_default():
+    c = comp(page(btn("a", 0, 0, "Mute")))
+    assert c.models[0].widgets[0].icon == ICON_IDS["mute"]
+
+
+def test_device_icon_must_be_a_known_stock_icon_and_is_valid_on_every_device_kind():
+    with pytest.raises(ConfigError):
+        parse_model(BASE.replace("  - id: tv\n", "  - id: tv\n    icon: nope\n"), "t.yaml")
+    assert parse_model(ICON_BASE, "t.yaml")["devices"][0]["icon"] == "music"
+    ha = "devices:\n  - {id: s, kind: ha, icon: tv, entity: media_player.s}\n"
+    assert parse_model(ha, "t.yaml")["devices"][0]["icon"] == "tv"
+    bt = "devices:\n  - {id: b, kind: bt, icon: game}\n"
+    assert parse_model(bt, "t.yaml")["devices"][0]["icon"] == "game"

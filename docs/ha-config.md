@@ -91,6 +91,11 @@ pages:
 - **Device `source`** (optional mapping of scalars): where an imported device came from, written by
   `tools/irdb_import.py` (`kind: harmony_archive, mfr, model_file, codeset, imported_at`). Never compiled
   or sent to the hub.
+- **Device `icon`** (optional, a name from `proto/icons.yaml`; valid on `ir`, `ha` and `bt` devices):
+  the icon the editor shows for the device, and the default icon of a page widget whose action targets
+  that device (`{device: tv, command: ...}`) when the widget sets no `icon` of its own (`icon: none`
+  still means no icon). Without it the widget icon comes from its label as before. No change to the
+  firmware or the page format: widgets already carry their icon.
 - **Device `aliases`** (optional list of names, max 31 bytes each): other names the device answers to
   in `remote.send_command` and `ha_harmony.set_device_state`. Resolved in Home Assistant and never
   sent to the hub. Meant for migration: `tools/stock_to_ha_config.py --device-list` sets each

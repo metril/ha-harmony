@@ -1,3 +1,4 @@
+import '../components/hh-icon-picker';
 import { css, html, nothing, type TemplateResult } from 'lit';
 import { displayCommand } from '../lib/key-names';
 import { customElement, property, state } from 'lit/decorators.js';
@@ -7,7 +8,7 @@ import '../components/hh-send-ir';
 import { StoreElement, confirmAction } from '../components/base';
 import type { CodeEdit, CodeSave } from '../components/hh-code-dialog';
 import { summarize, trimBytes } from '../lib/codes';
-import { KIND_LABEL, art, commandIconId, deviceKind, groupIconId } from '../lib/device-art';
+import { KIND_LABEL, commandIconId, deviceArt, deviceKind, groupIconId } from '../lib/device-art';
 import { capProblem, commandCount, duplicateCommand, isHaDevice, mapCodes, nameProblem, patchDevice, powerMode, powerStatus, setCommand, setInput, setPowerCode, setPowerMode, sourceLabel, withPorts, withRepeats, type PowerMode } from '../lib/device-edit';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { icon } from '../lib/icons';
@@ -36,6 +37,11 @@ export class HhDevices extends StoreElement {
       .dcard { display: grid; grid-template-rows: auto 1fr; border: 1px solid var(--line); border-radius: var(--r3); background: var(--sf); color: var(--tx); text-decoration: none; overflow: hidden; transition: box-shadow 140ms ease-out, transform 140ms ease-out; }
       .dcard:hover { box-shadow: var(--sh); transform: translateY(-1px); }
       .dcard .top { display: grid; place-items: center; height: 104px; background: var(--sf2); color: var(--acc); position: relative; }
+      details.iconpick { position: relative; }
+      details.iconpick > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; padding: 2px 10px 2px 6px; border: 1px solid var(--line); border-radius: 16px; background: var(--sf2); font-size: 12.5px; }
+      details.iconpick > summary::-webkit-details-marker { display: none; }
+      details.iconpick .dic { width: 22px; height: 22px; color: var(--acc); }
+      details.iconpick[open] > hh-icon-picker { position: absolute; z-index: 5; top: calc(100% + 6px); left: 0; width: 320px; max-width: 80vw; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); }
       .dcard .top .art { width: 88px; height: 66px; }
       .dcard .errdot { position: absolute; top: 10px; right: 10px; }
       .dcard .body { padding: 12px 14px 14px; display: grid; gap: 8px; align-content: start; }
@@ -206,7 +212,7 @@ export class HhDevices extends StoreElement {
     const ha = isHaDevice(d);
     const inputs = Object.keys(d.inputs ?? {}).length;
     return html`<a class="dcard" href=${hashFor('devices', d.id)} aria-label="${d.name ?? d.id}: ${commandCount(d)} commands, ${ps.text}">
-      <div class="top">${art(deviceKind(d))}${errs ? html`<span class="errdot" title="${errs} error${errs === 1 ? '' : 's'}"></span>` : nothing}</div>
+      <div class="top">${deviceArt(d)}${errs ? html`<span class="errdot" title="${errs} error${errs === 1 ? '' : 's'}"></span>` : nothing}</div>
       <div class="body">
         <h2>${d.name ?? d.id}</h2>
         <span class="src">${sourceLabel(d)}</span>
@@ -405,6 +411,8 @@ export class HhDevices extends StoreElement {
       ${problemList(problemsFor(this.store.errors, 'devices', idx), (p) => p.open && this.openProblem(d, p))}
       <div class="dbar">
         <span class="chip acc">${KIND_LABEL[deviceKind(d)]}</span>
+        <details class="iconpick"><summary aria-label="Device icon">${deviceArt(d, 'dic')}<span>Icon</span></summary>
+          <hh-icon-picker .value=${d.icon ?? ''} @hh-icon=${(e: CustomEvent<string | undefined>) => this.put(patchDevice(this.store.config, d.id, { icon: e.detail }), undefined, e.detail ? `Icon of ${d.name ?? d.id} set to ${e.detail}` : `${d.name ?? d.id} uses the default icon`)}></hh-icon-picker></details>
         <input class="name" aria-label="Device name" .value=${d.name ?? d.id} @change=${(e: Event) => this.put(patchDevice(this.store.config, d.id, { name: trimBytes((e.target as HTMLInputElement).value.trim()) || undefined }), `name${d.id}`)} />
         <span class="muted">${bytes.used}/31 B · id <span class="mono">${d.id}</span> · ${sourceLabel(d)}${this.errorsOf(idx) ? ` · ${this.errorsOf(idx)} errors` : ''}</span>
       </div>

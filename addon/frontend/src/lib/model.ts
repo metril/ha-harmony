@@ -31,6 +31,8 @@ export interface Device {
   entity?: string;
   id: string;
   name?: string;
+  /** stock icon name (proto/icons.yaml): shown for the device and the default icon of widgets that target it */
+  icon?: string;
   aliases?: string[];
   settle_ms?: number;
   power?: { on?: IrAction; off?: IrAction; toggle?: IrAction };

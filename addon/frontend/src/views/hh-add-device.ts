@@ -5,6 +5,7 @@ import { StoreElement } from '../components/base';
 import type { HhSendIr } from '../components/hh-send-ir';
 import { ApiError, type IrBrand, type IrDeviceResult, type IrModels, type IrParsed } from '../lib/api';
 import { KIND_LABEL, KIND_TYPE, OTHER_TYPES, art, commandIconId, type Kind } from '../lib/device-art';
+import '../components/hh-icon-picker';
 import { capProblem, deviceIdFor, nameProblem } from '../lib/device-edit';
 import { proposeFromEntity, PROPOSAL_DOMAINS } from '../lib/ha-propose';
 import { icon } from '../lib/icons';
@@ -107,6 +108,7 @@ export class HhAddDevice extends StoreElement {
   @state() private mq = '';
   @state() private names: Record<string, string> = {};
   @state() private devName = '';
+  @state() private devIcon = '';
   @state() private notes: string[] = [];
   @state() private text = '';
   @state() private kind: 'pronto' | 'flipper' | 'smartir' = 'pronto';
@@ -290,7 +292,7 @@ export class HhAddDevice extends StoreElement {
     for (const n of this.w.selected) commands[this.finalName(n)] = (d.commands ?? {})[n] as IrAction;
     const name = trimBytes(this.devName.trim()) || d.name || d.id;
     const id = deviceIdFor(this.store.config, d.kind === 'ha' ? name : (d.id ?? name));
-    const dev: Device = { ...d, id, name, commands };
+    const dev: Device = { ...d, id, name, commands, ...(this.devIcon ? { icon: this.devIcon } : {}) };
     this.store.replace({ ...this.store.config, devices: [...(this.store.config.devices ?? []), dev] });
     this.store.toast(`Added ${name} to the draft (${Object.keys(commands).length} commands). Nothing is applied yet.`, 'info', true);
     location.hash = hashFor('devices', id);
@@ -416,6 +418,7 @@ export class HhAddDevice extends StoreElement {
         </div>
         <aside class="side card" aria-label="Summary">
           <label>Device name<input class="namein" type="text" aria-label="Device name" .value=${this.devName} @input=${(e: Event) => (this.devName = trimBytes((e.target as HTMLInputElement).value))} /></label>
+          <details><summary>Icon${this.devIcon ? `: ${this.devIcon}` : ' (default)'}</summary><hh-icon-picker .value=${this.devIcon} @hh-icon=${(e: CustomEvent<string | undefined>) => (this.devIcon = e.detail ?? '')}></hh-icon-picker></details>
           <span class="muted">${w.selected.length} of ${cmds.length} commands${ha ? '' : ' · settle ' + (d.settle_ms ?? 0) + ' ms'}</span>
           ${this.notes.length || (ha && (r.notes?.length ?? 0)) ? html`<ul class="plain">${(ha ? r.notes : this.notes).map((n) => html`<li>${n}</li>`)}</ul>` : nothing}
           ${r.skipped.length ? html`<div><b>Left out (${r.skipped_total || r.skipped.length})</b><ul class="plain">${r.skipped.slice(0, 8).map((s) => html`<li>${s.name}: ${s.reason}</li>`)}</ul></div>` : nothing}

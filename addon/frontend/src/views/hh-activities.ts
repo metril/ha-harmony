@@ -12,7 +12,7 @@ import {
   MAX_ACTIVITIES, MAX_DEVICES, MAX_STEPS, isRefused, ZONES, ZONE_KEYS, addActivity, addActivityDevice, addControlPage, addStartButton, addStep, applyHandler, chainOrder, deleteActivity, handlerOf,
   matchZone, moveChain, moveStep, removeActivityDevice, removeStep, renameActivity, setActivityInput, timeline, type TItem, type Zone,
 } from '../lib/activity-edit';
-import { art, deviceKind } from '../lib/device-art';
+import { art, deviceArt, deviceKind } from '../lib/device-art';
 import { powerStatus } from '../lib/device-edit';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { icon } from '../lib/icons';
@@ -329,7 +329,7 @@ export class HhActivities extends StoreElement {
     const d = this.dev(dv);
     const ps = d ? powerStatus(d) : null;
     return html`<div class="dev ${this.over?.kind === 'chain' && this.over.i === i ? 'over' : ''}" data-chain=${i}>
-      <span aria-hidden="true" title="Drag to reorder" @pointerdown=${(e: PointerEvent) => this.chainDown(e, id, i)}>${art(d ? deviceKind(d) : 'other', 'art')}</span>
+      <span aria-hidden="true" title="Drag to reorder" @pointerdown=${(e: PointerEvent) => this.chainDown(e, id, i)}>${deviceArt(d, 'art')}</span>
       <b title=${d?.name ?? dv}>${d?.name ?? dv}</b>
       <div class="chips">${ps ? html`<span class="chip ${ps.tone === 'ok' ? 'ok' : ps.tone === 'ir' ? 'ir' : ''}">${ps.text.replace('Power ', '')}</span>` : nothing}${d?.settle_ms ? html`<span class="chip">${d.settle_ms / 1000} s settle</span>` : nothing}</div>
       ${i === 0 ? html`<div class="first" data-drop="wire:${dv}">${this.inputPill(id, dv)}</div>` : nothing}
@@ -435,7 +435,7 @@ export class HhActivities extends StoreElement {
           <button class="zbtn ${dv ? '' : 'nobody'}" aria-haspopup="menu" aria-expanded=${this.zoneMenu === z} aria-label="Who handles ${ZONE_NAME[z].toLowerCase()}: ${d?.name ?? dv ?? 'nobody'}. Choose a device."
             @click=${(e: Event) => { e.stopPropagation(); this.zoneMenu = this.zoneMenu === z ? null : z; }}
             @keydown=${(e: KeyboardEvent) => { if (e.key === 'ArrowDown' && this.zoneMenu !== z) { e.preventDefault(); this.zoneMenu = z; } }}>
-            ${d ? html`${art(deviceKind(d), 'art')}<span>${d.name ?? d.id}</span>` : html`<span>Nobody (keys stay free)</span>`}<span aria-hidden="true">▾</span></button>
+            ${d ? html`${deviceArt(d, 'art')}<span>${d.name ?? d.id}</span>` : html`<span>Nobody (keys stay free)</span>`}<span aria-hidden="true">▾</span></button>
           ${this.zoneMenu === z
             ? html`<div class="menu zmenu" role="menu" aria-label="Device for ${ZONE_NAME[z].toLowerCase()}" @keydown=${(e: KeyboardEvent) => this.menuKey(e)}>
                 <button role="menuitemradio" aria-checked=${!dv} @click=${(e: Event) => { e.stopPropagation(); this.zoneApply(id, z, null); this.zoneMenu = null; }}>Nobody (keys stay free)</button>
