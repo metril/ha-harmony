@@ -59,7 +59,7 @@ function tokens(name: string): string[] {
 }
 const cap = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
 /** Title Case a list of words: plain lower-case words get a capital, codes/acronyms stay, small joining words stay lower unless first. */
-const title = (words: string[]): string => words.map((w, i) => (!bare(w) ? w : i > 0 && NAME_SMALL.has(w) ? w : cap(w))).join(' ');
+const title = (words: string[]): string => words.map((w, i) => (!bare(w) ? w : w.length === 1 ? w.toUpperCase() : i > 0 && NAME_SMALL.has(w) ? w : cap(w))).join(' ');
 /** Already written for people (has a space): shown as written, only tidied. */
 const isHuman = (n: string): boolean => /\S\s+\S/.test(n.trim());
 
@@ -113,3 +113,6 @@ export const FREE_CAP = 9;
 
 /** The palette's cell fits a label (plus icon and padding) of this many characters; longer ones take two cells. Same for every group. */
 export const PALETTE_CAP = 9;
+
+/** A device or activity name for display (Title Case); an id with no name goes through displayKey. The stored value is untouched. */
+export const dn = (name: string | undefined, id: string): string => (name ? titleHuman(name) : displayKey(id));

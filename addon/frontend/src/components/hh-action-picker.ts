@@ -6,7 +6,7 @@ import { shared } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { HA_DOMAINS } from '../lib/studio-state';
 import { ACTION_DOMAINS, haProblem } from '../lib/ha-rules';
-import { displayCommand } from '../lib/key-names';
+import { displayCommand, dn } from '../lib/key-names';
 import { GROUPS, HA_ENTITY_ID, deviceChips, describeAction, isHaAction, fieldData, groupCommand, pretty, resolveIr, type Source } from '../lib/studio-model';
 import './hh-send-ir';
 
@@ -125,7 +125,7 @@ export class HhActionPicker extends LitElement {
       <label>Device
         <select .value=${this.device} @change=${(e: Event) => { this.device = (e.target as HTMLSelectElement).value; this.name = ''; }}>
           <option value="">Choose a Device</option>
-          ${devs.map((x) => html`<option value=${x.id} ?selected=${x.id === this.device}>${x.name ?? x.id}</option>`)}
+          ${devs.map((x) => html`<option value=${x.id} ?selected=${x.id === this.device}>${dn(x.name, x.id)}</option>`)}
         </select>
       </label>
       <label>${this.kind === 'input' ? 'Input' : 'Command'}
@@ -196,7 +196,7 @@ export class HhActionPicker extends LitElement {
           ? html`<label>Activity
               <select .value=${this.activity} @change=${(e: Event) => (this.activity = (e.target as HTMLSelectElement).value)}>
                 <option value="">Choose an Activity</option>
-                ${(this.cfg.activities ?? []).map((a) => html`<option value=${a.id} ?selected=${a.id === this.activity}>${a.name ?? a.id}</option>`)}
+                ${(this.cfg.activities ?? []).map((a) => html`<option value=${a.id} ?selected=${a.id === this.activity}>${dn(a.name, a.id)}</option>`)}
               </select>
             </label>`
           : this.kind === 'alloff'

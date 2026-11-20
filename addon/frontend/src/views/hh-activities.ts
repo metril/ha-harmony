@@ -24,7 +24,7 @@ import { stockIconByName } from '../lib/stock-icons';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import { sourceAction, describeAction, type Source } from '../lib/studio-model';
 import { shared } from '../lib/styles';
-import { displayCommand } from '../lib/key-names';
+import { displayCommand, dn } from '../lib/key-names';
 import { keyTitle } from '../lib/remote-layout';
 
 const ZONE_NOTE: Record<Zone, string> = { volume: 'Vol +, Vol −, Mute', navigation: 'Arrows, OK, Menu, Exit', transport: 'Play, Pause, Stop, Rew, FF, Rec', channels: 'Ch +, Ch −, Prev' };
@@ -295,7 +295,7 @@ export class HhActivities extends StoreElement {
     return html`
       <div class="head"><h1>Activities</h1><span class="chip">${acts.length} / 16</span><span class="muted">What the remote does when you press a start button.</span></div>
       <div class="gallery">
-        ${acts.map((a) => html`<a class="acard" href=${hashFor('activities', a.id)}><h2>${stockIconSvg(stockIconByName('play')?.id ?? 26)} ${a.name ?? a.id}</h2><hh-chain-mini .cfg=${this.cfg} activity=${a.id}></hh-chain-mini>
+        ${acts.map((a) => html`<a class="acard" href=${hashFor('activities', a.id)}><h2>${stockIconSvg(stockIconByName('play')?.id ?? 26)} ${dn(a.name, a.id)}</h2><hh-chain-mini .cfg=${this.cfg} activity=${a.id}></hh-chain-mini>
           <span class="muted">${(a.devices ?? []).length} devices · ${(a.steps ?? []).length + (a.off ?? []).length} own steps · ${Object.keys(a.keys ?? {}).length} keys</span></a>`)}
         <button class="newcard" @click=${() => (this.newOpen = true)}><span class="plus">${icon('plus')}</span>New Activity</button>
       </div>
@@ -306,7 +306,7 @@ export class HhActivities extends StoreElement {
     return html`<hh-dialog .open=${this.newOpen} heading="New Activity" @close=${() => (this.newOpen = false)}>
       <label>Name<input class="txt" type="text" aria-label="Activity name" placeholder="Watch TV" .value=${this.newName} @input=${(e: Event) => (this.newName = (e.target as HTMLInputElement).value)} @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && this.create()} /></label>
       <div><b>Devices It Uses</b><p class="muted">You can change this later.</p>
-        <div class="checks">${devs.length ? devs.map((d) => html`<label><input type="checkbox" .checked=${this.newDevs.includes(d.id)} @change=${(e: Event) => (this.newDevs = (e.target as HTMLInputElement).checked ? [...this.newDevs, d.id] : this.newDevs.filter((x) => x !== d.id))} /> ${d.name ?? d.id}</label>`) : html`<span class="muted">No devices yet. Add one first.</span>`}</div></div>
+        <div class="checks">${devs.length ? devs.map((d) => html`<label><input type="checkbox" .checked=${this.newDevs.includes(d.id)} @change=${(e: Event) => (this.newDevs = (e.target as HTMLInputElement).checked ? [...this.newDevs, d.id] : this.newDevs.filter((x) => x !== d.id))} /> ${dn(d.name, d.id)}</label>`) : html`<span class="muted">No devices yet. Add one first.</span>`}</div></div>
       <button slot="footer" class="btn" @click=${() => (this.newOpen = false)}>Cancel</button>
       <button slot="footer" class="btn pri" ?disabled=${!this.newName.trim()} @click=${() => this.create()}>Create</button>
     </hh-dialog>`;
@@ -330,7 +330,7 @@ export class HhActivities extends StoreElement {
     const ps = d ? powerStatus(d) : null;
     return html`<div class="dev ${this.over?.kind === 'chain' && this.over.i === i ? 'over' : ''}" data-chain=${i}>
       <span aria-hidden="true" title="Drag to reorder" @pointerdown=${(e: PointerEvent) => this.chainDown(e, id, i)}>${deviceArt(d, 'art')}</span>
-      <b title=${d?.name ?? dv}>${d?.name ?? dv}</b>
+      <b title=${d?.name ?? dv}>${dn(d?.name, dv)}</b>
       <div class="chips">${ps ? html`<span class="chip ${ps.tone === 'ok' ? 'ok' : ps.tone === 'ir' ? 'ir' : ''}">${ps.text.replace('Power ', '')}</span>` : nothing}${d?.settle_ms ? html`<span class="chip">${d.settle_ms / 1000} s settle</span>` : nothing}</div>
       ${i === 0 ? html`<div class="first" data-drop="wire:${dv}">${this.inputPill(id, dv)}</div>` : nothing}
       <div class="tools" role="group" aria-label="${d?.name ?? dv}">
@@ -361,9 +361,9 @@ export class HhActivities extends StoreElement {
         ${order.length < MAX_DEVICES ? html`<div class="slot" data-drop="slot">${icon('plus')}<span>Drop a Device</span><span class="muted">${order.length}/${MAX_DEVICES}</span></div>` : nothing}
       </div>
       ${order.some((dv) => Object.keys(this.dev(dv)?.inputs ?? {}).length)
-        ? html`<div class="tray" role="group" aria-label="Inputs to drop on a wire"><span class="muted">Inputs: drag one onto its device's wire, or click it and then the wire.</span>${order.map((dv) => Object.keys(this.dev(dv)?.inputs ?? {}).length ? html`<span class="igrp"><span class="muted">${this.dev(dv)?.name ?? dv}</span>${Object.keys(this.dev(dv)?.inputs ?? {}).map((n) => html`<button class="dchip ${this.pickedInput?.device === dv && this.pickedInput.input === n ? 'on' : ''}" aria-pressed=${this.pickedInput?.device === dv && this.pickedInput.input === n} @pointerdown=${(e: PointerEvent) => this.inputDown(e, dv, n)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.setInput(dv, n, dv); } }} aria-label="Input ${displayCommand(n)} of ${this.dev(dv)?.name ?? dv}. Press to switch to it.">${displayCommand(n)}</button>`)}</span>` : nothing)}</div>`
+        ? html`<div class="tray" role="group" aria-label="Inputs to drop on a wire"><span class="muted">Inputs: drag one onto its device's wire, or click it and then the wire.</span>${order.map((dv) => Object.keys(this.dev(dv)?.inputs ?? {}).length ? html`<span class="igrp"><span class="muted">${dn(this.dev(dv)?.name, dv)}</span>${Object.keys(this.dev(dv)?.inputs ?? {}).map((n) => html`<button class="dchip ${this.pickedInput?.device === dv && this.pickedInput.input === n ? 'on' : ''}" aria-pressed=${this.pickedInput?.device === dv && this.pickedInput.input === n} @pointerdown=${(e: PointerEvent) => this.inputDown(e, dv, n)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.setInput(dv, n, dv); } }} aria-label="Input ${displayCommand(n)} of ${this.dev(dv)?.name ?? dv}. Press to switch to it.">${displayCommand(n)}</button>`)}</span>` : nothing)}</div>`
         : nothing}
-      <div class="tray" role="group" aria-label="Devices to add">${free.length ? html`<span class="muted">Add:</span>${free.map((d) => html`<button class="dchip" @pointerdown=${(e: PointerEvent) => this.chipDown(e, d.id)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.addDev(id, d.id); } }} aria-label="Add ${d.name ?? d.id} to ${a?.name ?? id}. Click or drag to the slot.">${art(deviceKind(d), 'art')} ${d.name ?? d.id}</button>`)}` : html`<span class="muted">Every device is already in this activity.</span>`}</div>
+      <div class="tray" role="group" aria-label="Devices to add">${free.length ? html`<span class="muted">Add:</span>${free.map((d) => html`<button class="dchip" @pointerdown=${(e: PointerEvent) => this.chipDown(e, d.id)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.addDev(id, d.id); } }} aria-label="Add ${d.name ?? d.id} to ${a?.name ?? id}. Click or drag to the slot.">${art(deviceKind(d), 'art')} ${dn(d.name, d.id)}</button>`)}` : html`<span class="muted">Every device is already in this activity.</span>`}</div>
     </section>`;
   }
 
@@ -435,11 +435,11 @@ export class HhActivities extends StoreElement {
           <button class="zbtn ${dv ? '' : 'nobody'}" aria-haspopup="menu" aria-expanded=${this.zoneMenu === z} aria-label="Who handles ${ZONE_NAME[z].toLowerCase()}: ${d?.name ?? dv ?? 'nobody'}. Choose a device."
             @click=${(e: Event) => { e.stopPropagation(); this.zoneMenu = this.zoneMenu === z ? null : z; }}
             @keydown=${(e: KeyboardEvent) => { if (e.key === 'ArrowDown' && this.zoneMenu !== z) { e.preventDefault(); this.zoneMenu = z; } }}>
-            ${d ? html`${deviceArt(d, 'art')}<span>${d.name ?? d.id}</span>` : html`<span>Nobody (Keys Stay Free)</span>`}<span aria-hidden="true">▾</span></button>
+            ${d ? html`${deviceArt(d, 'art')}<span>${dn(d.name, d.id)}</span>` : html`<span>Nobody (Keys Stay Free)</span>`}<span aria-hidden="true">▾</span></button>
           ${this.zoneMenu === z
             ? html`<div class="menu zmenu" role="menu" aria-label="Device for ${ZONE_NAME[z].toLowerCase()}" @keydown=${(e: KeyboardEvent) => this.menuKey(e)}>
                 <button role="menuitemradio" aria-checked=${!dv} @click=${(e: Event) => { e.stopPropagation(); this.zoneApply(id, z, null); this.zoneMenu = null; }}>Nobody (Keys Stay Free)</button>
-                ${order.map((x) => html`<button role="menuitemradio" aria-checked=${x === dv} @click=${(e: Event) => { e.stopPropagation(); this.zoneApply(id, z, x); this.zoneMenu = null; }}>${this.dev(x)?.name ?? x}</button>`)}</div>`
+                ${order.map((x) => html`<button role="menuitemradio" aria-checked=${x === dv} @click=${(e: Event) => { e.stopPropagation(); this.zoneApply(id, z, x); this.zoneMenu = null; }}>${dn(this.dev(x)?.name, x)}</button>`)}</div>`
             : nothing}
         </div>
         ${m ? html`<div class="rep">${Object.keys(m.matched).length ? html`<b>Filled:</b> ${Object.entries(m.matched).map(([k, c]) => `${keyTitle(k)} → ${c}`).join(', ')}.` : nothing}${kept.length ? html` <em>Kept your own for ${kept.map(keyTitle).join(', ')}.</em>` : nothing}
@@ -448,7 +448,7 @@ export class HhActivities extends StoreElement {
     });
     return html`<section class="card" aria-label="Who handles it"><h2>Who Handles It</h2>
       <p class="sub">Choose which device answers each group of keys. Keys are filled by matching command names; anything you set on a key yourself is kept.</p>
-      <div class="tray" role="group" aria-label="Devices of this activity"><span class="muted">Drag a device onto a zone, or click one and then a zone:</span>${order.map((dv) => html`<button class="dchip" aria-pressed=${this.picked === dv} @pointerdown=${(e: PointerEvent) => this.chipDown(e, dv)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.picked = this.picked === dv ? null : dv; } }}>${art(deviceKind(this.dev(dv) ?? { id: dv }), 'art')} ${this.dev(dv)?.name ?? dv}</button>`)}</div>
+      <div class="tray" role="group" aria-label="Devices of this activity"><span class="muted">Drag a device onto a zone, or click one and then a zone:</span>${order.map((dv) => html`<button class="dchip" aria-pressed=${this.picked === dv} @pointerdown=${(e: PointerEvent) => this.chipDown(e, dv)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.picked = this.picked === dv ? null : dv; } }}>${art(deviceKind(this.dev(dv) ?? { id: dv }), 'art')} ${dn(this.dev(dv)?.name, dv)}</button>`)}</div>
       <div class="who mt">
         <div class="zones">${zoneCards[0]}${zoneCards[1]}</div>
         <hh-mini-remote class="remote" .marks=${marks} label="Keys filled by who handles it"></hh-mini-remote>
@@ -461,10 +461,10 @@ export class HhActivities extends StoreElement {
     if (!a) return html`<div class="card"><h2>That Activity Is Gone</h2><a class="btn" href=${hashFor('activities')}>All Activities</a></div>`;
     const o = this.offer?.id === id ? this.offer : null;
     return html`
-      <div class="tabs"><div role="tablist" aria-label="Activities" class="tl">${(this.cfg.activities ?? []).map((x) => html`<a role="tab" href=${hashFor('activities', x.id)} aria-selected=${x.id === id}>${x.name ?? x.id}</a>`)}</div><button class="btn sm" @click=${() => (this.newOpen = true)}>+ New</button></div>
+      <div class="tabs"><div role="tablist" aria-label="Activities" class="tl">${(this.cfg.activities ?? []).map((x) => html`<a role="tab" href=${hashFor('activities', x.id)} aria-selected=${x.id === id}>${dn(x.name, x.id)}</a>`)}</div><button class="btn sm" @click=${() => (this.newOpen = true)}>+ New</button></div>
       <div class="head"><input class="name" aria-label="Activity name" .value=${a.name ?? a.id} @change=${(e: Event) => this.store.replace(renameActivity(this.cfg, id, trimBytes((e.target as HTMLInputElement).value.trim()) || id), `an${id}`)} />
         <a class="btn" href=${hashFor('remote', id)}>Open on Remote</a><button class="btn danger" @click=${() => void this.removeActivity(id)}>Delete</button></div>
-      ${o ? html`<div class="banner" role="status"><span><b>${a.name ?? id}</b> is new. Make it easy to start?</span><span class="sp"></span><span class="offer">
+      ${o ? html`<div class="banner" role="status"><span><b>${dn(a.name, id)}</b> is new. Make it easy to start?</span><span class="sp"></span><span class="offer">
         ${o.button ? html`<button class="btn sm pri" @click=${() => this.offerStart(id)}>Add Start Button to Home</button>` : nothing}
         ${o.page ? html`<button class="btn sm pri" @click=${() => { this.store.replace(addControlPage(this.cfg, id)); this.say('Added a control page from the Activity control template'); this.offer = o.button ? { ...o, page: false } : null; }}>Add a Control Page</button>` : nothing}
         <button class="btn sm" @click=${() => (this.offer = null)}>Not Now</button></span></div>` : nothing}

@@ -140,7 +140,7 @@ async def test_duplicate_a_preset_edit_the_accent_and_see_it_in_the_apply_dialog
     assert "#f88c40" in fills  # the thumbnails draw the new accent (snapped to 5-6-5)
     await page.get_by_role("button", name="Review & Apply").click()
     dlg = page.locator("hh-apply-dialog")
-    await dlg.get_by_text("my_default").first.wait_for()
+    await dlg.get_by_text("My Default").first.wait_for()
     assert await dlg.get_by_text("Theme", exact=False).count() >= 1
     await shot(page, "apply-theme")
     await page.context.close()

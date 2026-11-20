@@ -1,3 +1,4 @@
+import { dn } from '../lib/key-names';
 import { html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { BtElement, btCss } from './bt-base';
@@ -120,7 +121,7 @@ export class HhBtPanel extends BtElement {
           ${cfgHosts.length || cfgRemotes.length
             ? html`<h2>In Your Config, Not Paired</h2>
               <ul class="list" aria-label="Not paired">
-                ${cfgHosts.map((d) => html`<li class="card peer"><div class="who"><b>${d.name ?? d.id}</b><div class="meta">${statusChip('ir', 'Not Paired')}<span class="mono">${d.address ?? 'no address yet'}</span></div></div><div class="acts"><a class="btn sm" href=${hashFor('devices', d.id)}>Open</a></div></li>`)}
+                ${cfgHosts.map((d) => html`<li class="card peer"><div class="who"><b>${dn(d.name, d.id)}</b><div class="meta">${statusChip('ir', 'Not Paired')}<span class="mono">${d.address ?? 'no address yet'}</span></div></div><div class="acts"><a class="btn sm" href=${hashFor('devices', d.id)}>Open</a></div></li>`)}
                 ${cfgRemotes.map(({ r, i }) => html`<li class="card peer"><div class="who"><b>${r.name}</b><div class="meta">${statusChip('ir', 'Not Paired')}<span class="mono">${r.address ?? 'no address yet'}</span></div></div><div class="acts"><a class="btn sm" href=${hashFor('bluetooth', 'keys', i)}>Edit Buttons</a></div></li>`)}
               </ul>
               <p class="hint">Pair them with the buttons above; the hub matches them to these entries by address.</p>`

@@ -138,8 +138,8 @@ describe('picker logic and bookkeeping', () => {
     const a = base();
     const b = selectTheme(duplicateTheme(a, 'default').config, 'my_default');
     const rows = diffConfig(a, b).map((r) => `${r.kind} ${r.area} ${r.label}`);
-    expect(rows).toContain('added Theme my_default');
-    expect(rows).toContain('changed Active Theme my_default');
+    expect(rows).toContain('added Theme My Default');
+    expect(rows).toContain('changed Active Theme My Default');
     expect(diffConfig(a, base())).toEqual([]);
   });
 });

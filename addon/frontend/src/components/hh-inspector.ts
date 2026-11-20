@@ -4,7 +4,7 @@ import type { Assigner } from '../lib/assigner';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { setStyle } from '../lib/set-style';
 import { fitCells, watchCells } from '../lib/fit-cells';
-import { displayKey, gridStyle, FREE_CAP } from '../lib/key-names';
+import { displayCommand, displayKey, gridStyle, FREE_CAP, dn } from '../lib/key-names';
 import { KEYS, keyTitle } from '../lib/remote-layout';
 import { STOCK_ICONS } from '../lib/stock-icons';
 import { shared } from '../lib/styles';
@@ -131,7 +131,7 @@ export class HhInspector extends LitElement {
       <div class="stat"><span>${layer === DEFAULT_LAYER ? 'Assigned Keys' : 'Overridden Here'}</span><span>${own}</span>
         ${layer === DEFAULT_LAYER ? nothing : html`<span>From Default</span><span>${inherited}</span>`}
         <span>Do Nothing</span><span>${free.length}</span></div>
-      ${act?.devices?.length ? html`<div class="sec"><h3>Who Handles It</h3><div class="free cells">${act.devices.map((d) => html`<span class="chip">${(this.cfg.devices ?? []).find((x) => x.id === d.device)?.name ?? d.device}${d.input ? ` · ${d.input}` : ''}</span>`)}</div></div>` : nothing}
+      ${act?.devices?.length ? html`<div class="sec"><h3>Who Handles It</h3><div class="free cells">${act.devices.map((d) => html`<span class="chip">${(this.cfg.devices ?? []).find((x) => x.id === d.device)?.name ?? d.device}${d.input ? ` · ${displayCommand(d.input)}` : ''}</span>`)}</div></div>` : nothing}
       <div class="sec"><h3>Free Keys</h3>
         ${free.length ? html`<div class="free cells grid" style=${setStyle({ "grid-template-columns": gridStyle(free.map(displayKey), '1.5rem', FREE_CAP) })}>${orderedCells(free, (k) => k, (k) => html`<button title=${keyTitle(k)} @click=${() => this.st.set({ sel: { kind: 'key', name: k } })}>${displayKey(k)}</button>`)}</div>` : html`<p class="why">Every key does something.</p>`}
       </div>
@@ -342,7 +342,7 @@ export class HhInspector extends LitElement {
       <label>Show when this activity starts
         <select .value=${page.activity ?? ''} @change=${(e: Event) => this.pagePatch(pi, { activity: (e.target as HTMLSelectElement).value || undefined })}>
           <option value="">Never (Manual)</option>
-          ${(this.cfg.activities ?? []).map((a) => html`<option value=${a.id} ?selected=${page.activity === a.id}>${a.name ?? a.id}</option>`)}
+          ${(this.cfg.activities ?? []).map((a) => html`<option value=${a.id} ?selected=${page.activity === a.id}>${dn(a.name, a.id)}</option>`)}
         </select></label>
       <label class="chk"><input type="checkbox" .checked=${!!page.back} @change=${(e: Event) => this.pagePatch(pi, { back: (e.target as HTMLInputElement).checked || undefined })} /> Back Chevron (Exit Goes Home)</label>
       ${page.list ? html`<label>List Rows Per Screen<input type="number" min="1" max="16" .value=${String(page.list.rows)} @change=${(e: Event) => this.pagePatch(pi, { list: { rows: Math.max(1, Math.min(16, Number((e.target as HTMLInputElement).value) || 6)) } })} /></label>` : nothing}

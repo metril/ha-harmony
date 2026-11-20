@@ -223,7 +223,7 @@ describe('screens render with a realistic config', () => {
     av.shadowRoot!.querySelector<HTMLElement>('button[aria-label^="Who handles volume"]')!.click();
     await settle(av as HTMLElement);
     const items = [...av.shadowRoot!.querySelectorAll<HTMLElement>('.zmenu button')];
-    items.find((b) => b.textContent?.includes('Living room TV'))!.click();
+    items.find((b) => b.textContent?.includes('Living Room TV'))!.click();
     expect(store.config.activities![0]!.keys).toMatchObject({ volume_up: { device: 'tv', command: 'vol_up' }, volume_down: { device: 'tv', command: 'vol_down' } });
     expect((store.config.editor as { activities: Record<string, { handlers: object }> }).activities['watch_tv']!.handlers).toEqual({ volume: 'tv' });
     await settle(av as HTMLElement);

@@ -1,5 +1,6 @@
 // Reference index: where a device, command or input is used (hard keys, widgets, activity steps and
 // inputs, "who handles it"). Drives the delete guard; rename and delete keep every reference in step.
+import { displayCommand, displayKey } from './key-names';
 import type { Activity, Config, Device } from './model';
 
 export type Ref =
@@ -61,13 +62,13 @@ export function refHref(r: Ref): string {
 export function describeRef(r: Ref): string {
   switch (r.kind) {
     case 'key':
-      return `Key ${r.key.replace(/_/g, ' ')} (${r.layerName} Layer)`;
+      return `Key ${displayKey(r.key)} (${r.layerName} Layer)`;
     case 'widget':
       return `Widget "${r.label}" on page ${r.pageName}`;
     case 'step':
       return `${r.list === 'steps' ? 'Start' : 'Stop'} step ${r.index + 1} of ${r.activityName}`;
     case 'activity':
-      return `Activity ${r.activityName}${r.input ? ` (input ${r.input})` : ''}`;
+      return `Activity ${r.activityName}${r.input ? ` (input ${displayCommand(r.input)})` : ''}`;
     case 'handler':
       return `${r.activityName} handles ${r.zone} with this device`;
   }

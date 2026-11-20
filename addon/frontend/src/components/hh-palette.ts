@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { commandNames } from '../lib/bt';
 import { fitCells, watchCells } from '../lib/fit-cells';
-import { displayCommand, titleHuman } from '../lib/key-names';
+import { displayCommand, titleHuman, dn } from '../lib/key-names';
 import { orderedCells } from './parts';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { commandIconId } from '../lib/device-art';
@@ -170,7 +170,7 @@ export class HhPalette extends LitElement {
             </div>`
           : nothing;
       });
-      return html`<details open><summary>${d.icon && stockIconByName(d.icon) ? stockIconSvg(stockIconByName(d.icon)?.id ?? 1) : stockIconSvg(1)}<span title=${d.name ?? d.id}>${d.name ?? d.id}</span>${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant device">HA</i>` : nothing}<small>${commandNames(d).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
+      return html`<details open><summary>${d.icon && stockIconByName(d.icon) ? stockIconSvg(stockIconByName(d.icon)?.id ?? 1) : stockIconSvg(1)}<span title=${d.name ?? d.id}>${dn(d.name, d.id)}</span>${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant device">HA</i>` : nothing}<small>${commandNames(d).length} cmd</small></summary><div class="grp">${cards}</div></details>`;
     });
   }
   private activities() {

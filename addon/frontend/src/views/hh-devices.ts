@@ -1,6 +1,6 @@
 import '../components/hh-icon-picker';
 import { css, html, nothing, type TemplateResult } from 'lit';
-import { displayCommand } from '../lib/key-names';
+import { displayCommand, dn } from '../lib/key-names';
 import { orderBy, orderUnits } from '../lib/key-order';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../components/hh-action-picker';
@@ -217,7 +217,7 @@ export class HhDevices extends StoreElement {
     return html`<a class="dcard" href=${hashFor('devices', d.id)} aria-label="${d.name ?? d.id}: ${commandCount(d)} commands, ${ps.text}">
       <div class="top">${deviceArt(d)}${errs ? html`<span class="errdot" title="${errs} error${errs === 1 ? '' : 's'}"></span>` : nothing}</div>
       <div class="body">
-        <h2>${d.name ?? d.id}</h2>
+        <h2>${dn(d.name, d.id)}</h2>
         <span class="src">${sourceLabel(d)}</span>
         <div class="chips">
           <span class="chip ${ps.tone === 'ok' ? 'ok' : ps.tone === 'ir' ? 'ir' : ''}">${ps.text}</span>
