@@ -100,7 +100,7 @@ level: set `HH_BT_DEBUG` in the helper's environment to see them.
   always, success once).
 - **HCI trace** (bench diagnosis only): create the file `hci_trace` in the helper's data directory (next to `keys.tlv`, e.g.
   `/data/ha-harmony/bt/hci_trace`; contents ignored) and restart the helper (it restarts itself after being killed). Packets go, one
-  text line each (first 48 bytes in hex), to `/tmp/bt-hci.log` (RAM, never flash), which restarts when it reaches 512 KiB.
+  text line each (first 48 bytes in hex; key material such as link keys, LTK commands and SMP key / confirm / random PDUs is shown as `**`), to `/tmp/bt-hci.log` (mode 0600, RAM, never flash), which restarts when it reaches 512 KiB.
   Delete the file and restart the helper to turn it off.
 
 ## Picking a remote

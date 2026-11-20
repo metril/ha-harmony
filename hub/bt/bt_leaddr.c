@@ -1,5 +1,6 @@
 #include "bt_leaddr.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -53,13 +54,16 @@ static bool store(const char *path, const uint8_t a[6]) {
 int bt_leaddr_load_or_create(const char *path, uint8_t a[6], bool (*rnd)(uint8_t *, size_t)) {
     uint8_t b[7];
     int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0 && errno != ENOENT) return -1; /* cannot tell: keep the file, use the public address this run */
     if (fd >= 0) {
         ssize_t n = read(fd, b, sizeof b);
         close(fd);
+        if (n < 0) return -1;
         if (n == 6 && bt_leaddr_valid(b)) {
             memcpy(a, b, 6);
             return 0;
         }
+        /* read completely and invalid: replaced below */
     }
     uint8_t n6[6];
     if (!bt_leaddr_generate(n6, rnd) || !store(path, n6)) return -1;

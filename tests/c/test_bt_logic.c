@@ -345,6 +345,36 @@ static void test_trace(void) {
     bt_trace_format(l, sizeof l, 1, 0, 2, big, 100);
     CT_CHECK(strstr(l, "...") && strlen(l) < 200);
 
+    /* key material never reaches the trace */
+    uint8_t lk[26] = {0x18, 24, 1, 2, 3, 4, 5, 6, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 5};
+    bt_trace_format(l, sizeof l, 0, 1, 4, lk, 26);
+    CT_CHECK(!strstr(l, "aa") && strstr(l, "05 06 **"));
+    uint8_t cmd[35] = {0x19, 0x20, 28, 0x40, 0, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB};
+    bt_trace_format(l, sizeof l, 0, 0, 1, cmd, 35); /* LE Start Encryption */
+    CT_CHECK(!strstr(l, "bb") && strstr(l, "40 00 **"));
+    uint8_t lkr[25] = {0x0B, 0x04, 22, 1, 2, 3, 4, 5, 6, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC};
+    bt_trace_format(l, sizeof l, 0, 0, 1, lkr, 25);
+    CT_CHECK(!strstr(l, "cc") && strstr(l, "06 **"));
+    uint8_t ltk[23] = {0x1A, 0x20, 18, 0x40, 0, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD};
+    bt_trace_format(l, sizeof l, 0, 0, 1, ltk, 23);
+    CT_CHECK(!strstr(l, "dd") && strstr(l, "40 00 **"));
+    uint8_t enc[35] = {0x17, 0x20, 32, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE};
+    bt_trace_format(l, sizeof l, 0, 0, 1, enc, 35);
+    CT_CHECK(!strstr(l, "ee") && strstr(l, "17 20 20 **"));
+    uint8_t encr[22] = {0x0E, 20, 1, 0x17, 0x20, 0, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99};
+    bt_trace_format(l, sizeof l, 0, 1, 4, encr, 22);
+    CT_CHECK(!strstr(l, "99") && strstr(l, "20 00 **"));
+    /* SMP: Encryption Info (key), Identity Info, Signing Info on CID 6 are redacted; Pairing Request (0x01) is not */
+    uint8_t smp[26] = {0x40, 0x20, 21, 0, 17, 0, 6, 0, 0x06, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77};
+    for (int i = 0; i < 3; i++) {
+        smp[8] = i == 0 ? 0x06 : i == 1 ? 0x08 : 0x0A;
+        bt_trace_format(l, sizeof l, 0, 1, 2, smp, 26);
+        CT_CHECK(!strstr(l, "77") && strstr(l, "06 00 0"));
+    }
+    smp[8] = 0x01;
+    bt_trace_format(l, sizeof l, 0, 1, 2, smp, 26);
+    CT_CHECK(strstr(l, "77") && !strstr(l, "**"));
+
     char dir[] = "/tmp/hh_trace_XXXXXX";
     CT_CHECK(mkdtemp(dir) != NULL);
     static char path[80];
@@ -355,7 +385,29 @@ static void test_trace(void) {
     struct stat st;
     CT_EQ(stat(path, &st), 0);
     CT_CHECK(st.st_size > 0 && st.st_size <= 2000); /* capped: the file restarted instead of growing */
+    CT_EQ(st.st_mode & 0777, 0600);
     unlink(path);
+    rmdir(dir);
+}
+
+/* a file that cannot be read is neither replaced nor used */
+static void test_leaddr_unreadable(void) {
+    char dir[] = "/tmp/hh_leaddr2_XXXXXX", p[90];
+    CT_CHECK(mkdtemp(dir) != NULL);
+    uint8_t a[6];
+    snprintf(p, sizeof p, "%s/le_addr", dir);
+    CT_CHECK(mkdir(p, 0700) == 0); /* open() works, read() fails with EISDIR */
+    CT_EQ(bt_leaddr_load_or_create(p, a, NULL), -1);
+    struct stat st;
+    CT_CHECK(stat(p, &st) == 0 && S_ISDIR(st.st_mode)); /* untouched */
+    rmdir(p);
+    char nd[100];
+    snprintf(nd, sizeof nd, "%s/x", dir);
+    FILE *fp = fopen(nd, "w"); /* a path through a regular file: ENOTDIR, not ENOENT */
+    fclose(fp);
+    snprintf(p, sizeof p, "%s/x/le_addr", dir);
+    CT_EQ(bt_leaddr_load_or_create(p, a, NULL), -1);
+    unlink(nd);
     rmdir(dir);
 }
 
@@ -375,5 +427,6 @@ int main(void) {
     CT_RUN(test_leaddr);
     CT_RUN(test_adv_action);
     CT_RUN(test_trace);
+    CT_RUN(test_leaddr_unreadable);
     return CT_DONE();
 }
