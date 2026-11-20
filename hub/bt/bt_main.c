@@ -349,7 +349,8 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
         bd_addr_t a;
         hci_event_pin_code_request_get_bd_addr(packet, a);
         bool ok = bt_pair_classic_open();
-        bt_logf("pairing start: transport classic, peer %s, PIN request%s", bd_addr_to_str(a), ok ? "" : " (refused: no window for classic)");
+        if (ok) bt_logf("pairing start: transport classic, peer %s, PIN request", bd_addr_to_str(a));
+        else bt_logf("pairing refused: transport classic, peer %s, PIN request outside a classic window", bd_addr_to_str(a));
         if (ok) gap_pin_code_response(a, "0000");
         else gap_pin_code_negative(a);
         break;
@@ -381,7 +382,12 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
     case HCI_EVENT_IO_CAPABILITY_REQUEST: {
         bd_addr_t a;
         hci_event_io_capability_request_get_bd_addr(packet, a);
-        bt_logf("pairing start: transport classic, peer %s, SSP%s", bd_addr_to_str(a), bt_pair_classic_open() ? "" : " (no classic window open)");
+        if (bt_pair_classic_open()) bt_logf("pairing start: transport classic, peer %s, SSP", bd_addr_to_str(a));
+        else { /* a bonded host reconnecting re-authenticates: routine */
+            char l[96];
+            snprintf(l, sizeof l, "authentication: transport classic, peer %s, SSP (no window)", bd_addr_to_str(a));
+            bt_dbg(l);
+        }
         break;
     }
     case HCI_EVENT_SIMPLE_PAIRING_COMPLETE: {
@@ -397,7 +403,12 @@ static void hci_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, 
         uint8_t st = hci_event_authentication_complete_get_status(packet);
         if (st == ERROR_CODE_SUCCESS) break;
         hci_connection_t *c = hci_connection_for_handle(hci_event_authentication_complete_get_connection_handle(packet));
-        if (c) log_pair_fail("classic", c->address, "auth status", st);
+        if (c && bt_pair_classic_open()) log_pair_fail("classic", c->address, "auth status", st);
+        else if (c) { /* reconnect retries of a bonded host: debug only */
+            char l[120];
+            bt_pair_fail_line(l, sizeof l, "classic", bd_addr_to_str(c->address), "auth status", st);
+            bt_dbg(l);
+        }
         break;
     }
     case HCI_EVENT_REMOTE_NAME_REQUEST_COMPLETE: {
