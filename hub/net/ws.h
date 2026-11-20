@@ -8,13 +8,17 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/socket.h>
 
 #define HP_WS_MAX_FRAME 65536   /* max payload of one frame and of a reassembled message */
 #define HP_WS_MAX_CONNS 16
 #define HP_WS_MAX_OUT (256 * 1024)  /* per-connection unsent-bytes cap; exceeded => drop */
 #define HP_WS_HANDSHAKE_MS 5000     /* time allowed to finish the HTTP upgrade */
 #define HP_WS_AUTH_MS 10000         /* upgraded conn must be marked authed within this (default) */
-#define HP_WS_IDLE_MS 90000         /* max silence (no inbound frame of any kind) (default) */
+#define HP_WS_IDLE_MS 90000         /* max silence of a not-yet-authenticated conn (authed ones have none: TCP keepalive) */
+#define HP_WS_KEEPIDLE_S 60         /* TCP keepalive on every accepted socket: idle, probe interval, probe count */
+#define HP_WS_KEEPINTVL_S 10
+#define HP_WS_KEEPCNT 3
 #define HP_WS_CLOSE_MS 2000         /* time allowed to flush a close frame */
 
 typedef struct hp_ws_server hp_ws_server_t;
@@ -43,6 +47,10 @@ int hp_ws_send(hp_ws_conn_t *, const char *text, size_t len);
 void hp_ws_conn_close(hp_ws_conn_t *, uint16_t code);
 /* Overrides the auth/idle deadlines (ms, >0) for connections upgraded from now on. */
 int hp_ws_set_timeouts(hp_ws_server_t *, int auth_ms, int idle_ms);
+/* Test seams: the setsockopt used on accepted sockets (NULL = the real one); the handshake deadline (ms). */
+typedef int (*hp_ws_setsockopt_fn)(int fd, int level, int opt, const void *val, socklen_t len);
+void hp_ws_set_setsockopt(hp_ws_setsockopt_fn fn);
+void hp_ws_set_handshake_ms(hp_ws_server_t *, int ms);
 /* The owner calls this once the peer authenticated (hello ok); until then an
  * upgraded connection is closed (1008) after the auth deadline. */
 void hp_ws_conn_set_authed(hp_ws_conn_t *);

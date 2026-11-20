@@ -61,7 +61,7 @@ ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'ho
 # name -> (code, transport, ((field, wire type, optional), ...))
 MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'hello': (1, 'ws', (('token', 'str', False), ('client', 'str', True), )),
-    'hello_ack': (2, 'ws', (('hub_id', 'str', False), ('fw_version', 'str', True), ('activities', 'json', True), ('config_hash', 'str', True), ('limits', 'json', True), ('fw_build', 'u32', True), ('ota_key', 'str', True), ('name', 'str', True), ('hw_id', 'str', True), ('rename', 'bool', True), ('id_pinned', 'bool', True), ('bt', 'json', True), )),
+    'hello_ack': (2, 'ws', (('hub_id', 'str', False), ('fw_version', 'str', True), ('activities', 'json', True), ('config_hash', 'str', True), ('limits', 'json', True), ('fw_build', 'u32', True), ('ota_key', 'str', True), ('name', 'str', True), ('hw_id', 'str', True), ('rename', 'bool', True), ('id_pinned', 'bool', True), ('tcp_keepalive', 'bool', True), ('bt', 'json', True), )),
     'error': (3, 'ws', (('code', 'str', False), ('message', 'str', False), ('ref_id', 'u32', True), )),
     'ping': (4, 'ws', ()),
     'pong': (5, 'ws', ()),

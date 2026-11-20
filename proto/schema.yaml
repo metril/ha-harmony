@@ -36,6 +36,9 @@ messages:
       - {name: hw_id, type: str, optional: true}
       - {name: rename, type: bool, optional: true}
       - {name: id_pinned, type: bool, optional: true}
+      # docs/proto/hub-identity.md: the hub uses TCP keepalive and never closes an authenticated client for
+      # silence; clients that see it send no application ping. Absent on older firmware.
+      - {name: tcp_keepalive, type: bool, optional: true}
       # Bluetooth HID (docs/proto/bluetooth.md): present only when the hub build has Bluetooth:
       # {hosts_max, conn_max, remotes_max, le_bonds_max, pages: [7, 12], le} (paired-host limit, simultaneous-connection limit, HID usage pages, LE supported). Absent = no bt_* messages.
       - {name: bt, type: json, optional: true}

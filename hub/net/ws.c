@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -293,7 +294,7 @@ struct hp_ws_server {
     char *token;
     hp_ws_cb_t cb;
     void *user;
-    int auth_ms, idle_ms;
+    int auth_ms, idle_ms, hs_ms;
     int (*extra_fds)(void *arg, int out[8]);
     void *extra_arg;
     hp_ws_conn_t conns[HP_WS_MAX_CONNS];
@@ -320,6 +321,7 @@ hp_ws_server_t *hp_ws_listen(uint16_t port, const char *token, const hp_ws_cb_t 
     s->user = user;
     s->auth_ms = HP_WS_AUTH_MS;
     s->idle_ms = HP_WS_IDLE_MS;
+    s->hs_ms = HP_WS_HANDSHAKE_MS;
     s->token = token ? strdup(token) : NULL;
     s->lfd = socket(AF_INET, SOCK_STREAM, 0);
     if (s->lfd < 0) goto fail;
@@ -355,7 +357,36 @@ int hp_ws_set_timeouts(hp_ws_server_t *s, int auth_ms, int idle_ms) {
     s->idle_ms = idle_ms;
     return 0;
 }
-void hp_ws_conn_set_authed(hp_ws_conn_t *c) { c->auth_dl = 0; }
+void hp_ws_conn_set_authed(hp_ws_conn_t *c) {
+    c->auth_dl = 0;
+    c->idle_dl = 0; /* liveness of an authenticated client is the kernel's TCP keepalive, not a timer */
+}
+
+void hp_ws_set_handshake_ms(hp_ws_server_t *s, int ms) {
+    if (s && ms > 0) s->hs_ms = ms;
+}
+
+static hp_ws_setsockopt_fn g_setsockopt = setsockopt;
+
+void hp_ws_set_setsockopt(hp_ws_setsockopt_fn fn) { g_setsockopt = fn ? fn : setsockopt; }
+
+/* Kernel liveness: a dead peer is noticed after idle + intvl * cnt (about 90 s). Failures are ignored. */
+static void set_keepalive(int fd) {
+    int on = 1;
+    (void)g_setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof on);
+#ifdef TCP_KEEPIDLE
+    int v = HP_WS_KEEPIDLE_S;
+    (void)g_setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &v, sizeof v);
+#endif
+#ifdef TCP_KEEPINTVL
+    v = HP_WS_KEEPINTVL_S;
+    (void)g_setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &v, sizeof v);
+#endif
+#ifdef TCP_KEEPCNT
+    v = HP_WS_KEEPCNT;
+    (void)g_setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &v, sizeof v);
+#endif
+}
 void hp_ws_foreach(hp_ws_server_t *s, void (*fn)(hp_ws_conn_t *, void *), void *arg) {
     for (int i = 0; i < HP_WS_MAX_CONNS; i++)
         if (s->conns[i].state == ST_OPEN && s->conns[i].upgraded && !s->conns[i].dead) fn(&s->conns[i], arg);
@@ -477,7 +508,7 @@ static void deliver(hp_ws_conn_t *c, const uint8_t *p, size_t n) {
 
 static void handle_frame(hp_ws_conn_t *c, const hp_ws_frame_hdr_t *h, uint8_t *p) {
     size_t n = (size_t)h->payload_len;
-    c->idle_dl = now_ms() + c->srv->idle_ms; /* any inbound frame counts */
+    if (c->idle_dl) c->idle_dl = now_ms() + c->srv->idle_ms; /* unauthenticated only: any inbound frame counts */
     for (size_t i = 0; i < n; i++) p[i] ^= h->mask[i & 3];
     switch (h->opcode) {
     case 0:
@@ -596,11 +627,12 @@ static void accept_one(hp_ws_server_t *s) {
         return;
     }
     set_nb(fd);
+    set_keepalive(fd);
     c->fd = fd;
     c->peer = pl >= sizeof pa && pa.sin_family == AF_INET ? ntohl(pa.sin_addr.s_addr) : 0;
     c->rbuf = rb;
     c->state = ST_HANDSHAKE;
-    c->deadline = now_ms() + HP_WS_HANDSHAKE_MS;
+    c->deadline = now_ms() + s->hs_ms;
 }
 
 void hp_ws_set_extra_fds(hp_ws_server_t *s, int (*fn)(void *arg, int out[8]), void *arg) {

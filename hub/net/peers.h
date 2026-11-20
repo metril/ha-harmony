@@ -5,9 +5,11 @@
  *
  * A peer on the hub's own L2 segment may be unable to ARP for the hub (its broadcast ARP requests can
  * go unanswered on the hub's Wi-Fi), but it learns the hub's MAC as soon as the hub sends it any unicast
- * frame. So the hub remembers the addresses of peers that authenticated, and while one has no live
- * authenticated connection it sends it one small UDP datagram to the discard port now and then; the
- * kernel ARPs for the peer to send it, and the peer learns the hub's MAC from that request.
+ * frame. So the hub remembers the addresses of peers that authenticated, and when one loses its
+ * authenticated connection (and once at boot, for all of them) it sends it a few small UDP datagrams to the
+ * discard port with exponential back-off, then stops until the next such event (no periodic timer); the
+ * kernel ARPs for the peer to send each, and the peer learns the hub's MAC from that request. A burst is
+ * cancelled when the peer authenticates again.
  *
  * The list is persisted (newest first, one dotted quad per line, atomic write, only when the SET of
  * addresses changes). Addresses are host-order uint32. */
@@ -17,14 +19,22 @@
 #include <stdint.h>
 
 #define HP_PEERS_MAX 64          /* ~1 KiB state file at most */
-#define HP_PEERS_PERIOD_MS 30000 /* between keepalive rounds */
+#define HP_PEERS_NUDGES 5        /* nudges per burst, at +1, +3, +7, +15, +31 s (gaps 1, 2, 4, 8, 16 s) */
+#define HP_PEERS_FIRST_MS 1000   /* gap before the first nudge; doubles after each */
+
+typedef struct {
+    uint32_t addr;
+    int64_t at_ms; /* when the next nudge is due */
+    int step;      /* nudges already sent */
+} hp_nudge_t;
 
 typedef struct {
     uint32_t addr[HP_PEERS_MAX]; /* [0] is the most recent */
     int n;
     char path[256];              /* "" = not persisted */
     int64_t saved_ms;            /* when a reorder-only change was last persisted (0 = not yet this boot) */
-    int64_t next_ms;             /* next keepalive round (monotonic ms); 0 = first round due at once */
+    hp_nudge_t nudge[HP_PEERS_MAX]; /* active bursts */
+    int nn;
 } hp_peers_t;
 
 /* Empty list; `path` may be NULL. */
@@ -41,8 +51,15 @@ int hp_peers_save(const hp_peers_t *);
 bool hp_peers_note(hp_peers_t *, uint32_t addr, int64_t now_ms);
 /* 10/8, 172.16/12, 192.168/16, 169.254/16 (not loopback, multicast, 0 or public). */
 bool hp_peers_usable(uint32_t addr);
-/* True when a keepalive round is due at `now_ms` (and schedules the next one). The first call is due. */
-bool hp_peers_due(hp_peers_t *, int64_t now_ms);
+/* Starts a burst for a remembered peer (no-op for an unknown one or one already bursting). */
+void hp_peers_arm(hp_peers_t *, uint32_t addr, int64_t now_ms);
+/* Boot: starts a burst for every remembered peer. */
+void hp_peers_arm_all(hp_peers_t *, int64_t now_ms);
+/* The peer reconnected: stops its burst. */
+void hp_peers_cancel(hp_peers_t *, uint32_t addr);
+/* Writes up to `max` peers whose nudge is due at `now_ms` to out and schedules each one's next nudge (the
+ * burst ends after HP_PEERS_NUDGES). Returns the count. */
+int hp_peers_due(hp_peers_t *, int64_t now_ms, uint32_t *out, int max);
 /* Peers (in list order, at most `max`) not in live[0..nlive). Returns the count written to out. */
 int hp_peers_pending(const hp_peers_t *, const uint32_t *live, int nlive, uint32_t *out, int max);
 /* One UDP datagram to addr:9, non-blocking, errors ignored. */

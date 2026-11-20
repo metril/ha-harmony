@@ -346,6 +346,79 @@ static void test_sigpipe_safe(void) {
     CT_CHECK(1); /* reaching here means SIGPIPE did not kill us */
 }
 
+static int g_so[16][3], g_nso;
+static int rec_sso(int fd, int level, int opt, const void *val, socklen_t len) {
+    (void)fd; (void)len;
+    if (g_nso < 16) { g_so[g_nso][0] = level; g_so[g_nso][1] = opt; g_so[g_nso][2] = *(const int *)val; g_nso++; }
+    return 0;
+}
+
+static bool so_has(int level, int opt, int val) {
+    for (int i = 0; i < g_nso; i++)
+        if (g_so[i][0] == level && g_so[i][1] == opt && g_so[i][2] == val) return true;
+    return false;
+}
+
+static void test_keepalive_on_accept(void) {
+    g_nso = 0;
+    hp_ws_set_setsockopt(rec_sso);
+    int fd = cl_connect();
+    pump(3);
+    CT_CHECK(so_has(SOL_SOCKET, SO_KEEPALIVE, 1));
+#ifdef TCP_KEEPIDLE
+    CT_CHECK(so_has(IPPROTO_TCP, TCP_KEEPIDLE, 60));
+#endif
+#ifdef TCP_KEEPINTVL
+    CT_CHECK(so_has(IPPROTO_TCP, TCP_KEEPINTVL, 10));
+#endif
+#ifdef TCP_KEEPCNT
+    CT_CHECK(so_has(IPPROTO_TCP, TCP_KEEPCNT, 3));
+#endif
+    hp_ws_set_setsockopt(NULL);
+    close(fd);
+    pump(3);
+}
+
+static void run_for_ms(int ms) {
+    for (int i = 0; i < ms / 5; i++) hp_ws_poll(srv, 5);
+}
+
+static void test_no_idle_close_when_authed_but_auth_and_handshake_deadlines(void) {
+    CT_EQ(hp_ws_set_timeouts(srv, 150, 100), 0); /* idle shorter than the test's silence */
+    hp_ws_set_handshake_ms(srv, 150);
+    /* authenticated: silent well past idle_ms, still open and answering */
+    int fd = cl_upgrade();
+    send_frame(fd, 1, true, (const uint8_t *)"x", 1);
+    pump(4);
+    hp_ws_conn_set_authed(g_conn);
+    int closes = g_closes;
+    run_for_ms(500);
+    CT_EQ(g_closes, closes);
+    send_frame(fd, 9, true, NULL, 0); /* an app-level PING from an old client is still answered */
+    uint8_t b[16];
+    CT_EQ(cl_read(fd, b, sizeof b), 2);
+    CT_EQ(b[0], 0x8a);
+    close(fd);
+    pump(3);
+    /* upgraded but never authenticated: closed by the auth deadline (1008) */
+    hp_ws_set_timeouts(srv, 150, 60000);
+    fd = cl_upgrade();
+    run_for_ms(400);
+    uint8_t cl[16];
+    ssize_t n = cl_read(fd, cl, sizeof cl);
+    CT_EQ(close_code(cl, n), 1008);
+    close(fd);
+    /* TCP connected but no handshake: dropped by the handshake deadline */
+    fd = cl_connect();
+    pump(2);
+    closes = g_closes;
+    run_for_ms(400);
+    CT_EQ(cl_read(fd, cl, sizeof cl), 0); /* EOF */
+    close(fd);
+    hp_ws_set_handshake_ms(srv, HP_WS_HANDSHAKE_MS);
+    hp_ws_set_timeouts(srv, HP_WS_AUTH_MS, HP_WS_IDLE_MS);
+}
+
 int main(void) {
     hp_ws_cb_t cb = {on_text, on_close};
     srv = hp_ws_listen(0, "tok", &cb, NULL);
@@ -362,6 +435,8 @@ int main(void) {
     CT_RUN(test_http_garbage_and_slow_handshake);
     CT_RUN(test_send_max_frame);
     CT_RUN(test_sigpipe_safe);
+    CT_RUN(test_keepalive_on_accept);
+    CT_RUN(test_no_idle_close_when_authed_but_auth_and_handshake_deadlines);
     hp_ws_close(srv);
     return CT_DONE();
 }

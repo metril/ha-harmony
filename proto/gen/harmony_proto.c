@@ -29,6 +29,7 @@ static const hp_field_desc_t hp_fields_hello_ack[] = {
     {"hw_id", HP_T_STR, true, NULL},
     {"rename", HP_T_BOOL, true, NULL},
     {"id_pinned", HP_T_BOOL, true, NULL},
+    {"tcp_keepalive", HP_T_BOOL, true, NULL},
     {"bt", HP_T_JSON, true, NULL},
 };
 
@@ -224,7 +225,7 @@ static const hp_field_desc_t hp_fields_bt_listen[] = {
 
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
-    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 12, hp_fields_hello_ack},
+    {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 13, hp_fields_hello_ack},
     {"error", HP_MSG_ERROR, HP_TRANSPORT_WS, 3, hp_fields_error},
     {"ping", HP_MSG_PING, HP_TRANSPORT_WS, 0, NULL},
     {"pong", HP_MSG_PONG, HP_TRANSPORT_WS, 0, NULL},

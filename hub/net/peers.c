@@ -77,10 +77,43 @@ int hp_peers_save(const hp_peers_t *p) {
     return hp_atomic_write(p->path, (const uint8_t *)buf, len);
 }
 
-bool hp_peers_due(hp_peers_t *p, int64_t now_ms) {
-    if (p->next_ms != 0 && now_ms < p->next_ms) return false;
-    p->next_ms = now_ms + HP_PEERS_PERIOD_MS;
-    return true;
+void hp_peers_arm(hp_peers_t *p, uint32_t addr, int64_t now_ms) {
+    bool known = false;
+    for (int i = 0; i < p->n; i++) known |= p->addr[i] == addr;
+    if (!known) return;
+    for (int i = 0; i < p->nn; i++)
+        if (p->nudge[i].addr == addr) return;
+    if (p->nn >= HP_PEERS_MAX) return;
+    p->nudge[p->nn++] = (hp_nudge_t){addr, now_ms + HP_PEERS_FIRST_MS, 0};
+}
+
+void hp_peers_arm_all(hp_peers_t *p, int64_t now_ms) {
+    for (int i = 0; i < p->n; i++) hp_peers_arm(p, p->addr[i], now_ms);
+}
+
+void hp_peers_cancel(hp_peers_t *p, uint32_t addr) {
+    for (int i = 0; i < p->nn; i++)
+        if (p->nudge[i].addr == addr) {
+            p->nudge[i] = p->nudge[--p->nn];
+            return;
+        }
+}
+
+int hp_peers_due(hp_peers_t *p, int64_t now_ms, uint32_t *out, int max) {
+    int k = 0;
+    for (int i = 0; i < p->nn && k < max;) {
+        hp_nudge_t *n = &p->nudge[i];
+        if (now_ms < n->at_ms) { i++; continue; }
+        out[k++] = n->addr;
+        n->step++;
+        if (n->step >= HP_PEERS_NUDGES) {
+            *n = p->nudge[--p->nn]; /* burst over; re-examine the swapped-in entry */
+            continue;
+        }
+        n->at_ms = now_ms + ((int64_t)HP_PEERS_FIRST_MS << n->step);
+        i++;
+    }
+    return k;
 }
 
 int hp_peers_pending(const hp_peers_t *p, const uint32_t *live, int nlive, uint32_t *out, int max) {

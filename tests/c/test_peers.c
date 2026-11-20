@@ -81,15 +81,41 @@ static void t_reorder_save(void) {
     CT_EQ(p.addr[0], IP(10, 0, 0, 1));
 }
 
+static void t_burst(void) {
+    hp_peers_t p;
+    hp_peers_init(&p, NULL);
+    hp_peers_note(&p, IP(10, 0, 0, 1), 0);
+    hp_peers_note(&p, IP(10, 0, 0, 2), 0);
+    uint32_t out[8];
+    CT_EQ(hp_peers_due(&p, 1000000, out, 8), 0); /* nothing armed: no periodic nudge, ever */
+    hp_peers_arm(&p, IP(10, 0, 0, 9), 0);        /* unknown peer: ignored */
+    CT_EQ(p.nn, 0);
+    int64_t t0 = 5000;
+    hp_peers_arm_all(&p, t0); /* boot */
+    hp_peers_arm(&p, IP(10, 0, 0, 1), t0 + 500); /* already bursting: no restart */
+    CT_EQ(p.nn, 2);
+    CT_EQ(hp_peers_due(&p, t0 + 999, out, 8), 0);
+    CT_EQ(hp_peers_due(&p, t0 + 1000, out, 8), 2); /* +1 s */
+    CT_EQ(hp_peers_due(&p, t0 + 1000, out, 8), 0);
+    hp_peers_cancel(&p, IP(10, 0, 0, 2)); /* reconnected */
+    CT_EQ(p.nn, 1);
+    CT_EQ(hp_peers_due(&p, t0 + 2999, out, 8), 0);
+    CT_EQ(hp_peers_due(&p, t0 + 3000, out, 8), 1); /* +2 s gap */
+    CT_EQ(out[0], IP(10, 0, 0, 1));
+    CT_EQ(hp_peers_due(&p, t0 + 6999, out, 8), 0);
+    CT_EQ(hp_peers_due(&p, t0 + 7000, out, 8), 1);  /* +4 s */
+    CT_EQ(hp_peers_due(&p, t0 + 15000, out, 8), 1); /* +8 s */
+    CT_EQ(hp_peers_due(&p, t0 + 31000, out, 8), 1); /* +16 s: fifth and last */
+    CT_EQ(p.nn, 0);
+    CT_EQ(hp_peers_due(&p, t0 + 1000000, out, 8), 0); /* stopped until the next event */
+    hp_peers_arm(&p, IP(10, 0, 0, 2), t0 + 40000); /* a connection loss starts a new burst */
+    CT_EQ(hp_peers_due(&p, t0 + 41000, out, 8), 1);
+    CT_EQ(out[0], IP(10, 0, 0, 2));
+}
+
 static void t_sched(void) {
     hp_peers_t p;
     hp_peers_init(&p, NULL);
-    CT_CHECK(hp_peers_due(&p, 1000)); /* first call: at once */
-    CT_CHECK(!hp_peers_due(&p, 1001));
-    CT_CHECK(!hp_peers_due(&p, 1000 + HP_PEERS_PERIOD_MS - 1));
-    CT_CHECK(hp_peers_due(&p, 1000 + HP_PEERS_PERIOD_MS));
-    CT_CHECK(!hp_peers_due(&p, 1000 + HP_PEERS_PERIOD_MS + 5));
-
     hp_peers_note(&p, IP(10, 0, 0, 1), 1000);
     hp_peers_note(&p, IP(10, 0, 0, 2), 1000);
     hp_peers_note(&p, IP(10, 0, 0, 3), 1000); /* list: .3 .2 .1 */
@@ -111,6 +137,7 @@ int main(void) {
     CT_RUN(t_persist);
     CT_RUN(t_reorder_save);
     CT_RUN(t_sched);
+    CT_RUN(t_burst);
     rmdir(dir);
     return CT_DONE();
 }
