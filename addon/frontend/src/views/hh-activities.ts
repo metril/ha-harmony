@@ -24,6 +24,7 @@ import { stockIconByName } from '../lib/stock-icons';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import { sourceAction, describeAction, type Source } from '../lib/studio-model';
 import { shared } from '../lib/styles';
+import { displayCommand } from '../lib/key-names';
 import { keyTitle } from '../lib/remote-layout';
 
 const ZONE_NOTE: Record<Zone, string> = { volume: 'Vol +, Vol −, Mute', navigation: 'Arrows, OK, Menu, Exit', transport: 'Play, Pause, Stop, Rew, FF, Rec', channels: 'Ch +, Ch −, Prev' };
@@ -318,10 +319,10 @@ export class HhActivities extends StoreElement {
     const cur = a?.devices?.find((x) => x.device === dv)?.input;
     const names = Object.keys(d?.inputs ?? {});
     const open = this.menu === dv;
-    return html`<button class="pill ${cur ? '' : 'none'}" aria-haspopup="menu" aria-expanded=${open} aria-label="Input on ${d?.name ?? dv}: ${cur ?? 'no change'}. Click to choose." @click=${() => { if (this.pickedInput) return this.setInput(this.pickedInput.device, this.pickedInput.input, dv); this.menu = open ? null : dv; }}>${cur ?? (names.length ? 'input?' : 'no inputs')}</button>
+    return html`<button class="pill ${cur ? '' : 'none'}" aria-haspopup="menu" aria-expanded=${open} aria-label="Input on ${d?.name ?? dv}: ${cur ?? 'no change'}. Click to choose." @click=${() => { if (this.pickedInput) return this.setInput(this.pickedInput.device, this.pickedInput.input, dv); this.menu = open ? null : dv; }}>${cur ? displayCommand(cur) : names.length ? 'input?' : 'no inputs'}</button>
       ${open ? html`<div class="menu" role="menu" aria-label="Input for ${d?.name ?? dv}">
         <button role="menuitemradio" aria-checked=${!cur} @click=${() => { this.store.replace(setActivityInput(this.cfg, id, dv, null)); this.menu = null; }}>No input change</button>
-        ${names.map((n) => html`<button role="menuitemradio" aria-checked=${cur === n} @click=${() => { this.store.replace(setActivityInput(this.cfg, id, dv, n)); this.menu = null; }}>${n}</button>`)}
+        ${names.map((n) => html`<button role="menuitemradio" aria-checked=${cur === n} @click=${() => { this.store.replace(setActivityInput(this.cfg, id, dv, n)); this.menu = null; }}>${displayCommand(n)}</button>`)}
         ${names.length ? nothing : html`<span class="muted np">This device has no inputs</span>`}</div>` : nothing}`;
   }
   private card(id: string, dv: string, i: number, n: number) {
@@ -360,7 +361,7 @@ export class HhActivities extends StoreElement {
         ${order.length < MAX_DEVICES ? html`<div class="slot" data-drop="slot">${icon('plus')}<span>Drop a device</span><span class="muted">${order.length}/${MAX_DEVICES}</span></div>` : nothing}
       </div>
       ${order.some((dv) => Object.keys(this.dev(dv)?.inputs ?? {}).length)
-        ? html`<div class="tray" role="group" aria-label="Inputs to drop on a wire"><span class="muted">Inputs: drag one onto its device's wire, or click it and then the wire.</span>${order.map((dv) => Object.keys(this.dev(dv)?.inputs ?? {}).length ? html`<span class="igrp"><span class="muted">${this.dev(dv)?.name ?? dv}</span>${Object.keys(this.dev(dv)?.inputs ?? {}).map((n) => html`<button class="dchip ${this.pickedInput?.device === dv && this.pickedInput.input === n ? 'on' : ''}" aria-pressed=${this.pickedInput?.device === dv && this.pickedInput.input === n} @pointerdown=${(e: PointerEvent) => this.inputDown(e, dv, n)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.setInput(dv, n, dv); } }} aria-label="Input ${n} of ${this.dev(dv)?.name ?? dv}. Press to switch to it.">${n}</button>`)}</span>` : nothing)}</div>`
+        ? html`<div class="tray" role="group" aria-label="Inputs to drop on a wire"><span class="muted">Inputs: drag one onto its device's wire, or click it and then the wire.</span>${order.map((dv) => Object.keys(this.dev(dv)?.inputs ?? {}).length ? html`<span class="igrp"><span class="muted">${this.dev(dv)?.name ?? dv}</span>${Object.keys(this.dev(dv)?.inputs ?? {}).map((n) => html`<button class="dchip ${this.pickedInput?.device === dv && this.pickedInput.input === n ? 'on' : ''}" aria-pressed=${this.pickedInput?.device === dv && this.pickedInput.input === n} @pointerdown=${(e: PointerEvent) => this.inputDown(e, dv, n)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.setInput(dv, n, dv); } }} aria-label="Input ${n} of ${this.dev(dv)?.name ?? dv}. Press to switch to it.">${displayCommand(n)}</button>`)}</span>` : nothing)}</div>`
         : nothing}
       <div class="tray" role="group" aria-label="Devices to add">${free.length ? html`<span class="muted">Add:</span>${free.map((d) => html`<button class="dchip" @pointerdown=${(e: PointerEvent) => this.chipDown(e, d.id)} @click=${(e: MouseEvent) => e.preventDefault()} @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.addDev(id, d.id); } }} aria-label="Add ${d.name ?? d.id} to ${a?.name ?? id}. Click or drag to the slot.">${art(deviceKind(d), 'art')} ${d.name ?? d.id}</button>`)}` : html`<span class="muted">Every device is already in this activity.</span>`}</div>
     </section>`;

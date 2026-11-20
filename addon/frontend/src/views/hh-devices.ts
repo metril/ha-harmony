@@ -1,4 +1,5 @@
 import { css, html, nothing, type TemplateResult } from 'lit';
+import { displayCommand } from '../lib/key-names';
 import { customElement, property, state } from 'lit/decorators.js';
 import '../components/hh-action-picker';
 import '../components/hh-code-dialog';
@@ -235,7 +236,7 @@ export class HhDevices extends StoreElement {
     const g = where === 'inputs' ? ('inputs' as Group) : groupCommand(name);
     return html`<div class="key ${bad ? 'bad' : ''}">
       <button class="k" aria-label="Edit ${name}" @click=${() => (this.edit = { where, name, code: JSON.parse(JSON.stringify(code)) as IrAction })}>
-        <b>${stockIconSvg(commandIconId(name, g))}<span>${name}</span></b><small>${summarize(code)}${code.port_mask ? ` · ports ${code.port_mask}` : ''}${code.repeats && code.repeats > 1 ? ` · ×${code.repeats}` : ''}</small>
+        <b>${stockIconSvg(commandIconId(name, g))}<span>${displayCommand(name)}</span></b><small>${summarize(code)}${code.port_mask ? ` · ports ${code.port_mask}` : ''}${code.repeats && code.repeats > 1 ? ` · ×${code.repeats}` : ''}</small>
       </button>
       <hh-send-ir variant="round" ?ha=${d.kind === 'ha'} .code=${code} name=${name}></hh-send-ir>
     </div>`;

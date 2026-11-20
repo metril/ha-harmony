@@ -24,3 +24,20 @@ export function displayKey(name: string): string {
   const t = words.join(' ');
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
+
+const CMD_WORDS: Record<string, string> = { vol: 'volume', ch: 'channel', chan: 'channel', pwr: 'power', prev: 'previous' };
+/** A device command or input name for people: "Power on", "Volume up", "HDMI 1", "OK". The config name is untouched. */
+export function displayCommand(name: string): string {
+  const c = canon(name);
+  const hit = NAMES[c];
+  if (hit) return hit;
+  const m = /^hdmi_?(\d+)$/.exec(c);
+  if (m) return `HDMI ${m[1]}`;
+  return displayKey(c.split('_').map((w) => CMD_WORDS[w] ?? w).join('_'));
+}
+
+/** An equal-column grid sized to the longest label, so every cell is as wide as the widest word needs and nothing truncates. */
+export const gridStyle = (labels: readonly string[]): string => {
+  const n = Math.max(4, ...labels.map((l) => l.length));
+  return `repeat(auto-fill, minmax(min(100%, calc(${n}ch + 3.25rem)), 1fr))`;
+};

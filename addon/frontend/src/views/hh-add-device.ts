@@ -45,13 +45,14 @@ export class HhAddDevice extends StoreElement {
       ol.steps { margin: 0; padding: 0; }
       h1 { font-size: 26px; text-align: center; margin: 4px 0 0; }
       .lead { text-align: center; color: var(--tx2); margin: -10px 0 0; }
-      .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+      .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
       .tile { display: grid; gap: 8px; justify-items: center; text-align: center; padding: 18px 14px; min-height: 150px; align-content: center; border: 1.5px solid var(--line); border-radius: var(--r3); background: var(--sf); color: var(--tx); cursor: pointer; font-weight: 650; font-size: 16px; }
       .tile:hover:not(:disabled) { border-color: var(--acc); background: var(--accs); }
       .tile:disabled { opacity: 0.55; cursor: not-allowed; }
       .tile .art { width: 96px; height: 72px; color: var(--acc); }
       .tile small { font-weight: 400; color: var(--tx3); font-size: 12.5px; }
-      .tile .big { width: 56px; height: 56px; color: var(--acc); }
+      a.tile { text-decoration: none; }
+      .tile .big { width: 96px; height: 72px; padding: 8px; box-sizing: border-box; color: var(--acc); fill: currentColor; }
       .search { height: 52px; font-size: 18px; border: 1.5px solid var(--line); border-radius: var(--r3); background: var(--sf); color: var(--tx); padding: 0 18px; width: 100%; }
       .brands { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
       .brand { display: grid; gap: 2px; padding: 14px; text-align: left; border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf); color: var(--tx); cursor: pointer; min-height: 72px; }

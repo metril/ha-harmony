@@ -8,6 +8,7 @@ import os
 
 import pytest
 from test_addon_e2e import DIST, STUDIO_YAML, browser, open_editor, site  # noqa: F401
+from test_addon_e2e_polish import large, open_large  # noqa: F401
 
 pytestmark = pytest.mark.skipif(not (DIST / "index.html").is_file(), reason="frontend not built")
 
@@ -47,6 +48,10 @@ async def test_labels_fit_and_centre_on_their_keys(browser, site):
     shot = os.environ.get("HH_REMOTE_SHOT")
     if shot:
         await page.screenshot(path=shot)
+        await page.set_viewport_size({"width": 1280, "height": 800})
+        await page.wait_for_timeout(300)
+        await page.screenshot(path=shot.replace(".png", "-1280.png"))
+        await page.set_viewport_size({"width": 1440, "height": 1000})
     got = await page.evaluate(PROBE)
     assert len(got) >= 10
     for t in got:
@@ -65,7 +70,7 @@ async def test_labels_fit_and_centre_on_their_keys(browser, site):
 
 CHIPS = """() => {
   const find = (n) => { for (const el of n.querySelectorAll('*')) { if (el.tagName === 'HH-INSPECTOR') return el.shadowRoot; if (el.shadowRoot) { const x = find(el.shadowRoot); if (x) return x; } } return null; };
-  return [...find(document.querySelector('hh-app').shadowRoot).querySelectorAll('.free.chips button')].map((b) => ({ text: b.textContent.trim(), cut: b.scrollWidth - b.clientWidth, h: b.getBoundingClientRect().height }));
+  return [...find(document.querySelector('hh-app').shadowRoot).querySelectorAll('.free.grid button')].map((b) => ({ text: b.textContent.trim(), cut: b.scrollWidth - b.clientWidth, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height }));
 }"""
 
 
@@ -78,3 +83,42 @@ async def test_free_key_chips_are_readable_names_that_are_not_cut(browser, site)
         assert "_" not in c["text"], c
         assert c["cut"] <= 0, f"{c['text']} is cut"
         assert c["h"] < 40, f"{c['text']} wraps"
+    assert len({round(c["w"]) for c in chips}) == 1, "free-key cells are not one width"
+
+
+async def test_page_tour_screenshots(browser, large):
+    """HH_PAGES_SHOTS=<dir> writes pages-<route>-<width>.png for every page; skipped otherwise."""
+    out = os.environ.get("HH_PAGES_SHOTS")
+    if not out:
+        pytest.skip("set HH_PAGES_SHOTS")
+    from test_addon_e2e import PREFIX
+    from test_addon_e2e_polish import ROUTES
+
+    for width in (1600, 1280):
+        page = await open_large(browser, large, width, 1000)
+        for route in [*ROUTES, "bluetooth"]:
+            await page.goto(f"{large}{PREFIX}/#/{route}")
+            await page.wait_for_timeout(700)
+            await page.screenshot(path=f"{out}/pages-{route.replace('/', '-')}-{width}.png")
+        await page.context.close()
+
+
+PALETTE = """() => {
+  const find = (n) => { for (const el of n.querySelectorAll('*')) { if (el.tagName === 'HH-PALETTE') return el.shadowRoot; if (el.shadowRoot) { const x = find(el.shadowRoot); if (x) return x; } } return null; };
+  return [...find(document.querySelector('hh-app').shadowRoot).querySelectorAll('.cells')].map((g) => [...g.querySelectorAll('.chip2')].map((b) => {
+    const r = b.getBoundingClientRect(), s = b.querySelector('span');
+    return { text: s.textContent.trim(), w: r.width, h: r.height, cut: s.scrollWidth - s.clientWidth, cx: s.getBoundingClientRect().x + s.getBoundingClientRect().width / 2 - (r.x + r.width / 2) };
+  }));
+}"""
+
+
+async def test_palette_commands_are_readable_and_sit_on_a_uniform_grid(browser, site):
+    page = await open_remote(browser, site)
+    groups = await page.evaluate(PALETTE)
+    texts = {c["text"] for g in groups for c in g}
+    assert {"Power on", "Volume up", "Volume down", "Mute", "HDMI 1", "OK", "Menu"} <= texts
+    for g in groups:
+        assert len({round(c["w"]) for c in g}) == 1 and len({round(c["h"]) for c in g}) == 1, f"uneven cells: {g}"
+        for c in g:
+            assert "_" not in c["text"], c
+            assert c["cut"] <= 0, f"{c['text']} is cut"

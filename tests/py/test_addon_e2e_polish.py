@@ -8,6 +8,7 @@ axe tests also need `npm ci` in addon/frontend.
 """
 
 import json
+import re
 import os
 from pathlib import Path
 
@@ -185,7 +186,7 @@ async def test_interaction_timings_on_the_large_config(browser, large):
                 key,
             )
             await page.wait_for_timeout(900)
-            chip = page.locator("hh-palette .chip2", has_text=cmd).first
+            chip = page.locator("hh-palette .chip2", has_text=re.compile(rf"^\s*{cmd[-1]}\s*$")).first
             await chip.scroll_into_view_if_needed()
             cb = await chip.bounding_box()
             kb = await page.locator(f"hh-remote [data-key={key}]").bounding_box()
@@ -266,13 +267,13 @@ async def test_keyboard_only_assign_a_command_to_a_key_then_apply(browser, large
     page = await open_large(browser, large)
     await page.evaluate(f"() => {STORE}.edit(c => {{ delete c.keys['play']; }})")
     await page.wait_for_timeout(800)
-    await page.locator("hh-palette .chip2", has_text="num_3").first.focus()
+    await page.locator("hh-palette .chip2", has_text=re.compile(r"^\s*3\s*$")).first.focus()
     await page.keyboard.press("Space")  # pick it up
     await page.locator(".banner2", has_text="Click a key").wait_for()
     await page.locator("hh-remote [data-key=play]").focus()
     await page.keyboard.press("Enter")  # drop it
     await page.wait_for_function(
-        f"() => {STUDIO}.querySelector('hh-remote').shadowRoot.querySelector('[data-key=play]').getAttribute('aria-label').includes('tv: num_3')"
+        f"() => {STUDIO}.querySelector('hh-remote').shadowRoot.querySelector('[data-key=play]').getAttribute('aria-label').includes('tv: 3')"
     )
     # review and apply with the keyboard
     await page.get_by_role("button", name="Review & apply").focus()
@@ -288,11 +289,11 @@ async def test_tap_then_tap_works_with_touch_emulation_at_400px(browser, large):
     await page.evaluate(f"() => {STORE}.edit(c => {{ delete c.keys['play']; }})")
     await page.wait_for_timeout(800)
     await page.get_by_role("button", name="Palette").tap()
-    await page.locator("hh-palette .chip2", has_text="num_3").first.tap()
+    await page.locator("hh-palette .chip2", has_text=re.compile(r"^\s*3\s*$")).first.tap()
     await page.locator(".banner2", has_text="Click a key").wait_for()
     await page.locator("hh-remote [data-key=play]").tap()
     await page.wait_for_function(
-        f"() => {STUDIO}.querySelector('hh-remote').shadowRoot.querySelector('[data-key=play]').getAttribute('aria-label').includes('tv: num_3')"
+        f"() => {STUDIO}.querySelector('hh-remote').shadowRoot.querySelector('[data-key=play]').getAttribute('aria-label').includes('tv: 3')"
     )
     # nothing scrolls the outer page during that
     assert await page.evaluate("window.scrollY") == 0
@@ -304,7 +305,7 @@ async def test_long_press_drag_with_touch_emulation_does_not_scroll_the_page(bro
     await page.evaluate(f"() => {STORE}.edit(c => {{ delete c.keys['pause']; }})")
     await page.wait_for_timeout(800)
     await page.get_by_role("button", name="Palette").tap()
-    chip = page.locator("hh-palette .chip2", has_text="num_4").first
+    chip = page.locator("hh-palette .chip2", has_text=re.compile(r"^\s*4\s*$")).first
     await chip.scroll_into_view_if_needed()
     cb = await chip.bounding_box()
     cdp = await page.context.new_cdp_session(page)
@@ -325,7 +326,7 @@ async def test_long_press_drag_with_touch_emulation_does_not_scroll_the_page(bro
         )
     await cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
     await page.wait_for_function(
-        f"() => {STUDIO}.querySelector('hh-remote').shadowRoot.querySelector('[data-key=pause]').getAttribute('aria-label').includes('tv: num_4')"
+        f"() => {STUDIO}.querySelector('hh-remote').shadowRoot.querySelector('[data-key=pause]').getAttribute('aria-label').includes('tv: 4')"
     )
     assert await page.evaluate("window.scrollY") == 0
 
@@ -352,7 +353,7 @@ async def test_ha_actions_have_no_test_fire_and_read_as_name_dot_command(browser
     long = [t for t in texts if t.startswith("Living room ceiling")]
     assert long and long[0].endswith("…") and len(long[0]) <= 26, texts
     titles = await remote.locator("text.xl title").all_text_contents()
-    assert any(t == "Living room ceiling shield · play_pause" for t in titles), titles
+    assert any(t == "Living room ceiling shield · Play pause" for t in titles), titles
     if SHOTS:
         Path(SHOTS).mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=f"{SHOTS}/xray-ha.png")

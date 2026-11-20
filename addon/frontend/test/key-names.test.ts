@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { displayKey } from '../src/lib/key-names';
+import { displayCommand, displayKey, gridStyle } from '../src/lib/key-names';
 import { keyLabel } from '../src/lib/bt-model';
 import { keyTitle } from '../src/lib/remote-layout';
+
+describe('displayCommand', () => {
+  it.each([['power_on', 'Power on'], ['vol_up', 'Volume up'], ['mute', 'Mute'], ['hdmi1', 'HDMI 1'], ['ok', 'OK'], ['menu', 'Menu'], ['stream', 'Stream']])('%s -> %s', (a, b) => expect(displayCommand(a)).toBe(b));
+  it('sizes a grid column to the longest label', () => expect(gridStyle(['a', 'Previous channel'])).toContain('16ch'));
+});
 
 describe('displayKey', () => {
   it.each([

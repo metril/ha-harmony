@@ -192,7 +192,7 @@ describe('screens render with a realistic config', () => {
     await settle(av as HTMLElement);
     expect(av.shadowRoot!.querySelectorAll('.acard').length).toBe(1);
     expect(text(av)).toContain('Watch TV');
-    expect(av.shadowRoot!.querySelector('hh-chain-mini')!.shadowRoot!.textContent).toContain('port1');
+    expect(av.shadowRoot!.querySelector('hh-chain-mini')!.shadowRoot!.textContent).toContain('Port 1');
     expect(text(av)).toContain('New activity');
     location.hash = '#/activities/watch_tv';
     await vi.waitFor(() => expect(text(av)).toContain('Signal chain'));
