@@ -35,7 +35,7 @@ def btn(i, label, cmd, x=0, y=0, w=1, extra=""):
         ("VolUp", "vol_up"),
         ("vol_up", "vol_up"),
         ("Vol Down", "vol_down"),
-        ("InputHdmi1", "input"),
+        ("InputHdmi1", "hdmi1"),
         ("PowerOff", "power"),
         ("Settings", "settings"),
         ("home", "home"),

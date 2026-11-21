@@ -11,7 +11,7 @@ class Icon(NamedTuple):
     keywords: tuple[str, ...]
 
 
-MAX_STOCK_ID = 91
+MAX_STOCK_ID = 109
 CUSTOM_FIRST, CUSTOM_LAST = 160, 254  # reserved; 255 is rejected
 ICONS: tuple[Icon, ...] = (
     Icon(1, 'tv', ('tv', 'television', 'screen', 'display', 'monitor')),
@@ -105,6 +105,24 @@ ICONS: tuple[Icon, ...] = (
     Icon(89, 'nvidia', ('nvidia',)),
     Icon(90, 'sonos', ('sonos',)),
     Icon(91, 'chromecast', ('chromecast', 'googlecast')),
+    Icon(92, 'speaker', ('speakers', 'bluetoothspeaker', 'smartspeaker')),
+    Icon(93, 'soundbar', ('soundbar', 'sound bar', 'bar')),
+    Icon(94, 'receiver', ('receiver', 'avr', 'amp', 'amplifier', 'stereo')),
+    Icon(95, 'streamer', ('streamer', 'streaming box', 'firetv', 'roku', 'mediaplayer', 'shield')),
+    Icon(96, 'projector', ('projector', 'beamer')),
+    Icon(97, 'kvm', ('kvm', 'matrix', 'hdmiswitch', 'switcher')),
+    Icon(98, 'plug', ('socket', 'smartplug')),
+    Icon(99, 'pc', ('pc', 'computer', 'desktop', 'workstation')),
+    Icon(100, 'laptop', ('laptop', 'notebook', 'macbook')),
+    Icon(101, 'hdmi1', ('port1',)),
+    Icon(102, 'hdmi2', ('port2',)),
+    Icon(103, 'hdmi3', ('port3',)),
+    Icon(104, 'hdmi4', ('port4',)),
+    Icon(105, 'av', ('av', 'composite', 'rca', 'analog')),
+    Icon(106, 'usb', ('usb',)),
+    Icon(107, 'cctv', ('cctv', 'camera', 'security', 'doorbell')),
+    Icon(108, 'cctv_off', ('cameraoff', 'cctvoff', 'privacy')),
+    Icon(109, 'garage', ('garage', 'garagedoor', 'carport')),
 )
 ICON_IDS: dict[str, int] = {i.name: i.id for i in ICONS}
 ICON_NAMES: dict[int, str] = {i.id: i.name for i in ICONS}
