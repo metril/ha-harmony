@@ -342,7 +342,7 @@
   "path": [
    "pages"
   ],
-  "msg": "too many pages: 39 (the remote holds at most 32); delete pages or shorten lists that split into several"
+  "msg": "too many pages: 40 (the remote holds at most 32); delete pages or shorten lists that split into several"
  },
  {
   "rule": "max 128 soft keys",

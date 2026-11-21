@@ -3,7 +3,7 @@
 import pytest
 
 from harmony_core.compiler import compile_config
-from harmony_core.config_model import parse_model
+from test_compiler_pages import parse_model
 from harmony_core.icons import ICON_IDS
 from harmony_core.page_build import icon_for_text
 

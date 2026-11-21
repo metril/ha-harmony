@@ -57,7 +57,7 @@ def _many_pages(c):
 
 def _many_widgets(c):
     p = pg(c)
-    p["cols"], p["rows"] = 16, 16
+    p["layout"], p["cols"], p["rows"] = "grid", 16, 16
     p["widgets"] = [{"type": "label", "x": n % 16, "y": n // 16, "label": "L"} for n in range(33)]
 
 
@@ -114,7 +114,7 @@ def _long_label(c):
 
 def _over_budget(c):
     p = pg(c)
-    p["cols"], p["rows"] = 16, 16
+    p["layout"], p["cols"], p["rows"] = "grid", 16, 16
     p["widgets"] = [
         {"type": "label", "x": n % 16, "y": n // 16, "label": "twenty-three bytes long.."}
         for n in range(32)

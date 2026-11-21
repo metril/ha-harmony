@@ -6,9 +6,17 @@ from pathlib import Path
 import pytest
 
 from harmony_core.compiler import CompileError, compile_config
-from harmony_core.config_model import ConfigError, parse_model
+from harmony_core.config_model import ConfigError
 from harmony_core.icons import ICON_IDS
 from harmony_core.page_codec import decode_page, encode
+
+from grid_layout import grid  # noqa: E402
+from harmony_core.config_model import parse_model as _parse_model  # noqa: E402
+
+
+def parse_model(text, *a, **k):
+    return _parse_model(grid(text), *a, **k)
+
 
 GOLDEN = json.loads((Path(__file__).parent / "fixtures" / "pages_v1_goldens.json").read_text())
 

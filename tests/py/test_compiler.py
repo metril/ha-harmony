@@ -45,7 +45,9 @@ pages:
 
 
 def model(text, **kw):
-    return parse_model(text, "/cfg/hub.yaml", **kw)
+    from grid_layout import grid
+
+    return parse_model(grid(text), "/cfg/hub.yaml", **kw)
 
 
 def test_key_table_sane():

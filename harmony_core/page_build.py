@@ -161,6 +161,7 @@ class _Spec:
     y: int = 0
     w: int = 1
     h: int = 1
+    order: int = 0  # index in the config page, to emit widgets in config order after a re-grid
 
     @property
     def trailing(self) -> bool:
@@ -300,7 +301,7 @@ def _lead_title(specs: list[_Spec], cols: int) -> _Spec | None:
     )
 
 
-def _default_icon_only(s: _Spec, cols: int, rows: int) -> None:
+def _default_icon_only(s: _Spec, cols: int, rows: int, fixed: bool = False) -> None:
     """A button that has an icon and no `icon_only` in the config shows the icon alone when its label
     would be cut, or when the cell is 1 wide in a 4-column grid. An explicit value always wins."""
     if "icon_only" in s.cfg or s.kind != "button" or not s.icon or s.nav is not None:
@@ -310,7 +311,7 @@ def _default_icon_only(s: _Spec, cols: int, rows: int) -> None:
     if s.icon in BRAND_COLORS:  # a brand logo replaces the text
         s.icon_only = True
         return
-    if (cols == 4 and s.w == 1) or fit_label(SimpleNamespace(cols=cols, rows=rows), _probe(s)):
+    if (cols == 4 and s.w == 1) or fit_label(SimpleNamespace(cols=cols, rows=rows, fixed=fixed), _probe(s)):
         s.icon_only = True
 
 
@@ -383,6 +384,97 @@ def _split_fixed(specs: list[_Spec], p: dict[str, Any], pi: int, base: int) -> l
     return out
 
 
+_FIT_PAGE = SimpleNamespace(cols=12, rows=1, fixed=True)
+_SPANS = (3, 4, 6, 12)
+
+
+def _span_of(w: int, cols: int) -> int:
+    """The FIXED span (12/6/4/3) nearest a grid cell width: a third is 4, a quarter is 3."""
+    f = w / cols
+    return 12 if f >= 0.66 else 6 if f > 0.4 else 4 if f > 0.28 else 3
+
+
+def _over(s: _Spec) -> bool:
+    s.x, s.y, s.h = 0, 0, 1
+    return fit_label(_FIT_PAGE, _probe(s)) is not None
+
+
+def _fit_class(s: _Spec) -> None:
+    """Widen a button or tile until its label fits its class: key -> half card -> compact (2 lines) -> full
+    row. A button with a glyph stops at the half card and falls back to icon-only; one without goes on."""
+    if s.kind == "label" or s.shape in ("row", "pill", "monogram") or s.icon_only or not s.label:
+        return
+    if s.icon in BRAND_COLORS and "icon_only" not in s.cfg:
+        return  # a brand logo replaces the text
+    if not _over(s):
+        return
+    if s.kind == "tile":
+        if s.w < 12:
+            s.w = 12 if _over(replace(s, w=6)) else 6
+        return
+    start = s.w
+    for sp in [t for t in _SPANS if t >= start]:
+        s.w = sp
+        if not _over(s):
+            return
+        if sp == 6 and not s.cfg.get("compact"):
+            s.compact = True
+            if not _over(s):
+                return
+            s.compact = False
+        if sp == 6 and s.icon:
+            break
+    if s.icon:
+        s.w, s.compact = start, False  # icon-only (set by _default_icon_only) keeps the small class
+        return
+    s.w, s.compact = 12, False
+    s.shape = "row"
+
+
+def _pack(specs: list[_Spec]) -> None:
+    """Row-major, left to right, each span on its own boundary; a label or full span has a row to itself."""
+    x = y = 0
+    for s in specs:
+        s.h = 1
+        if x and (s.w == 12 or x % s.w or x + s.w > 12):
+            y, x = y + 1, 0
+        s.x, s.y = x, y
+        x += s.w
+        if x >= 12:
+            y, x = y + 1, 0
+
+
+def _regrid(specs: list[_Spec], cols: int, rows: int) -> list[_Spec]:
+    """Convert a hand-placed grid page to the FIXED layout. Returns the specs in placement order.
+
+    Cell width picks the class: full width a row (a hero card when the cell is tall), a half a card (compact
+    when there are many) or a tile, a third a key, a quarter a glyph key; pills stay pad keys. Labels that
+    do not fit widen the widget (see `_fit_class`)."""
+    cell = 288 / max(rows, 1)
+    for s in specs:
+        sp = _span_of(s.w, cols)
+        explicit = s.cfg.get("shape")
+        if s.kind == "label" or s.nav is not None or s.shape == "row":
+            sp, s.shape = 12, ("row" if s.kind != "label" else s.shape)
+        elif s.kind == "button" and sp == 12 and not explicit:
+            hero = cell * s.h >= 140
+            s.shape = "card" if hero else "row"
+        s.w = sp
+        _fit_class(s)
+    ordered = sorted(specs, key=lambda s: (s.y, s.x, s.order))
+    halves = [s for s in ordered if s.kind == "button" and s.shape == "card" and s.w == 6]
+    if len(halves) > 6:
+        for s in halves:
+            s.compact = True
+    _pack(ordered)
+    return ordered
+
+
+def _is_off(s: _Spec) -> bool:
+    a = s.cfg.get("action")
+    return s.kind == "button" and bool(a) and a.get("type") == "activity" and a.get("activity") == "off"
+
+
 def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     names = {a["id"]: a.get("name", a["id"]) for a in model["activities"]}
     dev_icons = {d["id"]: d["icon"] for d in model["devices"] if d.get("icon")}
@@ -394,8 +486,11 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     for pi, p in enumerate(model["pages"]):
         in_list = "list" in p
         specs = [_spec(w, act_ids, names, in_list, dev_icons, dev_by_name) for w in p["widgets"]]
+        for k, s in enumerate(specs):
+            s.order = k
         cols, rows = p["cols"], p["rows"]
-        fixed = p.get("layout") == "fixed"
+        convert = p.get("layout") not in ("fixed", "grid")  # every page is FIXED unless it opts out
+        fixed = convert or p.get("layout") == "fixed"
         if fixed and in_list:  # one full-width row each, one grid row per widget
             for i, s in enumerate(specs):
                 s.x, s.y, s.w, s.h = 0, i, 12, 1
@@ -408,23 +503,49 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
                 title, rows = lead.label, rows - 1
                 for s in specs:
                     s.y -= 1
+        placed: list[_Spec] | None = None
+        if convert and not in_list:
+            placed = _regrid(specs, cols, rows)
+            cols, rows = 12, max(1, max(s.y for s in specs) + 1) if specs else 1
         if not in_list:
             for s in specs:
-                _default_icon_only(s, cols, rows)
+                _default_icon_only(s, cols, rows, fixed)
         common: dict[str, Any] = {
             "cfg_index": pi,
             "cfg_id": p["id"],
-            "cols": cols,
+            "cols": 12 if fixed else cols,
             "rows": rows,
             "title": title,
             "kind": p.get("kind", "normal"),
             "back": _default_back(model, p),
-            "fixed": p.get("layout") == "fixed",
+            "fixed": fixed,
             "act": act_ids.index(p["activity"]) + 1 if p.get("activity") in act_ids else 0,
         }
         if fixed:
             base = HEADER_V2 + len(title.encode())
             groups = _split_fixed(specs, p, pi, base)
+            if placed is not None:
+                halves = [s for s in placed if s.kind == "button" and s.shape == "card" and s.w == 6 and not s.compact]
+                if len(groups) > 1 and halves:  # compact (56 px) half cards may save the split
+                    for s in halves:
+                        s.compact = True
+                    _pack(placed)
+                    tight = _split_fixed(placed, p, pi, base)
+                    if len(tight) < len(groups):
+                        groups = tight
+                    else:
+                        for s in halves:
+                            s.compact = False
+                        _pack(placed)
+                        groups = _split_fixed(placed, p, pi, base)
+                off = next((s for s in placed if _is_off(s)), None)
+                while off is not None and not any(x is off for x in groups[0]) and placed.index(off) > 0:
+                    placed.remove(off)  # All Off belongs on page 1: nudge it up the reading order
+                    placed.insert(max(0, len(groups[0]) - 1), off)
+                    _pack(placed)
+                    groups = _split_fixed(placed, p, pi, base)
+                for g in groups:
+                    g.sort(key=lambda s: s.order)
             if len(groups) > MAX_PAGE_GROUP:
                 raise CompileError(
                     f"page {p['id']!r}: needs {len(groups)} pages (at most {MAX_PAGE_GROUP});"
