@@ -40,7 +40,7 @@ ol li,ul li{margin:4px 0}
 <input type="checkbox" id="zoom" aria-label="Show mockups at 2x"><label for="zoom" class="toggle" style="position:sticky;top:0;padding:8px 16px;background:var(--pg);z-index:2;margin:0">Show mockups at 2&times; (1&times; = panel pixels)</label>
 <div class="wrap">
 <h1>Elite remote UI redesign</h1>
-<p class="lede">Harmony Elite panel: ILI9341, <strong>240&times;320 px, RGB565</strong>, single-touch Synaptics pad over the panel, plus a touch strip below it that the driver reports as <code>KEY_HOME</code> (left) and <code>KEY_FAVORITES</code> (right). Mockups below are drawn at exactly 240&times;320. The grey bar under each mockup is the physical strip, not pixels. The <em>Current</em> column is rendered from today's <code>remote/app/ui.c</code> via the host memory framebuffer (LVGL 9.2.2, Montserrat 14/20).</p>
+<p class="lede">Harmony Elite panel: ILI9341, <strong>240&times;320 px, RGB565</strong>, single-touch Synaptics pad over the panel, plus a touch strip below it that the driver reports as <code>KEY_FAVORITES</code> (left, ACTIVITIES) and <code>KEY_HOME</code> (right, DEVICES). Mockups below are drawn at exactly 240&times;320. The grey bar under each mockup is the physical strip, not pixels. The <em>Current</em> column is rendered from today's <code>remote/app/ui.c</code> via the host memory framebuffer (LVGL 9.2.2, Montserrat 14/20).</p>
 <p class="note">Assumed physical size: 2.4&Prime; diagonal &rarr; about <strong>167 PPI, 0.152 mm/px</strong> (not in <code>docs/hardware/remote-elite.md</code>; check with calipers). So 44 px &asymp; 6.7 mm, 52 px &asymp; 7.9 mm.</p>
 
 <h2>1. What makes the current UI look poor</h2>

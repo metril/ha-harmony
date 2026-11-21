@@ -386,5 +386,5 @@ keys:
   - {id: 31, evdev: 78, name: HomeControlPlus}
   - {id: 32, evdev: 74, name: HomeControlMinus}
   - {id: 33, evdev: 116, name: PowerOffActivity}
-  - {id: 34, evdev: 102, name: Home}
-  - {id: 35, evdev: 364, name: Favorites}
+  - {id: 34, evdev: 364, name: Home}
+  - {id: 35, evdev: 102, name: Favorites}

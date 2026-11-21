@@ -98,7 +98,7 @@ static void gen_event(void) {
     break;
   }
   case 10: { /* a key */
-    static const int K[][2] = {{0, 103}, {0, 108}, {0, 174}, {1, 102}, {1, 364}};
+    static const int K[][2] = {{0, 103}, {0, 108}, {0, 174}, {1, 364}, {1, 102}};
     int i = (int)rnd(5);
     fk.now += 30; fk_key(&fk, K[i][0], K[i][1], 1); app_step(&app, 0);
     fk.now += (rnd(8) == 0) ? 700 : 30; fk_key(&fk, K[i][0], K[i][1], 0);
@@ -144,8 +144,8 @@ static void run_seed(uint64_t seed, int loops) {
   ra_ui_test_fail_at = -1;
   /* wherever the chaos left it, Home gets to a page (twice: the first press may only wake the screen) */
   for (int k = 0; k < 2; k++) {
-    fk.now += 100; fk_key(&fk, 1, 102, 1); app_step(&app, 0);
-    fk.now += 50; fk_key(&fk, 1, 102, 0); app_step(&app, 0);
+    fk.now += 100; fk_key(&fk, 1, 364, 1); app_step(&app, 0);
+    fk.now += 50; fk_key(&fk, 1, 364, 0); app_step(&app, 0);
   }
   for (int k = 0; k < 3; k++) { fk.now += 40; app_step(&app, 0); }
   check_invariants();

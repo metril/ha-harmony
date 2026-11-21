@@ -23,7 +23,7 @@ static void test_round_trip(void) {
 
 static void test_known_values(void) {
     CT_EQ(hp_hwkey_by_evdev(115)->id, hp_hwkey_by_name("VolumeUp")->id);
-    CT_CHECK(!strcmp(hp_hwkey_by_evdev(364)->name, "Favorites"));
+    CT_CHECK(!strcmp(hp_hwkey_by_evdev(102)->name, "Favorites"));
     CT_CHECK(!strcmp(hp_hwkey_by_name("HOME_CONTROL_1")->name, "HomeControl1"));
 }
 

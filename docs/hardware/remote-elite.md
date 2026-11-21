@@ -50,7 +50,7 @@ written 0 before suspend. **[CODE]**
 
 **Touch** (`event2`), single-touch, no `ABS_MT`: `ABS_X` 0–239, `ABS_Y` 0–320 (fuzz 3),
 `ABS_PRESSURE` 0–255, `ABS_TOOL_WIDTH` 0–15, `BTN_TOUCH` (330). The driver turns touches below the
-screen into keys itself: far left → `KEY_HOME` (102), far right → `KEY_FAVORITES` (364), the middle
+screen into keys itself: far left (ACTIVITIES) → `KEY_FAVORITES` (364), far right (DEVICES) → `KEY_HOME` (102), the middle
 emits nothing. So the strip arrives as keys on `event2`, not as coordinates.
 
 **Hard keys** (`event0`) — all 35 confirmed by pressing each one; the names are stock's:
@@ -66,7 +66,7 @@ emits nothing. So the strip arrives as keys on `event2`, not as coordinates.
 | colours | 398 Red, 399 Green, 400 Yellow, 401 Blue |
 | home control | 148 HomeControl1, 202 HomeControl2, 149 HomeControl3, 203 HomeControl4, 78 HomeControlPlus, 74 HomeControlMinus |
 | power | 116 PowerOffActivity |
-| strip (`event2`) | 102 Home, 364 Favorites |
+| strip (`event2`) | 364 Home (ACTIVITIES, far left), 102 Favorites (DEVICES, far right); the driver's key names are the reverse of the printed legends |
 
 There are **no numeric keys**. The Back (return) key beside Mute is 412 PrevChannel; Exit is a separate key. Codes run to 412, so the integration's
 logical key ids must be a mapping, not the evdev code.

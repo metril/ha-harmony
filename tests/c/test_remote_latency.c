@@ -240,7 +240,7 @@ static void test_v2_nav_and_home_redraw_before_the_radio(void) {
   fk.now += 500;
   t = fk.now;
   fr = app.display.frames;
-  fk_key(&fk, 1, 102, 1);
+  fk_key(&fk, 1, 364, 1);
   app_step(&app, 0);
   CT_EQ(app.ui.page.page_id, 0);
   CT_CHECK(app.display.frames > fr);

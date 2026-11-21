@@ -325,7 +325,7 @@ static void test_keys_all_stock_names(void) {
       {159, "FastForward"}, {389, "DVR"}, {395, "Guide"}, {358, "Info"}, {398, "Red"}, {399, "Green"},
       {400, "Yellow"}, {401, "Blue"}, {148, "HomeControl1"}, {202, "HomeControl2"}, {149, "HomeControl3"},
       {203, "HomeControl4"}, {78, "HomeControlPlus"}, {74, "HomeControlMinus"}, {116, "PowerOffActivity"},
-      {102, "Home"}, {364, "Favorites"}};
+      {364, "Home"}, {102, "Favorites"}};
   CT_EQ(sizeof want / sizeof want[0], 35);
   CT_EQ(sizeof RPR_KEYS / sizeof RPR_KEYS[0], 35);
   for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) CT_CHECK(!strcmp(rpr_key_name(want[i].c), want[i].n));
@@ -338,13 +338,13 @@ static void test_keys_read_error(void) {
   rpr_ops_t o = mk(f);
   f->q[f->nq].fd = 10; f->q[f->nq++].err = ENODEV;
   struct input_event e;
-  set_event(&e, EV_KEY, 102, 1);
+  set_event(&e, EV_KEY, 364, 1);
   f->q[f->nq].fd = 11; f->q[f->nq].ev[0] = e; f->q[f->nq++].n = 1;
   int rc;
   char *argv[] = {"remote_probe", "keys", "2"};
   char *t = run_cmd(&o, 3, argv, &rc);
   CT_EQ(rc, 1);
-  CT_CHECK(strstr(t, "event2 EV_KEY code=102 (Home) value=1"));
+  CT_CHECK(strstr(t, "event2 EV_KEY code=364 (Home) value=1"));
   free(t);
   check_log_safe(f);
   free(f);

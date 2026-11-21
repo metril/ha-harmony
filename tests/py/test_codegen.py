@@ -324,7 +324,7 @@ def test_key_table_is_the_35_confirmed_keys():
     assert len({k.id for k in keys}) == len({k.evdev for k in keys}) == 35
     assert all(0 < k.id < 128 for k in keys)  # 128+ is reserved for page soft keys
     by = {k.name: k for k in keys}
-    assert (by["VolumeUp"].evdev, by["Home"].evdev, by["Favorites"].evdev) == (115, 102, 364)
+    assert (by["VolumeUp"].evdev, by["Home"].evdev, by["Favorites"].evdev) == (115, 364, 102)
     assert by["HomeControl1"].event == "home_control_1" and by["DVR"].event == "dvr"
     assert by["PowerOffActivity"].event == "power_off_activity"
 

@@ -299,8 +299,8 @@ const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT] = {
     {31, 78, "HomeControlPlus", "home_control_plus"},
     {32, 74, "HomeControlMinus", "home_control_minus"},
     {33, 116, "PowerOffActivity", "power_off_activity"},
-    {34, 102, "Home", "home"},
-    {35, 364, "Favorites", "favorites"},
+    {34, 364, "Home", "home"},
+    {35, 102, "Favorites", "favorites"},
 };
 
 const hp_hwkey_t *hp_hwkey_by_id(uint8_t id)

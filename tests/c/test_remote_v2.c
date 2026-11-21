@@ -140,8 +140,8 @@ static void press_key(int dev, int code) {
 #define KEY_UP_ 103
 #define KEY_DOWN_ 108
 #define KEY_EXIT_ 174
-#define KEY_HOME_ 102
-#define KEY_FAV_ 364
+#define KEY_HOME_ 364
+#define KEY_FAV_ 102
 
 static void test_fill_receiving_then_home(void) {
   start();

@@ -145,8 +145,8 @@ KEYS: tuple[tuple[int, int, str, str], ...] = (
     (31, 78, 'HomeControlPlus', 'home_control_plus'),
     (32, 74, 'HomeControlMinus', 'home_control_minus'),
     (33, 116, 'PowerOffActivity', 'power_off_activity'),
-    (34, 102, 'Home', 'home'),
-    (35, 364, 'Favorites', 'favorites'),
+    (34, 364, 'Home', 'home'),
+    (35, 102, 'Favorites', 'favorites'),
 )
 KEY_BY_ID = {k[0]: k for k in KEYS}
 KEY_BY_EVDEV = {k[1]: k for k in KEYS}

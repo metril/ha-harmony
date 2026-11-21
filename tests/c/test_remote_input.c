@@ -69,8 +69,8 @@ static void test_all_35_keys(void) {
   feed(EV_KEY, 115, 0, 1);
   CT_EQ(rec.e[0].code, hp_hwkey_by_name("VolumeUp")->id);
   rec.n = 0;
-  feed(EV_KEY, 364, 1, 0); /* Favorites, from the touch strip */
-  feed(EV_KEY, 364, 0, 1);
+  feed(EV_KEY, 102, 1, 0); /* Favorites, from the touch strip */
+  feed(EV_KEY, 102, 0, 1);
   CT_EQ(rec.e[0].code, hp_hwkey_by_name("Favorites")->id);
   ra_input_close(&in);
 }
@@ -199,8 +199,8 @@ static void test_read_path(void) {
   begin();
   fk_key(&fk, 0, 115, 1);
   fk_key(&fk, 0, 115, 0);
-  fk_key(&fk, 1, 102, 1); /* Home from the touch node */
-  fk_key(&fk, 1, 102, 0);
+  fk_key(&fk, 1, 364, 1); /* Home from the touch node */
+  fk_key(&fk, 1, 364, 0);
   fk_touch(&fk, 10, 42, 1);
   fk_touch(&fk, 10, 42, 0);
   int ready[2];

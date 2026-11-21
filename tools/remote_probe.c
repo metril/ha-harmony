@@ -51,7 +51,7 @@ static const rpr_key_t RPR_KEYS[] = {
     {167, "Record"}, {168, "Rewind"}, {159, "FastForward"}, {389, "DVR"}, {395, "Guide"}, {358, "Info"},
     {398, "Red"}, {399, "Green"}, {400, "Yellow"}, {401, "Blue"}, {148, "HomeControl1"},
     {202, "HomeControl2"}, {149, "HomeControl3"}, {203, "HomeControl4"}, {78, "HomeControlPlus"},
-    {74, "HomeControlMinus"}, {116, "PowerOffActivity"}, {102, "Home"}, {364, "Favorites"},
+    {74, "HomeControlMinus"}, {116, "PowerOffActivity"}, {364, "Home"}, {102, "Favorites"},
 };
 
 static const char *rpr_key_name(unsigned code) {
