@@ -34,7 +34,9 @@ _HAS_STYLE, _HAS_ICON, _HAS_BIND, _HAS_COLOR = 0x10, 0x20, 0x40, 0x80
 _ALIGN_SHIFT = 2  # kind bits 2-3: alignment, an index into ALIGNS
 _ICON_ONLY = 0x20
 _TRAILING = 0x40  # style bit 6: trailing chevron (nav role only)
+_COMPACT = 0x80  # style bit 7: 56 px card on a FIXED page
 _BACK = 0x04
+_FIXED = 0x40  # pflags bit 6: fixed-size layout
 _THEME_SHIFT, _THEME_MASK = (
     3,
     0x38,
@@ -63,6 +65,7 @@ class Widget:
     on_color: str | None = None  # v2, tiles only: fill when on; same forms
     trailing: bool = False  # v2: draw a trailing chevron (nav role only)
     align: str = "center"  # v2: kind bits 2-3 (centre is the default and costs nothing)
+    compact: bool = False  # v2: style bit 7, FIXED pages only
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,7 @@ class Page:
     act: int = 0  # v2: 0, or activity index + 1
     title: str = ""  # v2: "" -> the remote shows "Harmony"
     theme: int = 0  # v2: preset id 0..7 (0 default, 7 custom)
+    fixed: bool = False  # v2: pflags bit 6, fixed-size layout (cols 12; see page_box)
 
 
 def _encode_text(s: str, limit: int, what: str) -> bytes:
@@ -108,6 +112,8 @@ def _validate(page: Page) -> None:
         raise ValueError(f"too many widgets: {len(page.widgets)} (max {MAX_WIDGETS})")
     if v2:
         _validate_header_v2(page)
+    if page.fixed:
+        _validate_fixed(page)
     seen: list[Widget] = []
     for w in page.widgets:
         if w.kind not in KINDS:
@@ -121,12 +127,100 @@ def _validate(page: Page) -> None:
         _encode_text(w.label, MAX_LABEL, f"widget {w.id} label")
         if v2:
             _validate_widget_v2(page, w)
+        if w.compact and not page.fixed:
+            raise ValueError(f"widget {w.id} is compact on a page that is not fixed")
         for o in seen:
             if o.id == w.id:
                 raise ValueError(f"duplicate widget id {w.id}")
             if _overlap(w, o):
                 raise ValueError(f"widgets {o.id} and {w.id} overlap")
         seen.append(w)
+
+
+# FIXED layout (pflags bit 6). One shared box function, mirrored by hp_page_box (C) and widgetBox (TS) and checked
+# against tests/vectors/pages.json. Spans 12/6/4/3 -> widths 224/108/69/50 at x = 8 + (x/w)*(width+8).
+FIXED_SPANS = (12, 6, 4, 3)
+FIXED_MAX = 276  # stacked content height: 288 - 8 top - 4 bottom
+FIXED_TOP = 8
+BAR_H = 32
+
+
+def fixed_class(w: Widget) -> tuple[int, bool]:
+    """(pixel height, row-class) of a widget on a FIXED page; ValueError when it cannot be placed."""
+    sp = w.w
+    if w.h != 1 or sp not in FIXED_SPANS or w.x % sp:
+        raise ValueError(f"widget {w.id} {w.w}x{w.h} at x {w.x} is not a fixed-layout cell")
+    if w.compact and (w.kind != "button" or w.shape != "card" or sp != 6):
+        raise ValueError(f"widget {w.id}: compact is only for a 6-wide card button")
+    if w.kind == "label" or w.shape == "row":
+        return 44, True
+    if w.kind == "tile":
+        return 64, False
+    if w.shape == "pill":
+        return 52, False
+    if sp >= 6:
+        return (56 if w.compact else 80), False
+    return 52, False
+
+
+def _fixed_tops(page: Page) -> tuple[dict[int, int], int]:
+    """({grid row: stack offset from content y 8}, stacked height); empty grid rows take no space."""
+    tops: dict[int, int] = {}
+    cur = 0
+    prev_list: bool | None = None
+    for y in range(page.rows):
+        cls = [fixed_class(w) for w in page.widgets if w.y == y]
+        if not cls:
+            continue
+        lst = all(rc for _, rc in cls)
+        if prev_list is not None:
+            cur += 2 if prev_list and lst else 8
+        tops[y] = cur
+        cur += max(h for h, _ in cls)
+        prev_list = lst
+    return tops, cur
+
+
+def fixed_height(page: Page) -> int:
+    """Stacked content height of a FIXED page (ValueError for an unplaceable widget)."""
+    return _fixed_tops(page)[1]
+
+
+def _validate_fixed(page: Page) -> None:
+    if page.cols != 12:
+        raise ValueError(f"a fixed page needs 12 columns, not {page.cols}")
+    if _fixed_tops(page)[1] > FIXED_MAX:
+        raise ValueError(f"fixed page stacks over {FIXED_MAX} px")
+
+
+def _edge(i: int, n: int, total: int) -> int:
+    return -(-i * total // n)
+
+
+def _title_index(page: Page) -> int:
+    for i, w in enumerate(page.widgets):
+        if w.kind == "label" and (w.x, w.y, w.w, w.h) == (0, 0, page.cols, 1):
+            return i
+    return -1
+
+
+def page_box(page: Page, w: Widget) -> tuple[int, int, int, int]:
+    """The widget's box in screen pixels (x1, y1, x2, y2 inclusive), before any inset: hp_page_box."""
+    if page.fixed:
+        h, _ = fixed_class(w)
+        n = 12 // w.w
+        wpx = (224 - (n - 1) * 8) // n
+        x1 = 8 + (w.x // w.w) * (wpx + 8)
+        y1 = BAR_H + FIXED_TOP + _fixed_tops(page)[0][w.y]
+        return x1, y1, x1 + wpx - 1, y1 + h - 1
+    shift = 1 if page.version == 1 and page.rows > 1 and _title_index(page) >= 0 else 0
+    rows = page.rows - shift
+    return (
+        _edge(w.x, page.cols, 240),
+        BAR_H + _edge(w.y - shift, rows, 288),
+        _edge(w.x + w.w, page.cols, 240) - 1,
+        BAR_H + _edge(w.y + w.h - shift, rows, 288) - 1,
+    )
 
 
 def _validate_header_v2(page: Page) -> None:
@@ -213,6 +307,7 @@ def widget_cost(w: Widget) -> dict[str, int]:
         | SHAPES.index(w.shape) << 3
         | (_ICON_ONLY if w.icon_only else 0)
         | (_TRAILING if w.trailing else 0)
+        | (_COMPACT if w.compact else 0)
     )
     return {
         "base": WIDGET_BYTES,
@@ -235,6 +330,7 @@ def _widget_bytes(w: Widget, v2: bool) -> bytes:
             | SHAPES.index(w.shape) << 3
             | (_ICON_ONLY if w.icon_only else 0)
             | (_TRAILING if w.trailing else 0)
+            | (_COMPACT if w.compact else 0)
             )
         if style:
             kind |= _HAS_STYLE
@@ -280,7 +376,10 @@ def encode(page: Page, version: int = 2) -> bytes:
         t = page.title.encode()
         seq = (page.seq_idx << 4) | page.seq_cnt
         pflags = (
-            PAGE_KINDS.index(page.kind) | (_BACK if page.back else 0) | page.theme << _THEME_SHIFT
+            PAGE_KINDS.index(page.kind)
+            | (_BACK if page.back else 0)
+            | (_FIXED if page.fixed else 0)
+            | page.theme << _THEME_SHIFT
         )
         out = bytearray(
             [2, page.page_id, page.cols, page.rows, len(page.widgets), page.gen, page.total]
@@ -346,7 +445,7 @@ def decode_page(data: bytes) -> Page:
     off = hdr
     if v2:
         pflags, seq, act, tlen = data[7:11]
-        if pflags & 3 == 3 or pflags & ~(3 | _BACK | _THEME_MASK):
+        if pflags & 3 == 3 or pflags & ~(3 | _BACK | _THEME_MASK | _FIXED):
             raise ValueError(f"reserved page flag bits set ({pflags:#04x})")
         if tlen > MAX_TITLE:
             raise ValueError(f"title exceeds {MAX_TITLE} bytes")
@@ -360,6 +459,7 @@ def decode_page(data: bytes) -> Page:
             "total": data[6],
             "kind": PAGE_KINDS[pflags & 3],
             "back": bool(pflags & _BACK),
+            "fixed": bool(pflags & _FIXED),
             "seq_idx": seq >> 4,
             "seq_cnt": seq & 15,
             "act": act,
@@ -377,7 +477,7 @@ def decode_page(data: bytes) -> Page:
         if v2 and (kind & 3 == 3 or (kind >> _ALIGN_SHIFT) & 3 == 3):
             raise ValueError(f"bad widget kind byte {kind:#04x}")
         role, shape, icon_only, icon, bind = "default", "card", False, 0, None
-        trailing = False
+        trailing = compact = False
         align = ALIGNS[(kind >> _ALIGN_SHIFT) & 3] if v2 else "center"
         color = on_color = None
         wid, xy, wh = data[off : off + 3]
@@ -393,6 +493,7 @@ def decode_page(data: bytes) -> Page:
                     raise ValueError(f"bad style byte {s:#04x}")
                 role, shape, icon_only = ROLES[s & 7], SHAPES[(s >> 3) & 3], bool(s & _ICON_ONLY)
                 trailing = bool(s & _TRAILING)
+                compact = bool(s & _COMPACT)
             if kind & _HAS_ICON:
                 icon = data[off]
                 off += 1
@@ -439,6 +540,7 @@ def decode_page(data: bytes) -> Page:
                 on_color,
                 trailing,
                 align,
+                compact,
             )
         )
     if off != len(data):
@@ -459,6 +561,7 @@ def page_to_dict(page: Page) -> dict[str, Any]:
         "total": page.total,
         "kind": page.kind,
         "back": page.back,
+        **({"fixed": True} if page.fixed else {}),
         "seq": {"idx": page.seq_idx, "cnt": page.seq_cnt} if page.seq_cnt else None,
         "act": page.act,
         "title": page.title,
@@ -481,6 +584,7 @@ def page_to_dict(page: Page) -> dict[str, Any]:
                 "on_color": w.on_color,
                 **({"trailing": True} if w.trailing else {}),
                 **({"align": w.align} if w.align != "center" else {}),
+                **({"compact": True} if w.compact else {}),
             }
             for w in page.widgets
         ],

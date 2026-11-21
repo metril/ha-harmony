@@ -104,7 +104,7 @@
      "y": 5,
      "w": 4,
      "h": 1,
-     "label": "é日"
+     "label": "\u00e9\u65e5"
     }
    ],
    "hex": "010904060300021021044d757465010301420454656d700204054105c3a9e697a5",
@@ -160,7 +160,7 @@
       "y": 5,
       "w": 4,
       "h": 1,
-      "label": "é日",
+      "label": "\u00e9\u65e5",
       "role": "default",
       "shape": "card",
       "icon_only": false,
@@ -1334,7 +1334,7 @@
      "cnt": 3
     },
     "act": 3,
-    "title": "Watch TV é",
+    "title": "Watch TV \u00e9",
     "widgets": [
      {
       "kind": "button",
@@ -4348,6 +4348,1504 @@
      }
     ]
    }
+  }
+ ],
+ "valid_fixed": [
+  {
+   "name": "fixed_rows_6",
+   "hex": "02000c0606000140000000300100c1080305526f772030300201c1080305526f772031300302c1080305526f772032300403c1080305526f772033300504c1080305526f772034300605c1080305526f772035",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 6,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 12,
+      "h": 1,
+      "label": "Row 0",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 3,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 2,
+      "x": 0,
+      "y": 1,
+      "w": 12,
+      "h": 1,
+      "label": "Row 1",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 3,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 3,
+      "x": 0,
+      "y": 2,
+      "w": 12,
+      "h": 1,
+      "label": "Row 2",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 3,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 4,
+      "x": 0,
+      "y": 3,
+      "w": 12,
+      "h": 1,
+      "label": "Row 3",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 3,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 5,
+      "x": 0,
+      "y": 4,
+      "w": 12,
+      "h": 1,
+      "label": "Row 4",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 3,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 6,
+      "x": 0,
+      "y": 5,
+      "w": 12,
+      "h": 1,
+      "label": "Row 5",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 3,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     231,
+     83
+    ],
+    [
+     8,
+     86,
+     231,
+     129
+    ],
+    [
+     8,
+     132,
+     231,
+     175
+    ],
+    [
+     8,
+     178,
+     231,
+     221
+    ],
+    [
+     8,
+     224,
+     231,
+     267
+    ],
+    [
+     8,
+     270,
+     231,
+     313
+    ]
+   ]
+  },
+  {
+   "name": "fixed_cards_2x2",
+   "hex": "02000c02040001400000000001006102476f0002606102476f0003016102476f0004616102476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 2,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 2,
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 3,
+      "x": 0,
+      "y": 1,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 4,
+      "x": 6,
+      "y": 1,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     115,
+     119
+    ],
+    [
+     124,
+     40,
+     231,
+     119
+    ],
+    [
+     8,
+     128,
+     115,
+     207
+    ],
+    [
+     124,
+     128,
+     231,
+     207
+    ]
+   ]
+  },
+  {
+   "name": "fixed_compact_4x2",
+   "hex": "02000c0408000140000000100100618002476f100260618002476f100301618002476f100461618002476f100502618002476f100662618002476f100703618002476f100863618002476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 4,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "compact": true
+     },
+     {
+      "kind": "button",
+      "id": 2,
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "compact": true
+     },
+     {
+      "kind": "button",
+      "id": 3,
+      "x": 0,
+      "y": 1,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "compact": true
+     },
+     {
+      "kind": "button",
+      "id": 4,
+      "x": 6,
+      "y": 1,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "compact": true
+     },
+     {
+      "kind": "button",
+      "id": 5,
+      "x": 0,
+      "y": 2,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "compact": true
+     },
+     {
+      "kind": "button",
+      "id": 6,
+      "x": 6,
+      "y": 2,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "compact": true
+     },
+     {
+      "kind": "button",
+      "id": 7,
+      "x": 0,
+      "y": 3,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "compact": true
+     },
+     {
+      "kind": "button",
+      "id": 8,
+      "x": 6,
+      "y": 3,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "compact": true
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     115,
+     95
+    ],
+    [
+     124,
+     40,
+     231,
+     95
+    ],
+    [
+     8,
+     104,
+     115,
+     159
+    ],
+    [
+     124,
+     104,
+     231,
+     159
+    ],
+    [
+     8,
+     168,
+     115,
+     223
+    ],
+    [
+     124,
+     168,
+     231,
+     223
+    ],
+    [
+     8,
+     232,
+     115,
+     287
+    ],
+    [
+     124,
+     232,
+     231,
+     287
+    ]
+   ]
+  },
+  {
+   "name": "fixed_mixed_classes",
+   "hex": "02000c040a000140000000100100c10806496e707574730102016102476f0103616102476f0004024102476f0005424102476f0006824102476f0007033102476f0008333102476f0009633102476f000a933102476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 4,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 12,
+      "h": 1,
+      "label": "Inputs",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "tile",
+      "id": 2,
+      "x": 0,
+      "y": 1,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "tile",
+      "id": 3,
+      "x": 6,
+      "y": 1,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 4,
+      "x": 0,
+      "y": 2,
+      "w": 4,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 5,
+      "x": 4,
+      "y": 2,
+      "w": 4,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 6,
+      "x": 8,
+      "y": 2,
+      "w": 4,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 7,
+      "x": 0,
+      "y": 3,
+      "w": 3,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 8,
+      "x": 3,
+      "y": 3,
+      "w": 3,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 9,
+      "x": 6,
+      "y": 3,
+      "w": 3,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 10,
+      "x": 9,
+      "y": 3,
+      "w": 3,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     231,
+     83
+    ],
+    [
+     8,
+     92,
+     115,
+     155
+    ],
+    [
+     124,
+     92,
+     231,
+     155
+    ],
+    [
+     8,
+     164,
+     76,
+     215
+    ],
+    [
+     85,
+     164,
+     153,
+     215
+    ],
+    [
+     162,
+     164,
+     230,
+     215
+    ],
+    [
+     8,
+     224,
+     57,
+     275
+    ],
+    [
+     66,
+     224,
+     115,
+     275
+    ],
+    [
+     124,
+     224,
+     173,
+     275
+    ],
+    [
+     182,
+     224,
+     231,
+     275
+    ]
+   ]
+  },
+  {
+   "name": "fixed_pills",
+   "hex": "02000c0204000140000000100100411001311002404110013210038041100133100401c1100130",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 2,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 4,
+      "h": 1,
+      "label": "1",
+      "role": "default",
+      "shape": "pill",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 2,
+      "x": 4,
+      "y": 0,
+      "w": 4,
+      "h": 1,
+      "label": "2",
+      "role": "default",
+      "shape": "pill",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 3,
+      "x": 8,
+      "y": 0,
+      "w": 4,
+      "h": 1,
+      "label": "3",
+      "role": "default",
+      "shape": "pill",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 4,
+      "x": 0,
+      "y": 1,
+      "w": 12,
+      "h": 1,
+      "label": "0",
+      "role": "default",
+      "shape": "pill",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     76,
+     91
+    ],
+    [
+     85,
+     40,
+     153,
+     91
+    ],
+    [
+     162,
+     40,
+     230,
+     91
+    ],
+    [
+     8,
+     100,
+     231,
+     151
+    ]
+   ]
+  },
+  {
+   "name": "fixed_empty_row_skipped",
+   "hex": "02000c0803000140000000100100c10802476f100203c10802476f0003076102476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 8,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 2,
+      "x": 0,
+      "y": 3,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 3,
+      "x": 0,
+      "y": 7,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     231,
+     83
+    ],
+    [
+     8,
+     86,
+     231,
+     129
+    ],
+    [
+     8,
+     138,
+     115,
+     217
+    ]
+   ]
+  },
+  {
+   "name": "fixed_tallest_wins",
+   "hex": "02000c02040001400000000001006102476f0002603102476f0003903102476f000401c102476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 2,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 2,
+      "x": 6,
+      "y": 0,
+      "w": 3,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 3,
+      "x": 9,
+      "y": 0,
+      "w": 3,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 4,
+      "x": 0,
+      "y": 1,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     115,
+     119
+    ],
+    [
+     124,
+     40,
+     173,
+     91
+    ],
+    [
+     182,
+     40,
+     231,
+     91
+    ],
+    [
+     8,
+     128,
+     231,
+     207
+    ]
+   ]
+  },
+  {
+   "name": "fixed_max_stack",
+   "hex": "02000c0303000140000000000100c102476f000201c102476f100302c11002476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 3,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 2,
+      "x": 0,
+      "y": 1,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 3,
+      "x": 0,
+      "y": 2,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "pill",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     231,
+     119
+    ],
+    [
+     8,
+     128,
+     231,
+     207
+    ],
+    [
+     8,
+     216,
+     231,
+     267
+    ]
+   ]
+  },
+  {
+   "name": "fixed_exactly_276",
+   "hex": "02000c0404000140000000000100c102476f010201c102476f010302c102476f100403c10802476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 4,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "tile",
+      "id": 2,
+      "x": 0,
+      "y": 1,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "tile",
+      "id": 3,
+      "x": 0,
+      "y": 2,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "button",
+      "id": 4,
+      "x": 0,
+      "y": 3,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     231,
+     119
+    ],
+    [
+     8,
+     128,
+     231,
+     191
+    ],
+    [
+     8,
+     200,
+     231,
+     263
+    ],
+    [
+     8,
+     272,
+     231,
+     315
+    ]
+   ]
+  },
+  {
+   "name": "fixed_back_title",
+   "hex": "02000c010100014400000744657669636573100100c10802476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 12,
+    "rows": 1,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": true,
+    "fixed": true,
+    "seq": null,
+    "act": 0,
+    "title": "Devices",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 12,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     8,
+     40,
+     231,
+     83
+    ]
+   ]
+  },
+  {
+   "name": "grid_v2_boxes",
+   "hex": "0200040602000100000000000111220141010205410154",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 4,
+    "rows": 6,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 1,
+      "y": 1,
+      "w": 2,
+      "h": 2,
+      "label": "A",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "tile",
+      "id": 2,
+      "x": 0,
+      "y": 5,
+      "w": 4,
+      "h": 1,
+      "label": "T",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     60,
+     80,
+     179,
+     175
+    ],
+    [
+     0,
+     272,
+     239,
+     319
+    ]
+   ]
+  },
+  {
+   "name": "grid_v1_title_shift",
+   "hex": "0100040602000111220141010205410154",
+   "dict": {
+    "version": 1,
+    "id": 0,
+    "cols": 4,
+    "rows": 6,
+    "gen": 0,
+    "total": 0,
+    "kind": "normal",
+    "back": false,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 1,
+      "y": 1,
+      "w": 2,
+      "h": 2,
+      "label": "A",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     },
+     {
+      "kind": "tile",
+      "id": 2,
+      "x": 0,
+      "y": 5,
+      "w": 4,
+      "h": 1,
+      "label": "T",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null
+     }
+    ]
+   },
+   "boxes": [
+    [
+     60,
+     80,
+     179,
+     175
+    ],
+    [
+     0,
+     272,
+     239,
+     319
+    ]
+   ]
+  }
+ ],
+ "invalid_fixed": [
+  {
+   "name": "fixed_cols_4",
+   "hex": "0200040801000140000000000100410141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_cols_16",
+   "hex": "0200100801000140000000000100c10141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_span_5",
+   "hex": "02000c0801000140000000000100510141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_span_1",
+   "hex": "02000c0801000140000000000100110141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_span_2",
+   "hex": "02000c0801000140000000000100210141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_h_2",
+   "hex": "02000c0801000140000000000100c20141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_x_off_boundary",
+   "hex": "02000c0801000140000000000130610141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_x_off_boundary_4",
+   "hex": "02000c0801000140000000000120410141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_stack_over_276",
+   "hex": "02000c0804000140000000000100c10141000201c10141000302c10141000403c10141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_stack_277",
+   "hex": "02000c0804000140000000100100c1000141100201c1000142100302c1080143010403c10144",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_compact_on_tile",
+   "hex": "02000c080100014000000011010061800154",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_compact_span_4",
+   "hex": "02000c080100014000000010010041800141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_compact_row_shape",
+   "hex": "02000c080100014000000010010061880141",
+   "error": "inval"
+  },
+  {
+   "name": "fixed_compact_label",
+   "hex": "02000c080100014000000012010061800141",
+   "error": "inval"
+  },
+  {
+   "name": "compact_without_fixed",
+   "hex": "02000c080100010000000010010061800141",
+   "error": "inval"
+  },
+  {
+   "name": "compact_without_fixed_4col",
+   "hex": "020004080100010000000010010021800141",
+   "error": "inval"
+  },
+  {
+   "name": "pflags_bit7",
+   "hex": "02000c0800000180000000",
+   "error": "inval"
+  },
+  {
+   "name": "pflags_fixed_and_bit7",
+   "hex": "02000c08000001c0000000",
+   "error": "inval"
   }
  ]
 }

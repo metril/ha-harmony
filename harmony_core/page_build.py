@@ -18,13 +18,16 @@ from .ha_actions import default_tap
 from .harmony_proto import SOFT_KEY_BASE
 from .icons import BRAND_COLORS, ICON_IDS, ICONS
 from .key_names import display_name
+from .keys import key_code
 from .page_codec import (
     HEADER_V2,
     MAX_BYTES,
     MAX_WIDGETS,
     Page,
     Widget,
+    FIXED_MAX,
     encode,
+    fixed_height,
     page_size,
     widget_cost,
     widget_size,
@@ -121,6 +124,7 @@ class _Spec:
     color: str | None = None
     on_color: str | None = None
     align: str = "center"
+    compact: bool = False
     x: int = 0
     y: int = 0
     w: int = 1
@@ -146,6 +150,7 @@ class _Unit:
     back: bool
     act: int
     seq: tuple[int, int] = (0, 0)
+    fixed: bool = False
 
 
 def _spec(
@@ -201,6 +206,7 @@ def _spec(
         w.get("color"),
         w.get("on_color"),
         w.get("align", "center"),
+        bool(w.get("compact", False)),
         w.get("x", 0),
         w.get("y", 0),
         w["w"],
@@ -226,6 +232,7 @@ def _probe(s: _Spec) -> Widget:
         s.on_color,
         s.trailing,
         s.align,
+        s.compact,
     )
 
 
@@ -255,6 +262,66 @@ def _default_icon_only(s: _Spec, cols: int, rows: int) -> None:
         s.icon_only = True
 
 
+_EXIT = key_code("exit")
+
+
+def _maps_exit(model: Model, activity: str | None) -> bool:
+    """Does the page's activity (or the global key map) bind the Exit key?"""
+    maps = [model.get("keys") or {}]
+    maps += [a.get("keys") or {} for a in model["activities"] if a["id"] == activity]
+    return any(key_code(n) == _EXIT for m in maps for n in m)
+
+
+def _split_fixed(specs: list[_Spec], p: dict[str, Any], pi: int, base: int) -> list[list[_Spec]]:
+    """Split a FIXED page by grid rows: a new wire page when the stacked height, the byte budget, the
+    widget count or the 16 grid rows run out. Rows are renumbered from 0 on every page."""
+    rows: dict[int, list[_Spec]] = {}
+    for s in specs:
+        rows.setdefault(s.y, []).append(s)
+    groups: list[list[list[_Spec]]] = [[]]
+    size = base
+
+    def height(g: list[list[_Spec]]) -> int:
+        ws = tuple(
+            replace(_probe(s), y=y) for y, row in enumerate(g) for s in row
+        )
+        return fixed_height(Page(0, 12, max(1, len(g)), ws, 2, 0, 1, fixed=True))
+
+    for y in sorted(rows):
+        row = rows[y]
+        n = sum(widget_size(_probe(s)) for s in row)
+        try:
+            if height([row]) > FIXED_MAX or base + n > MAX_BYTES or len(row) > MAX_WIDGETS:
+                raise CompileError(
+                    f"page {p['id']!r}: grid row {y} does not fit one page; shorten its labels or use fewer widgets",
+                    ["pages", pi],
+                )
+            cur = groups[-1]
+            fits = (
+                cur
+                and len(cur) < 16
+                and size + n <= MAX_BYTES
+                and sum(len(r) for r in cur) + len(row) <= MAX_WIDGETS
+                and height([*cur, row]) <= FIXED_MAX
+            )
+        except ValueError as exc:
+            raise CompileError(f"page {p['id']!r}: {exc}", ["pages", pi]) from exc
+        if not fits and groups[-1]:
+            groups.append([])
+            size = base
+        groups[-1].append(row)
+        size += n
+    out = []
+    for g in groups:
+        flat: list[_Spec] = []
+        for y, row in enumerate(g):
+            for s in row:
+                s.y = y
+                flat.append(s)
+        out.append(flat)
+    return out
+
+
 def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     names = {a["id"]: a.get("name", a["id"]) for a in model["activities"]}
     dev_icons = {d["id"]: d["icon"] for d in model["devices"] if d.get("icon")}
@@ -263,6 +330,11 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
         in_list = "list" in p
         specs = [_spec(w, act_ids, names, in_list, dev_icons) for w in p["widgets"]]
         cols, rows = p["cols"], p["rows"]
+        fixed = p.get("layout") == "fixed"
+        if fixed and in_list:  # one full-width row each, one grid row per widget
+            for i, s in enumerate(specs):
+                s.x, s.y, s.w, s.h = 0, i, 12, 1
+            rows = max(1, min(16, len(specs)))
         title = p.get("title", "")
         if not title and not in_list and rows >= 2:
             lead = _lead_title(specs, cols)
@@ -281,9 +353,25 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
             "rows": rows,
             "title": title,
             "kind": p.get("kind", "normal"),
-            "back": p.get("back", False),
+            "back": p["back"] if "back" in p else not _maps_exit(model, p.get("activity")),
+            "fixed": p.get("layout") == "fixed",
             "act": act_ids.index(p["activity"]) + 1 if p.get("activity") in act_ids else 0,
         }
+        if fixed:
+            base = HEADER_V2 + len(title.encode())
+            groups = _split_fixed(specs, p, pi, base)
+            if len(groups) > MAX_PAGE_GROUP:
+                raise CompileError(
+                    f"page {p['id']!r}: needs {len(groups)} pages (at most {MAX_PAGE_GROUP});"
+                    " shorten it or split it across pages",
+                    ["pages", pi],
+                )
+            for gi, g in enumerate(groups, 1):
+                u = _Unit(specs=g, **{**common, "rows": max([s.y for s in g], default=0) + 1})
+                if len(groups) > 1:
+                    u.seq = (gi, len(groups))
+                units.append(u)
+            continue
         if not in_list:
             units.append(_Unit(specs=specs, **common))
             continue
@@ -402,6 +490,7 @@ def build_pages(
                     s.on_color,
                     s.trailing,
                     s.align,
+                    s.compact,
                 )
             )
         pages.append(
@@ -420,6 +509,7 @@ def build_pages(
                 u.act,
                 u.title,
                 theme,
+                u.fixed,
             )
         )
     return pages, [u.cfg_id for u in units], tiles

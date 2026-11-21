@@ -499,6 +499,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("shape"): vol.In(SHAPES),
         vol.Optional("icon_only"): bool,
         vol.Optional("align"): vol.In(["left", "center", "right"]),
+        vol.Optional("compact"): bool,  # fixed-layout pages: a 56 px card
         vol.Optional("color"): _color,
         vol.Optional("on_color"): _color,
         vol.Optional("nav"): vol.All(str, vol.Match(_NAV, msg="use next, prev, home or a page id")),
@@ -511,6 +512,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("title"): _title,
         vol.Optional("activity"): _slug,
         vol.Optional("back"): bool,
+        vol.Optional("layout"): vol.In(["fixed"], msg="the only layout is `fixed`"),
         vol.Optional("list"): {vol.Required("rows"): _int(1, 16)},
         vol.Required("widgets"): [vol.All(widget, _check_widget)],
     }
@@ -636,6 +638,8 @@ def _check_widget(w: dict[str, Any]) -> dict[str, Any]:
             )
     if kind != "button" and "action" in w or kind != "tile" and "entity" in w:
         raise vol.Invalid(f"unexpected `{'action' if 'action' in w else 'entity'}` on a {kind}")
+    if w.get("compact") and kind != "button":
+        raise vol.Invalid("`compact` belongs on a button")
     if "on_color" in w and kind != "tile":
         raise vol.Invalid("`on_color` belongs on a tile")
     if nav and "role" in w:
@@ -643,7 +647,32 @@ def _check_widget(w: dict[str, Any]) -> dict[str, Any]:
     return w
 
 
+FIXED_SPANS = (12, 6, 4, 3)
+
+
+def _check_fixed(p: dict[str, Any]) -> dict[str, Any]:
+    """`layout: fixed`: 12 columns, one grid row per widget row, spans 12/6/4/3 on their own boundary."""
+    if p.get("cols", 12) != 12:
+        raise vol.Invalid("a fixed page has 12 columns", path=["cols"])
+    p["cols"] = 12
+    if "list" not in p:
+        for j, w in enumerate(p["widgets"]):
+            if w.get("h", 1) != 1 or w.get("w", 1) not in FIXED_SPANS or w.get("x", 0) % w.get("w", 1):
+                raise vol.Invalid(
+                    "a fixed page takes w 12, 6, 4 or 3 (x a multiple of w) and h 1",
+                    path=["widgets", j],
+                )
+    for j, w in enumerate(p["widgets"]):
+        if w.get("compact") and ("list" in p or w.get("shape", "card") != "card" or w.get("w") != 6):
+            raise vol.Invalid("`compact` is for a 6-wide card button", path=["widgets", j, "compact"])
+    return p
+
+
 def _check_page(p: dict[str, Any]) -> dict[str, Any]:
+    if p.get("layout") == "fixed":
+        p = _check_fixed(p)
+    elif any(w.get("compact") for w in p["widgets"]):
+        raise vol.Invalid("`compact` needs `layout: fixed` on the page", path=["layout"])
     if "list" in p:
         if "rows" in p:
             raise vol.Invalid("a list page takes its rows from `list.rows`", path=["rows"])

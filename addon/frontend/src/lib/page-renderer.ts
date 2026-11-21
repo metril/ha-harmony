@@ -69,8 +69,60 @@ export function titleIndex(p: V2Page): number {
 }
 export const rowShift = (p: V2Page): number => (p.rows > 1 && titleIndex(p) >= 0 ? 1 : 0);
 
-/** The widget's cell box in screen pixels, before the inset. */
-export function widgetBox(p: V2Page, w: Pick<V2Widget, 'x' | 'y' | 'w' | 'h'>): Rect {
+const isFixed = (p: V2Page): boolean => !!(p as { fixed?: boolean }).fixed;
+export const FIXED_MAX = 276;
+const FIXED_TOP = 8;
+const FIXED_SPANS = [12, 6, 4, 3];
+type BoxWidget = Pick<V2Widget, 'x' | 'y' | 'w' | 'h'> & Partial<Pick<V2Widget, 'kind' | 'shape'>> & { compact?: boolean };
+
+/** FIXED layout class of a widget: pixel height and whether it is row-class; null when it cannot be placed (hp_page_box). */
+export function fixedClass(w: BoxWidget): { h: number; row: boolean } | null {
+  const sp = w.w;
+  const kind = w.kind ?? 'button';
+  const shape = w.shape ?? 'card';
+  if (w.h !== 1 || !FIXED_SPANS.includes(sp) || w.x % sp) return null;
+  if (w.compact && (kind !== 'button' || shape !== 'card' || sp !== 6)) return null;
+  if (kind === 'label' || shape === 'row') return { h: 44, row: true };
+  if (kind === 'tile') return { h: 64, row: false };
+  if (shape === 'pill') return { h: 52, row: false };
+  return { h: sp >= 6 ? (w.compact ? 56 : 80) : 52, row: false };
+}
+/** Stack offsets (from content y 8) per non-empty grid row, and the stacked height; null if a widget is unplaceable. */
+export function fixedRows(p: V2Page): { tops: Map<number, number>; total: number } | null {
+  const tops = new Map<number, number>();
+  let cur = 0;
+  let prevList: boolean | null = null;
+  for (let y = 0; y < p.rows; y++) {
+    const cls: { h: number; row: boolean }[] = [];
+    for (const w of p.widgets) {
+      if (w.y !== y) continue;
+      const c = fixedClass(w as BoxWidget);
+      if (!c) return null;
+      cls.push(c);
+    }
+    if (!cls.length) continue;
+    const list = cls.every((c) => c.row);
+    if (prevList !== null) cur += prevList && list ? 2 : 8;
+    tops.set(y, cur);
+    cur += Math.max(...cls.map((c) => c.h));
+    prevList = list;
+  }
+  return { tops, total: cur };
+}
+
+/** The widget's box in screen pixels, before the inset (hp_page_box in C, page_box in Python). */
+export function widgetBox(p: V2Page, w: BoxWidget): Rect {
+  if (isFixed(p)) {
+    const c = fixedClass(w);
+    const top = fixedRows(p)?.tops.get(w.y);
+    if (c && top !== undefined) {
+      const n = 12 / w.w;
+      const wpx = Math.floor((224 - (n - 1) * 8) / n);
+      const x1 = 8 + (w.x / w.w) * (wpx + 8);
+      const y1 = BAR_H + FIXED_TOP + top;
+      return { x1, y1, x2: x1 + wpx - 1, y2: y1 + c.h - 1 };
+    }
+  }
   const sh = rowShift(p);
   const rows = p.rows - sh;
   return {
@@ -88,8 +140,9 @@ function inset(lo: number, hi: number, a: number, b: number): [number, number] {
   return [lo + a, hi - b];
 }
 /** The widget's drawn rectangle (what ra_ui_widget_rect gives the C remote). */
-export function widgetRect(p: V2Page, w: Pick<V2Widget, 'x' | 'y' | 'w' | 'h'>): Rect {
+export function widgetRect(p: V2Page, w: BoxWidget): Rect {
   const b = widgetBox(p, w);
+  if (isFixed(p)) return b; // FIXED boxes are the drawn rectangle: the gaps sit between widgets
   const [x1, x2] = inset(b.x1, b.x2, b.x1 === 0 ? MARGIN : GAP / 2, b.x2 === SCREEN_W - 1 ? MARGIN : GAP / 2);
   const [y1, y2] = inset(b.y1, b.y2, b.y1 === BAR_H ? MARGIN : GAP / 2, b.y2 === SCREEN_H - 1 ? MARGIN : GAP / 2);
   return { x1, y1, x2, y2 };
@@ -102,6 +155,13 @@ export function cellAt(p: V2Page, px: number, py: number): { x: number; y: numbe
 }
 /** Widget index under a screen pixel, or -1. */
 export function hitWidget(p: V2Page, px: number, py: number): number {
+  if (isFixed(p)) {
+    if (px < 0 || py < BAR_H || px >= SCREEN_W || py >= SCREEN_H) return -1;
+    return p.widgets.findIndex((w) => {
+      const r = widgetBox(p, w as BoxWidget);
+      return px >= r.x1 && px <= r.x2 && py >= r.y1 && py <= r.y2;
+    });
+  }
   const c = cellAt(p, px, py);
   if (!c) return -1;
   return p.widgets.findIndex((w) => c.x >= w.x && c.x < w.x + w.w && c.y >= w.y && c.y < w.y + w.h);
