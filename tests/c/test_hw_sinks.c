@@ -204,23 +204,20 @@ static void test_sequence(void) {
     CHECK(F.log[6].op == 'i' && F.log[6].req == HP_I2S_START && F.log[6].arg == 0x10000);
     CHECK(F.nlog == 7 && F.closes == 0); /* send returns before DRAIN: it must not block */
     CHECK(F.wlen == w.nbytes && memcmp(F.wbuf, ref, w.nbytes) == 0);
-    /* not yet reaped before the predicted end + margin; reaped after */
-    F.now = 1000 + w.dur_ms + HP_HW_REAP_MARGIN_MS - 1;
-    hp_hw_service(g_h);
-    CHECK(F.nlog == 7);
-    F.now++;
-    hp_hw_service(g_h);
-    CHECK(F.nlog == 9 && F.log[7].op == 'i' && F.log[7].req == HP_I2S_DRAIN && F.log[7].arg == 0 && F.log[8].op == 'c');
-    CHECK(F.closes == 1 && F.opens == 1);
     CHECK(w.dur_ms == 109); /* one frame: 49152 bits x 2199 ns (the bench's 324.1 ms was 3 repeats) */
-    /* a second send while one is pending drains+closes the first before opening */
-    F.nlog = 0;
-    CHECK(send_ir(0, s) == 0);
-    F.nlog = 0; F.now += 5000;
-    CHECK(send_ir(0, s) == 0);
-    CHECK(F.log[0].op == 'i' && F.log[0].req == HP_I2S_DRAIN && F.log[1].op == 'c' && F.log[2].op == 'o');
+    /* later sends: same fd, config once, per send DRAIN(prev) FREQ write START; never a close or reopen */
+    for (int k = 0; k < 3; k++) {
+        F.nlog = 0;
+        CHECK(send_ir(0, s) == 0);
+        CHECK(F.nlog == 4);
+        CHECK(F.log[0].op == 'i' && F.log[0].req == HP_I2S_DRAIN && F.log[0].arg == 0);
+        CHECK(F.log[1].op == 'i' && F.log[1].req == HP_I2S_FREQ && F.log[1].arg == 0x0036f999);
+        CHECK(F.log[2].op == 'w' && F.log[2].req == w.nbytes);
+        CHECK(F.log[3].op == 'i' && F.log[3].req == HP_I2S_START && F.log[3].arg == 0x10000);
+    }
+    CHECK(F.opens == 1 && F.closes == 0);
     hp_hw_sinks_close(g_h);
-    CHECK(F.log[F.nlog - 2].req == HP_I2S_DRAIN && F.log[F.nlog - 1].op == 'c');
+    CHECK(F.log[F.nlog - 1].req == HP_I2S_DRAIN && F.closes == 0); /* exit drains, still no close */
 }
 
 static void test_ports(void) {
@@ -254,21 +251,21 @@ static void test_writes(void) {
     CHECK(F.wlen == w.nbytes && memcmp(F.wbuf, ref, w.nbytes) == 0);
     CHECK(F.log[F.nlog - 1].req == HP_I2S_START);
     hp_hw_sinks_close(g_h);
-    /* write error mid-stream: error returned, fd closed, no START */
+    /* write error mid-stream: error returned, fd kept (never closed), no START */
     setup();
     F.wsteps[0] = 500; F.wsteps[1] = 0; F.nsteps = 2;
     CHECK(open_hw(0) == 0);
     CHECK(send_ir(0, s) == -HP_E_IO);
-    CHECK(F.closes == 1 && F.log[F.nlog - 1].op == 'c');
+    CHECK(F.closes == 0);
     for (int i = 0; i < F.nlog; i++) CHECK(!(F.log[i].op == 'i' && F.log[i].req == HP_I2S_START));
-    /* a failed ioctl also closes */
+    /* a failed ioctl keeps the fd too */
     setup();
     F.fail_req = HP_I2S_FREQ;
     CHECK(open_hw(0) == 0);
-    CHECK(send_ir(0, s) == -HP_E_IO && F.closes == 1 && F.wlen == 0);
+    CHECK(send_ir(0, s) == -HP_E_IO && F.closes == 0 && F.wlen == 0);
     /* and a later send still works (no stuck pending state) */
     F.fail_req = 0; F.nlog = 0;
-    CHECK(send_ir(0, s) == 0 && F.wlen == w.nbytes);
+    CHECK(send_ir(0, s) == 0 && F.wlen == w.nbytes && F.opens == 1 && F.closes == 0);
     hp_hw_sinks_close(g_h);
 }
 
@@ -302,6 +299,9 @@ static void test_open_errors(void) {
     CHECK(open_hw(0) == 0);
     F.open_errno = EBUSY;
     CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 100000)) == -HP_E_HALBUSY && F.wlen == 0);
+    /* the failed open is retried on the next send */
+    F.open_errno = 0;
+    CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 100000)) == 0 && F.opens == 1 && F.wlen > 0);
 }
 
 static void test_stubs(void) {

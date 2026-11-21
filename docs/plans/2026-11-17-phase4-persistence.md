@@ -351,7 +351,7 @@ hook log 4 lines, 0 oops/jffs2. Log cap never fired.
 2. `usb 1-1 ... error -71` flood in hub dmesg (khubd in D state) and host-side enumeration failures on usb 1-10 (bursts that pre-date arming).
    No stock-boot dmesg to compare. Test with the cable unplugged and on a stock boot.
 3. Time to SSH not measured on boots 1-2 (the wait script hung on `ssh reboot`).
-4. /dev/i2s is opened on first use (not held at idle), so the "holds /dev/i2s" check does not apply while idle.
+4. /dev/i2s is opened on the first IR send and then held open for the daemon's life (like hal; never closed, closing hard-froze the hub), so the "holds /dev/i2s" check applies only after the first send.
 5. `remote_sim` and `rf_probe` are still on /data (prune not run; 2620 KB free).
 6. Hook and daemon still differ on CR in conf values (hook stricter: safe direction). From review, not bench-tested.
 7. Factory-reset/Pair button is probably unavailable while armed (from probe, not bench-tested).

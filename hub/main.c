@@ -505,12 +505,11 @@ int main(int argc, char **argv) {
             }
         }
         /* Only real due-times shorten the poll (-1 = sleep until an fd wakes it): scheduler timers, the BT helper,
-         * a pending IR drain, the peers' nudges, the heartbeat touch and the post-OTA flush. Everything else is
+         * the peers' nudges, the heartbeat touch and the post-OTA flush. Everything else is
          * woken by its fd (sockets, mDNS, RF reader pipe, BT helper). */
         int wait = hub_next_timeout_ms(&g_hub);
 #define DUE(x) do { int d_ = (x); if (d_ >= 0 && (wait < 0 || d_ < wait)) wait = d_; } while (0)
         DUE(peers_next());
-        if (!sim) DUE(hp_hw_next_ms(&g_hw));
         if (hb_path) {
             struct timespec t;
             if (clock_gettime(CLOCK_MONOTONIC, &t) == 0) {
@@ -532,7 +531,6 @@ int main(int argc, char **argv) {
 #endif
         hub_pump_rf(&g_hub);
         hp_mdns_srv_service(&g_mdns);
-        if (!sim) hp_hw_service(&g_hw);
         hub_run_timers(&g_hub);
         peers_keepalive(srv);
         if (g_hub.ota.restart && ++restart_polls >= 3) break;

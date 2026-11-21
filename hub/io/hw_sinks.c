@@ -97,12 +97,12 @@ static int ioc(hp_hw_t *h, unsigned long req, unsigned long arg) {
     return -HP_E_IO;
 }
 
-static void drain_close(hp_hw_t *h) {
+/* DRAIN the previous waveform. The fd is never closed: stock hal holds /dev/i2s for its whole life, and closing
+ * frees the DMA ring while IRQ 23 can still fire (hard lockup). */
+static void drain_prev(hp_hw_t *h) {
     if (!h->pending) return;
-    (void)ioc(h, HP_I2S_DRAIN, 0); /* blocks only for what is left of the waveform */
-    (void)h->ops.close(h->ops.ctx, h->fd);
+    (void)ioc(h, HP_I2S_DRAIN, 0); /* normally returns at once: irout books the line for the waveform */
     h->pending = false;
-    h->fd = -1;
 }
 
 static int open_dev(hp_hw_t *h) {
@@ -131,27 +131,29 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     int rc = hp_hw_ir_build(sig->us, sig->once_n, sig->carrier_hz, 1, h->buf, sizeof h->buf, &w);
     if (rc < 0) return rc; /* too big for the ring: reject, nothing touches the device */
 
-    drain_close(h); /* previous waveform: normally long finished (irout books the line) */
-    int fd = open_dev(h);
-    if (fd < 0) return fd;
-    h->fd = fd;
-    if ((rc = ioc(h, HP_I2S_DSIZE, 16)) < 0 || (rc = ioc(h, HP_I2S_MODE, 2)) < 0 ||
-        (rc = ioc(h, HP_I2S_VOLUME, 15)) < 0 || (rc = ioc(h, HP_I2S_FREQ, w.divider)) < 0)
-        goto fail;
+    if (h->fd >= 0) drain_prev(h);
+    else {
+        int fd = open_dev(h); /* first send (or retry after a failed open); then held for the daemon's life */
+        if (fd < 0) return fd;
+        h->fd = fd;
+        h->configured = false;
+    }
+    if (!h->configured) {
+        if ((rc = ioc(h, HP_I2S_DSIZE, 16)) < 0 || (rc = ioc(h, HP_I2S_MODE, 2)) < 0 ||
+            (rc = ioc(h, HP_I2S_VOLUME, 15)) < 0)
+            return rc;
+        h->configured = true;
+    }
+    if ((rc = ioc(h, HP_I2S_FREQ, w.divider)) < 0) return rc;
     for (size_t off = 0; off < w.nbytes;) {
-        ssize_t n = h->ops.write(h->ops.ctx, fd, h->buf + off, w.nbytes - off);
+        ssize_t n = h->ops.write(h->ops.ctx, h->fd, h->buf + off, w.nbytes - off);
         if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) { rc = -HP_E_IO; goto fail; }
+        if (n <= 0) return -HP_E_IO;
         off += (size_t)n; /* short write: keep going, never truncate the waveform */
     }
-    if ((rc = ioc(h, HP_I2S_START, (unsigned long)((uint32_t)ports << 16))) < 0) goto fail;
+    if ((rc = ioc(h, HP_I2S_START, (unsigned long)((uint32_t)ports << 16))) < 0) return rc;
     h->pending = true;
-    h->deadline_ms = h->ops.now_ms(h->ops.ctx) + w.dur_ms;
-    return 0; /* DRAIN + close are deferred, see header */
-fail:
-    (void)h->ops.close(h->ops.ctx, fd);
-    h->fd = -1;
-    return rc;
+    return 0; /* DRAIN is deferred to the next send / hp_hw_sinks_close, so the loop never blocks */
 }
 
 /* A key for a Bluetooth host goes to the link (hub/bt_link.h). Best effort by contract: a helper that is down, a host
@@ -193,19 +195,10 @@ int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *h) {
     return 0;
 }
 
-int hp_hw_next_ms(const hp_hw_t *h) {
-    if (!h || !h->pending) return -1;
-    int64_t d = (int64_t)(h->deadline_ms + HP_HW_REAP_MARGIN_MS) - (int64_t)h->ops.now_ms(h->ops.ctx);
-    return d < 0 ? 0 : d > 1000000 ? 1000000 : (int)d;
-}
-
-void hp_hw_service(hp_hw_t *h) {
-    if (h && h->pending && h->ops.now_ms(h->ops.ctx) >= h->deadline_ms + HP_HW_REAP_MARGIN_MS) drain_close(h);
-}
-
 void hp_hw_sinks_close(hp_hw_t *h) {
     if (!h) return;
-    drain_close(h);
+    if (h->fd >= 0) drain_prev(h);
+    h->fd = -1; /* deliberately not closed, see drain_prev */
     hp_rf_spi_destroy(h->rfspi);
     h->rfspi = NULL;
 }

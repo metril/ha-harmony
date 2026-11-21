@@ -460,10 +460,12 @@ duration: the daemon was emitting a correct waveform into a gated-off output.
 Implements the section 9 sequence behind `hp_ir_sink`; host-tested with injected syscalls and
 diffed byte-for-byte against `tools/ir_bench.c --out`. Engine `port_mask` bit n maps to START bit
 16+n (`--ir-ports`, default `0x01` = bit 16, the built-in emitter; mask 0 = all configured ports;
-an empty result is `-HP_E_INVAL`). `send` ends after START and leaves DRAIN+close to
-`hp_hw_service()` (or the next send), so the daemon loop never blocks. Not yet verified on the
-device: the deferred-DRAIN flow, startup write-open/close probe, hold-open-after-START, any
-carrier other than 37900 Hz.
+an empty result is `-HP_E_INVAL`). `/dev/i2s` is opened on the first send and
+held for the daemon's life, like stock `hal` (DSIZE/MODE/VOLUME once; per send FREQ, write, START;
+DRAIN of the previous waveform at the start of the next send). It is never closed during operation:
+closing frees the DMA ring while IRQ 23 may still fire, which hard-froze the hub right after an
+activity's IR sends (the old close ~25 ms after DRAIN). No timer reaping. Not yet verified on the
+device: the held-fd flow, any carrier other than 37900 Hz.
 
 ## 11. Capture (receive) path
 

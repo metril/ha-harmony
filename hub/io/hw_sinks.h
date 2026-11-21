@@ -20,9 +20,8 @@
  *
  * BLOCKING. hp_ir_sink.send must not block, but DRAIN blocks for the whole waveform (324 ms
  * for one Samsung frame). Resolution: send() does everything up to and including START, then
- * returns with the fd still open; the DRAIN+close happens later, either from
- * hp_hw_service() (called once per daemon loop iteration; it reaps once the predicted
- * duration plus a margin has elapsed, so DRAIN returns at once) or at the start of the next
+ * returns with the fd held open (never closed, like stock hal; closing frees the DMA ring while
+ * IRQ 23 may still fire and hard-locks the hub). DRAIN happens at the start of the next
  * send / at hp_hw_sinks_close(). hub/engine/irout.c already books the line busy for the
  * waveform duration plus a guard and defers further keyed sends, so in practice the previous
  * DRAIN is already complete when the next send runs. In the paths where irout sends
@@ -40,7 +39,6 @@
 #define HP_HW_RING_BYTES (512u * 768u) /* driver ring: a larger stream is rejected, never split */
 #define HP_HW_DEFAULT_IR_PORTS 0x01u   /* engine bit 0 == START bit 16 == built-in emitter */
 #define HP_HW_DEFAULT_DEV "/dev/i2s"
-#define HP_HW_REAP_MARGIN_MS 25u
 
 #define HP_I2S_VOLUME 0x80044e20u
 #define HP_I2S_FREQ 0x80044e21u
@@ -83,9 +81,9 @@ typedef struct {
     hp_hw_ops_t ops;
     bool rf_claimed;
     hp_rf_transport *rfspi; /* the real radio when cfg.rf was given; sinks.rf then points at it */
-    bool pending;          /* fd open, START issued, DRAIN+close owed */
-    int fd;
-    uint64_t deadline_ms;  /* predicted end of the pending waveform */
+    bool pending;          /* START issued, DRAIN owed */
+    bool configured;       /* DSIZE/MODE/VOLUME done on fd */
+    int fd;                /* /dev/i2s, opened on first send and held for the daemon's life (like hal); -1 before */
     uint8_t buf[HP_HW_RING_BYTES];
 } hp_hw_t;
 
@@ -98,8 +96,6 @@ int hp_hw_ir_build(const uint16_t *us, size_t n, uint32_t carrier_hz, unsigned r
 /* Probes the device (write-open + close) so a held device fails at startup. Returns 0,
  * -HP_E_HALBUSY (EBUSY/EACCES: stock hal holds /dev/i2s), or -HP_E_IO / -HP_E_NOENT. */
 int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *out);
-int hp_hw_next_ms(const hp_hw_t *h); /* ms until the pending waveform may be reaped; -1 when none */
-void hp_hw_service(hp_hw_t *h); /* reap a finished waveform; call once per loop iteration */
-void hp_hw_sinks_close(hp_hw_t *h); /* drains (bounded by the waveform) and closes */
+void hp_hw_sinks_close(hp_hw_t *h); /* drains (bounded by the waveform); never closes the fd */
 
 #endif
