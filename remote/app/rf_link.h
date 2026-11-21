@@ -75,6 +75,7 @@ typedef struct {
   bool awake;
   uint64_t last_sync_ms;
   bool synced_once;
+  bool pulse_pending, ever_up; /* a pulse awaits its link-up (for the log); the link has been up since boot */
 } rf_link_t;
 
 /* No device access. Until rf_link_open() succeeds the link reports one APP_LINK_EV_FAILED. */

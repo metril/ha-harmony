@@ -279,6 +279,10 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
     if (n >= 5 && (b[0] == 0x10 || b[0] == 0x11) && b[2] == 0x41 && b[3] == 0x04 && !(b[4] & LINK_LOST))
         learn_slot(s, b[1], "link report");
     if (inner) {
+        if (!s->attached && s->link_logged == 0 && s->slot_known) { /* a data frame is the first sign the link is back */
+            s->link_logged = 1;
+            slogf(s, "rf_spi: link up (slot %u, data frame)", (unsigned)s->slot);
+        }
         s->attached = true;
         size_t qi = q_push(s, false); /* a full queue (reader outran the hub loop) drops the oldest frame */
         memcpy(s->q[qi], inner, HP_RF_INNER_LEN);

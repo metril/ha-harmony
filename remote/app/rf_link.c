@@ -135,11 +135,13 @@ static bool link_down(const rf_link_t *l) {
 }
 
 /* One sync pulse (coalesced with a recent one), then the quick uplink 5 ms later. */
-static void rejoin_attempt(rf_link_t *l, uint64_t now) {
+static void rejoin_attempt(rf_link_t *l, uint64_t now, const char *why) {
   bool recent = l->synced_once && now - l->last_sync_ms < RF_LINK_SYNC_COALESCE_MS;
   if (!recent && hp_rf_spi_sync(l->tp) == 0) { /* failure is untracked: it never blocks a key send */
     l->synced_once = true;
     l->last_sync_ms = now;
+    l->pulse_pending = true;
+    ra_logf(&l->sys, "rf_link: rejoin pulse (%s)", l->ever_up ? why : "boot-never-up"); /* coalesced triggers log nothing */
     uint64_t at = now + RF_LINK_SYNC_QUERY_MS; /* one-shot deadline in the loop, no sleep */
     if (!l->info_pending || at < l->next_info_ms) l->next_info_ms = at;
     l->info_pending = true;
@@ -147,9 +149,9 @@ static void rejoin_attempt(rf_link_t *l, uint64_t now) {
 }
 
 /* An event while the link is down: pulse now. */
-static void rejoin_event(rf_link_t *l, uint64_t now) {
+static void rejoin_event(rf_link_t *l, uint64_t now, const char *why) {
   if (!link_down(l)) return;
-  rejoin_attempt(l, now);
+  rejoin_attempt(l, now, why);
 }
 
 static int rf_send_key(void *ctx, uint8_t code, uint8_t action) {
@@ -157,7 +159,7 @@ static int rf_send_key(void *ctx, uint8_t code, uint8_t action) {
   if (!l->tp) return -HP_E_NOENT;
   hp_rf_val_t v[3] = {{.u = l->remote}, {.u = code}, {.u = action}};
   uint64_t now = l->sys.ops.now_ms(l->sys.ops.ctx);
-  if (action == HP_KEY_ACTION_PRESS) rejoin_event(l, now); /* re-sync first; the key itself still goes out as before */
+  if (action == HP_KEY_ACTION_PRESS) rejoin_event(l, now, "key"); /* re-sync first; the key itself still goes out as before */
   int rc = send_msg(l, HP_MSG_KEY_EVENT, v, 3, now);
   if (rc < 0) raise_failed(l);
   return rc;
@@ -220,7 +222,12 @@ static void service(rf_link_t *l, uint64_t now) {
   }
   if (rc == -HP_E_IO) ra_logf(&l->sys, "rf_link: link dead");
   bool att = l->tp->attached ? l->tp->attached(l->tp->self) : l->was_attached;
-  if (!att && l->was_attached) rejoin_attempt(l, now); /* lost just now: one attempt, no retry timer */
+  if (!att && l->was_attached) rejoin_attempt(l, now, "loss"); /* lost just now: one attempt, no retry timer */
+  if (att && !l->was_attached) {
+    if (l->pulse_pending) ra_logf(&l->sys, "rf_link: link up %llu ms after the rejoin pulse", (unsigned long long)(now - l->last_sync_ms));
+    l->pulse_pending = false;
+    l->ever_up = true;
+  }
   if (att && l->lost) { /* re-attached after a loss: tell the hub we are here */
     l->lost = false;
     l->next_batt_ms = now;
@@ -272,13 +279,13 @@ static void rf_set_awake(void *ctx, bool awake) {
   if (!l->tp) return;
   uint64_t now = l->sys.ops.now_ms(l->sys.ops.ctx);
   hp_rf_link_set_awake(&l->link, awake, t32(now));
-  if (awake) rejoin_event(l, now);
+  if (awake) rejoin_event(l, now, "wake");
 }
 
 static void rf_resumed(void *ctx, uint64_t now, uint64_t gap_ms) {
   rf_link_t *l = ctx;
   (void)gap_ms;
-  if (l->tp) rejoin_event(l, now);
+  if (l->tp) rejoin_event(l, now, "resume");
   l->lost = false; /* the hub may have timed us out while we slept: announce ourselves again, then the battery */
   l->info_pending = true;
   l->next_info_ms = now;
@@ -287,7 +294,7 @@ static void rf_resumed(void *ctx, uint64_t now, uint64_t gap_ms) {
 
 static void rf_touched(void *ctx) {
   rf_link_t *l = ctx;
-  if (l->tp) rejoin_event(l, l->sys.ops.now_ms(l->sys.ops.ctx));
+  if (l->tp) rejoin_event(l, l->sys.ops.now_ms(l->sys.ops.ctx), "touch");
 }
 
 static uint32_t rf_next_ms(void *ctx, uint64_t now) {

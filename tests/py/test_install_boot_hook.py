@@ -194,6 +194,13 @@ def test_install_removes_the_old_flash_log(hub: FakeHub, capsys) -> None:
     assert ibh.LEGACY_LOG in capsys.readouterr().out
 
 
+def test_install_removes_the_stock_ota_log(hub: FakeHub) -> None:
+    hub.files[ibh.OTA_LEGACY_LOG] = b"stock updater\n"
+    assert install(hub) == 0
+    assert ibh.OTA_LEGACY_LOG not in hub.files
+    assert ibh.OTA_LEGACY_LOG in ibh.WRITE_PATHS and ibh.OTA_LEGACY_LOG.startswith("/cache/")
+
+
 def test_uses_no_applet_the_hub_lacks(hub: FakeHub) -> None:
     """The hub's BusyBox 1.13.4 has no head/find/awk/timeout/df/dd/wc/readlink."""
     inst = ibh.HookInstaller(hub)

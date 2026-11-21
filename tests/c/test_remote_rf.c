@@ -1021,6 +1021,13 @@ static void idle_awake(uint64_t ms) {
   }
 }
 
+static int msg_count(const char *sub) {
+  int n = 0;
+  for (int i = 0; i < fk.nmsgs; i++)
+    if (strstr(fk.msgs[i], sub)) n++;
+  return n;
+}
+
 static void test_rejoin_silent_while_link_up(void) {
   setup();
   idle_awake(20000);
@@ -1039,9 +1046,13 @@ static void test_rejoin_on_loss_once_and_no_timer(void) {
   idle_awake(200000); /* no retry timer: nothing more without an event */
   CT_EQ(count_syncs(), 1);
   CT_CHECK(rf.awake);
+  CT_EQ(msg_count("rejoin pulse (loss)"), 1);
+  CT_EQ(msg_count("link up "), 0);
   remote_chip_link(1);
   idle_awake(60000);
   CT_EQ(count_syncs(), 1);
+  CT_EQ(msg_count("rejoin pulse ("), 1);
+  CT_EQ(msg_count("ms after the rejoin pulse"), 1); /* once, when the link comes back */
   teardown();
 }
 
@@ -1057,6 +1068,7 @@ static void test_rejoin_on_keypress_while_lost(void) {
   fk_key(&fk, 0, 115, 1);
   tick(50);
   CT_EQ(count_syncs(), base + 1); /* a press re-initiates the link; the key itself still goes out */
+  CT_EQ(msg_count("rejoin pulse (key)"), 1);
   idle_awake(30000); /* and nothing follows */
   CT_EQ(count_syncs(), base + 1);
   teardown();
@@ -1097,6 +1109,7 @@ static void test_rejoin_never_up_remote_pulses(void) {
   no_remote_up = 0;
   settle(5);
   CT_EQ(chip_attached(), 0);
+  CT_EQ(msg_count("rejoin pulse (boot-never-up)"), 1);
   CT_CHECK(count_syncs() >= 1); /* first awake event: the chip never reported, the link is still sought */
   teardown();
 }
@@ -1163,6 +1176,7 @@ static void test_rejoin_on_touch_while_lost(void) {
   fk_touch(&fk, 300, 300, 0);
   tick(50);
   CT_EQ(count_syncs(), base + 1);
+  CT_EQ(msg_count("rejoin pulse (touch)"), 1);
   teardown();
 }
 

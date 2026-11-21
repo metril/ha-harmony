@@ -856,6 +856,29 @@ static void test_tx_status_surfaced(void) {
     hp_rf_spi_destroy(r);
 }
 
+/* A data frame after a loss is link-up evidence even without a status report: logged once. */
+static void test_link_up_logged_from_data_frame(void) {
+    fake_t f;
+    cap_t c;
+    fake_init(&f);
+    cap_init(&c);
+    hp_rf_transport *t = NULL;
+    CT_EQ(open_cfg(&f, HP_RF_SPI_ROLE_HUB, 2, false, &c, &t), 0);
+    t->claim(t->self);
+    const uint8_t lost[7] = {0x10, 0x02, 0x41, 0x04, 0x47, 0x21, 0x40};
+    uint8_t rep[30], fr[HP_RF_INNER_LEN];
+    data_report(rep, 2, 0x10);
+    feed(&f, lost, 7); /* never reported up: logs the loss */
+    feed(&f, rep, 30);
+    feed(&f, rep, 30); /* a second frame: no second line */
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
+    CT_EQ(t->recv(t->self, fr, sizeof fr, 2000), 28);
+    CT_CHECK(t->attached(t->self));
+    CT_EQ(cap_count(&c, "link up (slot 2, data frame)"), 1);
+    CT_EQ(cap_count(&c, "link lost (status 0x47)"), 1);
+    hp_rf_spi_destroy(t);
+}
+
 static void test_link_transition_logs(void) {
     fake_t f;
     cap_t c;
@@ -1328,6 +1351,7 @@ int main(void) {
     CT_RUN(test_tx_status_surfaced);
     CT_RUN(test_hub_data_slot_filter_and_stamps);
     CT_RUN(test_link_transition_logs);
+    CT_RUN(test_link_up_logged_from_data_frame);
     CT_RUN(test_rf_debug_frames);
     CT_RUN(test_slot_learning_vectors);
     CT_RUN(test_unknown_slot_is_safe_and_then_learned);
