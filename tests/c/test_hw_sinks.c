@@ -273,6 +273,24 @@ static void test_writes(void) {
     CHECK(F.nlog == 2 && F.log[0].req == HP_I2S_START && F.log[1].req == HP_I2S_DRAIN && F.closes == 0);
     F.fail_req = 0; F.nlog = 0;
     CHECK(send_ir(0, s) == 0 && F.log[0].op == 'o');
+    /* flush START failing: no DRAIN, no FREQ/write, send refused; retry after recovery flushes and sends */
+    setup();
+    F.fail_req = HP_I2S_START;
+    CHECK(open_hw(0) == 0);
+    CHECK(send_ir(0, s) == -HP_E_IO);
+    F.nlog = 0; F.wlen = 0;
+    CHECK(send_ir(0, s) == -HP_E_IO);
+    CHECK(F.nlog == 1 && F.log[0].req == HP_I2S_START && F.wlen == 0);
+    hp_hw_sinks_close(g_h);
+    CHECK(F.nlog == 2 && F.log[1].req == HP_I2S_START); /* close skips DRAIN too */
+    CHECK(send_ir(0, s) == -HP_E_IO); /* fd was forgotten at close: reopen path, send itself fails at START */
+    setup();
+    F.fail_req = HP_I2S_START;
+    CHECK(open_hw(0) == 0);
+    CHECK(send_ir(0, s) == -HP_E_IO);
+    F.fail_req = 0; F.nlog = 0;
+    CHECK(send_ir(0, s) == 0);
+    CHECK(F.log[0].req == HP_I2S_START && F.log[1].req == HP_I2S_DRAIN && F.log[2].req == HP_I2S_FREQ);
     /* a failed ioctl keeps the fd too */
     setup();
     F.fail_req = HP_I2S_FREQ;
