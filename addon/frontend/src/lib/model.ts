@@ -60,7 +60,7 @@ export interface Widget {
   shape?: string;
   icon?: string;
   icon_only?: boolean;
-  /** `left` (the default) or `center`: where the icon + label sit on row and big-card buttons */
+  /** `left`, `center` (the default) or `right`: where the icon + label sit on row, wide short and big-card buttons */
   align?: string;
   /** `next`, `prev`, `home` or a page id: a navigation button */
   nav?: string;

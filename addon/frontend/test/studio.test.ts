@@ -173,6 +173,8 @@ describe('remote studio', () => {
 
   it('Align: a three-way icon toggle; Center is the default and clears the key', async () => {
     const { insp, store } = await inspectorFor({ kind: 'widget', page: 0, index: 0 });
+    store.edit((c) => void (c.pages![0]!.widgets[0]!.shape = 'row'));
+    await tick(insp);
     const btn = (n: string) => insp.shadowRoot.querySelector(`.ali button[aria-label="${n}"]`) as HTMLButtonElement;
     expect(['Align Left', 'Align Center', 'Align Right'].map((n) => btn(n).getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false']);
     btn('Align Right').click();
@@ -185,6 +187,12 @@ describe('remote studio', () => {
     btn('Align Center').click();
     await tick(insp);
     expect('align' in store.config.pages![0]!.widgets[0]!).toBe(false);
+  });
+
+  it('Align is disabled with a reason where it has no effect (tiles, small buttons)', async () => {
+    const t = await inspectorFor({ kind: 'widget', page: 0, index: 1 });
+    expect(t.insp.shadowRoot.querySelector<HTMLButtonElement>('.ali button')!.disabled).toBe(true);
+    expect(t.insp.shadowRoot.textContent).toContain('always centred');
   });
 
   it('tile "When Tapped": Automatic by default and says what runs; Toggle, Action and Nothing write the tap schema', async () => {

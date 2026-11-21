@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'lit';
 import vectors from '../../../tests/vectors/pages.json';
 import keymap from './fixtures/keymap.json';
-import { cellAt, hitWidget, layoutPage, pageSvg, widgetRect, type Prim } from '../src/lib/page-renderer';
+import { alignApplies, cellAt, hitWidget, layoutPage, pageSvg, widgetRect, type Prim } from '../src/lib/page-renderer';
 import { BODY, DPAD, KEYS, PHYSICAL_KEYS, SCREEN, keyByName, keyTitle } from '../src/lib/remote-layout';
 import type { V2Page } from '../src/lib/api';
 import { css as hexOf } from '../src/lib/themes';
@@ -105,6 +105,16 @@ describe('page renderer: v2 looks', () => {
     expect(prim(one({ ...big, align: 'right' }), 0, 'text')).toMatchObject({ anchor: 'end', x: rect.x + rect.w - 12 });
     const dense = mk({ shape: 'card', w: 1, h: 3, label: 'D' });
     expect(prim(one({ ...dense, align: 'left' }), 0, 'text')).toMatchObject({ anchor: 'middle' });
+  });
+  it('alignApplies follows the remote: rows, wide short and big cards only', () => {
+    const g = { cols: 1, rows: 8 };
+    const b = { shape: 'card', x: 0, y: 0, w: 1, h: 1 };
+    expect(alignApplies(g, { ...b, shape: 'row' })).toBe(true);
+    expect(alignApplies(g, b)).toBe(true); // wide and short
+    expect(alignApplies({ cols: 4, rows: 8 }, b)).toBe(false); // narrow
+    expect(alignApplies({ cols: 1, rows: 3 }, b)).toBe(true); // big
+    expect(alignApplies(g, { ...b, type: 'tile' })).toBe(false);
+    expect(alignApplies(g, { ...b, icon_only: true })).toBe(false);
   });
   it('trailing draws a right-aligned chevron on a row; align works in the width left of it', () => {
     const row = mk({ w: 4 });

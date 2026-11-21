@@ -521,7 +521,8 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
     if (ic) lv_obj_align(ic, ia, dx, 12);
     if (l) {
       lv_obj_set_style_text_align(l, w->align == HP_ALIGN_LEFT ? LV_TEXT_ALIGN_LEFT : w->align == HP_ALIGN_RIGHT ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_CENTER, 0);
-      lv_obj_align(l, la, dx, -12);
+      if (ic) lv_obj_align(l, la, dx, -12);
+      else lv_obj_align(l, w->align == HP_ALIGN_LEFT ? LV_ALIGN_LEFT_MID : w->align == HP_ALIGN_RIGHT ? LV_ALIGN_RIGHT_MID : LV_ALIGN_CENTER, dx, 0); /* label only: vertically centred */
     }
   } else if (ic && l) { /* dense: icon over label, both centred */
     int ih = lv_font_get_line_height(icon_font(px)), lh = lv_font_get_line_height(lv_obj_get_style_text_font(l, 0));

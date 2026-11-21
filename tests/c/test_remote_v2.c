@@ -651,6 +651,22 @@ static void test_align_big_card(void) {
   app_destroy(&app);
 }
 
+/* a label-only big card is vertically centred whatever the alignment; only x follows align */
+static void test_align_big_card_label_only(void) {
+  start();
+  ws_t w[3] = {BTN, BTN, BTN};
+  for (int i = 0; i < 3; i++) { w[i].id = (uint8_t)(i + 1); w[i].y = (uint8_t)i; w[i].icon = 0; w[i].label = "Go"; w[i].align = (uint8_t)i; }
+  push(0, 1, 5, 1, 0, 0, 0, 0, "", w, 3);
+  settle();
+  for (int i = 0; i < 3; i++) lv_obj_update_layout(app.ui.lbl[i]);
+  int bh = lv_obj_get_height(lv_obj_get_parent(app.ui.lbl[0]));
+  CT_CHECK(bh >= 80);
+  for (int i = 0; i < 3; i++) near(lv_obj_get_y(app.ui.lbl[i]) * 2 + lv_obj_get_height(app.ui.lbl[i]), lv_obj_get_content_height(lv_obj_get_parent(app.ui.lbl[i])));
+  CT_CHECK(lv_obj_get_style_text_align(app.ui.lbl[1], 0) == LV_TEXT_ALIGN_LEFT);
+  CT_CHECK(lv_obj_get_style_text_align(app.ui.lbl[2], 0) == LV_TEXT_ALIGN_RIGHT);
+  app_destroy(&app);
+}
+
 /* a row is centred by default (in the space left of a trailing chevron); left and right are explicit */
 static void test_align_row(void) {
   start();
@@ -698,6 +714,7 @@ int main(void) {
   CT_RUN(test_v1_page_still_works_and_is_not_stored);
   CT_RUN(test_align_wide_short_card);
   CT_RUN(test_align_big_card);
+  CT_RUN(test_align_big_card_label_only);
   CT_RUN(test_align_row);
   return CT_DONE();
 }

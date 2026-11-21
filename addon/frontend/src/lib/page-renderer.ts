@@ -204,7 +204,7 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
     const ax = al === 'left' ? x + 12 : al === 'right' ? x + bw - 12 : x + bw / 2;
     const anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
     out.push({ t: 'icon', id: w.icon, x: al === 'left' ? ax : al === 'right' ? ax - 22 : ax - 11, y: y + bh / 2 - 22, size: 22, color: icon, wi });
-    out.push({ t: 'text', x: ax, y: y + bh / 2 + 22, s: fit(label, bw - 8, size), size, fill: text, anchor, weight: 500, wi });
+    out.push({ t: 'text', x: ax, y: y + bh / 2 + 22, s: fit(label, big ? bw - 24 : bw - 8, size), size, fill: text, anchor, weight: 500, wi });
   } else if (hasIcon) {
     const al = rowPath ? w.align ?? 'center' : 'center';
     const isz = 20;
@@ -225,8 +225,18 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
     const span = chev ? bw - CHEV_ROOM : bw;
     const tx = al === 'left' ? x + 12 : al === 'right' ? x + span - 12 : x + span / 2;
     const anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
-    out.push({ t: 'text', x: tx, y: y + bh / 2 + size * 0.35, s: fit(label, span - 12 - (chev ? 4 : 0), size), size, fill: text, anchor, weight: 500, wi });
+    out.push({ t: 'text', x: tx, y: y + bh / 2 + size * 0.35, s: fit(label, big ? bw - 24 : rowPath ? span - 24 - (chev ? 4 : 0) : bw - 8, size), size, fill: text, anchor, weight: 500, wi });
   }
+}
+
+/** Does `align` change how this button is drawn? Only for rows/pills, wide short buttons and big cards (remote/app/ui.c). */
+export function alignApplies(page: { cols: number; rows: number }, w: { type?: string; shape: string; icon_only?: boolean; x: number; y: number; w: number; h: number }): boolean {
+  if (w.type === 'tile' || w.type === 'label' || w.icon_only || w.shape === 'monogram') return false;
+  const r = widgetRect({ version: 2, cols: page.cols, rows: page.rows, widgets: [] } as unknown as V2Page, w);
+  const bw = r.x2 - r.x1 + 1;
+  const bh = r.y2 - r.y1 + 1;
+  const rowPath = w.shape === 'row' || w.shape === 'pill' || (bh < 44 && bw >= 100);
+  return rowPath || (w.shape === 'card' && bw >= 100 && bh >= 80);
 }
 
 /** the remote's trailing nav chevron: a 24 px glyph in a 28 px box, 8 px in from the right edge */

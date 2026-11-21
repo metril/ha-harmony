@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing, svg } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { stockIconSvg } from '../lib/icon-shapes';
+import { alignApplies } from '../lib/page-renderer';
 import { setStyle } from '../lib/set-style';
 import { fitCells, watchCells } from '../lib/fit-cells';
 import { displayCommand, displayKey, gridStyle, FREE_CAP, dn } from '../lib/key-names';
@@ -52,6 +53,7 @@ export class HhInspector extends LitElement {
       .ali .grp { display: flex; gap: 4px; }
       .ali button { width: 36px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx2); cursor: pointer; }
       .ali button[aria-pressed="true"] { background: var(--accs); border-color: var(--acc); color: var(--tx); }
+      .ali button:disabled { opacity: 0.45; cursor: not-allowed; }
       .ali svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
       .sw { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
       .sw button { display: grid; gap: 4px; justify-items: center; padding: 6px 2px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx2); font-size: 11px; cursor: pointer; text-transform: capitalize; }
@@ -150,6 +152,15 @@ export class HhInspector extends LitElement {
     </div>`;
   }
 
+  private alignRow(pi: number, wi: number, w: Widget, navVal: string) {
+    const page = this.cfg.pages?.[pi];
+    const list = !!page?.list;
+    const shape = w.shape ?? (navVal || list ? 'row' : 'card');
+    const ok = !!page && alignApplies({ cols: page.list ? 1 : page.cols ?? 4, rows: page.list ? page.list.rows : page.rows ?? 6 }, { type: w.type, shape, icon_only: w.icon_only, x: list ? 0 : w.x ?? 0, y: list ? wi : w.y ?? 0, w: list ? 1 : w.w ?? 1, h: list ? 1 : w.h ?? 1 });
+    const why = 'Small buttons, tiles and icon-only buttons are always centred';
+    return html`<div class="ali"><span id="ali-l">Align</span><div class="grp" role="group" aria-labelledby="ali-l" title=${ok ? '' : why}>${ALIGNS.map((o) => html`<button type="button" ?disabled=${!ok} aria-pressed=${(ok ? w.align ?? 'center' : 'center') === o.v} aria-label=${o.name} title=${ok ? o.name : why} @click=${() => this.widgetPatch(pi, wi, { align: o.v === 'center' ? undefined : o.v })}>${svg`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d=${o.d}></path></svg>`}</button>`)}</div></div>${ok ? nothing : html`<p class="why" role="note">${why}.</p>`}`;
+  }
+
   private keyView(name: string) {
     const row = this.st.rows().find((r) => r.key === name);
     const layer = this.st.layer;
@@ -202,9 +213,7 @@ export class HhInspector extends LitElement {
         ? html`<div class="sec"><h3>Look</h3>
             <div class="sw" role="group" aria-label="Role">${ROLES.map((r) => html`<button class="r-${r}" aria-pressed=${(w.role ?? 'default') === r} ?disabled=${!!navVal} @click=${() => this.widgetPatch(pi, wi, { role: r === 'default' ? undefined : r })}><i></i>${r}</button>`)}</div>
             <div class="sw" role="group" aria-label="Shape">${SHAPES.map((s) => html`<button class="s-${s}" aria-pressed=${(w.shape ?? 'card') === s} @click=${() => this.widgetPatch(pi, wi, { shape: s === 'card' ? undefined : s })}><i></i>${s}</button>`)}</div>
-            ${w.icon_only || w.shape === 'monogram'
-              ? nothing
-              : html`<div class="ali"><span id="ali-l">Align</span><div class="grp" role="group" aria-labelledby="ali-l">${ALIGNS.map((o) => html`<button type="button" aria-pressed=${(w.align ?? 'center') === o.v} aria-label=${o.name} title=${o.name} @click=${() => this.widgetPatch(pi, wi, { align: o.v === 'center' ? undefined : o.v })}>${svg`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d=${o.d}></path></svg>`}</button>`)}</div></div>`}
+            ${this.alignRow(pi, wi, w, navVal)}
             ${this.colourRows(pi, wi, w)}
             <label>Icon <input type="search" placeholder="Search icons" .value=${this.iconQ} @input=${(e: Event) => (this.iconQ = (e.target as HTMLInputElement).value)} /></label>
             <div class="icons" role="group" aria-label="Icon">

@@ -275,7 +275,7 @@ exports[`page renderer: shared golden vectors > draws max_label 1`] = `
     {
       "anchor": "middle",
       "fill": "#f8fcf8",
-      "s": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "s": "aaaaaaaaaaaaaaaaaaaaaa…",
       "size": 16,
       "t": "text",
       "weight": 500,
