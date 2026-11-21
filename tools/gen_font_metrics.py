@@ -15,7 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 FONT_DIR = ROOT / "remote" / "app" / "fonts"
 OUT = ROOT / "proto" / "font_metrics.json"
 # copies the runtime reads: harmony_core ships in the add-on and integration, the frontend stage only gets frontend-shared
-COPIES = (ROOT / "harmony_core" / "font_metrics.json", ROOT / "harmony_addon" / "frontend-shared" / "font_metrics.json")
+COPIES = (
+    ROOT / "harmony_core" / "font_metrics.json",
+    ROOT / "harmony_addon" / "frontend-shared" / "font_metrics.json",
+)
 FONTS = ("b13", "m16", "b18", "b20", "r12")
 
 
@@ -31,11 +34,11 @@ def parse(src: str) -> dict[str, int]:
     adv = [int(m) for m in re.findall(r"\.adv_w = (\d+)", body)]
     lists = {
         m.group(1): [int(x, 16) for x in re.findall(r"0x[0-9a-f]+", m.group(2))]
-        for m in re.finditer(r"unicode_list_(\d+)\[\] = \{(.*?)\};", src, re.S)
+        for m in re.finditer(r"unicode_list_(\d+)\[\] = \{(.*?)\};", src, re.DOTALL)
     }
     cmaps = src.split("cmaps[] =", 1)[1].split("};", 1)[0]
     out: dict[str, int] = {}
-    for m in re.finditer(r"\{\s*\.range_start = (\d+).*?\.type = (\w+)\s*\}", cmaps, re.S):
+    for m in re.finditer(r"\{\s*\.range_start = (\d+).*?\.type = (\w+)\s*\}", cmaps, re.DOTALL):
         start, gid0 = int(m.group(1)), _int(r"glyph_id_start = (\d+)", m.group(0))
         if m.group(2).endswith("FORMAT0_TINY"):
             length = _int(r"range_length = (\d+)", m.group(0))

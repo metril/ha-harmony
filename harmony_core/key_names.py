@@ -30,11 +30,11 @@ _NAMES = {
     "directionright": "Right",
 }
 _ACRONYMS = frozenset(
-    "ok dvr tv hdmi usb ir av dvd cd hd uhd sd epg ui hdr arc pip bt ha am fm cec rf led lcd osd pc vcr pvr nec sirc dts cc vod kvm".split()
+    ["ok", "dvr", "tv", "hdmi", "usb", "ir", "av", "dvd", "cd", "hd", "uhd", "sd", "epg", "ui", "hdr", "arc", "pip", "bt", "ha", "am", "fm", "cec", "rf", "led", "lcd", "osd", "pc", "vcr", "pvr", "nec", "sirc", "dts", "cc", "vod", "kvm"]
 )
 _BRAND = {"earc": "eARC", "dpad": "D-Pad", "necext": "NECext"}
-_SPLIT_WORDS = frozenset("ch vol num key input digit page mode scene".split())
-_UNITS = frozenset("s ms min sec h hz khz mhz db st nd rd th m cm mm".split())
+_SPLIT_WORDS = frozenset(["ch", "vol", "num", "key", "input", "digit", "page", "mode", "scene"])
+_UNITS = frozenset(["s", "ms", "min", "sec", "h", "hz", "khz", "mhz", "db", "st", "nd", "rd", "th", "m", "cm", "mm"])
 _CMD_WORDS = {
     "vol": "volume",
     "ch": "channel",
@@ -44,7 +44,7 @@ _CMD_WORDS = {
     "pct": "percent",
 }
 _SMALL = frozenset(
-    "a an and of the to for at".split()
+    ["a", "an", "and", "of", "the", "to", "for", "at"]
 )  # "on" / "in" stay capitalised in a command name
 _DIGIT = re.compile(r"^(?:key_10|num_?|digit_?|number_?)(\d)$")
 _HDMI_INPUT = re.compile(r"^input_hdmi_?(\d+)$")

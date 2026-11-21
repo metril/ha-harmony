@@ -18,7 +18,6 @@ from .ha_actions import default_tap
 from .harmony_proto import SOFT_KEY_BASE
 from .icons import ICON_IDS, ICONS
 from .key_names import display_name
-from .text_fit import fit_label
 from .page_codec import (
     HEADER_V2,
     MAX_BYTES,
@@ -30,6 +29,7 @@ from .page_codec import (
     widget_cost,
     widget_size,
 )
+from .text_fit import fit_label
 
 MAX_SOFT_KEYS = 256 - SOFT_KEY_BASE  # widget wire ids 0..127
 MAX_PAGE_GROUP = 15  # seq count is 4 bits
