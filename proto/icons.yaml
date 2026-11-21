@@ -5,7 +5,7 @@ icons:
   - {id: 3, name: music, keywords: [music, audio, song, spotify, sonos]}
   - {id: 4, name: game, keywords: [game, gaming, console, playstation, xbox, nintendo]}
   - {id: 5, name: radio, keywords: [radio, tuner, fm, am]}
-  - {id: 6, name: app, keywords: [app, apps, streaming, netflix, youtube]}
+  - {id: 6, name: app, keywords: [app, streaming, netflix, youtube]}
   - {id: 7, name: power, keywords: [power, "off", "on", shutdown, standby]}
   - {id: 8, name: chev_right, keywords: [next, right, forward, more]}
   - {id: 9, name: chev_left, keywords: [left, previous]}
@@ -48,19 +48,19 @@ icons:
   - {id: 46, name: rf_off, keywords: ["no", signal, offline]}
   - {id: 47, name: sync, keywords: [sync, refresh, reload]}
   - {id: 48, name: warn, keywords: [warning, alert, error]}
-  - {id: 49, name: moon, keywords: [night, sleep, moon, bedtime]}
+  - {id: 49, name: moon, keywords: [night, moon, bedtime]}
   - {id: 50, name: sun, keywords: [day, morning, sun]}
   - {id: 51, name: search, keywords: [search, find]}
-  - {id: 52, name: grid_apps, keywords: [apps, grid, launcher]}
+  - {id: 52, name: grid_apps, keywords: [apps, app, grid, launcher]}
   - {id: 53, name: numpad, keywords: [numpad, keypad, digits, numbers]}
-  - {id: 54, name: replay10, keywords: [replay, back10, rewind10]}
-  - {id: 55, name: skip10, keywords: [skip10, forward10]}
+  - {id: 54, name: replay10, keywords: [replay, back10, rewind10, rewind, '10']}
+  - {id: 55, name: skip10, keywords: [skip10, forward10, skip, forward, '10']}
   - {id: 56, name: shuffle, keywords: [shuffle, random]}
   - {id: 57, name: repeat, keywords: [repeat, loop]}
   - {id: 58, name: aspect, keywords: [aspect, ratio, zoom]}
-  - {id: 59, name: picture, keywords: [picture, image, photo]}
-  - {id: 60, name: sleep_timer, keywords: [timer, sleep timer]}
-  - {id: 61, name: prev_ch, keywords: [last, recall, prevch]}
+  - {id: 59, name: picture, keywords: [picture, image, photo, pic]}
+  - {id: 60, name: sleep_timer, keywords: [timer, sleep]}
+  - {id: 61, name: prev_ch, keywords: [last, recall, prevch, prev, previous, channel]}
   - {id: 62, name: enter, keywords: [enter, return]}
   - {id: 63, name: keyboard, keywords: [keyboard, type]}
   - {id: 64, name: audio_track, keywords: [language, dub, audiotrack]}

@@ -57,8 +57,6 @@ describe('starter pages', () => {
   it('no starter label overflows its cell', () => {
     for (const id of ['activity', 'devices', 'numbers'] as const) {
       const c = cfg();
-      // replay_10 / skip_10 have glyphs only once the new icon ids ship; without one they are over budget in a 4-column cell
-      for (const k of ['replay_10', 'skip_10']) delete (c.devices?.[0]?.commands as Record<string, unknown>)[k];
       const pages = templatePages(c, id, { activity: 'watch' });
       for (const p of pages) expect(pageOverflow(p, null), `${id}/${p.id}`).toEqual([]);
     }
