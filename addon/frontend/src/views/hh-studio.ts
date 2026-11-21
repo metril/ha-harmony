@@ -18,7 +18,7 @@ import { tid } from '../components/hh-remote';
 import type { PageOp } from '../components/hh-page-strip';
 import '../components/hh-remote';
 void import('../components/hh-palette');
-import '../components/hh-inspector';
+void import('../components/hh-inspector');
 void import('../components/hh-page-strip');
 void import('../components/hh-action-picker');
 

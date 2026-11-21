@@ -1,12 +1,13 @@
 // Bundle-size budget (gzip). The entry chunk is what every visit downloads: 90 KiB. The rarely opened
 // routes (add-device wizard, activities, themes) are separate dynamic-import chunks, capped at 30 KiB each
-// and 200 KiB for all JS together (raised from 160: the growth is lazily loaded route chunks, Bluetooth and the
+// and 210 KiB for all JS together (raised from 160: the growth is lazily loaded route chunks, Bluetooth and the
 // Home Assistant catalog; the entry budget, which is what every visit pays, did not move, and each chunk keeps its 30 KiB cap). CSS is one file.
+// Raised again to 210 KiB: the growth is the remote redesign's lazy-loaded code (the inspector now loads after the studio paints).
 import { readdirSync, readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 
 const KiB = 1024;
-const BUDGET = { entry: 90 * KiB, chunk: 30 * KiB, total: 200 * KiB, css: 8 * KiB };
+const BUDGET = { entry: 90 * KiB, chunk: 30 * KiB, total: 210 * KiB, css: 8 * KiB };
 const dir = new URL('../dist/assets/', import.meta.url);
 const index = readFileSync(new URL('../dist/index.html', import.meta.url), 'utf8');
 let bad = false;
