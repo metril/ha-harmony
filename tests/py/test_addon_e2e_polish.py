@@ -290,9 +290,11 @@ async def test_keyboard_only_assign_a_command_to_a_key_then_apply(browser, large
     # review and apply with the keyboard
     await page.get_by_role("button", name="Review & Apply").focus()
     await page.keyboard.press("Enter")
-    # the large config has labels the remote cuts, so Apply waits for "Apply anyway" (also keyboard-reachable)
-    await page.get_by_label("Apply anyway").focus()
-    await page.keyboard.press("Space")
+    # pages are converted to fixed classes, so no label is cut; if one ever is, Apply waits for "Apply anyway"
+    anyway = page.get_by_label("Apply anyway")
+    if await anyway.count():
+        await anyway.focus()
+        await page.keyboard.press("Space")
     await page.get_by_role("button", name="Apply To Hub").focus()
     await page.keyboard.press("Enter")
     await page.get_by_text("Saved as rev 1").wait_for()

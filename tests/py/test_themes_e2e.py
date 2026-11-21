@@ -154,6 +154,7 @@ async def test_over_budget_page_says_so_in_the_inspector(browser, site):
         {
             "id": "home",
             "kind": "home",
+            "layout": "grid",
             "cols": 4,
             "rows": 4,
             "widgets": [
