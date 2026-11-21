@@ -7,7 +7,7 @@
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/metril/ha-harmony/issues",
-  "requirements": [],
+  "requirements": ["Pillow"],
   "version": "0.3.31",
   "zeroconf": ["_haharmony._tcp.local."]
 }

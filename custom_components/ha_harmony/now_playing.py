@@ -211,6 +211,7 @@ class NowPlayingFeed:
         self._start = 0.0  # estimated media start (seconds, clock epoch) of the last send
         self._cover: tuple[int, str] | None = None  # (cid, base64) of the cover for _last
         self._cover_sent: int | None = None  # cid last handed to the hub (it keeps it; resent on a rejoin only)
+        self._warned: set[int] = set()
         self._cover_for: int | None = None  # cid the cover above (or a fetch in flight) belongs to
         self.sent_now_playing = 0
         self.sent_covers = 0
@@ -272,20 +273,27 @@ class NowPlayingFeed:
         if not targets:
             return
         if cur.cid and cur.picture and self._cover_for != cur.cid:
-            self._cover_for, self._cover = cur.cid, None
             raw = await self._fetch(cur.picture)
+            why = "fetch failed"
             if raw is not None:
                 try:
                     data = await self.hass.async_add_executor_job(quantize_cover, raw)
                 except Exception as exc:  # noqa: BLE001  (a bad image is no reason to lose the text)
-                    _LOGGER.debug("cover for %s not usable: %s", cur.picture, exc)
+                    why = f"not usable: {exc}"
                 else:
-                    self._cover = (cur.cid, base64.b64encode(data).decode())
+                    self._cover_for, self._cover = cur.cid, (cur.cid, base64.b64encode(data).decode())
+                    why = ""
+            if why and cur.cid not in self._warned:  # retried on the next push; logged once per cid
+                self._warned.add(cur.cid)
+                _LOGGER.warning("cover for %s: %s", cur.picture, why)
         if self._cover and self._cover[0] == cur.cid and (force or self._cover_sent != cur.cid):
             self._cover_sent = cur.cid
             for r in targets:
                 if await self._send(CMD_COVER, {"remote": r, "cid": cur.cid, "data": self._cover[1]}):
                     self.sent_covers += 1
+        pos = cur.pos
+        if force and cur.flags == PLAYING:  # the stored pos is old: run it on like the hub does
+            pos = max(int(self._clock().timestamp() - self._start), 0)
         for r in targets:
             if await self._send(
                 CMD_NOW_PLAYING,
@@ -293,7 +301,7 @@ class NowPlayingFeed:
                     "remote": r,
                     "cid": cur.cid,
                     "flags": cur.flags,
-                    "pos": min(cur.pos, 65535),
+                    "pos": min(pos, 65535),
                     "dur": min(cur.dur, 65535),
                     "t1": cur.t1,
                     "t2": cur.t2,

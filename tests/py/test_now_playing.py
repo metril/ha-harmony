@@ -154,3 +154,33 @@ def test_no_timers_in_the_feed():
     assert not re.search(
         r"call_later|call_at|async_call_later|track_time|async_track_point|asyncio\.sleep|loop\.call_", src
     )
+
+
+async def test_attach_resend_runs_pos_on_and_a_failed_cover_fetch_is_retried(hass, caplog):
+    client, calls, now = FakeClient(), [], [dt_util.utcnow()]
+
+    async def fetch(url):
+        calls.append(url)
+        return None if len(calls) == 1 else _png()
+
+    feed = npl.NowPlayingFeed(
+        hass, client, lambda: (1,), lambda r: True,
+        lambda coro, name: hass.async_create_task(coro, name), fetch=fetch, clock=lambda: now[0],
+    )
+    feed.start()
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **PLEX_ATTRS)
+    await hass.async_block_till_done()
+    assert [c for c, _ in client.sent].count("cover") == 0 and len(calls) == 1
+    assert sum("cover for" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records) == 1
+    _state(hass, PLEX, "paused", **PLEX_ATTRS)  # the next push tries again, and does not warn twice
+    await hass.async_block_till_done()
+    assert len(calls) == 2 and [c for c, _ in client.sent].count("cover") == 1
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **PLEX_ATTRS)
+    await hass.async_block_till_done()
+    now[0] += timedelta(seconds=30)
+    feed.on_remote_attached(1)
+    await hass.async_block_till_done()
+    last = [a for c, a in client.sent if c == "now_playing"][-1]
+    assert last["pos"] == 130
+    feed.stop()
