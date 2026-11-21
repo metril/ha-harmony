@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.29 (2026-11-21)
+
+- Fix: the Devices starter page now takes the remote's Devices key (it had no favorites kind, so the key did nothing). Existing configs: set the device list page's kind to favorites. Add-on only.
+
 ## 0.3.28 (2026-11-21)
 
 - Brand logos on buttons: Plex, YouTube, Netflix, Prime Video, Disney+, HBO Max, Hulu, Apple TV, Paramount+, Peacock, Crunchyroll, Twitch, Jellyfin, Emby, Kodi, Plexamp, Spotify, Apple Music, Tidal, SoundCloud, Steam, Xbox, PlayStation, Nintendo Switch, Nvidia, Sonos and Chromecast (icons 65-91). Name a button after one and the studio suggests the logo; picking it fills the button in the brand colour, and it shows the logo alone. The remote needs the new firmware to draw them, and the integration must be updated with the add-on (HACS) before Apply.

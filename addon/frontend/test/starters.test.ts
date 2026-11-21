@@ -41,6 +41,12 @@ describe('starter pages', () => {
     expect(num.widgets.slice(0, 9).map((w) => w.label)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
   });
 
+  it('the device list takes the Devices hard key (favorites) unless the config has one', () => {
+    expect(templatePages(cfg(), 'devices')[0]?.kind).toBe('favorites');
+    const c = { ...cfg(), pages: [{ id: 'f', kind: 'favorites', cols: 1, rows: 1, widgets: [] }] } as ReturnType<typeof cfg>;
+    expect(templatePages(c, 'devices')[0]?.kind).toBeUndefined();
+  });
+
   it('the device starter is one nav row per device plus a 3-column grid each, labelled by command', () => {
     const pages = templatePages(cfg(), 'devices');
     expect(pages.map((p) => p.id)).toEqual(['devices', 'dev_shield', 'dev_tv']);

@@ -749,7 +749,8 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
         const icon = d.icon && stockIconByName(d.icon) ? d.icon : undefined;
         return { type: 'button', id: mk('btn'), label: trimToBytes(dn(d.name, d.id), LABEL_MAX), ...(g ? { nav: g.id } : { action: { none: true } }), ...(icon ? { icon } : {}) };
       });
-      const pages: Page[] = [{ id: listId, cols: 1, list: { rows: 6 }, title: 'Devices', back: true, widgets: rows }];
+      const hasFav = (cfg.pages ?? []).some((p) => p.kind === 'favorites');
+      const pages: Page[] = [{ id: listId, cols: 1, list: { rows: 6 }, ...(hasFav ? {} : { kind: 'favorites' as const }), title: 'Devices', back: true, widgets: rows }];
       for (const { d, id: gid } of grids) {
         const cmds = commandNames(d).filter((c) => !isHardKey(c)).slice(0, 12);
         const gr = { cols: 3, rows: Math.max(1, Math.min(4, Math.ceil(cmds.length / 3))) };
