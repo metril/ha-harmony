@@ -100,7 +100,7 @@ PINNED = [
     "chromecast",
 ]
 
-from harmony_core.icons import BRAND_COLORS, ICON_NAMES  # noqa: E402
+from harmony_core.icons import BRAND_COLORS, ICON_NAMES
 
 BRAND = {ICON_NAMES[i] for i in BRAND_COLORS}
 
