@@ -4,14 +4,13 @@ import json
 from pathlib import Path
 
 import pytest
+from grid_layout import grid
 
 from harmony_core.compiler import CompileError, compile_config
 from harmony_core.config_model import ConfigError
+from harmony_core.config_model import parse_model as _parse_model
 from harmony_core.icons import ICON_IDS
 from harmony_core.page_codec import decode_page, encode
-
-from grid_layout import grid  # noqa: E402
-from harmony_core.config_model import parse_model as _parse_model  # noqa: E402
 
 
 def parse_model(text, *a, **k):

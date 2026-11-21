@@ -1,9 +1,9 @@
 """Icon inference, the icon_only default and the overflow warning of page_build."""
 
 import pytest
+from test_compiler_pages import parse_model
 
 from harmony_core.compiler import compile_config
-from test_compiler_pages import parse_model
 from harmony_core.icons import ICON_IDS
 from harmony_core.page_build import icon_for_text
 

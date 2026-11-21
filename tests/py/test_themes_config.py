@@ -5,12 +5,11 @@ import json
 from pathlib import Path
 
 import pytest
-from test_compiler_pages import BASE, btn, page
+from test_compiler_pages import BASE, btn, page, parse_model
 
 from harmony_core.compiler import CompileError, compile_config
 from harmony_core.config_model import ConfigError, parse_data, validate_all
 from harmony_core.config_model import parse_model as _real_parse
-from test_compiler_pages import parse_model
 from harmony_core.page_codec import decode_page
 from harmony_core.theme_build import CAP_THEME_COLOR, CAP_THEME_CUSTOM, active_theme
 from harmony_core.theme_math import PALETTE_NAMES, nearest_palette, serialise_theme, snap565

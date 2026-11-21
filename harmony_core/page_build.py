@@ -20,12 +20,12 @@ from .icons import BRAND_COLORS, ICON_IDS, ICONS
 from .key_names import display_name
 from .keys import key_code
 from .page_codec import (
+    FIXED_MAX,
     HEADER_V2,
     MAX_BYTES,
     MAX_WIDGETS,
     Page,
     Widget,
-    FIXED_MAX,
     encode,
     fixed_height,
     page_size,
@@ -92,7 +92,7 @@ def _apps_entity(
     """The apps_entity behind a button: its page's activity, else the activity that uses the button's
     device, else the only one the config names."""
     acts = {a["id"]: a for a in model["activities"]}
-    media = lambda a: (a.get("media") or {}).get("apps_entity")  # noqa: E731
+    media = lambda a: (a.get("media") or {}).get("apps_entity")
     if page.get("activity") in acts:
         a = acts[page["activity"]]
         return (media(a), a["id"]) if media(a) else (None, None)
@@ -318,10 +318,10 @@ def _default_icon_only(s: _Spec, cols: int, rows: int, fixed: bool = False) -> N
         return
     if s.shape == "monogram":
         return
-    if s.icon in BRAND_COLORS:  # a brand logo replaces the text where there is no room for both
-        if not fixed or (s.w <= 4 and s.shape == "card"):
-            s.icon_only = True
-            return
+    # a brand logo replaces the text where there is no room for both
+    if s.icon in BRAND_COLORS and (not fixed or (s.w <= 4 and s.shape == "card")):
+        s.icon_only = True
+        return
     if (cols == 4 and s.w == 1) or fit_label(SimpleNamespace(cols=cols, rows=rows, fixed=fixed), _probe(s)):
         s.icon_only = True
 

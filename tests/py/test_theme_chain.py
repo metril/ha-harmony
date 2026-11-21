@@ -11,12 +11,11 @@ import os
 from pathlib import Path
 
 import pytest
-from test_compiler_pages import BASE, btn, page
+from test_compiler_pages import BASE, btn, page, parse_model
 from test_ha_e2e import remote, setup
 from test_ha_runtime import YAML
 
 from harmony_core.compiler import compile_config
-from test_compiler_pages import parse_model
 
 VECTOR = Path(__file__).resolve().parents[1] / "vectors" / "theme_chain.json"
 DUSK = "themes:\n  dusk: {extends: midnight, tokens: {ACC: '#FF8A3D'}, palette: {3: {fill: '#2E7D32'}}}\n"

@@ -50,6 +50,7 @@ from .api import (
     HarmonyHubClient,
     HarmonyVersionError,
 )
+from .app_status import AppStatusFeed
 from .bluetooth import TOPIC_BT, BtManager  # noqa: F401  (TOPIC_BT is used by the platforms)
 from .const import (
     CMD_DEVICE_COMMAND,
@@ -80,7 +81,6 @@ from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
 from .harmony_core.hub_limits import bt_fit_error
-from .app_status import AppStatusFeed
 from .now_playing import NowPlayingFeed
 from .now_playing import options as now_playing_options
 from .ota import CHUNK, TARGET_HUB, UPLOAD_ATTEMPTS, Image, encode_chunk
@@ -1418,7 +1418,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """Point the app rings and Now Playing at the entities of the live config's `media:`."""
         self.app_status.configure(self.compiled.apps)
         media = list(self.compiled.media.values())
-        pick = lambda k: next((self._cur(m[k]) for m in media if m.get(k)), None)  # noqa: E731
+        pick = lambda k: next((self._cur(m[k]) for m in media if m.get(k)), None)
         self.now_playing.configure(pick("apps_entity"), pick("now_playing_entity"))
 
     async def _send_tiles(self, entities: set[str], remotes: tuple[int, ...]) -> None:
