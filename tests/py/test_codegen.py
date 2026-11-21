@@ -177,6 +177,7 @@ def test_real_schema_has_phase2_messages():
         "device_state", "tile_update", "activity_list", "remote_attached", "remote_info", "tile_state",
         "config_chunk", "set_hub_id", "hub_id_ack", "theme_push",
         "bt_pair", "bt_state", "bt_forget", "bt_key", "bt_remote_key", "bt_listen", "hub_log",
+        "now_playing", "cover_chunk",
         "ota_begin", "ota_chunk", "ota_end", "ota_abort", "ota_status",
         "ota_offer", "ota_frag", "ota_frag_ack", "ota_commit", "ota_result",
     }  # fmt: skip

@@ -129,6 +129,30 @@ static void test_tile_state(void) {
     CT_EQ(hp_rf_unpack(HP_MSG_TILE_STATE, buf, 4, o, 5), -HP_E_INVAL);
 }
 
+static void test_now_playing_and_cover_chunk(void) {
+    hp_rf_val_t v[7] = {{.u = 1}, {.u = 0xDEADBEEF}, {.u = 1}, {.u = 65}, {.u = 3000}, {.p = (const uint8_t *)"Hi", .len = 2},
+                        {.p = (const uint8_t *)"S1", .len = 2}}, o[7];
+    uint8_t buf[HP_RF_MSG_MAX];
+    size_t n = 0;
+    CT_EQ(hp_rf_pack(HP_MSG_NOW_PLAYING, v, 7, buf, sizeof buf, &n), 0);
+    const uint8_t want[] = {1, 0xDE, 0xAD, 0xBE, 0xEF, 1, 0, 65, 0x0B, 0xB8, 2, 'H', 'i', 2, 'S', '1'};
+    CT_EQ(n, sizeof want);
+    CT_MEM_EQ(buf, want, sizeof want);
+    CT_EQ(hp_rf_unpack(HP_MSG_NOW_PLAYING, buf, n, o, 7), 0);
+    CT_EQ(o[1].u, 0xDEADBEEF);
+    CT_EQ(o[4].u, 3000);
+    CT_EQ(hp_rf_unpack(HP_MSG_NOW_PLAYING, buf, n - 1, o, 7), -HP_E_INVAL);
+    uint8_t data[220];
+    memset(data, 0xA5, sizeof data);
+    hp_rf_val_t c[4] = {{.u = 1}, {.u = 7}, {.u = 1540}, {.p = data, .len = sizeof data}}, co[4];
+    CT_EQ(hp_rf_pack(HP_MSG_COVER_CHUNK, c, 4, buf, sizeof buf, &n), 0);
+    CT_EQ(n, 1 + 4 + 2 + 1 + 220);
+    CT_EQ(hp_rf_unpack(HP_MSG_COVER_CHUNK, buf, n, co, 4), 0);
+    CT_EQ(co[2].u, 1540);
+    CT_EQ(co[3].len, 220);
+    CT_EQ(hp_rf_unpack(HP_MSG_COVER_CHUNK, buf, n - 1, co, 4), -HP_E_INVAL);
+}
+
 static void test_rejects(void) {
     hp_rf_val_t v[3] = {{0}};
     uint8_t buf[8];
@@ -165,6 +189,7 @@ int main(void) {
     CT_RUN(test_tile_update);
     CT_RUN(test_remote_info);
     CT_RUN(test_tile_state);
+    CT_RUN(test_now_playing_and_cover_chunk);
     CT_RUN(test_rejects);
     CT_RUN(test_split_budget);
     return CT_DONE();

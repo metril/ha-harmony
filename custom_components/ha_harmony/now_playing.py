@@ -1,0 +1,324 @@
+"""Now Playing for the remote: a Shield (androidtv) media player plus the Plex player behind it.
+
+Push only: the feed listens to state changes of the two configured entities and sends the hub a
+`now_playing` command (title lines, flags, position) and, when the media changed, a `cover` command
+(48x72, 4 bpp, 16 RGB565 palette entries: 1760 bytes). There is no timer anywhere: the position
+runs on in the hub, which adds the time a message was held to `pos` when it goes out.
+
+Wire (hub `command` verbs, device "hub"):
+  now_playing {remote, cid u32, flags u8 (1 playing, 2 paused, 0 nothing), pos s, dur s, t1, t2}
+  cover       {remote, cid u32, data = base64 of the 1760 bytes}
+
+Cover bytes: 1728 bytes of 48x72 pixels, row by row, two per byte (first pixel in the high nibble),
+each a palette index; then 16 RGB565 entries, little-endian (32 bytes).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import io
+import logging
+import zlib
+from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+import aiohttp
+from homeassistant.core import Event, HomeAssistant, State, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import EventStateChangedData, async_track_state_change_event
+from homeassistant.helpers.network import get_url
+from homeassistant.util import dt as dt_util
+
+from .api import HarmonyCommandError, HarmonyConnectionError
+from .harmony_core.harmony_proto import MsgType
+from .harmony_core.text_fit import _metrics
+
+_LOGGER = logging.getLogger(__name__)
+
+# Defaults for the options below (the real entities of this install); config comes with the compiler (E2).
+DEFAULT_SHIELD = "media_player.nvidia_shield_tv"
+DEFAULT_PLEX = "media_player.plex_plex_for_android_tv_shield_android_tv"
+DEFAULT_PLEX_APPS = ("com.plexapp.android",)
+DEFAULT_FONT = "m16"  # the baked font of the remote's title lines (proto/font_metrics.json)
+
+CMD_NOW_PLAYING = "now_playing"
+CMD_COVER = "cover"
+HUB_DEVICE = "hub"
+TEXT_MAX = 48  # bytes of UTF-8 per title line
+COVER_W, COVER_H = 48, 72
+COVER_BYTES = COVER_W * COVER_H // 2 + 32  # 1760
+PLAYING, PAUSED = 1, 2
+_SEEK_SLACK = 3  # seconds a start-time estimate may drift before it counts as a seek
+
+
+def options(entry_options: dict[str, Any]) -> dict[str, Any]:
+    """The feed's settings from integration options (keys now_playing_shield / _plex / _plex_apps /
+    _font); anything absent takes the documented default."""
+    return {
+        "shield": entry_options.get("now_playing_shield") or DEFAULT_SHIELD,
+        "plex": entry_options.get("now_playing_plex") or DEFAULT_PLEX,
+        "plex_apps": tuple(entry_options.get("now_playing_plex_apps") or DEFAULT_PLEX_APPS),
+        "font": entry_options.get("now_playing_font") or DEFAULT_FONT,
+    }
+
+
+def cut(text: str, limit: int = TEXT_MAX) -> str:
+    """At most `limit` bytes of UTF-8, never splitting a character."""
+    return text.encode()[:limit].decode(errors="ignore")
+
+
+def has_glyphs(text: str, font: str) -> bool:
+    """Every character of `text` is in the remote's baked `font` (else it would show placeholders)."""
+    m = _metrics()[font]
+    return all(str(ord(c)) in m for c in text)
+
+
+def _text(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
+def _line(text: str, fallbacks: Iterable[str], font: str) -> str:
+    """`text`, or the first fallback, whose glyphs the font has; "" when none does."""
+    for cand in (text, *fallbacks):
+        if cand and has_glyphs(cand, font):
+            return cut(cand)
+    return ""
+
+
+@dataclass(frozen=True)
+class Playing:
+    cid: int
+    flags: int
+    pos: int
+    dur: int
+    t1: str
+    t2: str
+    picture: str | None
+
+    @property
+    def sig(self) -> tuple[int, int, int, str, str]:
+        """What a resend would change on the remote (pos excluded: the hub runs it on)."""
+        return (self.cid, self.flags, self.dur, self.t1, self.t2)
+
+
+def _flags(state: State | None) -> int:
+    return {"playing": PLAYING, "paused": PAUSED}.get(state.state if state else "", 0)
+
+
+def _int(value: Any) -> int:
+    try:
+        return max(int(float(value)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _position(attrs: Any, flags: int, now: datetime) -> int:
+    pos = _int(attrs.get("media_position"))
+    at = attrs.get("media_position_updated_at")
+    if flags == PLAYING and isinstance(at, datetime):
+        pos += max(int((now - at).total_seconds()), 0)
+    return pos
+
+
+def build(
+    shield: State | None, plex: State | None, now: datetime, plex_apps: Iterable[str], font: str
+) -> Playing | None:
+    """What the remote should show now, or None when neither player is in use. The Plex player gives
+    the details while the Shield runs a Plex app; any other app shows its own title (no cover, no
+    position unless the player reports them)."""
+    on_plex = (
+        shield is not None
+        and shield.attributes.get("app_id") in tuple(plex_apps)
+        and plex is not None
+        and plex.state in ("playing", "paused")
+    )
+    src = plex if on_plex else shield
+    if src is None or src.state in ("unavailable", "unknown"):
+        return None
+    flags = _flags(src)
+    a = src.attributes
+    title, series = _text(a.get("media_title")), _text(a.get("media_series_title"))
+    library = _text(a.get("media_library_title"))
+    if flags == 0 and not title:
+        return Playing(0, 0, 0, 0, "", "", None)
+    t1 = _line(series or title, (library,), font)
+    t2 = ""
+    season, episode = a.get("media_season"), a.get("media_episode")
+    if series and (season not in (None, "") or episode not in (None, "")):
+        tag = f"S{_int(season)} E{_int(episode)}"
+        t2 = cut(f"{tag} · {title}") if title and has_glyphs(f"{tag} · {title}", font) else tag
+    content = _text(a.get("media_content_id")) or title
+    cid = zlib.crc32(content.encode()) & 0xFFFFFFFF if content else 0
+    picture = a.get("entity_picture") if on_plex else None
+    return Playing(cid, flags, _position(a, flags, now), _int(a.get("media_duration")), t1, t2, picture)
+
+
+def _rgb565(r: int, g: int, b: int) -> int:
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+
+def quantize_cover(raw: bytes) -> bytes:
+    """Image bytes -> the 1760-byte cover: fitted (centre crop) to 48x72, 16 colours, packed 4 bpp
+    with an RGB565 palette. Blocking: run it in an executor."""
+    from PIL import Image, ImageOps
+
+    with Image.open(io.BytesIO(raw)) as src:
+        img = ImageOps.fit(src.convert("RGB"), (COVER_W, COVER_H), method=Image.Resampling.LANCZOS)
+    q = img.quantize(colors=16, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    flat = (q.getpalette() or [])[:48]
+    flat += [0] * (48 - len(flat))
+    pal = b"".join(_rgb565(*flat[i * 3 : i * 3 + 3]).to_bytes(2, "little") for i in range(16))
+    px = q.tobytes()
+    body = bytes((px[i] << 4) | px[i + 1] for i in range(0, len(px), 2))
+    out = body + pal
+    assert len(out) == COVER_BYTES
+    return out
+
+
+Fetch = Callable[[str], Awaitable[bytes | None]]
+
+
+class NowPlayingFeed:
+    """Subscribes to the Shield and Plex players and tells the hub what to show, per attached remote."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: Any,
+        remotes: Callable[[], Iterable[int]],
+        attached: Callable[[int], bool],
+        spawn: Callable[[Awaitable[None], str], asyncio.Task[None]],
+        *,
+        shield: str = DEFAULT_SHIELD,
+        plex: str = DEFAULT_PLEX,
+        plex_apps: Iterable[str] = DEFAULT_PLEX_APPS,
+        font: str = DEFAULT_FONT,
+        fetch: Fetch | None = None,
+        clock: Callable[[], datetime] = dt_util.utcnow,
+    ) -> None:
+        self.hass, self.client = hass, client
+        self._remotes, self._attached, self._spawn = remotes, attached, spawn
+        self.shield, self.plex, self.plex_apps, self.font = shield, plex, tuple(plex_apps), font
+        self._fetch = fetch or self._fetch_picture
+        self._clock = clock
+        self._unsub: Callable[[], None] | None = None
+        self._task: asyncio.Task[None] | None = None
+        self._dirty = False
+        self._last: Playing | None = None
+        self._start = 0.0  # estimated media start (seconds, clock epoch) of the last send
+        self._cover: tuple[int, str] | None = None  # (cid, base64) of the cover for _last
+        self._cover_sent: int | None = None  # cid last handed to the hub (it keeps it; resent on a rejoin only)
+        self._cover_for: int | None = None  # cid the cover above (or a fetch in flight) belongs to
+        self.sent_now_playing = 0
+        self.sent_covers = 0
+
+    # -- lifecycle (events only: nothing here schedules a timer)
+    def start(self) -> None:
+        self.stop()
+        self._unsub = async_track_state_change_event(
+            self.hass, [self.shield, self.plex], self._on_event
+        )
+
+    def stop(self) -> None:
+        if self._unsub:
+            self._unsub()
+            self._unsub = None
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
+    @callback
+    def _on_event(self, _event: Event[EventStateChangedData]) -> None:
+        """Runs one update at a time; events that arrive meanwhile are folded into one more pass."""
+        self._dirty = True
+        if self._task is None or self._task.done():
+            self._task = self._spawn(self._run(), "ha_harmony now playing")
+
+    def on_remote_attached(self, remote: int) -> None:
+        """A remote (re)joined: it knows nothing, show it the current state again."""
+        if self._last is None:
+            return
+        self._spawn(self._push(self._last, (remote,), force=True), "ha_harmony now playing attach")
+
+    # -- work
+    async def _run(self) -> None:
+        while self._dirty:
+            self._dirty = False
+            cur = build(
+                self.hass.states.get(self.shield),
+                self.hass.states.get(self.plex),
+                self._clock(),
+                self.plex_apps,
+                self.font,
+            )
+            if cur is None or not self._changed(cur):
+                continue
+            await self._push(cur, tuple(self._remotes()))
+
+    def _changed(self, cur: Playing) -> bool:
+        last = self._last
+        start = self._clock().timestamp() - cur.pos
+        same = last is not None and cur.sig == last.sig
+        return not (same and (cur.flags != PLAYING or abs(start - self._start) <= _SEEK_SLACK))
+
+    async def _push(self, cur: Playing, remotes: tuple[int, ...], force: bool = False) -> None:
+        if not force:
+            self._last = cur
+            self._start = self._clock().timestamp() - cur.pos
+        targets = [r for r in remotes if self._attached(r) and self.client.connected]
+        if not targets:
+            return
+        if cur.cid and cur.picture and self._cover_for != cur.cid:
+            self._cover_for, self._cover = cur.cid, None
+            raw = await self._fetch(cur.picture)
+            if raw is not None:
+                try:
+                    data = await self.hass.async_add_executor_job(quantize_cover, raw)
+                except Exception as exc:  # noqa: BLE001  (a bad image is no reason to lose the text)
+                    _LOGGER.debug("cover for %s not usable: %s", cur.picture, exc)
+                else:
+                    self._cover = (cur.cid, base64.b64encode(data).decode())
+        if self._cover and self._cover[0] == cur.cid and (force or self._cover_sent != cur.cid):
+            self._cover_sent = cur.cid
+            for r in targets:
+                if await self._send(CMD_COVER, {"remote": r, "cid": cur.cid, "data": self._cover[1]}):
+                    self.sent_covers += 1
+        for r in targets:
+            if await self._send(
+                CMD_NOW_PLAYING,
+                {
+                    "remote": r,
+                    "cid": cur.cid,
+                    "flags": cur.flags,
+                    "pos": min(cur.pos, 65535),
+                    "dur": min(cur.dur, 65535),
+                    "t1": cur.t1,
+                    "t2": cur.t2,
+                },
+            ):
+                self.sent_now_playing += 1
+
+    async def _send(self, command: str, args: dict[str, Any]) -> bool:
+        try:
+            await self.client.async_send(
+                MsgType.COMMAND, {"device": HUB_DEVICE, "command": command, "args": args}
+            )
+        except (HarmonyCommandError, HarmonyConnectionError) as exc:
+            _LOGGER.debug("%s not delivered: %s", command, exc)
+            return False
+        return True
+
+    async def _fetch_picture(self, picture: str) -> bytes | None:
+        """The entity picture through HA itself (a relative path is HA's own proxy)."""
+        url = picture if "://" in picture else f"{get_url(self.hass)}{picture}"
+        try:
+            async with async_get_clientsession(self.hass).get(url) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.read()
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            _LOGGER.debug("cover fetch %s failed: %s", picture, exc)
+            return None

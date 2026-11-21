@@ -251,7 +251,23 @@ messages:
       - {name: gen, type: u8}
       - {name: data, type: bytes}
 
-  # 29 spare. 30..34 are RESERVED for the remote's RF transport (not implemented): the hub
+  # Now Playing (remote redesign, stream H). flags bit 0 playing, bit 1 paused (0 = nothing playing: t1 / t2 empty);
+  # pos / dur in seconds (pos is as of the moment the hub sends it); cid = crc32 of the media content id, the key of the
+  # cover cached on the remote (cover_chunk). t1 / t2 are at most 48 bytes of UTF-8 each. Sent by the hub's `now_playing`
+  # command (args remote, cid, flags, pos, dur, t1, t2); the hub holds the latest per remote.
+  - name: now_playing
+    code: 29
+    transport: rf
+    fields:
+      - {name: remote, type: u8}
+      - {name: cid, type: u32}
+      - {name: flags, type: u8}
+      - {name: pos, type: u16}
+      - {name: dur, type: u16}
+      - {name: t1, type: str}
+      - {name: t2, type: str}
+
+  # 29 now_playing. 30..34 are RESERVED for the remote's RF transport (not implemented): the hub
   # relays a verified remote image as fragments and the remote answers per window.
   - name: ota_offer
     code: 30
@@ -359,6 +375,18 @@ messages:
       - {name: msg, type: str}
       - {name: ts, type: u32}
       - {name: dropped, type: u32, optional: true}
+
+  # One slice of a now-playing cover (1760 bytes in all: 48x72 at 4 bpp = 1728, then 16 RGB565
+  # palette entries, little-endian, 32) for the cover cached on the remote under `cid`. The hub cuts a `cover` command (args
+  # remote, cid, data = base64 of the 1760 bytes) into chunks of at most 220 bytes; `off` is the byte offset of `data` in the cover.
+  - name: cover_chunk
+    code: 42
+    transport: rf
+    fields:
+      - {name: remote, type: u8}
+      - {name: cid, type: u32}
+      - {name: "off", type: u16}
+      - {name: data, type: bytes}
 
 # The 35 physical keys of the Harmony Elite remote (docs/hardware/remote-elite.md, "Input").
 # `id` is the logical key code carried in key_event.key (u8): stable, unique, < 128 (128+ are page

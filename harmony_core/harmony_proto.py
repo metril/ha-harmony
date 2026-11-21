@@ -43,6 +43,7 @@ class MsgType(IntEnum):
     SET_HUB_ID = 26
     HUB_ID_ACK = 27
     THEME_PUSH = 28
+    NOW_PLAYING = 29
     OTA_OFFER = 30
     OTA_FRAG = 31
     OTA_FRAG_ACK = 32
@@ -55,6 +56,7 @@ class MsgType(IntEnum):
     BT_REMOTE_KEY = 39
     BT_LISTEN = 40
     HUB_LOG = 41
+    COVER_CHUNK = 42
 
 
 ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'hold': 2}}
@@ -89,6 +91,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'set_hub_id': (26, 'ws', (('id', 'str', False), ('name', 'str', True), )),
     'hub_id_ack': (27, 'ws', (('hub_id', 'str', False), ('name', 'str', True), )),
     'theme_push': (28, 'both', (('remote', 'u8', False), ('gen', 'u8', False), ('data', 'bytes', False), )),
+    'now_playing': (29, 'rf', (('remote', 'u8', False), ('cid', 'u32', False), ('flags', 'u8', False), ('pos', 'u16', False), ('dur', 'u16', False), ('t1', 'str', False), ('t2', 'str', False), )),
     'ota_offer': (30, 'rf', (('size', 'u32', False), ('build', 'u32', False), )),
     'ota_frag': (31, 'rf', (('offset', 'u32', False), ('data', 'bytes', False), )),
     'ota_frag_ack': (32, 'rf', (('offset', 'u32', False), )),
@@ -101,6 +104,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'bt_remote_key': (39, 'ws', (('slot', 'u8', False), ('page', 'u8', False), ('usage', 'u16', False), ('down', 'bool', False), )),
     'bt_listen': (40, 'ws', (('on', 'bool', False), )),
     'hub_log': (41, 'ws', (('level', 'str', False), ('msg', 'str', False), ('ts', 'u32', False), ('dropped', 'u32', True), )),
+    'cover_chunk': (42, 'rf', (('remote', 'u8', False), ('cid', 'u32', False), ('off', 'u16', False), ('data', 'bytes', False), )),
 }
 
 _INT_RANGES = {
