@@ -894,6 +894,33 @@
     "over": 53,
     "shown": "Living Roo..."
    }
+  },
+  {
+   "name": "fixed compact card, long word",
+   "cols": 12,
+   "rows": 4,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 1,
+    "label": "Keyboard Shortcuts",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false,
+    "compact": true
+   },
+   "expect": {
+    "font": "b13",
+    "px": 53,
+    "text_px": 116,
+    "fits": false,
+    "over": 63,
+    "shown": "Keyboa..."
+   }
   }
  ],
  "clip": [

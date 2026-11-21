@@ -306,8 +306,8 @@ pages:
     widgets:
       - {type: button, id: sa_on, x: 0, y: 0, w: 4, label: Power On, icon: power, action: {device: shield_ha, command: power_on}}
       - {type: button, id: sa_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: shield_ha, command: power_off}}
-      - {type: button, id: plex, app_id: com.plexapp.android, x: 0, y: 1, w: 12, shape: row, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}}
-      - {type: button, id: yt, app_id: org.smarttube.stable, x: 0, y: 2, w: 12, shape: row, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
+      - {type: button, id: plex, app_id: com.plexapp.android, x: 0, y: 1, w: 12, shape: row, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}, icon_only: false}
+      - {type: button, id: yt, app_id: org.smarttube.stable, x: 0, y: 2, w: 12, shape: row, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}, icon_only: false}
       - {type: button, id: cam, x: 0, y: 3, w: 12, shape: row, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
       - {type: button, id: camx, x: 0, y: 4, w: 12, shape: row, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
 
@@ -322,7 +322,7 @@ pages:
       - {type: button, id: sp_mute, x: 8, y: 0, w: 4, label: Mute, icon: mute, action: {device: speakers, command: Mute}}
 
   - id: dev_speaker_power
-    title: Speaker Power
+    title: Speaker
     layout: fixed
     cols: 12
     rows: 1

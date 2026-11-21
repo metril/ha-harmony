@@ -723,6 +723,29 @@ export function inferDeviceIcon(d: Device): string | undefined {
   return iconIf(bestIcon(d.name ?? d.id, d.id)) ?? iconIf('app');
 }
 
+/** `fitName`, then fewer words ("Sleep Timer" -> "Sleep") until `fits`; the full name when nothing fits. */
+export function fitShort(name: string, fits: (s: string) => boolean): string {
+  const full = fitName(name, fits);
+  if (fits(full)) return full;
+  const words = full.split(' ');
+  for (let n = words.length - 1; n >= 1; n--) {
+    const t = words.slice(0, n).join(' ');
+    if (fits(t)) return t;
+  }
+  return full;
+}
+/** A page title that fits the header beside the back chevron (b18, 102 px): `full`, else `short` when given, else fewer words. */
+export function fitTitle(full: string, short?: string, px = 100): string {
+  const ok = (t: string): boolean => textPx(t, 'b18') <= px;
+  if (ok(full)) return full;
+  if (short && ok(short)) return short;
+  const words = full.split(' ');
+  for (let n = words.length - 1; n >= 1; n--) if (ok(words.slice(0, n).join(' '))) return words.slice(0, n).join(' ');
+  return full;
+}
+/** A device that is a list of apps (a Home Assistant media player): its page uses the Apps layout. */
+const isAppDevice = (d: Device): boolean => inferDeviceIcon(d) === 'grid_apps';
+
 /** The glyph for an activity card: a brand logo matched by name (Shield TV -> NVIDIA), else the best keyword match, else the TV. */
 export function activityIcon(name: string): string | undefined {
   const brand = (name.toLowerCase().match(/[a-z0-9]+/g) ?? []).map((w) => BRAND_WORDS[w]).find((n) => n && stockIconByName(n));
@@ -756,7 +779,9 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       const lb = labelBudget(grid, { kind: 'button', ...b, label: s, shape: extra.shape ?? 'card', icon: icon ? 1 : 0, icon_only: only, compact: !!extra.compact });
       return !lb || textPx(s, lb.font) <= lb.px;
     };
-    return btn(b.x, b.y, fitName(cmd, fits), { device: dev.id, command: cmd }, { ...(icon ? { icon } : {}), ...(only ? { icon_only: true } : {}), ...extra }, b.w);
+    const name = fitShort(cmd, fits);
+    const cut = !fits(name) && !!icon; // a word that cannot fit: the glyph alone
+    return btn(b.x, b.y, name, { device: dev.id, command: cmd }, { ...(icon ? { icon } : {}), ...(only || cut ? { icon_only: true } : {}), ...extra, ...(cut ? { icon_only: true } : {}) }, b.w);
   };
   /** A full-width row of a FIXED page (44 px): glyph, label, and a chevron when it opens a page. */
   const rowBtn = (label: string, icon: string | undefined, y: number, more: Partial<Widget>): Widget => ({ type: 'button', id: mk('btn'), x: 0, y, w: 12, h: 1, shape: 'row', label: trimToBytes(label, LABEL_MAX), ...(icon ? { icon } : {}), ...more });
@@ -788,15 +813,18 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       // Home: activities as 108 x 80 cards (two a row), then 44 px rows to Devices, Lights and Favorites (when those pages exist) and All Off
       const acts = (cfg.activities ?? []).slice(0, 8);
       const pages = cfg.pages ?? [];
-      const widgets: Widget[] = acts.map((a, i) => btn((i % 2) * 6, Math.floor(i / 2), dn(a.name, a.id), { activity: a.id }, { align: 'left', icon_only: false, icon: activityIcon(a.name ?? a.id) }, 6));
+      const compact = acts.length > 2; // 56 px cards keep Devices, Lights and All Off on the first screen
+      const widgets: Widget[] = acts.map((a, i) => btn((i % 2) * 6, Math.floor(i / 2), dn(a.name, a.id), { activity: a.id }, { align: 'left', icon_only: false, ...(compact ? { compact: true } : {}), icon: activityIcon(a.name ?? a.id) }, 6));
       let y = Math.ceil(acts.length / 2);
       const nav = (label: string, icon: string, target: string | undefined) => {
         if (target) widgets.push(rowBtn(label, iconIf(icon), y++, { nav: target, align: 'left' }));
       };
-      nav('Devices', 'list', (pages.find((p) => p.id === 'devices') ?? pages.find((p) => p.kind === 'favorites' && p.id !== 'favorites'))?.id);
+      const devT = (pages.find((p) => p.id === 'devices') ?? pages.find((p) => p.kind === 'favorites' && p.id !== 'favorites'))?.id;
+      // All Off always stays on the first screen: it comes before the rows that may page
+      nav('Devices', 'list', devT);
+      widgets.push(rowBtn('All Off', iconIf('power'), y++, { action: { activity: 'off' }, role: 'danger', align: 'left' }));
       nav('Lights', 'bulb', pages.find((p) => p.id === 'lights')?.id);
       nav('Favorites', 'star', pages.find((p) => p.id === 'favorites')?.id);
-      widgets.push(rowBtn('All Off', iconIf('power'), y++, { action: { activity: 'off' }, role: 'danger', align: 'left' }));
       const hasHome = pages.some((p) => p.kind === 'home');
       return [fixedPage({ id: pid('home'), ...(hasHome ? {} : { kind: 'home' as const }), title: 'Activities', widgets })];
     }
@@ -807,12 +835,16 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       for (const dev of pool) for (const cmd of commandNames(dev)) if (!isHardKey(cmd) && !all.some((c) => c.cmd === cmd)) all.push({ dev, cmd });
       const numbersDev = pool.find((dv) => commandNames(dv).some((n) => groupCommand(n) === 'numbers'));
       const rest = all.filter((c) => groupCommand(c.cmd) !== 'numbers' && !/^(?:enter|prev_?ch(?:annel)?|last)$/.test(snake(c.cmd)));
-      const utils = rest.filter((c) => UTILITY.test(snake(c.cmd))).slice(0, 4);
+      // a Bluetooth device named like the activity (Shield TV -> Shield) lends its Home, Search, Settings and Keyboard keys
+      const words = (act?.name ?? '').toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+      const lenders = devices.filter((dv) => !pool.includes(dv) && dv.kind === 'bt' && words.some((w) => `${dv.name ?? ''} ${dv.id}`.toLowerCase().includes(w)));
+      const lent: Cmd[] = lenders.flatMap((dv) => commandNames(dv).filter((cmd) => UTILITY.test(snake(cmd)) && !isHardKey(cmd)).map((cmd) => ({ dev: dv, cmd })));
+      const utils = [...rest.filter((c) => UTILITY.test(snake(c.cmd))), ...lent.filter((c) => !rest.some((r) => r.cmd === c.cmd))].slice(0, 4);
       const extras = rest.filter((c) => !utils.includes(c) && EXTRAS.test(snake(c.cmd))).slice(0, 16);
       // device menu commands (Tools) belong on the device page, not among the apps
       const apps = rest.filter((c) => !utils.includes(c) && !extras.includes(c) && groupCommand(c.cmd) === 'other' && !TOOLS.test(snake(c.cmd)));
       const inDev = pool.reduce<Device | undefined>((best, d) => (deviceInputs(d).length > (best ? deviceInputs(best).length : 1) ? d : best), undefined);
-      const name = pool.length === 1 ? (pool[0]?.name ?? pool[0]?.id ?? 'Control') : (act?.name ?? pool[0]?.name ?? 'Control');
+      const name = fitTitle(pool.length === 1 ? (pool[0]?.name ?? pool[0]?.id ?? 'Control') : (act?.name ?? pool[0]?.name ?? 'Control'));
       const ids = { home: pid('activity'), apps: pid('apps'), extras: pid('extras'), numbers: pid('numbers'), inputs: pid('inputs') };
       const nav: { page: string; label: string; icon: string | undefined }[] = [];
       if (apps.length > 2) nav.push({ page: ids.apps, label: 'Apps', icon: iconIf('grid_apps') ?? iconIf('app') });
@@ -836,7 +868,7 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       }
       if (inDev) {
         const ins = deviceInputs(inDev).slice(0, 16);
-        pages.push(fixedPage({ id: ids.inputs, title: trimToBytes(`${dn(inDev.name, inDev.id)} Inputs`, LABEL_MAX), back: true, widgets: ins.map((i, n) => rowBtn(i.label, inputIcon(i.label), n, { action: i.action, align: 'left' })) }));
+        pages.push(fixedPage({ id: ids.inputs, title: fitTitle(`${dn(inDev.name, inDev.id)} Inputs`, 'Inputs'), back: true, widgets: ins.map((i, n) => rowBtn(i.label, inputIcon(i.label), n, { action: i.action, align: 'left' })) }));
       }
       if (extras.length) pages.push(fixedPage({ id: ids.extras, title: 'Extras', back: true, widgets: extras.map((c, i) => cmdBtn(c.dev, c.cmd, g, { x: (i % 3) * 4, y: Math.floor(i / 3), w: 4, h: 1 }, { icon_only: false })) }));
       if (numbersDev) pages.push({ ...numbersPage(ids.numbers, numbersDev, true) });
@@ -860,7 +892,7 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       const plans: Plan[] = [];
       const key = (dev: Device, cmd: string): Widget => {
         const icon = bestIcon(cmd);
-        const label = fitName(cmd, (s) => textPx(s, 'r12') <= 61);
+        const label = fitShort(cmd, (s) => textPx(s, 'r12') <= 61);
         return { type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label: trimToBytes(label, LABEL_MAX), action: { device: dev.id, command: cmd }, ...(icon ? { icon } : {}) };
       };
       for (const d of devices.slice(0, 16)) {
@@ -883,7 +915,25 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       const grid = (ws: Widget[], y0 = 0): Widget[] => ws.map((w, i) => ({ ...w, x: (i % 3) * 4, y: y0 + Math.floor(i / 3) }));
       const devPages: Page[] = [];
       for (const p of plans) {
-        const title = trimToBytes(dn(p.d.name, p.d.id), LABEL_MAX);
+        const title = fitTitle(trimToBytes(dn(p.d.name, p.d.id), LABEL_MAX));
+        if (isAppDevice(p.d) && p.keys.length && !p.inputs.length) {
+          // Apps layout: the power keys, then cards for up to 4 apps, compact cards from 5
+          const compact = p.keys.length > 4;
+          const y0 = Math.ceil(p.power.length / 3);
+          const fits = (s: string): boolean => {
+            const lb = labelBudget({ cols: 12, rows: 16, fixed: true }, { kind: 'button', x: 0, y: 0, w: 6, h: 1, label: s, shape: 'card', icon: 1, icon_only: false, compact });
+            return !lb || textPx(s, lb.font) <= lb.px;
+          };
+          const apps = p.keys.slice(0, 16).map((k, i): Widget => {
+            const cmd = String((k['action'] as { command?: string }).command ?? k.label ?? '');
+            const label = fitShort(cmd, fits);
+            const cut = !fits(label) && !!k.icon;
+            return { ...k, label: trimToBytes(label, LABEL_MAX), w: 6, x: (i % 2) * 6, y: y0 + Math.floor(i / 2), shape: 'card', align: 'left', icon_only: cut, ...(compact ? { compact: true } : {}) };
+          });
+          const ws = [...grid(p.power), ...apps];
+          devPages.push({ id: p.id, layout: 'fixed', cols: 12, rows: Math.max(...ws.map((w) => (w.y ?? 0) + 1)), title, widgets: ws });
+          continue;
+        }
         const inline = p.inputs.length <= 4;
         const allKeys = [...p.power, ...p.keys];
         let nav = inline ? p.inputs.length : p.inputs.length ? 1 : 0;
@@ -911,11 +961,11 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
         devPages.push({ id: p.id, layout: 'fixed', cols: 12, rows: Math.max(1, y), title, widgets });
         if (!inline) {
           const ws = p.inputs.slice(0, 16).map((i, n) => rowBtn(i.label, inputIcon(i.label), n, { action: i.action }));
-          extra.push({ id: inputsId, layout: 'fixed', cols: 12, rows: ws.length, title: trimToBytes(`${title} Inputs`, LABEL_MAX), widgets: ws });
+          extra.push({ id: inputsId, layout: 'fixed', cols: 12, rows: ws.length, title: fitTitle(`${title} Inputs`, 'Inputs'), widgets: ws });
         }
         if (rest.length) {
           const ws = grid(rest.slice(0, 48));
-          extra.push({ id: restId, layout: 'fixed', cols: 12, rows: Math.ceil(ws.length / 3), title: trimToBytes(`${title} Commands`, LABEL_MAX), widgets: ws });
+          extra.push({ id: restId, layout: 'fixed', cols: 12, rows: Math.ceil(ws.length / 3), title: 'Commands', widgets: ws });
         }
       }
       const rows = plans.map((p, i): Widget => {
@@ -929,7 +979,7 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       // Starred commands and activities from any device: compact cards, two to a row.
       const picks: { label: string; icon: string | undefined; action: Action }[] = [];
       for (const a of (cfg.activities ?? []).slice(0, 4)) picks.push({ label: dn(a.name, a.id), icon: activityIcon(a.name ?? a.id), action: { activity: a.id } });
-      for (const d of devices) for (const c of commandNames(d)) if (!isHardKey(c) && !isInputCommand(d, c) && !/^(?:power|num|digit)/i.test(snake(c)) && !TOOLS.test(snake(c)) && picks.length < 12) picks.push({ label: fitName(c, (s) => textPx(s, 'r12') <= 61), icon: bestIcon(c) || undefined, action: { device: d.id, command: c } });
+      for (const d of devices) for (const c of commandNames(d)) if (!isHardKey(c) && !isInputCommand(d, c) && !/^(?:power|num|digit)/i.test(snake(c)) && !TOOLS.test(snake(c)) && picks.length < 12) picks.push({ label: fitShort(c, (s) => textPx(s, 'b13') <= 100 && !s.split(' ').some((w) => textPx(w, 'b13') > 54)), icon: bestIcon(c) || undefined, action: { device: d.id, command: c } });
       const widgets: Widget[] = picks.slice(0, 12).map((p, i) => ({ type: 'button', id: mk('btn'), x: (i % 2) * 6, y: Math.floor(i / 2), w: 6, h: 1, compact: true, icon_only: false, label: trimToBytes(p.label, LABEL_MAX), ...(p.icon ? { icon: p.icon } : {}), action: p.action }));
       return [{ id: pid('favorites'), layout: 'fixed', cols: 12, rows: Math.max(1, Math.ceil(widgets.length / 2)), title: 'Favorites', widgets }];
     }

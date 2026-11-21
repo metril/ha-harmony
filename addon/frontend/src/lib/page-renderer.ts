@@ -214,6 +214,17 @@ function barPrims(p: V2Page, o: RenderOpts, T: RenderTheme, out: Prim[]): void {
   out.push({ t: 'rect', x: 0, y: BAR_H - 1, w: SCREEN_W, h: 1, r: 0, fill: hex(k.s2) });
 }
 
+/** Brand logos (icons 65..91, harmony_core/icons.py BRAND_COLORS) are drawn in the brand colour unless it is too dark for the fill (ui.c brand_rgb). */
+const BRAND_RGB = [0xE5A00D, 0xFF0000, 0xE50914, 0x00A8E1, 0x113CCF, 0x002BE7, 0x1CE783, 0x000000, 0x0064FF, 0x000000, 0xF47521, 0x9146FF, 0x00A4DC, 0x52B54B, 0x17B2E7, 0x282A2D, 0x1DB954, 0xFA243C, 0x000000, 0xFF5500, 0x171A21, 0x107C10, 0x003791, 0xE60012, 0x76B900, 0x000000, 0x4285F4];
+export function brandColour(icon: number, fill: number): number | null {
+  const c = BRAND_RGB[icon - 65];
+  if (c === undefined) return null;
+  const luma = (v: number): number => (((v >> 16) & 255) * 299 + ((v >> 8) & 255) * 587 + (v & 255) * 114) / 1000;
+  const l = Math.floor(luma(c));
+  const lf = Math.floor(luma(fill));
+  return (Math.abs(l - lf) < 48) || l < 40 ? null : c;
+}
+
 function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: RenderTheme, out: Prim[]): void {
   const r = widgetRect(p, w);
   const x = r.x1;
@@ -230,7 +241,8 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
   const tile = w.kind === 'tile' ? sampleTile(p, w, o) : null;
   const c = widgetColors(w, { active: !!active && w.kind === 'button', ...(tile ? { state: tile.state, stale: !!tile.stale } : {}) }, T);
   const ink = hex(c.ink);
-  const icon = hex(c.icon);
+  const brand = !tile && c.border === undefined && !(active && w.kind === 'button') && !w.color ? brandColour(w.icon, c.fill) : null;
+  const icon = hex(brand ?? c.icon);
   const cap = hex(c.cap);
   const k = T.tokens;
   // a 3 px active border, else a 1 px outline when the fill is too close to the ground; both drawn inside the box

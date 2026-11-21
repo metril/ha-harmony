@@ -401,6 +401,16 @@ static wclass_t wclass(const hp_widget_t *w, int bw, int bh) {
   return WC_KEY;
 }
 
+/* Brand logos (icons 65..91, harmony_core/icons.py BRAND_COLORS) are drawn in the brand colour; a colour too dark for the
+ * fill falls back to the role's icon colour. 0 = not a brand glyph. */
+static uint32_t brand_rgb(uint8_t icon, uint32_t fill) {
+  uint32_t c = ra_brand_rgb(icon);
+  if (!c) return 0;
+  int l = (int)((((c >> 16) & 255) * 299 + ((c >> 8) & 255) * 587 + (c & 255) * 114) / 1000);
+  int lf = (int)((((fill >> 16) & 255) * 299 + ((fill >> 8) & 255) * 587 + (fill & 255) * 114) / 1000);
+  return (l - lf < 48 && lf - l < 48) || l < 40 ? 0 : c;
+}
+
 /* (Re)paints widget i from its role, state and the activity / link state: fill and ink colours only, so only that
  * widget's area is invalidated. */
 static void np_paint(ra_ui_t *ui);
@@ -442,7 +452,10 @@ static void paint(ra_ui_t *ui, unsigned i) {
     key_cap = wclass(w, x2 - x1 + 1, y2 - y1 + 1) == WC_KEY;
   }
   if (ui->lbl[i]) lv_obj_set_style_text_color(ui->lbl[i], ra_color(tile || key_cap ? c.cap : c.ink), 0);
-  if (ui->ico[i]) lv_obj_set_style_text_color(ui->ico[i], ra_color(c.icon), 0);
+  if (ui->ico[i]) {
+    uint32_t br = !act && !c.local && !tile ? brand_rgb(w->icon, c.fill) : 0;
+    lv_obj_set_style_text_color(ui->ico[i], ra_color(br ? br : c.icon), 0);
+  }
   if (tile && ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], ra_color(c.ink), 0);
   if (w->kind == HP_WIDGET_BUTTON) { /* app status: an accent ring (2 px, inside the box) and, in wcap, the play / pause glyph */
     int ring = w->tstate != HP_APP_NONE && !act;
