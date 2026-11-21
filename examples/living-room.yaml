@@ -105,6 +105,7 @@ devices:
 activities:
   - id: shield_tv
     name: Shield TV
+    media: {apps_entity: media_player.nvidia_shield_tv, now_playing_entity: media_player.plex_plex_for_android_tv_shield_android_tv}
     devices:
       - {device: tv, input: HDMI 1}
       - {device: shield_ha}
@@ -305,8 +306,8 @@ pages:
     widgets:
       - {type: button, id: sa_on, x: 0, y: 0, w: 4, label: Power On, icon: power, action: {device: shield_ha, command: power_on}}
       - {type: button, id: sa_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: shield_ha, command: power_off}}
-      - {type: button, id: plex, x: 0, y: 1, w: 12, shape: row, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}}
-      - {type: button, id: yt, x: 0, y: 2, w: 12, shape: row, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
+      - {type: button, id: plex, app_id: com.plexapp.android, x: 0, y: 1, w: 12, shape: row, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}}
+      - {type: button, id: yt, app_id: org.smarttube.stable, x: 0, y: 2, w: 12, shape: row, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
       - {type: button, id: cam, x: 0, y: 3, w: 12, shape: row, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
       - {type: button, id: camx, x: 0, y: 4, w: 12, shape: row, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
 
@@ -351,8 +352,8 @@ pages:
       - {type: button, id: f_garage, x: 0, y: 0, w: 6, compact: true, label: Garage Cam, icon: garage, action: {device: shield_ha, command: Garage Cam}}
       - {type: button, id: f_cam, x: 6, y: 0, w: 6, compact: true, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
       - {type: button, id: f_camx, x: 0, y: 1, w: 6, compact: true, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
-      - {type: button, id: f_plex, x: 6, y: 1, w: 6, compact: true, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}}
-      - {type: button, id: f_yt, x: 0, y: 2, w: 6, compact: true, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
+      - {type: button, id: f_plex, app_id: com.plexapp.android, x: 6, y: 1, w: 6, compact: true, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}}
+      - {type: button, id: f_yt, app_id: org.smarttube.stable, x: 0, y: 2, w: 6, compact: true, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
       - {type: button, id: f_watch, x: 6, y: 2, w: 6, compact: true, label: Watch TV, icon: tv, action: {activity: watch_tv}}
 
   - id: shield
@@ -361,8 +362,8 @@ pages:
     cols: 2
     rows: 2
     widgets:
-      - {type: button, id: g_plex, x: 0, y: 0, label: Plex, color: red, action: {device: shield_ha, command: Plex}}
-      - {type: button, id: g_yt, x: 1, y: 0, label: YouTube, color: green, action: {device: shield_ha, command: YouTube}}
+      - {type: button, id: g_plex, app_id: com.plexapp.android, x: 0, y: 0, label: Plex, color: red, action: {device: shield_ha, command: Plex}}
+      - {type: button, id: g_yt, app_id: org.smarttube.stable, x: 1, y: 0, label: YouTube, color: green, action: {device: shield_ha, command: YouTube}}
       - {type: button, id: g_cam, x: 0, y: 1, label: Camera, color: yellow, action: {device: shield_ha, command: Show Camera}}
       - {type: button, id: g_camx, x: 1, y: 1, label: Clear, color: blue, action: {device: shield_ha, command: Clear Camera}}
 

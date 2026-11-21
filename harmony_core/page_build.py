@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Any
 
-from .config_model import Model
+from .config_model import Model, infer_app_ids
 from .ha_actions import default_tap
 from .harmony_proto import SOFT_KEY_BASE
 from .icons import BRAND_COLORS, ICON_IDS, ICONS
@@ -71,6 +71,31 @@ class CompileError(ValueError):
         super().__init__(msg)
         self.path = path or []
         self.count: int | None = None  # wire pages needed, when the error is about the page cap
+
+
+@dataclass(frozen=True)
+class AppBinding:
+    """An app button whose ring follows a media player: its app ids and the player (apps_entity)."""
+
+    page: int  # wire page id
+    widget: int  # wire id of the button
+    app_ids: tuple[str, ...]
+    entity_id: str
+
+
+def _apps_entity(model: Model, page: dict[str, Any], action: dict[str, Any]) -> str | None:
+    """The apps_entity behind a button: its page's activity, else the activity that uses the button's
+    device, else the only one the config names."""
+    acts = {a["id"]: a for a in model["activities"]}
+    media = lambda a: (a.get("media") or {}).get("apps_entity")  # noqa: E731
+    if page.get("activity") in acts:
+        return media(acts[page["activity"]])
+    if action["type"] == "device":
+        for a in model["activities"]:
+            if any(d["device"] == action["device"] for d in a["devices"]) and media(a):
+                return media(a)
+    found = {media(a) for a in model["activities"]} - {None}
+    return next(iter(found)) if len(found) == 1 else None
 
 
 @dataclass(frozen=True)
@@ -442,7 +467,12 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
 
 
 def build_pages(
-    model: Model, act_ids: list[str], names: dict[int, str], keys: dict[str, Any], theme: int = 0
+    model: Model,
+    act_ids: list[str],
+    names: dict[int, str],
+    keys: dict[str, Any],
+    theme: int = 0,
+    apps: list[AppBinding] | None = None,
 ) -> tuple[list[Page], list[str], list[Tile]]:
     """v2 page models (gen 0), the config id behind each wire page, and the tiles.
 
@@ -493,6 +523,11 @@ def build_pages(
             names[code] = f"tap_{s.cfg['id']}"
             if s.kind == "button":
                 keys[str(code)] = s.cfg["action"]
+                if apps is not None and s.cfg["action"]["type"] != "activity":
+                    ids = s.cfg.get("app_id") or infer_app_ids(s.label, s.cfg.get("icon"))
+                    ent = _apps_entity(model, cfg[u.cfg_index], s.cfg["action"]) if ids else None
+                    if ent:
+                        apps.append(AppBinding(pid, wire, tuple(ids), ent))
             else:
                 tiles.append(Tile(pid, wire, s.cfg["entity"], s.label))
                 tap = s.cfg.get("tap")

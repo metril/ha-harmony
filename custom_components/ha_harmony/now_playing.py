@@ -38,7 +38,8 @@ from .harmony_core.text_fit import _metrics
 
 _LOGGER = logging.getLogger(__name__)
 
-# Defaults for the options below (the real entities of this install); config comes with the compiler (E2).
+# Defaults for the options below (the real entities of this install); an activity's `media:` in the
+# config (apps_entity = the Shield, now_playing_entity = the Plex player) overrides them (configure()).
 DEFAULT_SHIELD = "media_player.nvidia_shield_tv"
 DEFAULT_PLEX = "media_player.plex_plex_for_android_tv_shield_android_tv"
 DEFAULT_PLEX_APPS = ("com.plexapp.android",)
@@ -202,6 +203,7 @@ class NowPlayingFeed:
         self.hass, self.client = hass, client
         self._remotes, self._attached, self._spawn = remotes, attached, spawn
         self.shield, self.plex, self.plex_apps, self.font = shield, plex, tuple(plex_apps), font
+        self._opt_shield, self._opt_plex = shield, plex
         self._fetch = fetch or self._fetch_picture
         self._clock = clock
         self._unsub: Callable[[], None] | None = None
@@ -222,6 +224,17 @@ class NowPlayingFeed:
         self._unsub = async_track_state_change_event(
             self.hass, [self.shield, self.plex], self._on_event
         )
+
+    def configure(self, shield: str | None, plex: str | None) -> None:
+        """Use the entities of the live config (None keeps the option default)."""
+        shield, plex = shield or self._opt_shield, plex or self._opt_plex
+        if (shield, plex) == (self.shield, self.plex):
+            return
+        self.shield, self.plex = shield, plex
+        self._last = None
+        if self._unsub:  # started: follow the new entities
+            self.start()
+            self._on_event(None)  # type: ignore[arg-type]
 
     def stop(self) -> None:
         if self._unsub:

@@ -80,6 +80,7 @@ from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
 from .harmony_core.hub_limits import bt_fit_error
+from .app_status import AppStatusFeed
 from .now_playing import NowPlayingFeed
 from .now_playing import options as now_playing_options
 from .ota import CHUNK, TARGET_HUB, UPLOAD_ATTEMPTS, Image, encode_chunk
@@ -321,6 +322,15 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             **now_playing_options(dict(entry.options)),
         )
         self.now_playing.start()
+        # App rings (app_status.py): event driven too; the bindings come with each compiled config
+        self.app_status = AppStatusFeed(
+            hass,
+            client,
+            lambda: self.remotes,
+            lambda remote: self._rlink(remote).attached and self._rlink(remote).tile_state,
+            lambda coro, name: entry.async_create_background_task(hass, coro, name=name),
+            self._cur,
+        )
         self.async_set_updated_data(None)
 
     async def _async_update_data(self) -> None:  # push only
@@ -332,6 +342,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._unsubs = []
         self._untrack_tiles()
         self.now_playing.stop()
+        self.app_status.stop()
         self.btm.shutdown()
         for t in [self._ha_task, self._flush_task, *(lk.task for lk in self.links.values()),
                   *(lk.retry_task for lk in self.links.values())]:
@@ -806,6 +817,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._warned.clear()  # one warning per (service, entity) per config revision
             self._tile_last.clear()
             self._track_tiles()
+            self._apply_media()
             self._prune_registry()
             for cb in list(self._config_listeners):
                 cb()
@@ -965,6 +977,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             link.pushed, link.pending = want, False
             self._retry_reset(link)
             await self._send_tiles({self._cur(t.entity_id) for t in self.compiled.tiles}, (remote,))
+            self.app_status.on_remote_attached(remote)
             return
         link.inflight = want
         t0 = time.monotonic()
@@ -1181,6 +1194,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             link.info_event.clear()
             self._request_push(remote, wait=True)
             self.now_playing.on_remote_attached(remote)
+            self.app_status.on_remote_attached(remote)
             self._notify(topic_remote(remote))
 
     def _on_remote_info(self, data: dict[str, Any]) -> None:
@@ -1262,6 +1276,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             else:
                 self._renamed[cfg] = new
         self._track_tiles()  # re-subscribe under the new ids
+        self._apply_media()
         self._tile_dirty.add(new)
         if self._tile_timer is None:
             self._tile_timer = self.hass.loop.call_later(const.TILE_DEBOUNCE, self._start_flush)
@@ -1330,6 +1345,16 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         for key in [k for k in self._tile_last if k[0] == remote]:
             del self._tile_last[key]
         await self._send_tiles({self._cur(t.entity_id) for t in self.compiled.tiles}, (remote,))
+        self.app_status.on_remote_attached(remote)  # a page push drops the rings too
+
+    def _apply_media(self) -> None:
+        """Point the app rings and Now Playing at the entities of the live config's `media:`."""
+        self.app_status.configure(self.compiled.apps)
+        media = self.compiled.media.values()
+        self.now_playing.configure(
+            next((m["apps_entity"] for m in media if m.get("apps_entity")), None),
+            next((m["now_playing_entity"] for m in media if m.get("now_playing_entity")), None),
+        )
 
     async def _send_tiles(self, entities: set[str], remotes: tuple[int, ...]) -> None:
         """Send each tile whose rendered (state, text) pair changed since the last send. Nothing is
