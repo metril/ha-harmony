@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.24 (2026-11-21)
+
+- Alignment: every button is centred by default, rows included (centred in the space left of the chevron). Per-widget `align: left | center | right`; the editor's Align control is a three-icon toggle, disabled where alignment has no effect (small buttons, tiles, icon-only).
+- The remote and the editor preview now draw buttons the same way at every size (wide buttons were silently left-aligned on the remote). Needs the matching remote firmware.
+
 ## 0.3.23 (2026-11-20)
 
 - Elite strip keys fixed: ACTIVITIES now opens the `kind: home` page and DEVICES the `kind: favorites` page (the driver's key codes were swapped). Needs the matching remote firmware.
