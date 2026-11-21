@@ -11,7 +11,7 @@ class Icon(NamedTuple):
     keywords: tuple[str, ...]
 
 
-MAX_STOCK_ID = 50
+MAX_STOCK_ID = 64
 CUSTOM_FIRST, CUSTOM_LAST = 160, 254  # reserved; 255 is rejected
 ICONS: tuple[Icon, ...] = (
     Icon(1, 'tv', ('tv', 'television', 'screen', 'display', 'monitor')),
@@ -64,6 +64,20 @@ ICONS: tuple[Icon, ...] = (
     Icon(48, 'warn', ('warning', 'alert', 'error')),
     Icon(49, 'moon', ('night', 'sleep', 'moon', 'bedtime')),
     Icon(50, 'sun', ('day', 'morning', 'sun')),
+    Icon(51, 'search', ('search', 'find')),
+    Icon(52, 'grid_apps', ('apps', 'grid', 'launcher')),
+    Icon(53, 'numpad', ('numpad', 'keypad', 'digits', 'numbers')),
+    Icon(54, 'replay10', ('replay', 'back10', 'rewind10')),
+    Icon(55, 'skip10', ('skip10', 'forward10')),
+    Icon(56, 'shuffle', ('shuffle', 'random')),
+    Icon(57, 'repeat', ('repeat', 'loop')),
+    Icon(58, 'aspect', ('aspect', 'ratio', 'zoom')),
+    Icon(59, 'picture', ('picture', 'image', 'photo')),
+    Icon(60, 'sleep_timer', ('timer', 'sleep timer')),
+    Icon(61, 'prev_ch', ('last', 'recall', 'prevch')),
+    Icon(62, 'enter', ('enter', 'return')),
+    Icon(63, 'keyboard', ('keyboard', 'type')),
+    Icon(64, 'audio_track', ('language', 'dub', 'audiotrack')),
 )
 ICON_IDS: dict[str, int] = {i.name: i.id for i in ICONS}
 ICON_NAMES: dict[int, str] = {i.id: i.name for i in ICONS}

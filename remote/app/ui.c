@@ -480,6 +480,8 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
     const lv_style_t *ts = w->shape == HP_SHAPE_MONOGRAM ? &ra_st_txt_display : big ? &ra_st_txt_display
                            : row ? &ra_st_txt_body : (bw >= 100 ? &ra_st_txt_body : &ra_st_txt_btn);
     const lv_font_t *tf = big ? &ra_font_b18 : NULL;
+    if (w->shape == HP_SHAPE_PILL && txt[0] && first_char_len(txt) + first_char_len(txt + first_char_len(txt)) == strlen(txt))
+      tf = &ra_font_b20; /* a 1-2 character pill (keypad digit) reads at b20 */
     int lw = big ? bw - 24 : bw - 8;
     if (row && ic) lw = bw - 12 - px - 8 - 8;
     else if (row) lw = bw - 24;

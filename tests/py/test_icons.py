@@ -57,6 +57,20 @@ PINNED = [
     "warn",
     "moon",
     "sun",
+    "search",
+    "grid_apps",
+    "numpad",
+    "replay10",
+    "skip10",
+    "shuffle",
+    "repeat",
+    "aspect",
+    "picture",
+    "sleep_timer",
+    "prev_ch",
+    "enter",
+    "keyboard",
+    "audio_track",
 ]
 
 

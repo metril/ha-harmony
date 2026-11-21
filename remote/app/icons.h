@@ -2,7 +2,7 @@
 #ifndef RA_ICONS_H
 #define RA_ICONS_H
 
-#define RA_ICON_MAX 50
+#define RA_ICON_MAX 64
 #define RA_ICON_GLYPH_BASE 0xE000 /* glyph = base + id (UTF-8 below) */
 
 #define RA_ICON_TV 1
@@ -105,5 +105,33 @@
 #define RA_GLYPH_MOON "\xEE\x80\xB1" /* U+E031 */
 #define RA_ICON_SUN 50
 #define RA_GLYPH_SUN "\xEE\x80\xB2" /* U+E032 */
+#define RA_ICON_SEARCH 51
+#define RA_GLYPH_SEARCH "\xEE\x80\xB3" /* U+E033 */
+#define RA_ICON_GRID_APPS 52
+#define RA_GLYPH_GRID_APPS "\xEE\x80\xB4" /* U+E034 */
+#define RA_ICON_NUMPAD 53
+#define RA_GLYPH_NUMPAD "\xEE\x80\xB5" /* U+E035 */
+#define RA_ICON_REPLAY10 54
+#define RA_GLYPH_REPLAY10 "\xEE\x80\xB6" /* U+E036 */
+#define RA_ICON_SKIP10 55
+#define RA_GLYPH_SKIP10 "\xEE\x80\xB7" /* U+E037 */
+#define RA_ICON_SHUFFLE 56
+#define RA_GLYPH_SHUFFLE "\xEE\x80\xB8" /* U+E038 */
+#define RA_ICON_REPEAT 57
+#define RA_GLYPH_REPEAT "\xEE\x80\xB9" /* U+E039 */
+#define RA_ICON_ASPECT 58
+#define RA_GLYPH_ASPECT "\xEE\x80\xBA" /* U+E03A */
+#define RA_ICON_PICTURE 59
+#define RA_GLYPH_PICTURE "\xEE\x80\xBB" /* U+E03B */
+#define RA_ICON_SLEEP_TIMER 60
+#define RA_GLYPH_SLEEP_TIMER "\xEE\x80\xBC" /* U+E03C */
+#define RA_ICON_PREV_CH 61
+#define RA_GLYPH_PREV_CH "\xEE\x80\xBD" /* U+E03D */
+#define RA_ICON_ENTER 62
+#define RA_GLYPH_ENTER "\xEE\x80\xBE" /* U+E03E */
+#define RA_ICON_KEYBOARD 63
+#define RA_GLYPH_KEYBOARD "\xEE\x80\xBF" /* U+E03F */
+#define RA_ICON_AUDIO_TRACK 64
+#define RA_GLYPH_AUDIO_TRACK "\xEE\x81\x80" /* U+E040 */
 
 #endif
