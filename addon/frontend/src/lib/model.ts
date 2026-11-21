@@ -79,7 +79,7 @@ export interface Page {
   activity?: string;
   back?: boolean;
   /** `fixed`: 12 columns, widgets sized by class (rows 44, keys 69x52, compact cards 108x56) instead of grid cells */
-  layout?: 'fixed';
+  layout?: 'fixed' | 'grid';
   /** a list page takes its rows from here and places widgets itself */
   list?: { rows: number };
   widgets: Widget[];

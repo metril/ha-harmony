@@ -554,7 +554,9 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("title"): _title,
         vol.Optional("activity"): _slug,
         vol.Optional("back"): bool,
-        vol.Optional("layout"): vol.In(["fixed"], msg="the only layout is `fixed`"),
+        vol.Optional("layout"): vol.In(
+            ["fixed", "grid"], msg="`fixed` (the default look) or `grid` (keep the hand-placed cells)"
+        ),
         vol.Optional("list"): {vol.Required("rows"): _int(1, 16)},
         vol.Required("widgets"): [vol.All(widget, _check_widget)],
     }

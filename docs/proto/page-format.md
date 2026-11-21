@@ -109,7 +109,12 @@ One function computes it: `hp_page_box` (remote/page/page.c; `ra_ui_widget_box` 
 the grid cell (ceil edges, v1 title row shift). Vectors: `valid_fixed` (each with `boxes`, one `[x1,y1,x2,y2]` per widget)
 and `invalid_fixed`.
 
-Compiler: config page `layout: fixed` (cols 12), widget `compact: true`. A FIXED page is split by grid rows
+Compiler: config page `layout: fixed` (cols 12), widget `compact: true`. Every other page is converted to FIXED
+automatically (`_regrid` in `harmony_core/page_build.py`) unless it sets `layout: grid`: cell width picks the class (full
+width a row, or an 80 px card when the cell is tall; half a card, a compact card when there are more than 6, or a tile; a
+third a key; a quarter a glyph key; pills stay pad keys), widgets are packed row-major left to right, a label that does not
+fit widens the widget (key, half card, compact, row) before a glyph button falls back to icon-only, and the
+All Off button is kept on page 1. Config order, ids and actions are unchanged. A FIXED page is split by grid rows
 when the stacked height, the 251 byte budget, 32 widgets or 16 grid rows run out; the pieces reuse the list `seq` groups
 (header "1/2") and renumber their rows from 0. BACK is set unless the page sets `back: false` or its activity (or the
 global key map) maps the Exit key.

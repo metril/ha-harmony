@@ -8,7 +8,9 @@ import pytest
 from test_compiler_pages import BASE, btn, page
 
 from harmony_core.compiler import CompileError, compile_config
-from harmony_core.config_model import ConfigError, parse_data, parse_model, validate_all
+from harmony_core.config_model import ConfigError, parse_data, validate_all
+from harmony_core.config_model import parse_model as _real_parse
+from test_compiler_pages import parse_model
 from harmony_core.page_codec import decode_page
 from harmony_core.theme_build import CAP_THEME_COLOR, CAP_THEME_CUSTOM, active_theme
 from harmony_core.theme_math import PALETTE_NAMES, nearest_palette, serialise_theme, snap565
@@ -162,17 +164,17 @@ def test_preset_theme_id_and_user_theme_wire():
 
 GOLDEN = {
     "living_room": {
-        "gen": 23,
-        "n": 14,
-        "v2": "8924d89c3a84540a8e6edd964d4e85575cce0aa295647a8e274200149e1601de",
-        "v1": "85182975efecb3658c9bccb1da6c6004c525135cfe1af57701c1e03516c017c4",
+        "gen": 5,
+        "n": 15,
+        "v2": "8011b2b52fa7f7980dbea4a460b0154b44294120d9831d04a9c3df7b3b0e1926",
+        "v1": "d63590c9f481a92c54c299dd98eb5ce0c4a3f17313cf8170261a0045e3d70a47",
         "hash": "16b320ed",
     },
     "large": {
-        "gen": 95,
-        "n": 19,
-        "v2": "0507f0e3651d900e3641e78e30f67637590872eb2111573810643e6662a2a57e",
-        "v1": "75bb953efe52e2dad8127dc94116bce92c15f91cb46d3d1712ef9c7fa0da1fdc",
+        "gen": 15,
+        "n": 18,
+        "v2": "4897fbc3836e911d06dc416c1284c5d4d242ecb236b98a59f56972ee3aa89fea",
+        "v1": "ff79fe8ae726ca608e1e1f50294c342d1852ab3a0a15cefe42099411085f4151",
         "hash": "5f6cca72",
     },
 }
@@ -181,7 +183,7 @@ GOLDEN = {
 @pytest.mark.parametrize("name", GOLDEN)
 def test_uncoloured_configs_compile_byte_identical_with_the_same_gen(name):
     if name == "living_room":
-        m = parse_model((FIX / "living_room.yaml").read_text(), "lr", FIX)
+        m = _real_parse((FIX / "living_room.yaml").read_text(), "lr", FIX)  # default layout: converted
     else:
         m = parse_data(json.loads((FIX / "large_config.json").read_text()))
     c = compile_config(m)
