@@ -3,6 +3,7 @@
  * argv[1] = path of the fake helper. */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -169,6 +170,7 @@ static void test_spawn_binding_and_stop(void) {
     bt_link_service();
     CT_CHECK(stats().pid > 0);
     CT_EQ(st()->status, BT_STARTING);
+    CT_CHECK(bt_link_log_fd() >= 0 && (fcntl(bt_link_log_fd(), F_GETFL) & O_NONBLOCK)); /* the helper's stderr pipe never blocks it */
     CT_CHECK(PUMP(ready(), 3000));
     struct bt_link_limits lim;
     bt_link_limits(&lim);

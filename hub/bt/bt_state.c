@@ -1,3 +1,4 @@
+#include "hub/net/hublog.h"
 #include "bt_state.h"
 
 #include <stdarg.h>
@@ -13,11 +14,11 @@ uint8_t g_bt_state = BT_ST_STARTING;
 bool g_bt_le;
 uint8_t g_window;
 
-void log_msg(const char *msg) { fprintf(stderr, "bt-helper: %s\n", msg); }
+void log_msg(const char *msg) { hp_log("bt-helper: %s\n", msg); }
 
 bool g_bt_debug;
 void bt_dbg(const char *msg) {
-    if (g_bt_debug) fprintf(stderr, "bt-helper: [debug] %s\n", msg);
+    if (g_bt_debug) hp_log("bt-helper: [debug] %s\n", msg);
 }
 
 void bt_logf(const char *fmt, ...) {

@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <string.h>
@@ -25,14 +26,36 @@ static bool emit(void *ctx, const hp_logline_t *l) {
     return true;
 }
 
+static uint32_t g_ms;
+static uint32_t fake_now(void) { return g_ms; }
+
+/* A hublog with its own out file (not stderr), the fake clock, installed for hp_log. */
+static int setup(hp_hublog_t *l, sink_t *s, char *path) {
+    memset(s, 0, sizeof *s);
+    int fd = mkstemp(path);
+    CT_CHECK(fd >= 0);
+    CT_EQ(hp_hublog_init(l, emit, s), 0);
+    l->out_fd = fd;
+    l->now_ms = fake_now;
+    l->last_ms = g_ms;
+    hp_hublog_install(l);
+    return fd;
+}
+
+static void teardown(int fd, const char *path) {
+    hp_hublog_install(NULL);
+    close(fd);
+    unlink(path);
+}
+
 static void test_push_when_up(void) {
     static sink_t s;
     static hp_hublog_t l;
-    memset(&s, 0, sizeof s);
+    char path[] = "/tmp/hublogXXXXXX";
+    int fd = setup(&l, &s, path);
     s.up = true;
-    CT_EQ(hp_hublog_init(&l, emit, &s), 0);
-    hp_hublog_write(&l, "hub: a\nhub: b fai", 17);
-    hp_hublog_write(&l, "led\n\n", 5); /* a line split over two writes; an empty line is skipped */
+    hp_log("hub: a\n");
+    hp_log("hub: b %s", "failed"); /* newline added */
     struct pollfd p = {hp_hublog_wake_fd(&l), POLLIN, 0};
     CT_EQ(poll(&p, 1, 0), 1); /* event-driven: the wake fd is readable, no timer involved */
     hp_hublog_service(&l);
@@ -40,71 +63,118 @@ static void test_push_when_up(void) {
     CT_CHECK(!strcmp(s.msg[0], "hub: a") && !strcmp(s.level[0], "info"));
     CT_CHECK(!strcmp(s.msg[1], "hub: b failed") && !strcmp(s.level[1], "warning"));
     CT_EQ(poll(&p, 1, 0), 0); /* drained */
+    teardown(fd, path);
 }
 
-static void test_buffer_while_down_then_flush(void) {
+/* Crash safety: the line is in the file the moment hp_log returns; nothing needs the loop, a thread or the ring. */
+static void test_line_reaches_the_file_synchronously(void) {
     static sink_t s;
     static hp_hublog_t l;
-    memset(&s, 0, sizeof s);
-    CT_EQ(hp_hublog_init(&l, emit, &s), 0);
-    for (int i = 0; i < HP_LOG_RING + 6; i++) {
-        char b[32];
-        int n = snprintf(b, sizeof b, "line %d\n", i);
-        hp_hublog_write(&l, b, (size_t)n);
-        hp_hublog_service(&l); /* nobody connected: stays queued */
-    }
-    CT_EQ(s.n, 0);
-    s.up = true;
-    hp_hublog_service(&l); /* the hello just completed */
-    CT_EQ(s.n, HP_LOG_RING);
-    CT_CHECK(!strcmp(s.msg[0], "line 6")); /* the 6 oldest were dropped, bounded */
-    CT_EQ(s.dropped[0], 6);
-    CT_EQ(s.dropped[1], 0);
-    CT_CHECK(!strcmp(s.msg[HP_LOG_RING - 1], "line 69"));
-}
-
-static void test_long_line_cut(void) {
-    static sink_t s;
-    static hp_hublog_t l;
-    memset(&s, 0, sizeof s);
-    s.up = true;
-    CT_EQ(hp_hublog_init(&l, emit, &s), 0);
-    char big[600];
-    memset(big, 'x', sizeof big);
-    big[599] = '\n';
-    hp_hublog_write(&l, big, sizeof big);
-    hp_hublog_write(&l, "next\n", 5);
-    hp_hublog_service(&l);
-    CT_EQ(s.n, 2);
-    CT_EQ(strlen(s.msg[0]), HP_LOG_LINE - 1);
-    CT_CHECK(!strcmp(s.msg[1], "next"));
-}
-
-static void test_capture_stderr(void) {
-    static sink_t s;
-    static hp_hublog_t l;
-    memset(&s, 0, sizeof s);
-    s.up = true;
     char path[] = "/tmp/hublogXXXXXX";
-    int fd = mkstemp(path), saved = dup(STDERR_FILENO);
-    CT_CHECK(fd >= 0 && saved >= 0);
-    dup2(fd, STDERR_FILENO);
-    CT_EQ(hp_hublog_init(&l, emit, &s), 0);
-    CT_EQ(hp_hublog_capture(&l), 0);
-    fprintf(stderr, "hub: captured %d\n", 7);
-    struct pollfd p = {hp_hublog_wake_fd(&l), POLLIN, 0};
-    CT_EQ(poll(&p, 1, 2000), 1); /* the reader thread woke us; well under a second */
-    hp_hublog_service(&l);
-    hp_hublog_release(&l);
-    dup2(saved, STDERR_FILENO);
-    CT_EQ(s.n, 1);
-    CT_CHECK(!strcmp(s.msg[0], "hub: captured 7"));
+    int fd = setup(&l, &s, path);
+    hp_log("hub: before the crash %d", 1);
     char buf[64] = "";
     CT_CHECK(pread(fd, buf, sizeof buf - 1, 0) > 0);
-    CT_CHECK(!strcmp(buf, "hub: captured 7\n")); /* still teed to the original stderr (the tmpfs log) */
-    close(fd);
-    close(saved);
-    unlink(path);
+    CT_CHECK(!strcmp(buf, "hub: before the crash 1\n"));
+    CT_EQ(s.n, 0); /* never serviced */
+    teardown(fd, path);
+}
+
+static void test_stalled_ring_never_blocks(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    int fd = setup(&l, &s, path);
+    for (int i = 0; i < 500; i++) { /* nobody takes lines; the clock moves so the rate limit does not hide the ring */
+        g_ms += 200;
+        hp_log("hub: line %d", i);
+    }
+    s.up = true;
+    hp_hublog_service(&l);
+    CT_EQ(s.n, HP_LOG_RING); /* bounded */
+    CT_CHECK(!strcmp(s.msg[HP_LOG_RING - 1], "hub: line 499"));
+    CT_EQ(s.dropped[0], 500 - HP_LOG_RING); /* the overflow is counted */
+    /* lock contention: the ring is busy, the line is dropped from it (counted) but still written */
+    pthread_mutex_lock(&l.mu);
+    g_ms += 200;
+    hp_log("hub: while busy");
+    pthread_mutex_unlock(&l.mu);
+    CT_EQ(atomic_load(&l.lost), 1);
+    char buf[8192] = "";
+    ssize_t n = pread(fd, buf, sizeof buf - 1, 0);
+    CT_CHECK(n > 0 && strstr(buf, "hub: while busy\n") && strstr(buf, "hub: line 0\n")); /* the file has everything */
+    teardown(fd, path);
+}
+
+static void test_rate_limit_and_summary(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    g_ms = 1000;
+    int fd = setup(&l, &s, path);
+    s.up = true;
+    for (int i = 0; i < 40; i++) hp_log("hub: burst %d", i); /* same millisecond */
+    hp_hublog_service(&l);
+    CT_EQ(s.n, HP_LOG_BURST); /* the bucket's burst; 10 suppressed */
+    char buf[8192] = "";
+    CT_CHECK(pread(fd, buf, sizeof buf - 1, 0) > 0 && strstr(buf, "hub: burst 39\n")); /* the file keeps them all */
+    g_ms += 1000; /* HP_LOG_RATE tokens back */
+    hp_log("hub: after");
+    hp_hublog_service(&l);
+    CT_EQ(s.n, HP_LOG_BURST + 2);
+    CT_CHECK(!strcmp(s.msg[HP_LOG_BURST], "hub: 10 log lines suppressed"));
+    CT_CHECK(!strcmp(s.msg[HP_LOG_BURST + 1], "hub: after"));
+    teardown(fd, path);
+}
+
+static void test_long_line_cut_in_the_ring_not_the_file(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    int fd = setup(&l, &s, path);
+    s.up = true;
+    char big[301];
+    memset(big, 'x', 300);
+    big[300] = 0;
+    hp_log("%s", big);
+    hp_hublog_service(&l);
+    CT_EQ(s.n, 1);
+    CT_EQ(strlen(s.msg[0]), HP_LOG_LINE - 1);
+    char buf[400] = "";
+    CT_EQ(pread(fd, buf, sizeof buf - 1, 0), 301);
+    teardown(fd, path);
+}
+
+/* The bt helper's stderr pipe: O_NONBLOCK, a stalled reader drops bytes and never blocks the writer. */
+static void test_child_pipe_is_nonblocking(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    int fd = setup(&l, &s, path);
+    s.up = true;
+    int ep[2];
+    CT_EQ(pipe2(ep, O_CLOEXEC | O_NONBLOCK), 0);
+    CT_CHECK(fcntl(ep[1], F_GETFL) & O_NONBLOCK);
+    long wrote = 0;
+    for (;;) { /* nobody reads: the pipe fills and the write fails with EAGAIN instead of blocking */
+        ssize_t w = write(ep[1], "bt: spam spam spam spam\n", 24);
+        if (w < 0) { CT_EQ(errno, EAGAIN); break; }
+        wrote += w;
+        CT_CHECK(wrote < (1 << 22));
+    }
+    hp_linebuf_t lb;
+    memset(&lb, 0, sizeof lb);
+    char b[256];
+    ssize_t n = read(ep[0], b, sizeof b);
+    CT_CHECK(n > 0);
+    hp_hublog_feed(&l, &lb, b, (size_t)n); /* line-split, to the file and the ring; a cut last line stays pending */
+    hp_hublog_service(&l);
+    CT_CHECK(s.n >= 1 && !strncmp(s.msg[0], "bt: spam", 8));
+    char buf[64] = "";
+    CT_CHECK(pread(fd, buf, sizeof buf - 1, 0) > 0 && !strncmp(buf, "bt: spam", 8));
+    close(ep[0]);
+    close(ep[1]);
+    teardown(fd, path);
 }
 
 static void test_emit_needs_a_client(void) {
@@ -136,9 +206,11 @@ static void test_only_home_assistant_hellos_get_logs(void) {
 
 int main(void) {
     CT_RUN(test_push_when_up);
-    CT_RUN(test_buffer_while_down_then_flush);
-    CT_RUN(test_long_line_cut);
-    CT_RUN(test_capture_stderr);
+    CT_RUN(test_line_reaches_the_file_synchronously);
+    CT_RUN(test_stalled_ring_never_blocks);
+    CT_RUN(test_rate_limit_and_summary);
+    CT_RUN(test_long_line_cut_in_the_ring_not_the_file);
+    CT_RUN(test_child_pipe_is_nonblocking);
     CT_RUN(test_emit_needs_a_client);
     CT_RUN(test_only_home_assistant_hellos_get_logs);
     return CT_DONE();

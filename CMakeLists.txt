@@ -89,6 +89,7 @@ add_library(hp_core STATIC
   hub/rf/link.c
   hub/rf/rf_payload.c
   hub/io/rf_spi.c
+  hub/net/hublog.c
   remote/page/page.c
   remote/page/store.c
 )
@@ -173,7 +174,6 @@ add_library(hp_hub STATIC
   hub/net/mdns.c
   hub/net/mdns_srv.c
   hub/net/ident.c
-  hub/net/hublog.c
   hub/net/peers.c
   hub/engine/mapping.c
   hub/engine/sched.c

@@ -114,4 +114,5 @@ void bt_link_connect(unsigned slot) {
     g_bt_fake.last_connect = slot;
 }
 int bt_link_poll_fd(void) { return -1; }
+int bt_link_log_fd(void) { return -1; }
 int bt_link_service(void) { return -1; }

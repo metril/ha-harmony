@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "hub/net/hublog.h"
 #include "bt_bonds.h"
 #include "bt_hid.h"
 #include "bt_main.h"
@@ -748,12 +749,12 @@ int bt_helper_main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--hci") && i + 1 < argc) hci = strtol(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--fd") && i + 1 < argc) fd = strtol(argv[++i], NULL, 10);
         else {
-            fprintf(stderr, "usage: hub bt-helper [--keys PATH] [--hci N] [--fd N]\n");
+            hp_log("usage: hub bt-helper [--keys PATH] [--hci N] [--fd N]\n");
             return 2;
         }
     }
     if (hci < 0 || hci > 15 || fd < 0 || fd > 1023) {
-        fprintf(stderr, "hub bt-helper: bad --hci/--fd\n");
+        hp_log("hub bt-helper: bad --hci/--fd\n");
         return 2;
     }
 
@@ -776,7 +777,7 @@ int bt_helper_main(int argc, char **argv) {
 
     prctl(PR_SET_PDEATHSIG, SIGKILL); /* the parent is gone: so are we */
     if (fcntl((int)fd, F_GETFD) < 0) {
-        fprintf(stderr, "hub bt-helper: no control channel on fd %ld\n", fd);
+        hp_log("hub bt-helper: no control channel on fd %ld\n", fd);
         return 2;
     }
     s_fd = (int)fd;

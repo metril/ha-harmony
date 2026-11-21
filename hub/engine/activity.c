@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include "hub/net/hublog.h"
 #include "hub/engine/activity.h"
 
 #include <stdio.h>
@@ -87,7 +88,7 @@ static int write_state(hp_actsm_t *e) {
     e->last_write = now_of(e);
     e->wrote = true;
     if (rc < 0) {
-        fprintf(stderr, "hub: state write to %s failed (%d)\n", e->state_path, rc);
+        hp_log("hub: state write to %s failed (%d)\n", e->state_path, rc);
         e->persist_h = hp_sched_after(e->sched, HP_ACT_PERSIST_MS, persist_tick, e); /* retry later */
         return rc;
     }
@@ -246,7 +247,7 @@ static void finish(hp_actsm_t *e) {
 }
 
 static void abort_plan(hp_actsm_t *e, int rc) {
-    fprintf(stderr, "hub: activity transition aborted (%d)\n", rc);
+    hp_log("hub: activity transition aborted (%d)\n", rc);
     cancel_plan(e);
     e->map->current = e->reported;
 }

@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include "hub/net/hublog.h"
 #include "hub/io/rf_spi.h"
 
 #include <errno.h>
@@ -109,15 +110,16 @@ static void install_usr1(void) {
 static void logf_limited(spi_t *s, const char *what, const uint8_t *b, size_t n) {
     if (s->logged >= LOG_MAX) return;
     s->logged++;
-    fprintf(stderr, "rf_spi: %s (%zu bytes):", what, n);
-    for (size_t i = 0; i < n && i < 8; i++) fprintf(stderr, " %02x", b[i]);
-    fputc('\n', stderr);
+    char line[96];
+    int k = snprintf(line, sizeof line, "rf_spi: %s (%zu bytes):", what, n);
+    for (size_t i = 0; i < n && i < 8 && k > 0 && (size_t)k + 4 < sizeof line; i++) k += snprintf(line + k, sizeof line - (size_t)k, " %02x", b[i]);
+    hp_log("%s\n", line);
 }
 
 /* Diagnostics sink (default stderr). */
 static void emit_line(spi_t *s, const char *line) {
     if (s->log) s->log(s->log_ctx, line);
-    else fprintf(stderr, "%s\n", line);
+    else hp_log("%s\n", line);
 }
 
 static void slogf(spi_t *s, const char *fmt, ...) {
@@ -467,7 +469,7 @@ int hp_rf_spi_open(const hp_rf_spi_cfg_t *cfg, hp_rf_transport **out) {
     /* Fail closed: alive or indeterminate (or no way to ask) both refuse. */
     int hal = s->ops.hal_alive ? s->ops.hal_alive(s->ops.ctx) : -1;
     if (hal != 0) {
-        fprintf(stderr, "rf_spi: refusing to open %s: stock hal %s; run `tools/deploy_hub.py quiesce` first\n", dev,
+        hp_log("rf_spi: refusing to open %s: stock hal %s; run `tools/deploy_hub.py quiesce` first\n", dev,
                 hal == 1 ? "is running" : "could not be ruled out (cannot read /proc)");
         free(s);
         return -HP_E_HALBUSY;
@@ -497,7 +499,7 @@ int hp_rf_spi_open(const hp_rf_spi_cfg_t *cfg, hp_rf_transport **out) {
     if (pr != 0) goto fail_pipe;
     s->t = (hp_rf_transport){s, spi_send, spi_recv, spi_claim, spi_attached, spi_tx_status, spi_frame_times};
     if (spi_write(s, CMD_INIT, sizeof CMD_INIT) < 0)
-        fprintf(stderr, "rf_spi: init command failed (the chip's ready line may be stuck); continuing\n");
+        hp_log("rf_spi: init command failed (the chip's ready line may be stuck); continuing\n");
     *out = &s->t;
     return 0;
 fail_pipe:
@@ -530,7 +532,7 @@ void hp_rf_spi_destroy(hp_rf_transport *t) {
         pthread_mutex_unlock(&s->mu);
     }
     if (!done) { /* a reader that ignores signals: leak rather than free memory it still uses */
-        fprintf(stderr, "rf_spi: reader did not stop; leaking the transport\n");
+        hp_log("rf_spi: reader did not stop; leaking the transport\n");
         pthread_detach(s->reader);
         return;
     }

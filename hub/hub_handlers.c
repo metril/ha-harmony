@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include "hub/net/hublog.h"
 #include "hub/hub_handlers.h"
 
 #include <stdio.h>
@@ -113,7 +114,7 @@ void hub_run_timers(hub_ctx_t *c) {
 void hub_shutdown(hub_ctx_t *c) {
     hp_cachew_abort(c->xfer);
     c->xfer = NULL;
-    if (hp_actsm_flush_state(&c->act) < 0) fprintf(stderr, "hub: final state write failed\n");
+    if (hp_actsm_flush_state(&c->act) < 0) hp_log("hub: final state write failed\n");
 }
 
 #define HUB_RF_SLOT 1 /* the single paired remote (docs/hardware/hub-rf-cc2544.md s7) */
@@ -194,7 +195,7 @@ static bool pend_make_room(hub_ctx_t *h, hp_msg_type_t incoming) {
             pend_remove(h, i);
             return true;
         }
-    if (!h->pend_dropped++) fprintf(stderr, "hub: held queue full of pages; dropping (counted in pend_dropped)\n");
+    if (!h->pend_dropped++) hp_log("hub: held queue full of pages; dropping (counted in pend_dropped)\n");
     if (is_tile_msg((uint8_t)incoming)) return false;
     for (uint8_t i = 0; i < h->npend; i++) /* the oldest page; the theme of the set is the last thing to lose */
         if (h->pend[i].type != HP_MSG_THEME_PUSH) {
@@ -235,7 +236,7 @@ static void link_result(void *ctx, hp_msg_type_t type, const uint8_t *body, size
         if (pend_match(&h->pend[i], (uint8_t)type, (uint8_t)v[0].u, pg, 0)) return;
     if (*out || !rf_up(h) || (has_gen && h->has_last_gen && gen != h->last_gen)) return;
     if (*tries >= HUB_PAGE_RESENDS) {
-        fprintf(stderr, "hub: %s %u not delivered after %d resends; giving up\n", theme ? "theme" : "page", pg, HUB_PAGE_RESENDS);
+        hp_log("hub: %s %u not delivered after %d resends; giving up\n", theme ? "theme" : "page", pg, HUB_PAGE_RESENDS);
         h->pend_dropped++;
         return;
     }
@@ -1333,7 +1334,7 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
     if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
         int rc = hp_key_handle(&h->map, &h->sinks, (uint8_t)v[0].u, (uint8_t)v[1].u, (hp_key_action_t)v[2].u,
                                emit_key, h);
-        if (rc < 0) fprintf(stderr, "hub: key %u action failed (%d)\n", (unsigned)v[1].u, rc);
+        if (rc < 0) hp_log("hub: key %u action failed (%d)\n", (unsigned)v[1].u, rc);
     } else if (m->type == HP_MSG_BATTERY && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
         cJSON *d = cJSON_CreateObject();
         if (!d) return;
@@ -1373,7 +1374,7 @@ void hub_pump_rf(hub_ctx_t *h) {
     if (hp_rf_link_pump(&h->link, hp_sched_now(&h->sched)) == -HP_E_NOENT) rf_link_lost(h);
     uint32_t failures = hp_rf_link_status(&h->link).failures;
     if (failures != h->rf_failures) {
-        fprintf(stderr, "hub: RF send failed after %d retries (%u object(s) dropped)\n", HP_RF_RETRIES,
+        hp_log("hub: RF send failed after %d retries (%u object(s) dropped)\n", HP_RF_RETRIES,
                 (unsigned)(failures - h->rf_failures));
         h->rf_failures = failures;
     }

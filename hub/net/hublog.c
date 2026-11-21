@@ -2,29 +2,36 @@
 #include "hub/net/hublog.h"
 
 #include <errno.h>
-#include <stdio.h>
 #include <fcntl.h>
-#include <poll.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "hub/hp_errors.h"
 
-static uint32_t now_ms(void) {
+static hp_hublog_t *g_cur;
+
+static uint32_t mono_ms(void) {
     struct timespec t;
     return clock_gettime(CLOCK_MONOTONIC, &t) == 0 ? (uint32_t)(t.tv_sec * 1000u + (uint32_t)(t.tv_nsec / 1000000)) : 0;
 }
 
 int hp_hublog_init(hp_hublog_t *l, hp_log_emit_fn emit, void *ctx) {
     memset(l, 0, sizeof *l);
-    l->wake[0] = l->wake[1] = l->orig_fd = l->pipe_r = l->pipe_w = -1;
+    l->wake[0] = l->wake[1] = -1;
+    l->out_fd = STDERR_FILENO;
+    l->now_ms = mono_ms;
     if (pthread_mutex_init(&l->mu, NULL) != 0 || pipe2(l->wake, O_NONBLOCK | O_CLOEXEC) < 0) return -HP_E_INVAL;
     l->emit = emit;
     l->ctx = ctx;
+    l->tokens_m = HP_LOG_BURST * 1000u;
+    l->last_ms = l->now_ms();
     return 0;
 }
 
+void hp_hublog_install(hp_hublog_t *l) { g_cur = l; }
 int hp_hublog_wake_fd(const hp_hublog_t *l) { return l->wake[0]; }
 
 const char *hp_hublog_level(const char *m) {
@@ -34,9 +41,8 @@ const char *hp_hublog_level(const char *m) {
     return "info";
 }
 
-static void push(hp_hublog_t *l, const char *s, size_t n) { /* mu held */
-    while (n && (s[n - 1] == '\r' || s[n - 1] == ' ')) n--;
-    if (!n) return;
+static void push(hp_hublog_t *l, const char *s, size_t n, uint32_t ts) { /* mu held */
+    if (n >= HP_LOG_LINE) n = HP_LOG_LINE - 1;
     if (l->count == HP_LOG_RING) {
         l->head = (l->head + 1) % HP_LOG_RING;
         l->count--;
@@ -46,32 +52,92 @@ static void push(hp_hublog_t *l, const char *s, size_t n) { /* mu held */
     memcpy(e->msg, s, n);
     e->msg[n] = 0;
     snprintf(e->level, sizeof e->level, "%s", hp_hublog_level(e->msg));
-    e->ts = now_ms();
+    e->ts = ts;
     e->dropped = 0;
 }
 
-void hp_hublog_write(hp_hublog_t *l, const char *buf, size_t n) {
-    pthread_mutex_lock(&l->mu);
-    bool any = false;
-    for (size_t i = 0; i < n; i++) {
-        char c = buf[i];
-        if (c == '\n') {
-            if (!l->over || l->plen) { push(l, l->part, l->plen); any = true; }
-            l->plen = 0;
-            l->over = false;
-        } else if (l->over) {
-            continue;
-        } else if (l->plen < sizeof l->part - 1) {
-            l->part[l->plen++] = (unsigned char)c < 0x20 && c != '\t' ? ' ' : c;
-        } else {
-            l->over = true;
-        }
+/* One finished line into the ring. Never blocks: a busy lock drops (and counts) the line. */
+static void ship(hp_hublog_t *l, const char *s, size_t n) {
+    while (n && (s[n - 1] == '\r' || s[n - 1] == ' ')) n--;
+    if (!l || !n) return;
+    if (pthread_mutex_trylock(&l->mu) != 0) {
+        atomic_fetch_add(&l->lost, 1);
+        return;
     }
-    bool kick = any && !l->woken;
-    if (kick) l->woken = true;
+    uint32_t now = l->now_ms();
+    uint64_t add = (uint64_t)(now - l->last_ms) * HP_LOG_RATE; /* milli-tokens: rate/s * ms */
+    l->last_ms = now;
+    uint64_t t = l->tokens_m + add;
+    if (t > HP_LOG_BURST * 1000u) t = HP_LOG_BURST * 1000u;
+    bool kick = false;
+    if (t < 1000) {
+        l->suppressed++;
+    } else {
+        t -= 1000;
+        if (l->suppressed) {
+            char sum[64];
+            int sn = snprintf(sum, sizeof sum, "hub: %u log lines suppressed", (unsigned)l->suppressed);
+            push(l, sum, (size_t)sn, now);
+            l->suppressed = 0;
+        }
+        push(l, s, n, now);
+        kick = !l->woken;
+        if (kick) l->woken = true;
+    }
+    l->tokens_m = (uint32_t)t;
     pthread_mutex_unlock(&l->mu);
     if (kick) { char b = 1; (void)!write(l->wake[1], &b, 1); }
 }
+
+static void out_line(hp_hublog_t *l, const char *s, size_t n) { /* s ends in \n; one write() so lines never interleave */
+    int fd = l ? l->out_fd : STDERR_FILENO;
+    while (n) {
+        ssize_t w = write(fd, s, n);
+        if (w < 0 && errno == EINTR) continue;
+        if (w <= 0) return;
+        s += w;
+        n -= (size_t)w;
+    }
+}
+
+void hp_log(const char *fmt, ...) {
+    char b[512];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(b, sizeof b - 1, fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if ((size_t)n > sizeof b - 2) n = sizeof b - 2;
+    if (!n || b[n - 1] != '\n') b[n++] = '\n';
+    hp_hublog_t *l = g_cur;
+    out_line(l, b, (size_t)n); /* first, synchronously: the file has it before anything else can go wrong */
+    size_t st = 0;
+    for (size_t i = 0; i < (size_t)n; i++)
+        if (b[i] == '\n') {
+            ship(l, b + st, i - st);
+            st = i + 1;
+        }
+}
+
+void hp_hublog_feed(hp_hublog_t *l, hp_linebuf_t *lb, const char *buf, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        char c = buf[i];
+        if (c == '\n') {
+            if (lb->n) {
+                lb->part[lb->n] = '\n';
+                out_line(l, lb->part, lb->n + 1);
+                ship(l, lb->part, lb->n);
+            }
+            lb->n = 0;
+            lb->over = false;
+        } else if (!lb->over) {
+            if (lb->n < sizeof lb->part - 1) lb->part[lb->n++] = (unsigned char)c < 0x20 && c != '\t' ? ' ' : c;
+            else lb->over = true;
+        }
+    }
+}
+
+void hp_log_feed(hp_linebuf_t *lb, const char *buf, size_t n) { hp_hublog_feed(g_cur, lb, buf, n); }
 
 void hp_hublog_service(hp_hublog_t *l) {
     char junk[16];
@@ -86,7 +152,7 @@ void hp_hublog_service(hp_hublog_t *l) {
         e = l->ring[l->head];
         l->head = (l->head + 1) % HP_LOG_RING;
         l->count--;
-        e.dropped = l->dropped;
+        e.dropped = l->dropped + atomic_exchange(&l->lost, 0);
         l->dropped = 0;
         pthread_mutex_unlock(&l->mu);
         if (l->emit && l->emit(l->ctx, &e)) continue;
@@ -102,57 +168,4 @@ void hp_hublog_service(hp_hublog_t *l) {
         pthread_mutex_unlock(&l->mu);
         return;
     }
-}
-
-static void *reader(void *arg) {
-    hp_hublog_t *l = arg;
-    char buf[512];
-    for (;;) {
-        ssize_t r = read(l->pipe_r, buf, sizeof buf);
-        if (r < 0 && errno == EINTR) continue;
-        if (r <= 0) break;
-        pthread_mutex_lock(&l->mu);
-        bool q = l->quit;
-        pthread_mutex_unlock(&l->mu);
-        if (q && buf[r - 1] == 0) r--; /* hp_hublog_release's sentinel: not a log byte */
-        for (ssize_t off = 0; off < r;) { /* tee first: the log file must not wait on anything else */
-            ssize_t w = write(l->orig_fd, buf + off, (size_t)(r - off));
-            if (w <= 0) break;
-            off += w;
-        }
-        if (r > 0) hp_hublog_write(l, buf, (size_t)r);
-        if (q) break;
-    }
-    return NULL;
-}
-
-int hp_hublog_capture(hp_hublog_t *l) {
-    int p[2];
-    if (l->running || pipe2(p, O_CLOEXEC) < 0) return -HP_E_INVAL;
-    int keep = fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 10);
-    if (keep < 0) { close(p[0]); close(p[1]); return -HP_E_INVAL; }
-    l->orig_fd = keep;
-    l->pipe_r = p[0];
-    l->pipe_w = p[1];
-    if (pthread_create(&l->th, NULL, reader, l) != 0) {
-        close(p[0]); close(p[1]); close(keep);
-        return -HP_E_INVAL;
-    }
-    l->running = true;
-    dup2(p[1], STDERR_FILENO); /* dup2 clears CLOEXEC: the BT helper child keeps logging into the same stream */
-    return 0;
-}
-
-void hp_hublog_release(hp_hublog_t *l) {
-    if (!l->running) return;
-    dup2(l->orig_fd, STDERR_FILENO);
-    pthread_mutex_lock(&l->mu);
-    l->quit = true;
-    pthread_mutex_unlock(&l->mu);
-    (void)!write(l->pipe_w, "", 1); /* wakes the reader (children may still hold the write end, so no EOF) */
-    pthread_join(l->th, NULL);
-    close(l->pipe_r);
-    close(l->pipe_w);
-    close(l->orig_fd);
-    l->running = false;
 }
