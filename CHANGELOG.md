@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.22 (2026-11-20)
+
+A hub request that gets no answer now reports "request timed out after 10 s" instead of an empty "hub is unreachable" reason.
+
 ## 0.3.21 (2026-11-20)
 
 Off always sends power-off to HA devices, even when their state still reads off.

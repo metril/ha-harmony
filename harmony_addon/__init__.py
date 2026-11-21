@@ -1,3 +1,3 @@
 """Harmony editor add-on server (aiohttp), fronted only by Supervisor ingress."""
 
-__version__ = "0.3.21"
+__version__ = "0.3.22"

@@ -1,6 +1,6 @@
 {
   "name": "harmony-editor-frontend",
-  "version": "0.3.21",
+  "version": "0.3.22",
   "private": true,
   "type": "module",
   "scripts": {
