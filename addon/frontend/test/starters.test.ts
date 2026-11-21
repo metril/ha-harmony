@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Config } from '../src/lib/model';
-import { isHardKey, labelMeter, pageOverflow, templatePages } from '../src/lib/studio-model';
+import type { Device } from '../src/lib/model';
+import vectors from '../../../tests/vectors/inputs.json';
+import { derivedInputsNote, deviceInputs, inferDeviceIcon, inputIcon, isHardKey, labelMeter, normalizeInput, pageOverflow, templatePages } from '../src/lib/studio-model';
 import { bestIcon, suggestIcons } from '../src/lib/icon-suggest';
 
 const ir = { proto: 'nec', addr: 1, cmd: 1 };
@@ -47,20 +49,72 @@ describe('starter pages', () => {
     expect(templatePages(c, 'devices')[0]?.kind).toBeUndefined();
   });
 
-  it('the device starter is one nav row per device plus a 3-column grid each, labelled by command', () => {
+  it('the device starter is a fixed page: a glyph row per device, keys, inline inputs and All Commands', () => {
     const pages = templatePages(cfg(), 'devices');
-    expect(pages.map((p) => p.id)).toEqual(['devices', 'dev_shield', 'dev_tv']);
-    expect(pages[0]?.widgets.map((w) => [w.label, w.nav])).toEqual([['Shield TV', 'dev_shield'], ['LG TV', 'dev_tv']]);
-    const tv = pages[2]!;
-    expect(tv.cols).toBe(3);
-    const labels = tv.widgets.map((w) => w.label);
-    expect(labels).toContain('HDMI 1');
-    expect(labels).toContain('Power On');
-    expect(labels).not.toContain('Menu'); // a hard key
-    expect(labels.some((l) => /^lg|input hdmi/i.test(l ?? ''))).toBe(false);
+    expect(pages.map((p) => p.id)).toEqual(['devices', 'dev_shield', 'dev_tv', 'dev_shield_all']);
+    expect(pages.every((p) => p.layout === 'fixed' && p.cols === 12)).toBe(true);
+    const list = pages[0]!;
+    expect(list.widgets.map((w) => [w.label, w.nav, w.shape, w.w])).toEqual([['Shield TV', 'dev_shield', 'row', 12], ['LG TV', 'dev_tv', 'row', 12]]);
+    expect(list.widgets.every((w) => !!w.icon)).toBe(true);
+    const tv = pages.find((p) => p.id === 'dev_tv')!;
+    const keys = tv.widgets.filter((w) => w.w === 4);
+    expect(keys.map((w) => w.label)).toEqual(['Pic Mode', 'Aspect']);
+    const withPower = templatePages({ devices: [{ id: 'p', name: 'P', power: { on: ir, off: ir }, commands: cmds('Tools') }], activities: [], pages: [] } as unknown as Config, 'devices')[1]!;
+    expect(withPower.widgets.map((w) => [w.label, w.x, w.y, w.w])).toEqual([['Power On', 0, 0, 4], ['Power Off', 4, 0, 4], ['Tools', 8, 0, 4]]);
+    expect(tv.widgets.filter((w) => w.shape === 'row').map((w) => [w.label, w.icon])).toEqual([['HDMI 1', 'hdmi1'], ['HDMI 2', 'hdmi2']]);
+    expect(tv.widgets.map((w) => w.label)).not.toContain('Menu'); // a hard key
+    expect(tv.widgets.some((w) => /^lg|input hdmi/i.test(w.label ?? ''))).toBe(false);
+    const sh = pages.find((p) => p.id === 'dev_shield')!;
+    expect(sh.widgets.at(-1)).toMatchObject({ label: 'All Commands', nav: 'dev_shield_all' });
+    expect(sh.widgets.filter((w) => w.w === 4).length % 3).toBe(0);
   });
 
-  it('no starter label overflows its cell', () => {
+  it('5 or more inputs sit behind an Inputs row; the page height never passes the stack limit', () => {
+    const c = { devices: [{ id: 'sw', name: 'Switch', inputs: Object.fromEntries(['HDMI 1', 'HDMI 2', 'HDMI 3', 'HDMI 4', 'AV'].map((k) => [k, ir])) }], activities: [], pages: [] } as unknown as Config;
+    const pages = templatePages(c, 'devices');
+    expect(pages.map((p) => p.id)).toEqual(['devices', 'dev_sw', 'dev_sw_in']);
+    expect(pages[1]!.widgets.map((w) => [w.label, w.nav])).toEqual([['Inputs', 'dev_sw_in']]);
+    expect(pages[2]!.widgets.map((w) => w.icon)).toEqual(['hdmi1', 'hdmi2', 'hdmi3', 'hdmi4', 'av']);
+  });
+
+  it('only the power buttons whose code exists are added; AV 1 and AV 2 stay separate', () => {
+    const c = { devices: [{ id: 'p', name: 'P', power: { on: ir }, commands: cmds('InputAv1', 'InputAv2') }], activities: [], pages: [] } as unknown as Config;
+    const pg = templatePages(c, 'devices')[1]!;
+    expect(pg.widgets.map((w) => w.label)).toEqual(['Power On', 'AV 1', 'AV 2']);
+  });
+
+  it('a device without anything to press gets no row', () => {
+    const c = { devices: [{ id: 'x', name: 'Empty' }], activities: [], pages: [] } as unknown as Config;
+    expect(templatePages(c, 'devices')[0]!.widgets).toEqual([]);
+  });
+
+  it('the favorites starter is a page of 6-wide compact cards', () => {
+    const f = templatePages(cfg(), 'favorites')[0]!;
+    expect(f.layout).toBe('fixed');
+    expect(f.widgets[0]).toMatchObject({ label: 'Watch Shield', w: 6, compact: true, action: { activity: 'watch' } });
+    expect(f.widgets.every((w) => w.w === 6 && w.compact === true && (w.x === 0 || w.x === 6))).toBe(true);
+  });
+
+  it('normalizeInput follows the shared vectors; inputs derive from commands', () => {
+    for (const [name, want] of vectors as [string, string | null][]) expect(normalizeInput(name), name).toBe(want);
+    expect(deviceInputs({ id: 'tv', commands: cmds('InputHdmi1', 'HDMI2', 'InputTv', 'Mute') } as unknown as Device).map((i) => i.label)).toEqual(['HDMI 1', 'HDMI 2', 'TV']);
+    expect(derivedInputsNote({ id: 'tv', commands: cmds('InputHdmi1', 'InputAv', 'InputUsb', 'InputTv') } as unknown as Device)).toBe('4 inputs found in commands');
+    expect(derivedInputsNote({ id: 'tv', inputs: { A: ir }, commands: cmds('InputHdmi1') } as unknown as Device)).toBe('');
+  });
+
+  it('device icons: config, brand, kind or domain, then keyword; input glyphs', () => {
+    const d = (o: object) => ({ id: 'x', ...o }) as unknown as Device;
+    expect(inferDeviceIcon(d({ icon: 'tv', name: 'Whatever' }))).toBe('tv');
+    expect(inferDeviceIcon(d({ id: 'shield', name: 'Shield', kind: 'bt' }))).toBe('nvidia');
+    expect(inferDeviceIcon(d({ id: 'shield_ha', name: 'Shield Apps', kind: 'ha', entity: 'media_player.nvidia_shield_tv' }))).toBe('grid_apps');
+    expect(inferDeviceIcon(d({ name: 'Speakers' }))).toBe('speaker');
+    expect(inferDeviceIcon(d({ id: 'sp', name: 'Speaker Power', kind: 'ha', entity: 'switch.speakers' }))).toBe('speaker');
+    expect(inferDeviceIcon(d({ id: 'p', name: 'Lamp Power', kind: 'ha', entity: 'switch.lamp' }))).toBe('plug');
+    expect(inferDeviceIcon(d({ name: 'KVM' }))).toBe('kvm');
+    expect(['HDMI 3', 'AV', 'USB', 'TV', 'MacBook Pro', 'Computer 4', 'Desktop', 'Work Laptop'].map((l) => inputIcon(l))).toEqual(['hdmi3', 'av', 'usb', 'tv', 'laptop', 'pc', 'pc', 'laptop']);
+  });
+
+  it('no starter label overflows its cell (fixed-layout class budgets are checked by the studio)', () => {
     for (const id of ['activity', 'devices', 'numbers'] as const) {
       const c = cfg();
       const pages = templatePages(c, id, { activity: 'watch' });

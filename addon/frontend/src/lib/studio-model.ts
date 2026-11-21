@@ -612,13 +612,14 @@ export function deletePage(cfg: Config, index: number): Config {
   return next;
 }
 
-export type TemplateId = 'activities' | 'activity' | 'numbers' | 'lights' | 'devices' | 'blank';
+export type TemplateId = 'activities' | 'activity' | 'numbers' | 'lights' | 'devices' | 'favorites' | 'blank';
 export const TEMPLATES: { id: TemplateId; name: string; note: string }[] = [
   { id: 'activities', name: 'Activities Home', note: 'One button per activity, plus All off' },
   { id: 'activity', name: 'Activity Control', note: 'Home, Apps, Extras and Numbers pages for the activity' },
   { id: 'numbers', name: 'Number Pad', note: '0-9 of the first device that has them' },
   { id: 'lights', name: 'Lights and Scenes', note: 'Tiles for Home Assistant lights' },
-  { id: 'devices', name: 'Device List', note: 'A row per device, with a command page for each' },
+  { id: 'devices', name: 'Device List', note: 'A row per device, with a page of keys and inputs for each' },
+  { id: 'favorites', name: 'Favorites', note: 'Compact cards for the commands and activities you use most' },
   { id: 'blank', name: 'Blank', note: 'Empty 4x6 grid' },
 ];
 
@@ -632,6 +633,69 @@ const EXTRAS = /replay|skip_?\d|(?:rew|rewind|forward|ffwd)_?\d|subtitle|caption
 
 /** The stock icon name when this build's icon set has it; a glyph that is not shipped yet is simply not used. */
 const iconIf = (name: string): string | undefined => (stockIconByName(name) ? name : undefined);
+
+// ---------------------------------------------------------------- inputs and device icons
+/** "InputHdmi1", "HDMI1", "Input HDMI 2" -> "HDMI 1" / "HDMI 2"; "InputAv" -> "AV", "InputUsb" -> "USB", "InputTv" -> "TV"; null for
+ * any other command. Twin of harmony_core.key_names.normalize_input (both run tests/vectors/inputs.json). */
+export function normalizeInput(name: string): string | null {
+  const c = snake(name.trim().replace(/([A-Za-z])(\d)/g, '$1_$2'));
+  const h = /^(?:input_)?hdmi_?(\d+)(?:_?mhl|_?arc|_?earc)?$/.exec(c);
+  if (h) return `HDMI ${Number(h[1])}`;
+  const p = /^input_(av|usb|tv)(?:_?(\d+))?$/.exec(c);
+  return p ? (p[1] as string).toUpperCase() + (p[2] ? ` ${Number(p[2])}` : '') : null;
+}
+/** A device's inputs: the configured ones, else derived from commands named like InputHdmi1 (label = the normalised name). */
+export function deviceInputs(d: Device): { label: string; action: Action }[] {
+  if (Object.keys(d.inputs ?? {}).length) return Object.keys(d.inputs ?? {}).map((k) => ({ label: k, action: { device: d.id, input: k } }));
+  const out: { label: string; action: Action }[] = [];
+  for (const c of commandNames(d)) {
+    const label = normalizeInput(c);
+    if (label && !out.some((o) => o.label === label)) out.push({ label, action: { device: d.id, command: c } });
+  }
+  return out;
+}
+
+/** The editor's note for a device whose inputs come from its commands ("4 inputs found in commands"); '' when it has its own `inputs`. */
+export function derivedInputsNote(d: Device): string {
+  if (Object.keys(d.inputs ?? {}).length) return '';
+  const n = deviceInputs(d).length;
+  return n ? `${n} input${n === 1 ? '' : 's'} found in commands` : '';
+}
+/** Commands that select an input (shown as inputs, not as keys) when the device has no `inputs` of its own. */
+const isInputCommand = (d: Device, c: string): boolean => !Object.keys(d.inputs ?? {}).length && normalizeInput(c) !== null;
+
+const INPUT_ICON: [RegExp, string][] = [[/macbook|laptop|notebook/i, 'laptop'], [/desktop|computer|\bpc\b|workstation/i, 'pc']];
+/** Glyph for an input row: HDMI N -> hdmiN, AV, USB, TV, laptop / pc by name, else the best keyword match. */
+export function inputIcon(label: string): string | undefined {
+  const h = /^HDMI (\d)$/.exec(label);
+  if (h) return iconIf(`hdmi${h[1]}`);
+  const fixed = ({ AV: 'av', USB: 'usb', TV: 'tv' } as Record<string, string>)[label];
+  if (fixed) return iconIf(fixed);
+  return iconIf(INPUT_ICON.find(([re]) => re.test(label))?.[1] ?? bestIcon(label));
+}
+
+const KIND_ICON: [RegExp, string][] = [
+  [/kvm/i, 'kvm'], [/soundbar|sound bar|sonos|homepod/i, 'soundbar'], [/receiver|\bavr\b|denon|marantz|onkyo|yamaha rx/i, 'receiver'],
+  [/speaker|audioengine/i, 'speaker'], [/projector|beamer/i, 'projector'], [/stream|roku|apple tv|chromecast|fire ?tv/i, 'streamer'],
+  [/laptop|macbook/i, 'laptop'], [/\bpc\b|computer|desktop/i, 'pc'], [/\btv\b|television|bravia|oled|qled|samsung|\blg\b/i, 'tv'],
+];
+const BRAND_WORDS: Record<string, string> = { shield: 'nvidia', nvidia: 'nvidia', plex: 'plex', youtube: 'youtube', kodi: 'kodi' };
+/**
+ * The glyph a device gets: the icon set in config, a brand logo matched by name or entity, the device kind or Home Assistant domain,
+ * then keywords in the name. A Home Assistant media player skips the brand step: it is an app list, not the box itself.
+ */
+export function inferDeviceIcon(d: Device): string | undefined {
+  if (d.icon && stockIconByName(d.icon)) return d.icon;
+  const text = `${d.name ?? ''} ${d.id} ${d.entity ?? ''}`;
+  const domain = d.entity ? entityDomain(d.entity) : '';
+  if (d.kind === 'ha' && domain === 'media_player') return iconIf('grid_apps');
+  const brand = (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).map((w) => BRAND_WORDS[w]).find((n) => n && stockIconByName(n));
+  if (brand) return brand;
+  const kind = KIND_ICON.find(([re]) => re.test(text))?.[1];
+  if (kind && stockIconByName(kind)) return kind;
+  if (d.kind === 'ha' && (domain === 'switch' || domain === 'input_boolean') && !Object.keys(d.commands ?? {}).length && !Object.keys(d.inputs ?? {}).length) return iconIf('plug');
+  return iconIf(bestIcon(d.name ?? d.id, d.id)) ?? iconIf('app');
+}
 
 /** The pages a template adds, in order; the first is the one that opens. Ids are unique among the config's pages and each other. */
 export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { entity_id: string; name?: string }[]; activity?: string; device?: string } = {}): Page[] {
@@ -741,22 +805,86 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       return [{ id: pid('lights'), cols: 4, rows: 6, title: 'Lights', back: true, widgets }];
     }
     case 'devices': {
+      // Every device with something to press gets a row (a glyph on each) and a page: power keys, commands as keys, inputs inline
+      // (up to 4) or behind an Inputs row (5 or more), and All Commands for the keys that do not fit.
       const listId = pid('devices');
-      const withCmds = devices.filter((d) => commandNames(d).some((c) => !isHardKey(c)));
-      const grids = withCmds.map((d) => ({ d, id: pid(`dev_${d.id}`.slice(0, 31)) }));
-      const rows: Widget[] = devices.map((d) => {
-        const g = grids.find((x) => x.d === d);
-        const icon = d.icon && stockIconByName(d.icon) ? d.icon : undefined;
-        return { type: 'button', id: mk('btn'), label: trimToBytes(dn(d.name, d.id), LABEL_MAX), ...(g ? { nav: g.id } : { action: { none: true } }), ...(icon ? { icon } : {}) };
-      });
-      const hasFav = (cfg.pages ?? []).some((p) => p.kind === 'favorites');
-      const pages: Page[] = [{ id: listId, cols: 1, list: { rows: 6 }, ...(hasFav ? {} : { kind: 'favorites' as const }), title: 'Devices', back: true, widgets: rows }];
-      for (const { d, id: gid } of grids) {
-        const cmds = commandNames(d).filter((c) => !isHardKey(c)).slice(0, 12);
-        const gr = { cols: 3, rows: Math.max(1, Math.min(4, Math.ceil(cmds.length / 3))) };
-        pages.push({ id: gid, cols: 3, rows: gr.rows, title: trimToBytes(dn(d.name, d.id), 24), back: true, widgets: cmds.map((c, i) => cmdBtn(d, c, gr, { x: i % 3, y: Math.floor(i / 3), w: 1, h: 1 })) });
+      type Plan = { d: Device; id: string; power: Widget[]; keys: Widget[]; inputs: { label: string; action: Action }[] };
+      const plans: Plan[] = [];
+      const key = (dev: Device, cmd: string): Widget => {
+        const icon = bestIcon(cmd);
+        const label = fitName(cmd, (s) => textPx(s, 'r12') <= 61);
+        return { type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label: trimToBytes(label, LABEL_MAX), action: { device: dev.id, command: cmd }, ...(icon ? { icon } : {}) };
+      };
+      for (const d of devices.slice(0, 16)) {
+        const inputs = deviceInputs(d);
+        const power: Widget[] = [];
+        if (d.power?.on || d.power?.off || d.power?.toggle) {
+          const { on, off, toggle } = d.power;
+          const mk1 = (label: string, command: string, extra: Partial<Widget> = {}): Widget => ({ type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label, icon: 'power', action: { device: d.id, command }, ...extra });
+          if (on) power.push(mk1('Power On', 'power_on', { role: 'accent' }));
+          if (off) power.push(mk1('Power Off', 'power_off'));
+          if (toggle && !on && !off) power.push(mk1('Power', 'power_on'));
+        }
+        const keys = commandNames(d).filter((c) => !isHardKey(c) && !isInputCommand(d, c) && !/^power_(?:on|off)$/.test(c)).map((c) => key(d, c));
+        if (power.length || keys.length || inputs.length) plans.push({ d, id: pid(`dev_${d.id}`.slice(0, 31)), power, keys, inputs });
       }
-      return pages;
+      const hasFav = (cfg.pages ?? []).some((p) => p.kind === 'favorites');
+      const rowH = (n: number): number => (n ? n * 44 + (n - 1) * 2 : 0);
+      const keysH = (k: number): number => (k ? k * 52 + (k - 1) * 8 : 0);
+      const extra: Page[] = [];
+      const rowBtn = (label: string, icon: string | undefined, y: number, more: Partial<Widget>): Widget => ({ type: 'button', id: mk('btn'), x: 0, y, w: 12, h: 1, shape: 'row', label: trimToBytes(label, LABEL_MAX), ...(icon ? { icon } : {}), ...more });
+      const grid = (ws: Widget[], y0 = 0): Widget[] => ws.map((w, i) => ({ ...w, x: (i % 3) * 4, y: y0 + Math.floor(i / 3) }));
+      const devPages: Page[] = [];
+      for (const p of plans) {
+        const title = trimToBytes(dn(p.d.name, p.d.id), LABEL_MAX);
+        const inline = p.inputs.length <= 4;
+        const allKeys = [...p.power, ...p.keys];
+        let nav = inline ? p.inputs.length : p.inputs.length ? 1 : 0;
+        // keys that do not fit above the rows go to All Commands, which then takes one row itself
+        let fit = allKeys.length;
+        const room = (n: number): number => {
+          let k = 0;
+          while (k < 16 && keysH(k + 1) + (n ? 8 + rowH(n) : 0) <= 276 && k * 3 < allKeys.length) k++;
+          return k * 3;
+        };
+        fit = Math.min(allKeys.length, room(nav));
+        if (fit < allKeys.length) {
+          nav += 1;
+          fit = Math.min(allKeys.length, room(nav));
+        }
+        const shown = allKeys.slice(0, fit);
+        const rest = allKeys.slice(fit);
+        const widgets: Widget[] = grid(shown);
+        let y = Math.ceil(shown.length / 3);
+        const inputsId = p.inputs.length > 4 ? pid(`${p.id}_in`.slice(0, 31)) : '';
+        const restId = rest.length ? pid(`${p.id}_all`.slice(0, 31)) : '';
+        if (inline) for (const i of p.inputs) widgets.push(rowBtn(i.label, inputIcon(i.label), y++, { action: i.action }));
+        else if (p.inputs.length) widgets.push(rowBtn('Inputs', iconIf('input'), y++, { nav: inputsId }));
+        if (rest.length) widgets.push(rowBtn('All Commands', iconIf('list'), y++, { nav: restId }));
+        devPages.push({ id: p.id, layout: 'fixed', cols: 12, rows: Math.max(1, y), title, widgets });
+        if (!inline) {
+          const ws = p.inputs.slice(0, 16).map((i, n) => rowBtn(i.label, inputIcon(i.label), n, { action: i.action }));
+          extra.push({ id: inputsId, layout: 'fixed', cols: 12, rows: ws.length, title: trimToBytes(`${title} Inputs`, LABEL_MAX), widgets: ws });
+        }
+        if (rest.length) {
+          const ws = grid(rest.slice(0, 48));
+          extra.push({ id: restId, layout: 'fixed', cols: 12, rows: Math.ceil(ws.length / 3), title: trimToBytes(`${title} Commands`, LABEL_MAX), widgets: ws });
+        }
+      }
+      const rows = plans.map((p, i): Widget => {
+        const icon = inferDeviceIcon(p.d);
+        return rowBtn(dn(p.d.name, p.d.id), icon, i, { nav: p.id });
+      });
+      const list: Page = { id: listId, layout: 'fixed', cols: 12, rows: Math.max(1, rows.length), ...(hasFav ? {} : { kind: 'favorites' as const }), title: 'Devices', widgets: rows };
+      return [list, ...devPages, ...extra];
+    }
+    case 'favorites': {
+      // Starred commands and activities from any device: compact cards, two to a row.
+      const picks: { label: string; icon: string | undefined; action: Action }[] = [];
+      for (const a of (cfg.activities ?? []).slice(0, 4)) picks.push({ label: dn(a.name, a.id), icon: iconIf(bestIcon(a.name ?? a.id)), action: { activity: a.id } });
+      for (const d of devices) for (const c of commandNames(d)) if (!isHardKey(c) && !isInputCommand(d, c) && !/^(?:power|num|digit)/i.test(snake(c)) && picks.length < 12) picks.push({ label: fitName(c, (s) => textPx(s, 'r12') <= 61), icon: bestIcon(c) || undefined, action: { device: d.id, command: c } });
+      const widgets: Widget[] = picks.slice(0, 12).map((p, i) => ({ type: 'button', id: mk('btn'), x: (i % 2) * 6, y: Math.floor(i / 2), w: 6, h: 1, compact: true, label: trimToBytes(p.label, LABEL_MAX), ...(p.icon ? { icon: p.icon } : {}), action: p.action }));
+      return [{ id: pid('favorites'), layout: 'fixed', cols: 12, rows: Math.max(1, Math.ceil(widgets.length / 2)), title: 'Favorites', widgets }];
     }
     default:
       return [{ id: pid('blank'), cols: 4, rows: 6, title: 'New Page', widgets: [] }];

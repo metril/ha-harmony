@@ -57,6 +57,9 @@ _DOMAIN_ICON = {
     "sun": "sun",
 }
 _NAV_ICON_LEAD = {"prev": "chev_left", "home": "home"}
+_KIND_ICONS = ("speaker", "soundbar", "receiver", "streamer", "projector", "kvm", "plug", "laptop", "pc")
+_CHEVRONS = frozenset(i for n, i in ICON_IDS.items() if n.startswith("chev"))
+_BRAND_NAMES = {"shield": "nvidia", "nvidia": "nvidia", "plex": "plex", "youtube": "youtube", "kodi": "kodi"}
 
 
 class CompileError(ValueError):
@@ -153,12 +156,30 @@ class _Unit:
     fixed: bool = False
 
 
+def nav_icon(label: str, dev_icons: dict[str, str] | None, dev_by_name: dict[str, str] | None) -> int:
+    """Icon for a nav row with none set: the device it names (its config icon), a brand logo matched by
+    name, then name keywords (the device kind or domain words are among them). Mirrors studio-model.ts."""
+    dev = (dev_by_name or {}).get(label.strip().casefold())
+    if dev and (dev_icons or {}).get(dev):
+        return ICON_IDS[dev_icons[dev]]  # type: ignore[index]
+    for word in _words(label):
+        if word in _BRAND_NAMES:
+            return ICON_IDS[_BRAND_NAMES[word]]
+    for word in _words(label):
+        kind = word[:-1] if len(word) > 3 and word.endswith("s") else word
+        if kind in _KIND_ICONS:
+            return ICON_IDS[kind]
+    found = icon_for_text(label)
+    return 0 if found in _CHEVRONS else found  # a nav row draws its own trailing chevron
+
+
 def _spec(
     w: dict[str, Any],
     act_ids: list[str],
     act_names: dict[str, str],
     in_list: bool,
     dev_icons: dict[str, str] | None = None,
+    dev_by_name: dict[str, str] | None = None,
 ) -> _Spec:
     kind, label = w["type"], w["label"]
     role = w.get("role", "default")
@@ -171,6 +192,8 @@ def _spec(
         role = "nav"
         if icon is None and nav in _NAV_ICON_LEAD:
             icon = ICON_IDS[_NAV_ICON_LEAD[nav]]
+        if icon is None:
+            icon = nav_icon(label, dev_icons, dev_by_name)
     elif kind == "button":
         action = w["action"]
         target = action["activity"] if action["type"] == "activity" else None
@@ -334,10 +357,14 @@ def _split_fixed(specs: list[_Spec], p: dict[str, Any], pi: int, base: int) -> l
 def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     names = {a["id"]: a.get("name", a["id"]) for a in model["activities"]}
     dev_icons = {d["id"]: d["icon"] for d in model["devices"] if d.get("icon")}
+    dev_by_name = {}
+    for d in model["devices"]:
+        dev_by_name[d["id"].casefold()] = d["id"]
+        dev_by_name[d.get("name", d["id"]).casefold()] = d["id"]
     units: list[_Unit] = []
     for pi, p in enumerate(model["pages"]):
         in_list = "list" in p
-        specs = [_spec(w, act_ids, names, in_list, dev_icons) for w in p["widgets"]]
+        specs = [_spec(w, act_ids, names, in_list, dev_icons, dev_by_name) for w in p["widgets"]]
         cols, rows = p["cols"], p["rows"]
         fixed = p.get("layout") == "fixed"
         if fixed and in_list:  # one full-width row each, one grid row per widget
@@ -424,7 +451,7 @@ def build_pages(
     """
     units = _units(model, act_ids)
     if len(units) > MAX_PAGES:
-        err = CompileError(f"too many pages: {len(units)} (at most {MAX_PAGES})")
+        err = CompileError(f"too many pages: {len(units)} (the remote holds at most {MAX_PAGES}); delete pages or shorten lists that split into several")
         err.count = len(units)
         raise err
     first: dict[int, int] = {}
