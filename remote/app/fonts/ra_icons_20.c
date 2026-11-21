@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 20 px
  * Bpp: 4
- * Opts: --font /tmp/tmp.TGaqO0wqEV/ra_icons.ttf --size 20 --bpp 4 --format lvgl --no-compress --no-kerning -r 0xE001-0xE040 --lv-font-name ra_icons_20 --lv-include lvgl.h -o /home/OLYMPOS/jagannath/projects/ha-harmony/.claude/worktrees/agent-a023c45155a377e44/tools/../remote/app/fonts/ra_icons_20.c
+ * Opts: --font /tmp/tmp.TGaqO0wqEV/ra_icons.ttf --size 20 --bpp 4 --format lvgl --no-compress --no-kerning -r 0xE001-0xE040 --lv-font-name ra_icons_20 --lv-include lvgl.h -o <workspace>/tools/../remote/app/fonts/ra_icons_20.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
