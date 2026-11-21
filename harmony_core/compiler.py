@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cached_property
 from typing import Any
@@ -19,6 +19,7 @@ from .keys import KEY_NAMES, UNKNOWN_KEY, key_code
 from .page_build import (
     MAX_PAGES,
     MAX_SOFT_KEYS,
+    AppBinding,
     CompileError,
     Tile,
     build_pages,
@@ -63,6 +64,7 @@ class HaDevice:
     off: HaCall | None
     inputs: dict[str, HaCall] = field(default_factory=dict)
     commands: dict[str, HaCall] = field(default_factory=dict)
+    source_list: bool = False  # inputs come from the entity's source_list attribute
 
     def lookup(self, command: str) -> HaCall | None:
         """`power_on`, `power_off`, `input_<name>` or a configured command -> its call."""
@@ -180,6 +182,10 @@ class Compiled:
     ha_devices: dict[str, HaDevice] = field(default_factory=dict)
     ha_activities: dict[str, HaActivity] = field(default_factory=dict)
     activity_ids: list[str] = field(default_factory=list)  # index = the hub's activity index
+    # App rings: per app button (wire page, widget id) its app ids and the apps_entity player.
+    apps: list[AppBinding] = field(default_factory=list)
+    # activity id -> {apps_entity, now_playing_entity} (only the keys the activity sets)
+    media: dict[str, dict[str, str]] = field(default_factory=dict)
     # Measured sizes against the hub's and remote's limits (the editor's meters). Not part of
     # equality: two compiles of the same config are the same config.
     usage: dict[str, Any] = field(default_factory=dict, compare=False)
@@ -296,8 +302,24 @@ def _keymap(
     return out
 
 
+def _select_source(d: dict[str, Any], name: str) -> HaCall:
+    """The call behind input `name` of a `source_list` device: select_source on its entity."""
+    return HaCall("media_player.select_source", (d["entity"],), {"source": name}, False)
+
+
+def _input_call(d: dict[str, Any], name: str) -> HaCall:
+    """An input's HA call: the explicit one, else (source_list devices) select_source."""
+    if name in d["inputs"]:
+        return call_of(d["inputs"][name])
+    return _select_source(d, name)
+
+
 def compile_config(
-    model: Model, *, collect: list[Problem] | None = None, limits: HubLimits = CURRENT
+    model: Model,
+    *,
+    collect: list[Problem] | None = None,
+    limits: HubLimits = CURRENT,
+    source_lists: Mapping[str, Sequence[str]] | None = None,
 ) -> Compiled:
     """Model -> Compiled. Raises CompileError when the hub or the remote cannot take it.
 
@@ -315,6 +337,16 @@ def compile_config(
     names: dict[int, str] = {}
     ha_devs = {d["id"]: d for d in model["devices"] if d.get("kind") == "ha"}
 
+    def input_call(d: dict[str, Any], name: str, path: list[Any] | None = None) -> HaCall:
+        """`_input_call`, but a name outside the entity's known source_list is an error."""
+        known = (source_lists or {}).get(d.get("entity", ""))
+        if known and d.get("source_list") and name not in d["inputs"] and name not in known:
+            fail(
+                f"{d['id']}: input {name!r} is not in {d['entity']}'s source_list ({', '.join(known)})",
+                path,
+            )
+        return _input_call(d, name)
+
     def ha_of(a: dict[str, Any]) -> HaCall | None:
         """The HA call behind an action: an `ha:` action, or a reference to an HA device."""
         if a["type"] == "ha_call":
@@ -322,7 +354,7 @@ def compile_config(
         if a["type"] == "device" and a["device"] in ha_devs:
             d = ha_devs[a["device"]]
             if "input" in a:
-                return call_of(d["inputs"][a["input"]])
+                return input_call(d, a["input"])
             if a["command"] in ("power_on", "power_off"):
                 return call_of(d["power"]["on" if a["command"] == "power_on" else "off"])
             return call_of(d["commands"][a["command"]])
@@ -393,13 +425,14 @@ def compile_config(
 
     act_ids = [a["id"] for a in model["activities"]]
     wire_count = 0
+    apps: list[AppBinding] = []
     try:
         at = active_theme(model)
     except ThemeError as exc:  # parse_model rejects these; a partial preview model may not
         fail(str(exc), ["theme"])
         at = ActiveTheme()
     try:
-        pages, cfg_ids, tiles = build_pages(model, act_ids, names, keys, at.id)
+        pages, cfg_ids, tiles = build_pages(model, act_ids, names, keys, at.id, apps)
     except CompileError as exc:
         fail(str(exc), exc.path or ["pages"])
         pages, cfg_ids, tiles = [], [], []
@@ -479,12 +512,17 @@ def compile_config(
         for cfg, m in zip(page_of, models, strict=False)
     ]
 
+    def input_names(d: dict[str, Any]) -> tuple[str, ...]:
+        """Explicit inputs, then the entity's source_list (when the caller knows it)."""
+        extra = (source_lists or {}).get(d.get("entity", ""), ()) if d.get("source_list") else ()
+        return (*d["inputs"], *(n for n in extra if n not in d["inputs"]))
+
     cdevs = {
         d["id"]: CompiledDevice(
             d["id"],
             d.get("name", d["id"]),
             d.get("power"),
-            tuple(d["inputs"]),
+            input_names(d),
             tuple(d["commands"]),
             tuple(d.get("aliases", ())),
             d["id"] in ha_devs,
@@ -498,8 +536,9 @@ def compile_config(
             d.get("settle_ms", 0),
             call_of(d["power"]["on"]) if d.get("power") else None,
             call_of(d["power"]["off"]) if d.get("power") else None,
-            {n: call_of(x) for n, x in d["inputs"].items()},
+            {n: _input_call(d, n) for n in input_names(d)},
             {n: call_of(x) for n, x in d["commands"].items()},
+            bool(d.get("source_list")),
         )
         for i, d in ha_devs.items()
     }
@@ -514,7 +553,7 @@ def compile_config(
         powered = {s_.device for s_ in start}
         start += [
             HaStep(
-                call_of(ha_devs[x["device"]]["inputs"][x["input"]]),
+                input_call(ha_devs[x["device"]], x["input"]),
                 x["device"],
                 ha_devices[x["device"]].settle_ms if x["device"] in powered else 0,
                 "input",
@@ -571,4 +610,6 @@ def compile_config(
         ha_devices=ha_devices,
         ha_activities=ha_activities,
         activity_ids=[a["id"] for a in model["activities"]],
+        apps=apps,
+        media={a["id"]: dict(a["media"]) for a in model["activities"] if a.get("media")},
     )
