@@ -386,6 +386,127 @@ static void test_status_bar_and_state_screens(void) {
   app_destroy(&app);
 }
 
+/* ---- back stack: a chain of 10 v2 pages 0..9; page n has a nav button to n+1. Page 0 is Home, page 9 a BACK page
+ * (act 1), page 5 is a BACK page too. ---- */
+#define KEY_EXIT_ 174
+#define KEY_HOME_ 364
+#define NCHAIN 10
+static void push_chain(void) {
+  for (int id = 0; id < NCHAIN; id++) {
+    uint8_t raw[40], k = 0;
+    int back = id == 9 || id == 5, last = id == NCHAIN - 1;
+    const char *lbl = "Go";
+    raw[k++] = 2; raw[k++] = (uint8_t)id; raw[k++] = 2; raw[k++] = 3; raw[k++] = 1;
+    raw[k++] = 3; raw[k++] = NCHAIN; raw[k++] = (uint8_t)((id == 0 ? HP_PAGE_KIND_HOME : HP_PAGE_KIND_NORMAL) | (back ? 4 : 0));
+    raw[k++] = 0; raw[k++] = (uint8_t)(id == 9 ? 1 : 0); raw[k++] = 0; /* idx/cnt, act, title len */
+    raw[k++] = (uint8_t)(HP_WIDGET_BUTTON | 0x10 | 0x40); raw[k++] = 1; raw[k++] = 0x00; raw[k++] = 0x21;
+    raw[k++] = HP_ROLE_NAV; raw[k++] = (uint8_t)(last ? 0 : id + 1); raw[k++] = 2;
+    memcpy(raw + k, lbl, 2);
+    k += 2;
+    fkl_push_page(&lk, raw, k);
+  }
+}
+static void settle_n(void) {
+  for (int i = 0; i < 3; i++) { fk.now += 40; app_step(&app, 0); }
+}
+static int shown_page(void) { return app.ui.page.version == 2 ? app.ui.page.page_id : -1; }
+static void tap_nav(void) {
+  const hp_widget_t *w = &app.ui.page.widgets[0];
+  int x1, y1, x2, y2;
+  ra_ui_widget_rect(&app.ui.page, w, &x1, &y1, &x2, &y2);
+  for (int d = 1; d >= 0; d--) {
+    fk.now += 40;
+    fk_touch(&fk, (x1 + x2) / 2, (y1 + y2) / 2, d);
+    app_step(&app, 0);
+  }
+}
+static void tap_chevron(void) {
+  for (int d = 1; d >= 0; d--) {
+    fk.now += 40;
+    fk_touch(&fk, 12, 12, d);
+    app_step(&app, 0);
+  }
+}
+static void key(int code) {
+  for (int d = 1; d >= 0; d--) {
+    fk.now += 40;
+    fk_key(&fk, 0, code, d);
+    app_step(&app, 0);
+  }
+}
+
+static void test_back_stack(void) {
+  CT_EQ(start(NULL), 0);
+  push_chain();
+  settle_n();
+  CT_EQ(shown_page(), 0);
+  CT_EQ(app.depth, 1);
+  tap_nav(); tap_nav();
+  CT_EQ(shown_page(), 2);
+  CT_EQ(app.depth, 3);
+  tap_chevron(); /* pop, not Home */
+  CT_EQ(shown_page(), 1);
+  tap_chevron();
+  CT_EQ(shown_page(), 0);
+  tap_chevron(); /* empty: Home */
+  CT_EQ(shown_page(), 0);
+  CT_EQ(app.depth, 1);
+  /* overflow: 9 pushes keep the newest 8 (pages 2..9); the 8th pop goes Home */
+  for (int i = 0; i < 9; i++) tap_nav();
+  CT_EQ(shown_page(), 9);
+  CT_EQ(app.depth, APP_STACK);
+  for (int p = 8; p >= 2; p--) {
+    tap_chevron();
+    CT_EQ(shown_page(), p);
+  }
+  tap_chevron();
+  CT_EQ(shown_page(), 0);
+  /* Home key clears the stack to [home] */
+  tap_nav(); tap_nav(); tap_nav();
+  CT_EQ(app.depth, 4);
+  key(KEY_HOME_);
+  CT_EQ(shown_page(), 0);
+  CT_EQ(app.depth, 1);
+  app_destroy(&app);
+}
+
+static void test_exit_pops_on_back_pages_only(void) {
+  CT_EQ(start(NULL), 0);
+  push_chain();
+  settle_n();
+  for (int i = 0; i < 4; i++) tap_nav();
+  CT_EQ(shown_page(), 4);
+  int sent = lk.nsent;
+  key(KEY_EXIT_); /* page 4 has no BACK: forwarded to the hub, nothing popped */
+  CT_EQ(shown_page(), 4);
+  CT_CHECK(lk.nsent > sent);
+  tap_nav(); /* page 5: BACK */
+  sent = lk.nsent;
+  key(KEY_EXIT_);
+  CT_EQ(shown_page(), 4); /* popped one page, not Home */
+  CT_EQ(lk.nsent, sent);
+  app_destroy(&app);
+}
+
+static void test_activity_start_resets_stack(void) {
+  CT_EQ(start(NULL), 0);
+  push_chain();
+  settle_n();
+  for (int i = 0; i < 3; i++) tap_nav();
+  CT_EQ(shown_page(), 3);
+  app_link_event_t *e = &lk.q[lk.nq++];
+  memset(e, 0, sizeof *e);
+  e->kind = APP_LINK_EV_STATE_UPDATE;
+  e->activity = 0;
+  e->power = true;
+  settle_n();
+  CT_EQ(shown_page(), 9); /* the act page; the stack is [home, act] */
+  CT_EQ(app.depth, 2);
+  tap_chevron();
+  CT_EQ(shown_page(), 0);
+  app_destroy(&app);
+}
+
 int main(void) {
   CT_RUN(test_refuses_wrong_panel);
   CT_RUN(test_fallback_only_on_link_failure);
@@ -394,5 +515,8 @@ int main(void) {
   CT_RUN(test_bootcount);
   CT_RUN(test_seam_refuses);
   CT_RUN(test_full_session_is_safe);
+  CT_RUN(test_back_stack);
+  CT_RUN(test_exit_pops_on_back_pages_only);
+  CT_RUN(test_activity_start_resets_stack);
   return CT_DONE();
 }
