@@ -294,7 +294,7 @@ export function primTemplate(q: Prim): TemplateResult {
     case 'text':
       return svg`<text x=${q.x} y=${q.y} font-size=${q.size} fill=${q.fill} text-anchor=${q.anchor} font-weight=${q.weight ?? 400}>${q.s}</text>`;
     case 'icon':
-      return svg`<g transform=${`translate(${q.x} ${q.y}) scale(${q.size / 24})`} fill="none" stroke=${q.color} stroke-width=${1.8} stroke-linecap="round" stroke-linejoin="round">${iconInner(q.id)}</g>`;
+      return svg`<g transform=${`translate(${q.x} ${q.y}) scale(${q.size / 24})`} fill="none" color=${q.color} stroke=${q.color} stroke-width=${1.8} stroke-linecap="round" stroke-linejoin="round">${iconInner(q.id)}</g>`;
     case 'path':
       return svg`<path d=${q.d} fill=${q.fill ?? 'none'} stroke=${q.stroke} stroke-width=${q.sw} stroke-linecap="round" stroke-linejoin="round"></path>`;
   }

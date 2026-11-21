@@ -16,7 +16,7 @@ from typing import Any
 from .config_model import Model
 from .ha_actions import default_tap
 from .harmony_proto import SOFT_KEY_BASE
-from .icons import ICON_IDS, ICONS
+from .icons import BRAND_COLORS, ICON_IDS, ICONS
 from .key_names import display_name
 from .page_codec import (
     HEADER_V2,
@@ -91,6 +91,7 @@ def icon_for_text(text: str) -> int:
     for src in dict.fromkeys((text, display_name(text))):
         words = _words(src)
         names.add("_".join(words))
+        names.add("".join(words))  # "You Tube" -> youtube
         for t in words:
             toks.add(t)
             toks.add(_EXPAND.get(t, t))
@@ -246,6 +247,9 @@ def _default_icon_only(s: _Spec, cols: int, rows: int) -> None:
     if "icon_only" in s.cfg or s.kind != "button" or not s.icon or s.nav is not None:
         return
     if s.shape == "monogram":
+        return
+    if s.icon in BRAND_COLORS:  # a brand logo replaces the text
+        s.icon_only = True
         return
     if (cols == 4 and s.w == 1) or fit_label(SimpleNamespace(cols=cols, rows=rows), _probe(s)):
         s.icon_only = True

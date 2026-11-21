@@ -11,7 +11,7 @@ class Icon(NamedTuple):
     keywords: tuple[str, ...]
 
 
-MAX_STOCK_ID = 64
+MAX_STOCK_ID = 91
 CUSTOM_FIRST, CUSTOM_LAST = 160, 254  # reserved; 255 is rejected
 ICONS: tuple[Icon, ...] = (
     Icon(1, 'tv', ('tv', 'television', 'screen', 'display', 'monitor')),
@@ -78,6 +78,35 @@ ICONS: tuple[Icon, ...] = (
     Icon(62, 'enter', ('enter', 'return')),
     Icon(63, 'keyboard', ('keyboard', 'type')),
     Icon(64, 'audio_track', ('language', 'dub', 'audiotrack')),
+    Icon(65, 'plex', ('plex',)),
+    Icon(66, 'youtube', ('youtube',)),
+    Icon(67, 'netflix', ('netflix',)),
+    Icon(68, 'prime_video', ('primevideo', 'amazon')),
+    Icon(69, 'disney_plus', ('disney', 'disneyplus', 'disney+')),
+    Icon(70, 'hbo_max', ('hbomax', 'hbo')),
+    Icon(71, 'hulu', ('hulu',)),
+    Icon(72, 'apple_tv', ('appletv', 'atv')),
+    Icon(73, 'paramount_plus', ('paramount', 'paramountplus', 'paramount+')),
+    Icon(74, 'peacock', ('peacock',)),
+    Icon(75, 'crunchyroll', ('crunchyroll',)),
+    Icon(76, 'twitch', ('twitch',)),
+    Icon(77, 'jellyfin', ('jellyfin',)),
+    Icon(78, 'emby', ('emby',)),
+    Icon(79, 'kodi', ('kodi',)),
+    Icon(80, 'plexamp', ('plexamp',)),
+    Icon(81, 'spotify', ('spotify',)),
+    Icon(82, 'apple_music', ('applemusic',)),
+    Icon(83, 'tidal', ('tidal',)),
+    Icon(84, 'soundcloud', ('soundcloud',)),
+    Icon(85, 'steam', ('steam',)),
+    Icon(86, 'xbox', ('xbox',)),
+    Icon(87, 'playstation', ('playstation', 'ps3', 'ps4', 'ps5', 'psn')),
+    Icon(88, 'nintendo_switch', ('nintendo', 'nintendoswitch')),
+    Icon(89, 'nvidia', ('nvidia',)),
+    Icon(90, 'sonos', ('sonos',)),
+    Icon(91, 'chromecast', ('chromecast', 'googlecast')),
 )
 ICON_IDS: dict[str, int] = {i.name: i.id for i in ICONS}
 ICON_NAMES: dict[int, str] = {i.id: i.name for i in ICONS}
+# brand logos: the brand card colour (#RRGGBB); they default to icon_only
+BRAND_COLORS: dict[int, str] = {65: '#E5A00D', 66: '#FF0000', 67: '#E50914', 68: '#00A8E1', 69: '#113CCF', 70: '#002BE7', 71: '#1CE783', 72: '#000000', 73: '#0064FF', 74: '#000000', 75: '#F47521', 76: '#9146FF', 77: '#00A4DC', 78: '#52B54B', 79: '#17B2E7', 80: '#282A2D', 81: '#1DB954', 82: '#FA243C', 83: '#000000', 84: '#FF5500', 85: '#171A21', 86: '#107C10', 87: '#003791', 88: '#E60012', 89: '#76B900', 90: '#000000', 91: '#4285F4'}

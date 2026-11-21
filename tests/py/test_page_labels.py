@@ -39,6 +39,14 @@ def btn(i, label, cmd, x=0, y=0, w=1, extra=""):
         ("PowerOff", "power"),
         ("Settings", "settings"),
         ("home", "home"),
+        ("Plex", "plex"),
+        ("YouTube", "youtube"),
+        ("You Tube", "youtube"),
+        ("Prime Video", "prime_video"),
+        ("Apple TV", "apple_tv"),
+        ("Disney+", "disney_plus"),
+        ("PS5", "playstation"),
+        ("Spotify", "spotify"),
     ],
 )
 def test_icon_for_text(text, icon):
@@ -83,12 +91,19 @@ def test_no_icon_means_no_icon_only():
 
 
 def test_overflow_is_a_warning_not_an_error():
-    c, _ = widgets(btn(1, "Plexamp Deluxe Edition", "plex", w=2))
+    c, _ = widgets(btn(1, "Zzyzx Deluxe Edition", "plex", w=2))
     msgs = [w["msg"] for w in c.warnings]
-    assert any("Plexamp Deluxe Edition" in m and "px too wide" in m for m in msgs)
+    assert any("Zzyzx Deluxe Edition" in m and "px too wide" in m for m in msgs)
     assert all(w["severity"] == "warning" for w in c.warnings)
 
 
 def test_a_label_that_fits_warns_nothing():
     c, _ = widgets(btn(1, "Plex", "plex", w=2))
     assert not [w for w in c.warnings if "too wide" in w["msg"]]
+
+
+def test_brand_logo_defaults_to_icon_only_even_in_a_wide_cell():
+    _, ws = widgets(btn(1, "YouTube", "plex", w=2), btn(2, "Plex", "plex", x=2, w=2))
+    assert all(w.icon and w.icon_only for w in ws)
+    _, ws = widgets(btn(1, "YouTube", "plex", w=2, extra=", icon_only: false"))
+    assert not ws[0].icon_only

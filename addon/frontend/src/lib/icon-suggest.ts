@@ -37,7 +37,7 @@ export function suggestIcons(command: string, label = '', deviceIcon = ''): Sugg
         toks.add(EXPAND[t] ?? t);
         if (t.length > 3 && t.endsWith('s')) toks.add(t.slice(0, -1));
       }
-      const exact = ws.join('_') === icon.name;
+      const exact = ws.join('_') === icon.name || ws.join('') === icon.name;
       const hits = icon.keywords.filter((k) => toks.has(k));
       const sc = (exact ? s.exact : 0) + hits.length * s.kw;
       if (sc > 0 && !reason) reason = exact ? `${s.tag} name "${displayName(icon.name)}"` : `keyword "${hits[0]}" in the ${s.tag}`;

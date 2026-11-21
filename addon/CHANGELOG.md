@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.28 (2026-11-21)
+
+- Brand logos on buttons: Plex, YouTube, Netflix, Prime Video, Disney+, HBO Max, Hulu, Apple TV, Paramount+, Peacock, Crunchyroll, Twitch, Jellyfin, Emby, Kodi, Plexamp, Spotify, Apple Music, Tidal, SoundCloud, Steam, Xbox, PlayStation, Nintendo Switch, Nvidia, Sonos and Chromecast (icons 65-91). Name a button after one and the studio suggests the logo; picking it fills the button in the brand colour, and it shows the logo alone. The remote needs the new firmware to draw them, and the integration must be updated with the add-on (HACS) before Apply.
+
 ## 0.3.27 (2026-11-21)
 
 - Fix: Apply failed in Home Assistant with "unknown icon" for the new icons when the integration was older than the add-on; a hub rejection now stays visible as a banner in the editor. Names keep brands ("YouTube", "iPhone", "PlayStation"). Update the integration together with the add-on. No hub or remote change.

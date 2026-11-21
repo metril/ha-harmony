@@ -6,7 +6,7 @@ describe('stock icons (shared with the compiler)', () => {
     expect(STOCK_ICONS.length).toBeGreaterThan(40);
     STOCK_ICONS.forEach((ic, i) => {
       expect(ic.id).toBe(i + 1);
-      expect(ic.svg.length).toBeGreaterThan(0);
+      if (!ic.brand) expect(ic.svg.length).toBeGreaterThan(0); // brand markup lives in brand-icons.json
       expect(ic.keywords.length).toBeGreaterThan(0);
     });
   });

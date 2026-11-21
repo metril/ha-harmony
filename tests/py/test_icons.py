@@ -71,7 +71,38 @@ PINNED = [
     "enter",
     "keyboard",
     "audio_track",
+    "plex",
+    "youtube",
+    "netflix",
+    "prime_video",
+    "disney_plus",
+    "hbo_max",
+    "hulu",
+    "apple_tv",
+    "paramount_plus",
+    "peacock",
+    "crunchyroll",
+    "twitch",
+    "jellyfin",
+    "emby",
+    "kodi",
+    "plexamp",
+    "spotify",
+    "apple_music",
+    "tidal",
+    "soundcloud",
+    "steam",
+    "xbox",
+    "playstation",
+    "nintendo_switch",
+    "nvidia",
+    "sonos",
+    "chromecast",
 ]
+
+from harmony_core.icons import BRAND_COLORS, ICON_NAMES  # noqa: E402
+
+BRAND = {ICON_NAMES[i] for i in BRAND_COLORS}
 
 
 def _gen():
@@ -98,7 +129,9 @@ def test_generated_files_fresh():
 def test_svgs_are_24px_stroke_icons():
     for svg in (ROOT / "assets" / "icons").glob("*.svg"):
         t = svg.read_text()
-        assert 'viewBox="0 0 24 24"' in t and 'stroke-width="2"' in t, svg.name
+        assert 'viewBox="0 0 24 24"' in t, svg.name
+        # brand logos (Simple Icons, CC0) are filled marks; everything else is a 2 px stroke icon
+        assert 'stroke-width="2"' in t or svg.stem in BRAND, svg.name
     names = {p.stem for p in (ROOT / "assets" / "icons").glob("*.svg")}
     assert names == set(PINNED)
 
@@ -108,7 +141,7 @@ def test_header_and_json_agree():
     j = json.loads((ROOT / "harmony_addon/frontend-shared/icons.json").read_text())
     for ic in j["icons"]:
         assert f"#define RA_ICON_{ic['name'].upper()} {ic['id']}\n" in h
-        assert ic["keywords"] and ic["svg"]
+        assert ic["keywords"] and (ic["svg"] or ic.get("brand"))  # brand markup is in brand-icons.json
     assert re.search(rf"RA_ICON_MAX {len(j['icons'])}", h)
 
 
@@ -140,3 +173,10 @@ def test_package_ships_the_generated_icons(tmp_path):
     )
     with zipfile.ZipFile(out) as z:
         assert z.read("harmony_core/icons.py").decode() == (ROOT / "harmony_core/icons.py").read_text()
+
+
+def test_brand_icons_are_the_filled_logos_with_hex_cards():
+    assert set(BRAND_COLORS) == set(range(65, 65 + len(BRAND)))
+    assert all(re.fullmatch(r"#[0-9A-F]{6}", c) for c in BRAND_COLORS.values())
+    for n in BRAND:
+        assert 'fill="#000"' in (ROOT / "assets" / "icons" / f"{n}.svg").read_text()

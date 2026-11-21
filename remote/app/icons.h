@@ -2,7 +2,7 @@
 #ifndef RA_ICONS_H
 #define RA_ICONS_H
 
-#define RA_ICON_MAX 64
+#define RA_ICON_MAX 91
 #define RA_ICON_GLYPH_BASE 0xE000 /* glyph = base + id (UTF-8 below) */
 
 #define RA_ICON_TV 1
@@ -133,5 +133,59 @@
 #define RA_GLYPH_KEYBOARD "\xEE\x80\xBF" /* U+E03F */
 #define RA_ICON_AUDIO_TRACK 64
 #define RA_GLYPH_AUDIO_TRACK "\xEE\x81\x80" /* U+E040 */
+#define RA_ICON_PLEX 65
+#define RA_GLYPH_PLEX "\xEE\x81\x81" /* U+E041 */
+#define RA_ICON_YOUTUBE 66
+#define RA_GLYPH_YOUTUBE "\xEE\x81\x82" /* U+E042 */
+#define RA_ICON_NETFLIX 67
+#define RA_GLYPH_NETFLIX "\xEE\x81\x83" /* U+E043 */
+#define RA_ICON_PRIME_VIDEO 68
+#define RA_GLYPH_PRIME_VIDEO "\xEE\x81\x84" /* U+E044 */
+#define RA_ICON_DISNEY_PLUS 69
+#define RA_GLYPH_DISNEY_PLUS "\xEE\x81\x85" /* U+E045 */
+#define RA_ICON_HBO_MAX 70
+#define RA_GLYPH_HBO_MAX "\xEE\x81\x86" /* U+E046 */
+#define RA_ICON_HULU 71
+#define RA_GLYPH_HULU "\xEE\x81\x87" /* U+E047 */
+#define RA_ICON_APPLE_TV 72
+#define RA_GLYPH_APPLE_TV "\xEE\x81\x88" /* U+E048 */
+#define RA_ICON_PARAMOUNT_PLUS 73
+#define RA_GLYPH_PARAMOUNT_PLUS "\xEE\x81\x89" /* U+E049 */
+#define RA_ICON_PEACOCK 74
+#define RA_GLYPH_PEACOCK "\xEE\x81\x8A" /* U+E04A */
+#define RA_ICON_CRUNCHYROLL 75
+#define RA_GLYPH_CRUNCHYROLL "\xEE\x81\x8B" /* U+E04B */
+#define RA_ICON_TWITCH 76
+#define RA_GLYPH_TWITCH "\xEE\x81\x8C" /* U+E04C */
+#define RA_ICON_JELLYFIN 77
+#define RA_GLYPH_JELLYFIN "\xEE\x81\x8D" /* U+E04D */
+#define RA_ICON_EMBY 78
+#define RA_GLYPH_EMBY "\xEE\x81\x8E" /* U+E04E */
+#define RA_ICON_KODI 79
+#define RA_GLYPH_KODI "\xEE\x81\x8F" /* U+E04F */
+#define RA_ICON_PLEXAMP 80
+#define RA_GLYPH_PLEXAMP "\xEE\x81\x90" /* U+E050 */
+#define RA_ICON_SPOTIFY 81
+#define RA_GLYPH_SPOTIFY "\xEE\x81\x91" /* U+E051 */
+#define RA_ICON_APPLE_MUSIC 82
+#define RA_GLYPH_APPLE_MUSIC "\xEE\x81\x92" /* U+E052 */
+#define RA_ICON_TIDAL 83
+#define RA_GLYPH_TIDAL "\xEE\x81\x93" /* U+E053 */
+#define RA_ICON_SOUNDCLOUD 84
+#define RA_GLYPH_SOUNDCLOUD "\xEE\x81\x94" /* U+E054 */
+#define RA_ICON_STEAM 85
+#define RA_GLYPH_STEAM "\xEE\x81\x95" /* U+E055 */
+#define RA_ICON_XBOX 86
+#define RA_GLYPH_XBOX "\xEE\x81\x96" /* U+E056 */
+#define RA_ICON_PLAYSTATION 87
+#define RA_GLYPH_PLAYSTATION "\xEE\x81\x97" /* U+E057 */
+#define RA_ICON_NINTENDO_SWITCH 88
+#define RA_GLYPH_NINTENDO_SWITCH "\xEE\x81\x98" /* U+E058 */
+#define RA_ICON_NVIDIA 89
+#define RA_GLYPH_NVIDIA "\xEE\x81\x99" /* U+E059 */
+#define RA_ICON_SONOS 90
+#define RA_GLYPH_SONOS "\xEE\x81\x9A" /* U+E05A */
+#define RA_ICON_CHROMECAST 91
+#define RA_GLYPH_CHROMECAST "\xEE\x81\x9B" /* U+E05B */
 
 #endif

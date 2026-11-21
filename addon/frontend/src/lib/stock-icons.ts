@@ -8,6 +8,8 @@ export interface StockIcon {
   keywords: string[];
   /** inner SVG markup for a 24x24 viewBox, stroke-based (currentColor) */
   svg: string;
+  /** brand logos: the brand's card colour (#RRGGBB); picking one fills the widget with it */
+  brand?: string;
 }
 
 export const GLYPH_BASE: number = data.glyph_base;

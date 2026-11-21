@@ -2,6 +2,7 @@ import './app.css';
 import { Api } from './lib/api';
 import { pickConfig, pickHub, rememberedHub } from './lib/hubs';
 import { Store, setStore } from './lib/store';
+import { brandsLoaded } from './lib/icon-shapes';
 import './components/hh-app';
 
 async function boot(): Promise<void> {
@@ -32,6 +33,7 @@ async function boot(): Promise<void> {
   });
   // Elements read the store when they are created, so the app element is only made once it exists
   // (the bundle is one chunk, so the class definitions themselves run before boot()).
+  await brandsLoaded; // the brand logos' markup is its own chunk, fetched while the config loads
   document.body.prepend(document.createElement('hh-app'));
 }
 void boot();

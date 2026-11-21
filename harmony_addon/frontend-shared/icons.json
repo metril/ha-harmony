@@ -663,6 +663,262 @@
     "audiotrack"
    ],
    "svg": "<path d=\"M4 5h16v11H10l-5 4v-4H4z\"/><path d=\"M10.5 13V8.5l4.5-1v4.2\"/><circle cx=\"9.5\" cy=\"13\" r=\"1\"/><circle cx=\"14\" cy=\"11.8\" r=\"1\"/>"
+  },
+  {
+   "id": 65,
+   "name": "plex",
+   "keywords": [
+    "plex"
+   ],
+   "brand": "#E5A00D",
+   "svg": ""
+  },
+  {
+   "id": 66,
+   "name": "youtube",
+   "keywords": [
+    "youtube"
+   ],
+   "brand": "#FF0000",
+   "svg": ""
+  },
+  {
+   "id": 67,
+   "name": "netflix",
+   "keywords": [
+    "netflix"
+   ],
+   "brand": "#E50914",
+   "svg": ""
+  },
+  {
+   "id": 68,
+   "name": "prime_video",
+   "keywords": [
+    "primevideo",
+    "amazon"
+   ],
+   "brand": "#00A8E1",
+   "svg": ""
+  },
+  {
+   "id": 69,
+   "name": "disney_plus",
+   "keywords": [
+    "disney",
+    "disneyplus",
+    "disney+"
+   ],
+   "brand": "#113CCF",
+   "svg": ""
+  },
+  {
+   "id": 70,
+   "name": "hbo_max",
+   "keywords": [
+    "hbomax",
+    "hbo"
+   ],
+   "brand": "#002BE7",
+   "svg": ""
+  },
+  {
+   "id": 71,
+   "name": "hulu",
+   "keywords": [
+    "hulu"
+   ],
+   "brand": "#1CE783",
+   "svg": ""
+  },
+  {
+   "id": 72,
+   "name": "apple_tv",
+   "keywords": [
+    "appletv",
+    "atv"
+   ],
+   "brand": "#000000",
+   "svg": ""
+  },
+  {
+   "id": 73,
+   "name": "paramount_plus",
+   "keywords": [
+    "paramount",
+    "paramountplus",
+    "paramount+"
+   ],
+   "brand": "#0064FF",
+   "svg": ""
+  },
+  {
+   "id": 74,
+   "name": "peacock",
+   "keywords": [
+    "peacock"
+   ],
+   "brand": "#000000",
+   "svg": ""
+  },
+  {
+   "id": 75,
+   "name": "crunchyroll",
+   "keywords": [
+    "crunchyroll"
+   ],
+   "brand": "#F47521",
+   "svg": ""
+  },
+  {
+   "id": 76,
+   "name": "twitch",
+   "keywords": [
+    "twitch"
+   ],
+   "brand": "#9146FF",
+   "svg": ""
+  },
+  {
+   "id": 77,
+   "name": "jellyfin",
+   "keywords": [
+    "jellyfin"
+   ],
+   "brand": "#00A4DC",
+   "svg": ""
+  },
+  {
+   "id": 78,
+   "name": "emby",
+   "keywords": [
+    "emby"
+   ],
+   "brand": "#52B54B",
+   "svg": ""
+  },
+  {
+   "id": 79,
+   "name": "kodi",
+   "keywords": [
+    "kodi"
+   ],
+   "brand": "#17B2E7",
+   "svg": ""
+  },
+  {
+   "id": 80,
+   "name": "plexamp",
+   "keywords": [
+    "plexamp"
+   ],
+   "brand": "#282A2D",
+   "svg": ""
+  },
+  {
+   "id": 81,
+   "name": "spotify",
+   "keywords": [
+    "spotify"
+   ],
+   "brand": "#1DB954",
+   "svg": ""
+  },
+  {
+   "id": 82,
+   "name": "apple_music",
+   "keywords": [
+    "applemusic"
+   ],
+   "brand": "#FA243C",
+   "svg": ""
+  },
+  {
+   "id": 83,
+   "name": "tidal",
+   "keywords": [
+    "tidal"
+   ],
+   "brand": "#000000",
+   "svg": ""
+  },
+  {
+   "id": 84,
+   "name": "soundcloud",
+   "keywords": [
+    "soundcloud"
+   ],
+   "brand": "#FF5500",
+   "svg": ""
+  },
+  {
+   "id": 85,
+   "name": "steam",
+   "keywords": [
+    "steam"
+   ],
+   "brand": "#171A21",
+   "svg": ""
+  },
+  {
+   "id": 86,
+   "name": "xbox",
+   "keywords": [
+    "xbox"
+   ],
+   "brand": "#107C10",
+   "svg": ""
+  },
+  {
+   "id": 87,
+   "name": "playstation",
+   "keywords": [
+    "playstation",
+    "ps3",
+    "ps4",
+    "ps5",
+    "psn"
+   ],
+   "brand": "#003791",
+   "svg": ""
+  },
+  {
+   "id": 88,
+   "name": "nintendo_switch",
+   "keywords": [
+    "nintendo",
+    "nintendoswitch"
+   ],
+   "brand": "#E60012",
+   "svg": ""
+  },
+  {
+   "id": 89,
+   "name": "nvidia",
+   "keywords": [
+    "nvidia"
+   ],
+   "brand": "#76B900",
+   "svg": ""
+  },
+  {
+   "id": 90,
+   "name": "sonos",
+   "keywords": [
+    "sonos"
+   ],
+   "brand": "#000000",
+   "svg": ""
+  },
+  {
+   "id": 91,
+   "name": "chromecast",
+   "keywords": [
+    "chromecast",
+    "googlecast"
+   ],
+   "brand": "#4285F4",
+   "svg": ""
   }
  ]
 }

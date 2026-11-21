@@ -4,6 +4,7 @@ import type { Assigner } from '../lib/assigner';
 void import('./hh-icon-picker');
 import { alignApplies } from '../lib/page-renderer';
 import { setStyle } from '../lib/set-style';
+import { stockIconByName } from '../lib/stock-icons';
 import { fitCells, watchCells } from '../lib/fit-cells';
 import { abbreviate, displayCommand, displayKey, displayName, gridStyle, FREE_CAP, dn } from '../lib/key-names';
 import { KEYS, keyTitle } from '../lib/remote-layout';
@@ -223,7 +224,7 @@ export class HhInspector extends LitElement {
             ${this.colourRows(pi, wi, w)}
             <span id="ico-l">Icon</span>
             <hh-icon-picker aria-labelledby="ico-l" .value=${w.icon && w.icon !== 'none' ? w.icon : ''} .command=${String((w['action'] as { command?: string } | undefined)?.command ?? '')} .label=${w.label ?? ''}
-              @hh-icon=${(e: CustomEvent<string | undefined>) => this.widgetPatch(pi, wi, { icon: e.detail })}></hh-icon-picker>
+              @hh-icon=${(e: CustomEvent<string | undefined>) => this.widgetPatch(pi, wi, { icon: e.detail, ...(e.detail && !w.color && stockIconByName(e.detail)?.brand ? { color: stockIconByName(e.detail)?.brand } : {}) })}></hh-icon-picker>
             <label class="chk"><input type="checkbox" .checked=${wireIconOnly(page, pp, wi)} @change=${(e: Event) => this.widgetPatch(pi, wi, { icon_only: (e.target as HTMLInputElement).checked })} /> Icon only (the label is kept but not drawn)</label>
           </div>`
         : nothing}

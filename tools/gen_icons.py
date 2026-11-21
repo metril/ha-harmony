@@ -1,6 +1,7 @@
 """Generate icon tables from proto/icons.yaml + assets/icons/*.svg (a test fails when stale).
 
-Outputs: harmony_core/icons.py, remote/app/icons.h, harmony_addon/frontend-shared/icons.json.
+Outputs: harmony_core/icons.py, remote/app/icons.h, harmony_addon/frontend-shared/icons.json (brand logos have an
+empty svg there; their markup is in brand-icons.json, which the editor loads as its own chunk).
 Usage: uv run python tools/gen_icons.py
 """
 
@@ -18,6 +19,7 @@ SVG_DIR = ROOT / "assets" / "icons"
 OUT_PY = ROOT / "harmony_core" / "icons.py"
 OUT_H = ROOT / "remote" / "app" / "icons.h"
 OUT_JSON = ROOT / "harmony_addon" / "frontend-shared" / "icons.json"
+OUT_BRAND = ROOT / "harmony_addon" / "frontend-shared" / "brand-icons.json"
 GLYPH_BASE = 0xE000
 MAX_STOCK = 159
 
@@ -37,6 +39,7 @@ def load() -> list[dict]:
 
 
 def emit_py(icons: list[dict]) -> str:
+    brands = {i["id"]: i["brand"] for i in icons if i.get("brand")}
     rows = "".join(
         f"    Icon({i['id']}, {i['name']!r}, {tuple(i['keywords'])!r}),\n" for i in icons
     )
@@ -53,6 +56,8 @@ def emit_py(icons: list[dict]) -> str:
         "ICONS: tuple[Icon, ...] = (\n" + rows + ")\n"
         "ICON_IDS: dict[str, int] = {i.name: i.id for i in ICONS}\n"
         "ICON_NAMES: dict[int, str] = {i.id: i.name for i in ICONS}\n"
+        "# brand logos: the brand card colour (#RRGGBB); they default to icon_only\n"
+        f"BRAND_COLORS: dict[int, str] = {brands!r}\n"
     )
 
 
@@ -75,14 +80,17 @@ def emit_h(icons: list[dict]) -> str:
 
 
 def emit_json(icons: list[dict]) -> str:
-    return (
-        json.dumps({"glyph_base": GLYPH_BASE, "icons": icons}, indent=1, ensure_ascii=False) + "\n"
-    )
+    slim = [{**i, "svg": ""} if i.get("brand") else i for i in icons]
+    return json.dumps({"glyph_base": GLYPH_BASE, "icons": slim}, indent=1, ensure_ascii=False) + "\n"
+
+
+def emit_brand_json(icons: list[dict]) -> str:
+    return json.dumps({str(i["id"]): i["svg"] for i in icons if i.get("brand")}, indent=1) + "\n"
 
 
 def outputs() -> dict[Path, str]:
     icons = load()
-    return {OUT_PY: emit_py(icons), OUT_H: emit_h(icons), OUT_JSON: emit_json(icons)}
+    return {OUT_PY: emit_py(icons), OUT_H: emit_h(icons), OUT_JSON: emit_json(icons), OUT_BRAND: emit_brand_json(icons)}
 
 
 def main() -> int:

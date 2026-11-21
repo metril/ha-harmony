@@ -18,3 +18,5 @@ for s in 20 24 32; do
   npx -y lv_font_conv@1.5.3 --font "$TMP/ra_icons.ttf" --size "$s" --bpp 4 --format lvgl --no-compress \
     --no-kerning -r "$RANGE" --lv-font-name "ra_icons_$s" --lv-include lvgl.h -o "$OUT/ra_icons_$s.c"
 done
+# keep the generator's temp and workspace paths out of the committed files
+sed -i -e 's|--font [^ ]*|--font <tmp>/ra_icons.ttf|' -e 's| -o [^ ]*/tools/\.\./| -o <workspace>/tools/../|' "$OUT"/ra_icons_*.c
