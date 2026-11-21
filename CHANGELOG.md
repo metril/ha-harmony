@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.26 (2026-11-21)
+
+- Editor: the palette, page strip and action picker load on demand, keeping the first download under budget. No remote change.
+
 ## 0.3.25 (2026-11-21)
 
 - Elite redesign: new icon fonts (more glyphs, icon keywords pick them), 1-2 character pills render in b20, pixel-budget text fit and LVGL-style clipping in the studio preview, starter pages, BT pairing fixes. Needs the matching remote firmware.

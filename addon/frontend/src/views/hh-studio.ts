@@ -17,10 +17,10 @@ import type { HhRemote } from '../components/hh-remote';
 import { tid } from '../components/hh-remote';
 import type { PageOp } from '../components/hh-page-strip';
 import '../components/hh-remote';
-import '../components/hh-palette';
+void import('../components/hh-palette');
 import '../components/hh-inspector';
-import '../components/hh-page-strip';
-import '../components/hh-action-picker';
+void import('../components/hh-page-strip');
+void import('../components/hh-action-picker');
 
 interface Press {
   source: Source;

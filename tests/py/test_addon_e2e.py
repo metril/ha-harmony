@@ -743,7 +743,8 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
     assert cfg["activities"][1]["keys"]["channel_up"] == {
         "ha": {"service": "light.toggle", "target": {"entity_id": "light.kitchen"}}
     }
-    await page.locator("hh-remote svg.scr text", has_text="Kitchen").first.wait_for()  # preview
+    # a one-cell tile is under 44 px tall, so (as on the remote, ui.c) it shows the state, not the name
+    await page.locator("hh-remote svg.scr text", has_text="On").first.wait_for()  # preview
 
     bar = page.get_by_role("region", name="Draft")
     await bar.get_by_text("Valid").wait_for()

@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing, svg } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
-import './hh-icon-picker';
+void import('./hh-icon-picker');
 import { alignApplies } from '../lib/page-renderer';
 import { setStyle } from '../lib/set-style';
 import { fitCells, watchCells } from '../lib/fit-cells';
