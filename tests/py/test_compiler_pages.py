@@ -423,16 +423,37 @@ def comp_err(cfg: str) -> str:
     return str(e.value)
 
 
-def test_back_bit_means_exit_pops_unless_the_activity_maps_exit():
+def _back_of(keys_global: str, music_keys: str, pages: str):
     cfg = BASE.replace(
         "  - {id: music, name: Music, devices: [{device: tv}]}",
-        "  - {id: music, name: Music, devices: [{device: tv}], keys: {exit: {device: tv, command: mute}}}",
+        f"  - {{id: music, name: Music, devices: [{{device: tv}}]{music_keys}}}",
     )
-    pages = (
-        "pages:\n"
-        "  - {id: a, cols: 1, rows: 1, activity: watch, widgets: []}\n"
-        "  - {id: b, cols: 1, rows: 1, activity: music, widgets: []}\n"
-        "  - {id: c, cols: 1, rows: 1, back: false, widgets: []}\n"
-    )
-    c = compile_config(parse_model(cfg + pages, "t.yaml"))
-    assert [m.back for m in c.models] == [True, False, False]
+    c = compile_config(parse_model(cfg + keys_global + pages, "t.yaml"))
+    return [m.back for m in c.models]
+
+
+EXITKEY = "keys: {exit: {device: tv, command: mute}}"
+PAGES = (
+    "pages:\n"
+    "  - {id: h, kind: home, cols: 1, rows: 1, widgets: []}\n"
+    "  - {id: f, kind: favorites, cols: 1, rows: 1, widgets: []}\n"
+    "  - {id: a, cols: 1, rows: 1, activity: watch, widgets: []}\n"
+    "  - {id: b, cols: 1, rows: 1, activity: music, widgets: []}\n"
+    "  - {id: n, cols: 1, rows: 1, widgets: []}\n"
+    "  - {id: x, cols: 1, rows: 1, back: false, activity: watch, widgets: []}\n"
+    "  - {id: y, cols: 1, rows: 1, back: true, widgets: []}\n"
+)
+
+
+def test_back_default_home_and_favorites_never_explicit_wins():
+    assert _back_of("", "", PAGES) == [False, False, True, True, True, False, True]
+
+
+def test_back_default_follows_the_pages_activity_exit_mapping():
+    got = _back_of("", ", " + EXITKEY, PAGES)
+    # a (watch) has no Exit: BACK; b (music) maps it: none; n has no activity and music maps Exit: none
+    assert got == [False, False, True, False, False, False, True]
+
+
+def test_back_default_global_exit_clears_every_default():
+    assert _back_of(EXITKEY + "\n", "", PAGES) == [False, False, False, False, False, False, True]

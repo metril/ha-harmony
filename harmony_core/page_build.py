@@ -266,10 +266,19 @@ _EXIT = key_code("exit")
 
 
 def _maps_exit(model: Model, activity: str | None) -> bool:
-    """Does the page's activity (or the global key map) bind the Exit key?"""
+    """Would the hub resolve Exit to a binding? With an activity: its keys or the global map. Without
+    one (any activity may be running): any activity's keys or the global map."""
     maps = [model.get("keys") or {}]
-    maps += [a.get("keys") or {} for a in model["activities"] if a["id"] == activity]
+    maps += [a.get("keys") or {} for a in model["activities"] if activity is None or a["id"] == activity]
     return any(key_code(n) == _EXIT for m in maps for n in m)
+
+
+def _default_back(model: Model, p: dict[str, Any]) -> bool:
+    if "back" in p:
+        return bool(p["back"])
+    if p.get("kind") in ("home", "favorites"):
+        return False
+    return not _maps_exit(model, p.get("activity"))
 
 
 def _split_fixed(specs: list[_Spec], p: dict[str, Any], pi: int, base: int) -> list[list[_Spec]]:
@@ -353,7 +362,7 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
             "rows": rows,
             "title": title,
             "kind": p.get("kind", "normal"),
-            "back": p["back"] if "back" in p else not _maps_exit(model, p.get("activity")),
+            "back": _default_back(model, p),
             "fixed": p.get("layout") == "fixed",
             "act": act_ids.index(p["activity"]) + 1 if p.get("activity") in act_ids else 0,
         }
