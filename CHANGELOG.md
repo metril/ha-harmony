@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.31 (2026-11-21)
+
+- The hub logs the RF data-frame link-up; the remote logs each rejoin pulse with its trigger and latency; the hub installer removes the stock /cache/ota-update.log once. Flash the remote, update the hub, re-run `tools/install_boot_hook.py`. Add-on and integration unchanged in behaviour.
+
 ## 0.3.30 (2026-11-21)
 
 - Fix: the hub no longer freezes after activity IR (/dev/i2s is held open), and the IR path is flushed after a failed send.
