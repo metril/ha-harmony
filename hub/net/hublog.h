@@ -67,6 +67,9 @@ const char *hp_hublog_level(const char *msg);
 void hp_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 /* The same for bytes read from a child's stderr pipe: complete lines are written to the log fd and queued. */
 void hp_hublog_feed(hp_hublog_t *, hp_linebuf_t *, const char *buf, size_t n);
+/* Lines that already live in a file elsewhere (the boot hook's log): queued for shipping only, tagged with `prefix`. */
+void hp_hublog_feed_ship(hp_hublog_t *, hp_linebuf_t *, const char *prefix, const char *buf, size_t n);
+void hp_log_feed_ship(hp_linebuf_t *, const char *prefix, const char *buf, size_t n);
 /* hp_hublog_feed on the installed instance. */
 void hp_log_feed(hp_linebuf_t *, const char *buf, size_t n);
 

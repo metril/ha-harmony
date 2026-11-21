@@ -66,7 +66,7 @@ run_hook() {
 	done
 	sleep "${HAH_SELFTEST_SETTLE:-2}" # let the backgrounded daemon stub write its argv
 	# A launched argv-recording stub may still be starting on a loaded host: wait for its file.
-	if grep -q 'daemon started pid [0-9]' "$R/cache/ha-harmony.log" 2>/dev/null && grep -q '/argv' "$R/data/ha-harmony/hub" 2>/dev/null; then
+	if grep -q 'daemon started pid [0-9]' "$R/var/volatile/ha-harmony-hook.log" 2>/dev/null && grep -q '/argv' "$R/data/ha-harmony/hub" 2>/dev/null; then
 		ha=0
 		while [ ! -s "$T/argv" ] && [ "$ha" -lt 500 ]; do
 			ha=$((ha + 1))
@@ -84,7 +84,7 @@ run_hook() {
 mkdir -p "$T" || exit 2
 GAP="${HAH_SELFTEST_GAP:-4}"
 TICK="${HAH_SELFTEST_TICK:-1}"
-CLOG() { echo "$R/cache/ha-harmony.log"; }
+CLOG() { echo "$R/var/volatile/ha-harmony-hook.log"; }
 
 # wait_log PATTERN: poll the hook log up to ~200 ticks for a line containing PATTERN
 wait_log() {

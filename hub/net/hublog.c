@@ -119,14 +119,20 @@ void hp_log(const char *fmt, ...) {
         }
 }
 
-void hp_hublog_feed(hp_hublog_t *l, hp_linebuf_t *lb, const char *buf, size_t n) {
+static void feed(hp_hublog_t *l, hp_linebuf_t *lb, const char *prefix, bool to_file, const char *buf, size_t n) {
     for (size_t i = 0; i < n; i++) {
         char c = buf[i];
         if (c == '\n') {
             if (lb->n) {
-                lb->part[lb->n] = '\n';
-                out_line(l, lb->part, lb->n + 1);
-                ship(l, lb->part, lb->n);
+                if (to_file) {
+                    lb->part[lb->n] = '\n';
+                    out_line(l, lb->part, lb->n + 1);
+                    ship(l, lb->part, lb->n);
+                } else {
+                    char t[sizeof lb->part + 24];
+                    int k = snprintf(t, sizeof t, "%s%.*s", prefix, (int)lb->n, lb->part);
+                    ship(l, t, (size_t)k);
+                }
             }
             lb->n = 0;
             lb->over = false;
@@ -137,7 +143,14 @@ void hp_hublog_feed(hp_hublog_t *l, hp_linebuf_t *lb, const char *buf, size_t n)
     }
 }
 
+void hp_hublog_feed(hp_hublog_t *l, hp_linebuf_t *lb, const char *buf, size_t n) { feed(l, lb, "", true, buf, n); }
+void hp_hublog_feed_ship(hp_hublog_t *l, hp_linebuf_t *lb, const char *prefix, const char *buf, size_t n) {
+    feed(l, lb, prefix, false, buf, n);
+}
 void hp_log_feed(hp_linebuf_t *lb, const char *buf, size_t n) { hp_hublog_feed(g_cur, lb, buf, n); }
+void hp_log_feed_ship(hp_linebuf_t *lb, const char *prefix, const char *buf, size_t n) {
+    hp_hublog_feed_ship(g_cur, lb, prefix, buf, n);
+}
 
 void hp_hublog_service(hp_hublog_t *l) {
     char junk[16];

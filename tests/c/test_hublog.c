@@ -7,6 +7,7 @@
 
 #include "ctest_assert.h"
 #include "hub/hub_handlers.h"
+#include "hub/net/hooklog.h"
 #include "hub/net/hublog.h"
 
 typedef struct {
@@ -204,7 +205,47 @@ static void test_only_home_assistant_hellos_get_logs(void) {
     CT_CHECK(!sess.log_sink);
 }
 
+static void test_hook_log_is_shipped_once_then_followed(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    static hp_hooklog_t h;
+    char path[] = "/tmp/hublogXXXXXX", hook[] = "/tmp/hubhookXXXXXX";
+    int fd = setup(&l, &s, path);
+    s.up = true;
+    int hf = mkstemp(hook);
+    CT_CHECK(hf >= 0);
+    CT_EQ(write(hf, "[t] ha-harmony: starting\n[t] ha-harmony: respawn 1 of 3 in 5s\n", 62), 62);
+    hp_hooklog_start(&h, &l, hook); /* the file as the daemon finds it at start */
+    hp_hublog_service(&l);
+    CT_EQ(s.n, 2);
+    CT_CHECK(!strcmp(s.msg[0], "[boot-hook] [t] ha-harmony: starting"));
+    CT_CHECK(!strcmp(s.msg[1], "[boot-hook] [t] ha-harmony: respawn 1 of 3 in 5s"));
+    CT_EQ(lseek(fd, 0, SEEK_END), 0); /* shipped only: not copied into the daemon log */
+    /* a later hook write wakes the poll loop through inotify (no timer) and ships just the new line */
+    CT_CHECK(hp_hooklog_fd(&h) >= 0);
+    CT_EQ(write(hf, "[t] ha-harmony: healthy after 120s\n", 36), 36);
+    struct pollfd p = {hp_hooklog_fd(&h), POLLIN, 0};
+    CT_EQ(poll(&p, 1, 2000), 1);
+    hp_hooklog_service(&h);
+    hp_hublog_service(&l);
+    CT_EQ(s.n, 3);
+    CT_CHECK(!strcmp(s.msg[2], "[boot-hook] [t] ha-harmony: healthy after 120s"));
+    CT_EQ(ftruncate(hf, 0), 0); /* a new boot: restarts from the top */
+    CT_EQ(pwrite(hf, "[t] new\n", 8, 0), 8);
+    hp_hooklog_service(&h);
+    hp_hublog_service(&l);
+    CT_EQ(s.n, 4);
+    CT_CHECK(!strcmp(s.msg[3], "[boot-hook] [t] new"));
+    char out[64];
+    CT_CHECK(hp_hooklog_path_beside("/var/volatile/ha-harmony.healthy", out, sizeof out) &&
+             !strcmp(out, "/var/volatile/ha-harmony-hook.log"));
+    close(hf);
+    unlink(hook);
+    teardown(fd, path);
+}
+
 int main(void) {
+    CT_RUN(test_hook_log_is_shipped_once_then_followed);
     CT_RUN(test_push_when_up);
     CT_RUN(test_line_reaches_the_file_synchronously);
     CT_RUN(test_stalled_ring_never_blocks);

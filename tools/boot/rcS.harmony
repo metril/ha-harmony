@@ -58,7 +58,7 @@
 hah_root="${HAH_ROOT:-}"
 hah_marker="$hah_root/etc/ha-harmony-enable"
 hah_counter="$hah_root/cache/ha-harmony-boot.n"
-hah_log="$hah_root/cache/ha-harmony.log"
+hah_log="$hah_root/var/volatile/ha-harmony-hook.log" # tmpfs: logs never touch flash; the daemon ships it to HA at start
 hah_dlog="$hah_root/var/volatile/ha-harmony.log"
 hah_pidfile="$hah_root/cache/ha-harmony.pid"
 hah_dir="$hah_root/data/ha-harmony"

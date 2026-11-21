@@ -174,6 +174,7 @@ add_library(hp_hub STATIC
   hub/net/mdns.c
   hub/net/mdns_srv.c
   hub/net/ident.c
+  hub/net/hooklog.c
   hub/net/peers.c
   hub/engine/mapping.c
   hub/engine/sched.c

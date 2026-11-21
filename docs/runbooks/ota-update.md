@@ -38,7 +38,7 @@ than the installed one (`hub: build N` at startup, `fw_build` in hello_ack, `/da
 4. If the new build never comes up healthy the hub is back on the previous build by itself and a repair issue
    "Hub firmware update rolled back" appears; the sensor shows `rolled_back` with `rollback_reason`.
 
-On the hub (read-only checks): `/cache/ha-harmony.log` has `daemon exited for a signed update`, `updated build healthy` (or
+On the hub (read-only checks): `/var/volatile/ha-harmony-hook.log` has `daemon exited for a signed update`, `updated build healthy` (or
 `updated build died ... restored hub.prev`); `/data/ha-harmony/hub.prev` is the build to fall back to, `ota-pending` is gone
 once the build is healthy.
 

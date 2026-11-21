@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "hub/net/hooklog.h"
 #include "hub/net/hublog.h"
 #include "common/ota/ota_image.h"
 #include "hub/hp_errors.h"
@@ -40,6 +41,7 @@ static void on_signal(int sig) { (void)sig; g_stop = 1; }
 static hp_handler_tbl_t g_tbl;
 static hub_ctx_t g_hub;
 static hp_hublog_t g_log;
+static hp_hooklog_t g_hook;
 static hp_sim_t g_sim;
 static hp_hw_t g_hw;
 static hp_peers_t g_peers; /* authenticated peers: ARP keepalive (hub/net/peers.h) */
@@ -128,6 +130,8 @@ static int rf_fds(void *arg, int out[8]) {
     if (n < 8 && g_mdns.fd >= 0) out[n++] = g_mdns.fd;
     int lfd = hp_hublog_wake_fd(&g_log); /* a new stderr line to ship */
     if (n < 8 && lfd >= 0) out[n++] = lfd;
+    int hfd = hp_hooklog_fd(&g_hook); /* the boot hook appended to its log */
+    if (n < 8 && hfd >= 0) out[n++] = hfd;
     int blf = bt_link_log_fd(); /* the Bluetooth helper's stderr pipe */
     if (n < 8 && blf >= 0) out[n++] = blf;
     int bfd = bt_link_poll_fd(); /* the Bluetooth helper's socket (-1 when none runs) */
@@ -497,6 +501,11 @@ int main(int argc, char **argv) {
             hp_log("hub: mdns disabled (%s)\n", g_mdns.err);
         else snprintf(g_mdns.svc.hub_id, sizeof g_mdns.svc.hub_id, "%s", g_tbl.hub_id); /* TXT hub_id= is the real id */
     }
+    { /* the boot hook's tmpfs log sits next to the health file: ship it (then follow it via inotify) */
+        char hl[256];
+        if (health_file && hp_hooklog_path_beside(health_file, hl, sizeof hl)) hp_hooklog_start(&g_hook, &g_log, hl);
+        else g_hook.ino = -1;
+    }
     hp_ws_set_extra_fds(srv, rf_fds, rf);
     hp_ws_set_timeouts(srv, (int)auth_ms, (int)idle_ms);
     printf("listening port=%u\n", hp_ws_port(srv));
@@ -532,6 +541,7 @@ int main(int argc, char **argv) {
         if (bt_wait >= 0 && (wait < 0 || bt_wait < wait)) wait = bt_wait;
 #endif
         hp_ws_poll(srv, wait);
+        hp_hooklog_service(&g_hook);
         hp_hublog_service(&g_log);
 #ifdef HH_BT
         if (bt_run) { /* the helper's socket, supervision, then the broadcasts its changes queued */
