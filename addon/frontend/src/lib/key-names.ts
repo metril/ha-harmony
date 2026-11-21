@@ -14,7 +14,7 @@ const NAMES: Record<string, string> = {
 /** What a screen reader and the palette search get for names that are printed as a symbol. */
 const SPOKEN: Record<string, string> = { home_control_plus: 'Home Control Plus', home_control_minus: 'Home Control Minus' };
 const ACRONYMS = new Set(['ok', 'dvr', 'tv', 'hdmi', 'usb', 'ir', 'av', 'dvd', 'cd', 'hd', 'uhd', 'sd', 'epg', 'ui', 'hdr', 'arc', 'pip', 'bt', 'ha', 'am', 'fm', 'cec', 'rf', 'led', 'lcd', 'osd', 'pc', 'vcr', 'pvr', 'nec', 'sirc', 'dts', 'cc', 'vod', 'kvm']);
-const BRAND: Record<string, string> = { earc: 'eARC', dpad: 'D-Pad', necext: 'NECext' };
+const BRAND: Record<string, string> = { earc: 'eARC', dpad: 'D-Pad', necext: 'NECext', youtube: 'YouTube', iphone: 'iPhone', ipad: 'iPad', ipod: 'iPod', playstation: 'PlayStation', airplay: 'AirPlay', directv: 'DirecTV', tivo: 'TiVo', wifi: 'WiFi', hbo: 'HBO', hulu: 'Hulu' };
 /** Joining words that stay lower-case in a Title Case name unless they come first. */
 export const SMALL_WORDS = new Set(['a', 'an', 'and', 'of', 'the', 'to', 'in', 'on', 'at', 'for']);
 // in a command or key name "On"/"In" are the verb ("Power On", "Zoom In"), so they stay capitalised there
@@ -35,7 +35,7 @@ function tokens(name: string): string[] {
     const sym = /[+-]+$/.exec(raw)?.[0] ?? '';
     const part = sym ? raw.slice(0, -sym.length) : raw;
     if (!part) { out.push(raw); continue; }
-    const pieces = /^[a-z][A-Z]/.test(part) ? [part] : part
+    const pieces = /^[a-z][A-Z]/.test(part) || BRAND[part.toLowerCase()] ? [part] : part
       .replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').replace(/([A-Za-z]\d+)(?=[A-Z][a-z])/g, '$1 ').split(' ');
     for (const piece of pieces) {
       const low = piece.toLowerCase();

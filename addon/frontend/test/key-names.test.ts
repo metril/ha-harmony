@@ -15,6 +15,7 @@ describe('displayKey: codes and acronyms', () => {
     ['1a', '1A'], ['1A', '1A'], ['4k', '4K'], ['3D', '3D'], ['5g', '5G'],
     ['HDMI1', 'HDMI 1'], ['hdmi1', 'HDMI 1'], ['hdmi_2', 'HDMI 2'], ['InputHdmi1', 'Input HDMI 1'], ['av1', 'AV 1'], ['usb', 'USB'], ['dvd_menu', 'DVD Menu'],
     ['eARC', 'eARC'], ['earc', 'eARC'], ['AM/FM', 'AM/FM'], ['tv_input', 'TV Input'], ['BT_pair', 'BT Pair'],
+    ['YouTube', 'YouTube'], ['youtube', 'YouTube'], ['iPhone', 'iPhone'], ['PlayStation', 'PlayStation'], ['youtube_music', 'YouTube Music'], ['open_youtube', 'Open YouTube'], ['HDMI', 'HDMI'],
   ])('%s -> %s', (raw, want) => expect(displayKey(raw)).toBe(want));
   it('keeps units lower-case and symbols on the ends', () => {
     expect(displayKey('30s')).toBe('30s');

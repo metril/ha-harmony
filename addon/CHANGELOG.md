@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.27 (2026-11-21)
+
+- Fix: Apply failed in Home Assistant with "unknown icon" for the new icons when the integration was older than the add-on; a hub rejection now stays visible as a banner in the editor. Names keep brands ("YouTube", "iPhone", "PlayStation"). Update the integration together with the add-on. No hub or remote change.
+
 ## 0.3.26 (2026-11-21)
 
 - Editor: the palette, page strip and action picker load on demand, keeping the first download under budget. No remote change.

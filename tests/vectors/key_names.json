@@ -1,5 +1,6 @@
 {
  "display": [
+  ["YouTube", "YouTube"], ["youtube", "YouTube"], ["iPhone", "iPhone"], ["PlayStation", "PlayStation"], ["youtube_music", "YouTube Music"], ["open_youtube", "Open YouTube"], ["HDMI", "HDMI"],
   ["DirectionUp", "Up"], ["direction_down", "Down"], ["directionleft", "Left"], ["InputHdmi1", "HDMI 1"], ["input_hdmi_2", "HDMI 2"],
   ["hdmi1", "HDMI 1"], ["vol_up", "Volume Up"], ["ch_down", "Channel Down"], ["power_on", "Power On"], ["PowerOff", "Power Off"],
   ["InputA1", "Input A1"], ["select", "OK"], ["play_pause", "Play/Pause"], ["FastForward", "Fast Forward"], ["key_105", "5"],

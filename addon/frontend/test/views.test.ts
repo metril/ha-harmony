@@ -394,6 +394,12 @@ describe('apply dialog', () => {
     await vi.waitFor(() => expect(none.app.shadowRoot!.querySelector('#link-problem')?.textContent).toContain('No Home Assistant integration is linked'));
   });
 
+  it('a hub rejection stays on screen after the dialog is gone, with its detail', async () => {
+    const { app } = await boot({ statuses: [status({ acked_rev: 'aaaa1111', result: 'error', detail: 'pages[1].widgets[3].icon: unknown icon' })] });
+    await vi.waitFor(() => expect(app.shadowRoot!.querySelector('#link-rejected')?.textContent).toContain('unknown icon'));
+    expect(app.shadowRoot!.querySelector('#link-pending')).toBeNull();
+  });
+
   it('the header shows the hub name with the id as secondary text, and the switcher uses names', async () => {
     const hubs = (linked: object[]) => ({ body: { hubs: [], linked, adopt: null } });
     const { app } = await boot({ routes: { 'GET api/v1/hubs': () => hubs([{ id: 'h', last_seen: 1, name: 'Living room' }]) } });

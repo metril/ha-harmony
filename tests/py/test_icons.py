@@ -110,3 +110,33 @@ def test_header_and_json_agree():
         assert f"#define RA_ICON_{ic['name'].upper()} {ic['id']}\n" in h
         assert ic["keywords"] and ic["svg"]
     assert re.search(rf"RA_ICON_MAX {len(j['icons'])}", h)
+
+
+def test_no_surface_keeps_its_own_icon_cap():
+    """The cap lives in proto/icons.yaml only: the integration (validator), the remote and the editor all take it from
+    the generated tables, and no C source on the hub or remote hard-codes a number or a name list of its own."""
+    from harmony_core.icons import ICON_IDS, MAX_STOCK_ID
+
+    cap = len(ICON_IDS)
+    assert cap == MAX_STOCK_ID == len(json.loads((ROOT / "harmony_addon/frontend-shared/icons.json").read_text())["icons"])
+    assert f"RA_ICON_MAX {cap}\n" in (ROOT / "remote/app/icons.h").read_text()
+    for src in [*(ROOT / "hub").rglob("*.[ch]"), *(ROOT / "common").rglob("*.[ch]")]:
+        assert not re.search(r"icon\w*\s*(>|>=|<|<=)\s*\d{2,}", src.read_text()), src
+    for src in (ROOT / "remote" / "app").glob("*.[ch]"):
+        if src.name != "icons.h":
+            assert not re.search(r"icon\w*\s*(>|>=)\s*\d{2,}", src.read_text()), src
+
+
+def test_package_ships_the_generated_icons(tmp_path):
+    import zipfile
+
+    from tools.package_integration import build
+
+    out = tmp_path / "p.zip"
+    build(
+        ROOT / "custom_components" / "ha_harmony",
+        out,
+        json.loads((ROOT / "custom_components/ha_harmony/manifest.json").read_text())["version"],
+    )
+    with zipfile.ZipFile(out) as z:
+        assert z.read("harmony_core/icons.py").decode() == (ROOT / "harmony_core/icons.py").read_text()

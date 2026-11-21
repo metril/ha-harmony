@@ -32,7 +32,22 @@ _NAMES = {
 _ACRONYMS = frozenset(
     ["ok", "dvr", "tv", "hdmi", "usb", "ir", "av", "dvd", "cd", "hd", "uhd", "sd", "epg", "ui", "hdr", "arc", "pip", "bt", "ha", "am", "fm", "cec", "rf", "led", "lcd", "osd", "pc", "vcr", "pvr", "nec", "sirc", "dts", "cc", "vod", "kvm"]
 )
-_BRAND = {"earc": "eARC", "dpad": "D-Pad", "necext": "NECext"}
+_BRAND = {
+    "earc": "eARC",
+    "dpad": "D-Pad",
+    "necext": "NECext",
+    "youtube": "YouTube",
+    "iphone": "iPhone",
+    "ipad": "iPad",
+    "ipod": "iPod",
+    "playstation": "PlayStation",
+    "airplay": "AirPlay",
+    "directv": "DirecTV",
+    "tivo": "TiVo",
+    "wifi": "WiFi",
+    "hbo": "HBO",
+    "hulu": "Hulu",
+}
 _SPLIT_WORDS = frozenset(["ch", "vol", "num", "key", "input", "digit", "page", "mode", "scene"])
 _UNITS = frozenset(["s", "ms", "min", "sec", "h", "hz", "khz", "mhz", "db", "st", "nd", "rd", "th", "m", "cm", "mm"])
 _CMD_WORDS = {
@@ -65,7 +80,7 @@ def _tokens(name: str) -> list[str]:
         if not part:
             out.append(raw)
             continue
-        if re.match(r"^[a-z][A-Z]", part):
+        if re.match(r"^[a-z][A-Z]", part) or part.lower() in _BRAND:
             pieces = [part]
         else:
             p = re.sub(r"([a-z])([A-Z])", r"\1 \2", part)

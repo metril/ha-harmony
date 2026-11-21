@@ -349,6 +349,8 @@ export class HhApp extends StoreElement {
     const problem = linkProblem(info, s.hub);
     if (problem) out.push(html`<div class="banner ir" role="status" id="link-problem">${problem}</div>`);
     const l = this.link;
+    if (!problem && l && l.applied_rev !== null && l.acked_rev === l.applied_rev && l.result === 'error')
+      out.push(html`<div class="banner ir" role="alert" id="link-rejected">The hub rejected ${this.store.applied ? `Rev ${this.store.applied.rev}` : 'the new config'}: ${l.detail ?? 'no reason given'}. The remote is still running the previous config.</div>`);
     if (!problem && l && l.applied_rev !== null && l.acked_rev !== l.applied_rev)
       out.push(html`<div class="banner" role="status" id="link-pending">${this.store.applied ? `Rev ${this.store.applied.rev}` : 'The new config'} is being sent to the remote…</div>`);
     return out;
