@@ -55,7 +55,9 @@ _DOMAIN_ICON = {
     "script": "scene",
     "media_player": "tv",
     "sun": "sun",
+    "input_select": "settings",
 }
+_SERVICE_ICON = {"open_cover": "up", "close_cover": "down"}
 _NAV_ICON_LEAD = {"prev": "chev_left", "home": "home"}
 _KIND_ICONS = ("speaker", "soundbar", "receiver", "streamer", "projector", "kvm", "plug", "laptop", "pc")
 _CHEVRONS = frozenset(i for n, i in ICON_IDS.items() if n.startswith("chev"))
@@ -210,6 +212,7 @@ def _spec(
     in_list: bool,
     dev_icons: dict[str, str] | None = None,
     dev_by_name: dict[str, str] | None = None,
+    act_devs: dict[str, list[str]] | None = None,
 ) -> _Spec:
     kind, label = w["type"], w["label"]
     role = w.get("role", "default")
@@ -237,10 +240,17 @@ def _spec(
             )  # unknown: validated elsewhere
             if icon is None:
                 icon = icon_for_text(f"{act_names.get(target, target)} {target}")
+                for dn in (act_devs or {}).get(target, []) if not icon else []:
+                    found = nav_icon(dn, dev_icons, dev_by_name)  # the activity's own devices
+                    icon = icon or found
         if icon is None and action["type"] == "device" and dev_icons:
             named = dev_icons.get(action["device"])  # the device's own icon is the default
             if named:
                 icon = ICON_IDS[named]
+        if icon is None and action["type"] == "ha_call":
+            svc = action["service"]
+            dom, _, name = svc.partition(".")
+            icon = ICON_IDS.get(_SERVICE_ICON.get(name) or _DOMAIN_ICON.get(dom, ""), None)
         if icon is None:
             icon = icon_for_text(label)
     elif kind == "tile" and icon is None:
@@ -308,9 +318,10 @@ def _default_icon_only(s: _Spec, cols: int, rows: int, fixed: bool = False) -> N
         return
     if s.shape == "monogram":
         return
-    if s.icon in BRAND_COLORS:  # a brand logo replaces the text
-        s.icon_only = True
-        return
+    if s.icon in BRAND_COLORS:  # a brand logo replaces the text where there is no room for both
+        if not fixed or (s.w <= 4 and s.shape == "card"):
+            s.icon_only = True
+            return
     if (cols == 4 and s.w == 1) or fit_label(SimpleNamespace(cols=cols, rows=rows, fixed=fixed), _probe(s)):
         s.icon_only = True
 
@@ -373,6 +384,23 @@ def _split_fixed(specs: list[_Spec], p: dict[str, Any], pi: int, base: int) -> l
             size = base
         groups[-1].append(row)
         size += n
+    while len(groups) > 1 and len(groups[-1]) == 1 and len(groups[-2]) > 1:
+        moved = groups[-2][-1]  # never leave one grid row alone on the last page
+        if height([moved, *groups[-1]]) > FIXED_MAX:
+            break
+        groups[-1].insert(0, moved)
+        groups[-2].pop()
+    moved_any = True  # balance: neighbouring pages differ by at most one grid row
+    while moved_any and len(groups) > 1:
+        moved_any = False
+        for i in range(len(groups) - 1, 0, -1):
+            if len(groups[i - 1]) - len(groups[i]) >= 2:
+                row = groups[i - 1][-1]
+                nb = sum(widget_size(_probe(x)) for x in row) + sum(widget_size(_probe(x)) for r in groups[i] for x in r)
+                if height([row, *groups[i]]) <= FIXED_MAX and base + nb <= MAX_BYTES and len(groups[i]) < 16:
+                    groups[i].insert(0, row)
+                    groups[i - 1].pop()
+                    moved_any = True
     out = []
     for g in groups:
         flat: list[_Spec] = []
@@ -395,8 +423,46 @@ def _span_of(w: int, cols: int) -> int:
 
 
 def _over(s: _Spec) -> bool:
-    s.x, s.y, s.h = 0, 0, 1
-    return fit_label(_FIT_PAGE, _probe(s)) is not None
+    return fit_label(_FIT_PAGE, _probe(replace(s, x=0, y=0, h=1))) is not None
+
+
+_ABBREV = {"volume": "Vol", "channel": "Ch", "previous": "Prev", "settings": "Setup", "navigation": "Nav", "subtitles": "Subs"}
+
+
+def _abbrev(label: str) -> str:
+    return " ".join(_ABBREV.get(w.lower(), w) for w in label.split())
+
+
+def _shorten_key(s: _Spec) -> bool:
+    """A glyph key whose caption is cut gets a shorter one (Volume Up -> Vol Up) before it loses the caption."""
+    if s.kind != "button" or s.w > 4 or s.shape != "card" or not s.icon or s.icon_only or s.icon in BRAND_COLORS:
+        return False
+    if not _over(s):
+        return False
+    short = _abbrev(s.label)
+    if short == s.label:
+        return False
+    full, s.label = s.label, short
+    if _over(s):
+        s.label = full
+        return False
+    return True
+
+
+def _caption_rows(specs: list[_Spec]) -> None:
+    """In one row of glyph keys either every key has a caption or none does (logo keys excepted)."""
+    rows: dict[int, list[_Spec]] = {}
+    for s in specs:
+        if s.kind == "button" and s.w <= 4 and s.shape == "card" and s.icon and s.icon not in BRAND_COLORS and s.nav is None:
+            rows.setdefault(s.y, []).append(s)
+    for row in rows.values():
+        if any(s.label != _abbrev(s.label) for s in row) and any(s.label != s.cfg["label"] for s in row):
+            for s in row:  # one wording across the row (Vol Up beside Vol Down)
+                s.label = _abbrev(s.label)
+        if any(s.icon_only for s in row) and not all(s.icon_only for s in row):
+            for s in row:
+                if s.cfg.get("icon_only") is not False:
+                    s.icon_only = True
 
 
 def _fit_class(s: _Spec) -> None:
@@ -404,9 +470,11 @@ def _fit_class(s: _Spec) -> None:
     row. A button with a glyph stops at the half card and falls back to icon-only; one without goes on."""
     if s.kind == "label" or s.shape in ("row", "pill", "monogram") or s.icon_only or not s.label:
         return
-    if s.icon in BRAND_COLORS and "icon_only" not in s.cfg:
-        return  # a brand logo replaces the text
+    if s.icon in BRAND_COLORS and s.w <= 4 and s.shape == "card" and "icon_only" not in s.cfg:
+        return  # a brand logo key
     if not _over(s):
+        return
+    if _shorten_key(s):
         return
     if s.kind == "tile":
         if s.w < 12:
@@ -478,6 +546,8 @@ def _is_off(s: _Spec) -> bool:
 def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     names = {a["id"]: a.get("name", a["id"]) for a in model["activities"]}
     dev_icons = {d["id"]: d["icon"] for d in model["devices"] if d.get("icon")}
+    dev_name = {d["id"]: d.get("name") or d["id"] for d in model["devices"]}
+    act_devs = {a["id"]: [dev_name[x["device"]] for x in a["devices"] if x["device"] in dev_name] for a in model["activities"]}
     dev_by_name = {}
     for d in model["devices"]:
         dev_by_name[d["id"].casefold()] = d["id"]
@@ -485,16 +555,27 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     units: list[_Unit] = []
     for pi, p in enumerate(model["pages"]):
         in_list = "list" in p
-        specs = [_spec(w, act_ids, names, in_list, dev_icons, dev_by_name) for w in p["widgets"]]
+        specs = [_spec(w, act_ids, names, in_list, dev_icons, dev_by_name, act_devs) for w in p["widgets"]]
         for k, s in enumerate(specs):
             s.order = k
         cols, rows = p["cols"], p["rows"]
         convert = p.get("layout") not in ("fixed", "grid")  # every page is FIXED unless it opts out
         fixed = convert or p.get("layout") == "fixed"
         if fixed and in_list:  # one full-width row each, one grid row per widget
-            for i, s in enumerate(specs):
-                s.x, s.y, s.w, s.h = 0, i, 12, 1
-            rows = max(1, min(16, len(specs)))
+            half = convert and len(specs) >= 7 and all(
+                s.kind == "button" and s.nav is None and "shape" not in s.cfg for s in specs
+            )
+            if half:  # many short items: compact half cards, 8 a page
+                for i, s in enumerate(specs):
+                    s.x, s.y, s.w, s.h, s.shape, s.compact = (i % 2) * 6, i // 2, 6, 1, "card", True
+                half = not any(_over(replace(s, x=0)) for s in specs)
+            if not half:
+                for s in specs:
+                    if s.compact and s.shape == "card" and "compact" not in s.cfg:
+                        s.shape, s.compact = "row", False  # the compact trial did not fit
+                for i, s in enumerate(specs):
+                    s.x, s.y, s.w, s.h = 0, i, 12, 1
+            rows = max(1, min(16, len(specs) if not half else (len(specs) + 1) // 2))
         title = p.get("title", "")
         if not title and not in_list and rows >= 2:
             lead = _lead_title(specs, cols)
@@ -509,7 +590,11 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
             cols, rows = 12, max(1, max(s.y for s in specs) + 1) if specs else 1
         if not in_list:
             for s in specs:
+                if fixed and not convert:
+                    _shorten_key(s)
                 _default_icon_only(s, cols, rows, fixed)
+            if fixed:
+                _caption_rows(specs)
         common: dict[str, Any] = {
             "cfg_index": pi,
             "cfg_id": p["id"],

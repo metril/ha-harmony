@@ -164,17 +164,17 @@ def test_preset_theme_id_and_user_theme_wire():
 
 GOLDEN = {
     "living_room": {
-        "gen": 255,
-        "n": 16,
-        "v2": "861739acd10353ea98c1887f2744940164d5aec1ebc7e33f654858c7cc35c0bf",
-        "v1": "224acf2e0df58182a3b52af7618e710fe8366a3b86a3bc7f66374a6451b81121",
+        "gen": 5,
+        "n": 15,
+        "v2": "8011b2b52fa7f7980dbea4a460b0154b44294120d9831d04a9c3df7b3b0e1926",
+        "v1": "d63590c9f481a92c54c299dd98eb5ce0c4a3f17313cf8170261a0045e3d70a47",
         "hash": "16b320ed",
     },
     "large": {
-        "gen": 210,
-        "n": 20,
-        "v2": "baa72dfbf62d8f0926263e0334b43f7222af99e4fa16ad7698590b816b88426c",
-        "v1": "d887a7ae12144095490dd2844679e096a29e94dab34825d2b60a756604b72743",
+        "gen": 15,
+        "n": 18,
+        "v2": "4897fbc3836e911d06dc416c1284c5d4d242ecb236b98a59f56972ee3aa89fea",
+        "v1": "ff79fe8ae726ca608e1e1f50294c342d1852ab3a0a15cefe42099411085f4151",
         "hash": "5f6cca72",
     },
 }
