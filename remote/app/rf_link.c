@@ -131,12 +131,21 @@ static int lt_claim(void *self) {
 
 /* The chip has reported the link lost (and it was up before). Live: the app's events may arrive before service(). */
 static bool link_down(const rf_link_t *l) {
-  return l->tp && l->tp->attached && l->ever_up && !l->tp->attached(l->tp->self);
+  return l->tp && l->tp->attached && !l->tp->attached(l->tp->self); /* never-up counts as lost */
 }
 
 /* One sync pulse; arms the next backoff step while the link stays down. */
 static void rejoin_attempt(rf_link_t *l, uint64_t now) {
-  (void)hp_rf_spi_sync(l->tp); /* a refused write (backoff) just counts as a try */
+  bool receiving = l->store && l->store->have_gen && hp_store_count(l->store) > 0 && !hp_store_complete(l->store);
+  if (receiving) return; /* a page-set transfer is under way: no re-sync (stock skips it during config sync / OTA) */
+  bool recent = l->synced_once && now - l->last_sync_ms < RF_LINK_SYNC_COALESCE_MS;
+  if (!recent && hp_rf_spi_sync(l->tp) == 0) { /* failure is untracked: it never blocks a key send */
+    l->synced_once = true;
+    l->last_sync_ms = now;
+    uint64_t at = now + RF_LINK_SYNC_QUERY_MS; /* one-shot deadline in the loop, no sleep */
+    if (!l->info_pending || at < l->next_info_ms) l->next_info_ms = at;
+    l->info_pending = true;
+  }
   l->sync_tries++;
   l->next_sync_ms = l->sync_tries < RF_LINK_SYNC_MAX_TRIES
                         ? now + ((uint64_t)RF_LINK_SYNC_BASE_MS << (l->sync_tries - 1)) : UINT64_MAX;
@@ -218,14 +227,13 @@ static void service(rf_link_t *l, uint64_t now) {
   if (rc == -HP_E_IO) ra_logf(&l->sys, "rf_link: link dead");
   bool att = l->tp->attached ? l->tp->attached(l->tp->self) : l->was_attached;
   if (att) {
-    l->ever_up = true;
     l->sync_tries = 0;
     l->next_sync_ms = UINT64_MAX;
   }
   if (!att && l->was_attached) { /* lost just now: one immediate attempt */
     l->sync_tries = 0;
     rejoin_attempt(l, now);
-  } else if (!att && l->ever_up && l->awake && now >= l->next_sync_ms) {
+  } else if (!att && l->awake && now >= l->next_sync_ms) {
     rejoin_attempt(l, now);
   }
   if (att && l->lost) { /* re-attached after a loss: tell the hub we are here */
@@ -293,6 +301,11 @@ static void rf_resumed(void *ctx, uint64_t now, uint64_t gap_ms) {
   l->next_batt_ms = now;
 }
 
+static void rf_touched(void *ctx) {
+  rf_link_t *l = ctx;
+  if (l->tp) rejoin_event(l, l->sys.ops.now_ms(l->sys.ops.ctx));
+}
+
 static uint32_t rf_next_ms(void *ctx, uint64_t now) {
   rf_link_t *l = ctx;
   if (l->n || (!l->tp && !l->dead_reported)) return 0;
@@ -351,5 +364,5 @@ void rf_link_close(rf_link_t *l) {
 
 app_link_t rf_link_app(rf_link_t *l) {
   return (app_link_t){.ctx = l, .send_key = rf_send_key, .poll = rf_poll, .get_fd = rf_get_fd, .next_ms = rf_next_ms,
-                      .set_awake = rf_set_awake, .resumed = rf_resumed};
+                      .set_awake = rf_set_awake, .resumed = rf_resumed, .touched = rf_touched};
 }

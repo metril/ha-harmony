@@ -56,7 +56,9 @@
  * a retry after RF_LINK_SYNC_BASE_MS << (n-1), at most RF_LINK_SYNC_MAX_TRIES attempts, then silence until the next
  * event. A deadline, not a poll: nothing runs while the link is up or the remote is asleep. */
 #define RF_LINK_SYNC_BASE_MS 2000
-#define RF_LINK_SYNC_MAX_TRIES 5
+#define RF_LINK_SYNC_MAX_TRIES 5 /* the whole backoff lives behind this: 1 = a single pulse per event, no retry timer */
+#define RF_LINK_SYNC_COALESCE_MS 250 /* triggers closer than this share one pulse (resume + wake) */
+#define RF_LINK_SYNC_QUERY_MS 5      /* the quick uplink (remote_info) follows the pulse after this, as stock's sync request */
 #define RF_LINK_RING 16
 
 typedef struct {
@@ -74,8 +76,10 @@ typedef struct {
   uint8_t told_gen, told_pages; /* what the last remote_info said about it */
   int last_pct;
   bool was_attached, lost, dead_reported;
-  bool ever_up, awake;
+  bool awake;
   unsigned sync_tries;
+  uint64_t last_sync_ms;
+  bool synced_once;
   uint64_t next_sync_ms; /* UINT64_MAX = no retry armed */
 } rf_link_t;
 

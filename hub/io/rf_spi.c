@@ -145,7 +145,7 @@ static void wake(spi_t *s) {
 
 /* The only write() site. 0 ok (including a positive return, which is an rx length), -HP_E_BUSY while
  * backing off after an error, -HP_E_IO on a negative return. */
-static int spi_write(spi_t *s, const uint8_t *buf, size_t n) {
+static int spi_write_ex(spi_t *s, const uint8_t *buf, size_t n, bool track) {
     if (s->role == HP_RF_SPI_ROLE_REMOTE && n > REMOTE_WRITE_CAP) return -HP_E_TOOBIG; /* never reaches the syscall */
     pthread_mutex_lock(&s->tx_mu);
     uint64_t now = s->ops.now_ms(s->ops.ctx);
@@ -157,7 +157,9 @@ static int spi_write(spi_t *s, const uint8_t *buf, size_t n) {
         do w = s->ops.write(s->ops.ctx, s->fd, buf, n);
         while (w < 0 && errno == EINTR);
         dbg_frame(s, "TX", (long)w, buf, n);
-        if (w < 0) {
+        if (w < 0 && !track) {
+            rc = -HP_E_IO; /* an untracked write (sync pulse) must not put the next real send into backoff */
+        } else if (w < 0) {
             unsigned d = s->delay_ms ? s->delay_ms * 2 : HP_RF_SPI_BACKOFF_MIN_MS;
             s->delay_ms = d > HP_RF_SPI_BACKOFF_MAX_MS ? HP_RF_SPI_BACKOFF_MAX_MS : d;
             s->next_ok = now + s->delay_ms;
@@ -170,6 +172,8 @@ static int spi_write(spi_t *s, const uint8_t *buf, size_t n) {
     pthread_mutex_unlock(&s->tx_mu);
     return rc;
 }
+
+static int spi_write(spi_t *s, const uint8_t *buf, size_t n) { return spi_write_ex(s, buf, n, true); }
 
 /* ---- reader ---- */
 
@@ -566,7 +570,7 @@ int hp_rf_spi_unpair(hp_rf_transport *t, unsigned slot) {
 int hp_rf_spi_sync(hp_rf_transport *t) {
     if (!t || t->recv != spi_recv || ((spi_t *)t->self)->role != HP_RF_SPI_ROLE_REMOTE) return -HP_E_INVAL;
     const uint8_t cmd[10] = {0x12, 0x01};
-    return spi_write(t->self, cmd, sizeof cmd);
+    return spi_write_ex(t->self, cmd, sizeof cmd, false); /* a failed pulse never blocks the key send behind it */
 }
 
 int hp_rf_spi_write_for_test(hp_rf_transport *t, const uint8_t *buf, size_t n) {

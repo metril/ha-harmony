@@ -41,6 +41,7 @@ typedef struct fake {
   struct fake *peer;
   int drop_acks; /* swallow this many outgoing ack frames */
   int drop_all;  /* swallow every outgoing data frame */
+  int fail_sync; /* the 10-byte sync pulse write fails with EIO */
 } fake_t;
 
 static void feed(fake_t *f, const uint8_t *b, size_t n) {
@@ -70,6 +71,10 @@ static ssize_t f_write(void *c, int fd, const void *b, size_t n) {
   fake_t *f = c;
   (void)fd;
   const uint8_t *p = b;
+  if (n == 10 && f->fail_sync) {
+    errno = EIO;
+    return -1;
+  }
   pthread_mutex_lock(&f->mu);
   if (f->nw < 512) {
     f->w[f->nw].len = n;
@@ -245,11 +250,12 @@ static void tick(uint64_t ms) {
 
 /* The radios' link-up reports (bench, docs/hardware/hub-rf-cc2544.md): neither side is given a slot,
  * both learn it from these. Queued before the open: the reader picks them up first. */
+static int no_remote_up; /* the remote's chip never reports link status */
 static void radios_link_up(void) {
   const uint8_t hub_up[7] = {0x10, 0x02, 0x41, 0x04, 0x87, 0x21, 0x40};
   const uint8_t rem_up[7] = {0x10, 0x01, 0x41, 0x04, 0x07, 0x0B, 0x88};
   feed(&fh, hub_up, 7);
-  feed(&fr, rem_up, 7);
+  if (!no_remote_up) feed(&fr, rem_up, 7);
 }
 
 static int setup_ex(int hal, int soc_missing) {
@@ -278,7 +284,7 @@ static int setup_ex(int hal, int soc_missing) {
   hp_rf_spi_ops_t ro = fake_ops(&fr);
   hp_rf_spi_cfg_t rc = {NULL, 0, &ro, HP_RF_SPI_ROLE_REMOTE, 0, false, NULL, NULL, NULL};
   int orc = rf_link_open(&rf, &rc);
-  if (orc == 0) { /* both radios have learned their slot from the link-up reports before anything is driven */
+  if (orc == 0 && !no_remote_up) { /* both radios have learned their slot from the link-up reports before anything is driven */
     wait_slots();
     CT_EQ(hp_rf_spi_slot(rf.tp), 1);
     CT_EQ(hp_rf_spi_slot(hub_tp), 2);
@@ -1007,10 +1013,10 @@ static void remote_chip_link(int up) {
   CT_EQ(chip_attached(), up);
   settle(3);
 }
-/* idle for `ms` in 1 s steps, with a touch every 5 s on empty glass so the screen stays awake without a link event */
+/* idle for `ms` in 1 s steps, noting activity every 5 s so the screen stays awake without a link event */
 static void idle_awake(uint64_t ms) {
   for (uint64_t t = 0; t < ms; t += 1000) {
-    if (t % 5000 == 0) { fk_touch(&fk, 300, 300, 1); fk_touch(&fk, 300, 300, 0); }
+    if (t % 5000 == 0) ra_power_activity(&app.power, fk.now); /* keeps the screen on; not a link event */
     tick(1000);
   }
 }
@@ -1025,6 +1031,7 @@ static void test_rejoin_silent_while_link_up(void) {
 static void test_rejoin_on_loss_then_capped_backoff(void) {
   setup();
   DRAIN();
+  fh.drop_all = 1; /* the hub stays unreachable */
   idle_awake(1000);
   CT_EQ(count_syncs(), 0);
   remote_chip_link(0); /* status 0x47 */
@@ -1050,6 +1057,7 @@ static void test_rejoin_on_loss_then_capped_backoff(void) {
 static void test_rejoin_on_keypress_while_lost(void) {
   setup();
   DRAIN();
+  fh.drop_all = 1;
   remote_chip_link(0);
   idle_awake(40000); /* retries exhausted */
   int base = count_syncs();
@@ -1066,6 +1074,7 @@ static void test_rejoin_on_keypress_while_lost(void) {
 static void test_rejoin_on_wake_and_resume(void) {
   setup();
   DRAIN();
+  fh.drop_all = 1; /* the hub stays unreachable */
   remote_chip_link(0);
   int base = count_syncs();
   for (int i = 0; i < 50; i++) tick(1000); /* backlight off: asleep, retries stopped */
@@ -1078,12 +1087,95 @@ static void test_rejoin_on_wake_and_resume(void) {
   fk_touch(&fk, 300, 300, 0);
   tick(50);
   CT_EQ(count_syncs(), quiet + 1);
+  tick(RF_LINK_SYNC_COALESCE_MS + 10);
   app_link_t lk = rf_link_app(&rf);
   lk.resumed(lk.ctx, fk.now, 60000); /* resume from suspend */
+  CT_EQ(count_syncs(), quiet + 2);
+  lk.resumed(lk.ctx, fk.now + 10, 60000); /* back to back: coalesced into the one pulse */
+  lk.touched(lk.ctx);
   CT_EQ(count_syncs(), quiet + 2);
   remote_chip_link(1);
   lk.resumed(lk.ctx, fk.now, 60000); /* link is up: resume sends nothing */
   CT_EQ(count_syncs(), quiet + 2);
+  teardown();
+}
+
+static void test_rejoin_never_up_remote_pulses(void) {
+  no_remote_up = 1;
+  CT_EQ(setup_ex(0, 0), 0);
+  no_remote_up = 0;
+  settle(5);
+  CT_EQ(chip_attached(), 0);
+  CT_CHECK(count_syncs() >= 1); /* first awake event: the chip never reported, the link is still sought */
+  teardown();
+}
+
+static void test_rejoin_failed_pulse_does_not_block_key(void) {
+  setup();
+  DRAIN();
+  fr.fail_sync = 1;
+  remote_chip_link(0); /* the immediate pulse write fails */
+  int keys = nhkeys;
+  fk_key(&fk, 0, 115, 1);
+  tick(50);
+  fk_key(&fk, 0, 115, 0);
+  tick(50);
+  WAIT_FOR(nhkeys == keys + 2); /* the press was not lost to a write backoff */
+  teardown();
+}
+
+static void test_rejoin_followed_by_quick_uplink_in_5ms(void) {
+  setup();
+  DRAIN();
+  int info = nhinfo;
+  fh.drop_all = 1;
+  remote_chip_link(0);
+  int n = count_syncs();
+  CT_EQ(n, 1);
+  tick(RF_LINK_SYNC_QUERY_MS + 1);
+  WAIT_FOR(nhinfo >= info || fr.nw > 0); /* settle */
+  int w0 = 0;
+  for (int i = 0; i < fr.nw && i < 512; i++) if (fr.w[i].len == 32 && fr.w[i].head[4] != HP_RF_KIND_POLL) w0++;
+  CT_CHECK(w0 > 0);
+  teardown();
+}
+
+static void test_rejoin_skipped_during_page_transfer(void) {
+  setup();
+  DRAIN();
+  fh.drop_all = 1; /* the hub stays unreachable */
+  app.store.have_gen = true;
+  app.store.gen = 1;
+  app.store.total = 3;
+  app.store.count = 1; /* a page set is arriving */
+  remote_chip_link(0);
+  CT_EQ(count_syncs(), 0);
+  fk_touch(&fk, 300, 300, 1);
+  fk_touch(&fk, 300, 300, 0);
+  tick(50);
+  CT_EQ(count_syncs(), 0);
+  app.store.have_gen = false;
+  tick(RF_LINK_SYNC_COALESCE_MS + 10);
+  fk_touch(&fk, 300, 300, 1);
+  fk_touch(&fk, 300, 300, 0);
+  tick(50);
+  CT_EQ(count_syncs(), 1);
+  teardown();
+}
+
+static void test_rejoin_on_touch_while_lost(void) {
+  setup();
+  DRAIN();
+  fh.drop_all = 1;
+  remote_chip_link(0);
+  idle_awake(40000);
+  int base = count_syncs();
+  CT_EQ(base, RF_LINK_SYNC_MAX_TRIES);
+  fk_touch(&fk, 300, 300, 1);
+  tick(50);
+  fk_touch(&fk, 300, 300, 0);
+  tick(50);
+  CT_EQ(count_syncs(), base + 1);
   teardown();
 }
 
@@ -1107,6 +1199,11 @@ int main(void) {
   CT_RUN(test_rejoin_on_loss_then_capped_backoff);
   CT_RUN(test_rejoin_on_keypress_while_lost);
   CT_RUN(test_rejoin_on_wake_and_resume);
+  CT_RUN(test_rejoin_never_up_remote_pulses);
+  CT_RUN(test_rejoin_failed_pulse_does_not_block_key);
+  CT_RUN(test_rejoin_followed_by_quick_uplink_in_5ms);
+  CT_RUN(test_rejoin_skipped_during_page_transfer);
+  CT_RUN(test_rejoin_on_touch_while_lost);
   CT_RUN(test_heartbeat_unreadable_soc);
   CT_RUN(test_wait_includes_link_fd_and_deadline);
   CT_RUN(test_open_refused_when_hal_alive);

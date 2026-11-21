@@ -163,6 +163,7 @@ static bool sink_gate(void *ctx, uint64_t now) {
 static void sink_touch(void *ctx, int x, int y, bool down) {
   app_t *a = ctx;
   ra_display_note(&a->display, down ? RA_WHY_PRESS : RA_WHY_RELEASE, a->input_ms);
+  if (down && a->link.touched) a->link.touched(a->link.ctx);
   if (down) ra_ui_press_at(&a->ui, x, y);
   else ra_ui_release(&a->ui);
   if (!down && a->v2 && a->ui.page.page_id == RA_UI_PAGE_ERROR)

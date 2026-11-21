@@ -49,6 +49,8 @@ typedef struct {
   void (*set_awake)(void *ctx, bool awake);
   /* Optional. The kernel resumed from suspend (gap_ms asleep): re-announce to the hub (remote_info, battery) and re-poll. */
   void (*resumed)(void *ctx, uint64_t now, uint64_t gap_ms);
+  /* Optional. A touch went down (any place): a link that is lost re-initiates itself. */
+  void (*touched)(void *ctx);
 } app_link_t;
 
 extern const app_link_t app_link_null;
