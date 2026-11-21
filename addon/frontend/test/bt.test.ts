@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, type BtCodes, type BtState } from '../src/lib/api';
 import { commandNames, setBtDefaults } from '../src/lib/bt';
-import { CmdId, addHostDevice, addRemote, bars, btError, clock, dropRowKey, hidCode, keyLabel, keyOptions, keyProblem, keyRows, nextCountdown, outcome, parseHid, patchRemote, removeRemote, secsLeft, setRowKey } from '../src/lib/bt-model';
+import { useForActivities, CmdId, addHostDevice, addRemote, bars, btError, clock, dropRowKey, hidCode, keyLabel, keyOptions, keyProblem, keyRows, nextCountdown, outcome, parseHid, patchRemote, removeRemote, secsLeft, setRowKey } from '../src/lib/bt-model';
 import { announce, derive, observe, startRun } from '../src/lib/bt-wizard';
 import { deviceChips } from '../src/lib/studio-model';
 import { capProblem, irTotals } from '../src/lib/device-edit';
@@ -248,5 +248,34 @@ describe('command ids bound to the action', () => {
   it('key order of the body does not matter', () => {
     const c = new CmdId();
     expect(c.id('key', { page: 7, usage: 1 })).toBe(c.id('key', { usage: 1, page: 7 }));
+  });
+});
+
+describe('useForActivities', () => {
+  const rk: BtCodes = {
+    ...codes,
+    builtins: [...codes.builtins, { name: 'Back', page: 12, usage: 0x224, default: true }, { name: 'Escape', page: 7, usage: 0x29, default: true }, { name: 'VolumeUp', page: 12, usage: 0xe9, default: true }],
+    remote_keys: [
+      { name: 'DirectionUp', page: 7, usage: 0x52, key: 'up' },
+      { name: 'Back', page: 12, usage: 0x224, key: 'exit' },
+      { name: 'Escape', page: 7, usage: 0x29, key: 'exit' },
+      { name: 'VolumeUp', page: 12, usage: 0xe9, key: 'volume_up' },
+      { name: 'Red', page: 12, usage: 0x69, key: 'red' },
+    ],
+  };
+  const dev = { id: 'bt1', kind: 'bt', name: 'Box', address: 'AA:BB:CC:00:00:01', commands: { DirectionUp: 'DirectionUp', Back: 'Back', Escape: 'Escape' } } as unknown as Device;
+  const cfg = (): Config => ({ devices: [dev], activities: [{ id: 'a', name: 'A', devices: [{ device: 'tv' }], keys: { up: { device: 'tv', command: 'Up' } } }, { id: 'b', name: 'B' }] }) as Config;
+  it('adds the device and binds only free nav/transport keys', () => {
+    const out = useForActivities(cfg(), 'bt1', ['a', 'b'], rk);
+    const [a, b] = out.activities!;
+    expect(a!.devices).toEqual([{ device: 'tv' }, { device: 'bt1' }]);
+    expect(a!.keys).toEqual({ up: { device: 'tv', command: 'Up' }, exit: { device: 'bt1', command: 'Back' } });
+    expect(b!.devices).toEqual([{ device: 'bt1' }]);
+    expect(b!.keys).toEqual({ up: { device: 'bt1', command: 'DirectionUp' }, exit: { device: 'bt1', command: 'Back' } });
+  });
+  it('is idempotent and leaves other activities alone', () => {
+    const once = useForActivities(cfg(), 'bt1', ['b'], rk);
+    expect(useForActivities(once, 'bt1', ['b'], rk)).toEqual(once);
+    expect(once.activities![0]).toEqual(cfg().activities![0]);
   });
 });

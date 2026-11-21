@@ -311,3 +311,24 @@ export function keyOptions(codes: BtCodes, extra?: string | null): { group: KeyG
 }
 /** "Up" for `up`, "Does nothing" for null. */
 export const keyText = (k: string | null): string => (k === null ? 'Does Nothing' : keyLabel(k));
+
+/** Activity keys "Use For Activity" fills: navigation and transport (not volume, channel, colours, digits or power). */
+const ACTIVITY_KEYS = new Set(['up', 'down', 'left', 'right', 'select', 'exit', 'menu', 'guide', 'info', 'play', 'pause', 'stop', 'fast_forward', 'rewind']);
+/** Add a bt device to the given activities and bind each default nav/transport key the device has a command for and the
+ *  activity has not bound yet. Uses the hub's default usage -> key map (`remote_keys`); the first name per key wins. */
+export function useForActivities(cfg: Config, devId: string, actIds: readonly string[], codes: BtCodes): Config {
+  const dev = (cfg.devices ?? []).find((d) => d.id === devId);
+  const cmds = (dev as unknown as { commands?: Record<string, string> } | undefined)?.commands ?? {};
+  const map = new Map<string, string>();
+  for (const r of codes.remote_keys) if (ACTIVITY_KEYS.has(r.key) && r.name in cmds && !map.has(r.key)) map.set(r.key, r.name);
+  return {
+    ...cfg,
+    activities: (cfg.activities ?? []).map((a) => {
+      if (!actIds.includes(a.id)) return a;
+      const devices = (a.devices ?? []).some((d) => d.device === devId) ? a.devices : [...(a.devices ?? []), { device: devId }];
+      const keys = { ...(a.keys ?? {}) };
+      for (const [k, name] of map) if (!(k in keys)) keys[k] = { device: devId, command: name };
+      return { ...a, devices, keys };
+    }),
+  };
+}

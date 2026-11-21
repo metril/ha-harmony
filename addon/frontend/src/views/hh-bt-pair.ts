@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { signal, BtElement, btCss } from './bt-base';
 import './hh-bt-commands';
 import './hh-bt-keys';
-import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, patchHost, patchRemote, clock, outcome, remoteNameProblem, remotesOf, secsLeft, nextCountdown, sameAddr } from '../lib/bt-model';
+import { type KeyMap, CmdId, LINK_CHIP, addHostDevice, addRemote, patchHost, patchRemote, clock, outcome, remoteNameProblem, remotesOf, useForActivities, secsLeft, nextCountdown, sameAddr } from '../lib/bt-model';
 import { announce, derive, observe, startRun, type Phase, type Run } from '../lib/bt-wizard';
 import { byteCounter, trimBytes } from '../lib/codes';
 import { capProblem } from '../lib/device-edit';
@@ -31,6 +31,7 @@ export class HhBtPair extends BtElement {
   @state() private commands: Record<string, string> = {};
   @state() private keys: KeyMap = {};
   @state() private picking = '';
+  @state() private useActs = new Set<string>();
   private cStart = new CmdId();
   private cStop = new CmdId();
   private cPick = new CmdId();
@@ -69,6 +70,7 @@ export class HhBtPair extends BtElement {
     }
   }
   protected override updated(): void {
+    super.updated(); // schedules the countdown's next one-second redraw
     const key = `${this.step}:${this.step === 'pair' && this.run ? this.phase().t : ''}`;
     if (key !== this.focusKey) {
       this.focusKey = key;
@@ -191,6 +193,7 @@ export class HhBtPair extends BtElement {
         this.store.replace(r.config);
         id = r.id;
       }
+      if (this.useActs.size && this.codes) this.store.replace(useForActivities(this.store.config, id, [...this.useActs], this.codes));
       this.store.toast(`Added ${name} to the draft (${Object.keys(this.commands).length} commands). Nothing is applied yet.`, 'info', true);
       location.hash = hashFor('devices', id);
     } else {
@@ -258,6 +261,19 @@ export class HhBtPair extends BtElement {
     return html`<h1 id="step-title" tabindex="-1">${host ? 'Pair the Device' : 'Pair the Remote'}</h1>
       <div class="stage">${body}${this.err ? html`<div class="banner bad" role="alert"><span>${this.err}</span></div>` : nothing}</div>`;
   }
+  private activityPicker() {
+    const acts = this.store.config.activities ?? [];
+    if (!acts.length) return nothing;
+    const toggle = (id: string, on: boolean) => {
+      const n = new Set(this.useActs);
+      if (on) n.add(id);
+      else n.delete(id);
+      this.useActs = n;
+    };
+    return html`<fieldset class="opts bare"><legend>Use For Activity…</legend>
+      ${acts.map((a) => html`<label class="opt"><input type="checkbox" .checked=${this.useActs.has(a.id)} @change=${(e: Event) => toggle(a.id, (e.target as HTMLInputElement).checked)} /><b>${a.name ?? a.id}</b></label>`)}
+      <span class="hint">Adds the device to the chosen activities and binds its navigation and transport keys where none is set yet.</span></fieldset>`;
+  }
   private setupStep() {
     const p = this.paired;
     if (!p) return html`<h1 id="step-title" tabindex="-1">Looking for It…</h1><p class="lead" role="status">Waiting for the hub to list it.</p>`;
@@ -280,6 +296,7 @@ export class HhBtPair extends BtElement {
           <label class="f">${host ? 'Device Name' : 'Remote Name'}<input type="text" aria-label="Name" aria-invalid=${prob ? 'true' : 'false'} .value=${this.name} @input=${(e: Event) => (this.name = trimBytes((e.target as HTMLInputElement).value))} /></label>
           <span class="hint">${bytes.used} of ${bytes.max} bytes (the hub stores at most ${bytes.max})</span>
           ${prob ? html`<span class="err" role="alert">${prob}</span>` : nothing}
+          ${host ? this.activityPicker() : nothing}
           <button class="btn pri" ?disabled=${!!prob || !this.codes} @click=${() => this.save()}>${host ? 'Add Device' : 'Add Remote'}</button>
           <span class="hint">${host ? 'The device is already in the draft.' : this.remoteAddr ? 'The remote is already in the draft.' : 'Adds to the draft only.'} Review and apply it from the bar at the top.</span>
         </aside>

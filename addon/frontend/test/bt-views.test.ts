@@ -150,6 +150,20 @@ describe('hh-bt-pair', () => {
     expect(el.shadowRoot.querySelector('.stage .big')?.textContent).toContain('pair with');
   });
 
+  it('the pairing wizard timer counts down', async () => {
+    const open = { state: 'ready', discoverable: true, discoverable_secs: 90, window: 'host', hosts: [], remotes: [], gen: 2 };
+    await boot({ 'POST api/v1/bt/pair': () => ({ body: { ok: true, state: open } }) }, {}, status({ state: open as never }));
+    const el = await mount('hh-bt-pair', { mode: 'host' });
+    await vi_waitFor(() => !!el.shadowRoot.querySelector('.stage .btn.pri:not([disabled])'));
+    el.shadowRoot.querySelector<HTMLButtonElement>('.stage .btn.pri')!.click();
+    await vi_waitFor(() => !!el.shadowRoot.querySelector('.timer'));
+    const t = () => el.shadowRoot.querySelector('.timer')?.textContent ?? '';
+    const first = t();
+    expect(first).toMatch(/\d:\d\d/);
+    await tick(2300);
+    expect(t()).not.toBe(first);
+  });
+
   it('the pairing wizard keeps the countdown out of every live region', async () => {
     await boot({}, {}, status({ state: { state: 'ready', discoverable: true, discoverable_secs: 90, window: 'host', hosts: [], remotes: [], gen: 2 } }));
     const el = await mount('hh-bt-pair', { mode: 'host' });
@@ -237,5 +251,26 @@ describe('hh-bt-pair saves a paired device at once', () => {
     // finishing the form edits that entry instead of adding a second one
     el.shadowRoot.querySelector<HTMLButtonElement>('.side .btn.pri')!.click();
     expect((store.config.devices ?? []).filter((d) => d.kind === 'bt')).toHaveLength(1);
+  });
+});
+
+describe('hh-bt-pair Use For Activity', () => {
+  it('adds the saved device to the chosen activities with default keys', async () => {
+    const { store } = await boot({ 'GET api/v1/bt/codes': () => ({ body: { ...codes, remote_keys: [...codes.remote_keys, { name: 'Select', page: 7, usage: 0x28, key: 'select' }] } }) }, { activities: [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }] } as Config);
+    const host = { addr: 'AA:BB:CC:00:00:09', name: 'Box', connected: true, slot: 0, transport: 'le' as const };
+    const el = await mount('hh-bt-pair', { mode: 'host', addr: host.addr });
+    fakeLive.push({ t: 'bt', ...status({ state: { state: 'ready', discoverable: false, hosts: [host], remotes: [], gen: 5 } as never }) });
+    await vi_waitFor(() => !!el.shadowRoot.querySelector('.twocol'));
+    const boxes = el.shadowRoot.querySelectorAll<HTMLInputElement>('.side input[type=checkbox]');
+    expect(boxes).toHaveLength(2);
+    boxes[1]!.click();
+    await el.updateComplete;
+    await vi_waitFor(() => Object.keys((store.config.devices?.[0] as unknown as { commands: object }).commands).length > 0);
+    el.shadowRoot.querySelector<HTMLButtonElement>('.side .btn.pri')!.click();
+    const id = store.config.devices![0]!.id;
+    const [a, b] = store.config.activities!;
+    expect(a!.devices).toBeUndefined();
+    expect(b!.devices).toEqual([{ device: id }]);
+    expect(b!.keys).toMatchObject({ select: { device: id, command: 'Select' } });
   });
 });
