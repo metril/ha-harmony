@@ -4,7 +4,9 @@ import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("gen_font_metrics", ROOT / "tools" / "gen_font_metrics.py")
+spec = importlib.util.spec_from_file_location(
+    "gen_font_metrics", ROOT / "tools" / "gen_font_metrics.py"
+)
 assert spec and spec.loader
 gen = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gen)

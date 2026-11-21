@@ -8,6 +8,7 @@ import { StoreElement } from './base';
 import './hh-dialog';
 import './hh-page-diff';
 import { meters, themeNotice } from './parts';
+import { pageOverflow } from '../lib/studio-model';
 
 type Step = { label: string; state: 'done' | 'pending' | 'active' | 'todo' };
 
@@ -43,6 +44,8 @@ export class HhApplyDialog extends StoreElement {
   @state() private phase: 'review' | 'applying' | 'done' | 'error' = 'review';
   @state() private appliedRev = 0;
   @state() private message = '';
+  /** the author has confirmed applying with labels the remote will cut */
+  @state() private cutOk = false;
   @state() private ack: 'unknown' | 'waiting' | 'ok' | 'error' | 'timeout' = 'unknown';
   @state() private lastStatus: ApplyStatus | null = null;
   @state() private hubs: HubsResponse | null = null;
@@ -142,6 +145,14 @@ export class HhApplyDialog extends StoreElement {
     }
   }
 
+  /** Labels the remote would cut in the draft, from the live preview (the same pixel rule as the page editor). */
+  private cutLabels(): { page: string; label: string }[] {
+    return (this.store.config.pages ?? []).flatMap((p, i) => {
+      const pp = this.store.pages[i];
+      return pageOverflow(p, pp?.ok && pp.page ? pp : null).map((o) => ({ page: p.title || p.id, label: o.label }));
+    });
+  }
+
   private steps(): Step[] {
     const w = this.ack === 'ok' ? 'done' : this.ack === 'error' ? 'todo' : 'pending';
     return [
@@ -156,6 +167,7 @@ export class HhApplyDialog extends StoreElement {
     const hub = this.target === 'default' ? 'the hub' : this.target;
     const diff = this.rev === null ? s.diff : [];
     const choices = this.hubChoices();
+    const cut = this.rev === null ? this.cutLabels() : [];
     if (this.phase === 'review' || this.phase === 'applying') {
       return html`<hh-dialog .open=${this.open} heading=${this.rev === null ? `Apply Draft to ${hub}?` : `Apply Rev ${this.rev} to ${hub}?`} @close=${() => this.close()}>
         <label class="hubpick">Target Hub
@@ -174,9 +186,13 @@ export class HhApplyDialog extends StoreElement {
         ${this.rev === null ? html`<div class="meters">${meters(s)}</div>` : nothing}
         <p class="muted">Activities that are running keep going until they stop; the new config takes effect for the next one.</p>
         ${this.rev === null && s.hash ? html`<div class="hash">Config hash ${s.hash}</div>` : nothing}
+        ${cut.length
+          ? html`<div class="banner ir" role="alert">${cut.length} label${cut.length === 1 ? '' : 's'} will be cut off on the remote: ${cut.slice(0, 3).map((c) => `${c.page}: ${c.label}`).join('; ')}${cut.length > 3 ? '…' : ''}
+              <label class="chk"><input type="checkbox" .checked=${this.cutOk} @change=${(e: Event) => (this.cutOk = (e.target as HTMLInputElement).checked)} /> Apply anyway</label></div>`
+          : nothing}
         ${this.message ? html`<div class="banner bad" role="alert">${this.message}</div>` : nothing}
         <button slot="footer" class="btn" @click=${() => this.close()}>Cancel</button>
-        <button slot="footer" class="btn pri" aria-disabled=${this.phase === 'applying'} @click=${() => (this.phase === 'applying' ? undefined : void this.apply())}>
+        <button slot="footer" class="btn pri" aria-disabled=${this.phase === 'applying' || (cut.length > 0 && !this.cutOk)} @click=${() => (this.phase === 'applying' || (cut.length > 0 && !this.cutOk) ? undefined : void this.apply())}>
           ${this.phase === 'applying' ? 'Applying…' : 'Apply To Hub'}
         </button>
       </hh-dialog>`;

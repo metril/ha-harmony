@@ -35,8 +35,17 @@ _ACRONYMS = frozenset(
 _BRAND = {"earc": "eARC", "dpad": "D-Pad", "necext": "NECext"}
 _SPLIT_WORDS = frozenset("ch vol num key input digit page mode scene".split())
 _UNITS = frozenset("s ms min sec h hz khz mhz db st nd rd th m cm mm".split())
-_CMD_WORDS = {"vol": "volume", "ch": "channel", "chan": "channel", "pwr": "power", "prev": "previous", "pct": "percent"}
-_SMALL = frozenset("a an and of the to for at".split())  # "on" / "in" stay capitalised in a command name
+_CMD_WORDS = {
+    "vol": "volume",
+    "ch": "channel",
+    "chan": "channel",
+    "pwr": "power",
+    "prev": "previous",
+    "pct": "percent",
+}
+_SMALL = frozenset(
+    "a an and of the to for at".split()
+)  # "on" / "in" stay capitalised in a command name
 _DIGIT = re.compile(r"^(?:key_10|num_?|digit_?|number_?)(\d)$")
 _HDMI_INPUT = re.compile(r"^input_hdmi_?(\d+)$")
 
@@ -144,7 +153,12 @@ def display_name(name: str) -> str:
     return _title(words) if words else name
 
 
-_PHRASES = (("Picture Mode", "Pic Mode"), ("Aspect Ratio", "Aspect"), ("Input HDMI", "HDMI"), ("Fast Forward", "FF"))
+_PHRASES = (
+    ("Picture Mode", "Pic Mode"),
+    ("Aspect Ratio", "Aspect"),
+    ("Input HDMI", "HDMI"),
+    ("Fast Forward", "FF"),
+)
 SHORT = {
     "Volume": "Vol",
     "Channel": "Ch",

@@ -58,8 +58,12 @@ def widget_size(page: Any, w: Any) -> tuple[int, int]:
     x1, x2 = _edge(w.x, page.cols, SCREEN_W), _edge(w.x + w.w, page.cols, SCREEN_W) - 1
     y1 = BAR_H + _edge(w.y, page.rows, SCREEN_H - BAR_H)
     y2 = BAR_H + _edge(w.y + w.h, page.rows, SCREEN_H - BAR_H) - 1
-    x1, x2 = _inset(x1, x2, MARGIN if x1 == 0 else GAP // 2, MARGIN if x2 == SCREEN_W - 1 else GAP // 2)
-    y1, y2 = _inset(y1, y2, MARGIN if y1 == BAR_H else GAP // 2, MARGIN if y2 == SCREEN_H - 1 else GAP // 2)
+    x1, x2 = _inset(
+        x1, x2, MARGIN if x1 == 0 else GAP // 2, MARGIN if x2 == SCREEN_W - 1 else GAP // 2
+    )
+    y1, y2 = _inset(
+        y1, y2, MARGIN if y1 == BAR_H else GAP // 2, MARGIN if y2 == SCREEN_H - 1 else GAP // 2
+    )
     return x2 - x1 + 1, y2 - y1 + 1
 
 

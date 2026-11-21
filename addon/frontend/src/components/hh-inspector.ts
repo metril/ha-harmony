@@ -1,14 +1,14 @@
 import { LitElement, css, html, nothing, svg } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { customElement, property } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
-import { stockIconSvg } from '../lib/icon-shapes';
+import './hh-icon-picker';
 import { alignApplies } from '../lib/page-renderer';
 import { setStyle } from '../lib/set-style';
 import { fitCells, watchCells } from '../lib/fit-cells';
-import { displayCommand, displayKey, gridStyle, FREE_CAP, dn } from '../lib/key-names';
+import { abbreviate, displayCommand, displayKey, displayName, gridStyle, FREE_CAP, dn } from '../lib/key-names';
 import { KEYS, keyTitle } from '../lib/remote-layout';
-import { STOCK_ICONS } from '../lib/stock-icons';
 import { shared } from '../lib/styles';
+import type { PreviewPage } from '../lib/api';
 import type { StudioHost } from '../lib/studio-state';
 import { meter, orderedCells } from './parts';
 import { confirmAction } from './base';
@@ -16,10 +16,11 @@ import type { AddPaletteDetail } from './hh-colour-field';
 import { PALETTE_NAMES } from '../lib/themes';
 import { PRESETS, activeName, activeTheme, colourBytes, widgetColors } from '../lib/theme-model';
 import {
-  DEFAULT_LAYER, LABEL_MAX, PAGE_BUDGET, describeAction, errorTarget, gridOf, isList, labelBytes, labelRoom, pageBytes, setPage, setWidget, trimToBytes,
+  DEFAULT_LAYER, LABEL_MAX, PAGE_BUDGET, describeAction, errorTarget, gridOf, isList, labelBytes, labelMeter, labelRoom, pageBytes, pageOverflow, setPage, setWidget, trimToBytes,
   sourceAction, type Source,
 } from '../lib/studio-model';
 import type { Page, Widget } from '../lib/model';
+import { clip, textPx } from '../lib/text-fit';
 import { tileDefaultTap } from '../lib/permissions';
 
 const ROLES = ['default', 'primary', 'secondary', 'danger'] as const;
@@ -46,6 +47,12 @@ export class HhInspector extends LitElement {
       input[type="text"], input[type="number"], input[type="search"], select { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; width: 100%; min-width: 0; }
       .cnt { display: flex; justify-content: space-between; font-weight: 500; color: var(--tx3); }
       .cnt.warn { color: var(--ir); } .cnt.full { color: var(--bad); }
+      .pxm { margin: -4px 0 8px; font-size: 12px; }
+      .pxm .over { color: var(--bad); margin: 2px 0; }
+      .pxm .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+      .pxm .chip { border: 1px solid var(--line); background: var(--sf2); color: var(--tx); border-radius: 12px; padding: 2px 10px; cursor: pointer; }
+      .issues { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
+      .linkbtn { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
       .seg { display: flex; flex-wrap: wrap; gap: 4px; }
       .seg button { height: 30px; padding: 0 10px; border-radius: 15px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); cursor: pointer; font-size: 12px; font-weight: 600; text-transform: capitalize; }
       .seg button[aria-pressed="true"] { background: var(--accs); border-color: var(--acc); color: var(--tx); }
@@ -85,7 +92,6 @@ export class HhInspector extends LitElement {
   ];
   @property({ attribute: false }) host!: StudioHost;
   @property({ attribute: false }) assigner!: Assigner;
-  @state() private iconQ = '';
   private bound: EventTarget[] = [];
   private rerender = () => this.requestUpdate();
   private stopCells?: () => void;
@@ -181,8 +187,7 @@ export class HhInspector extends LitElement {
     const pp = this.st.previewOf(pi);
     const room = labelRoom(page, wi, pp?.limit ?? PAGE_BUDGET);
     const bytes = labelBytes(w.label ?? '');
-    const q = this.iconQ.trim().toLowerCase();
-    const icons = STOCK_ICONS.filter((i) => !q || i.name.includes(q) || i.keywords.some((k) => k.includes(q)));
+    const meterPx = labelMeter(page, pp, wi);
     const isBtn = w.type === 'button';
     const navVal = typeof w['nav'] === 'string' ? (w['nav'] as string) : '';
     const picked = this.assigner.phase.name === 'picked';
@@ -192,6 +197,7 @@ export class HhInspector extends LitElement {
       <label>Label <span class="cnt ${bytes >= room ? 'full' : bytes >= room - 4 ? 'warn' : ''}"><span>Shown on the Remote</span><span aria-live="polite">${bytes}/${room} B</span></span>
         <input type="text" .value=${w.label ?? ''} aria-label="Label" @input=${(e: Event) => this.widgetPatch(pi, wi, { label: trimToBytes((e.target as HTMLInputElement).value, room) }, 'label')} />
       </label>
+      ${this.pxMeter(pi, wi, w, meterPx)}
       <div class="sec"><h3>Type</h3>
         <div class="seg" role="group" aria-label="Widget type">${(['button', 'tile', 'label'] as const).map((t) => html`<button aria-pressed=${w.type === t} @click=${() => this.setType(pi, wi, t)}>${t}</button>`)}</div>
       </div>
@@ -215,11 +221,9 @@ export class HhInspector extends LitElement {
             <div class="sw" role="group" aria-label="Shape">${SHAPES.map((s) => html`<button class="s-${s}" aria-pressed=${(w.shape ?? 'card') === s} @click=${() => this.widgetPatch(pi, wi, { shape: s === 'card' ? undefined : s })}><i></i>${s}</button>`)}</div>
             ${this.alignRow(pi, wi, w, navVal)}
             ${this.colourRows(pi, wi, w)}
-            <label>Icon <input type="search" placeholder="Search icons" .value=${this.iconQ} @input=${(e: Event) => (this.iconQ = (e.target as HTMLInputElement).value)} /></label>
-            <div class="icons" role="group" aria-label="Icon">
-              <button aria-pressed=${!w.icon || w.icon === 'none'} aria-label="No icon" title="No icon" @click=${() => this.widgetPatch(pi, wi, { icon: undefined })}>none</button>
-              ${icons.map((i) => html`<button aria-pressed=${w.icon === i.name} aria-label=${displayKey(i.name)} title=${displayKey(i.name)} @click=${() => this.widgetPatch(pi, wi, { icon: i.name })}>${stockIconSvg(i.id)}</button>`)}
-            </div>
+            <span id="ico-l">Icon</span>
+            <hh-icon-picker aria-labelledby="ico-l" .value=${w.icon && w.icon !== 'none' ? w.icon : ''} .command=${String((w['action'] as { command?: string } | undefined)?.command ?? '')} .label=${w.label ?? ''}
+              @hh-icon=${(e: CustomEvent<string | undefined>) => this.widgetPatch(pi, wi, { icon: e.detail })}></hh-icon-picker>
             <label class="chk"><input type="checkbox" .checked=${!!w.icon_only} @change=${(e: Event) => this.widgetPatch(pi, wi, { icon_only: (e.target as HTMLInputElement).checked || undefined })} /> Icon only (the label is kept but not drawn)</label>
           </div>`
         : nothing}
@@ -341,6 +345,27 @@ export class HhInspector extends LitElement {
     else this.widgetPatch(pi, wi, { type, entity: undefined, on_color: undefined, action: { none: true }, id: w.id ?? `btn_${wi + 1}` });
   }
 
+  /** The label's pixel meter (what the remote can show, not bytes) and one-tap shorter forms when it is over. */
+  private pxMeter(pi: number, wi: number, w: Widget, m: ReturnType<typeof labelMeter>) {
+    if (!m) return nothing;
+    const cmd = String((w['action'] as { command?: string } | undefined)?.command ?? '');
+    const label = w.label ?? '';
+    const options = [...new Set([abbreviate(label), cmd ? abbreviate(displayName(cmd)) : ''])].filter((o) => o && o !== label && textPx(o, m.font) <= m.px);
+    const state = m.over > 0 ? 'full' : m.px - m.used <= 6 ? 'warn' : '';
+    return html`<div class="pxm">
+      <div class="cnt ${state}"><span>Fits the Remote</span><span aria-live="polite">${m.used} / ${m.px} px · ${m.font}</span></div>
+      ${m.over > 0 ? html`<div class="over" role="alert">${m.over} px too wide: the remote will show "${clip(label, m.font, m.px).text}"</div>` : nothing}
+      ${m.over > 0 && options.length ? html`<div class="chips" role="group" aria-label="Shorter labels">${options.map((o) => html`<button type="button" class="chip" @click=${() => this.widgetPatch(pi, wi, { label: o }, 'label')}>${o}</button>`)}</div>` : nothing}
+    </div>`;
+  }
+  /** Labels the remote will cut on this page, each selectable. */
+  private issues(pi: number, page: Page, pp: PreviewPage | null) {
+    const list = pageOverflow(page, pp);
+    if (!list.length) return nothing;
+    return html`<div class="errs" role="status"><div class="err">${list.length} label${list.length === 1 ? '' : 's'} will be cut off on the remote${list.length > 4 ? ' (top 4 shown)' : ''}</div>
+      <ul class="issues">${list.slice(0, 4).map((o) => html`<li><button type="button" class="linkbtn" @click=${() => this.host.activateWidget(pi, o.index)}>${o.label}</button>: needs ${o.px + o.over} px, has ${o.px}; ${o.advice}</li>`)}</ul></div>`;
+  }
+
   private pageView(pi: number) {
     const page = this.cfg.pages?.[pi] as (Page & { activity?: string }) | undefined;
     if (!page) return this.layerSummary();
@@ -352,6 +377,7 @@ export class HhInspector extends LitElement {
       <h2>Page <span class="chip">${page.id}</span></h2>
       ${this.errorsFor((t) => t.kind === 'page' && t.page === pi)}
       ${pp?.error ? html`<div class="errs" role="alert"><div class="err">${pp.error}</div></div>` : nothing}
+      ${this.issues(pi, page, pp)}
       ${meter('Page size', `${bytes} / ${limit} B`, bytes, limit)}
       ${meter('Widgets', `${page.widgets.length} / ${pp?.widget_limit ?? 32}`, page.widgets.length, pp?.widget_limit ?? 32)}
       <label>Title <span class="cnt"><span>Top Bar</span><span>${titleB}/24 B</span></span>

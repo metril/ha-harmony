@@ -10,12 +10,15 @@ from __future__ import annotations
 import re
 import zlib
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 from typing import Any
 
 from .config_model import Model
 from .ha_actions import default_tap
 from .harmony_proto import SOFT_KEY_BASE
 from .icons import ICON_IDS, ICONS
+from .key_names import display_name
+from .text_fit import fit_label
 from .page_codec import (
     HEADER_V2,
     MAX_BYTES,
@@ -33,6 +36,9 @@ MAX_PAGE_GROUP = 15  # seq count is 4 bits
 MAX_PAGES = 32  # the remote store holds page ids 0..31 (HP_STORE_MAX)
 
 _TOKEN = re.compile(r"[a-z0-9+\-]+")
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+_EXPAND = {"vol": "volume", "ch": "channel", "chan": "channel", "pwr": "power", "prev": "previous"}
+_EXACT = 100  # an icon named exactly like the text beats any keyword overlap
 _DANGER_LABEL = re.compile(r"^(power ?off|all off)\b")
 _DOMAIN_ICON = {
     "light": "bulb",
@@ -69,16 +75,30 @@ class Tile:
     label: str = ""
 
 
+def _words(text: str) -> list[str]:
+    """Lower-case words of a command or label: camelCase and snake_case split ("DirectionUp" -> direction up)."""
+    return _TOKEN.findall(re.sub(r"[_\s]+", " ", _CAMEL.sub(" ", text)).lower())
+
+
 def icon_for_text(text: str) -> int:
-    """Stock icon whose keywords share the most words with `text` (lowest id on ties); 0 if none."""
+    """Stock icon for a command or label; 0 if none.
+
+    An icon named exactly like the text ("vol_up", or "up" for "DirectionUp") beats any keyword
+    match; otherwise the icon whose keywords share the most words wins (lowest id on ties).
+    """
     toks: set[str] = set()
-    for t in _TOKEN.findall(text.lower()):
-        toks.add(t)
-        if len(t) > 3 and t.endswith("s"):
-            toks.add(t[:-1])
+    names: set[str] = set()
+    for src in dict.fromkeys((text, display_name(text))):
+        words = _words(src)
+        names.add("_".join(words))
+        for t in words:
+            toks.add(t)
+            toks.add(_EXPAND.get(t, t))
+            if len(t) > 3 and t.endswith("s"):
+                toks.add(t[:-1])
     best, best_score = 0, 0
     for ic in ICONS:
-        score = len(toks & set(ic.keywords))
+        score = len(toks & set(ic.keywords)) + (_EXACT if ic.name in names else 0)
         if score > best_score:
             best, best_score = ic.id, score
     return best
@@ -220,6 +240,17 @@ def _lead_title(specs: list[_Spec], cols: int) -> _Spec | None:
     )
 
 
+def _default_icon_only(s: _Spec, cols: int, rows: int) -> None:
+    """A button that has an icon and no `icon_only` in the config shows the icon alone when its label
+    would be cut, or when the cell is 1 wide in a 4-column grid. An explicit value always wins."""
+    if "icon_only" in s.cfg or s.kind != "button" or not s.icon or s.nav is not None:
+        return
+    if s.shape == "monogram":
+        return
+    if (cols == 4 and s.w == 1) or fit_label(SimpleNamespace(cols=cols, rows=rows), _probe(s)):
+        s.icon_only = True
+
+
 def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     names = {a["id"]: a.get("name", a["id"]) for a in model["activities"]}
     dev_icons = {d["id"]: d["icon"] for d in model["devices"] if d.get("icon")}
@@ -236,6 +267,9 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
                 title, rows = lead.label, rows - 1
                 for s in specs:
                     s.y -= 1
+        if not in_list:
+            for s in specs:
+                _default_icon_only(s, cols, rows)
         common: dict[str, Any] = {
             "cfg_index": pi,
             "cfg_id": p["id"],
@@ -452,3 +486,22 @@ def encode_pages(
         v2.append(b2)
         v1.append(b1)
     return pages, v1, v2
+
+
+def overflow_warnings(pages: list[Page], cfg_ids: list[str], model: Model) -> list[dict[str, Any]]:
+    """Non-fatal: one warning per button or tile whose label the remote will cut with "..."."""
+    order = {p["id"]: i for i, p in enumerate(model["pages"])}
+    out: list[dict[str, Any]] = []
+    for pg, cid in zip(pages, cfg_ids, strict=True):
+        for w in pg.widgets:
+            f = fit_label(pg, w)
+            if f:
+                out.append(
+                    {
+                        "path": ["pages", order[cid]],
+                        "msg": f"page {cid!r}: {w.label!r} is {f[2]} px too wide ({f[1]} px in {f[0]});"
+                        " shorten it or use an icon",
+                        "severity": "warning",
+                    }
+                )
+    return out
