@@ -160,6 +160,16 @@ static const hp_field_desc_t hp_fields_theme_push[] = {
     {"data", HP_T_BYTES, false, NULL},
 };
 
+static const hp_field_desc_t hp_fields_now_playing[] = {
+    {"remote", HP_T_U8, false, NULL},
+    {"cid", HP_T_U32, false, NULL},
+    {"flags", HP_T_U8, false, NULL},
+    {"pos", HP_T_U16, false, NULL},
+    {"dur", HP_T_U16, false, NULL},
+    {"t1", HP_T_STR, false, NULL},
+    {"t2", HP_T_STR, false, NULL},
+};
+
 static const hp_field_desc_t hp_fields_ota_offer[] = {
     {"size", HP_T_U32, false, NULL},
     {"build", HP_T_U32, false, NULL},
@@ -230,6 +240,13 @@ static const hp_field_desc_t hp_fields_hub_log[] = {
     {"dropped", HP_T_U32, true, NULL},
 };
 
+static const hp_field_desc_t hp_fields_cover_chunk[] = {
+    {"remote", HP_T_U8, false, NULL},
+    {"cid", HP_T_U32, false, NULL},
+    {"off", HP_T_U16, false, NULL},
+    {"data", HP_T_BYTES, false, NULL},
+};
+
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
     {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 13, hp_fields_hello_ack},
@@ -259,6 +276,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"set_hub_id", HP_MSG_SET_HUB_ID, HP_TRANSPORT_WS, 2, hp_fields_set_hub_id},
     {"hub_id_ack", HP_MSG_HUB_ID_ACK, HP_TRANSPORT_WS, 2, hp_fields_hub_id_ack},
     {"theme_push", HP_MSG_THEME_PUSH, HP_TRANSPORT_BOTH, 3, hp_fields_theme_push},
+    {"now_playing", HP_MSG_NOW_PLAYING, HP_TRANSPORT_RF, 7, hp_fields_now_playing},
     {"ota_offer", HP_MSG_OTA_OFFER, HP_TRANSPORT_RF, 2, hp_fields_ota_offer},
     {"ota_frag", HP_MSG_OTA_FRAG, HP_TRANSPORT_RF, 2, hp_fields_ota_frag},
     {"ota_frag_ack", HP_MSG_OTA_FRAG_ACK, HP_TRANSPORT_RF, 1, hp_fields_ota_frag_ack},
@@ -271,6 +289,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"bt_remote_key", HP_MSG_BT_REMOTE_KEY, HP_TRANSPORT_WS, 4, hp_fields_bt_remote_key},
     {"bt_listen", HP_MSG_BT_LISTEN, HP_TRANSPORT_WS, 1, hp_fields_bt_listen},
     {"hub_log", HP_MSG_HUB_LOG, HP_TRANSPORT_WS, 4, hp_fields_hub_log},
+    {"cover_chunk", HP_MSG_COVER_CHUNK, HP_TRANSPORT_RF, 4, hp_fields_cover_chunk},
 };
 
 const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT] = {

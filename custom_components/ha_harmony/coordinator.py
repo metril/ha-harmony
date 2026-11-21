@@ -80,6 +80,8 @@ from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
 from .harmony_core.harmony_proto import MsgType
 from .harmony_core.hub_limits import bt_fit_error
+from .now_playing import NowPlayingFeed
+from .now_playing import options as now_playing_options
 from .ota import CHUNK, TARGET_HUB, UPLOAD_ATTEMPTS, Image, encode_chunk
 from .tile_format import tile_state, tile_text
 
@@ -309,6 +311,16 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, self._on_registry_update)
         )
         self.btm = BtManager(self)  # the hub's Bluetooth feature (bluetooth.py)
+        # Now Playing (now_playing.py): event driven, no timer; the entities come from the options (defaults there)
+        self.now_playing = NowPlayingFeed(
+            hass,
+            client,
+            lambda: self.remotes,
+            lambda remote: self._rlink(remote).attached,
+            lambda coro, name: entry.async_create_background_task(hass, coro, name=name),
+            **now_playing_options(dict(entry.options)),
+        )
+        self.now_playing.start()
         self.async_set_updated_data(None)
 
     async def _async_update_data(self) -> None:  # push only
@@ -319,6 +331,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             unsub()
         self._unsubs = []
         self._untrack_tiles()
+        self.now_playing.stop()
         self.btm.shutdown()
         for t in [self._ha_task, self._flush_task, *(lk.task for lk in self.links.values()),
                   *(lk.retry_task for lk in self.links.values())]:
@@ -1167,6 +1180,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._retry_reset(link)
             link.info_event.clear()
             self._request_push(remote, wait=True)
+            self.now_playing.on_remote_attached(remote)
             self._notify(topic_remote(remote))
 
     def _on_remote_info(self, data: dict[str, Any]) -> None:
