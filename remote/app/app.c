@@ -136,7 +136,8 @@ static bool local_key(app_t *a, uint8_t code, uint8_t action) {
   if (bit == 2) {
     if (stored && !p->back) return false; /* a plain page: Exit goes to the hub; the receiving / error screens go Home */
     a->swallowed |= 4;
-    go_back(a);
+    if (stored) go_back(a);
+    else go_home(a);
     return true;
   }
   if (action != HP_KEY_ACTION_PRESS) return false;
