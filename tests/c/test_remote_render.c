@@ -807,6 +807,36 @@ static void test_cover_art_draws(void) {
   app_destroy(&app);
 }
 
+static void test_now_playing_activity_change_and_suspend_gap(void) {
+  fresh_app();
+  ra_cover_reset();
+  ra_ui_set_activity(&app.ui, 0, 1);
+  hp_page_t p = np_page();
+  render(&p);
+  ra_np_t n = np_state(1, 100, 2706, 7, 1000);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 1);
+  render(&p);
+  /* 1 s awake, then 60 s asleep (the monotonic clock did not run) */
+  ra_ui_np_skip(&app.ui, 2000, 60000);
+  ra_ui_np_tick(&app.ui, 2000);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "2:41 / 45:06")); /* 100 + 1 + 60 */
+  ra_ui_np_skip(&app.ui, 3000, 0);
+  CT_EQ(app.ui.np.pos, 162u);
+  /* power off then on again: the old track must not come back */
+  ra_ui_set_activity(&app.ui, 0, 0);
+  CT_EQ(app.ui.np.flags, 0);
+  ra_ui_set_activity(&app.ui, 0, 1);
+  render(&p);
+  CT_EQ(app.ui.np_idx, -1);
+  CT_EQ(app.ui.page.count, 3);
+  n = np_state(1, 5, 100, 7, 0);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 1);
+  ra_ui_set_activity(&app.ui, 1, 1); /* another activity */
+  CT_EQ(app.ui.np.flags, 0);
+  CT_EQ(app.ui.np.cid, 0u);
+  app_destroy(&app);
+}
+
 int main(void) {
   CT_RUN(test_tokens_are_rgb565_exact);
   CT_RUN(test_goldens);
@@ -822,5 +852,6 @@ int main(void) {
   CT_RUN(test_now_playing_row_choice);
   CT_RUN(test_cover_cache);
   CT_RUN(test_cover_art_draws);
+  CT_RUN(test_now_playing_activity_change_and_suspend_gap);
   return CT_DONE();
 }

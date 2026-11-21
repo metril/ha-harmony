@@ -89,6 +89,8 @@ int ra_ui_set_np(ra_ui_t *ui, const ra_np_t *np);
 void ra_ui_np_cover(ra_ui_t *ui, uint32_t cid);
 /* The card's position and bar for `now` (ms): redraws only when the whole second changed; no-op while paused. */
 void ra_ui_np_tick(ra_ui_t *ui, uint64_t now);
+/* The clock stood still for gap_ms (suspend): the playing position moves on by it. */
+void ra_ui_np_skip(ra_ui_t *ui, uint64_t now, uint64_t gap_ms);
 /* Ms to the next whole-second change of the position while the card shows a playing item, else UINT32_MAX. */
 uint32_t ra_ui_np_next_ms(const ra_ui_t *ui, uint64_t now);
 /* The card widget on screen is `w` (a tap on it is play / pause). */

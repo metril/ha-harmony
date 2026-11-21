@@ -474,6 +474,7 @@ static void suspend_now(app_t *a) {
   ra_logf(&a->sys, "resumed after %llu ms asleep (woke: %s; %u suspends, %llu ms total)", (unsigned long long)gap, ev,
           a->power.suspends + 1, (unsigned long long)(a->power.suspended_ms + gap));
   ra_power_resumed(&a->power, now, gap);
+  ra_ui_np_skip(&a->ui, now, gap);
   a->last_rx_ms = now; /* the hub was silent for the sleep, not failing: no fallback page for it */
   a->fail_run = 0;
   if (a->link.resumed) a->link.resumed(a->link.ctx, now, gap);

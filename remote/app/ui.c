@@ -867,6 +867,8 @@ void ra_ui_set_activity(ra_ui_t *ui, uint8_t activity, int power) {
   if (ui->act_idx == activity && ui->act_on == power) return;
   ui->act_idx = activity;
   ui->act_on = power;
+  ui->np.flags = 0; /* the track belonged to the previous activity: the hub pushes a fresh now_playing */
+  ui->np.cid = 0;
   if (ui->page.version != 2) return;
   for (unsigned i = 0; i < ui->page.count; i++) {
     const hp_widget_t *w = &ui->page.widgets[i];
@@ -1133,4 +1135,12 @@ uint32_t ra_ui_np_next_ms(const ra_ui_t *ui, uint64_t now) {
   if (ui->np_idx < 0 || !(ui->np.flags & 1)) return UINT32_MAX;
   if (ui->np.dur && np_pos(ui, now) >= ui->np.dur) return UINT32_MAX; /* at the end: nothing moves */
   return 1000 - (uint32_t)((now - ui->np.at) % 1000);
+}
+
+void ra_ui_np_skip(ra_ui_t *ui, uint64_t now, uint64_t gap_ms) {
+  if (!(ui->np.flags & 1)) return;
+  unsigned long pos = np_pos(ui, now) + (unsigned long)(gap_ms / 1000); /* the monotonic clock stood still while asleep */
+  if (ui->np.dur && pos > ui->np.dur) pos = ui->np.dur;
+  ui->np.pos = pos > 0xFFFF ? 0xFFFF : (uint16_t)pos;
+  ui->np.at = now;
 }
