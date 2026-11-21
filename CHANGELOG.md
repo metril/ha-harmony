@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.30 (2026-11-21)
+
+- Fix: the hub no longer freezes after activity IR (/dev/i2s is held open), and the IR path is flushed after a failed send.
+- The remote re-joins the RF link after a loss, on loss, key, touch, wake and resume.
+- Hub logs are shipped to Home Assistant and the add-on log (rate-limited); the boot-hook log moved off flash to tmpfs (/var/volatile/ha-harmony-hook.log). Update the integration with the add-on (HACS), flash the remote, update the hub, and re-run `tools/install_boot_hook.py`.
+
 ## 0.3.29 (2026-11-21)
 
 - Fix: the Devices starter page now takes the remote's Devices key (it had no favorites kind, so the key did nothing). Existing configs: set the device list page's kind to favorites. Add-on only.
