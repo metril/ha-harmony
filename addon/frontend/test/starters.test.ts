@@ -96,7 +96,7 @@ describe('icon suggestions', () => {
     expect(bestIcon('Settings')).toBe('settings');
   });
   it('says why it matched', () => {
-    const s = suggestIcons('InputHdmi1', 'HDMI 1');
+    const s = suggestIcons('Source', 'Source');
     expect(s[0]?.icon.name).toBe('input');
     expect(s[0]?.reason).toContain('keyword');
   });
