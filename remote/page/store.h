@@ -1,9 +1,9 @@
 #ifndef HP_PAGE_STORE_H
 #define HP_PAGE_STORE_H
 
-/* The remote's page store (docs/plans/2026-11-18-page-format-v2.md, section 4): up to 32 v2 pages keyed by page id,
+/* The remote's page store (docs/plans/2026-11-18-page-format-v2.md, section 4): up to 252 v2 pages keyed by page id,
  * held as RAW wire bytes (<= 251 each) and decoded on show: decoding costs microseconds, so keeping decoded models
- * (2.5 KB each, 80 KB for 32) would be pure waste. A page with a new gen clears the store. Live tile state
+ * (2.5 KB each, 630 KB for 252) would be pure waste. A page with a new gen clears the store. Live tile state
  * (tile_update / tile_state) is kept apart in a small overlay, so it survives while a page is not on screen and is
  * applied whenever the page is decoded. No allocation, no LVGL. */
 #include <stdbool.h>
@@ -12,7 +12,7 @@
 
 #include "remote/page/page.h"
 
-#define HP_STORE_MAX 32  /* page ids 0..31 can be stored; a config has at most 32 pages */
+#define HP_STORE_MAX 252 /* page ids 0..251; 0xFC..0xFF are the UI built-in screens (RA_UI_PAGE_*) */
 #define HP_STORE_TILES 32 /* tile overlay entries; the oldest is recycled when full */
 
 #define HP_STORE_OK 0

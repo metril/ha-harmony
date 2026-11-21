@@ -36,7 +36,7 @@ from .text_fit import fit_label
 
 MAX_SOFT_KEYS = 256 - SOFT_KEY_BASE  # widget wire ids 0..127
 MAX_PAGE_GROUP = 15  # seq count is 4 bits
-MAX_PAGES = 32  # the remote store holds page ids 0..31 (HP_STORE_MAX)
+MAX_PAGES = 252  # the remote store holds page ids 0..251 (HP_STORE_MAX); 0xFC..0xFF are its built-in screens
 
 _TOKEN = re.compile(r"[a-z0-9+\-]+")
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")

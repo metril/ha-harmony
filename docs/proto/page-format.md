@@ -64,7 +64,7 @@ Golden vectors: `tests/vectors/pages.json` keys `valid` / `invalid` (v1), `valid
 
 ## Header (11 + tlen bytes)
 `version`=2 · `page id` (< total) · `cols` · `rows` · `count` 0..32 · `gen` (low byte of a CRC over the hub
-config and every page layout; a new gen clears the remote's page store) · `total` 1..255 · `pflags`
+config and every page layout; a new gen clears the remote's page store) · `total` 1..252 (the remote stores page ids 0..251; 0xFC..0xFF are its built-in screens) · `pflags`
 (bits 0-1 kind: 0 normal, 1 home, 2 favorites, 3 rejected; bit 2 BACK = "Exit pops locally" (clear: Exit goes to the hub; the header chevron ignores it); bits 3-5 theme preset id 0..7, 7 = custom; bit 6 FIXED; bit 7 must be 0) · `seq`
 (`idx<<4|cnt`; 0 = not paged, else 1 <= idx <= cnt, cnt >= 2; the group is the consecutive ids
 `id-idx+1 .. id+cnt-idx`, all < total) · `act` (0, or activity index + 1) · `tlen` 0..24 · `title`

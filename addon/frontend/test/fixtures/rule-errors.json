@@ -338,11 +338,11 @@
   "msg": "page 'watch': too many widgets: 33 (max 32)"
  },
  {
-  "rule": "max 32 pages",
+  "rule": "max 252 pages",
   "path": [
    "pages"
   ],
-  "msg": "too many pages: 38 (the remote holds at most 32); delete pages or shorten lists that split into several"
+  "msg": "too many pages: 278 (the remote holds at most 252); delete pages or shorten lists that split into several"
  },
  {
   "rule": "max 128 soft keys",

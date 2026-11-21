@@ -444,7 +444,7 @@ export function removeWidget(cfg: Config, page: number, index: number): Config {
   next.pages?.[page]?.widgets.splice(index, 1);
   return next;
 }
-export const MAX_PAGES = 32;
+export const MAX_PAGES = 252;
 export const MAX_PAGE_WIDGETS = 32;
 export const MAX_SOFT_KEYS = 128;
 /** Why one more widget cannot go on page `pi` (page, soft-key caps), or null. Labels take no soft key. */

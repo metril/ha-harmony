@@ -86,9 +86,9 @@
 #include "hub/net/ws.h"
 #include "hub/ota/hub_ota.h"
 
-/* 40 held messages: a full v2 config is up to 32 pages plus a few tile updates, all of which must survive a
- * remote that is away. 40 * sizeof(hub_pend_t) (~270 B) = ~10.8 KB of static hub memory, fixed, never grown. */
-#define HUB_PEND_MAX 40
+/* 255 held messages: a full v2 config is up to 252 pages (HP_STORE_MAX) plus the theme and a few tile updates, all of which
+ * must survive a remote that is away. 255 * sizeof(hub_pend_t) (~270 B) = ~69 KB of static hub memory, fixed, never grown. */
+#define HUB_PEND_MAX 255
 #define HUB_PAGE_RESENDS 3 /* a page_push that exhausts its RF retries is held and resent this many times */
 /* An RF message held back while the remote's link is down; the latest per key wins. */
 typedef struct {
@@ -167,7 +167,7 @@ typedef struct {
     uint8_t pending_dev[HP_MAP_MAX_DEVICES]; /* devices whose device_state is to be broadcast, in change order */
     uint8_t npending_dev;
     hub_pend_t pend[HUB_PEND_MAX]; /* oldest first */
-    uint8_t npend;
+    uint8_t npend; /* HUB_PEND_MAX <= 255 */
     hub_cover_t cover[HUB_COVER_MAX];
     hub_np_t np[HUB_NP_MAX];
     uint8_t page_tries[256]; /* resends of an unacked page_push per page id (bounded by HUB_PAGE_RESENDS); reset by a fresh push or an ack */

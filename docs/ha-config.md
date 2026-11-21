@@ -113,7 +113,7 @@ pages:
   `tap_<widget id>`. The `remote_sim` test tool's `--press`/`--hold` take a key **name**
   (`VolumeUp` or `volume_up`) or the numeric logical code.
 - **Page widgets**: `button` (needs `action`), `tile` (shows the state of `entity`, updated on change),
-  `label`. Grid up to 16x16, 32 widgets per page, 128 widgets over all pages, labels up to 24 bytes.
+  `label`. Grid up to 16x16, 32 widgets per page, 128 widgets over all pages, at most 252 pages, labels up to 24 bytes.
   A page's id on the remote is its position in `pages` (a list page takes one id per group).
   Only buttons and tiles take a soft-key id (`128+n`); labels and `nav` buttons never do.
 - **Page keys** (page format v2; v1 remotes ignore them): `title:` (max 24 bytes; else a non-empty

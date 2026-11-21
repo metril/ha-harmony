@@ -455,13 +455,13 @@ async def test_ref_errors_for_pages_are_all_collected(c):
 async def test_page_cap_is_in_usage_and_over_it_is_an_error(c):
     cfg = json.loads(json.dumps(CONFIG))
     mk = lambda i: {"id": f"p{i}", "cols": 1, "rows": 1, "widgets": [{"type": "label", "x": 0, "y": 0, "label": "x"}]}
-    cfg["pages"] = [mk(i) for i in range(32)]
+    cfg["pages"] = [mk(i) for i in range(252)]
     _, body = await preview(c, cfg)
-    assert body["ok"] and body["usage"]["pages"] == 32 and body["usage"]["page_limit"] == 32
-    cfg["pages"].append(mk(32))
+    assert body["ok"] and body["usage"]["pages"] == 252 and body["usage"]["page_limit"] == 252
+    cfg["pages"].append(mk(252))
     _, body = await preview(c, cfg)
-    assert not body["ok"] and any("at most 32" in e["msg"] for e in body["errors"])
-    assert body["usage"] is None or body["usage"]["pages"] == 33
+    assert not body["ok"] and any("at most 252" in e["msg"] for e in body["errors"])
+    assert body["usage"] is None or body["usage"]["pages"] == 253
 
 
 async def test_preview_survives_a_button_that_starts_an_unknown_activity(c):

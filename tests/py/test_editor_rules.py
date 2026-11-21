@@ -52,7 +52,7 @@ def _dev(c, **kw):
 
 
 def _many_pages(c):
-    c["pages"] += [{"id": f"p{n}", "cols": 1, "rows": 1, "widgets": []} for n in range(20)]
+    c["pages"] += [{"id": f"p{n}", "cols": 1, "rows": 1, "widgets": []} for n in range(260)]
 
 
 def _many_widgets(c):
@@ -276,7 +276,7 @@ CASES: list[tuple[str, object, list]] = [
         ["pages", 4, "activity"],
     ),
     ("max 32 widgets per page", _many_widgets, ["pages", 4]),
-    ("max 32 pages", _many_pages, []),
+    ("max 252 pages", _many_pages, []),
     ("max 128 soft keys", _many_soft, []),
     ("widget label 24 bytes", _long_label, ["pages", 4]),
     ("page 251 bytes", _over_budget, ["pages", 4]),

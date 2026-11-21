@@ -78,7 +78,8 @@ describe('the prevention behind the "prevented" rows', () => {
     expect(widgetCap(full, 0)).toMatch(/at most 32/);
     expect(widgetCap({ pages: Array.from({ length: 4 }, (_, i) => ({ id: `p${i}`, widgets: w(26) })) }, 0)).toBeNull();
     expect(widgetCap({ pages: Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, widgets: w(22) })) }, 0)).toMatch(/soft keys/);
-    expect(pageCap({ pages: Array.from({ length: MAX_PAGES }, (_, i) => ({ id: `p${i}`, widgets: [] })) })).toMatch(/at most 32/);
+    expect(pageCap({ pages: Array.from({ length: MAX_PAGES }, (_, i) => ({ id: `p${i}`, widgets: [] })) })).toMatch(/at most 252/);
+    expect(pageCap({ pages: Array.from({ length: MAX_PAGES - 1 }, (_, i) => ({ id: `p${i}`, widgets: [] })) })).toBeNull();
     expect(pageCap({ pages: [] })).toBeNull();
   });
 });

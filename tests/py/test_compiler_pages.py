@@ -320,14 +320,33 @@ def test_encode_helper_roundtrip():
         assert encode(m, 2) == b
 
 
-def test_more_than_32_pages_is_a_compile_error():
-    """The remote's store holds page ids 0..31."""
-    many = "pages:\n" + "".join(
-        f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(33)
+def test_more_than_the_max_pages_is_a_compile_error():
+    """The remote's store holds page ids 0..251 (HP_STORE_MAX = MAX_PAGES)."""
+    from harmony_core.page_build import MAX_PAGES
+
+    def cfg(n):
+        return "pages:\n" + "".join(f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(n))
+
+    assert MAX_PAGES == 252
+    with pytest.raises(CompileError, match=f"at most {MAX_PAGES}"):
+        comp(cfg(MAX_PAGES + 1))
+    c = comp(cfg(MAX_PAGES))
+    assert len(c.pages_v2) == MAX_PAGES
+
+
+def test_nav_to_the_last_page_compiles():
+    from harmony_core.page_build import MAX_PAGES
+
+    n = MAX_PAGES
+    pages = "".join(f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(n - 1))
+    pages += f"  - {{id: last, cols: 1, rows: 1, widgets: []}}\n"
+    pages = pages.replace(
+        "id: p0, cols: 1, rows: 1, widgets: []",
+        "id: p0, cols: 1, rows: 1, widgets: [{type: button, label: Go, x: 0, y: 0, nav: last}]",
     )
-    with pytest.raises(CompileError, match="at most 32"):
-        comp(many)
-    comp("pages:\n" + "".join(f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(32)))
+    c = comp("pages:\n" + pages)
+    assert len(c.pages_v2) == n
+    assert encode(c.models[0], 2)[-8:] and n - 1 in encode(c.models[0], 2)
 
 
 # ---------------------------------------------------------------- device icons
