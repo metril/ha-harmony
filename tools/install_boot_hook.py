@@ -51,11 +51,12 @@ MARKER = "/etc/ha-harmony-enable"
 NOWATCHDOG = "/etc/nowatchdog"  # read only (test -e); stock rcS:59 skips the watchdog while it exists
 COUNTER = "/cache/ha-harmony-boot.n"
 PIDFILE = "/cache/ha-harmony.pid"
-LOG = "/cache/ha-harmony.log"
+LOG = "/var/volatile/ha-harmony-hook.log"  # tmpfs: the hook's own log never touches flash; the daemon ships it to HA
+LEGACY_LOG = "/cache/ha-harmony.log"  # where older hooks logged (jffs2 flash): removed on install
 DAEMON_LOG = "/var/volatile/ha-harmony.log"  # tmpfs; read-only here, the hook writes it
 
 # The only paths this tool may write. Asserted by tests over the recorded command log.
-WRITE_PATHS = (RCS_LOCAL, RCS_HARMONY, MARKER, REMOTE_DIR, COUNTER, PIDFILE, LOG)
+WRITE_PATHS = (RCS_LOCAL, RCS_HARMONY, MARKER, REMOTE_DIR, COUNTER, PIDFILE, LEGACY_LOG)
 
 BEGIN = "# >>> ha-harmony boot hook >>>"
 END = "# <<< ha-harmony boot hook <<<"
@@ -330,6 +331,9 @@ class HookInstaller:
         # A stale strike count from an earlier run must not make the first boot of a fresh
         # install count as already struck.
         self._run(["rm", "-f", COUNTER], "clear strike counter")
+        if self._exists(LEGACY_LOG):  # no logs on flash
+            self._run(["rm", "-f", LEGACY_LOG], "remove the old flash log")
+            print(f"removed {LEGACY_LOG} (the hook now logs to {LOG}, tmpfs)")
         self._write(MARKER, b"", "644")
         print(f"\nARMED: created {MARKER}")
         print(f"  next boot runs {DAEMON} instead of stock hal (DEMO_MODE=1)")
@@ -375,7 +379,7 @@ class HookInstaller:
                 self._run(["rm", "-f", p], f"remove {p}")
                 print(f"removed {p}")
         if purge:
-            for p in (CONF, LOG):
+            for p in (CONF, LEGACY_LOG):
                 if self._exists(p):
                     self._run(["rm", "-f", p], f"remove {p}")
                     print(f"removed {p}")

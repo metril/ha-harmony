@@ -7,6 +7,7 @@
 
 #define BTSTACK_FILE__ "hci_transport_linux.c"
 
+#include "hub/net/hublog.h"
 #include "hci_transport_linux.h"
 
 #include "btstack_bool.h"
@@ -97,7 +98,7 @@ static void hci_transport_linux_process_read(btstack_data_source_t * ds) {
         int err = bytes_read == 0 ? ENODEV : errno;
         if (err == EAGAIN || err == EWOULDBLOCK || err == EINTR) return;
         /* fatal (adapter removed, socket broken): stop polling the fd and tell the application */
-        fprintf(stderr, "[hci_transport_linux] Read error: %s (errno=%d)\n", strerror(err), err);
+        hp_log("[hci_transport_linux] Read error: %s (errno=%d)\n", strerror(err), err);
         btstack_run_loop_remove_data_source(&hci_transport_linux_data_source);
         bt_transport_fatal(err);
         return;
@@ -134,7 +135,7 @@ static int hci_transport_linux_open(void) {
     for (int retry = 0; retry < 15; retry++) {
         hci_socket = socket(AF_BLUETOOTH, SOCK_RAW, BTPROTO_HCI);
         if (hci_socket < 0) {
-            fprintf(stderr, "[hci_transport_linux] Failed to create HCI socket: %s\n", strerror(errno));
+            hp_log("[hci_transport_linux] Failed to create HCI socket: %s\n", strerror(errno));
             sleep(1);
             continue;
         }
@@ -155,7 +156,7 @@ static int hci_transport_linux_open(void) {
         }
 
         if (retry < 14) {
-            fprintf(stderr, "[hci_transport_linux] Waiting for hci%u to appear (%d/15): %s\n",
+            hp_log("[hci_transport_linux] Waiting for hci%u to appear (%d/15): %s\n",
                     addr.hci_dev, retry + 1, strerror(errno));
             close(hci_socket);
             hci_socket = -1;
@@ -164,17 +165,17 @@ static int hci_transport_linux_open(void) {
     }
 
     if (hci_socket < 0) {
-        fprintf(stderr, "[hci_transport_linux] Failed to bind HCI socket to hci%u: %s\n",
+        hp_log("[hci_transport_linux] Failed to bind HCI socket to hci%u: %s\n",
                 (unsigned short)hci_transport_config_linux->device_id, strerror(errno));
         return -1;
     }
-    fprintf(stderr, "[hci_transport_linux] Bound socket to hci%u (RAW channel)\n", addr.hci_dev);
+    hp_log("[hci_transport_linux] Bound socket to hci%u (RAW channel)\n", addr.hci_dev);
 
     // Disable kernel L2CAP/ACL processing so kernel doesn't interfere or disconnect links
     if (ioctl(hci_socket, HCISETRAW, 1) < 0) {
-        fprintf(stderr, "[hci_transport_linux] Note: ioctl HCISETRAW returned: %s (errno=%d)\n", strerror(errno), errno);
+        hp_log("[hci_transport_linux] Note: ioctl HCISETRAW returned: %s (errno=%d)\n", strerror(errno), errno);
     } else {
-        fprintf(stderr, "[hci_transport_linux] HCISETRAW enabled: kernel Bluetooth processing disabled\n");
+        hp_log("[hci_transport_linux] HCISETRAW enabled: kernel Bluetooth processing disabled\n");
         log_msg("[hci_transport_linux] HCISETRAW enabled: kernel Bluetooth processing disabled");
     }
 
@@ -186,9 +187,9 @@ static int hci_transport_linux_open(void) {
     flt.opcode = 0;
 
     if (setsockopt(hci_socket, SOL_HCI, HCI_FILTER, &flt, sizeof(flt)) < 0) {
-        fprintf(stderr, "[hci_transport_linux] Failed to set HCI_FILTER: %s\n", strerror(errno));
+        hp_log("[hci_transport_linux] Failed to set HCI_FILTER: %s\n", strerror(errno));
     } else {
-        fprintf(stderr, "[hci_transport_linux] HCI_FILTER enabled successfully\n");
+        hp_log("[hci_transport_linux] HCI_FILTER enabled successfully\n");
     }
 
     btstack_run_loop_set_data_source_fd(&hci_transport_linux_data_source, hci_socket);
@@ -196,7 +197,7 @@ static int hci_transport_linux_open(void) {
     btstack_run_loop_add_data_source(&hci_transport_linux_data_source);
     btstack_run_loop_enable_data_source_callbacks(&hci_transport_linux_data_source, DATA_SOURCE_CALLBACK_READ);
 
-    fprintf(stderr, "[hci_transport_linux] HCI transport ready on fd %d\n", hci_socket);
+    hp_log("[hci_transport_linux] HCI transport ready on fd %d\n", hci_socket);
     return 0;
 }
 
@@ -230,7 +231,7 @@ static int hci_transport_linux_send_packet(uint8_t packet_type, uint8_t * packet
         }
     }
     if (written < 0) {
-        fprintf(stderr, "[hci_transport_linux] Write failed (type=%u, len=%d): %s\n",
+        hp_log("[hci_transport_linux] Write failed (type=%u, len=%d): %s\n",
                 packet_type, size, strerror(errno));
         return -1;
     }

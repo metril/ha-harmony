@@ -12,6 +12,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "hub/net/hooklog.h"
+#include "hub/net/hublog.h"
 #include "common/ota/ota_image.h"
 #include "hub/hp_errors.h"
 #include "hub/hub_handlers.h"
@@ -38,6 +40,8 @@ static void on_signal(int sig) { (void)sig; g_stop = 1; }
 
 static hp_handler_tbl_t g_tbl;
 static hub_ctx_t g_hub;
+static hp_hublog_t g_log;
+static hp_hooklog_t g_hook;
 static hp_sim_t g_sim;
 static hp_hw_t g_hw;
 static hp_peers_t g_peers; /* authenticated peers: ARP keepalive (hub/net/peers.h) */
@@ -93,10 +97,11 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     if (sess->authed) hp_ws_conn_set_authed(c);
     if (!was_authed && sess->authed) {
         hub_send_state(&g_hub, c); /* live state right after hello_ack */
+        hp_hublog_service(&g_log);  /* lines queued while nobody was connected */
         hp_peers_cancel(&g_peers, hp_ws_conn_peer(c));
         if (hp_peers_note(&g_peers, hp_ws_conn_peer(c), mono_ms()) &&
             hp_peers_save(&g_peers) < 0)
-            fprintf(stderr, "hub: cannot save the peer list\n");
+            hp_log("hub: cannot save the peer list\n");
     }
     if (r == HP_DISPATCH_CLOSE) hp_ws_conn_close(c, 1008);
     hub_flush_pending(&g_hub); /* after the reply, so clients see it first */
@@ -110,10 +115,10 @@ static void on_ident_changed(void *ctx, const hp_ident_t *id) {
     char lab[HP_ID_MAX + 1];
     hp_ident_mdns_label(id->id, lab);
     if (g_mdns.sched) {
-        if (hp_mdns_srv_rename(&g_mdns, lab) < 0) fprintf(stderr, "hub: mdns keeps the old name (%s is not a DNS label)\n", id->id);
+        if (hp_mdns_srv_rename(&g_mdns, lab) < 0) hp_log("hub: mdns keeps the old name (%s is not a DNS label)\n", id->id);
         else snprintf(g_mdns.svc.hub_id, sizeof g_mdns.svc.hub_id, "%s", id->id); /* TXT hub_id= is the real id */
     }
-    fprintf(stderr, "hub: id is now %s\n", id->id);
+    hp_log("hub: id is now %s\n", id->id);
 }
 
 /* The ws poll's (max 8) extra wake-only fds: RF pair socket(s) + mDNS. */
@@ -123,6 +128,12 @@ static int rf_fds(void *arg, int out[8]) {
     int spi = hp_rf_spi_wake_fd(g_hub.sinks.rf); /* the real radio's reader thread wakes the poll */
     if (spi >= 0 && n < 8) out[n++] = spi;
     if (n < 8 && g_mdns.fd >= 0) out[n++] = g_mdns.fd;
+    int lfd = hp_hublog_wake_fd(&g_log); /* a new stderr line to ship */
+    if (n < 8 && lfd >= 0) out[n++] = lfd;
+    int hfd = hp_hooklog_fd(&g_hook); /* the boot hook appended to its log */
+    if (n < 8 && hfd >= 0) out[n++] = hfd;
+    int blf = bt_link_log_fd(); /* the Bluetooth helper's stderr pipe */
+    if (n < 8 && blf >= 0) out[n++] = blf;
     int bfd = bt_link_poll_fd(); /* the Bluetooth helper's socket (-1 when none runs) */
     if (n < 8 && bfd >= 0) out[n++] = bfd;
     return n;
@@ -137,7 +148,7 @@ static void on_close(hp_ws_conn_t *c, void *user) {
 }
 
 static int bad_num(const char *flag, const char *val) {
-    fprintf(stderr, "hub: invalid value for %s: '%s'\n", flag, val);
+    hp_log("hub: invalid value for %s: '%s'\n", flag, val);
     return 2;
 }
 
@@ -232,11 +243,11 @@ static size_t config_budget_bytes(size_t want_kib) {
     size_t cap = free_kib ? free_kib / 5 : want_kib;
     if (cap < 256) cap = 256;
     if (want_kib < 256) { /* below the smallest useful budget: clamp, never refuse to start */
-        fprintf(stderr, "hub: config budget %zu KiB raised to the 256 KiB minimum\n", want_kib);
+        hp_log("hub: config budget %zu KiB raised to the 256 KiB minimum\n", want_kib);
         want_kib = 256;
     }
     size_t kib = want_kib < cap ? want_kib : cap;
-    if (kib < want_kib) fprintf(stderr, "hub: config budget capped at %zu KiB (20%% of the %zu KiB free)\n", kib, free_kib);
+    if (kib < want_kib) hp_log("hub: config budget capped at %zu KiB (20%% of the %zu KiB free)\n", kib, free_kib);
     return kib * 1024;
 }
 
@@ -244,6 +255,7 @@ int main(int argc, char **argv) {
 #ifdef HH_BT
     if (argc >= 2 && !strcmp(argv[1], "bt-helper")) return bt_helper_main(argc - 2, argv + 2);
 #endif
+    if (hp_hublog_init(&g_log, hub_log_emit, &g_hub) == 0) hp_hublog_install(&g_log); /* else: file only */
     bool sim = false, rf_spi = false;
     bool rf_debug = false;
     long rf_slot = 0; /* 0 = learn it from the radio's link-up report */
@@ -279,7 +291,7 @@ int main(int argc, char **argv) {
             const char *v = argv[++i];
             rf_slot = strtol(v, &end, 10);
             if (!*v || !end || *end || rf_slot < 1 || rf_slot > 15) {
-                fprintf(stderr, "hub: --rf-slot %s: must be 1..15 (the remote's HID++ device index)\n", v);
+                hp_log("hub: --rf-slot %s: must be 1..15 (the remote's HID++ device index)\n", v);
                 return 2;
             }
         }
@@ -305,7 +317,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--auth-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &auth_ms)) return bad_num("--auth-timeout-ms", argv[i]); }
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
-            fprintf(stderr, "usage: hub [--sim] [--port N] (--token T | --token-file PATH) [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
+            hp_log("usage: hub [--sim] [--port N] (--token T | --token-file PATH) [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
                             "[--ota-dir DIR [--ota-target FILE] [--ota-allow-dev] [--health-file FILE]] [--hub-id ID] [--ident-dir DIR] [--hw-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] "
                             "[--config-budget KiB] [--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P] [--bt-helper EXE] [--bt-dir DIR]\n");
@@ -319,18 +331,19 @@ int main(int argc, char **argv) {
         if (!ota_dir) ota_dir = "/data/ha-harmony"; /* the dir the boot hook installs the binary in */
     }
     if (rf_spi && (sim || rf_path)) {
-        fprintf(stderr, "hub: --rf-spi (the real radio) cannot be combined with --sim or --rf\n");
+        hp_log("hub: --rf-spi (the real radio) cannot be combined with --sim or --rf\n");
         return 2;
     }
     if (token_file) {
-        if (token) { fprintf(stderr, "hub: --token and --token-file are mutually exclusive\n"); return 2; }
+        if (token) { hp_log("hub: --token and --token-file are mutually exclusive\n"); return 2; }
         token = read_token_file(token_file);
     }
     if (!token || !*token || port < 0 || port > 65535 || auth_ms <= 0 || idle_ms <= 0 ||
         auth_ms > INT32_MAX || idle_ms > INT32_MAX) {
-        fprintf(stderr, "hub: --token T or a readable --token-file (1-256 chars) required, port 0-65535, timeouts > 0\n");
+        hp_log("hub: --token T or a readable --token-file (1-256 chars) required, port 0-65535, timeouts > 0\n");
         return 2;
     }
+
 
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
@@ -361,12 +374,12 @@ int main(int argc, char **argv) {
         hp_hw_cfg_t hc = {NULL, (uint8_t)ir_ports, NULL, rf_spi ? &rc_cfg : NULL};
         int hr = hp_hw_sinks_open(&hc, &g_hw);
         if (hr == -HP_E_HALBUSY) {
-            fprintf(stderr, "hub: stock hal holds the hardware (or could not be ruled out): "
+            hp_log("hub: stock hal holds the hardware (or could not be ruled out): "
                             "run `tools/deploy_hub.py quiesce` first\n");
             return 1;
         }
         if (hr < 0) {
-            fprintf(stderr, "hub: cannot open /dev/i2s (%d)\n", hr);
+            hp_log("hub: cannot open /dev/i2s (%d)\n", hr);
             return 1;
         }
         g_hub.sinks = g_hw.sinks;
@@ -379,27 +392,27 @@ int main(int argc, char **argv) {
     g_hub.ota.health_file = health_file; /* the boot hook's health mark: no update before it exists */
     hp_rf_transport *rf = NULL;
     if (rf_path && strlen(rf_path) >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
-        fprintf(stderr, "hub: --rf path is %zu bytes; a unix socket path must be shorter than %zu bytes (sun_path)\n",
+        hp_log("hub: --rf path is %zu bytes; a unix socket path must be shorter than %zu bytes (sun_path)\n",
                 strlen(rf_path), sizeof(((struct sockaddr_un *)0)->sun_path));
         return 2;
     }
     if (rf_path) {
         if (hp_rf_pair_create(rf_path, &rf) < 0) {
-            fprintf(stderr, "hub: cannot listen on RF socket %s\n", rf_path);
+            hp_log("hub: cannot listen on RF socket %s\n", rf_path);
             return 1;
         }
         g_hub.sinks.rf = rf;
     }
     if (g_hub.sinks.rf && g_hub.sinks.rf->claim(g_hub.sinks.rf->self) < 0) {
-        fprintf(stderr, "hub: RF transport already claimed\n");
+        hp_log("hub: RF transport already claimed\n");
         return 1;
     }
     if (cache) {
         int cr = hp_map_load_cache(&g_hub.map, cache);
         if (cr == -HP_E_TOOBIG)
-            fprintf(stderr, "hub: cached config %s is over 4x the memory budget (%zu KiB); booting with no config\n", cache,
+            hp_log("hub: cached config %s is over 4x the memory budget (%zu KiB); booting with no config\n", cache,
                     hp_map_budget(&g_hub.map) / 1024);
-        else if (cr < 0 && cr != -HP_E_NOENT) fprintf(stderr, "hub: ignoring unusable cache %s (%d)\n", cache, cr);
+        else if (cr < 0 && cr != -HP_E_NOENT) hp_log("hub: ignoring unusable cache %s (%d)\n", cache, cr);
     }
     hp_actsm_reloaded(&g_hub.act); /* device tracking for the cached config */
     hub_bt_config_sync(&g_hub);    /* the helper starts when the cached config has Bluetooth hosts or remotes */
@@ -432,9 +445,9 @@ int main(int argc, char **argv) {
     if (state) {
         hp_actsm_set_state_path(&g_hub.act, state);
         int sr = hp_actsm_load_state(&g_hub.act);
-        if (sr == -HP_E_NOENT) fprintf(stderr, "hub: no state file %s, starting all off/unknown\n", state);
-        else if (sr < 0) fprintf(stderr, "hub: ignoring unusable state file %s (%d), starting all off/unknown\n", state, sr);
-        else fprintf(stderr, "hub: restored state from %s\n", state);
+        if (sr == -HP_E_NOENT) hp_log("hub: no state file %s, starting all off/unknown\n", state);
+        else if (sr < 0) hp_log("hub: ignoring unusable state file %s (%d), starting all off/unknown\n", state, sr);
+        else hp_log("hub: restored state from %s\n", state);
     }
     hub_install(&g_tbl, &g_hub);
     g_tbl.token = token;
@@ -458,12 +471,12 @@ int main(int argc, char **argv) {
         hw_id = hw_buf;
     }
     (void)hp_ident_init(&g_hub.ident, ident_dir, hub_id, sim ? "sim-hub" : real_id, hw_id); /* never fails */
-    if (g_hub.ident.warn[0]) fprintf(stderr, "hub: %s\n", g_hub.ident.warn);
+    if (g_hub.ident.warn[0]) hp_log("hub: %s\n", g_hub.ident.warn);
     g_hub.ident_changed = on_ident_changed;
     g_tbl.hub_id = g_hub.ident.id;
     g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : "ha-harmony-hub";
-    fprintf(stderr, "hub: build %u\n", (unsigned)hp_build_id());
-    if (ota_pubkey_is_dev()) fprintf(stderr, "hub: dev OTA key built in (never ship this build)\n");
+    hp_log("hub: build %u\n", (unsigned)hp_build_id());
+    if (ota_pubkey_is_dev()) hp_log("hub: dev OTA key built in (never ship this build)\n");
     { /* peer list next to the state file */
         char pp[300] = "";
         const char *sl = state ? strrchr(state, '/') : NULL;
@@ -475,7 +488,7 @@ int main(int argc, char **argv) {
     hp_ws_cb_t cb = {on_text, on_close};
     hp_ws_server_t *srv = hp_ws_listen((uint16_t)port, token, &cb, NULL);
     if (!srv) {
-        fprintf(stderr, "hub: cannot listen on port %ld\n", port);
+        hp_log("hub: cannot listen on port %ld\n", port);
         return 1;
     }
     g_hub.srv = srv;
@@ -485,8 +498,13 @@ int main(int argc, char **argv) {
         char lab[HP_ID_MAX + 1];
         hp_ident_mdns_label(g_tbl.hub_id, lab);
         if (hp_mdns_srv_start(&g_mdns, &g_hub.sched, &mo, lab, hp_ws_port(srv), HP_PROTO_VERSION) < 0)
-            fprintf(stderr, "hub: mdns disabled (%s)\n", g_mdns.err);
+            hp_log("hub: mdns disabled (%s)\n", g_mdns.err);
         else snprintf(g_mdns.svc.hub_id, sizeof g_mdns.svc.hub_id, "%s", g_tbl.hub_id); /* TXT hub_id= is the real id */
+    }
+    { /* the boot hook's tmpfs log sits next to the health file: ship it (then follow it via inotify) */
+        char hl[256];
+        if (health_file && hp_hooklog_path_beside(health_file, hl, sizeof hl)) hp_hooklog_start(&g_hook, &g_log, hl);
+        else g_hook.ino = -1;
     }
     hp_ws_set_extra_fds(srv, rf_fds, rf);
     hp_ws_set_timeouts(srv, (int)auth_ms, (int)idle_ms);
@@ -523,6 +541,8 @@ int main(int argc, char **argv) {
         if (bt_wait >= 0 && (wait < 0 || bt_wait < wait)) wait = bt_wait;
 #endif
         hp_ws_poll(srv, wait);
+        hp_hooklog_service(&g_hook);
+        hp_hublog_service(&g_log);
 #ifdef HH_BT
         if (bt_run) { /* the helper's socket, supervision, then the broadcasts its changes queued */
             bt_wait = bt_link_service();

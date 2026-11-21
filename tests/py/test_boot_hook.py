@@ -291,7 +291,7 @@ def test_a_daemon_that_dies_leaves_the_strike_standing(root: Path) -> None:
     install_conf(root)
     source_hook(root, healthy=1)
     counter = root / "cache" / "ha-harmony-boot.n"
-    _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
     assert counter.read_text().strip() == "1", "a dead daemon must not clear its strike"
 
 
@@ -445,15 +445,15 @@ def test_daemon_output_never_goes_to_cache(root: Path) -> None:
     assert "DAEMON-CHATTER" in vlog.read_text()
     for f in (root / "cache").iterdir():
         assert "DAEMON" not in f.read_text(), f"daemon output leaked into {f}"
-    assert "starting" in (root / "cache" / "ha-harmony.log").read_text()
+    assert "starting" in (root / "var" / "volatile" / "ha-harmony-hook.log").read_text()
 
 
 def test_hook_log_is_truncated_per_boot(root: Path) -> None:
     install_daemon(root, "sleep 30")
     install_conf(root)
-    (root / "cache" / "ha-harmony.log").write_text("OLD-BOOT-LINE\n")
+    (root / "var" / "volatile" / "ha-harmony-hook.log").write_text("OLD-BOOT-LINE\n")
     source_hook(root)
-    assert "OLD-BOOT-LINE" not in (root / "cache" / "ha-harmony.log").read_text()
+    assert "OLD-BOOT-LINE" not in (root / "var" / "volatile" / "ha-harmony-hook.log").read_text()
 
 
 def test_launch_is_deferred_not_synchronous(root: Path) -> None:
@@ -616,7 +616,7 @@ def test_token_containing_equals_survives_intact(root: Path) -> None:
     argv = _argv(root)
     assert "--token-file" in argv
     assert "abc123==" not in argv
-    for log in ("cache/ha-harmony.log", "var/volatile/ha-harmony.log"):
+    for log in ("var/volatile/ha-harmony-hook.log", "var/volatile/ha-harmony.log"):
         assert "abc123==" not in (root / log).read_text()
 
 
@@ -661,7 +661,7 @@ def test_early_death_reboots_by_default_only_with_a_persisted_strike(root: Path)
     install_daemon(root, "exit 1")
     install_conf(root)
     source_hook(root, healthy=2)
-    log = _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
     assert "rebooting (reboot_on_early_death)" in log
     _wait_for(root / "reboot.log")
     assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
@@ -672,7 +672,7 @@ def test_reboot_switch_off(root: Path) -> None:
     install_conf(root, "token=t\nreboot_on_early_death=0\n")
     source_hook(root, healthy=2)
     # The watcher's own final lines say whether it decided against rebooting: no race.
-    log = _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
     assert "died within" in log and "not rebooting" in log
     assert not (root / "reboot.log").exists()
 
@@ -681,7 +681,7 @@ def test_no_reboot_after_the_health_mark(root: Path) -> None:
     install_daemon(root, "sleep 0.25")  # health window is 0.1 s, dies later
     install_conf(root, "token=benchtok\nrespawn_max=0\n")
     source_hook(root, healthy=1)
-    log = _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
     assert "daemon died after health mark" in log and "rebooting" not in log.replace(
         "no reboot", ""
     )
@@ -807,7 +807,7 @@ def _wait_runs(root: Path, n: int, tries: int = 400) -> None:
 
 
 def _clog(root: Path) -> str:
-    f = root / "cache" / "ha-harmony.log"
+    f = root / "var" / "volatile" / "ha-harmony-hook.log"
     return f.read_text() if f.exists() else ""
 
 
@@ -815,7 +815,7 @@ def test_death_after_health_respawns_then_budget_exhausts_without_reboot(root: P
     install_daemon(root, MORTAL)
     install_conf(root, "token=t\nrespawn_max=2\n")
     source_hook(root, extra_env=FAST)
-    _wait_text(root / "cache" / "ha-harmony.log", "budget exhausted")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "budget exhausted")
     time.sleep(0.5)  # stays down: no third respawn
     assert _runs(root) == 3, "initial launch + exactly respawn_max respawns"
     assert not (root / "reboot.log").exists(), "respawns never reboot"
@@ -828,7 +828,7 @@ def test_default_budget_is_three(root: Path) -> None:
     install_daemon(root, MORTAL)
     install_conf(root)
     source_hook(root, extra_env=FAST)
-    _wait_text(root / "cache" / "ha-harmony.log", "budget exhausted (3 of 3)")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "budget exhausted (3 of 3)")
     assert _runs(root) == 4
 
 
@@ -836,7 +836,7 @@ def test_respawn_max_zero_is_the_old_single_shot_behaviour(root: Path) -> None:
     install_daemon(root, MORTAL)
     install_conf(root, "token=t\nrespawn_max=0\n")
     source_hook(root, extra_env=FAST)
-    _wait_text(root / "cache" / "ha-harmony.log", "no respawn")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "no respawn")
     time.sleep(0.3)
     assert _runs(root) == 1
     assert not (root / "reboot.log").exists()
@@ -886,7 +886,7 @@ def test_early_death_with_respawn_enabled_keeps_strike_and_reboots_no_respawn(ro
     install_daemon(root, 'echo x >>"$(dirname "$0")/runs"; exit 1')
     install_conf(root, "token=t\nrespawn_max=3\n")
     source_hook(root, extra_env=FAST)
-    _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
     time.sleep(0.3)
     assert _runs(root) == 1
     assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
@@ -909,7 +909,7 @@ def test_stale_heartbeat_kills_and_respawns_the_wedged_daemon(root: Path) -> Non
     assert _runs(root) == 1
     _fake_clock(root, 1100)  # 100 s with no heartbeat
     _wait_runs(root, 2)
-    _wait_text(root / "cache" / "ha-harmony.log", "heartbeat stale")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "heartbeat stale")
     time.sleep(0.3)
     assert _runs(root) == 2, "second launch is fresh; budget of 1 is spent"
     assert not (root / "reboot.log").exists()
@@ -933,12 +933,12 @@ def test_budget_refills_after_an_hour_of_uptime(root: Path) -> None:
     install_daemon(root, MORTAL)
     install_conf(root, "token=t\nrespawn_max=1\n")
     source_hook(root, extra_env={**FAST, "HAH_UPTIME_FILE": str(clock), "HAH_HB_STALE": "99999"})
-    _wait_text(root / "cache" / "ha-harmony.log", "respawn 1 of 1")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "respawn 1 of 1")
     _wait_runs(root, 2)  # run 2 is the last respawn of the budget
     time.sleep(0.25)  # the watcher has taken this run's start stamp
     _fake_clock(root, 1000 + 3600)  # ... which then runs "an hour"
     _wait_runs(root, 3)  # refilled, so it is respawned once more
-    _wait_text(root / "cache" / "ha-harmony.log", "budget refilled")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "budget refilled")
     assert not (root / "reboot.log").exists()
 
 
@@ -949,7 +949,7 @@ def test_log_lines_carry_uptime_stamps(root: Path) -> None:
     vlog = root / "var" / "volatile" / "ha-harmony.log"
     _wait_text(vlog, "DAEMON-LINE")
     assert re.search(r"^\[up \d+s\] DAEMON-LINE$", vlog.read_text(), re.MULTILINE)
-    _wait_text(root / "cache" / "ha-harmony.log", "healthy")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy")
     lines = _clog(root).splitlines()
     assert lines and all(re.match(r"\[up \d+s( \d{4}-\d\d-\d\d [\d:]+)?\] ha-harmony: ", ln) for ln in lines)
     assert any(re.match(r"\[up \d+s \d{4}-", ln) for ln in lines), "background lines carry the date"
@@ -1000,9 +1000,9 @@ def test_good_update_relaunches_into_the_new_build_and_keeps_prev(root: Path) ->
     _install_new(root, NEW_OK)
     install_conf(root, "token=t\nrespawn_max=0\n")  # an update never needs the respawn budget
     source_hook(root, healthy=1)
-    _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy after")
     (_hub_dir(root) / "go").touch()
-    log = _wait_text(root / "cache" / "ha-harmony.log", "updated build healthy")
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "updated build healthy")
     assert "launching the new build" in log
     assert _count(root, "runs_new") == 1 and _count(root, "runs_old") == 1
     assert not (_hub_dir(root) / "ota-pending").exists()
@@ -1017,9 +1017,9 @@ def test_bad_update_is_rolled_back_once_and_reported(root: Path) -> None:
     _install_new(root, NEW_BAD)
     install_conf(root, "token=t\nrespawn_max=0\n")
     source_hook(root, healthy=1)
-    _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy after")
     (_hub_dir(root) / "go").touch()
-    log = _wait_text(root / "cache" / "ha-harmony.log", "restored hub.prev")
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "restored hub.prev")
     assert "updated build died" in log and "died_early" in log
     _wait_count(root, "runs_old", 2)  # the previous build is serving again
     rb = (_hub_dir(root) / "ota-rollback").read_text().split("\n")
@@ -1050,7 +1050,7 @@ def test_boot_after_unhealthy_fresh_build_restores_prev_and_resets_strikes(root:
     rb = (_hub_dir(root) / "ota-rollback").read_text().split("\n")
     assert rb[0] == "build=3" and rb[1] == "reason=boot_unclean"
     assert not (_hub_dir(root) / "ota-pending").exists() and not (_hub_dir(root) / "hub.prev").exists()
-    log = _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy after")
     assert "restored hub.prev" in log and "boot strike 1 of 3" in log  # slate wiped, not strike 3
     _wait_for(_hub_dir(root) / "argv.txt")  # the restored (previous) build is the one running
     assert (root / "etc" / "ha-harmony-enable").exists()
@@ -1061,13 +1061,13 @@ def test_rollback_happens_once_only_then_normal_strikes_apply(root: Path) -> Non
     _arm_pending_boot(root, bad, bad, counter="1")
     install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=0\n")
     source_hook(root, healthy=1)
-    _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
     first = (_hub_dir(root) / "ota-rollback").read_text()
     assert "reason=boot_unclean" in first
     (_hub_dir(root) / "ota-rollback").unlink()
     # the restored build is bad too: boots 2 and 3 are ordinary strikes, never another rollback
     source_hook(root, healthy=1)  # strike 2
-    _wait_text(root / "cache" / "ha-harmony.log", "watcher done")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
     assert not (_hub_dir(root) / "ota-rollback").exists()
     assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "2"
     _, demo = source_hook(root, healthy=1)  # strike 3: back to stock semantics, hook disables itself
@@ -1087,7 +1087,7 @@ def test_power_loss_before_the_swap_leaves_the_old_binary_and_only_clears_the_ma
     assert (_hub_dir(root) / "hub").read_text() == before
     assert not (_hub_dir(root) / "ota-pending").exists()
     assert not (_hub_dir(root) / "ota-rollback").exists()  # nothing to roll back to, nothing to report
-    assert "no previous build to restore" in _wait_text(root / "cache" / "ha-harmony.log", "no previous build")
+    assert "no previous build to restore" in _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "no previous build")
 
 
 def test_power_loss_after_the_link_before_the_rename_is_harmless(root: Path) -> None:
@@ -1135,7 +1135,7 @@ def test_update_inside_the_health_window_is_a_planned_relaunch_not_a_death(root:
     _install_new(root, NEW_OK)
     install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=1\n")
     source_hook(root, healthy=1, extra_env=_EARLY_WINDOW)
-    log = _wait_text(root / "cache" / "ha-harmony.log", "healthy after", tries=1000)
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy after", tries=1000)
     assert "inside the health window - launching the new build" in log
     assert "died within" not in log and not (root / "reboot.log").exists()
     assert _count(root, "runs_new") == 1
@@ -1149,7 +1149,7 @@ def test_update_inside_the_window_that_dies_rolls_back_once_and_restores_ota_bui
     _install_new(root, NEW_BAD)
     install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=0\n")
     source_hook(root, healthy=1, extra_env=_EARLY_WINDOW)
-    _wait_text(root / "cache" / "ha-harmony.log", "restored hub.prev")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "restored hub.prev")
     _wait_count(root, "runs_old", 2)
     assert (_hub_dir(root) / "ota-build").read_text().strip() == "1"  # the previous build id is back
     assert "reason=died_early" in (_hub_dir(root) / "ota-rollback").read_text()
@@ -1185,9 +1185,9 @@ def test_health_file_appears_at_the_health_mark_and_goes_while_an_update_is_unpr
     _install_new(root, NEW_OK)
     install_conf(root, "token=t\nrespawn_max=0\n")
     source_hook(root, healthy=1)
-    _wait_text(root / "cache" / "ha-harmony.log", "healthy after")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy after")
     hf = root / "var" / "volatile" / "ha-harmony.healthy"
     assert hf.exists()
     (_hub_dir(root) / "go").touch()
-    _wait_text(root / "cache" / "ha-harmony.log", "updated build healthy")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "updated build healthy")
     assert hf.exists()  # proven again

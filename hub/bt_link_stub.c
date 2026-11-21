@@ -50,4 +50,5 @@ void bt_link_set_config(const struct bt_link_cfg_entry *hosts, unsigned n_hosts,
 void bt_link_set_engine(const struct bt_link_engine *e) { (void)e; }
 void bt_link_connect(unsigned slot) { (void)slot; }
 int bt_link_poll_fd(void) { return -1; }
+int bt_link_log_fd(void) { return -1; }
 int bt_link_service(void) { return -1; }

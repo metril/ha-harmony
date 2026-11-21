@@ -348,6 +348,18 @@ messages:
     fields:
       - {name: "on", type: bool}
 
+  # One hub daemon log line (stderr), pushed to every authenticated client as it is produced; lines made while no
+  # client is authenticated wait in a bounded in-memory ring and are sent after the next hello. `ts` is the hub's
+  # uptime in ms (wraps), `dropped` the lines the ring lost before this one. Nothing is stored on the hub.
+  - name: hub_log
+    code: 41
+    transport: ws
+    fields:
+      - {name: level, type: str}
+      - {name: msg, type: str}
+      - {name: ts, type: u32}
+      - {name: dropped, type: u32, optional: true}
+
 # The 35 physical keys of the Harmony Elite remote (docs/hardware/remote-elite.md, "Input").
 # `id` is the logical key code carried in key_event.key (u8): stable, unique, < 128 (128+ are page
 # soft keys). `evdev` is the Linux input code (event0; Home/Favorites come from event2). `name` is

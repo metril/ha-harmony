@@ -27,7 +27,7 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
 ## Status / disarm
 
 - `tools/install_boot_hook.py status`: marker, binary md5, token-redacted conf, strike counter, tails of the
-  hook log (`/cache/ha-harmony.log`, truncated each boot) and the daemon log (`/var/volatile/ha-harmony.log`,
+  hook log (`/var/volatile/ha-harmony-hook.log`, truncated each boot) and the daemon log (`/var/volatile/ha-harmony.log`,
   tmpfs, gone on reboot).
 - `tools/install_boot_hook.py disarm --yes`: removes only the marker; next boot is pure stock.
 - `uninstall --yes [--purge]`: disarm, remove our block and files (`--purge` also conf and log).
@@ -92,7 +92,7 @@ Run it before the first real arm. (BusyBox 1.13 `ls -ln` has extra columns, so t
 
 ## Bench gate: respawn (before trusting it)
 
-1. Arm, boot, wait past 150 s (`healthy ... strikes cleared` in `/cache/ha-harmony.log`).
+1. Arm, boot, wait past 150 s (`healthy ... strikes cleared` in `/var/volatile/ha-harmony-hook.log`).
 2. `kill` the daemon pid: log shows `respawn 1 of 3 in 5s`, daemon back, HA reconnects, `/cache/ha-harmony-boot.n` absent, no reboot.
 3. Kill it 3 more times (each time wait for it to return): 4th death logs `budget exhausted (3 of 3)`, daemon stays down, hub does not reboot.
 4. Reboot, then `kill -STOP` the daemon: within ~65 s the log shows `heartbeat stale`, it is killed and respawned.

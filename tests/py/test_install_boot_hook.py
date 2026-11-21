@@ -174,6 +174,26 @@ def test_never_touches_anything_outside_its_remit(action: str) -> None:
             assert not re.search(pat, cmd), f"{action} touched a forbidden path: {cmd!r}"
 
 
+def test_write_paths_keep_logs_off_flash_and_cover_every_rm() -> None:
+    assert ibh.LEGACY_LOG in ibh.WRITE_PATHS and ibh.LEGACY_LOG.startswith("/cache/")
+    assert ibh.LOG.startswith("/var/volatile/") and ibh.LOG not in ibh.WRITE_PATHS  # tmpfs, written by the hook only
+    hub = FakeHub(files={**FakeHub().files, ibh.LEGACY_LOG: b"old\n"})
+    inst = ibh.HookInstaller(hub)
+    inst.install("tok", 8099, None, expect_md5=DAEMON_MD5)
+    inst.uninstall(purge=True)
+    for argv in hub.log:
+        if argv[0] == "rm":
+            assert argv[-1] in ibh.WRITE_PATHS or argv[-1] == ibh.CONF, argv
+
+
+def test_install_removes_the_old_flash_log(hub: FakeHub, capsys) -> None:
+    hub.files[ibh.LEGACY_LOG] = b"[t] ha-harmony: old boot\n"
+    assert install(hub) == 0
+    assert ibh.LEGACY_LOG not in hub.files
+    assert ["rm", "-f", ibh.LEGACY_LOG] in hub.log
+    assert ibh.LEGACY_LOG in capsys.readouterr().out
+
+
 def test_uses_no_applet_the_hub_lacks(hub: FakeHub) -> None:
     """The hub's BusyBox 1.13.4 has no head/find/awk/timeout/df/dd/wc/readlink."""
     inst = ibh.HookInstaller(hub)

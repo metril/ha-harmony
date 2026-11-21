@@ -1,3 +1,4 @@
+#include "hub/net/hublog.h"
 #include "hub/engine/irout.h"
 
 #include <stdio.h>
@@ -175,7 +176,7 @@ int hp_irout_send_n(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uin
     uint32_t w = line_wait(o, now, HP_IROUT_GUARD_MS);
     bool defer = key != HP_IROUT_KEY_NONE && (w > 0 || o->pend_n);
     if (defer && o->pend_n >= HP_IROUT_PEND) {
-        fprintf(stderr, "hub: IR line busy, send dropped (queue full)\n");
+        hp_log("hub: IR line busy, send dropped (queue full)\n");
         return -HP_E_BUSY;
     }
     uint8_t slot = (uint8_t)((o->pend_head + o->pend_n) % HP_IROUT_PEND);

@@ -1,5 +1,6 @@
 #define _DEFAULT_SOURCE /* getifaddrs / IFF_* on glibc and uClibc */
 #define _POSIX_C_SOURCE 200809L
+#include "hub/net/hublog.h"
 #include "hub/net/mdns_srv.h"
 
 #include <arpa/inet.h>
@@ -147,9 +148,9 @@ static void log_state(hp_mdns_srv_t *s, int st) {
     int first = s->logged == 0;
     s->logged = st;
     if (st == 2) {
-        fprintf(stderr, "hub: mdns disabled (%s); retrying\n", s->err);
+        hp_log("hub: mdns disabled (%s); retrying\n", s->err);
     } else if (!first) { /* first-time success is reported by the owner (port line) */
-        fprintf(stderr, "hub: mdns enabled ip=%u.%u.%u.%u port=%u\n", (unsigned)(s->svc.ipv4 >> 24),
+        hp_log("hub: mdns enabled ip=%u.%u.%u.%u port=%u\n", (unsigned)(s->svc.ipv4 >> 24),
                 (unsigned)((s->svc.ipv4 >> 16) & 255), (unsigned)((s->svc.ipv4 >> 8) & 255),
                 (unsigned)(s->svc.ipv4 & 255), (unsigned)s->port);
     }

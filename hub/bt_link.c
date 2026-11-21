@@ -24,6 +24,7 @@
 /* bt_ipc.h and bt_link.h both define BT_KIND_*: the wire values are BT_IPC_KIND_* here. */
 #define BT_KIND_HOST BT_IPC_KIND_HOST
 #define BT_KIND_REMOTE BT_IPC_KIND_REMOTE
+#include "hub/net/hublog.h"
 #include "hub/bt/bt_ipc.h"
 #undef BT_KIND_HOST
 #undef BT_KIND_REMOTE
@@ -64,6 +65,8 @@ static struct {
     /* process */
     pid_t pid, reap;      /* running helper / a killed one not yet reaped */
     int fd;
+    int efd;              /* read end of the helper's stderr pipe (its write end is O_NONBLOCK: a stall drops bytes) */
+    hp_linebuf_t elb;
     uint64_t kill_at;     /* SIGKILL for `reap` when it has not exited by then */
     uint64_t last_rx, next_ping, next_spawn;
     uint8_t token;
@@ -112,7 +115,7 @@ static struct {
     void *listener_ctx;
     void (*rkey)(void *, unsigned, unsigned, unsigned, bool);
     void *rkey_ctx;
-} L = {.fd = -1};
+} L = {.fd = -1, .efd = -1};
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -305,9 +308,30 @@ static void clear_cache(void) {
 }
 
 /* The helper is gone (or being removed): close the link, tell the engine, clear everything it told us. `pid` keeps being reaped. */
+/* The helper's stderr lines: each goes to the log file and the ship ring (hp_log_feed); never blocks. */
+static void drain_log(void) {
+    char b[256];
+    while (L.efd >= 0) {
+        ssize_t n = read(L.efd, b, sizeof b);
+        if (n > 0) { hp_log_feed(&L.elb, b, (size_t)n); continue; }
+        if (n < 0 && errno == EINTR) continue;
+        if (n == 0) { close(L.efd); L.efd = -1; }
+        return; /* EAGAIN: drained */
+    }
+}
+
+static void close_log(void) {
+    drain_log();
+    if (L.efd >= 0) close(L.efd);
+    L.efd = -1;
+    L.elb.n = 0;
+    L.elb.over = false;
+}
+
 static void drop_link(bool signal_kill, int sig) {
     if (L.fd >= 0) close(L.fd);
     L.fd = -1;
+    close_log();
     if (L.pid > 0) {
         if (signal_kill) kill(L.pid, sig);
         L.reap = L.pid; /* a previous unreaped one was already SIGKILLed below */
@@ -457,30 +481,30 @@ static bool bluetoothd_clear(uint64_t now) {
     int (*sig)(int) = L.hk.bluetoothd_signal ? L.hk.bluetoothd_signal : default_bluetoothd_signal;
     if (L.bz == 0) {
         if (sig(0) == 0) {
-            fprintf(stderr, "hub: bluetooth: stock bluetoothd not found, nothing to stop\n");
+            hp_log("hub: bluetooth: stock bluetoothd not found, nothing to stop\n");
             L.bz = 3;
             return true;
         }
-        fprintf(stderr, "hub: bluetooth: stopping stock bluetoothd (SIGTERM); hciattach is left running (it attaches the controller)\n");
+        hp_log("hub: bluetooth: stopping stock bluetoothd (SIGTERM); hciattach is left running (it attaches the controller)\n");
         sig(SIGTERM);
         L.bz = 1;
         L.bz_deadline = now + 3000;
         return false;
     }
     if (sig(0) == 0) {
-        fprintf(stderr, "hub: bluetooth: stock bluetoothd stopped\n");
+        hp_log("hub: bluetooth: stock bluetoothd stopped\n");
         L.bz = 3;
         return true;
     }
     if (now < L.bz_deadline) return false;
     if (L.bz == 1) {
-        fprintf(stderr, "hub: bluetooth: bluetoothd ignored SIGTERM, sending SIGKILL\n");
+        hp_log("hub: bluetooth: bluetoothd ignored SIGTERM, sending SIGKILL\n");
         sig(SIGKILL);
         L.bz = 2;
         L.bz_deadline = now + 1000;
         return false;
     }
-    fprintf(stderr, "hub: bluetooth: bluetoothd still running after SIGKILL, starting the helper anyway\n");
+    hp_log("hub: bluetooth: bluetoothd still running after SIGKILL, starting the helper anyway\n");
     L.bz = 3; /* gave up waiting: spawn anyway, the helper reports no_adapter if the controller is still taken */
     return true;
 }
@@ -488,6 +512,8 @@ static bool bluetoothd_clear(uint64_t now) {
 static void spawn(uint64_t now) {
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) < 0) { failure("socketpair"); return; }
+    int ep[2];
+    if (pipe2(ep, O_CLOEXEC | O_NONBLOCK) < 0) { close(sv[0]); close(sv[1]); failure("pipe"); return; }
     const char *exe = L.hk.helper_exe;
     if (!exe) exe = access("/proc/self/exe", X_OK) == 0 ? "/proc/self/exe" : (L.hk.argv0 ? L.hk.argv0 : "hub");
     char keys[320], hci[16];
@@ -504,8 +530,9 @@ static void spawn(uint64_t now) {
     if (L.hk.helper_hci) { argv[ac++] = "--hci"; argv[ac++] = hci; }
     argv[ac] = NULL;
     pid_t pid = fork();
-    if (pid < 0) { close(sv[0]); close(sv[1]); failure("fork"); return; }
+    if (pid < 0) { close(sv[0]); close(sv[1]); close(ep[0]); close(ep[1]); failure("fork"); return; }
     if (pid == 0) {
+        dup2(ep[1], STDERR_FILENO); /* before the IPC dup2: ep[1] may be fd 3; the shared O_NONBLOCK stays */
         if (sv[1] == BT_IPC_FD) fcntl(sv[1], F_SETFD, 0);
         else dup2(sv[1], BT_IPC_FD); /* dup2 clears close-on-exec on the new fd */
         int maxfd = getdtablesize();
@@ -518,6 +545,8 @@ static void spawn(uint64_t now) {
         _exit(127);
     }
     close(sv[1]);
+    close(ep[1]);
+    L.efd = ep[0];
     fcntl(sv[0], F_SETFL, fcntl(sv[0], F_GETFL) | O_NONBLOCK);
     L.fd = sv[0];
     L.pid = pid;
@@ -808,10 +837,12 @@ void bt_link_stats(struct bt_link_stats *o) {
 
 void bt_link_reset(void) {
     if (L.fd >= 0) close(L.fd);
+    if (L.efd >= 0) close(L.efd);
     if (L.pid > 0) { kill(L.pid, SIGKILL); waitpid(L.pid, NULL, 0); }
     if (L.reap > 0) { kill(L.reap, SIGKILL); waitpid(L.reap, NULL, 0); }
     memset(&L, 0, sizeof L);
     L.fd = -1;
+    L.efd = -1;
 }
 
 bool bt_link_available(void) { return !L.hk.unavailable; }
@@ -956,6 +987,7 @@ void bt_link_connect(unsigned slot) {
 }
 
 int bt_link_poll_fd(void) { return L.fd; }
+int bt_link_log_fd(void) { return L.efd; }
 
 static int ms_until(uint64_t now, uint64_t t) { return t <= now ? 0 : (t - now > 200 ? 200 : (int)(t - now)); }
 
@@ -963,6 +995,7 @@ int bt_link_service(void) {
     uint64_t now = now_of();
     int next = -1;
 #define WAKE(t) do { int w_ = ms_until(now, (t)); if (next < 0 || w_ < next) next = w_; } while (0)
+    drain_log();
     reap(now);
     if (running()) {
         flush_out();

@@ -54,6 +54,7 @@ class MsgType(IntEnum):
     BT_KEY = 38
     BT_REMOTE_KEY = 39
     BT_LISTEN = 40
+    HUB_LOG = 41
 
 
 ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'hold': 2}}
@@ -99,6 +100,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'bt_key': (38, 'ws', (('slot', 'u8', False), ('page', 'u8', False), ('usage', 'u16', False), ('action', 'str', False), )),
     'bt_remote_key': (39, 'ws', (('slot', 'u8', False), ('page', 'u8', False), ('usage', 'u16', False), ('down', 'bool', False), )),
     'bt_listen': (40, 'ws', (('on', 'bool', False), )),
+    'hub_log': (41, 'ws', (('level', 'str', False), ('msg', 'str', False), ('ts', 'u32', False), ('dropped', 'u32', True), )),
 }
 
 _INT_RANGES = {
