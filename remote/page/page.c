@@ -39,7 +39,9 @@ static int utf8_valid(const uint8_t *s, size_t n) {
 #define HAS_BIND 0x40
 #define STYLE_ICON_ONLY 0x20
 #define STYLE_TRAILING 0x40
+#define STYLE_COMPACT 0x80
 #define PF_BACK 4
+#define PF_FIXED 0x40
 #define PF_THEME_SHIFT 3
 #define PF_THEME_MASK 0x38u
 
@@ -49,6 +51,74 @@ static int color_nibble(unsigned nib, hp_color_t *c) {
     if (nib <= HP_PAGE_PALETTE_MAX) { c->kind = HP_COLOR_PALETTE; c->value = (uint16_t)nib; return 0; }
     if (nib == 15) { c->kind = HP_COLOR_RGB; return 0; }
     return -1;
+}
+
+/* ---- FIXED layout ---- */
+/* Widget class: pixel height, and whether it is row-class (shares the 2 px gap). -1 when the span is not 12/6/4/3,
+ * the widget is not on its span boundary, h != 1, or COMPACT is on anything but a span-6 card button. */
+static int fixed_class(const hp_widget_t *w, int *row_class) {
+    int sp = w->w;
+    *row_class = 0;
+    if (w->h != 1 || (sp != 12 && sp != 6 && sp != 4 && sp != 3) || w->x % sp) return -1;
+    if (w->compact && (w->kind != HP_WIDGET_BUTTON || w->shape != HP_SHAPE_CARD || sp != 6)) return -1;
+    if (w->kind == HP_WIDGET_LABEL || w->shape == HP_SHAPE_ROW) { *row_class = 1; return 44; }
+    if (w->kind == HP_WIDGET_TILE) return 64;
+    if (w->shape == HP_SHAPE_PILL) return 52;
+    if (sp >= 6) return w->compact ? 56 : 80;
+    return 52;
+}
+
+/* Stack offsets (from content y = 8) of every non-empty grid row; returns the stacked height, or -1 if any widget is
+ * unplaceable. top[y] = -1 for an empty row. */
+static int fixed_rows(const hp_page_t *p, int top[HP_PAGE_MAX_GRID]) {
+    int cur = 0, prev_list = -1;
+    for (int y = 0; y < p->rows && y < HP_PAGE_MAX_GRID; y++) {
+        int h = 0, list = 1, any = 0;
+        for (unsigned i = 0; i < p->count; i++) {
+            const hp_widget_t *w = &p->widgets[i];
+            if (w->y != y) continue;
+            int rc, wh = fixed_class(w, &rc);
+            if (wh < 0) return -1;
+            any = 1;
+            if (wh > h) h = wh;
+            if (!rc) list = 0;
+        }
+        top[y] = -1;
+        if (!any) continue;
+        if (prev_list >= 0) cur += prev_list && list ? 2 : 8;
+        top[y] = cur;
+        cur += h;
+        prev_list = list;
+    }
+    return cur;
+}
+
+static int fixed_check(const hp_page_t *p) {
+    int top[HP_PAGE_MAX_GRID];
+    if (p->cols != 12) return -1;
+    int total = fixed_rows(p, top);
+    return total < 0 || total > HP_PAGE_FIXED_MAX ? -1 : 0;
+}
+
+static int edge(int i, int n, int total) { return (i * total + n - 1) / n; }
+
+int hp_page_box(const hp_page_t *p, const hp_widget_t *w, int *x1, int *y1, int *x2, int *y2) {
+    if (p->fixed) {
+        int top[HP_PAGE_MAX_GRID], rc, h = fixed_class(w, &rc);
+        if (h < 0 || p->cols != 12 || w->y >= HP_PAGE_MAX_GRID || fixed_rows(p, top) < 0) return -HP_E_INVAL;
+        int n = 12 / w->w, wpx = (224 - (n - 1) * 8) / n;
+        *x1 = 8 + (w->x / w->w) * (wpx + 8);
+        *x2 = *x1 + wpx - 1;
+        *y1 = HP_PAGE_BAR_H + HP_PAGE_FIXED_TOP + top[w->y];
+        *y2 = *y1 + h - 1;
+        return 0;
+    }
+    *x1 = edge(w->x, p->cols, HP_PAGE_SCREEN_W);
+    *x2 = edge(w->x + w->w, p->cols, HP_PAGE_SCREEN_W) - 1;
+    int sh = hp_page_row_shift(p), rows = p->rows - sh;
+    *y1 = HP_PAGE_BAR_H + edge(w->y - sh, rows, HP_PAGE_CONTENT_H);
+    *y2 = HP_PAGE_BAR_H + edge(w->y + w->h - sh, rows, HP_PAGE_CONTENT_H) - 1;
+    return 0;
 }
 
 int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
@@ -68,7 +138,7 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
     p.count = (uint8_t)count;
     if (v2) {
         unsigned pflags = d[7], tlen = d[10];
-        if ((pflags & 3) == 3 || (pflags & ~(3u | PF_BACK | PF_THEME_MASK))) return -HP_E_INVAL;
+        if ((pflags & 3) == 3 || (pflags & ~(3u | PF_BACK | PF_THEME_MASK | PF_FIXED))) return -HP_E_INVAL;
         if (tlen > HP_PAGE_MAX_TITLE) return -HP_E_TOOBIG;
         if (len - off < tlen || !utf8_valid(d + off, tlen)) return -HP_E_INVAL;
         memcpy(p.title, d + off, tlen);
@@ -77,6 +147,7 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
         p.total = d[6];
         p.kind = (uint8_t)(pflags & 3);
         p.back = (pflags & PF_BACK) != 0;
+        p.fixed = (pflags & PF_FIXED) != 0;
         p.theme = (uint8_t)((pflags & PF_THEME_MASK) >> PF_THEME_SHIFT);
         p.seq_idx = d[8] >> 4;
         p.seq_cnt = d[8] & 15;
@@ -105,6 +176,7 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
                 w->shape = (uint8_t)((s >> 3) & 3);
                 w->icon_only = (s & STYLE_ICON_ONLY) != 0;
                 w->trailing = (s & STYLE_TRAILING) != 0;
+                w->compact = (s & STYLE_COMPACT) != 0;
             }
             if (kind & HAS_ICON) {
                 w->icon = d[off++];
@@ -143,8 +215,10 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
             if (p.page_id - i + 1 < 0 || p.page_id + c - i >= p.total) return -HP_E_INVAL;
         }
     }
+    if (p.fixed && fixed_check(&p)) return -HP_E_INVAL;
     for (unsigned i = 0; i < count; i++) {
         const hp_widget_t *w = &p.widgets[i];
+        if (!p.fixed && w->compact) return -HP_E_INVAL;
         if (w->id > 127 || !w->w || !w->h || w->x + w->w > p.cols || w->y + w->h > p.rows) return -HP_E_INVAL;
         if (w->role == HP_ROLE_NAV && (!w->has_bind || w->bind >= p.total)) return -HP_E_INVAL;
         for (unsigned j = 0; j < i; j++) {
@@ -171,6 +245,14 @@ int hp_page_row_shift(const hp_page_t *p) { return p->rows > 1 && hp_page_title(
 
 const hp_widget_t *hp_page_hit(const hp_page_t *p, int x_px, int y_px) {
     if (x_px < 0 || y_px < HP_PAGE_BAR_H || x_px >= HP_PAGE_SCREEN_W || y_px >= HP_PAGE_SCREEN_H) return NULL;
+    if (p->fixed) {
+        for (unsigned i = 0; i < p->count; i++) {
+            int x1, y1, x2, y2;
+            if (hp_page_box(p, &p->widgets[i], &x1, &y1, &x2, &y2)) return NULL;
+            if (x_px >= x1 && x_px <= x2 && y_px >= y1 && y_px <= y2) return &p->widgets[i];
+        }
+        return NULL;
+    }
     int cx = x_px * p->cols / HP_PAGE_SCREEN_W, cy = (y_px - HP_PAGE_BAR_H) * (p->rows - hp_page_row_shift(p)) / HP_PAGE_CONTENT_H + hp_page_row_shift(p);
     for (unsigned i = 0; i < p->count; i++) {
         const hp_widget_t *w = &p->widgets[i];

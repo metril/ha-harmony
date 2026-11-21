@@ -16,14 +16,8 @@ static const char *tile_caption(const ra_ui_t *ui, const hp_widget_t *w);
 
 static void stale_caption(ra_ui_t *ui, unsigned i);
 
-static int edge(int i, int n, int total) { return (i * total + n - 1) / n; }
-
 void ra_ui_widget_box(const hp_page_t *p, const hp_widget_t *w, int *x1, int *y1, int *x2, int *y2) {
-  *x1 = edge(w->x, p->cols, HP_PAGE_SCREEN_W);
-  *x2 = edge(w->x + w->w, p->cols, HP_PAGE_SCREEN_W) - 1;
-  int sh = hp_page_row_shift(p), rows = p->rows - sh;
-  *y1 = HP_PAGE_BAR_H + edge(w->y - sh, rows, HP_PAGE_CONTENT_H);
-  *y2 = HP_PAGE_BAR_H + edge(w->y + w->h - sh, rows, HP_PAGE_CONTENT_H) - 1;
+  if (hp_page_box(p, w, x1, y1, x2, y2)) *x1 = *y1 = *x2 = *y2 = 0;
 }
 
 /* Inset one axis [lo,hi]: `a` at the low edge, `b` at the high edge, relaxed for tiny cells so a
@@ -40,6 +34,7 @@ static void inset(int *lo, int *hi, int a, int b) {
 
 void ra_ui_widget_rect(const hp_page_t *p, const hp_widget_t *w, int *x1, int *y1, int *x2, int *y2) {
   ra_ui_widget_box(p, w, x1, y1, x2, y2);
+  if (p->fixed) return; /* FIXED boxes are already the drawn rectangle: gaps are between widgets */
   inset(x1, x2, *x1 == 0 ? RA_MARGIN : RA_GAP / 2, *x2 == HP_PAGE_SCREEN_W - 1 ? RA_MARGIN : RA_GAP / 2);
   inset(y1, y2, *y1 == HP_PAGE_BAR_H ? RA_MARGIN : RA_GAP / 2, *y2 == HP_PAGE_SCREEN_H - 1 ? RA_MARGIN : RA_GAP / 2);
 }

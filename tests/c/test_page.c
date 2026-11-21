@@ -84,6 +84,7 @@ static void check_dict(const char *name, const hp_page_t *p, const cJSON *m) {
         CT_EQ(p->seq_idx, jint(sq, "idx"));
         CT_EQ(p->seq_cnt, jint(sq, "cnt"));
     }
+    CT_EQ(p->fixed, cJSON_IsTrue(cJSON_GetObjectItem(m, "fixed")));
     CT_EQ(p->act, jint(m, "act"));
     CT_EQ(p->theme, jint(m, "theme"));
     CT_CHECK(!strcmp(p->title, jstr(m, "title")));
@@ -104,6 +105,7 @@ static void check_dict(const char *name, const hp_page_t *p, const cJSON *m) {
         CT_EQ(o->icon_only, cJSON_IsTrue(cJSON_GetObjectItem(w, "icon_only")));
         CT_EQ(o->icon, jint(w, "icon"));
         CT_EQ(o->trailing, cJSON_IsTrue(cJSON_GetObjectItem(w, "trailing")));
+        CT_EQ(o->compact, cJSON_IsTrue(cJSON_GetObjectItem(w, "compact")));
         {
             const cJSON *al = cJSON_GetObjectItem(w, "align");
             CT_CHECK(!strcmp(align_str[o->align], al ? al->valuestring : "center"));
@@ -127,6 +129,38 @@ static void test_valid_vectors(const cJSON *root, const char *set) {
         hp_page_t p;
         CT_EQ(hp_page_decode(raw, n, &p), 0);
         check_dict(jstr(v, "name"), &p, cJSON_GetObjectItem(v, "dict"));
+    }
+}
+
+/* hp_page_box must give every widget the vector's `boxes` entry (the Python page_box and the TS widgetBox agree); a
+ * FIXED page's hit test is the same boxes, with the gaps between them empty. */
+static void test_boxes(const cJSON *root, const char *set) {
+    const cJSON *v;
+    cJSON_ArrayForEach(v, cJSON_GetObjectItem(root, set)) {
+        uint8_t raw[300];
+        size_t n = unhex(jstr(v, "hex"), raw, sizeof raw);
+        hp_page_t p;
+        CT_EQ(hp_page_decode(raw, n, &p), 0);
+        const cJSON *bx = cJSON_GetObjectItem(v, "boxes");
+        CT_EQ(cJSON_GetArraySize(bx), p.count);
+        for (int i = 0; i < p.count && i < cJSON_GetArraySize(bx); i++) {
+            const cJSON *b = cJSON_GetArrayItem(bx, i);
+            int x1, y1, x2, y2;
+            CT_EQ(hp_page_box(&p, &p.widgets[i], &x1, &y1, &x2, &y2), 0);
+            if (x1 != cJSON_GetArrayItem(b, 0)->valueint || y1 != cJSON_GetArrayItem(b, 1)->valueint ||
+                x2 != cJSON_GetArrayItem(b, 2)->valueint || y2 != cJSON_GetArrayItem(b, 3)->valueint)
+                fprintf(stderr, "vector %s widget %d: box %d,%d,%d,%d\n", jstr(v, "name"), i, x1, y1, x2, y2);
+            CT_EQ(x1, cJSON_GetArrayItem(b, 0)->valueint);
+            CT_EQ(y1, cJSON_GetArrayItem(b, 1)->valueint);
+            CT_EQ(x2, cJSON_GetArrayItem(b, 2)->valueint);
+            CT_EQ(y2, cJSON_GetArrayItem(b, 3)->valueint);
+            if (p.fixed) {
+                CT_CHECK(hp_page_hit(&p, x1, y1) == &p.widgets[i]);
+                CT_CHECK(hp_page_hit(&p, x2, y2) == &p.widgets[i]);
+                CT_CHECK(hp_page_hit(&p, x1 - 1, y1) != &p.widgets[i]);
+                CT_CHECK(hp_page_hit(&p, x1, y2 + 1) != &p.widgets[i]);
+            }
+        }
     }
 }
 
@@ -211,6 +245,9 @@ int main(int argc, char **argv) {
     test_valid_vectors(root, "valid_v2");
     test_valid_vectors(root, "valid_v2c");
     test_invalid_vectors(root, "invalid_v2");
+    test_valid_vectors(root, "valid_fixed");
+    test_boxes(root, "valid_fixed");
+    test_invalid_vectors(root, "invalid_fixed");
     cJSON_Delete(root);
     CT_RUN(test_hit);
     CT_RUN(test_tile_text);

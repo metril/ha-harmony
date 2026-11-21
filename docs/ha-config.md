@@ -216,6 +216,10 @@ keys (default and per-activity layers), page buttons, tile taps, and the `steps`
   Assistant. A service or entity that does not exist logs one warning per (service, entity) per config
   revision and never raises. The *Remote N keys* event entity still fires for every key, so automations keep
   working.
+- On a page with the BACK flag (the compiler's default; `back: false` opts out) the remote handles Exit itself (it pops
+  to the previous page) and does not forward it: no `key_event`, so no *Remote N keys* event and no `ha:` action for Exit
+  there. The default is off for home and favorites pages; on a page with `activity: X` it is on only when neither X nor the global
+  `keys:` binds Exit; a page without an activity gets it only when no activity and no global key binds Exit.
 
 ### Home Assistant devices
 

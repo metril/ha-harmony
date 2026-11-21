@@ -169,9 +169,9 @@ GOLDEN = {
         "hash": "16b320ed",
     },
     "large": {
-        "gen": 131,
+        "gen": 95,
         "n": 19,
-        "v2": "fa20742fa2bbe2dbd9d557e741fc68cc2d85964970a291cf9ec9a0cf4568abba",
+        "v2": "0507f0e3651d900e3641e78e30f67637590872eb2111573810643e6662a2a57e",
         "v1": "75bb953efe52e2dad8127dc94116bce92c15f91cb46d3d1712ef9c7fa0da1fdc",
         "hash": "5f6cca72",
     },

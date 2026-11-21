@@ -12,6 +12,7 @@ from harmony_core.page_codec import (
     Widget,
     decode_page,
     encode,
+    page_box,
     page_to_dict,
 )
 
@@ -35,6 +36,7 @@ def model_from_dict(d):
         d["act"],
         d["title"],
         d["theme"],
+        d.get("fixed", False),
     )
 
 
@@ -57,6 +59,33 @@ def test_v2_vectors(v):
 def test_v2_invalid_vectors(v):
     with pytest.raises(ValueError):
         decode_page(bytes.fromhex(v["hex"]))
+
+
+@pytest.mark.parametrize("v", VECTORS["valid_fixed"], ids=lambda v: v["name"])
+def test_fixed_vectors(v):
+    data = bytes.fromhex(v["hex"])
+    page = decode_page(data)
+    assert page_to_dict(page) == v["dict"]
+    assert encode(model_from_dict(v["dict"]), page.version) == data
+    assert [list(page_box(page, w)) for w in page.widgets] == v["boxes"]
+
+
+@pytest.mark.parametrize("v", VECTORS["invalid_fixed"], ids=lambda v: v["name"])
+def test_fixed_invalid_vectors(v):
+    with pytest.raises(ValueError):
+        decode_page(bytes.fromhex(v["hex"]))
+
+
+def test_fixed_spans_and_height_limit():
+    cards = tuple(Widget("button", i + 1, 0, i, 12, 1, "A") for i in range(4))
+    with pytest.raises(ValueError, match="stacks over 276"):
+        encode(Page(0, 12, 4, cards, 2, 0, 1, fixed=True), 2)
+    with pytest.raises(ValueError, match="not a fixed-layout cell"):
+        encode(Page(0, 12, 1, (Widget("button", 1, 0, 0, 5, 1, "A"),), 2, 0, 1, fixed=True), 2)
+    with pytest.raises(ValueError, match="12 columns"):
+        encode(Page(0, 4, 1, (), 2, 0, 1, fixed=True), 2)
+    with pytest.raises(ValueError, match="not fixed"):
+        encode(Page(0, 4, 1, (Widget("button", 1, 0, 0, 2, 1, "A", compact=True),), 2, 0, 1), 2)
 
 
 def test_v2_minimal_hand_assembled():

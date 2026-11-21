@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'lit';
 import vectors from '../../../tests/vectors/pages.json';
 import keymap from './fixtures/keymap.json';
-import { alignApplies, cellAt, hitWidget, layoutPage, pageSvg, widgetRect, type Prim } from '../src/lib/page-renderer';
+import { alignApplies, cellAt, fixedRows, hitWidget, layoutPage, pageSvg, widgetBox, widgetRect, type Prim } from '../src/lib/page-renderer';
 import { BODY, DPAD, KEYS, PHYSICAL_KEYS, SCREEN, keyByName, keyTitle } from '../src/lib/remote-layout';
 import type { V2Page } from '../src/lib/api';
 import { css as hexOf } from '../src/lib/themes';
@@ -48,6 +48,39 @@ describe('page renderer: shared golden vectors', () => {
         rects.slice(i + 1).forEach((b) => expect(a.x1 > b.x2 || b.x1 > a.x2 || a.y1 > b.y2 || b.y1 > a.y2, `${v.name} ${i}`).toBe(true));
       });
     }
+  });
+});
+
+describe('page renderer: fixed layout vectors', () => {
+  type BoxVec = Vec & { boxes: number[][] };
+  const fixed = vectors.valid_fixed as unknown as BoxVec[];
+  for (const v of fixed) {
+    it(`${v.name}: widgetBox equals the shared boxes`, () => {
+      const got = v.dict.widgets.map((w) => {
+        const b = widgetBox(v.dict, w);
+        return [b.x1, b.y1, b.x2, b.y2];
+      });
+      expect(got).toEqual(v.boxes);
+      const f = (v.dict as unknown as { fixed?: boolean }).fixed;
+      if (f) {
+        expect(fixedRows(v.dict)!.total).toBeLessThanOrEqual(276);
+        v.dict.widgets.forEach((w, i) => {
+          const r = widgetRect(v.dict, w);
+          expect([r.x1, r.y1, r.x2, r.y2]).toEqual(v.boxes[i]);
+          expect(hitWidget(v.dict, r.x1, r.y1)).toBe(i);
+          expect(hitWidget(v.dict, r.x2, r.y2)).toBe(i);
+          expect(hitWidget(v.dict, r.x1, r.y2 + 1)).not.toBe(i);
+        });
+        expect(layoutPage(v.dict).prims.length).toBeGreaterThan(1);
+      }
+    });
+  }
+  it('rejects every invalid fixed vector the way the codec does (unplaceable widgets have no fixed rows)', () => {
+    const base = fixed.find((v) => v.name === 'fixed_cards_2x2')!.dict;
+    const wide = { ...base, widgets: [{ ...base.widgets[0]!, w: 5 }] };
+    expect(fixedRows(wide)).toBeNull();
+    const tall = { ...base, rows: 4, widgets: [0, 1, 2, 3].map((y) => ({ ...base.widgets[0]!, id: y + 1, x: 0, y, w: 12 })) };
+    expect(fixedRows(tall)!.total).toBeGreaterThan(276);
   });
 });
 
