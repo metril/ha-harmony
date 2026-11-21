@@ -89,9 +89,12 @@ int hp_store_get(const hp_store_t *s, uint8_t id, hp_page_t *out) {
     for (unsigned i = 0; i < HP_STORE_TILES; i++) {
         const hp_store_tile_t *t = &s->tiles[i];
         if (!t->used || t->page != id) continue;
-        if (hp_page_set_tile_text(out, t->tile, t->text, strlen(t->text)) == 0)
-            for (unsigned k = 0; k < out->count; k++)
-                if (out->widgets[k].id == t->tile && out->widgets[k].kind == HP_WIDGET_TILE) out->widgets[k].tstate = t->state;
+        for (unsigned k = 0; k < out->count; k++) { /* ids are unique per page: a button takes the app status, a tile its state and text */
+            hp_widget_t *w = &out->widgets[k];
+            if (w->id != t->tile) continue;
+            if (w->kind == HP_WIDGET_BUTTON) w->tstate = t->state;
+            else if (w->kind == HP_WIDGET_TILE && hp_page_set_tile_text(out, t->tile, t->text, strlen(t->text)) == 0) w->tstate = t->state;
+        }
     }
     return 0;
 }

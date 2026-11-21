@@ -145,7 +145,7 @@ async def test_page_and_total_usage_match_the_compiler(c):
 async def test_over_budget_page_reports_bytes_and_stays_missing(c):
     cfg = json.loads(json.dumps(CONFIG))
     ws = [{"type": "label", "x": i % 8, "y": i // 8, "label": "L" * 22} for i in range(10)]
-    cfg["pages"] = [cfg["pages"][0], {"id": "fat", "cols": 8, "rows": 4, "widgets": ws}]
+    cfg["pages"] = [cfg["pages"][0], {"id": "fat", "layout": "grid", "cols": 8, "rows": 4, "widgets": ws}]
     cfg["pages"][0]["widgets"][1] = {"type": "label", "x": 1, "y": 0, "label": "ok"}
     cfg["pages"][0]["widgets"][0]["action"] = {"activity": "off"}
     _, body = await preview(c, cfg)
@@ -361,6 +361,7 @@ def _list_cfg(n=40):
         {
             "id": "lst",
             "title": "Scenes",
+            "layout": "grid",
             "list": {"rows": 4},
             "widgets": [
                 {

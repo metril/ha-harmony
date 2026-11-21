@@ -167,3 +167,12 @@ void ra_theme_local(lv_obj_t *o, lv_obj_t *label, const ra_swatch_t *s, int outl
   lv_obj_set_style_border_color(o, C(t->tx3), 0);
   if (label) lv_obj_set_style_text_color(label, C(s->ink), 0);
 }
+
+/* Brand logo colours, icons 65..91 (harmony_core/icons.py BRAND_COLORS); 0 for any other icon. */
+static const uint32_t brand_tab[] = {0xE5A00D, 0xFF0000, 0xE50914, 0x00A8E1, 0x113CCF, 0x002BE7, 0x1CE783, 0x000000, 0x0064FF, 0x000000, 0xF47521, 0x9146FF, 0x00A4DC, 0x52B54B, 0x17B2E7, 0x282A2D, 0x1DB954, 0xFA243C, 0x000000, 0xFF5500, 0x171A21, 0x107C10, 0x003791, 0xE60012, 0x76B900, 0x000000, 0x4285F4};
+uint32_t ra_brand_rgb(uint8_t icon) {
+  unsigned k = (unsigned)icon - 65u; /* the logos are one contiguous run of ids */
+  if (icon < 65 || k >= sizeof brand_tab / sizeof brand_tab[0]) return 0;
+  uint32_t c = brand_tab[k];
+  return c ? c : 0x000001; /* black is a colour too: callers drop it as too dark */
+}

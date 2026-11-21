@@ -13,6 +13,7 @@
 #include "hub/rf/link.h"
 #include "hub/rf/rf_payload.h"
 #include "remote/app/cli.h"
+#include "remote/app/cover.h"
 #include "remote/app/icons.h"
 #include "remote/app/rf_link.h"
 #include "remote/app/theme.h"
@@ -546,6 +547,90 @@ static void test_keys_and_taps_reach_the_hub(void) {
   CT_EQ(hkeys[base + 2].action, HP_KEY_ACTION_PRESS);
   CT_EQ(hkeys[base + 3].key, HP_SOFT_KEY_BASE + 1);
   CT_EQ(hkeys[base + 3].action, HP_KEY_ACTION_RELEASE);
+  CT_CHECK(!app.ui.fallback);
+  teardown();
+}
+
+
+/* ---- Now Playing: now_playing (29) and cover_chunk (42) ---- */
+static int send_np(uint32_t cid, unsigned flags, unsigned pos, unsigned dur, const char *t1, const char *t2) {
+  hp_rf_val_t v[7] = {{.u = 1}, {.u = cid}, {.u = flags}, {.u = pos}, {.u = dur},
+                      {.p = (const uint8_t *)t1, .len = strlen(t1)}, {.p = (const uint8_t *)t2, .len = strlen(t2)}};
+  return hub_send(HP_MSG_NOW_PLAYING, v, 7);
+}
+static int send_chunk(uint32_t cid, unsigned off, const uint8_t *cover, size_t n) {
+  hp_rf_val_t v[4] = {{.u = 1}, {.u = cid}, {.u = off}, {.p = cover + off, .len = n}};
+  return hub_send(HP_MSG_COVER_CHUNK, v, 4);
+}
+
+/* A fixed page (act = activity 1) with two 6-span cards in one grid row, ids 1 and 2. */
+static const uint8_t NPPAGE[] = {2, 0, 12, 1, 2, 0x5A, 1, 0x40, 0, 1, 0, 0x00, 1, 0x00, 0x61, 1, 'A', 0x00, 2, 0x60, 0x61, 1, 'B'};
+
+/* multi-frame objects need the fake clock to move (the link's frame gap): wait in 20 ms steps */
+#define TWAIT(cond) \
+  do { int _i; for (_i = 0; _i < 400 && !(cond); _i++) tick(20); if (_i == 400) { CT_CHECK(cond); } } while (0)
+
+static void test_now_playing_card_and_cover_over_rf(void) {
+  setup();
+  CT_EQ(hub_push_page(NPPAGE, sizeof NPPAGE), 0);
+  TWAIT(app.ui.page.page_id == 0 && app.ui.page.count == 2);
+  hp_rf_val_t st[2] = {{.u = 0}, {.u = 1}};
+  CT_EQ(hub_send(HP_MSG_STATE_UPDATE, st, 2), 0); /* activity 0 runs: its page (act 1) is the one on screen */
+  TWAIT(app.state_updates == 1);
+  CT_EQ(app.ui.np_idx, -1); /* nothing playing: the cards stay */
+  CT_EQ(send_np(0xC0FFEE, 1, 247, 2706, "VisionQuest", "S1 E2"), 0);
+  TWAIT(app.ui.np_idx >= 0);
+  CT_EQ(app.ui.np.cid, 0xC0FFEEu);
+  CT_EQ(app.ui.np.pos, 247);
+  CT_EQ(app.ui.np.dur, 2706);
+  CT_CHECK(!strcmp(app.ui.np.t1, "VisionQuest") && !strcmp(app.ui.np.t2, "S1 E2"));
+  CT_EQ(app.ui.page.count, 1); /* the card replaced the row */
+  CT_EQ(app.ui.np_cid_drawn, 0u); /* no cover yet: the Plex glyph */
+  /* a cover in 8 slices, out of order, one repeated and one missing for a while */
+  static uint8_t cover[RA_COVER_BYTES + 220];
+  for (unsigned i = 0; i < 1728; i++) cover[i] = 0x37; /* palette 3 / 7 */
+  for (unsigned i = 0; i < 16; i++) { cover[1728 + 2 * i] = (uint8_t)(0x11 * i); cover[1729 + 2 * i] = (uint8_t)i; }
+  static const unsigned order[] = {3, 0, 7, 3, 1, 2, 5, 6};
+  for (unsigned k = 0; k < sizeof order / sizeof *order; k++)
+    CT_EQ(send_chunk(0xC0FFEE, order[k] * 220, cover, order[k] == 7 ? RA_COVER_BYTES - 7 * 220 : 220), 0);
+  TWAIT(hp_rf_link_status(&rf.link).queued == 0 && hp_rf_link_status(&hub_link).queued == 0);
+  tick(100);
+  CT_CHECK(!ra_cover_have(0xC0FFEE)); /* slice 4 is missing: a miss, and the glyph stays */
+  CT_EQ(app.ui.np_cid_drawn, 0u);
+  CT_EQ(send_chunk(0xC0FFEE, 4 * 220, cover, 220), 0);
+  TWAIT(ra_cover_have(0xC0FFEE));
+  CT_EQ(app.ui.np_cid_drawn, 0xC0FFEEu); /* complete: the art slot shows it */
+  const uint16_t *px = ra_cover_expand(0xC0FFEE);
+  CT_CHECK(px && px[0] == 0x0333 && px[1] == 0x0777);
+  /* garbage is dropped, not applied: bad flags; a slice that overruns the cover */
+  CT_EQ(send_np(1, 3, 0, 0, "x", "y"), 0);
+  CT_EQ(send_chunk(0xBEEF, 1700, cover, 220), 0);
+  TWAIT(hp_rf_link_status(&rf.link).queued == 0 && hp_rf_link_status(&hub_link).queued == 0);
+  tick(100);
+  CT_EQ(app.ui.np.cid, 0xC0FFEEu);
+  CT_CHECK(!ra_cover_have(0xBEEF));
+  /* a tap on the card is play / pause, as the hard keys: playing -> Pause, paused -> Play */
+  int base = nhkeys;
+  fk_touch(&fk, 100, 60, 1);
+  tick(50);
+  fk_touch(&fk, 100, 60, 0);
+  tick(50);
+  TWAIT(nhkeys == base + 2);
+  CT_EQ(hkeys[base].key, hp_hwkey_by_name("Pause")->id);
+  CT_EQ(hkeys[base + 1].action, HP_KEY_ACTION_RELEASE);
+  CT_EQ(send_np(0xC0FFEE, 2, 300, 2706, "VisionQuest", "S1 E2"), 0);
+  TWAIT(app.ui.np.flags == 2);
+  CT_CHECK(app.ui.np_idx >= 0); /* in place: no rebuild */
+  fk_touch(&fk, 100, 60, 1);
+  tick(50);
+  fk_touch(&fk, 100, 60, 0);
+  tick(50);
+  TWAIT(nhkeys == base + 4);
+  CT_EQ(hkeys[base + 2].key, hp_hwkey_by_name("Play")->id);
+  /* nothing playing: the cards come back */
+  CT_EQ(send_np(0, 0, 0, 0, "", ""), 0);
+  TWAIT(app.ui.np_idx < 0);
+  CT_EQ(app.ui.page.count, 2);
   CT_CHECK(!app.ui.fallback);
   teardown();
 }
@@ -1189,6 +1274,7 @@ int main(void) {
   CT_RUN(test_keys_and_taps_reach_the_hub);
   CT_RUN(test_tile_update_changes_render);
   CT_RUN(test_tile_state_applies_and_unknown_types_are_dropped);
+  CT_RUN(test_now_playing_card_and_cover_over_rf);
   CT_RUN(test_remote_info_is_first_uplink);
   CT_RUN(test_remote_info_reports_the_page_store);
   CT_RUN(test_remote_info_reports_a_store_it_already_holds);

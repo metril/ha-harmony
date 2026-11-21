@@ -45,6 +45,7 @@ typedef enum { HP_ALIGN_CENTER = 0, HP_ALIGN_LEFT = 1, HP_ALIGN_RIGHT = 2 } hp_a
 typedef struct {
     uint8_t kind, id, x, y, w, h;
     uint8_t role, shape, icon_only; /* v2; v1: default / card / 0 */
+    uint8_t compact;                /* style bit 7, FIXED pages only: 56 px card instead of 80 */
     uint8_t trailing;               /* nav row: chevron at the right edge */
     uint8_t align;                  /* hp_align_t: icon + label group alignment (kind bits 2-3) */
     uint8_t icon;                   /* 0 none, 1..159 stock, 160..254 custom */
@@ -63,6 +64,7 @@ typedef struct {
     uint8_t kind, back;         /* v2: hp_page_kind_t, BACK flag */
     uint8_t seq_idx, seq_cnt;   /* v2: paged group position; 0/0 = not paged */
     uint8_t act;                /* v2: 0, or activity index + 1 */
+    uint8_t fixed;              /* v2 pflags bit 6: fixed-size layout (cols 12, widgets keep their class size) */
     uint8_t theme;              /* v2: header theme preset id 0..7 (0 default, 7 custom); v1: 0 */
     char title[HP_PAGE_MAX_TITLE + 1]; /* v2 header title, "" = none */
     hp_widget_t widgets[HP_PAGE_MAX_WIDGETS];
@@ -80,6 +82,20 @@ int hp_page_decode(const uint8_t *data, size_t len, hp_page_t *out);
  * (hp_page_row_shift() = 1). Without a title, or with a 1-row page, the shift is 0. */
 int hp_page_title(const hp_page_t *p);
 int hp_page_row_shift(const hp_page_t *p);
+
+/* FIXED layout (pflags bit 6; docs/proto/page-format.md): cols = 12, every widget h = 1, span (w) 12/6/4/3 with
+ * x a multiple of w. Widths 224/108/69/50 px at x = 8 + (x/w)*(width+8). Height by class: label or shape row 44;
+ * tile 64; pill 52; card (and monogram) by span: 12 -> 80, 6 -> 80 (COMPACT 56), 4 or 3 -> 52. A grid row is as
+ * tall as its tallest widget; empty grid rows take no space; rows stack from content y = 8 with a 2 px gap
+ * between two rows made only of row-class widgets and 8 px otherwise. The stack may not exceed HP_PAGE_FIXED_MAX. */
+#define HP_PAGE_FIXED_MAX 276
+#define HP_PAGE_FIXED_TOP 8
+
+/* Widget box in screen pixels, inclusive corners, before any inset. The one layout function: FIXED pages use
+ * the table above, others the grid cell (ceil edges, v1 title row shift). 0 ok, -HP_E_INVAL for a widget
+ * a FIXED page cannot place. ra_ui_widget_box and hp_page_hit use it; harmony_core/page_codec.py page_box and
+ * the renderer's widgetBox mirror it (tests/vectors/pages.json `boxes`). */
+int hp_page_box(const hp_page_t *p, const hp_widget_t *w, int *x1, int *y1, int *x2, int *y2);
 
 /* Widget under pixel (x,y), or NULL (also for pixels outside the screen and in the status bar). */
 const hp_widget_t *hp_page_hit(const hp_page_t *p, int x_px, int y_px);

@@ -111,6 +111,7 @@ case "${HAH_BACKOFF1:-}" in '' | *[!0-9.]*) ;; *) hah_b1="$HAH_BACKOFF1" ;; esac
 case "${HAH_BACKOFF2:-}" in '' | *[!0-9.]*) ;; *) hah_b2="$HAH_BACKOFF2" ;; esac
 case "${HAH_BACKOFF3:-}" in '' | *[!0-9.]*) ;; *) hah_b3="$HAH_BACKOFF3" ;; esac
 hah_wall=''
+hah_exitf="$hah_root/var/volatile/ha-harmony.status" # tmpfs: the daemon's wait status, written by its launcher
 
 # Sets hah_now (whole seconds of uptime, or empty) and hah_ts, the log prefix. Pure `read`: no
 # fork, no arithmetic, safe on the synchronous path. The wall clock is added only in the
@@ -394,9 +395,11 @@ else
 					}
 					# Start the daemon through a tiny exec wrapper that records its own pid
 					# ($! of a pipeline is the timestamper, not the daemon), then read it back.
+					# The launcher shell stays as the daemon's parent only to record how it ended ($? = 128+N for a
+					# signal N) in the tmpfs exit file; the pid we supervise (and kill -9) is the daemon's own.
 					hah_launch() {
-						rm -f "$hah_pidfile" 2>/dev/null
-						sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$hah_pidfile" "$hah_daemon" "$@" 2>&1 </dev/null |
+						rm -f "$hah_pidfile" "$hah_exitf" 2>/dev/null
+						sh -c 'p="$1"; x="$2"; shift 2; "$@" & echo $! >"$p"; wait $!; echo $? >"$x"' sh "$hah_pidfile" "$hah_exitf" "$hah_daemon" "$@" 2>&1 </dev/null |
 							hah_tsloop >>"$hah_dlog" 2>/dev/null &
 						hah_pid=''
 						hah_i=0
@@ -407,6 +410,39 @@ else
 							hah_i=$((hah_i + 1))
 						done
 						hah_blog "daemon started pid ${hah_pid:-none}"
+					}
+
+					# Logs how the daemon ended (exit status, or the signal that killed it). The status file is
+					# written a moment after the death is seen: look twice. File content only goes through `case`,
+					# arithmetic only on a validated 129..159.
+					hah_endnote() {
+						hah_xs=''
+						hah_xi=0
+						while [ -z "$hah_xs" ] && [ "$hah_xi" -lt 2 ]; do
+							read -r hah_xs 2>/dev/null <"$hah_exitf"
+							case "$hah_xs" in '' | *[!0-9]* | ????*) hah_xs='' ;; esac
+							[ -n "$hah_xs" ] || sleep "$hah_nap"
+							hah_xi=$((hah_xi + 1))
+						done
+						hah_xw="status ${hah_xs:-unknown}"
+						case "$hah_xs" in
+						129 | 13[0-9] | 14[0-9] | 15[0-9])
+							hah_xn=$((hah_xs - 128))
+							case "$hah_xn" in
+							4) hah_xg=" SIGILL" ;;
+							6) hah_xg=" SIGABRT" ;;
+							7) hah_xg=" SIGBUS" ;;
+							8) hah_xg=" SIGFPE" ;;
+							9) hah_xg=" SIGKILL" ;;
+							11) hah_xg=" SIGSEGV" ;;
+							13) hah_xg=" SIGPIPE" ;;
+							15) hah_xg=" SIGTERM" ;;
+							*) hah_xg='' ;;
+							esac
+							hah_xw="$hah_xw (killed by signal $hah_xn$hah_xg)"
+							;;
+						esac
+						hah_blog "daemon ended: $hah_xw"
 					}
 
 					sleep "$hah_delay"
@@ -453,6 +489,7 @@ else
 								hah_t=0
 								continue
 							fi
+							hah_endnote
 							hah_up=0
 							break
 						fi
@@ -510,6 +547,7 @@ else
 									break
 								fi
 							done
+							[ -e "$hah_restart" ] || hah_endnote
 							if [ -e "$hah_restart" ]; then
 								# The daemon applied a signed update and exited (status 42) to be relaunched:
 								# no budget spent. The new build gets one health window; dying inside it
@@ -591,5 +629,6 @@ fi
 
 unset hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
 unset hah_otadev hah_bfile hah_health hah_rbp hah_rbnote hah_prev hah_pending hah_restart hah_rbfile hah_rbl hah_t hah_ok hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
+unset hah_exitf hah_xs hah_xi hah_xw hah_xn hah_xg
 unset hah_rf hah_slot hah_budget hah_budnote hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr
-unset -f hah_say hah_blog hah_stamp hah_num hah_rollback 2>/dev/null
+unset -f hah_endnote hah_say hah_blog hah_stamp hah_num hah_rollback 2>/dev/null

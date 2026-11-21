@@ -155,8 +155,8 @@ static void shot(const char *dir, const char *name) {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    fprintf(stderr, "usage: %s <outdir>\n", argv[0]);
+  if (argc < 2) {
+    fprintf(stderr, "usage: %s <outdir> [page.bin ...]\n", argv[0]);
     return 2;
   }
   for (uint32_t i = 0; i < 256; i++) {
@@ -165,6 +165,31 @@ int main(int argc, char **argv) {
     crc_table[i] = c;
   }
   mkdir(argv[1], 0777);
+  if (argc > 2) { /* encoded v2 pages (harmony_core page_codec) -> <outdir>/<file stem>.png; back stack depth 2 unless home */
+    for (int a = 2; a < argc; a++) {
+      FILE *f = fopen(argv[a], "rb");
+      static uint8_t buf[512];
+      size_t n = f ? fread(buf, 1, sizeof buf, f) : 0;
+      if (f) fclose(f);
+      static hp_page_t pg;
+      if (hp_page_decode(buf, n, &pg) != 0) {
+        fprintf(stderr, "cannot decode %s\n", argv[a]);
+        return 1;
+      }
+      fresh();
+      ra_ui_set_battery(&app.ui, 72, 0);
+      ra_ui_set_depth(&app.ui, pg.kind == HP_PAGE_KIND_HOME ? 1 : 2);
+      ra_ui_show_page(&app.ui, &pg);
+      const char *base = strrchr(argv[a], '/');
+      char name[256];
+      snprintf(name, sizeof name, "%s", base ? base + 1 : argv[a]);
+      char *dot = strrchr(name, '.');
+      if (dot) *dot = 0;
+      shot(argv[1], name);
+      app_destroy(&app);
+    }
+    return 0;
+  }
   const char *d = argv[1];
   hp_page_t p;
   fresh();

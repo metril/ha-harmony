@@ -8,7 +8,7 @@ import { svg, type TemplateResult } from 'lit';
 import { iconInner } from './icon-shapes';
 import type { V2Page, V2Widget } from './api';
 import { THEMES, css as hex } from './themes';
-import { clip, fitLabel, labelBudget, lineHeight, textPx, type Font } from './text-fit';
+import { clip, fitLabel, lineHeight, textPx, type Font } from './text-fit';
 import { DEFAULT_THEME, labelColor, presetTheme, widgetColors, type RenderTheme, type TileState } from './theme-model';
 
 export const SCREEN_W = 240;
@@ -45,6 +45,8 @@ export interface RenderOpts {
   noStatus?: boolean;
   /** the config's active theme (`activeTheme(config).theme`); default: the preset the page names */
   theme?: RenderTheme;
+  /** back stack depth of the page (the remote's chevron shows above 1); default: Home 1, every other page 2 */
+  depth?: number;
   /** studio: outline every label the remote would cut, with a -N px badge */
   flagOverflow?: boolean;
 }
@@ -69,8 +71,60 @@ export function titleIndex(p: V2Page): number {
 }
 export const rowShift = (p: V2Page): number => (p.rows > 1 && titleIndex(p) >= 0 ? 1 : 0);
 
-/** The widget's cell box in screen pixels, before the inset. */
-export function widgetBox(p: V2Page, w: Pick<V2Widget, 'x' | 'y' | 'w' | 'h'>): Rect {
+const isFixed = (p: V2Page): boolean => !!(p as { fixed?: boolean }).fixed;
+export const FIXED_MAX = 276;
+const FIXED_TOP = 8;
+const FIXED_SPANS = [12, 6, 4, 3];
+type BoxWidget = Pick<V2Widget, 'x' | 'y' | 'w' | 'h'> & Partial<Pick<V2Widget, 'kind' | 'shape'>> & { compact?: boolean };
+
+/** FIXED layout class of a widget: pixel height and whether it is row-class; null when it cannot be placed (hp_page_box). */
+export function fixedClass(w: BoxWidget): { h: number; row: boolean } | null {
+  const sp = w.w;
+  const kind = w.kind ?? 'button';
+  const shape = w.shape ?? 'card';
+  if (w.h !== 1 || !FIXED_SPANS.includes(sp) || w.x % sp) return null;
+  if (w.compact && (kind !== 'button' || shape !== 'card' || sp !== 6)) return null;
+  if (kind === 'label' || shape === 'row') return { h: 44, row: true };
+  if (kind === 'tile') return { h: 64, row: false };
+  if (shape === 'pill') return { h: 52, row: false };
+  return { h: sp >= 6 ? (w.compact ? 56 : 80) : 52, row: false };
+}
+/** Stack offsets (from content y 8) per non-empty grid row, and the stacked height; null if a widget is unplaceable. */
+export function fixedRows(p: V2Page): { tops: Map<number, number>; total: number } | null {
+  const tops = new Map<number, number>();
+  let cur = 0;
+  let prevList: boolean | null = null;
+  for (let y = 0; y < p.rows; y++) {
+    const cls: { h: number; row: boolean }[] = [];
+    for (const w of p.widgets) {
+      if (w.y !== y) continue;
+      const c = fixedClass(w as BoxWidget);
+      if (!c) return null;
+      cls.push(c);
+    }
+    if (!cls.length) continue;
+    const list = cls.every((c) => c.row);
+    if (prevList !== null) cur += prevList && list ? 2 : 8;
+    tops.set(y, cur);
+    cur += Math.max(...cls.map((c) => c.h));
+    prevList = list;
+  }
+  return { tops, total: cur };
+}
+
+/** The widget's box in screen pixels, before the inset (hp_page_box in C, page_box in Python). */
+export function widgetBox(p: V2Page, w: BoxWidget): Rect {
+  if (isFixed(p)) {
+    const c = fixedClass(w);
+    const top = fixedRows(p)?.tops.get(w.y);
+    if (c && top !== undefined) {
+      const n = 12 / w.w;
+      const wpx = Math.floor((224 - (n - 1) * 8) / n);
+      const x1 = 8 + (w.x / w.w) * (wpx + 8);
+      const y1 = BAR_H + FIXED_TOP + top;
+      return { x1, y1, x2: x1 + wpx - 1, y2: y1 + c.h - 1 };
+    }
+  }
   const sh = rowShift(p);
   const rows = p.rows - sh;
   return {
@@ -88,8 +142,9 @@ function inset(lo: number, hi: number, a: number, b: number): [number, number] {
   return [lo + a, hi - b];
 }
 /** The widget's drawn rectangle (what ra_ui_widget_rect gives the C remote). */
-export function widgetRect(p: V2Page, w: Pick<V2Widget, 'x' | 'y' | 'w' | 'h'>): Rect {
+export function widgetRect(p: V2Page, w: BoxWidget): Rect {
   const b = widgetBox(p, w);
+  if (isFixed(p)) return b; // FIXED boxes are the drawn rectangle: the gaps sit between widgets
   const [x1, x2] = inset(b.x1, b.x2, b.x1 === 0 ? MARGIN : GAP / 2, b.x2 === SCREEN_W - 1 ? MARGIN : GAP / 2);
   const [y1, y2] = inset(b.y1, b.y2, b.y1 === BAR_H ? MARGIN : GAP / 2, b.y2 === SCREEN_H - 1 ? MARGIN : GAP / 2);
   return { x1, y1, x2, y2 };
@@ -102,6 +157,13 @@ export function cellAt(p: V2Page, px: number, py: number): { x: number; y: numbe
 }
 /** Widget index under a screen pixel, or -1. */
 export function hitWidget(p: V2Page, px: number, py: number): number {
+  if (isFixed(p)) {
+    if (px < 0 || py < BAR_H || px >= SCREEN_W || py >= SCREEN_H) return -1;
+    return p.widgets.findIndex((w) => {
+      const r = widgetBox(p, w as BoxWidget);
+      return px >= r.x1 && px <= r.x2 && py >= r.y1 && py <= r.y2;
+    });
+  }
   const c = cellAt(p, px, py);
   if (!c) return -1;
   return p.widgets.findIndex((w) => c.x >= w.x && c.x < w.x + w.w && c.y >= w.y && c.y < w.y + w.h);
@@ -128,15 +190,20 @@ function barPrims(p: V2Page, o: RenderOpts, T: RenderTheme, out: Prim[]): void {
   const k = T.tokens;
   const tIdx = titleIndex(p);
   const title = p.version === 1 ? (tIdx >= 0 ? (p.widgets[tIdx] as V2Widget).label : '') || 'Harmony' : p.title || 'Harmony';
+  // chevron when the back stack is deeper than Home (remote/app/ui.c bar_build); the Studio has no stack: any page but Home counts as reached
+  const depth = o.depth ?? (p.kind === 'home' ? 1 : 2);
+  const back = p.version === 2 && depth > 1;
   let tx = 12;
-  if (p.back) {
-    out.push({ t: 'path', d: 'M16 10l-6 6 6 6', stroke: hex(k.tx2), sw: 2 });
-    tx = 26;
+  if (back) {
+    out.push({ t: 'icon', id: 9, x: 4, y: 4, size: 24, color: hex(k.tx2) });
+    tx = 38;
   }
   const paged = p.seq ? `${p.seq.idx}/${p.seq.cnt}` : '';
-  const room = (o.noStatus ? 228 : paged ? 126 : 140) - tx;
-  out.push({ t: 'text', x: tx, y: 22, s: fit(title, 'm16', room), size: 16, fill: hex(k.tx), anchor: 'start', weight: 500 });
-  if (paged) out.push({ t: 'text', x: o.noStatus ? 228 : 146, y: 21, s: paged, size: 12, fill: hex(k.tx2), anchor: 'end', weight: 600 });
+  const seqRight = o.noStatus ? 228 : 142;
+  const sw = paged ? textPx(paged, 'r12') + 2 : 0;
+  const room = paged ? seqRight - sw - 6 - tx : (o.noStatus ? 228 : 140) - tx;
+  out.push({ t: 'text', x: tx, y: 22, s: fit(title, 'b18', room), size: 18, fill: hex(k.tx), anchor: 'start', weight: 700 });
+  if (paged) out.push({ t: 'text', x: seqRight, y: 21, s: paged, size: 12, fill: hex(k.tx3), anchor: 'end' });
   if (!o.noStatus) {
     out.push({ t: 'path', d: 'M152 21v-3M157 21v-6M162 21v-9M167 21v-12', stroke: hex(k.acc), sw: 2.2 });
     out.push({ t: 'text', x: 198, y: 21, s: '72%', size: 12, fill: hex(k.tx2), anchor: 'end' });
@@ -145,6 +212,17 @@ function barPrims(p: V2Page, o: RenderOpts, T: RenderTheme, out: Prim[]): void {
     out.push({ t: 'rect', x: 226.5, y: 13.5, w: 2, h: 5, r: 1, fill: hex(k.tx2) });
   }
   out.push({ t: 'rect', x: 0, y: BAR_H - 1, w: SCREEN_W, h: 1, r: 0, fill: hex(k.s2) });
+}
+
+/** Brand logos (icons 65..91, harmony_core/icons.py BRAND_COLORS) are drawn in the brand colour unless it is too dark for the fill (ui.c brand_rgb). */
+const BRAND_RGB = [0xE5A00D, 0xFF0000, 0xE50914, 0x00A8E1, 0x113CCF, 0x002BE7, 0x1CE783, 0x000000, 0x0064FF, 0x000000, 0xF47521, 0x9146FF, 0x00A4DC, 0x52B54B, 0x17B2E7, 0x282A2D, 0x1DB954, 0xFA243C, 0x000000, 0xFF5500, 0x171A21, 0x107C10, 0x003791, 0xE60012, 0x76B900, 0x000000, 0x4285F4];
+export function brandColour(icon: number, fill: number): number | null {
+  const c = BRAND_RGB[icon - 65];
+  if (c === undefined) return null;
+  const luma = (v: number): number => (((v >> 16) & 255) * 299 + ((v >> 8) & 255) * 587 + (v & 255) * 114) / 1000;
+  const l = Math.floor(luma(c));
+  const lf = Math.floor(luma(fill));
+  return (Math.abs(l - lf) < 48) || l < 40 ? null : c;
 }
 
 function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: RenderTheme, out: Prim[]): void {
@@ -163,13 +241,13 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
   const tile = w.kind === 'tile' ? sampleTile(p, w, o) : null;
   const c = widgetColors(w, { active: !!active && w.kind === 'button', ...(tile ? { state: tile.state, stale: !!tile.stale } : {}) }, T);
   const ink = hex(c.ink);
-  const icon = hex(c.icon);
+  const brand = !tile && c.border === undefined && !(active && w.kind === 'button') && !w.color ? brandColour(w.icon, c.fill) : null;
+  const icon = hex(brand ?? c.icon);
   const cap = hex(c.cap);
   const k = T.tokens;
   // a 3 px active border, else a 1 px outline when the fill is too close to the ground; both drawn inside the box
   const sw = c.border !== undefined ? 3 : c.outline ? 1 : 0;
   const stroke = c.border !== undefined ? hex(c.border) : c.outline ? hex(k.tx3) : undefined;
-  const radius = w.shape === 'pill' ? Math.min(bh / 2, 24) : w.shape === 'monogram' ? 0 : w.shape === 'row' ? 10 : 14;
   if (w.shape === 'monogram') {
     const d = Math.min(bw, bh) - 4;
     const cx = x + bw / 2;
@@ -181,90 +259,126 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
     if (bh >= 64 && w.label && !w.icon_only) out.push({ t: 'text', x: cx, y: y + bh - 4, s: fit(w.label, 'r12', bw), size: 12, fill: cap, anchor: 'middle', wi });
     return;
   }
+  const compact = !!(w as { compact?: boolean }).compact;
+  const cls = wclass(w, compact, bw, bh);
+  const radius = w.shape === 'pill' ? Math.min(bh / 2, 26) : cls === 'card' || cls === 'ccard' || tileKind(w) ? 14 : 10;
   out.push({ t: 'rect', x: x + sw / 2, y: y + sw / 2, w: bw - sw, h: bh - sw, r: Math.max(0, radius - sw / 2), fill: hex(c.fill), stroke, sw: sw || undefined, wi });
-  const sh = rowShift(p);
-  const lb = labelBudget({ cols: p.cols, rows: p.rows - sh }, { ...w, y: w.y - sh });
-  const font: Font = lb?.font ?? 'b13';
-  const size = FONT_SIZE[font];
-  const weight = FONT_WEIGHT[font];
-  const room0 = lb?.px ?? 0;
   const hasIcon = w.icon > 0;
-  // the remote's layout choice (remote/app/ui.c): a row/pill or any wide, short button is one line; a big card stacks
-  const rowPath = w.shape === 'row' || w.shape === 'pill' || (bh < 44 && bw >= 100);
-  const big = w.shape === 'card' && !rowPath && bw >= 100 && bh >= 80;
+  const base = (top: number, font: Font): number => top + lineHeight(font) * 0.78; // text baseline from the top of its line box
   if (tile) {
-    const val = tile.text;
-    const vf: Font = bw >= 80 ? 'b20' : 'b13';
-    // remote/app/ui.c: a tile ignores icon_only; the icon needs bh >= 56 and bw >= 56, the caption bh >= 44
-    const showIcon = hasIcon && bh >= 56 && bw >= 56;
-    const capH = bh >= 44 && !!w.label;
-    if (showIcon) out.push({ t: 'icon', id: w.icon, x: x + 8, y: y + 8, size: 16, color: icon, wi });
-    if (capH) out.push({ t: 'text', x: showIcon ? x + 32 : x + bw / 2, y: y + 20, s: fit(w.label, 'r12', bw - (showIcon ? 38 : 8)), size: 12, fill: cap, anchor: showIcon ? 'start' : 'middle', wi });
-    out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + (capH ? 18 : FONT_SIZE[vf] * 0.35), s: fit(val, vf, bw - 8), size: FONT_SIZE[vf], fill: ink, anchor: 'middle', weight: 700, wi });
+    // remote/app/ui.c build_tile: glyph 20 top left, state r12 top right, name m16 at the bottom
+    const roomy = bh >= 56 && bw >= 80;
+    const showIcon = hasIcon && roomy;
+    if (showIcon) out.push({ t: 'icon', id: w.icon, x: x + 8, y: y + 8, size: 20, color: icon, wi });
+    const sx = showIcon ? 34 : 10;
+    const st = fit(tile.text, 'r12', bw - sx - 10);
+    out.push({ t: 'text', x: x + bw - 10, y: base(y + (roomy ? 12 : (bh - lineHeight('r12')) / 2), 'r12'), s: st, size: 12, fill: cap, anchor: 'end', wi });
+    if (w.label) {
+      const nm = fit(w.label, 'm16', roomy ? bw - 20 : bw - 64);
+      out.push({ t: 'text', x: x + 10, y: base(y + (roomy ? bh - 10 - lineHeight('m16') : (bh - lineHeight('m16')) / 2), 'm16'), s: nm, size: 16, fill: ink, anchor: 'start', weight: 500, wi });
+    }
     return;
   }
   const legacyDanger = p.version === 1 && w.kind === 'button' && /^power off$/i.test(w.label);
   const text = legacyDanger ? hex(k.bad) : ink;
-  const label = w.icon_only ? '' : w.label;
-  if (hasIcon && !label) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: icon, wi });
-  else if (hasIcon && !rowPath) {
-    // stacked: icon over label; the big card (bw >= 100, bh >= 80) honours align, a dense one is always centred
-    const al = big ? w.align ?? 'center' : 'center';
-    const ax = al === 'left' ? x + 12 : al === 'right' ? x + bw - 12 : x + bw / 2;
-    const anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
-    if (big || bh >= 56) {
-      out.push({ t: 'icon', id: w.icon, x: al === 'left' ? ax : al === 'right' ? ax - 22 : ax - 11, y: y + bh / 2 - 22, size: 22, color: icon, wi });
-      out.push({ t: 'text', x: ax, y: y + bh / 2 + 22, s: fit(label, font, room0), size, fill: text, anchor, weight, wi });
-    } else {
-      // a short dense button (ui.c): icon at the top, label at the bottom, the free height split in thirds
-      const isz = bh >= 64 ? 24 : 20;
-      const gap = Math.max(0, Math.floor((bh - isz - lineHeight(font)) / 3));
-      out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - isz / 2, y: y + gap + 1, size: isz, color: icon, wi });
-      out.push({ t: 'text', x: x + bw / 2, y: y + bh - gap - lineHeight(font) * 0.22, s: fit(label, font, room0), size, fill: text, anchor: 'middle', weight, wi });
+  const label = w.icon_only && hasIcon ? '' : w.label;
+  const fixed = isFixed(p);
+  const al = fixed ? 'left' : w.align ?? 'center';
+  const px = cls === 'card' ? 32 : (cls === 'key' && bh < 48) || (cls === 'row' && bh < 36) ? 20 : 24;
+  if (hasIcon && (!label || cls === 'pill')) {
+    out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - px / 2, y: y + bh / 2 - px / 2, size: px, color: icon, wi });
+    return;
+  }
+  if (!label) return;
+  if (cls === 'row') {
+    const chev = !!w.trailing;
+    let x0 = 10;
+    const gap = hasIcon ? px + 10 : 0;
+    let lw = Math.max(0, bw - x0 - gap - 8 - (chev ? 30 : 0));
+    if (chev) out.push({ t: 'icon', id: 8, x: x + bw - 8 - 20, y: y + bh / 2 - 10, size: 20, color: cap, wi });
+    const s = fit(label, 'm16', lw);
+    if (al !== 'left') {
+      const room = bw - (chev ? 8 + 20 + 10 : 0);
+      const tw = Math.min(lw, textPx(s, 'm16') + 2);
+      lw = tw;
+      if (al === 'right') x0 = room - gap - lw - 10 >= 10 ? room - gap - lw - 10 : x0;
+      else if (room - gap - lw >= 20) x0 = Math.floor((room - gap - lw) / 2);
     }
-  } else if (hasIcon) {
-    const al = rowPath ? w.align ?? 'center' : 'center';
-    const isz = 20;
-    const chev = !!w.trailing && rowPath;
-    if (chev) chevPrim(out, x, y, bw, bh, icon, wi);
-    const span = chev ? bw - CHEV_ROOM : bw;
-    const s = fit(label, font, room0);
-    const tw = Math.min(room0, textPx(s, font));
-    const gw = isz + 8 + tw;
-    const gx = al === 'left' ? x + 12 : al === 'right' ? x + span - 12 - gw : x + span / 2 - gw / 2;
-    out.push({ t: 'icon', id: w.icon, x: gx, y: y + bh / 2 - isz / 2, size: isz, color: icon, wi });
-    out.push({ t: 'text', x: gx + isz + 8, y: y + bh / 2 + size * 0.35, s, size, fill: text, anchor: 'start', weight, wi });
-  } else if (label) {
-    const al = rowPath || big ? w.align ?? 'center' : 'center';
-    const chev = !!w.trailing && rowPath;
-    if (chev) chevPrim(out, x, y, bw, bh, icon, wi);
-    const span = chev ? bw - CHEV_ROOM : bw;
-    const tx = al === 'left' ? x + 12 : al === 'right' ? x + span - 12 : x + span / 2;
+    if (hasIcon) out.push({ t: 'icon', id: w.icon, x: x + x0, y: y + bh / 2 - px / 2, size: px, color: icon, wi });
+    out.push({ t: 'text', x: x + x0 + gap, y: y + bh / 2 + 5.6, s, size: 16, fill: text, anchor: 'start', weight: 500, wi });
+  } else if (cls === 'card') {
+    const lh = lineHeight('b13');
+    const ix = al === 'right' ? x + bw - 12 - px : al === 'left' ? x + 12 : x + (bw - px) / 2;
     const anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
-    out.push({ t: 'text', x: tx, y: y + bh / 2 + size * 0.35, s: fit(label, font, room0), size, fill: text, anchor, weight, wi });
+    const tx = al === 'left' ? x + 12 : al === 'right' ? x + bw - 12 : x + bw / 2;
+    if (hasIcon) {
+      out.push({ t: 'icon', id: w.icon, x: ix, y: y + 12, size: px, color: icon, wi });
+      out.push({ t: 'text', x: tx, y: base(y + bh - 12 - lh, 'b13'), s: fit(label, 'b13', bw - 24), size: 13, fill: text, anchor, weight: 700, wi });
+    } else {
+      out.push({ t: 'text', x: tx, y: base(y + (bh - lineHeight('m16')) / 2, 'm16'), s: fit(label, 'm16', bw - 24), size: 16, fill: text, anchor, weight: 500, wi });
+    }
+  } else if (cls === 'ccard') {
+    const x0 = hasIcon ? 10 + px + 10 : 10;
+    const lines = wrap2(label, 'b13', bw - x0 - 10);
+    const lh = lineHeight('b13');
+    if (hasIcon) out.push({ t: 'icon', id: w.icon, x: x + 10, y: y + bh / 2 - px / 2, size: px, color: icon, wi });
+    const top = y + (bh - lines.length * lh) / 2;
+    lines.forEach((ln, i) => out.push({ t: 'text', x: x + x0, y: base(top + i * lh, 'b13'), s: ln, size: 13, fill: text, anchor: 'start', weight: 700, wi }));
+  } else if (cls === 'pill') {
+    const f: Font = Array.from(label).length <= 2 ? 'b20' : 'm16';
+    out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + FONT_SIZE[f] * 0.35, s: fit(label, f, bw - 8), size: FONT_SIZE[f], fill: text, anchor: 'middle', weight: FONT_WEIGHT[f], wi });
+  } else if (hasIcon) {
+    // key: glyph over an r12 caption
+    const lh = lineHeight('r12');
+    const gap = bh >= 52 ? 4 : 2;
+    const top = Math.max(0, (bh - px - gap - lh) / 2);
+    out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - px / 2, y: y + top, size: px, color: icon, wi });
+    out.push({ t: 'text', x: x + bw / 2, y: base(y + top + px + gap, 'r12'), s: fit(label, 'r12', bw - 6), size: 12, fill: cap, anchor: 'middle', wi });
+  } else {
+    out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 4.5, s: fit(label, 'b13', bw - 6), size: 13, fill: text, anchor: 'middle', weight: 700, wi });
   }
 }
 
-/** Does `align` change how this button is drawn? Only for rows/pills, wide short buttons and big cards (remote/app/ui.c). */
-export function alignApplies(page: { cols: number; rows: number }, w: { type?: string; shape: string; icon_only?: boolean; x: number; y: number; w: number; h: number }): boolean {
-  if (w.type === 'tile' || w.type === 'label' || w.icon_only || w.shape === 'monogram') return false;
+export type WClass = 'mono' | 'row' | 'pill' | 'card' | 'ccard' | 'key';
+const tileKind = (w: V2Widget): boolean => w.kind === 'tile';
+/** The widget class the remote draws (wclass in remote/app/ui.c): fixes the glyph size, the fonts and the layout. */
+export function wclass(w: Pick<V2Widget, 'shape'>, compact: boolean, bw: number, bh: number): WClass {
+  if (w.shape === 'monogram') return 'mono';
+  if (w.shape === 'row' || (bh < 44 && bw >= 100)) return 'row';
+  if (w.shape === 'pill') return 'pill';
+  if (bw >= 100) return compact || bh < 72 ? 'ccard' : 'card';
+  return 'key';
+}
+/** A label wrapped to at most two lines in `px` (the remote's compact card): the second line ends in "..." when cut. */
+function wrap2(s: string, font: Font, px: number): string[] {
+  const words = s.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = '';
+  let i = 0;
+  for (; i < words.length; i++) {
+    const t = cur ? `${cur} ${words[i]}` : (words[i] as string);
+    if (cur && textPx(t, font) > px) break;
+    cur = t;
+  }
+  if (!cur) return [fit(s, font, px)];
+  lines.push(cur);
+  if (i < words.length) lines.push(fit(words.slice(i).join(' '), font, px));
+  return lines.map((l) => fit(l, font, px)).slice(0, 2);
+}
+
+/** Does `align` change how this button is drawn? Only for rows and big cards of a grid page; a FIXED page always reads left to right (remote/app/ui.c). */
+export function alignApplies(page: { cols: number; rows: number; fixed?: boolean }, w: { type?: string; shape: string; icon_only?: boolean; x: number; y: number; w: number; h: number }): boolean {
+  if (page.fixed || w.type === 'tile' || w.type === 'label' || w.icon_only || w.shape === 'monogram') return false;
   const r = widgetRect({ version: 2, cols: page.cols, rows: page.rows, widgets: [] } as unknown as V2Page, w);
   const bw = r.x2 - r.x1 + 1;
   const bh = r.y2 - r.y1 + 1;
-  const rowPath = w.shape === 'row' || w.shape === 'pill' || (bh < 44 && bw >= 100);
-  return rowPath || (w.shape === 'card' && bw >= 100 && bh >= 80);
-}
-
-/** the remote's trailing nav chevron: a 24 px glyph in a 28 px box, 8 px in from the right edge */
-const CHEV_ROOM = 36;
-function chevPrim(out: Prim[], x: number, y: number, bw: number, bh: number, color: string, wi: number): void {
-  out.push({ t: 'icon', id: 8, x: x + bw - CHEV_ROOM + 2, y: y + bh / 2 - 12, size: 24, color, wi });
+  return w.shape === 'row' || (bh < 44 && bw >= 100) || (w.shape === 'card' && bw >= 100 && bh >= 72);
 }
 
 /** Studio: a dashed red outline and a "-N px" badge on a widget whose label the remote would cut. */
 function flagPrims(p: V2Page, w: V2Widget, wi: number, out: Prim[]): void {
   const sh = rowShift(p);
-  const f = fitLabel({ cols: p.cols, rows: p.rows - sh }, { ...w, y: w.y - sh });
+  const f = fitLabel({ cols: p.cols, rows: p.rows - sh, fixed: isFixed(p) }, { ...w, y: w.y - sh });
   if (!f) return;
   const r = widgetRect(p, w);
   const text = `\u2212${f.over} px`;

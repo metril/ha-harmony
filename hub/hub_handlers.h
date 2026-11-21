@@ -102,6 +102,32 @@ typedef struct {
     uint8_t payload[HP_RF_MSG_MAX];
 } hub_pend_t;
 
+/* Now Playing (stream H): neither is a keyed pend[] entry, so neither can evict a page. One cover and one now_playing are
+ * held per remote. A cover is cut into cover_chunk objects of HUB_COVER_CHUNK bytes; each cid is sent once per remote (the last
+ * HUB_COVER_SENT cids are remembered, the remote caches that many) and again after a rejoin. Both are sent only while the
+ * remote was heard within HUB_AWAKE_MS: a sleeping remote costs the link's 300 ms timeout per frame, and cannot be woken. */
+#define HUB_COVER_BYTES 1760 /* 48x72 at 4 bpp (1728) + 16 RGB565 palette entries (32) */
+#define HUB_COVER_CHUNK 220
+#define HUB_COVER_MAX 2
+#define HUB_COVER_SENT 4
+#define HUB_NP_MAX 2
+#define HUB_NP_TEXT 48
+#define HUB_AWAKE_MS 1000
+typedef struct {
+    bool used, hold;     /* used: data / cid are valid (kept after sending, for a rejoin); hold: chunks still to send */
+    uint8_t remote, nsent, sent_next, tries;
+    uint32_t cid, sent[HUB_COVER_SENT];
+    uint16_t off;        /* next byte to send */
+    uint8_t data[HUB_COVER_BYTES];
+} hub_cover_t;
+typedef struct {
+    bool used, hold;
+    uint8_t remote, flags, l1, l2;
+    uint32_t cid, at; /* at: scheduler ms when pos was given */
+    uint16_t pos, dur;
+    char t1[HUB_NP_TEXT], t2[HUB_NP_TEXT];
+} hub_np_t;
+
 /* What a remote announced in remote_info (docs/plans/2026-11-18-page-format-v2.md); cached while its link is up. */
 #define HUB_INFO_MAX 4
 typedef struct {
@@ -142,6 +168,8 @@ typedef struct {
     uint8_t npending_dev;
     hub_pend_t pend[HUB_PEND_MAX]; /* oldest first */
     uint8_t npend;
+    hub_cover_t cover[HUB_COVER_MAX];
+    hub_np_t np[HUB_NP_MAX];
     uint8_t page_tries[256]; /* resends of an unacked page_push per page id (bounded by HUB_PAGE_RESENDS); reset by a fresh push or an ack */
     uint8_t page_out[256];   /* page_push objects of a page id handed to the link and not yet resolved */
     uint8_t theme_tries, theme_out; /* as page_tries / page_out for the (single) theme_push of the remote */

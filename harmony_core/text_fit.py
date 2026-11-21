@@ -1,6 +1,6 @@
 """Label pixel budgets on the Elite's 240x320 screen: what fits, what the remote clips.
 
-A port of `ra_ui_widget_rect` and the font / label-width rules of `build_v2_content`
+A port of `ra_ui_widget_rect` and the class font / label-width rules of `build_v2_content` / `build_tile`
 (remote/app/ui.c), measured with the baked fonts' advance widths (proto/font_metrics.json, made by
 tools/gen_font_metrics.py). The TypeScript twin is addon/frontend/src/lib/text-fit.ts; both run
 tests/vectors/text_fit.json. No Home Assistant imports.
@@ -59,7 +59,23 @@ def _inset(lo: int, hi: int, a: int, b: int) -> tuple[int, int]:
 
 
 def widget_size(page: Any, w: Any) -> tuple[int, int]:
-    """(width, height) in px of a widget's drawn rectangle (v2 pages: no title-row shift)."""
+    """(width, height) in px of a widget's drawn rectangle (v2 pages: no title-row shift).
+
+    A FIXED page (`page.fixed`) gives every widget its class size (docs/proto/page-format.md); other pages the grid cell."""
+    if getattr(page, "fixed", False):
+        sp, compact = w.w, getattr(w, "compact", False)
+        if w.h == 1 and sp in (12, 6, 4, 3) and w.x % sp == 0:
+            n = 12 // sp
+            if w.kind == "label" or w.shape == "row":
+                h = 44
+            elif w.kind == "tile":
+                h = 64
+            elif w.shape == "pill":
+                h = 52
+            else:
+                h = (56 if compact else 80) if sp >= 6 else 52
+            return (224 - (n - 1) * 8) // n, h
+        # an unplaceable widget: the page is rejected elsewhere; measure it as a cell
     x1, x2 = _edge(w.x, page.cols, SCREEN_W), _edge(w.x + w.w, page.cols, SCREEN_W) - 1
     y1 = BAR_H + _edge(w.y, page.rows, SCREEN_H - BAR_H)
     y2 = BAR_H + _edge(w.y + w.h, page.rows, SCREEN_H - BAR_H) - 1
@@ -75,32 +91,32 @@ def widget_size(page: Any, w: Any) -> tuple[int, int]:
 def label_budget(page: Any, w: Any) -> tuple[str, int] | None:
     """(font, max label px) the remote gives this widget's label; None when it draws no label.
 
-    `page` has cols and rows; `w` has kind, x, y, w, h, label, shape, icon, icon_only, trailing.
+    `page` has cols and rows (and `fixed` on a FIXED page); `w` has kind, x, y, w, h, label, shape, icon, icon_only,
+    trailing and compact. The class rules of `build_v2_content` / `build_tile` (remote/app/ui.c): row m16, card b13
+    (compact: two lines), key r12 caption under a glyph, pill b20 digit, tile name m16.
     """
     bw, bh = widget_size(page, w)
     has_icon = bool(w.icon)
     if w.kind == "tile":
-        if not (bh >= 44 and w.label):
+        if not w.label:
             return None
-        return "r12", bw - (38 if has_icon and bh >= 56 and bw >= 56 else 8)
+        return "m16", max(0, bw - 20 if bh >= 56 and bw >= 80 else bw - 64)
     if w.kind != "button" or not w.label or w.shape == "monogram" or (w.icon_only and has_icon):
         return None
-    row = w.shape in ("row", "pill") or (bh < 44 and bw >= 100)
-    big = w.shape == "card" and not row and bw >= 100 and bh >= 80
-    px = 24 if row else 32 if big else 24 if bh >= 64 else 20
-    if big:
-        font, lw = "b18", bw - 24
-    else:
-        font = "m16" if row or bw >= 100 else "b13"
-        lw = bw - 8
-    if row:
-        # a keypad pill with a 1-2 character label (a digit) is set in b20
-        if w.shape == "pill" and len(w.label) <= 2:
-            font = "b20"
-        lw = bw - 12 - px - 16 if has_icon else bw - 24
-        if getattr(w, "trailing", False):
-            lw -= 28
-    return font, max(0, lw)
+    if w.shape == "row" or (bh < 44 and bw >= 100):
+        px = 20 if bh < 36 else 24
+        lw = bw - 10 - (px + 10 if has_icon else 0) - 8 - (30 if getattr(w, "trailing", False) else 0)
+        return "m16", max(0, lw)
+    if w.shape == "pill":
+        return ("b20" if len(w.label) <= 2 else "m16"), max(0, bw - 8)  # a digit reads at b20
+    if bw >= 100:
+        if getattr(w, "compact", False) or bh < 72:  # two lines beside the glyph, wrapped at spaces only
+            line = bw - (44 if has_icon else 10) - 10
+            if any(text_px(word, "b13") > line for word in w.label.split()):
+                return "b13", max(0, line - 1)  # a word wider than the line would break mid-word: never fits
+            return "b13", max(0, 2 * line - 4)
+        return ("b13" if has_icon else "m16"), max(0, bw - 24)
+    return ("r12" if has_icon else "b13"), max(0, bw - 6)
 
 
 def fit_label(page: Any, w: Any) -> tuple[str, int, int] | None:

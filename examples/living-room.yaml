@@ -5,6 +5,9 @@
 # Sources of IR codes (no network archive needed): the owner's own stock-hub backup,
 # backups/user-config/ha-harmony-pimentoblue.v2.yaml, decoded from its raw timings:
 #   Samsung TV (UN55JS9000): samsung32 addr 7 (frame 0x07 0x07), repeats 3 as the stock hub sent them.
+#   TV HDMI 2 (0xE0E07D82 = cmd 190) and HDMI 3 (0xE0E043BC = cmd 194): pickysysadmin/logitech-harmony-ir-archive,
+#   devices/Samsung/UN55JS9000.json (HDMI 1 there, 0xE0E09768 = cmd 233, matches ours). That model has no direct HDMI 4
+#   code (the archive uses a Source-menu macro), so HDMI 4 is left out.
 #   Audioengine A5+: necext, wire address bytes 0x00 0xFD (= 0xFD00), 8-bit cmd with inverse; Vol Up 9, Vol Down 7, Mute 3.
 devices:
   - id: tv
@@ -16,6 +19,8 @@ devices:
       'off': {proto: samsung32, addr: 7, cmd: 152, repeats: 3}
     inputs:
       HDMI 1: {proto: samsung32, addr: 7, cmd: 233, repeats: 3}   # Shield
+      HDMI 2: {proto: samsung32, addr: 7, cmd: 190, repeats: 3}
+      HDMI 3: {proto: samsung32, addr: 7, cmd: 194, repeats: 3}
       TV: {proto: samsung32, addr: 7, cmd: 27, repeats: 3}        # antenna
     commands:
       Volume Up: {proto: samsung32, addr: 7, cmd: 7, repeats: 3}
@@ -47,11 +52,13 @@ devices:
   - id: shield
     kind: bt            # pair it in the editor; address is optional until then
     name: Shield
+    icon: nvidia
     transport: auto
 
   - id: shield_ha
     kind: ha
     name: Shield Apps
+    icon: grid_apps
     entity: media_player.nvidia_shield_tv
     power:
       'on': {ha: {service: media_player.turn_on, target: {entity_id: media_player.nvidia_shield_tv}}}
@@ -65,6 +72,7 @@ devices:
 
   - id: speakers
     name: Speakers
+    icon: speaker
     commands:
       Volume Up: {proto: necext, addr: 64768, cmd: 9}
       Volume Down: {proto: necext, addr: 64768, cmd: 7}
@@ -73,6 +81,7 @@ devices:
   - id: speakers_pwr
     kind: ha
     name: Speaker Power
+    icon: plug
     entity: switch.speakers
     power:
       'on': {ha: {service: switch.turn_on, target: {entity_id: switch.speakers}}}
@@ -81,6 +90,7 @@ devices:
   - id: kvm
     kind: ha
     name: KVM
+    icon: kvm
     entity: switch.kvm_controller_kvm_power
     settle_ms: 1500
     power:
@@ -95,6 +105,7 @@ devices:
 activities:
   - id: shield_tv
     name: Shield TV
+    media: {apps_entity: media_player.nvidia_shield_tv, now_playing_entity: media_player.plex_plex_for_android_tv_shield_android_tv}
     devices:
       - {device: tv, input: HDMI 1}
       - {device: shield_ha}
@@ -191,7 +202,7 @@ pages:
     kind: home          # the HOME hard key opens this page
     title: Home
     cols: 1
-    rows: 7
+    rows: 8
     widgets:
       - {type: button, id: a_shield, x: 0, y: 0, label: Shield TV, action: {activity: shield_tv}}
       - {type: button, id: a_watch, x: 0, y: 1, label: Watch TV, action: {activity: watch_tv}}
@@ -200,17 +211,21 @@ pages:
       - {type: button, id: n_lights, x: 0, y: 4, label: Lights, nav: lights}
       - {type: button, id: n_scenes, x: 0, y: 5, label: Scenes, nav: scenes}
       - {type: button, id: n_blinds, x: 0, y: 6, label: Blinds, nav: blinds}
+      - {type: button, id: n_fav, x: 0, y: 7, label: Favorites, icon: star, nav: favorites}
 
   - id: devices
     kind: favorites     # the DEVICES hard key opens this page
     title: Devices
-    cols: 1
-    rows: 4
+    layout: fixed
+    cols: 12
+    rows: 6
     widgets:
-      - {type: button, id: n_tv, x: 0, y: 0, label: TV, nav: dev_tv}
-      - {type: button, id: n_shield, x: 0, y: 1, label: Shield, nav: dev_shield}
-      - {type: button, id: n_spk, x: 0, y: 2, label: Speakers, nav: dev_speakers}
-      - {type: button, id: n_kvm, x: 0, y: 3, label: KVM, nav: dev_kvm}
+      - {type: button, id: n_tv, x: 0, y: 0, w: 12, label: TV, icon: tv, nav: dev_tv}
+      - {type: button, id: n_shield, x: 0, y: 1, w: 12, label: Shield, icon: nvidia, nav: dev_shield}
+      - {type: button, id: n_shield_apps, x: 0, y: 2, w: 12, label: Shield Apps, icon: grid_apps, nav: dev_shield_apps}
+      - {type: button, id: n_spk, x: 0, y: 3, w: 12, label: Speakers, icon: speaker, nav: dev_speakers}
+      - {type: button, id: n_spk_pwr, x: 0, y: 4, w: 12, label: Speaker Power, icon: plug, nav: dev_speaker_power}
+      - {type: button, id: n_kvm, x: 0, y: 5, w: 12, label: KVM, icon: kvm, nav: dev_kvm}
 
   - id: lights
     title: Lights
@@ -258,56 +273,88 @@ pages:
 
   - id: dev_tv
     title: TV
-    back: true
-    cols: 2
-    rows: 4
+    layout: fixed
+    cols: 12
+    rows: 5
     widgets:
-      - {type: button, id: tv_on, x: 0, y: 0, label: Power On, action: {device: tv, command: power_on}}
-      - {type: button, id: tv_off, x: 1, y: 0, label: Power Off, action: {device: tv, command: power_off}}
-      - {type: button, id: tv_h1, x: 0, y: 1, label: Input HDMI 1, action: {device: tv, input: HDMI 1}}
-      - {type: button, id: tv_ant, x: 1, y: 1, label: Input TV, action: {device: tv, input: TV}}
-      - {type: button, id: tv_vu, x: 0, y: 2, label: Volume Up, action: {device: tv, command: Volume Up}}
-      - {type: button, id: tv_vd, x: 1, y: 2, label: Volume Down, action: {device: tv, command: Volume Down}}
-      - {type: button, id: tv_mute, x: 0, y: 3, w: 2, label: Mute, action: {device: tv, command: Mute}}
+      - {type: button, id: tv_on, x: 0, y: 0, w: 4, label: Power On, icon: power, action: {device: tv, command: power_on}}
+      - {type: button, id: tv_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: tv, command: power_off}}
+      - {type: button, id: tv_mute, x: 8, y: 0, w: 4, label: Mute, icon: mute, action: {device: tv, command: Mute}}
+      - {type: button, id: tv_h1, x: 0, y: 1, w: 12, shape: row, label: HDMI 1, icon: hdmi1, action: {device: tv, input: HDMI 1}}
+      - {type: button, id: tv_h2, x: 0, y: 2, w: 12, shape: row, label: HDMI 2, icon: hdmi2, action: {device: tv, input: HDMI 2}}
+      - {type: button, id: tv_h3, x: 0, y: 3, w: 12, shape: row, label: HDMI 3, icon: hdmi3, action: {device: tv, input: HDMI 3}}
+      - {type: button, id: tv_ant, x: 0, y: 4, w: 12, shape: row, label: TV, icon: tv, action: {device: tv, input: TV}}
 
   - id: dev_shield
     title: Shield
-    back: true
-    cols: 1
-    rows: 6
+    layout: fixed
+    cols: 12
+    rows: 2
     widgets:
-      - {type: button, id: sh_on, x: 0, y: 0, label: Power On, action: {device: shield_ha, command: power_on}}
-      - {type: button, id: sh_off, x: 0, y: 1, label: Power Off, action: {device: shield_ha, command: power_off}}
-      - {type: button, id: plex, x: 0, y: 2, label: Plex, action: {device: shield_ha, command: Plex}}
-      - {type: button, id: yt, x: 0, y: 3, label: YouTube, action: {device: shield_ha, command: YouTube}}
-      - {type: button, id: cam, x: 0, y: 4, label: Show Camera, action: {device: shield_ha, command: Show Camera}}
-      - {type: button, id: camx, x: 0, y: 5, label: Clear Camera, action: {device: shield_ha, command: Clear Camera}}
+      - {type: button, id: sh_home, x: 0, y: 0, w: 4, label: Home, icon: home, action: {device: shield, command: Home}}
+      - {type: button, id: sh_back, x: 4, y: 0, w: 4, label: Back, icon: back, action: {device: shield, command: Back}}
+      - {type: button, id: sh_menu, x: 8, y: 0, w: 4, label: Menu, icon: menu, action: {device: shield, command: Menu}}
+      - {type: button, id: sh_info, x: 0, y: 1, w: 4, label: Info, icon: info, action: {device: shield, command: Info}}
+      - {type: button, id: sh_play, x: 4, y: 1, w: 4, label: Play/Pause, icon: play, action: {device: shield, command: PlayPause}}
+      - {type: button, id: sh_stop, x: 8, y: 1, w: 4, label: Stop, icon: stop, action: {device: shield, command: Stop}}
+
+  - id: dev_shield_apps
+    title: Shield Apps
+    layout: fixed
+    cols: 12
+    rows: 5
+    widgets:
+      - {type: button, id: sa_on, x: 0, y: 0, w: 4, label: Power On, icon: power, action: {device: shield_ha, command: power_on}}
+      - {type: button, id: sa_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: shield_ha, command: power_off}}
+      - {type: button, id: plex, app_id: com.plexapp.android, x: 0, y: 1, w: 12, shape: row, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}, icon_only: false}
+      - {type: button, id: yt, app_id: org.smarttube.stable, x: 0, y: 2, w: 12, shape: row, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}, icon_only: false}
+      - {type: button, id: cam, x: 0, y: 3, w: 12, shape: row, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
+      - {type: button, id: camx, x: 0, y: 4, w: 12, shape: row, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
 
   - id: dev_speakers
     title: Speakers
-    back: true
-    cols: 2
-    rows: 3
+    layout: fixed
+    cols: 12
+    rows: 1
     widgets:
-      - {type: button, id: sp_on, x: 0, y: 0, label: Power On, action: {device: speakers_pwr, command: power_on}}
-      - {type: button, id: sp_off, x: 1, y: 0, label: Power Off, action: {device: speakers_pwr, command: power_off}}
-      - {type: button, id: sp_vu, x: 0, y: 1, label: Volume Up, action: {device: speakers, command: Volume Up}}
-      - {type: button, id: sp_vd, x: 1, y: 1, label: Volume Down, action: {device: speakers, command: Volume Down}}
-      - {type: button, id: sp_mute, x: 0, y: 2, w: 2, label: Mute, action: {device: speakers, command: Mute}}
+      - {type: button, id: sp_vu, x: 0, y: 0, w: 4, label: Volume Up, icon: vol_up, action: {device: speakers, command: Volume Up}}
+      - {type: button, id: sp_vd, x: 4, y: 0, w: 4, label: Volume Down, icon: vol_down, action: {device: speakers, command: Volume Down}}
+      - {type: button, id: sp_mute, x: 8, y: 0, w: 4, label: Mute, icon: mute, action: {device: speakers, command: Mute}}
+
+  - id: dev_speaker_power
+    title: Speaker
+    layout: fixed
+    cols: 12
+    rows: 1
+    widgets:
+      - {type: button, id: sp_on, x: 0, y: 0, w: 4, label: Power On, icon: power, action: {device: speakers_pwr, command: power_on}}
+      - {type: button, id: sp_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: speakers_pwr, command: power_off}}
 
   - id: dev_kvm
     title: KVM
-    back: true
-    cols: 2
-    rows: 4
+    layout: fixed
+    cols: 12
+    rows: 5
     widgets:
-      - {type: tile, id: kvm_t, x: 0, y: 0, w: 2, label: Source, entity: select.kvm_source, tap: {ha: {service: select.select_next, target: {entity_id: select.kvm_source}}}}
-      - {type: button, id: kvm_k0, x: 0, y: 1, label: MacBook Pro, action: {device: kvm, input: MacBook Pro}}
-      - {type: button, id: kvm_k1, x: 1, y: 1, label: Desktop, action: {device: kvm, input: Desktop}}
-      - {type: button, id: kvm_k2, x: 0, y: 2, label: Work Laptop, action: {device: kvm, input: Work Laptop}}
-      - {type: button, id: kvm_k3, x: 1, y: 2, label: Computer 4, action: {device: kvm, input: Computer 4}}
-      - {type: button, id: kvm_on, x: 0, y: 3, label: Power On, action: {device: kvm, command: power_on}}
-      - {type: button, id: kvm_off, x: 1, y: 3, label: Power Off, action: {device: kvm, command: power_off}}
+      - {type: button, id: kvm_on, x: 0, y: 0, w: 4, label: Power On, icon: power, action: {device: kvm, command: power_on}}
+      - {type: button, id: kvm_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: kvm, command: power_off}}
+      - {type: button, id: kvm_k0, x: 0, y: 1, w: 12, shape: row, label: MacBook Pro, icon: laptop, action: {device: kvm, input: MacBook Pro}}
+      - {type: button, id: kvm_k1, x: 0, y: 2, w: 12, shape: row, label: Desktop, icon: pc, action: {device: kvm, input: Desktop}}
+      - {type: button, id: kvm_k2, x: 0, y: 3, w: 12, shape: row, label: Work Laptop, icon: laptop, action: {device: kvm, input: Work Laptop}}
+      - {type: button, id: kvm_k3, x: 0, y: 4, w: 12, shape: row, label: Computer 4, icon: pc, action: {device: kvm, input: Computer 4}}
+
+  - id: favorites
+    title: Favorites
+    layout: fixed
+    cols: 12
+    rows: 3
+    widgets:
+      - {type: button, id: f_garage, x: 0, y: 0, w: 6, compact: true, label: Garage Cam, icon: garage, action: {device: shield_ha, command: Garage Cam}}
+      - {type: button, id: f_cam, x: 6, y: 0, w: 6, compact: true, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
+      - {type: button, id: f_camx, x: 0, y: 1, w: 6, compact: true, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
+      - {type: button, id: f_plex, app_id: com.plexapp.android, x: 6, y: 1, w: 6, compact: true, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}}
+      - {type: button, id: f_yt, app_id: org.smarttube.stable, x: 0, y: 2, w: 6, compact: true, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
+      - {type: button, id: f_watch, x: 6, y: 2, w: 6, compact: true, label: Watch TV, icon: tv, action: {activity: watch_tv}}
 
   - id: shield
     activity: shield_tv
@@ -315,8 +362,8 @@ pages:
     cols: 2
     rows: 2
     widgets:
-      - {type: button, id: g_plex, x: 0, y: 0, label: Plex, color: red, action: {device: shield_ha, command: Plex}}
-      - {type: button, id: g_yt, x: 1, y: 0, label: YouTube, color: green, action: {device: shield_ha, command: YouTube}}
+      - {type: button, id: g_plex, app_id: com.plexapp.android, x: 0, y: 0, label: Plex, color: red, action: {device: shield_ha, command: Plex}}
+      - {type: button, id: g_yt, app_id: org.smarttube.stable, x: 1, y: 0, label: YouTube, color: green, action: {device: shield_ha, command: YouTube}}
       - {type: button, id: g_cam, x: 0, y: 1, label: Camera, color: yellow, action: {device: shield_ha, command: Show Camera}}
       - {type: button, id: g_camx, x: 1, y: 1, label: Clear, color: blue, action: {device: shield_ha, command: Clear Camera}}
 

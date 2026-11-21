@@ -57,9 +57,9 @@ describe('widget colour rules', () => {
   const th = presetTheme('default');
   const T = th.tokens;
   it('role defaults, active, nav', () => {
-    expect(widgetColors({ kind: 'button', role: 'default' }, {}, th)).toMatchObject({ fill: T.s2, ink: T.tx });
-    expect(widgetColors({ kind: 'button', role: 'primary' }, {}, th)).toMatchObject({ fill: T.s2, ink: T.acc });
-    expect(widgetColors({ kind: 'button', role: 'danger' }, {}, th)).toMatchObject({ fill: T.s2, ink: T.bad });
+    expect(widgetColors({ kind: 'button', role: 'default' }, {}, th)).toMatchObject({ fill: T.s1, ink: T.tx });
+    expect(widgetColors({ kind: 'button', role: 'primary' }, {}, th)).toMatchObject({ fill: T.s1, ink: T.acc });
+    expect(widgetColors({ kind: 'button', role: 'danger' }, {}, th)).toMatchObject({ fill: T.s1, ink: T.bad });
     expect(widgetColors({ kind: 'button', role: 'secondary' }, {}, th)).toMatchObject({ fill: T.s1, ink: T.tx2 });
     expect(widgetColors({ kind: 'button', role: 'default' }, { active: true }, th)).toMatchObject({ fill: T.acc, ink: T.onacc });
   });

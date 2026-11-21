@@ -6,6 +6,7 @@
 
 #include "hub/hp_errors.h"
 #include "proto/gen/harmony_proto.h"
+#include "remote/app/cover.h"
 #include "remote/app/theme_derive.h"
 
 #define LINK_POLL_MS 100 /* select() timeout cap for a link with no fd to wait on */
@@ -35,6 +36,7 @@ static void show_cur(app_t *a) {
   hp_page_t p;
   if ((hp_store_complete(&a->store) || a->partial) && a->cur >= 0 && hp_store_ready(&a->store, (uint8_t)a->cur) &&
       hp_store_get(&a->store, (uint8_t)a->cur, &p) == 0) { /* never with a stale or missing custom theme */
+    ra_ui_set_depth(&a->ui, a->depth);
     ra_ui_show_page(&a->ui, &p);
     return;
   }
@@ -55,8 +57,21 @@ static void goto_page(app_t *a, int id) {
     return;
   }
   if (id == a->cur && on_stored_page(a)) return;
+  if (a->depth >= APP_STACK) { /* full: the oldest entry drops */
+    memmove(a->stack, a->stack + 1, APP_STACK - 1);
+    a->depth = APP_STACK - 1;
+  }
+  a->stack[a->depth++] = (uint8_t)id;
   a->cur = id;
   show_cur(a);
+}
+
+/* The stack becomes [home] (+ `top` when >= 0 and not home); `cur` is its top. */
+static void stack_reset(app_t *a, int home, int top) {
+  a->depth = 0;
+  a->stack[a->depth++] = (uint8_t)home;
+  if (top >= 0 && top != home) a->stack[a->depth++] = (uint8_t)top;
+  a->cur = a->stack[a->depth - 1];
 }
 
 /* To the start page (home, else page 0, else the lowest stored) from any state: also the receiving and error screens. */
@@ -64,9 +79,23 @@ static void go_home(app_t *a) {
   int id = hp_store_start(&a->store);
   if (id < 0) return;
   if (!hp_store_complete(&a->store)) a->partial = true; /* the user asked for a page: show what there is */
-  if (id == a->cur && on_stored_page(a)) return;
-  a->cur = id;
+  if (id == a->cur && on_stored_page(a) && a->depth == 1) return;
+  stack_reset(a, id, -1);
   show_cur(a);
+}
+
+/* One page back (the chevron, Exit on a BACK page): pops to the previous stored page, Home when nothing is left. */
+static void go_back(app_t *a) {
+  while (a->depth > 1) {
+    a->depth--;
+    int id = a->stack[a->depth - 1];
+    if (hp_store_has(&a->store, (uint8_t)id)) {
+      a->cur = id;
+      show_cur(a);
+      return;
+    }
+  }
+  go_home(a);
 }
 
 /* Incomplete set, nothing new for APP_PARTIAL_MS: show the best stored page and keep filling in the background. */
@@ -81,8 +110,10 @@ static void partial_check(app_t *a, uint64_t now) {
 
 static void page_step(app_t *a, int dir) {
   const hp_page_t *p = &a->ui.page;
-  if (dir > 0 && p->seq_idx < p->seq_cnt) goto_page(a, a->cur + 1);
-  else if (dir < 0 && p->seq_idx > 1) goto_page(a, a->cur - 1);
+  int id = dir > 0 && p->seq_idx < p->seq_cnt ? a->cur + 1 : dir < 0 && p->seq_idx > 1 ? a->cur - 1 : -1;
+  if (id < 0 || (unsigned)id >= hp_store_need(&a->store) || !hp_store_has(&a->store, (uint8_t)id)) return;
+  if (a->depth) a->depth--; /* paging replaces the top */
+  goto_page(a, id);
 }
 
 /* Hard keys the app acts on itself. Returns true when the key is consumed (not forwarded). Up / Down page a paged
@@ -107,7 +138,8 @@ static bool local_key(app_t *a, uint8_t code, uint8_t action) {
   if (bit == 2) {
     if (stored && !p->back) return false; /* a plain page: Exit goes to the hub; the receiving / error screens go Home */
     a->swallowed |= 4;
-    go_home(a);
+    if (stored) go_back(a);
+    else go_home(a);
     return true;
   }
   if (action != HP_KEY_ACTION_PRESS) return false;
@@ -116,14 +148,27 @@ static bool local_key(app_t *a, uint8_t code, uint8_t action) {
   return false;
 }
 
+static void sink_emit(void *ctx, uint8_t code, uint8_t action);
+
 static bool sink_widget(void *ctx, const hp_widget_t *w) {
   app_t *a = ctx;
+  if (a->v2 && on_stored_page(a) && ra_ui_is_np(&a->ui, w)) { /* the Now Playing card: play / pause, as the hard keys */
+    uint8_t code = (a->ui.np.flags & 1) ? a->key_pause : a->key_play;
+    if (code != HP_KEY_NONE) {
+      sink_emit(a, code, HP_KEY_ACTION_PRESS);
+      sink_emit(a, code, HP_KEY_ACTION_RELEASE);
+    }
+    return true;
+  }
   if (!a->v2 || !on_stored_page(a) || !w->has_bind) return false;
   if (w->role != HP_ROLE_NAV) {
     /* tapping the already-running activity: the hub sees a redundant start and sends no state change, so show its act page here */
     if (w->kind == HP_WIDGET_BUTTON && a->ui.act_on && w->bind == a->ui.act_idx) {
       int pg = hp_store_find_act(&a->store, (uint8_t)(w->bind + 1));
-      if (pg >= 0) goto_page(a, pg);
+      if (pg >= 0 && hp_store_has(&a->store, (uint8_t)pg)) {
+        stack_reset(a, hp_store_start(&a->store), pg); /* the re-tap path: [home, act page] */
+        show_cur(a);
+      }
     }
     return false;
   }
@@ -135,7 +180,8 @@ static void sink_bar(void *ctx, int x, int y) {
   app_t *a = ctx;
   (void)y;
   if (x >= 40 || !a->v2) return;
-  if (!on_stored_page(a) || a->ui.page.back) go_home(a); /* the back chevron; on the receiving / error screens the same corner */
+  if (!on_stored_page(a)) go_home(a); /* the receiving / error screens: the same corner */
+  else go_back(a); /* the back chevron ignores the BACK bit */
 }
 
 static void sink_emit(void *ctx, uint8_t code, uint8_t action) {
@@ -192,12 +238,16 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
   }
   ra_ui_init(&a->ui);
   a->cur = -1;
+  a->depth = 0;
   const hp_hwkey_t *k;
   a->key_up = (k = hp_hwkey_by_name("Up")) ? k->id : HP_KEY_NONE;
   a->key_down = (k = hp_hwkey_by_name("Down")) ? k->id : HP_KEY_NONE;
   a->key_exit = (k = hp_hwkey_by_name("Exit")) ? k->id : HP_KEY_NONE;
   a->key_home = (k = hp_hwkey_by_name("Home")) ? k->id : HP_KEY_NONE;
   a->key_fav = (k = hp_hwkey_by_name("Favorites")) ? k->id : HP_KEY_NONE;
+  a->key_play = (k = hp_hwkey_by_name("Play")) ? k->id : HP_KEY_NONE;
+  a->key_pause = (k = hp_hwkey_by_name("Pause")) ? k->id : HP_KEY_NONE;
+  ra_cover_reset();
   ra_input_sink_t sink = {.ctx = a, .emit = sink_emit, .gate = sink_gate, .activity = sink_activity, .page = sink_page,
                        .touch = sink_touch, .widget = sink_widget, .bar = sink_bar};
   if (ra_input_open(&a->input, &a->sys, &sink) < 0) {
@@ -235,11 +285,13 @@ static void push_v2(app_t *a, const uint8_t *raw, size_t len, uint64_t now) {
     a->v2 = true;
     a->have_saved = false;
     a->cur = -1;
+    a->depth = 0;
     a->partial = false;
   }
   a->last_page_ms = now;
   if (r == HP_STORE_CLEARED) {
     a->cur = -1;
+    a->depth = 0;
     a->partial = false;
   }
   settle(a, raw[1]);
@@ -254,11 +306,9 @@ static void settle(app_t *a, int page) {
     return;
   }
   if (a->cur < 0) { /* the set just completed: pick what to show */
-    a->cur = hp_store_start(&a->store);
-    if (a->last_power) {
-      int pg = hp_store_find_act(&a->store, (uint8_t)(a->last_activity + 1));
-      if (pg >= 0) a->cur = pg;
-    }
+    int pg = -1;
+    if (a->last_power) pg = hp_store_find_act(&a->store, (uint8_t)(a->last_activity + 1));
+    stack_reset(a, hp_store_start(&a->store), pg);
     show_cur(a);
   } else if (page < 0 || page == a->cur || !on_stored_page(a)) { /* the visible page was replaced, or the screen is not a stored page */
     if (hp_store_has(&a->store, (uint8_t)a->cur)) show_cur(a);
@@ -279,6 +329,7 @@ static void theme_v2(app_t *a, uint8_t gen, const uint8_t *bytes, size_t len, ui
   a->last_page_ms = now;
   if (r == HP_STORE_CLEARED) { /* the held set is stale: off the screen before the new theme is applied */
     a->cur = -1;
+    a->depth = 0;
     a->partial = false;
     if (a->v2) show_cur(a);
   }
@@ -298,7 +349,10 @@ static void state_v2(app_t *a, uint8_t activity, bool power) {
   if (!a->v2 || !changed || !(hp_store_complete(&a->store) || a->partial)) return;
   if (power) {
     int pg = hp_store_find_act(&a->store, (uint8_t)(activity + 1));
-    if (pg >= 0) goto_page(a, pg);
+    if (pg >= 0 && hp_store_has(&a->store, (uint8_t)pg)) {
+      stack_reset(a, hp_store_start(&a->store), pg); /* [home, act page] */
+      show_cur(a);
+    }
   } else {
     go_home(a);
   }
@@ -323,6 +377,7 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
         a->v2 = false;
         a->partial = false;
         a->cur = -1;
+        a->depth = 0;
         hp_store_init(&a->store);
       }
       a->saved = p;
@@ -351,6 +406,23 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
     if (a->have_saved && a->saved.page_id == ev->page) (void)hp_page_set_tile_text(&a->saved, ev->tile, ev->text, strlen(ev->text));
     if (ra_ui_tile_text(&a->ui, ev->page, ev->tile, ev->text, strlen(ev->text)) < 0)
       ra_logf(&a->sys, "tile_update %u/%u ignored", ev->page, ev->tile);
+    break;
+  case APP_LINK_EV_NOW_PLAYING: {
+    heard(a, now);
+    ra_display_note(&a->display, RA_WHY_STATUS, 0);
+    ra_np_t n = {.flags = ev->flags, .pos = ev->pos, .dur = ev->dur, .cid = ev->cid, .at = now};
+    memcpy(n.t1, ev->data, sizeof n.t1); /* rf_link left both NUL-terminated within 49 bytes */
+    memcpy(n.t2, ev->data + 49, sizeof n.t2);
+    n.t1[48] = n.t2[48] = 0;
+    if (ra_ui_set_np(&a->ui, &n) && a->v2 && on_stored_page(a)) show_cur(a); /* the card appears or goes away */
+    break;
+  }
+  case APP_LINK_EV_COVER:
+    heard(a, now);
+    if (ra_cover_chunk(ev->cid, ev->off, ev->data, ev->len) == 1) {
+      ra_display_note(&a->display, RA_WHY_STATUS, 0);
+      ra_ui_np_cover(&a->ui, ev->cid);
+    }
     break;
   case APP_LINK_EV_STATE_UPDATE:
     heard(a, now);
@@ -403,6 +475,7 @@ static void suspend_now(app_t *a) {
   ra_logf(&a->sys, "resumed after %llu ms asleep (woke: %s; %u suspends, %llu ms total)", (unsigned long long)gap, ev,
           a->power.suspends + 1, (unsigned long long)(a->power.suspended_ms + gap));
   ra_power_resumed(&a->power, now, gap);
+  ra_ui_np_skip(&a->ui, now, gap);
   a->last_rx_ms = now; /* the hub was silent for the sleep, not failing: no fallback page for it */
   a->fail_run = 0;
   if (a->link.resumed) a->link.resumed(a->link.ctx, now, gap);
@@ -419,9 +492,11 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   if (lfd >= 0) fds[nfd++] = lfd;
   uint32_t cap = lfd >= 0 ? APP_LINK_IDLE_WAIT_MS : LINK_POLL_MS;
   uint32_t t = max_wait_ms < cap ? max_wait_ms : cap;
-  uint32_t d[5] = {lv_ms, ra_power_next_ms(&a->power, now), ra_input_next_ms(&a->input, now),
-                   a->link.next_ms ? a->link.next_ms(a->link.ctx, now) : UINT32_MAX, partial_wait_ms(a, now)};
-  for (int i = 0; i < 5; i++)
+  /* the Now Playing position moves on the loop's own wait: due once a second while the card plays and the screen is on */
+  uint32_t d[6] = {lv_ms, ra_power_next_ms(&a->power, now), ra_input_next_ms(&a->input, now),
+                   a->link.next_ms ? a->link.next_ms(a->link.ctx, now) : UINT32_MAX, partial_wait_ms(a, now),
+                   a->power.state != RA_PW_OFF ? ra_ui_np_next_ms(&a->ui, now) : UINT32_MAX};
+  for (int i = 0; i < 6; i++)
     if (d[i] < t) t = d[i];
   int ready[3] = {0, 0, 0};
   int w = a->sys.ops.wait(a->sys.ops.ctx, fds, nfd, t, ready);
@@ -461,6 +536,7 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   a->last_awake = awake;
   app_link_event_t ev;
   for (int i = 0; i < LINK_EVENTS_PER_STEP && a->link.poll(a->link.ctx, now, &ev) > 0; i++) handle_link_event(a, &ev, now);
+  if (awake) ra_ui_np_tick(&a->ui, now);
   if (a->home_req) {
     a->home_req = false;
     go_home(a);

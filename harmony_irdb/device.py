@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from harmony_core.key_names import normalize_input
+
 from .convert import Converted, convert_command
 
 # Sanity bounds of ONE imported device, not hub limits: the compiler checks a whole config against
@@ -193,6 +195,12 @@ def build_device(
         key = cmds[0] if isinstance(cmds, list) and cmds and isinstance(cmds[0], str) else None
         if key in by_raw and isinstance(item.get("name"), str) and len(inputs) < MAX_INPUTS:
             inputs[_label(item["name"], labels)] = by_raw[key].action
+    if not inputs:  # no input list in the archive entry: derive it from commands named like InputHdmi1
+        for raw, res in by_raw.items():
+            label = normalize_input(raw)
+            if label and label not in labels and len(inputs) < MAX_INPUTS:
+                labels.add(label)
+                inputs[label] = res.action
     if inputs:
         out["inputs"] = inputs
     out["commands"] = commands

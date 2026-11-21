@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 (2026-11-21)
+
+- Remote redesign. Every page uses fixed sizes per widget type (44 px rows, 108x80 cards, 52 px keys, 64 px tiles), so nothing stretches; overflow pages show 1/2. Hand-written pages are converted automatically (opt out with `layout: grid`).
+- The header back button returns to the previous page (8-deep history); Home clears it; Exit sends the activity's Exit command, or goes back when none is mapped.
+- A symbol on every device, input and app: 18 new glyphs (device types, HDMI 1-4, AV, USB, cameras, garage), brand logos in brand colours, icons inferred for every device.
+- Inputs are derived from input commands (HDMI 2 and 3 added to the example TV from the IR archive); every device gets a page; Inputs page per activity; Favorites is a real page; HA devices can take inputs from `source_list`.
+- App buttons show which app is open on the Shield, with play/pause marks (activity `media.apps_entity`); a Now Playing card with cover art, title and progress from the Plex integration (`media.now_playing_entity`). Event-driven, no polling.
+- The hub logs why its daemon died (signal and last actions) before it is respawned.
+- Flash the remote, update the hub, update the integration with the add-on.
+
 ## 0.3.31 (2026-11-21)
 
 - The hub logs the RF data-frame link-up; the remote logs each rejoin pulse with its trigger and latency; the hub installer removes the stock /cache/ota-update.log once. Flash the remote, update the hub, re-run `tools/install_boot_hook.py`. Add-on and integration unchanged in behaviour.

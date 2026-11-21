@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'lit';
 import vectors from '../../../tests/vectors/pages.json';
 import keymap from './fixtures/keymap.json';
-import { alignApplies, cellAt, hitWidget, layoutPage, pageSvg, widgetRect, type Prim } from '../src/lib/page-renderer';
+import { alignApplies, cellAt, fixedRows, hitWidget, layoutPage, pageSvg, widgetBox, widgetRect, type Prim } from '../src/lib/page-renderer';
 import { BODY, DPAD, KEYS, PHYSICAL_KEYS, SCREEN, keyByName, keyTitle } from '../src/lib/remote-layout';
 import type { V2Page } from '../src/lib/api';
 import { css as hexOf } from '../src/lib/themes';
 import { DEFAULT_THEME } from '../src/lib/theme-model';
 
-const PAL = { bg: hexOf(DEFAULT_THEME.tokens.bg), acc: hexOf(DEFAULT_THEME.tokens.acc), s2: hexOf(DEFAULT_THEME.tokens.s2) };
+const PAL = { bg: hexOf(DEFAULT_THEME.tokens.bg), acc: hexOf(DEFAULT_THEME.tokens.acc), s1: hexOf(DEFAULT_THEME.tokens.s1) };
 
 type Vec = { name: string; dict: V2Page };
 const v2 = vectors.valid_v2 as unknown as Vec[];
@@ -51,14 +51,47 @@ describe('page renderer: shared golden vectors', () => {
   });
 });
 
+describe('page renderer: fixed layout vectors', () => {
+  type BoxVec = Vec & { boxes: number[][] };
+  const fixed = vectors.valid_fixed as unknown as BoxVec[];
+  for (const v of fixed) {
+    it(`${v.name}: widgetBox equals the shared boxes`, () => {
+      const got = v.dict.widgets.map((w) => {
+        const b = widgetBox(v.dict, w);
+        return [b.x1, b.y1, b.x2, b.y2];
+      });
+      expect(got).toEqual(v.boxes);
+      const f = (v.dict as unknown as { fixed?: boolean }).fixed;
+      if (f) {
+        expect(fixedRows(v.dict)!.total).toBeLessThanOrEqual(276);
+        v.dict.widgets.forEach((w, i) => {
+          const r = widgetRect(v.dict, w);
+          expect([r.x1, r.y1, r.x2, r.y2]).toEqual(v.boxes[i]);
+          expect(hitWidget(v.dict, r.x1, r.y1)).toBe(i);
+          expect(hitWidget(v.dict, r.x2, r.y2)).toBe(i);
+          expect(hitWidget(v.dict, r.x1, r.y2 + 1)).not.toBe(i);
+        });
+        expect(layoutPage(v.dict).prims.length).toBeGreaterThan(1);
+      }
+    });
+  }
+  it('rejects every invalid fixed vector the way the codec does (unplaceable widgets have no fixed rows)', () => {
+    const base = fixed.find((v) => v.name === 'fixed_cards_2x2')!.dict;
+    const wide = { ...base, widgets: [{ ...base.widgets[0]!, w: 5 }] };
+    expect(fixedRows(wide)).toBeNull();
+    const tall = { ...base, rows: 4, widgets: [0, 1, 2, 3].map((y) => ({ ...base.widgets[0]!, id: y + 1, x: 0, y, w: 12 })) };
+    expect(fixedRows(tall)!.total).toBeGreaterThan(276);
+  });
+});
+
 describe('page renderer: v2 looks', () => {
   const full = v2.find((v) => v.name === 'v2_all_options')!.dict;
   const texts = (s: Prim[]) => s.filter((p): p is Extract<Prim, { t: 'text' }> => p.t === 'text').map((p) => p.s);
   it('shows the title, paged idx/cnt and the back chevron', () => {
     const s = layoutPage(full).prims;
-    expect(texts(s)).toContain('Watch TV é');
+    expect(texts(s).some((t) => t.startsWith('Watch T'))).toBe(true); // b18, cut to the room left of 2/3
     expect(texts(s)).toContain('2/3');
-    expect(s.some((p) => p.t === 'path' && p.d.startsWith('M16 10'))).toBe(true);
+    expect(s.some((p) => p.t === 'icon' && p.id === 9)).toBe(true); // the chevron, drawn above back stack depth 1
   });
   it('uses Harmony when there is no title, and promotes a title label only for v1', () => {
     expect(texts(layoutPage(v2.find((v) => v.name === 'v2_minimal')!.dict).prims)).toContain('Harmony');
@@ -69,17 +102,17 @@ describe('page renderer: v2 looks', () => {
   it('draws roles, icons and the active highlight', () => {
     const prims = layoutPage(full, { activeAct: 0 }).prims;
     expect(prims.some((p) => p.t === 'icon')).toBe(true);
-    // the running activity: ACC fill; otherwise the primary role is ACC text on an S2 surface (remote/app/ui.c)
+    // the running activity: ACC fill; otherwise the primary role is ACC text on an S1 surface (remote/app/ui.c)
     expect(prims.find((p) => p.t === 'rect' && p.wi === 0)).toMatchObject({ fill: PAL.acc });
     const idle = layoutPage(full, { activeAct: null }).prims.find((p) => p.t === 'rect' && p.wi === 0);
-    expect(idle).toMatchObject({ fill: PAL.s2 });
+    expect(idle).toMatchObject({ fill: PAL.s1 });
   });
   type W = V2Page['widgets'][number];
   const mk = (o: Partial<W>): W => ({ kind: 'button', id: 1, x: 0, y: 0, w: 2, h: 1, label: 'Go', role: 'default', shape: 'row', icon_only: false, icon: 1, bind: null, ...o }) as W;
   const prim = (page: V2Page, wi: number, t: 'icon' | 'text', id?: number) => layoutPage(page).prims.find((p) => p.t === t && p.wi === wi && (id === undefined || (p as Extract<Prim, { t: 'icon' }>).id === id)) as never as { x: number; anchor?: string };
   const one = (w: W, cols = 4, rows = 8) => ({ ...full, cols, rows, widgets: [w] }) as V2Page;
-  it('every shape centres by default; left and right are explicit (row, pill, wide card)', () => {
-    for (const shape of ['row', 'pill', 'card']) {
+  it('every shape centres by default; left and right are explicit (row, wide card)', () => {
+    for (const shape of ['row', 'card']) {
       const w = mk({ shape, w: 4 });
       const c = prim(one(w), 0, 'icon', 1).x;
       const l = prim(one({ ...w, align: 'left' }), 0, 'icon', 1).x;
@@ -91,9 +124,8 @@ describe('page renderer: v2 looks', () => {
   });
   it('a 1-column page: card buttons and row buttons are both centred', () => {
     const page = { ...full, cols: 1, rows: 6, widgets: [mk({ w: 1, shape: 'card', icon: 0, label: 'Watch TV' }), mk({ id: 2, y: 1, w: 1, shape: 'row', icon: 0, label: 'Listen' })] } as V2Page;
-    for (const wi of [0, 1]) expect(prim(page, wi, 'text')).toMatchObject({ anchor: 'middle' });
     const left = { ...page, widgets: page.widgets.map((w) => ({ ...w, align: 'left' as const })) } as V2Page;
-    for (const wi of [0, 1]) expect(prim(left, wi, 'text')).toMatchObject({ anchor: 'start' });
+    for (const wi of [0, 1]) expect(prim(page, wi, 'text').x).toBeGreaterThan(prim(left, wi, 'text').x + 20); // the group sits in the middle, not at the left edge
   });
   it('a big card stacks icon over label and honours align; a dense card stays centred', () => {
     const big = mk({ shape: 'card', w: 4, h: 3, label: 'Big' });
@@ -122,7 +154,7 @@ describe('page renderer: v2 looks', () => {
     expect(ic(row, 8)).toBeUndefined();
     const t = { ...row, trailing: true };
     const rect = layoutPage(one(t)).prims.find((p) => p.t === 'rect' && p.wi === 0) as Extract<Prim, { t: 'rect' }>;
-    expect(ic(t, 8).x + 24).toBeCloseTo(rect.x + rect.w - 8 - 2, 0);
+    expect(ic(t, 8).x + 20).toBeCloseTo(rect.x + rect.w - 8, 0); // a 20 px chevron, 8 px from the edge
     expect(ic(t, 1).x).toBeLessThan(ic(row, 1).x);
     expect(ic({ ...t, align: 'right' }, 1).x).toBeGreaterThan(ic(t, 1).x);
     expect(ic({ ...t, align: 'right' }, 1).x).toBeLessThan(ic({ ...row, align: 'right' }, 1).x);

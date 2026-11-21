@@ -216,6 +216,10 @@ keys (default and per-activity layers), page buttons, tile taps, and the `steps`
   Assistant. A service or entity that does not exist logs one warning per (service, entity) per config
   revision and never raises. The *Remote N keys* event entity still fires for every key, so automations keep
   working.
+- On a page with the BACK flag (the compiler's default; `back: false` opts out) the remote handles Exit itself (it pops
+  to the previous page) and does not forward it: no `key_event`, so no *Remote N keys* event and no `ha:` action for Exit
+  there. The default is off for home and favorites pages; on a page with `activity: X` it is on only when neither X nor the global
+  `keys:` binds Exit; a page without an activity gets it only when no activity and no global key binds Exit.
 
 ### Home Assistant devices
 
@@ -229,6 +233,25 @@ unknown power. Everything else works as for IR devices:
 `{device: shield, command: ok}` on a key or button becomes that service call, the device gets its buttons,
 `remote.send_command` and a power sensor, and activities may list it with an `input`. It does not count
 against the hub's device limits and never reaches the hub. Turn HDMI-CEC off on these devices and on the TV they connect to (Samsung calls it Anynet+): CEC fights Harmony's own power handling, and a device put to sleep while the TV powers off can wake straight back up.
+
+`source_list: true` (needs `entity`) takes the inputs from the entity's `source_list` attribute: any
+`{device, input: <name>}` or activity `input` that is not in `inputs` becomes `media_player.select_source`
+with `source: <name>` on the entity (an explicit input of the same name wins).
+
+### App rings and Now Playing
+
+An activity may set `media: {apps_entity, now_playing_entity}` (both optional entity ids). `apps_entity` is an
+androidtv player (state playing / paused / idle / off, attribute `app_id`); `now_playing_entity` is the player
+with the title and cover (Plex). Now Playing uses them instead of the integration options when set.
+
+An app button carries an optional `app_id` (a package name or a list). Without one it is inferred from the
+label or icon: plex = `com.plexapp.android`; youtube / smarttube = `org.smarttube.stable` and
+`com.google.android.youtube.tv`; kodi = `org.xbmc.kodi`; netflix = `com.netflix.ninja`. The button follows the
+`apps_entity` of its page's activity (else of the activity that uses its device, else the only one in the
+config). When that player's `app_id` is the button's, the remote draws a ring: playing, paused, or open (any
+other state); otherwise none. The integration sends only the buttons whose status changed, on state changes
+(no polling), and all of them again when a remote rejoins or gets its pages. An `app_id` outside the table
+shows no ring and is logged once.
 
 **Order when an activity starts or stops** (the hub runs its IR sequence as always; Home Assistant runs its
 steps once the hub *reports the result*, so they come after the TV's settle time): when the hub reports

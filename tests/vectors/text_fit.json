@@ -18,7 +18,7 @@
    },
    "expect": {
     "font": "b13",
-    "px": 44,
+    "px": 46,
     "text_px": 30,
     "fits": true,
     "over": 0,
@@ -43,7 +43,7 @@
    },
    "expect": {
     "font": "b13",
-    "px": 40,
+    "px": 42,
     "text_px": 32,
     "fits": true,
     "over": 0,
@@ -68,10 +68,10 @@
    },
    "expect": {
     "font": "b13",
-    "px": 44,
+    "px": 46,
     "text_px": 88,
     "fits": false,
-    "over": 44,
+    "over": 42,
     "shown": "Shield..."
    }
   },
@@ -92,9 +92,9 @@
     "trailing": false
    },
    "expect": {
-    "font": "b13",
-    "px": 64,
-    "text_px": 58,
+    "font": "r12",
+    "px": 66,
+    "text_px": 54,
     "fits": true,
     "over": 0,
     "shown": "Power On"
@@ -117,12 +117,12 @@
     "trailing": false
    },
    "expect": {
-    "font": "b13",
-    "px": 60,
-    "text_px": 61,
-    "fits": false,
-    "over": 1,
-    "shown": "Power ..."
+    "font": "r12",
+    "px": 62,
+    "text_px": 57,
+    "fits": true,
+    "over": 0,
+    "shown": "Power Off"
    }
   },
   {
@@ -142,9 +142,9 @@
     "trailing": false
    },
    "expect": {
-    "font": "m16",
-    "px": 100,
-    "text_px": 88,
+    "font": "b13",
+    "px": 172,
+    "text_px": 71,
     "fits": true,
     "over": 0,
     "shown": "Prime Video"
@@ -167,12 +167,12 @@
     "trailing": false
    },
    "expect": {
-    "font": "m16",
-    "px": 100,
-    "text_px": 133,
-    "fits": false,
-    "over": 33,
-    "shown": "Shield TV Yo..."
+    "font": "b13",
+    "px": 172,
+    "text_px": 108,
+    "fits": true,
+    "over": 0,
+    "shown": "Shield TV YouTube"
    }
   },
   {
@@ -192,12 +192,12 @@
     "trailing": false
    },
    "expect": {
-    "font": "m16",
-    "px": 100,
-    "text_px": 128,
-    "fits": false,
-    "over": 28,
-    "shown": "Shield TV Se..."
+    "font": "b13",
+    "px": 104,
+    "text_px": 104,
+    "fits": true,
+    "over": 0,
+    "shown": "Shield TV Settings"
    }
   },
   {
@@ -243,7 +243,7 @@
    },
    "expect": {
     "font": "m16",
-    "px": 144,
+    "px": 142,
     "text_px": 87,
     "fits": true,
     "over": 0,
@@ -268,10 +268,10 @@
    },
    "expect": {
     "font": "m16",
-    "px": 144,
+    "px": 142,
     "text_px": 197,
     "fits": false,
-    "over": 53,
+    "over": 55,
     "shown": "Living Room Light..."
    }
   },
@@ -293,7 +293,7 @@
    },
    "expect": {
     "font": "m16",
-    "px": 144,
+    "px": 142,
     "text_px": 65,
     "fits": true,
     "over": 0,
@@ -317,9 +317,9 @@
     "trailing": false
    },
    "expect": {
-    "font": "b18",
+    "font": "m16",
     "px": 84,
-    "text_px": 35,
+    "text_px": 31,
     "fits": true,
     "over": 0,
     "shown": "Plex"
@@ -342,12 +342,12 @@
     "trailing": false
    },
    "expect": {
-    "font": "b18",
+    "font": "b13",
     "px": 84,
-    "text_px": 181,
+    "text_px": 130,
     "fits": false,
-    "over": 97,
-    "shown": "Prime Vi..."
+    "over": 46,
+    "shown": "Prime Video ..."
    }
   },
   {
@@ -368,7 +368,7 @@
    },
    "expect": {
     "font": "b20",
-    "px": 44,
+    "px": 60,
     "text_px": 11,
     "fits": true,
     "over": 0,
@@ -393,7 +393,7 @@
    },
    "expect": {
     "font": "b20",
-    "px": 48,
+    "px": 64,
     "text_px": 22,
     "fits": true,
     "over": 0,
@@ -418,7 +418,7 @@
    },
    "expect": {
     "font": "m16",
-    "px": 44,
+    "px": 60,
     "text_px": 39,
     "fits": true,
     "over": 0,
@@ -478,12 +478,12 @@
     "trailing": false
    },
    "expect": {
-    "font": "r12",
-    "px": 100,
-    "text_px": 99,
-    "fits": true,
-    "over": 0,
-    "shown": "Living Room Lamp"
+    "font": "m16",
+    "px": 44,
+    "text_px": 131,
+    "fits": false,
+    "over": 87,
+    "shown": "Livi..."
    }
   },
   {
@@ -502,7 +502,14 @@
     "icon_only": false,
     "trailing": false
    },
-   "expect": null
+   "expect": {
+    "font": "m16",
+    "px": 44,
+    "text_px": 39,
+    "fits": true,
+    "over": 0,
+    "shown": "Lamp"
+   }
   },
   {
    "name": "dense 4x6 cell",
@@ -521,12 +528,398 @@
     "trailing": false
    },
    "expect": {
-    "font": "b13",
-    "px": 40,
-    "text_px": 78,
+    "font": "r12",
+    "px": 42,
+    "text_px": 70,
     "fits": false,
-    "over": 38,
-    "shown": "Fast ..."
+    "over": 28,
+    "shown": "Fast F..."
+   }
+  },
+  {
+   "name": "fixed row, glyph and chevron",
+   "cols": 12,
+   "rows": 6,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 1,
+    "label": "Shield Apps",
+    "shape": "row",
+    "icon": 5,
+    "icon_only": false,
+    "trailing": true
+   },
+   "expect": {
+    "font": "m16",
+    "px": 142,
+    "text_px": 82,
+    "fits": true,
+    "over": 0,
+    "shown": "Shield Apps"
+   }
+  },
+  {
+   "name": "fixed row, long label cut",
+   "cols": 12,
+   "rows": 6,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 1,
+    "label": "Living Room Ceiling Lights Dimmer",
+    "shape": "row",
+    "icon": 5,
+    "icon_only": false,
+    "trailing": true
+   },
+   "expect": {
+    "font": "m16",
+    "px": 142,
+    "text_px": 250,
+    "fits": false,
+    "over": 108,
+    "shown": "Living Room Ceili..."
+   }
+  },
+  {
+   "name": "fixed row, no glyph",
+   "cols": 12,
+   "rows": 6,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 1,
+    "label": "Favorites",
+    "shape": "row",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "m16",
+    "px": 206,
+    "text_px": 65,
+    "fits": true,
+    "over": 0,
+    "shown": "Favorites"
+   }
+  },
+  {
+   "name": "fixed card 108, glyph",
+   "cols": 12,
+   "rows": 2,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 1,
+    "label": "Watch Shield",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b13",
+    "px": 84,
+    "text_px": 75,
+    "fits": true,
+    "over": 0,
+    "shown": "Watch Shield"
+   }
+  },
+  {
+   "name": "fixed card 108, cut",
+   "cols": 12,
+   "rows": 2,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 1,
+    "label": "Nvidia Shield Pro",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b13",
+    "px": 84,
+    "text_px": 98,
+    "fits": false,
+    "over": 14,
+    "shown": "Nvidia Shield..."
+   }
+  },
+  {
+   "name": "fixed compact card, two lines",
+   "cols": 12,
+   "rows": 4,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 1,
+    "label": "Show Camera",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false,
+    "compact": true
+   },
+   "expect": {
+    "font": "b13",
+    "px": 104,
+    "text_px": 80,
+    "fits": true,
+    "over": 0,
+    "shown": "Show Camera"
+   }
+  },
+  {
+   "name": "fixed compact card, over two lines",
+   "cols": 12,
+   "rows": 4,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 1,
+    "label": "Clear Garage Camera Overlay",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false,
+    "compact": true
+   },
+   "expect": {
+    "font": "b13",
+    "px": 104,
+    "text_px": 171,
+    "fits": false,
+    "over": 67,
+    "shown": "Clear Garage Ca..."
+   }
+  },
+  {
+   "name": "fixed key 69, caption",
+   "cols": 12,
+   "rows": 2,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 1,
+    "label": "Power Off",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "r12",
+    "px": 63,
+    "text_px": 57,
+    "fits": true,
+    "over": 0,
+    "shown": "Power Off"
+   }
+  },
+  {
+   "name": "fixed key 69, caption cut",
+   "cols": 12,
+   "rows": 2,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 1,
+    "label": "Volume Down",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "r12",
+    "px": 63,
+    "text_px": 77,
+    "fits": false,
+    "over": 14,
+    "shown": "Volume D..."
+   }
+  },
+  {
+   "name": "fixed glyph key 50, icon only",
+   "cols": 12,
+   "rows": 2,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 3,
+    "h": 1,
+    "label": "Home",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": true,
+    "trailing": false
+   },
+   "expect": null
+  },
+  {
+   "name": "fixed pill digit",
+   "cols": 12,
+   "rows": 4,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 1,
+    "label": "5",
+    "shape": "pill",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b20",
+    "px": 61,
+    "text_px": 11,
+    "fits": true,
+    "over": 0,
+    "shown": "5"
+   }
+  },
+  {
+   "name": "fixed pill word",
+   "cols": 12,
+   "rows": 4,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 1,
+    "label": "Enter",
+    "shape": "pill",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "m16",
+    "px": 61,
+    "text_px": 39,
+    "fits": true,
+    "over": 0,
+    "shown": "Enter"
+   }
+  },
+  {
+   "name": "fixed tile name",
+   "cols": 12,
+   "rows": 4,
+   "fixed": true,
+   "widget": {
+    "kind": "tile",
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 1,
+    "label": "Living Room",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "m16",
+    "px": 88,
+    "text_px": 88,
+    "fits": true,
+    "over": 0,
+    "shown": "Living Room"
+   }
+  },
+  {
+   "name": "fixed tile name cut",
+   "cols": 12,
+   "rows": 4,
+   "fixed": true,
+   "widget": {
+    "kind": "tile",
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 1,
+    "label": "Living Room Ceiling",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "m16",
+    "px": 88,
+    "text_px": 141,
+    "fits": false,
+    "over": 53,
+    "shown": "Living Roo..."
+   }
+  },
+  {
+   "name": "fixed compact card, long word",
+   "cols": 12,
+   "rows": 4,
+   "fixed": true,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 1,
+    "label": "Keyboard Shortcuts",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false,
+    "compact": true
+   },
+   "expect": {
+    "font": "b13",
+    "px": 53,
+    "text_px": 116,
+    "fits": false,
+    "over": 63,
+    "shown": "Keyboa..."
    }
   }
  ],

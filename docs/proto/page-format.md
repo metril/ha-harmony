@@ -65,7 +65,7 @@ Golden vectors: `tests/vectors/pages.json` keys `valid` / `invalid` (v1), `valid
 ## Header (11 + tlen bytes)
 `version`=2 · `page id` (< total) · `cols` · `rows` · `count` 0..32 · `gen` (low byte of a CRC over the hub
 config and every page layout; a new gen clears the remote's page store) · `total` 1..255 · `pflags`
-(bits 0-1 kind: 0 normal, 1 home, 2 favorites, 3 rejected; bit 2 BACK; bits 3-5 theme preset id 0..7, 7 = custom; bits 6-7 must be 0) · `seq`
+(bits 0-1 kind: 0 normal, 1 home, 2 favorites, 3 rejected; bit 2 BACK = "Exit pops locally" (clear: Exit goes to the hub; the header chevron ignores it); bits 3-5 theme preset id 0..7, 7 = custom; bit 6 FIXED; bit 7 must be 0) · `seq`
 (`idx<<4|cnt`; 0 = not paged, else 1 <= idx <= cnt, cnt >= 2; the group is the consecutive ids
 `id-idx+1 .. id+cnt-idx`, all < total) · `act` (0, or activity index + 1) · `tlen` 0..24 · `title`
 (UTF-8, no NUL; empty = "Harmony").
@@ -79,7 +79,7 @@ for left/right; dense and icon-only widgets are always centred; any role). `colo
 on tiles; see docs/plans/2026-11-18-page-format-v2.md section 7. `style`: bits 0-2 role (0 default, 1 primary, 2 secondary, 3 danger, 4 nav;
 5-7 rejected), bits 3-4 shape (0 card, 1 row, 2 pill, 3 monogram), bit 5 icon_only, bit 6 TRAILING (draw a chevron at the
 right end of the widget; only valid with role nav; the compiler sets it on `nav: next|<page id>`, which also default to shape row
-and no leading icon; `nav: prev|home` keep their leading chev_left/home icon), bit 7 unused.
+and no leading icon; `nav: prev|home` keep their leading chev_left/home icon), bit 7 COMPACT (FIXED pages only; see below).
 `icon`: 0 none, 1..159 stock (`proto/icons.yaml`, glyph U+E000+id), 160..254 reserved custom, 255
 rejected. `bind`: role nav -> target page id (< total, a nav widget must have one); otherwise the
 activity index highlighted while `state_update.activity == bind` and power is on. Encoders drop
@@ -89,12 +89,58 @@ length, 251 bytes) as v1. v2 never promotes a title label and never matches "Pow
 Errors: more than 251 bytes, a title or label over 24 bytes, more than 32 widgets: too big
 (`HP_E_TOOBIG`); every other violation: invalid (`HP_E_INVAL`).
 
+## FIXED layout (pflags bit 6)
+Widgets keep a class size whatever the page holds; nothing stretches. Requires `cols` = 12, every widget `h` = 1,
+span `w` in 12/6/4/3 with `x` a multiple of `w`; anything else is `HP_E_INVAL`. COMPACT (style bit 7) is valid only
+on a FIXED page and only on a button with shape card and span 6; otherwise `HP_E_INVAL` (so is bit 7 on a non-FIXED page).
+
+Width = (224 - (n-1)*8) / n with n = 12/w (integer division): span 12 = 224, 6 = 108, 4 = 69, 3 = 50 px.
+x1 = 8 + (x/w)*(width+8); x2 = x1 + width - 1.
+
+Height by class: label or shape row = 44; kind tile = 64; shape pill = 52; shape card or monogram by span: 12 = 80,
+6 = 80 (COMPACT 56), 4 or 3 = 52. A grid row is as tall as its tallest widget; a grid row with no widget takes no
+space. Rows stack from content y 8 (screen y = 32 + 8 + offset), with a 2 px gap between two consecutive non-empty grid rows
+that hold only row-class widgets (labels, shape row) and 8 px otherwise. The stack (heights + gaps) may not exceed 276
+px (288 - 8 top - 4 bottom): `HP_E_INVAL`. y2 = y1 + height - 1. The drawn rectangle IS the box (no inset); hit-testing
+uses the box, the gaps are dead.
+
+One function computes it: `hp_page_box` (remote/page/page.c; `ra_ui_widget_box` calls it), `page_box`
+(harmony_core/page_codec.py) and `widgetBox` (addon/frontend/src/lib/page-renderer.ts). For a non-FIXED page it is
+the grid cell (ceil edges, v1 title row shift). Vectors: `valid_fixed` (each with `boxes`, one `[x1,y1,x2,y2]` per widget)
+and `invalid_fixed`.
+
+Compiler: config page `layout: fixed` (cols 12), widget `compact: true`. Every other page is converted to FIXED
+automatically (`_regrid` in `harmony_core/page_build.py`) unless it sets `layout: grid`: cell width picks the class (full
+width a row, or an 80 px card when the cell is tall; half a card, a compact card when there are more than 6, or a tile; a
+third a key; a quarter a glyph key; pills stay pad keys), widgets are packed row-major left to right, a label that does not
+fit widens the widget (key, half card, compact, row) before a glyph button falls back to icon-only, and the
+All Off button is kept on page 1. Config order, ids and actions are unchanged. A FIXED page is split by grid rows
+when the stacked height, the 251 byte budget, 32 widgets or 16 grid rows run out; the pieces reuse the list `seq` groups
+(header "1/2") and renumber their rows from 0. BACK is set unless the page sets `back: false` or its activity (or the
+global key map) maps the Exit key.
+
 ## Compiler contract
 `compile_config` keeps one list of v2 page models (`Compiled.models`) and derives both encodings:
 `Compiled.pages_v2` (v2) and `Compiled.pages` (v1: the title is a row-0 label again, widget extras and
 `nav` buttons are dropped, list groups become plain pages). Ids: buttons and tiles take global soft-key
 ids; labels and nav widgets take page-local ids, so v1 bytes differ from pre-v2 output only in ids when
 a label precedes a button.
+
+## App status and Now Playing (remote)
+**App status ring.** `tile_state` addressed to a *button* widget id (ids are unique per page) sets the app status of that
+button instead of a tile state; `text` is empty. `state`: 0 none (no ring), 1 open (2 px accent ring inside the box), 2 playing
+(ring + 16 px play glyph at the top right, 12 px in, 8 on a COMPACT card), 3 paused (ring + pause glyph). The remote keeps it in
+its tile overlay (survives the page leaving the screen; a re-push of the page drops it) and reports no new caps bit. E2 emits one
+`tile_state` per app button whose status changed.
+
+**Now Playing card** (`now_playing` 29 + `cover_chunk` 42). On a FIXED v2 page whose `act` is the running activity (+ 1, power
+on) and while `flags` != 0, the card (224x80, 4 px pad: 48x72 art, m16 title, r12 subtitle, an r12 accent line with the play or
+pause glyph and `m:ss / m:ss` (`Paused · ` before it when paused), a 3 px bar) replaces the page's first grid row (lowest y)
+whose widgets are all non-compact button cards of span 12 or 6 (80 px class); the row's widgets are not drawn nor tappable.
+A page with no such row shows none. A tap on the card sends the hard keys Pause (while playing) or Play (while paused) as a
+key_event, so the activity's own Play / Pause mapping applies. The position advances locally (once a second, only while awake
+and playing; `pos` is as of arrival). The art slot shows the Plex glyph until the cover of `cid` is complete in the 4-cover cache
+(1760 B in `cover_chunk`s of any order and size, 1728 B of 4 bpp indices high nibble first, then 16 RGB565 LE palette entries).
 
 ## New messages
 `remote_info` (18, both): `{remote, page_fmt, caps, icons, gen, pages}` (`gen`/`pages`: the v2 set held in the page store, 0/0 when none); `tile_state` (19, rf): `{remote, page, tile,

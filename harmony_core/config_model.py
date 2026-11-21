@@ -370,6 +370,34 @@ _THEME = {
 }
 
 
+# Brand word (in a button's label or icon name) -> Android package ids (the first is the main one).
+APP_IDS: dict[str, tuple[str, ...]] = {
+    "plex": ("com.plexapp.android",),
+    "youtube": ("org.smarttube.stable", "com.google.android.youtube.tv"),
+    "smarttube": ("org.smarttube.stable",),
+    "kodi": ("org.xbmc.kodi",),
+    "netflix": ("com.netflix.ninja",),
+}
+KNOWN_APP_IDS = frozenset(i for ids in APP_IDS.values() for i in ids)
+_PKG = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
+
+
+def _app_ids(v: Any) -> list[str]:
+    ids = [v] if isinstance(v, str) else list(v)
+    if not ids or len(ids) > 4 or not all(_PKG.match(i) for i in ids):
+        raise vol.Invalid("app_id: one to four Android package names, like com.plexapp.android")
+    return ids
+
+
+def infer_app_ids(label: str, icon: str | None = None) -> list[str]:
+    """Package ids for a button from its label or icon name ("Plex", icon youtube); [] if no brand."""
+    words = re.findall(r"[a-z0-9]+", f"{label} {icon or ''}".casefold())
+    for brand, ids in APP_IDS.items():
+        if brand in words:
+            return list(ids)
+    return []
+
+
 def _int(lo: int, hi: int):
     def check(v: Any) -> int:
         if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
@@ -411,6 +439,9 @@ def _build_schema(r: _Resolver) -> vol.Schema:
                 vol.Schema({vol.Optional("on"): ha, vol.Optional("off"): ha}), _check_ha_power
             ),
             vol.Optional("inputs", default=dict): {_name: ha},
+            # Inputs come from the entity's `source_list` attribute (media_player.select_source);
+            # explicit `inputs` of the same name win.
+            vol.Optional("source_list", default=False): bool,
             vol.Optional("settle_ms"): _int(0, 60000),
             vol.Optional("source"): {str: vol.Any(str, int, float, bool, None)},
             vol.Optional("commands", default=dict): {_cmd_name: ha},
@@ -482,6 +513,15 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("steps", default=list): [step],
         vol.Optional("off", default=list): [step],
         vol.Optional("keys", default=dict): keys,
+        # Players behind the remote's app rings and Now Playing screen (docs/ha-config.md).
+        vol.Optional("media"): vol.Schema(
+            {
+                vol.Optional("apps_entity"): vol.All(str, vol.Match(_ENTITY, msg="not an entity id")),
+                vol.Optional("now_playing_entity"): vol.All(
+                    str, vol.Match(_ENTITY, msg="not an entity id")
+                ),
+            }
+        ),
     }
     widget = {
         vol.Required("type"): vol.In(["button", "tile", "label"]),
@@ -499,9 +539,12 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("shape"): vol.In(SHAPES),
         vol.Optional("icon_only"): bool,
         vol.Optional("align"): vol.In(["left", "center", "right"]),
+        vol.Optional("compact"): bool,  # fixed-layout pages: a 56 px card
         vol.Optional("color"): _color,
         vol.Optional("on_color"): _color,
         vol.Optional("nav"): vol.All(str, vol.Match(_NAV, msg="use next, prev, home or a page id")),
+        # Android package(s) of the app this button starts; inferred from the label for known apps.
+        vol.Optional("app_id"): vol.All(vol.Any(str, [str]), _app_ids),
     }
     page = {
         vol.Required("id"): _slug,
@@ -511,6 +554,9 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("title"): _title,
         vol.Optional("activity"): _slug,
         vol.Optional("back"): bool,
+        vol.Optional("layout"): vol.In(
+            ["fixed", "grid"], msg="`fixed` (the default look) or `grid` (keep the hand-placed cells)"
+        ),
         vol.Optional("list"): {vol.Required("rows"): _int(1, 16)},
         vol.Required("widgets"): [vol.All(widget, _check_widget)],
     }
@@ -636,6 +682,8 @@ def _check_widget(w: dict[str, Any]) -> dict[str, Any]:
             )
     if kind != "button" and "action" in w or kind != "tile" and "entity" in w:
         raise vol.Invalid(f"unexpected `{'action' if 'action' in w else 'entity'}` on a {kind}")
+    if w.get("compact") and kind != "button":
+        raise vol.Invalid("`compact` belongs on a button")
     if "on_color" in w and kind != "tile":
         raise vol.Invalid("`on_color` belongs on a tile")
     if nav and "role" in w:
@@ -643,7 +691,32 @@ def _check_widget(w: dict[str, Any]) -> dict[str, Any]:
     return w
 
 
+FIXED_SPANS = (12, 6, 4, 3)
+
+
+def _check_fixed(p: dict[str, Any]) -> dict[str, Any]:
+    """`layout: fixed`: 12 columns, one grid row per widget row, spans 12/6/4/3 on their own boundary."""
+    if p.get("cols", 12) != 12:
+        raise vol.Invalid("a fixed page has 12 columns", path=["cols"])
+    p["cols"] = 12
+    if "list" not in p:
+        for j, w in enumerate(p["widgets"]):
+            if w.get("h", 1) != 1 or w.get("w", 1) not in FIXED_SPANS or w.get("x", 0) % w.get("w", 1):
+                raise vol.Invalid(
+                    "a fixed page takes w 12, 6, 4 or 3 (x a multiple of w) and h 1",
+                    path=["widgets", j],
+                )
+    for j, w in enumerate(p["widgets"]):
+        if w.get("compact") and ("list" in p or w.get("shape", "card") != "card" or w.get("w") != 6):
+            raise vol.Invalid("`compact` is for a 6-wide card button", path=["widgets", j, "compact"])
+    return p
+
+
 def _check_page(p: dict[str, Any]) -> dict[str, Any]:
+    if p.get("layout") == "fixed":
+        p = _check_fixed(p)
+    elif any(w.get("compact") for w in p["widgets"]):
+        raise vol.Invalid("`compact` needs `layout: fixed` on the page", path=["layout"])
     if "list" in p:
         if "rows" in p:
             raise vol.Invalid("a list page takes its rows from `list.rows`", path=["rows"])
@@ -711,6 +784,9 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
             seen.add(it["id"])
 
     uniq(model["devices"], "devices", "device")
+    for i, d in enumerate(model["devices"]):
+        if d.get("source_list") and "entity" not in d:
+            fail(["devices", i, "source_list"], "`source_list` needs the device's `entity`")
     uniq(model["activities"], "activities", "activity")
     uniq(model["pages"], "pages", "page")
 
@@ -756,12 +832,14 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
                 fail([*path, "device"], f"unknown device {a['device']!r}")
                 return
             if "command" in a:
+                pw = d.get("power") or {}
+                want = {"power_on": "on", "power_off": "off"}.get(a["command"])
                 ok = a["command"] in d["commands"] or (
-                    a["command"] in ("power_on", "power_off") and "power" in d
+                    want is not None and (want in pw or ("toggle" in pw and d.get("kind") != "ha"))
                 )
                 if not ok:
                     fail([*path, "command"], f"{a['device']} has no {a['command']!r}")
-            elif a["input"] not in d["inputs"]:
+            elif a["input"] not in d["inputs"] and not d.get("source_list"):
                 fail([*path, "input"], f"{a['device']} has no input {a['input']!r}")
         elif a["type"] == "activity" and a["activity"] != "off" and a["activity"] not in acts:
             fail([*path, "activity"], f"unknown activity {a['activity']!r}")
@@ -772,7 +850,11 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
             if ad["device"] not in devs:
                 fail([*base, "devices", j, "device"], f"unknown device {ad['device']!r}")
                 continue
-            if "input" in ad and ad["input"] not in devs[ad["device"]]["inputs"]:
+            if (
+                "input" in ad
+                and ad["input"] not in devs[ad["device"]]["inputs"]
+                and not devs[ad["device"]].get("source_list")
+            ):
                 fail([*base, "devices", j, "input"], f"no input {ad['input']!r}")
         for sect in ("steps", "off"):
             for j, s in enumerate(a[sect]):
@@ -809,6 +891,8 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
                 seen.add(w["id"])
             if "action" in w:
                 check_action(w["action"], ["pages", i, "widgets", j, "action"])
+            if "app_id" in w and w["type"] != "button":
+                fail(["pages", i, "widgets", j, "app_id"], "`app_id` belongs on a button")
             if isinstance(w.get("tap"), dict):
                 check_action(w["tap"], ["pages", i, "widgets", j, "tap"])
 

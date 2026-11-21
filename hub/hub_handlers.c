@@ -10,6 +10,7 @@
 
 #include "hub/bt_link.h"
 #include "hub/hp_errors.h"
+#include "hub/net/crash.h"
 #include "hub/rf/rf_payload.h"
 #include "remote/page/page.h"
 
@@ -123,6 +124,7 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m);
 static void link_deliver(void *ctx, const hp_rf_msg_t *m) { handle_rf_msg(ctx, m); }
 
 static void link_result(void *ctx, hp_msg_type_t type, const uint8_t *body, size_t len, bool ok);
+static void cover_failed(hub_ctx_t *h, uint8_t remote, uint32_t cid);
 
 static void rf_log(void *c, const char *s) {
     (void)c;
@@ -224,7 +226,11 @@ static bool rf_up(const hub_ctx_t *h) { return !h->sinks.rf->attached || h->sink
  * (it would be overwritten by this older one), or a newer gen has been pushed since. */
 static void link_result(void *ctx, hp_msg_type_t type, const uint8_t *body, size_t len, bool ok) {
     hub_ctx_t *h = ctx;
-    hp_rf_val_t v[3];
+    hp_rf_val_t v[4];
+    if (type == HP_MSG_COVER_CHUNK) {
+        if (!ok && hp_rf_unpack(type, body, len, v, 4) == 0) cover_failed(h, (uint8_t)v[0].u, v[1].u);
+        return;
+    }
     bool theme = type == HP_MSG_THEME_PUSH;
     if ((type != HP_MSG_PAGE_PUSH && !theme) || hp_rf_unpack(type, body, len, v, 3) != 0 || v[0].u > 255 || v[1].u > 255) return;
     /* a theme_push is keyed (remote, -) like a page_push (remote, page): its own counters, its gen is v[1] */
@@ -342,6 +348,112 @@ static void pend_flush(hub_ctx_t *h) {
         if (out && rc != 0 && *out) (*out)--;
         if (rc == -HP_E_BUSY || rc == -HP_E_NOENT) return; /* later */
         pend_remove(h, i); /* sent, or unsendable */
+    }
+}
+
+/* ---- Now Playing: the cover and now_playing holds ---- */
+
+static bool remote_awake(const hub_ctx_t *h) {
+    return h->link.rx_frames && (int32_t)(hp_sched_now(&h->sched) - h->link.last_rx) < HUB_AWAKE_MS;
+}
+
+static hub_cover_t *cover_slot(hub_ctx_t *h, uint8_t remote) {
+    for (unsigned i = 0; i < HUB_COVER_MAX; i++)
+        if (h->cover[i].used && h->cover[i].remote == remote) return &h->cover[i];
+    for (unsigned i = 0; i < HUB_COVER_MAX; i++)
+        if (!h->cover[i].used) return &h->cover[i];
+    return &h->cover[0]; /* more remotes than slots: the first is recycled */
+}
+
+static hub_np_t *np_slot(hub_ctx_t *h, uint8_t remote) {
+    for (unsigned i = 0; i < HUB_NP_MAX; i++)
+        if (h->np[i].used && h->np[i].remote == remote) return &h->np[i];
+    for (unsigned i = 0; i < HUB_NP_MAX; i++)
+        if (!h->np[i].used) return &h->np[i];
+    return &h->np[0];
+}
+
+static bool cover_was_sent(const hub_cover_t *c, uint32_t cid) {
+    for (unsigned i = 0; i < c->nsent; i++)
+        if (c->sent[i] == cid) return true;
+    return false;
+}
+
+static void cover_forget(hub_cover_t *c, uint32_t cid) {
+    for (unsigned i = 0; i < c->nsent; i++)
+        if (c->sent[i] == cid) {
+            c->sent[i] = c->sent[--c->nsent];
+            c->sent_next = (uint8_t)(c->nsent % HUB_COVER_SENT);
+            return;
+        }
+}
+
+static void cover_mark_sent(hub_cover_t *c, uint32_t cid) {
+    if (cover_was_sent(c, cid)) return;
+    if (c->nsent < HUB_COVER_SENT) c->sent[c->nsent++] = cid;
+    else c->sent[c->sent_next] = cid;
+    c->sent_next = (uint8_t)((c->sent_next + 1) % HUB_COVER_SENT);
+}
+
+/* A chunk was abandoned after its RF retries: the remote's copy is incomplete. Sent again (from the start), a few times. */
+static void cover_failed(hub_ctx_t *h, uint8_t remote, uint32_t cid) {
+    hub_cover_t *c = cover_slot(h, remote);
+    if (!c->used || c->remote != remote || c->cid != cid) return;
+    cover_forget(c, cid);
+    if (c->tries >= HUB_PAGE_RESENDS) {
+        hp_log("hub: cover %08x not delivered after %d resends; giving up\n", (unsigned)cid, HUB_PAGE_RESENDS);
+        c->hold = false;
+        return;
+    }
+    c->tries++;
+    c->hold = true;
+    c->off = 0;
+}
+
+/* Hands the held covers and now_playing messages to the link: never while the remote is not heard (asleep: it cannot be
+ * woken, and each frame would cost the link's 300 ms timeout). Covers first; a full link queue (-HP_E_BUSY) waits. */
+static void cover_np_flush(hub_ctx_t *h) {
+    if (!h->sinks.rf || !rf_up(h) || !remote_awake(h)) return;
+    for (unsigned i = 0; i < HUB_COVER_MAX; i++) {
+        hub_cover_t *c = &h->cover[i];
+        while (c->used && c->hold) {
+            size_t n = HUB_COVER_BYTES - c->off < HUB_COVER_CHUNK ? HUB_COVER_BYTES - c->off : HUB_COVER_CHUNK;
+            hp_rf_val_t v[4] = {{.u = c->remote}, {.u = c->cid}, {.u = c->off}, {.p = c->data + c->off, .len = n}};
+            uint8_t pl[HP_RF_MSG_MAX];
+            size_t pn = 0;
+            if (hp_rf_pack(HP_MSG_COVER_CHUNK, v, 4, pl, sizeof pl, &pn) < 0) {
+                c->hold = false;
+                break;
+            }
+            int rc = hp_rf_link_send(&h->link, HP_MSG_COVER_CHUNK, pl, pn, hp_sched_now(&h->sched));
+            if (rc == -HP_E_BUSY || rc == -HP_E_NOENT) return; /* later */
+            c->off = (uint16_t)(c->off + n);
+            if (c->off >= HUB_COVER_BYTES) {
+                c->hold = false;
+                cover_mark_sent(c, c->cid);
+            }
+        }
+    }
+    for (unsigned i = 0; i < HUB_NP_MAX; i++) {
+        hub_np_t *p = &h->np[i];
+        if (!p->used || !p->hold) continue;
+        uint32_t pos = p->pos;
+        if (p->flags & 1) { /* playing: the position moved on while the message was held */
+            pos += (hp_sched_now(&h->sched) - p->at) / 1000;
+            if (p->dur && pos > p->dur) pos = p->dur;
+            if (pos > 0xFFFF) pos = 0xFFFF;
+        }
+        hp_rf_val_t v[7] = {{.u = p->remote}, {.u = p->cid}, {.u = p->flags}, {.u = pos}, {.u = p->dur},
+                            {.p = (const uint8_t *)p->t1, .len = p->l1}, {.p = (const uint8_t *)p->t2, .len = p->l2}};
+        uint8_t pl[HP_RF_MSG_MAX];
+        size_t pn = 0;
+        if (hp_rf_pack(HP_MSG_NOW_PLAYING, v, 7, pl, sizeof pl, &pn) < 0) {
+            p->hold = false;
+            continue;
+        }
+        int rc = hp_rf_link_send(&h->link, HP_MSG_NOW_PLAYING, pl, pn, hp_sched_now(&h->sched));
+        if (rc == -HP_E_BUSY || rc == -HP_E_NOENT) return;
+        p->hold = false;
     }
 }
 
@@ -776,6 +888,72 @@ static int cmd_tile_update(hub_ctx_t *h, uint32_t id, const cJSON *args, char *r
     return reply_ok(id, "command_result", true, NULL, reply, cap, len);
 }
 
+static bool uint_arg(const cJSON *o, const char *k, double max, uint32_t *out) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive((cJSON *)o, k);
+    if (!cJSON_IsNumber(v) || v->valuedouble < 0 || v->valuedouble > max || v->valuedouble != (double)(uint32_t)v->valuedouble)
+        return false;
+    *out = (uint32_t)v->valuedouble;
+    return true;
+}
+
+/* now_playing {remote, cid, flags, pos, dur, t1, t2}: held (latest per remote) and sent when the remote is awake. */
+static int cmd_now_playing(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply, size_t cap, size_t *len) {
+    uint32_t r, cid, fl, pos, dur;
+    const cJSON *t1 = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "t1") : NULL;
+    const cJSON *t2 = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "t2") : NULL;
+    if (!cJSON_IsObject(args) || !uint_arg(args, "remote", 255, &r) || !uint_arg(args, "cid", 4294967295.0, &cid) ||
+        !uint_arg(args, "flags", 255, &fl) || !uint_arg(args, "pos", 65535, &pos) || !uint_arg(args, "dur", 65535, &dur) ||
+        !cJSON_IsString(t1) || !cJSON_IsString(t2))
+        return reply_ok(id, "command_result", false, "args need remote, cid, flags, pos, dur, t1 and t2", reply, cap, len);
+    if (!h->sinks.rf) return reply_err(id, "no_remote", "no remote attached", reply, cap, len);
+    rf_link_ensure(h);
+    hub_np_t *p = np_slot(h, (uint8_t)r);
+    memset(p, 0, sizeof *p);
+    p->used = p->hold = true;
+    p->remote = (uint8_t)r;
+    p->cid = cid;
+    p->flags = (uint8_t)fl;
+    p->pos = (uint16_t)pos;
+    p->dur = (uint16_t)dur;
+    p->at = hp_sched_now(&h->sched);
+    p->l1 = (uint8_t)hp_text_cut(t1->valuestring, strlen(t1->valuestring), HUB_NP_TEXT);
+    p->l2 = (uint8_t)hp_text_cut(t2->valuestring, strlen(t2->valuestring), HUB_NP_TEXT);
+    memcpy(p->t1, t1->valuestring, p->l1);
+    memcpy(p->t2, t2->valuestring, p->l2);
+    cover_np_flush(h);
+    return reply_ok(id, "command_result", true, NULL, reply, cap, len);
+}
+
+/* cover {remote, cid, data = base64 of HUB_COVER_BYTES}: one slot per remote, a newer cid replaces it (even half sent). A
+ * cid already sent to that remote is not sent again until it rejoins. Pages are never touched. */
+static int cmd_cover(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply, size_t cap, size_t *len) {
+    uint32_t r, cid;
+    const cJSON *b64 = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "data") : NULL;
+    if (!cJSON_IsObject(args) || !uint_arg(args, "remote", 255, &r) || !uint_arg(args, "cid", 4294967295.0, &cid) ||
+        !cJSON_IsString(b64))
+        return reply_ok(id, "command_result", false, "args need remote, cid and data", reply, cap, len);
+    if (!h->sinks.rf) return reply_err(id, "no_remote", "no remote attached", reply, cap, len);
+    rf_link_ensure(h);
+    hub_cover_t *c = cover_slot(h, (uint8_t)r);
+    if (c->used && c->remote == r && ((c->hold && c->cid == cid) || cover_was_sent(c, cid)))
+        return reply_ok(id, "command_result", true, NULL, reply, cap, len); /* already held or sent */
+    uint8_t buf[HUB_COVER_BYTES + 4];
+    size_t n = hp_base64_decode(b64->valuestring, strlen(b64->valuestring), buf, sizeof buf);
+    if (n != HUB_COVER_BYTES) return reply_ok(id, "command_result", false, "data must be 1760 bytes", reply, cap, len);
+    if (!c->used || c->remote != r) {
+        memset(c, 0, sizeof *c);
+        c->used = true;
+        c->remote = (uint8_t)r;
+    }
+    c->cid = cid;
+    c->off = 0;
+    c->tries = 0;
+    c->hold = true;
+    memcpy(c->data, buf, n);
+    cover_np_flush(h);
+    return reply_ok(id, "command_result", true, NULL, reply, cap, len);
+}
+
 static int cmd_set_device_state(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply, size_t cap, size_t *len) {
     const cJSON *dv = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "device") : NULL;
     const cJSON *pw = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "power") : NULL;
@@ -811,6 +989,7 @@ static int on_command(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *
     const char *cmd = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "command")->valuestring;
     const cJSON *args = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "args");
     int rc;
+    hp_crumb("cmd %.24s %.32s", dev, cmd);
     if (!strcmp(dev, "hub") && !strcmp(cmd, "start_activity")) {
         const cJSON *n = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "name") : NULL;
         if (!cJSON_IsString(n)) return reply_ok(id, "command_result", false, "args.name required", reply, cap, len);
@@ -831,6 +1010,8 @@ static int on_command(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *
     if (!strcmp(dev, "hub") && !strcmp(cmd, "device_command")) return cmd_device_command(h, id, args, reply, cap, len);
     if (!strcmp(dev, "hub") && !strcmp(cmd, "ir_send")) return cmd_ir_send(h, id, args, reply, cap, len);
     if (!strcmp(dev, "hub") && !strcmp(cmd, "tile_update")) return cmd_tile_update(h, id, args, reply, cap, len);
+    if (!strcmp(dev, "hub") && !strcmp(cmd, "now_playing")) return cmd_now_playing(h, id, args, reply, cap, len);
+    if (!strcmp(dev, "hub") && !strcmp(cmd, "cover")) return cmd_cover(h, id, args, reply, cap, len);
     return reply_ok(id, "command_result", false, "unknown command", reply, cap, len);
 }
 
@@ -1306,6 +1487,13 @@ static void rf_link_up(hub_ctx_t *h) {
     if (h->rf_attached) return;
     h->rf_attached = true;
     h->info_fresh = true;
+    for (unsigned i = 0; i < HUB_COVER_MAX; i++) { /* the remote may have rebooted and lost its covers: send again */
+        hub_cover_t *c = &h->cover[i];
+        c->nsent = c->sent_next = c->tries = 0;
+        c->off = 0;
+        c->hold = c->used;
+    }
+    for (unsigned i = 0; i < HUB_NP_MAX; i++) h->np[i].hold = h->np[i].used;
     if (!hp_rf_link_status(&h->link).queued) { /* nothing is in flight: whatever a lost result left counted is void */
         h->theme_out = 0; /* (a strict link keeps its queue across a drop: those objects still report) */
         memset(h->page_out, 0, sizeof h->page_out);
@@ -1387,5 +1575,6 @@ void hub_pump_rf(hub_ctx_t *h) {
      * flag going false is not acted on here: its loss marker is still queued behind the frames of that link. */
     if (h->sinks.rf->attached && h->sinks.rf->attached(h->sinks.rf->self)) rf_link_up(h);
     pend_flush(h);
+    cover_np_flush(h);
     hub_flush_pending(h); /* a key may have started/stopped an activity */
 }

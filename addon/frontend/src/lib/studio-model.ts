@@ -367,18 +367,18 @@ export function wireIconOnly(page: Page, pp: PreviewPage | null, wi: number): bo
   return wireWidget(page, pp, wi).wire?.icon_only ?? !!page.widgets[wi]?.icon_only;
 }
 /** The widget as the remote will draw it: the wire page's copy when there is a preview (icons inferred, icon-only defaulted), else a config estimate. */
-function fitInputs(page: Page, pp: PreviewPage | null, wi: number): { p: { cols: number; rows: number }; w: FitWidget } | null {
+function fitInputs(page: Page, pp: PreviewPage | null, wi: number): { p: { cols: number; rows: number; fixed?: boolean }; w: FitWidget } | null {
   const w = page.widgets[wi];
   if (!w) return null;
   const { wp, wire } = wireWidget(page, pp, wi);
-  if (wp && wire) return { p: { cols: wp.cols, rows: wp.rows }, w: { ...wire, label: w.label ?? wire.label } };
+  if (wp && wire) return { p: { cols: wp.cols, rows: wp.rows, fixed: !!(wp as { fixed?: boolean }).fixed }, w: { ...wire, label: w.label ?? wire.label } };
   const { cols, rows } = gridOf(page);
   const nav = typeof w['nav'] === 'string' ? (w['nav'] as string) : '';
   const shape = w.shape ?? (page.list || nav ? 'row' : 'card');
   const list = !!page.list;
   return {
-    p: { cols: list ? 1 : cols, rows: list ? page.list?.rows ?? 6 : rows },
-    w: { kind: w.type, x: list ? 0 : w.x ?? 0, y: list ? wi : w.y ?? 0, w: list ? 1 : w.w ?? 1, h: list ? 1 : w.h ?? 1, label: w.label ?? '', shape, icon: stockIconId(w.icon ?? ''), icon_only: !!w.icon_only, trailing: !!nav && !['prev', 'home'].includes(nav) },
+    p: { cols: list ? 1 : cols, rows: list ? page.list?.rows ?? 6 : rows, fixed: page.layout === 'fixed' },
+    w: { kind: w.type, x: list ? 0 : w.x ?? 0, y: list ? wi : w.y ?? 0, w: list ? 1 : w.w ?? 1, h: list ? 1 : w.h ?? 1, label: w.label ?? '', shape, icon: stockIconId(w.icon ?? ''), icon_only: !!w.icon_only, trailing: !!nav && !['prev', 'home'].includes(nav), compact: !!(w as { compact?: boolean }).compact },
   };
 }
 /** Pixel meter of one widget's label: the font, the room, what the text needs. Null when no label is drawn. */
@@ -612,13 +612,14 @@ export function deletePage(cfg: Config, index: number): Config {
   return next;
 }
 
-export type TemplateId = 'activities' | 'activity' | 'numbers' | 'lights' | 'devices' | 'blank';
+export type TemplateId = 'activities' | 'activity' | 'numbers' | 'lights' | 'devices' | 'favorites' | 'blank';
 export const TEMPLATES: { id: TemplateId; name: string; note: string }[] = [
   { id: 'activities', name: 'Activities Home', note: 'One button per activity, plus All off' },
   { id: 'activity', name: 'Activity Control', note: 'Home, Apps, Extras and Numbers pages for the activity' },
   { id: 'numbers', name: 'Number Pad', note: '0-9 of the first device that has them' },
   { id: 'lights', name: 'Lights and Scenes', note: 'Tiles for Home Assistant lights' },
-  { id: 'devices', name: 'Device List', note: 'A row per device, with a command page for each' },
+  { id: 'devices', name: 'Device List', note: 'A row per device, with a page of keys and inputs for each' },
+  { id: 'favorites', name: 'Favorites', note: 'Compact cards for the commands and activities you use most' },
   { id: 'blank', name: 'Blank', note: 'Empty 4x6 grid' },
 ];
 
@@ -627,11 +628,129 @@ export const TEMPLATES: { id: TemplateId; name: string; note: string }[] = [
 const HARD = /^(?:vol(?:ume)?_?(?:up|down|plus|minus)|ch(?:annel)?_?(?:up|down|plus|minus)|mute|(?:direction_?|arrow_?|dpad_?|cursor_?)?(?:up|down|left|right)|ok|select|center|dpad_center|play|pause|play_?pause|ff|fast_?forward|rew|rewind|stop|rec|record|red|green|yellow|blue|menu|exit|return|back|guide|info|dvr)$/;
 const snake = (n: string): string => n.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[\s-]+/g, '_').toLowerCase();
 export const isHardKey = (cmd: string): boolean => HARD.test(snake(cmd));
+const TOOLS = /^(?:tools?|options?)$/;
 const UTILITY = /^(?:home|apps?|app_?list|search|settings?|setup|keyboard|sleep(?:_?timer)?)$/;
 const EXTRAS = /replay|skip_?\d|(?:rew|rewind|forward|ffwd)_?\d|subtitle|caption|^cc$|audio|aspect|sleep|shuffle|repeat|angle|zoom|picture|pic_?mode/;
 
 /** The stock icon name when this build's icon set has it; a glyph that is not shipped yet is simply not used. */
 const iconIf = (name: string): string | undefined => (stockIconByName(name) ? name : undefined);
+
+// ---------------------------------------------------------------- inputs and device icons
+/** "InputHdmi1", "HDMI1", "Input HDMI 2" -> "HDMI 1" / "HDMI 2"; "InputAv" -> "AV", "InputUsb" -> "USB", "InputTv" -> "TV"; null for
+ * any other command. Twin of harmony_core.key_names.normalize_input (both run tests/vectors/inputs.json). */
+export function normalizeInput(name: string): string | null {
+  const c = snake(name.trim().replace(/([A-Za-z])(\d)/g, '$1_$2'));
+  const h = /^(?:input_)?hdmi_?(\d+)(?:_?mhl|_?arc|_?earc)?$/.exec(c);
+  if (h) return `HDMI ${Number(h[1])}`;
+  const p = /^input_(av|usb|tv)(?:_?(\d+))?$/.exec(c);
+  return p ? (p[1] as string).toUpperCase() + (p[2] ? ` ${Number(p[2])}` : '') : null;
+}
+/** A device's inputs: the configured ones, else derived from commands named like InputHdmi1 (label = the normalised name). */
+export function deviceInputs(d: Device): { label: string; action: Action }[] {
+  if (Object.keys(d.inputs ?? {}).length) return Object.keys(d.inputs ?? {}).map((k) => ({ label: k, action: { device: d.id, input: k } }));
+  const out: { label: string; action: Action }[] = [];
+  for (const c of commandNames(d)) {
+    const label = normalizeInput(c);
+    if (label && !out.some((o) => o.label === label)) out.push({ label, action: { device: d.id, command: c } });
+  }
+  return out;
+}
+
+/** The editor's note for a device whose inputs come from its commands ("4 inputs found in commands"); '' when it has its own `inputs`. */
+export function derivedInputsNote(d: Device): string {
+  if (Object.keys(d.inputs ?? {}).length) return '';
+  const n = deviceInputs(d).length;
+  return n ? `${n} input${n === 1 ? '' : 's'} found in commands` : '';
+}
+/** Commands that select an input (shown as inputs, never as keys), whether derived or already saved as the device's `inputs`. */
+const isInputCommand = (_d: Device, c: string): boolean => normalizeInput(c) !== null;
+/** The inputs derived from a device's commands, with the command each one sends; none when the device has its own `inputs`. */
+export function derivedInputs(d: Device): { label: string; command: string }[] {
+  if (Object.keys(d.inputs ?? {}).length) return [];
+  return deviceInputs(d).map((i) => ({ label: i.label, command: String((i.action as { command?: string }).command ?? '') }));
+}
+/**
+ * Save a device's derived inputs as its own `inputs`: each row keeps its IR code under its new name, a hidden row is left out.
+ * Null when nothing is left, a name is empty or two rows share a name.
+ */
+export function materializeInputs(cfg: Config, deviceId: string, rows: { command: string; name: string; hidden: boolean }[]): Config | null {
+  const dev = (cfg.devices ?? []).find((d) => d.id === deviceId);
+  if (!dev) return null;
+  const keep = rows.filter((r) => !r.hidden);
+  const names = keep.map((r) => r.name.trim());
+  if (!keep.length || names.some((n) => !n) || new Set(names.map((n) => n.toLowerCase())).size !== names.length) return null;
+  const next = clone(cfg);
+  const d = (next.devices ?? []).find((x) => x.id === deviceId) as Device;
+  const inputs: Record<string, unknown> = {};
+  keep.forEach((r, i) => {
+    const code = d.commands?.[r.command];
+    if (code) inputs[trimToBytes(names[i] as string, LABEL_MAX)] = clone(code);
+  });
+  d.inputs = inputs as Device['inputs'];
+  return next;
+}
+
+const INPUT_ICON: [RegExp, string][] = [[/macbook|laptop|notebook/i, 'laptop'], [/desktop|computer|\bpc\b|workstation/i, 'pc']];
+/** Glyph for an input row: HDMI N -> hdmiN, AV, USB, TV, laptop / pc by name, else the best keyword match. */
+export function inputIcon(label: string): string | undefined {
+  const h = /^HDMI (\d)$/.exec(label);
+  if (h) return iconIf(`hdmi${h[1]}`);
+  const fixed = ({ AV: 'av', USB: 'usb', TV: 'tv' } as Record<string, string>)[label];
+  if (fixed) return iconIf(fixed);
+  return iconIf(INPUT_ICON.find(([re]) => re.test(label))?.[1] ?? bestIcon(label));
+}
+
+const KIND_ICON: [RegExp, string][] = [
+  [/kvm/i, 'kvm'], [/soundbar|sound bar|sonos|homepod/i, 'soundbar'], [/receiver|\bavr\b|denon|marantz|onkyo|yamaha rx/i, 'receiver'],
+  [/speaker|audioengine/i, 'speaker'], [/projector|beamer/i, 'projector'], [/stream|roku|apple tv|chromecast|fire ?tv/i, 'streamer'],
+  [/laptop|macbook/i, 'laptop'], [/\bpc\b|computer|desktop/i, 'pc'], [/\btv\b|television|bravia|oled|qled|samsung|\blg\b/i, 'tv'],
+];
+const BRAND_WORDS: Record<string, string> = { shield: 'nvidia', nvidia: 'nvidia', plex: 'plex', youtube: 'youtube', kodi: 'kodi' };
+/**
+ * The glyph a device gets: the icon set in config, a brand logo matched by name or entity, the device kind or Home Assistant domain,
+ * then keywords in the name. A Home Assistant media player skips the brand step: it is an app list, not the box itself.
+ */
+export function inferDeviceIcon(d: Device): string | undefined {
+  if (d.icon && stockIconByName(d.icon)) return d.icon;
+  const text = `${d.name ?? ''} ${d.id} ${d.entity ?? ''}`;
+  const domain = d.entity ? entityDomain(d.entity) : '';
+  if (d.kind === 'ha' && domain === 'media_player') return iconIf('grid_apps');
+  const brand = (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).map((w) => BRAND_WORDS[w]).find((n) => n && stockIconByName(n));
+  if (brand) return brand;
+  const kind = KIND_ICON.find(([re]) => re.test(text))?.[1];
+  if (kind && stockIconByName(kind)) return kind;
+  if (d.kind === 'ha' && (domain === 'switch' || domain === 'input_boolean') && !Object.keys(d.commands ?? {}).length && !Object.keys(d.inputs ?? {}).length) return iconIf('plug');
+  return iconIf(bestIcon(d.name ?? d.id, d.id)) ?? iconIf('app');
+}
+
+/** `fitName`, then fewer words ("Sleep Timer" -> "Sleep") until `fits`; the full name when nothing fits. */
+export function fitShort(name: string, fits: (s: string) => boolean): string {
+  const full = fitName(name, fits);
+  if (fits(full)) return full;
+  const words = full.split(' ');
+  for (let n = words.length - 1; n >= 1; n--) {
+    const t = words.slice(0, n).join(' ');
+    if (fits(t)) return t;
+  }
+  return full;
+}
+/** A page title that fits the header beside the back chevron (b18, 102 px): `full`, else `short` when given, else fewer words. */
+export function fitTitle(full: string, short?: string, px = 100): string {
+  const ok = (t: string): boolean => textPx(t, 'b18') <= px;
+  if (ok(full)) return full;
+  if (short && ok(short)) return short;
+  const words = full.split(' ');
+  for (let n = words.length - 1; n >= 1; n--) if (ok(words.slice(0, n).join(' '))) return words.slice(0, n).join(' ');
+  return full;
+}
+/** A device that is a list of apps (a Home Assistant media player): its page uses the Apps layout. */
+const isAppDevice = (d: Device): boolean => inferDeviceIcon(d) === 'grid_apps';
+
+/** The glyph for an activity card: a brand logo matched by name (Shield TV -> NVIDIA), else the best keyword match, else the TV. */
+export function activityIcon(name: string): string | undefined {
+  const brand = (name.toLowerCase().match(/[a-z0-9]+/g) ?? []).map((w) => BRAND_WORDS[w]).find((n) => n && stockIconByName(n));
+  return brand ?? iconIf(bestIcon(name)) ?? iconIf('tv');
+}
 
 /** The pages a template adds, in order; the first is the one that opens. Ids are unique among the config's pages and each other. */
 export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { entity_id: string; name?: string }[]; activity?: string; device?: string } = {}): Page[] {
@@ -652,82 +771,106 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
     return `${base}${n}`;
   };
   const btn = (x: number, y: number, label: string, action: Action, extra: Partial<Widget> = {}, w = 2): Widget => ({ type: 'button', id: mk('btn'), x, y, w, h: 1, label: trimToBytes(label, LABEL_MAX), action, ...extra });
-  /** A command button: the display name (abbreviated only when over budget), the stock icon alone in a 1-wide 4-column cell. */
-  const cmdBtn = (dev: Device, cmd: string, grid: { cols: number; rows: number }, b: Box, extra: Partial<Widget> = {}): Widget => {
+  /** A command button: the display name (abbreviated only when over budget); a FIXED page passes its span in `b.w` (12/6/4/3). */
+  const cmdBtn = (dev: Device, cmd: string, grid: { cols: number; rows: number; fixed?: boolean }, b: Box, extra: Partial<Widget> = {}): Widget => {
     const icon = bestIcon(cmd);
-    const only = !!icon && grid.cols === 4 && b.w === 1;
+    const only = !!icon && (extra.icon_only ?? (!grid.fixed && grid.cols === 4 && b.w === 1));
     const fits = (s: string): boolean => {
-      const lb = labelBudget(grid, { kind: 'button', ...b, label: s, shape: extra.shape ?? 'card', icon: icon ? 1 : 0, icon_only: only });
+      const lb = labelBudget(grid, { kind: 'button', ...b, label: s, shape: extra.shape ?? 'card', icon: icon ? 1 : 0, icon_only: only, compact: !!extra.compact });
       return !lb || textPx(s, lb.font) <= lb.px;
     };
-    return btn(b.x, b.y, fitName(cmd, fits), { device: dev.id, command: cmd }, { ...(icon ? { icon } : {}), ...(only ? { icon_only: true } : {}), ...extra }, b.w);
+    const name = fitShort(cmd, fits);
+    const cut = !fits(name) && !!icon; // a word that cannot fit: the glyph alone
+    return btn(b.x, b.y, name, { device: dev.id, command: cmd }, { ...(icon ? { icon } : {}), ...(only || cut ? { icon_only: true } : {}), ...extra, ...(cut ? { icon_only: true } : {}) }, b.w);
   };
+  /** A full-width row of a FIXED page (44 px): glyph, label, and a chevron when it opens a page. */
+  const rowBtn = (label: string, icon: string | undefined, y: number, more: Partial<Widget>): Widget => ({ type: 'button', id: mk('btn'), x: 0, y, w: 12, h: 1, shape: 'row', label: trimToBytes(label, LABEL_MAX), ...(icon ? { icon } : {}), ...more });
+  const fixedPage = (page: Omit<Page, 'cols' | 'rows' | 'layout'>): Page => ({ layout: 'fixed', cols: 12, rows: Math.max(1, ...page.widgets.map((w) => (w.y ?? 0) + 1)), ...page });
   const act = (cfg.activities ?? []).find((a) => a.id === ctx.activity);
   const actDevices = (act?.devices ?? []).map((d) => devices.find((x) => x.id === d.device)).filter((d): d is Device => !!d);
   const pool = actDevices.length ? actDevices : [devices.find((x) => x.id === ctx.device) ?? devices[0]].filter((d): d is Device => !!d);
 
-  /** 3x4 keypad: digits as b20 pills, Prev Ch and Enter as icons. */
+  /** 3x4 keypad (FIXED, 69 x 52 pills): digits as b20, Prev Ch and Enter as glyphs. */
   const numbersPage = (page: string, d: Device | undefined, back: boolean): Page => {
     const widgets: Widget[] = [];
     const names = d ? commandNames(d) : [];
     for (let n = 1; n <= 10 && d; n++) {
       const c = n % 10;
       const cmd = names.find((k) => RE.numbers.test(k.toLowerCase()) && k.endsWith(String(c)));
-      if (cmd) widgets.push(btn(c === 0 ? 1 : (n - 1) % 3, c === 0 ? 3 : Math.floor((n - 1) / 3), String(c), { device: d.id, command: cmd }, { shape: 'pill' }, 1));
+      if (cmd) widgets.push(btn(c === 0 ? 4 : ((n - 1) % 3) * 4, c === 0 ? 3 : Math.floor((n - 1) / 3), String(c), { device: d.id, command: cmd }, { shape: 'pill' }, 4));
     }
     const side = (re: RegExp, x: number, label: string, icon: string | undefined) => {
       const cmd = names.find((k) => re.test(snake(k)));
-      if (cmd && d) widgets.push(btn(x, 3, label, { device: d.id, command: cmd }, { shape: 'pill', ...(icon ? { icon, icon_only: true } : {}) }, 1));
+      if (cmd && d) widgets.push(btn(x, 3, label, { device: d.id, command: cmd }, { shape: 'pill', ...(icon ? { icon, icon_only: true } : {}) }, 4));
     };
     side(/^(?:prev(?:ious)?_?ch(?:annel)?|last(?:_?ch(?:annel)?)?)$/, 0, 'Prev Ch', iconIf('prev_ch'));
-    side(/^enter$/, 2, 'Enter', iconIf('enter'));
-    return { id: page, cols: 3, rows: 4, title: 'Numbers', ...(back ? { back: true } : {}), widgets };
+    side(/^enter$/, 8, 'Enter', iconIf('enter'));
+    return fixedPage({ id: page, title: 'Numbers', ...(back ? { back: true } : {}), widgets });
   };
 
   switch (id) {
     case 'activities': {
-      const acts = (cfg.activities ?? []).slice(0, 5);
-      const widgets = acts.map((a, i) => btn(0, i, a.name ?? a.id, { activity: a.id }, {}, 4));
-      widgets.push(btn(0, Math.min(acts.length, 5), 'All Off', { activity: 'off' }, { role: 'danger' }, 4));
-      const hasHome = (cfg.pages ?? []).some((p) => p.kind === 'home');
-      return [{ id: pid('home'), cols: 4, rows: 6, ...(hasHome ? {} : { kind: 'home' as const }), title: 'Activities', widgets }];
+      // Home: activities as 108 x 80 cards (two a row), then 44 px rows to Devices, Lights and Favorites (when those pages exist) and All Off
+      const acts = (cfg.activities ?? []).slice(0, 8);
+      const pages = cfg.pages ?? [];
+      const compact = acts.length > 2; // 56 px cards keep Devices, Lights and All Off on the first screen
+      const widgets: Widget[] = acts.map((a, i) => btn((i % 2) * 6, Math.floor(i / 2), dn(a.name, a.id), { activity: a.id }, { align: 'left', icon_only: false, ...(compact ? { compact: true } : {}), icon: activityIcon(a.name ?? a.id) }, 6));
+      let y = Math.ceil(acts.length / 2);
+      const nav = (label: string, icon: string, target: string | undefined) => {
+        if (target) widgets.push(rowBtn(label, iconIf(icon), y++, { nav: target, align: 'left' }));
+      };
+      const devT = (pages.find((p) => p.id === 'devices') ?? pages.find((p) => p.kind === 'favorites' && p.id !== 'favorites'))?.id;
+      // All Off always stays on the first screen: it comes before the rows that may page
+      nav('Devices', 'list', devT);
+      widgets.push(rowBtn('All Off', iconIf('power'), y++, { action: { activity: 'off' }, role: 'danger', align: 'left' }));
+      nav('Lights', 'bulb', pages.find((p) => p.id === 'lights')?.id);
+      nav('Favorites', 'star', pages.find((p) => p.id === 'favorites')?.id);
+      const hasHome = pages.some((p) => p.kind === 'home');
+      return [fixedPage({ id: pid('home'), ...(hasHome ? {} : { kind: 'home' as const }), title: 'Activities', widgets })];
     }
     case 'activity': {
+      // Two app cards, glyph keys (span 3) and rows to Apps, Extras, Numbers and Inputs; the sub-pages are FIXED too.
       type Cmd = { dev: Device; cmd: string };
       const all: Cmd[] = [];
       for (const dev of pool) for (const cmd of commandNames(dev)) if (!isHardKey(cmd) && !all.some((c) => c.cmd === cmd)) all.push({ dev, cmd });
       const numbersDev = pool.find((dv) => commandNames(dv).some((n) => groupCommand(n) === 'numbers'));
       const rest = all.filter((c) => groupCommand(c.cmd) !== 'numbers' && !/^(?:enter|prev_?ch(?:annel)?|last)$/.test(snake(c.cmd)));
-      const utils = rest.filter((c) => UTILITY.test(snake(c.cmd))).slice(0, 4);
+      // a Bluetooth device named like the activity (Shield TV -> Shield) lends its Home, Search, Settings and Keyboard keys
+      const words = (act?.name ?? '').toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+      const lenders = devices.filter((dv) => !pool.includes(dv) && dv.kind === 'bt' && words.some((w) => `${dv.name ?? ''} ${dv.id}`.toLowerCase().includes(w)));
+      const lent: Cmd[] = lenders.flatMap((dv) => commandNames(dv).filter((cmd) => UTILITY.test(snake(cmd)) && !isHardKey(cmd)).map((cmd) => ({ dev: dv, cmd })));
+      const utils = [...rest.filter((c) => UTILITY.test(snake(c.cmd))), ...lent.filter((c) => !rest.some((r) => r.cmd === c.cmd))].slice(0, 4);
       const extras = rest.filter((c) => !utils.includes(c) && EXTRAS.test(snake(c.cmd))).slice(0, 16);
-      const apps = rest.filter((c) => !utils.includes(c) && !extras.includes(c) && groupCommand(c.cmd) === 'other');
-      const name = pool.length === 1 ? (pool[0]?.name ?? pool[0]?.id ?? 'Control') : (act?.name ?? pool[0]?.name ?? 'Control');
-      const ids = { home: pid('activity'), apps: pid('apps'), extras: pid('extras'), numbers: pid('numbers') };
+      // device menu commands (Tools) belong on the device page, not among the apps
+      const apps = rest.filter((c) => !utils.includes(c) && !extras.includes(c) && groupCommand(c.cmd) === 'other' && !TOOLS.test(snake(c.cmd)));
+      const inDev = pool.reduce<Device | undefined>((best, d) => (deviceInputs(d).length > (best ? deviceInputs(best).length : 1) ? d : best), undefined);
+      const name = fitTitle(pool.length === 1 ? (pool[0]?.name ?? pool[0]?.id ?? 'Control') : (act?.name ?? pool[0]?.name ?? 'Control'));
+      const ids = { home: pid('activity'), apps: pid('apps'), extras: pid('extras'), numbers: pid('numbers'), inputs: pid('inputs') };
       const nav: { page: string; label: string; icon: string | undefined }[] = [];
       if (apps.length > 2) nav.push({ page: ids.apps, label: 'Apps', icon: iconIf('grid_apps') ?? iconIf('app') });
+      if (inDev) nav.push({ page: ids.inputs, label: 'Inputs', icon: iconIf('input') });
       if (extras.length) nav.push({ page: ids.extras, label: 'Extras', icon: iconIf('list') });
       if (numbersDev) nav.push({ page: ids.numbers, label: 'Numbers', icon: iconIf('numpad') });
-      // Home: apps as big cards, utilities as icon-only cells, then a row per sub-page
-      const homeRows = (apps.length ? 2 : 0) + (utils.length ? 1 : 0) + nav.length;
-      const g = { cols: 4, rows: Math.max(homeRows, 3) };
+      const g = { cols: 12, rows: 16, fixed: true };
       const home: Widget[] = [];
       let y = 0;
-      apps.slice(0, 2).forEach((c, i) => home.push(cmdBtn(c.dev, c.cmd, g, { x: i * 2, y: 0, w: 2, h: 2 }, { shape: 'card' })));
-      if (apps.length) y = 2;
-      utils.forEach((c, i) => home.push(cmdBtn(c.dev, c.cmd, g, { x: i, y, w: 1, h: 1 })));
+      apps.slice(0, 2).forEach((c, i) => home.push(cmdBtn(c.dev, c.cmd, g, { x: i * 6, y, w: 6, h: 1 }, { shape: 'card', align: 'left', icon_only: false })));
+      if (apps.length) y++;
+      utils.forEach((c, i) => home.push(cmdBtn(c.dev, c.cmd, g, { x: i * 3, y, w: 3, h: 1 }, { icon_only: !!bestIcon(c.cmd) })));
       if (utils.length) y++;
-      nav.forEach((n) => home.push({ type: 'button', id: mk('btn'), x: 0, y: y++, w: 4, h: 1, label: n.label, nav: n.page, shape: 'row', align: 'left', ...(n.icon ? { icon: n.icon } : {}) }));
-      const pages: Page[] = [{ id: ids.home, cols: 4, rows: g.rows, title: name, back: true, ...(ctx.activity ? { activity: ctx.activity } : {}), widgets: home }];
+      nav.forEach((n) => home.push(rowBtn(n.label, n.icon, y++, { nav: n.page, align: 'left' })));
+      const pages: Page[] = [fixedPage({ id: ids.home, title: name, back: true, ...(ctx.activity ? { activity: ctx.activity } : {}), widgets: home })];
       if (apps.length > 2) {
-        const rows = Math.min(6, Math.ceil(apps.length / 2));
-        const ag = { cols: 4, rows };
-        pages.push({ id: ids.apps, cols: 4, rows, title: 'Apps', back: true, widgets: apps.slice(0, 12).map((c, i) => cmdBtn(c.dev, c.cmd, ag, { x: (i % 2) * 2, y: Math.floor(i / 2), w: 2, h: 1 })) });
+        // up to 4 apps are 80 px cards; 5 to 8 are 56 px compact cards (the compiler adds page 2 beyond that)
+        const compact = apps.length > 4;
+        const shown = apps.slice(0, 16);
+        pages.push(fixedPage({ id: ids.apps, title: 'Apps', back: true, widgets: shown.map((c, i) => cmdBtn(c.dev, c.cmd, g, { x: (i % 2) * 6, y: Math.floor(i / 2), w: 6, h: 1 }, { shape: 'card', align: 'left', icon_only: false, ...(compact ? { compact: true } : {}) })) }));
       }
-      if (extras.length) {
-        const rows = Math.min(6, Math.ceil(extras.length / 4));
-        const eg = { cols: 4, rows };
-        pages.push({ id: ids.extras, cols: 4, rows, title: 'Extras', back: true, widgets: extras.map((c, i) => cmdBtn(c.dev, c.cmd, eg, { x: i % 4, y: Math.floor(i / 4), w: 1, h: 1 })) });
+      if (inDev) {
+        const ins = deviceInputs(inDev).slice(0, 16);
+        pages.push(fixedPage({ id: ids.inputs, title: fitTitle(`${dn(inDev.name, inDev.id)} Inputs`, 'Inputs'), back: true, widgets: ins.map((i, n) => rowBtn(i.label, inputIcon(i.label), n, { action: i.action, align: 'left' })) }));
       }
+      if (extras.length) pages.push(fixedPage({ id: ids.extras, title: 'Extras', back: true, widgets: extras.map((c, i) => cmdBtn(c.dev, c.cmd, g, { x: (i % 3) * 4, y: Math.floor(i / 3), w: 4, h: 1 }, { icon_only: false })) }));
       if (numbersDev) pages.push({ ...numbersPage(ids.numbers, numbersDev, true) });
       return pages;
     }
@@ -736,27 +879,109 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       return [numbersPage(pid('numbers'), d, true)];
     }
     case 'lights': {
+      // 108 x 64 tiles, two a row: glyph and state on top, name below
       const lights = (ctx.entities ?? []).filter((e) => entityDomain(e.entity_id) === 'light').slice(0, 8);
-      const widgets: Widget[] = lights.map((e, i) => ({ type: 'tile', id: mk('tile'), x: (i % 2) * 2, y: Math.floor(i / 2), w: 2, h: 1, label: trimToBytes(e.name ?? e.entity_id, LABEL_MAX), entity: e.entity_id, icon: 'bulb' }));
-      return [{ id: pid('lights'), cols: 4, rows: 6, title: 'Lights', back: true, widgets }];
+      const widgets: Widget[] = lights.map((e, i) => ({ type: 'tile', id: mk('tile'), x: (i % 2) * 6, y: Math.floor(i / 2), w: 6, h: 1, label: trimToBytes(e.name ?? e.entity_id, LABEL_MAX), entity: e.entity_id, icon: 'bulb' }));
+      return [fixedPage({ id: pid('lights'), title: 'Lights', back: true, widgets })];
     }
     case 'devices': {
+      // Every device with something to press gets a row (a glyph on each) and a page: power keys, commands as keys, inputs inline
+      // (up to 4) or behind an Inputs row (5 or more), and All Commands for the keys that do not fit.
       const listId = pid('devices');
-      const withCmds = devices.filter((d) => commandNames(d).some((c) => !isHardKey(c)));
-      const grids = withCmds.map((d) => ({ d, id: pid(`dev_${d.id}`.slice(0, 31)) }));
-      const rows: Widget[] = devices.map((d) => {
-        const g = grids.find((x) => x.d === d);
-        const icon = d.icon && stockIconByName(d.icon) ? d.icon : undefined;
-        return { type: 'button', id: mk('btn'), label: trimToBytes(dn(d.name, d.id), LABEL_MAX), ...(g ? { nav: g.id } : { action: { none: true } }), ...(icon ? { icon } : {}) };
-      });
-      const hasFav = (cfg.pages ?? []).some((p) => p.kind === 'favorites');
-      const pages: Page[] = [{ id: listId, cols: 1, list: { rows: 6 }, ...(hasFav ? {} : { kind: 'favorites' as const }), title: 'Devices', back: true, widgets: rows }];
-      for (const { d, id: gid } of grids) {
-        const cmds = commandNames(d).filter((c) => !isHardKey(c)).slice(0, 12);
-        const gr = { cols: 3, rows: Math.max(1, Math.min(4, Math.ceil(cmds.length / 3))) };
-        pages.push({ id: gid, cols: 3, rows: gr.rows, title: trimToBytes(dn(d.name, d.id), 24), back: true, widgets: cmds.map((c, i) => cmdBtn(d, c, gr, { x: i % 3, y: Math.floor(i / 3), w: 1, h: 1 })) });
+      type Plan = { d: Device; id: string; power: Widget[]; keys: Widget[]; inputs: { label: string; action: Action }[] };
+      const plans: Plan[] = [];
+      const key = (dev: Device, cmd: string): Widget => {
+        const icon = bestIcon(cmd);
+        const label = fitShort(cmd, (s) => textPx(s, 'r12') <= 61);
+        return { type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label: trimToBytes(label, LABEL_MAX), action: { device: dev.id, command: cmd }, ...(icon ? { icon } : {}) };
+      };
+      for (const d of devices.slice(0, 16)) {
+        const inputs = deviceInputs(d);
+        const power: Widget[] = [];
+        if (d.power?.on || d.power?.off || d.power?.toggle) {
+          const { on, off, toggle } = d.power;
+          const mk1 = (label: string, command: string, extra: Partial<Widget> = {}): Widget => ({ type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label, icon: 'power', action: { device: d.id, command }, ...extra });
+          if (on) power.push(mk1('Power On', 'power_on', { role: 'primary' }));
+          if (off) power.push(mk1('Power Off', 'power_off'));
+          if (toggle && !on && !off) power.push(mk1('Power', 'power_on'));
+        }
+        const keys = commandNames(d).filter((c) => !isHardKey(c) && !isInputCommand(d, c) && !/^power_(?:on|off)$/.test(c)).map((c) => key(d, c));
+        if (power.length || keys.length || inputs.length) plans.push({ d, id: pid(`dev_${d.id}`.slice(0, 31)), power, keys, inputs });
       }
-      return pages;
+      const hasFav = (cfg.pages ?? []).some((p) => p.kind === 'favorites');
+      const rowH = (n: number): number => (n ? n * 44 + (n - 1) * 2 : 0);
+      const keysH = (k: number): number => (k ? k * 52 + (k - 1) * 8 : 0);
+      const extra: Page[] = [];
+      const grid = (ws: Widget[], y0 = 0): Widget[] => ws.map((w, i) => ({ ...w, x: (i % 3) * 4, y: y0 + Math.floor(i / 3) }));
+      const devPages: Page[] = [];
+      for (const p of plans) {
+        const title = fitTitle(trimToBytes(dn(p.d.name, p.d.id), LABEL_MAX));
+        if (isAppDevice(p.d) && p.keys.length && !p.inputs.length) {
+          // Apps layout: the power keys, then cards for up to 4 apps, compact cards from 5
+          const compact = p.keys.length > 4;
+          const y0 = Math.ceil(p.power.length / 3);
+          const fits = (s: string): boolean => {
+            const lb = labelBudget({ cols: 12, rows: 16, fixed: true }, { kind: 'button', x: 0, y: 0, w: 6, h: 1, label: s, shape: 'card', icon: 1, icon_only: false, compact });
+            return !lb || textPx(s, lb.font) <= lb.px;
+          };
+          const apps = p.keys.slice(0, 16).map((k, i): Widget => {
+            const cmd = String((k['action'] as { command?: string }).command ?? k.label ?? '');
+            const label = fitShort(cmd, fits);
+            const cut = !fits(label) && !!k.icon;
+            return { ...k, label: trimToBytes(label, LABEL_MAX), w: 6, x: (i % 2) * 6, y: y0 + Math.floor(i / 2), shape: 'card', align: 'left', icon_only: cut, ...(compact ? { compact: true } : {}) };
+          });
+          const ws = [...grid(p.power), ...apps];
+          devPages.push({ id: p.id, layout: 'fixed', cols: 12, rows: Math.max(...ws.map((w) => (w.y ?? 0) + 1)), title, widgets: ws });
+          continue;
+        }
+        const inline = p.inputs.length <= 4;
+        const allKeys = [...p.power, ...p.keys];
+        let nav = inline ? p.inputs.length : p.inputs.length ? 1 : 0;
+        // keys that do not fit above the rows go to All Commands, which then takes one row itself
+        let fit = allKeys.length;
+        const room = (n: number): number => {
+          let k = 0;
+          while (k < 16 && keysH(k + 1) + (n ? 8 + rowH(n) : 0) <= 276 && k * 3 < allKeys.length) k++;
+          return k * 3;
+        };
+        fit = Math.min(allKeys.length, room(nav));
+        if (fit < allKeys.length) {
+          nav += 1;
+          fit = Math.min(allKeys.length, room(nav));
+        }
+        const shown = allKeys.slice(0, fit);
+        const rest = allKeys.slice(fit);
+        const widgets: Widget[] = grid(shown);
+        let y = Math.ceil(shown.length / 3);
+        const inputsId = p.inputs.length > 4 ? pid(`${p.id}_in`.slice(0, 31)) : '';
+        const restId = rest.length ? pid(`${p.id}_all`.slice(0, 31)) : '';
+        if (inline) for (const i of p.inputs) widgets.push(rowBtn(i.label, inputIcon(i.label), y++, { action: i.action }));
+        else if (p.inputs.length) widgets.push(rowBtn('Inputs', iconIf('input'), y++, { nav: inputsId }));
+        if (rest.length) widgets.push(rowBtn('All Commands', iconIf('list'), y++, { nav: restId }));
+        devPages.push({ id: p.id, layout: 'fixed', cols: 12, rows: Math.max(1, y), title, widgets });
+        if (!inline) {
+          const ws = p.inputs.slice(0, 16).map((i, n) => rowBtn(i.label, inputIcon(i.label), n, { action: i.action }));
+          extra.push({ id: inputsId, layout: 'fixed', cols: 12, rows: ws.length, title: fitTitle(`${title} Inputs`, 'Inputs'), widgets: ws });
+        }
+        if (rest.length) {
+          const ws = grid(rest.slice(0, 48));
+          extra.push({ id: restId, layout: 'fixed', cols: 12, rows: Math.ceil(ws.length / 3), title: 'Commands', widgets: ws });
+        }
+      }
+      const rows = plans.map((p, i): Widget => {
+        const icon = inferDeviceIcon(p.d);
+        return rowBtn(dn(p.d.name, p.d.id), icon, i, { nav: p.id });
+      });
+      const list: Page = { id: listId, layout: 'fixed', cols: 12, rows: Math.max(1, rows.length), ...(hasFav ? {} : { kind: 'favorites' as const }), title: 'Devices', widgets: rows };
+      return [list, ...devPages, ...extra];
+    }
+    case 'favorites': {
+      // Starred commands and activities from any device: compact cards, two to a row.
+      const picks: { label: string; icon: string | undefined; action: Action }[] = [];
+      for (const a of (cfg.activities ?? []).slice(0, 4)) picks.push({ label: dn(a.name, a.id), icon: activityIcon(a.name ?? a.id), action: { activity: a.id } });
+      for (const d of devices) for (const c of commandNames(d)) if (!isHardKey(c) && !isInputCommand(d, c) && !/^(?:power|num|digit)/i.test(snake(c)) && !TOOLS.test(snake(c)) && picks.length < 12) picks.push({ label: fitShort(c, (s) => textPx(s, 'b13') <= 100 && !s.split(' ').some((w) => textPx(w, 'b13') > 54)), icon: bestIcon(c) || undefined, action: { device: d.id, command: c } });
+      const widgets: Widget[] = picks.slice(0, 12).map((p, i) => ({ type: 'button', id: mk('btn'), x: (i % 2) * 6, y: Math.floor(i / 2), w: 6, h: 1, compact: true, icon_only: false, label: trimToBytes(p.label, LABEL_MAX), ...(p.icon ? { icon: p.icon } : {}), action: p.action }));
+      return [{ id: pid('favorites'), layout: 'fixed', cols: 12, rows: Math.max(1, Math.ceil(widgets.length / 2)), title: 'Favorites', widgets }];
     }
     default:
       return [{ id: pid('blank'), cols: 4, rows: 6, title: 'New Page', widgets: [] }];
@@ -779,6 +1004,32 @@ export function setPage(cfg: Config, index: number, patch: Record<string, unknow
     else p[k] = v;
   }
   return next;
+}
+
+// ---------------------------------------------------------------- Studio checks (shown above the canvas)
+export interface StudioCheck {
+  kind: 'label' | 'glyph' | 'action';
+  msg: string;
+  /** the page to show and the widget to select; absent for a device */
+  page?: number;
+  index?: number;
+}
+/** A device whose glyph cannot be found: not set in config and nothing in the name, kind or entity matches. */
+export const deviceHasGlyph = (d: Device): boolean => !!inferDeviceIcon(d);
+/**
+ * What the Studio warns about before a config is applied: a label over its class budget (the remote would cut it), a device
+ * with no glyph, and a row with no action (it would do nothing when tapped). `preview(i)` is page i's compiled preview, or null.
+ */
+export function studioChecks(cfg: Config, preview: (page: number) => PreviewPage | null = () => null): StudioCheck[] {
+  const out: StudioCheck[] = [];
+  (cfg.pages ?? []).forEach((pg, pi) => {
+    for (const o of pageOverflow(pg, preview(pi))) out.push({ kind: 'label', page: pi, index: o.index, msg: `${pg.title || pg.id}: "${o.label}" is ${o.over} px too wide for its ${o.font} slot; ${o.advice}` });
+    pg.widgets.forEach((w, wi) => {
+      if (w.type === 'button' && w.shape === 'row' && !w['action'] && !w.nav) out.push({ kind: 'action', page: pi, index: wi, msg: `${pg.title || pg.id}: the row "${w.label ?? ''}" does nothing; give it an action or a page` });
+    });
+  });
+  for (const d of cfg.devices ?? []) if (!deviceHasGlyph(d)) out.push({ kind: 'glyph', msg: `Device "${d.name ?? d.id}" has no glyph; pick an icon for it` });
+  return out;
 }
 
 // ---------------------------------------------------------------- errors -> targets

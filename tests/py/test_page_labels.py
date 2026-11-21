@@ -3,7 +3,7 @@
 import pytest
 
 from harmony_core.compiler import compile_config
-from harmony_core.config_model import parse_model
+from test_compiler_pages import parse_model
 from harmony_core.icons import ICON_IDS
 from harmony_core.page_build import icon_for_text
 
@@ -35,7 +35,7 @@ def btn(i, label, cmd, x=0, y=0, w=1, extra=""):
         ("VolUp", "vol_up"),
         ("vol_up", "vol_up"),
         ("Vol Down", "vol_down"),
-        ("InputHdmi1", "input"),
+        ("InputHdmi1", "hdmi1"),
         ("PowerOff", "power"),
         ("Settings", "settings"),
         ("home", "home"),
@@ -91,7 +91,7 @@ def test_no_icon_means_no_icon_only():
 
 
 def test_overflow_is_a_warning_not_an_error():
-    c, _ = widgets(btn(1, "Zzyzx Deluxe Edition", "plex", w=2))
+    c, _ = widgets(btn(1, "Zzyzx Deluxe Edition", "plex"))
     msgs = [w["msg"] for w in c.warnings]
     assert any("Zzyzx Deluxe Edition" in m and "px too wide" in m for m in msgs)
     assert all(w["severity"] == "warning" for w in c.warnings)

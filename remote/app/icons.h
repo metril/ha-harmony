@@ -2,7 +2,7 @@
 #ifndef RA_ICONS_H
 #define RA_ICONS_H
 
-#define RA_ICON_MAX 91
+#define RA_ICON_MAX 109
 #define RA_ICON_GLYPH_BASE 0xE000 /* glyph = base + id (UTF-8 below) */
 
 #define RA_ICON_TV 1
@@ -187,5 +187,41 @@
 #define RA_GLYPH_SONOS "\xEE\x81\x9A" /* U+E05A */
 #define RA_ICON_CHROMECAST 91
 #define RA_GLYPH_CHROMECAST "\xEE\x81\x9B" /* U+E05B */
+#define RA_ICON_SPEAKER 92
+#define RA_GLYPH_SPEAKER "\xEE\x81\x9C" /* U+E05C */
+#define RA_ICON_SOUNDBAR 93
+#define RA_GLYPH_SOUNDBAR "\xEE\x81\x9D" /* U+E05D */
+#define RA_ICON_RECEIVER 94
+#define RA_GLYPH_RECEIVER "\xEE\x81\x9E" /* U+E05E */
+#define RA_ICON_STREAMER 95
+#define RA_GLYPH_STREAMER "\xEE\x81\x9F" /* U+E05F */
+#define RA_ICON_PROJECTOR 96
+#define RA_GLYPH_PROJECTOR "\xEE\x81\xA0" /* U+E060 */
+#define RA_ICON_KVM 97
+#define RA_GLYPH_KVM "\xEE\x81\xA1" /* U+E061 */
+#define RA_ICON_PLUG 98
+#define RA_GLYPH_PLUG "\xEE\x81\xA2" /* U+E062 */
+#define RA_ICON_PC 99
+#define RA_GLYPH_PC "\xEE\x81\xA3" /* U+E063 */
+#define RA_ICON_LAPTOP 100
+#define RA_GLYPH_LAPTOP "\xEE\x81\xA4" /* U+E064 */
+#define RA_ICON_HDMI1 101
+#define RA_GLYPH_HDMI1 "\xEE\x81\xA5" /* U+E065 */
+#define RA_ICON_HDMI2 102
+#define RA_GLYPH_HDMI2 "\xEE\x81\xA6" /* U+E066 */
+#define RA_ICON_HDMI3 103
+#define RA_GLYPH_HDMI3 "\xEE\x81\xA7" /* U+E067 */
+#define RA_ICON_HDMI4 104
+#define RA_GLYPH_HDMI4 "\xEE\x81\xA8" /* U+E068 */
+#define RA_ICON_AV 105
+#define RA_GLYPH_AV "\xEE\x81\xA9" /* U+E069 */
+#define RA_ICON_USB 106
+#define RA_GLYPH_USB "\xEE\x81\xAA" /* U+E06A */
+#define RA_ICON_CCTV 107
+#define RA_GLYPH_CCTV "\xEE\x81\xAB" /* U+E06B */
+#define RA_ICON_CCTV_OFF 108
+#define RA_GLYPH_CCTV_OFF "\xEE\x81\xAC" /* U+E06C */
+#define RA_ICON_GARAGE 109
+#define RA_GLYPH_GARAGE "\xEE\x81\xAD" /* U+E06D */
 
 #endif

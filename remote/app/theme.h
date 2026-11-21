@@ -13,6 +13,7 @@
 /* The theme is a runtime value; every colour comes from ra_theme_cur() (0xRRGGBB, RGB565-exact). */
 const ra_theme_t *ra_theme_cur(void);
 lv_color_t ra_color(uint32_t rgb);
+uint32_t ra_brand_rgb(uint8_t icon); /* brand logo colour (RRGGBB) of an icon id, 0 when not a brand logo */
 
 /* Initialise the styles (after lv_init): default preset, then HARMONY_THEME=<preset key|id> if set (a bench aid).
  * Called by ra_ui_init. */

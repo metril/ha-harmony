@@ -588,6 +588,121 @@ static void test_tiles_do_not_overtake_a_resent_page(void) {
     CT_EQ(H.npend, 0);
 }
 
+/* ---- Now Playing: now_playing / cover_chunk holds (stream H) ---- */
+static bool hub_cmd(const char *js) {
+    cJSON *d = cJSON_Parse(js);
+    char reply[512];
+    size_t len = 0;
+    int rc = TBL.handler[HP_MSG_COMMAND](&H, NULL, 9, d, reply, sizeof reply, &len);
+    cJSON_Delete(d);
+    reply[len < sizeof reply ? len : sizeof reply - 1] = 0;
+    return rc == 0 && strstr(reply, "\"ok\":true");
+}
+static uint8_t COVER[HUB_COVER_BYTES];
+static bool cover_cmd(uint32_t cid, uint8_t fill) {
+    static char b64[2600], js[3000];
+    for (size_t i = 0; i < sizeof COVER; i++) COVER[i] = (uint8_t)(fill + i);
+    hp_base64_encode(COVER, sizeof COVER, b64);
+    snprintf(js, sizeof js, "{\"device\":\"hub\",\"command\":\"cover\",\"args\":{\"remote\":1,\"cid\":%u,\"data\":\"%s\"}}", cid, b64);
+    return hub_cmd(js);
+}
+static bool np_cmd(uint32_t cid, int flags, int pos) {
+    char js[300];
+    snprintf(js, sizeof js,
+             "{\"device\":\"hub\",\"command\":\"now_playing\",\"args\":{\"remote\":1,\"cid\":%u,\"flags\":%d,\"pos\":%d,\"dur\":3000,\"t1\":\"Show\",\"t2\":\"S1 E2\"}}",
+             cid, flags, pos);
+    return hub_cmd(js);
+}
+/* chunks of `cid` received by the remote; checks they tile the cover in order. Returns the count. */
+static int chunks_of(uint32_t cid, uint8_t fill) {
+    int n = 0;
+    uint32_t want = 0;
+    for (int i = 0; i < nlog; i++) {
+        hp_rf_val_t v[4];
+        if (rlog[i].type != HP_MSG_COVER_CHUNK || hp_rf_unpack(HP_MSG_COVER_CHUNK, rlog[i].payload, rlog[i].len, v, 4) != 0 || v[1].u != cid)
+            continue;
+        if (v[2].u == 0) want = 0; /* a fresh run of this cid */
+        CT_EQ(v[2].u, want);
+        for (size_t k = 0; k < v[3].len; k++) CT_EQ(v[3].p[k], (uint8_t)(fill + want + k));
+        want += (uint32_t)v[3].len;
+        n++;
+    }
+    return n;
+}
+static int count_type(uint8_t type) {
+    int n = 0;
+    for (int i = 0; i < nlog; i++) n += rlog[i].type == type;
+    return n;
+}
+
+static void test_cover_is_chunked_and_sent_once_per_cid(void) {
+    world();
+    send_info(3);
+    CT_CHECK(cover_cmd(11, 1));
+    run(4000);
+    CT_EQ(chunks_of(11, 1), 8); /* 7 x 220 + 220 = 1760 */
+    CT_CHECK(cover_cmd(11, 1)); /* the same cid again: nothing more */
+    CT_CHECK(cover_cmd(12, 2));
+    run(4000);
+    CT_EQ(count_type(HP_MSG_COVER_CHUNK), 16);
+    CT_CHECK(cover_cmd(11, 1)); /* an older cid the remote still caches: not resent */
+    run(600);
+    CT_EQ(count_type(HP_MSG_COVER_CHUNK), 16);
+    char bad[] = "{\"device\":\"hub\",\"command\":\"cover\",\"args\":{\"remote\":1,\"cid\":5,\"data\":\"AAAA\"}}";
+    CT_CHECK(!hub_cmd(bad)); /* not 1760 bytes */
+}
+
+static void test_cover_hold_supersedes_never_evicts_pages_and_skips_sleep(void) {
+    world();
+    send_info(3);
+    hp_rf_link_set_awake(&RL, false, R.now); /* asleep */
+    run(900);
+    CT_CHECK(!R.up);
+    uint8_t raw[40];
+    for (uint8_t i = 0; i < 40; i++) {
+        size_t n = mkpage(raw, i, 40, 5, 0, 0);
+        CT_CHECK(push_raw(i, raw, n));
+    }
+    CT_EQ(H.npend, 40); /* the page queue is full */
+    CT_CHECK(cover_cmd(21, 1));
+    CT_CHECK(cover_cmd(22, 9)); /* supersedes the held 21 */
+    CT_CHECK(np_cmd(22, 1, 100));
+    CT_EQ(H.npend, 40); /* no page lost to the cover or the now_playing */
+    CT_EQ(H.pend_dropped, 0u);
+    CT_EQ(count_type(HP_MSG_COVER_CHUNK) + count_type(HP_MSG_NOW_PLAYING), 0); /* nothing over the sleep path */
+    run(2000);
+    CT_EQ(count_type(HP_MSG_COVER_CHUNK), 0);
+    hp_rf_link_set_awake(&RL, true, R.now);
+    run(8000);
+    CT_EQ(chunks_of(21, 1), 0); /* superseded: never sent */
+    CT_EQ(chunks_of(22, 9), 8);
+    const hp_rf_msg_t *m = last_of(HP_MSG_NOW_PLAYING);
+    CT_CHECK(m != NULL);
+    if (m) {
+        hp_rf_val_t v[7];
+        CT_EQ(hp_rf_unpack(HP_MSG_NOW_PLAYING, m->payload, m->len, v, 7), 0);
+        CT_EQ(v[1].u, 22);
+        CT_CHECK(v[3].u >= 102 && v[3].u <= 110); /* pos moved on while it was held (>= 2 s) */
+        CT_EQ(v[4].u, 3000);
+        CT_EQ(v[5].len, 4);
+    }
+}
+
+static void test_cover_is_sent_again_after_a_rejoin(void) {
+    world();
+    send_info(3);
+    CT_CHECK(cover_cmd(31, 3));
+    run(4000);
+    CT_EQ(chunks_of(31, 3), 8);
+    hp_rf_link_set_awake(&RL, false, R.now);
+    run(900);
+    CT_CHECK(!R.up);
+    hp_rf_link_set_awake(&RL, true, R.now);
+    run(8000);
+    CT_CHECK(chunks_of(31, 3) >= 16);
+    CT_CHECK(count_type(HP_MSG_NOW_PLAYING) == 0);
+}
+
 int main(void) {
     test_link_drop_keeps_counting_what_the_link_still_holds();
     test_busy_link_holds_theme_and_page();
@@ -609,5 +724,8 @@ int main(void) {
     test_failed_page_push_is_resent_while_attached();
     test_page_resends_are_bounded();
     test_remote_info_broadcast_once_per_link_up();
+    test_cover_is_chunked_and_sent_once_per_cid();
+    test_cover_hold_supersedes_never_evicts_pages_and_skips_sleep();
+    test_cover_is_sent_again_after_a_rejoin();
     return CT_DONE();
 }

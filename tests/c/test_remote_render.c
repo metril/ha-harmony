@@ -3,6 +3,7 @@
  * HARMONY_REGEN_RENDER=1; it is never rewritten silently. */
 #include "cJSON.h"
 #include "hub/hp_errors.h"
+#include "remote/app/cover.h"
 #include "remote_fake.h"
 
 #ifndef HP_PAGES_JSON
@@ -471,13 +472,13 @@ static void test_state_screens(void) {
   ra_ui_show_receiving(&app.ui);
   refresh();
   CT_EQ(app.ui.page.page_id, RA_UI_PAGE_RECEIVING);
-  CT_CHECK(strstr(lv_label_get_text(app.ui.msg), "Receiving config") != NULL);
+  CT_CHECK(strstr(lv_label_get_text(app.ui.msg), "Receiving Pages") != NULL);
   CT_CHECK(!app.ui.fallback);
   /* hub unreachable: red headline */
   ra_ui_show_fallback(&app.ui);
   refresh();
   CT_CHECK(app.ui.fallback);
-  CT_CHECK(!strcmp(lv_label_get_text(app.ui.msg), "Hub unreachable"));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.msg), "Hub Unreachable"));
   int red = 0;
   for (int x = 8; x < 232; x++)
     for (int y = 148; y < 172; y++) red += px(x, y) == RGB565(RA_HEX_BAD);
@@ -487,7 +488,7 @@ static void test_state_screens(void) {
   hp_page_t e;
   CT_EQ(hp_page_decode(raw, sizeof raw, &e), 0);
   render(&e);
-  CT_CHECK(app.ui.msg && strstr(lv_label_get_text(app.ui.msg), "No activities") != NULL);
+  CT_CHECK(app.ui.msg && strstr(lv_label_get_text(app.ui.msg), "No Activities") != NULL);
   CT_CHECK(rect_has_ink(8, 148, 232, 170));
   /* a page with widgets has no such message */
   render(&p);
@@ -557,6 +558,285 @@ static void test_tile_text(void) {
   app_destroy(&app);
 }
 
+
+/* ---- app status ring and badge, Now Playing card, cover art ---- */
+
+#define ACC565 RGB565(RA_HEX_ACC)
+
+/* A fixed page of the running activity (act 1): two 80 px cards in grid row 0, a 44 px row below. */
+static hp_page_t np_page(void) {
+  hp_page_t p;
+  memset(&p, 0, sizeof p);
+  p.version = 2;
+  p.page_id = 5;
+  p.cols = 12;
+  p.rows = 2;
+  p.count = 3;
+  p.fixed = 1;
+  p.act = 1;
+  p.total = 6;
+  p.widgets[0] = (hp_widget_t){.kind = HP_WIDGET_BUTTON, .id = 1, .x = 0, .y = 0, .w = 6, .h = 1, .icon = RA_ICON_PLEX, .label = "Plex"};
+  p.widgets[1] = (hp_widget_t){.kind = HP_WIDGET_BUTTON, .id = 2, .x = 6, .y = 0, .w = 6, .h = 1, .label = "Kodi"};
+  p.widgets[2] = (hp_widget_t){.kind = HP_WIDGET_BUTTON, .id = 3, .x = 0, .y = 1, .w = 12, .h = 1, .shape = HP_SHAPE_ROW, .label = "Next"};
+  return p;
+}
+
+static int count_px(int x1, int y1, int x2, int y2, uint16_t c) {
+  int n = 0;
+  for (int y = y1; y <= y2; y++)
+    for (int x = x1; x <= x2; x++) n += px(x, y) == c;
+  return n;
+}
+
+static void test_app_ring_and_badge(void) {
+  fresh_app();
+  hp_page_t p = np_page();
+  render(&p);
+  int x1, y1, x2, y2;
+  ra_ui_widget_rect(&app.ui.page, &app.ui.page.widgets[0], &x1, &y1, &x2, &y2);
+  CT_CHECK(px(x1 + 1, y1 + 40) != ACC565);
+  CT_EQ(ra_ui_tile_state(&app.ui, 5, 1, HP_APP_OPEN, "", 0), 0); /* open: the ring alone */
+  refresh();
+  CT_EQ(px(x1, y1 + 40), ACC565); /* 2 px, inside the box */
+  CT_EQ(px(x1 + 1, y1 + 40), ACC565);
+  CT_CHECK(px(x1 + 3, y1 + 40) != ACC565);
+  CT_CHECK(app.ui.wcap[0] == NULL);
+  CT_CHECK(px(x2 + 9, y1 + 40) != ACC565); /* the other card has none */
+  CT_EQ(ra_ui_tile_state(&app.ui, 5, 1, HP_APP_PLAYING, "", 0), 0);
+  refresh();
+  CT_CHECK(app.ui.wcap[0] && !strcmp(lv_label_get_text(app.ui.wcap[0]), RA_GLYPH_PLAY));
+  CT_CHECK(count_px(x2 - 30, y1 + 4, x2 - 4, y1 + 30, ACC565) > 10); /* the glyph, top right */
+  CT_EQ(ra_ui_tile_state(&app.ui, 5, 1, HP_APP_PAUSED, "", 0), 0);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.wcap[0]), RA_GLYPH_PAUSE));
+  CT_EQ(ra_ui_tile_state(&app.ui, 5, 1, 9, "", 0), -HP_E_INVAL);
+  CT_EQ(ra_ui_tile_state(&app.ui, 5, 77, HP_APP_OPEN, "", 0), -HP_E_NOENT);
+  CT_EQ(ra_ui_tile_state(&app.ui, 6, 1, HP_APP_OPEN, "", 0), -HP_E_NOENT);
+  CT_EQ(ra_ui_tile_state(&app.ui, 5, 1, HP_APP_NONE, "", 0), 0); /* cleared: no ring, no glyph */
+  refresh();
+  CT_CHECK(app.ui.wcap[0] == NULL);
+  CT_CHECK(px(x1, y1 + 40) != ACC565);
+  /* a page shown with a status in it (the store applies its overlay) is built with the glyph */
+  p.widgets[1].tstate = HP_APP_PLAYING;
+  render(&p);
+  CT_CHECK(app.ui.wcap[1] && !strcmp(lv_label_get_text(app.ui.wcap[1]), RA_GLYPH_PLAY));
+  app_destroy(&app);
+}
+
+static ra_np_t np_state(unsigned flags, unsigned pos, unsigned dur, uint32_t cid, uint64_t at) {
+  ra_np_t n = {.flags = (uint8_t)flags, .pos = (uint16_t)pos, .dur = (uint16_t)dur, .cid = cid, .at = at};
+  snprintf(n.t1, sizeof n.t1, "VisionQuest");
+  snprintf(n.t2, sizeof n.t2, "S1 E2");
+  return n;
+}
+
+static void test_now_playing_card(void) {
+  fresh_app();
+  ra_cover_reset();
+  ra_ui_set_activity(&app.ui, 0, 1);
+  hp_page_t p = np_page();
+  ra_np_t n = np_state(1, 247, 2706, 7, 10000);
+  render(&p);
+  CT_EQ(app.ui.np_idx, -1); /* nothing known yet: the cards */
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 1); /* the card must appear: the caller shows the page again */
+  render(&p);
+  CT_EQ(app.ui.np_idx, 0);
+  CT_EQ(app.ui.page.count, 2); /* both cards of row 0 gone, the row below stays */
+  const hp_widget_t *w = hp_page_hit(&app.ui.page, 100, 60);
+  CT_CHECK(w && ra_ui_is_np(&app.ui, w));
+  int x1, y1, x2, y2;
+  ra_ui_widget_box(&app.ui.page, &app.ui.page.widgets[0], &x1, &y1, &x2, &y2);
+  CT_EQ(x2 - x1 + 1, 224);
+  CT_EQ(y2 - y1 + 1, 80);
+  CT_EQ(px(x1, y1 + 40), ACC565); /* the accent ring */
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_t1), "VisionQuest"));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_t2), "S1 E2"));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "4:07 / 45:06"));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_gly), RA_GLYPH_PLAY));
+  CT_CHECK(lv_obj_check_type(lv_obj_get_child(app.ui.np_art, 0), &lv_label_class)); /* the Plex glyph until a cover is in */
+  CT_CHECK(!strcmp(lv_label_get_text(lv_obj_get_child(app.ui.np_art, 0)), RA_GLYPH_PLEX));
+  CT_EQ(lv_obj_get_width(app.ui.np_fill), 152 * 247 / 2706);
+  /* the position moves on with the clock, once a second */
+  ra_ui_np_tick(&app.ui, 10000 + 3000);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "4:10 / 45:06"));
+  CT_EQ(ra_ui_np_next_ms(&app.ui, 13250), 750u);
+  CT_EQ(ra_ui_np_next_ms(&app.ui, 13000), 1000u);
+  /* paused: in place, no rebuild; the time stops and nothing is due */
+  n = np_state(2, 247, 2706, 7, 20000);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 0);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "Paused \xC2\xB7 4:07 / 45:06"));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_gly), RA_GLYPH_PAUSE));
+  ra_ui_np_tick(&app.ui, 29000);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "Paused \xC2\xB7 4:07 / 45:06"));
+  CT_EQ(ra_ui_np_next_ms(&app.ui, 29000), UINT32_MAX);
+  refresh();
+  /* the end of the item: clamped, then nothing is due */
+  n = np_state(1, 2705, 2706, 7, 0);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 0);
+  ra_ui_np_tick(&app.ui, 5000);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "45:06 / 45:06"));
+  CT_EQ(ra_ui_np_next_ms(&app.ui, 5000), UINT32_MAX);
+  /* a live item (no duration): the time alone */
+  n = np_state(1, 61, 0, 7, 0);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 0);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "1:01"));
+  /* another activity runs: the card is not for this page */
+  ra_ui_set_activity(&app.ui, 1, 1);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 1);
+  render(&p);
+  CT_EQ(app.ui.np_idx, -1);
+  CT_EQ(app.ui.page.count, 3);
+  /* back on this activity: the card; nothing playing: the cards again */
+  ra_ui_set_activity(&app.ui, 0, 1);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 1);
+  render(&p);
+  CT_EQ(app.ui.np_idx, 0);
+  n = np_state(0, 0, 0, 0, 0);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 1);
+  render(&p);
+  CT_EQ(app.ui.np_idx, -1);
+  CT_EQ(app.ui.page.count, 3);
+  /* power off: no card either */
+  n = np_state(1, 0, 100, 7, 0);
+  ra_ui_set_activity(&app.ui, 0, 0);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 0);
+  app_destroy(&app);
+}
+
+static void test_now_playing_row_choice(void) {
+  fresh_app();
+  ra_ui_set_activity(&app.ui, 0, 1);
+  ra_np_t n = np_state(1, 10, 100, 7, 0);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 0); /* no page yet */
+  hp_page_t p = np_page();
+  p.rows = 3;
+  p.count = 3;
+  /* row 0: compact cards (56 px), row 1: one span-12 card, row 2: a row: the card takes row 1 */
+  p.widgets[0] = (hp_widget_t){.kind = HP_WIDGET_BUTTON, .id = 1, .x = 0, .y = 0, .w = 6, .h = 1, .compact = 1, .label = "A"};
+  p.widgets[1] = (hp_widget_t){.kind = HP_WIDGET_BUTTON, .id = 2, .x = 0, .y = 1, .w = 12, .h = 1, .label = "Big"};
+  p.widgets[2] = (hp_widget_t){.kind = HP_WIDGET_BUTTON, .id = 3, .x = 0, .y = 2, .w = 12, .h = 1, .shape = HP_SHAPE_ROW, .label = "Next"};
+  render(&p);
+  CT_EQ(app.ui.np_row, 1);
+  CT_EQ(app.ui.np_idx, 1);
+  CT_EQ(app.ui.page.count, 3);
+  CT_EQ(app.ui.page.widgets[1].y, 1);
+  CT_CHECK(!strcmp(app.ui.page.widgets[0].label, "A") && !strcmp(app.ui.page.widgets[2].label, "Next"));
+  /* a page with no 80 px card row, and a page that is not fixed: no card */
+  p.widgets[1].shape = HP_SHAPE_ROW;
+  render(&p);
+  CT_EQ(app.ui.np_row, -1);
+  CT_EQ(app.ui.np_idx, -1);
+  p = np_page();
+  p.fixed = 0;
+  p.cols = 2;
+  p.widgets[0].w = p.widgets[1].w = p.widgets[2].w = 1;
+  p.widgets[1].x = 1;
+  render(&p);
+  CT_EQ(app.ui.np_idx, -1);
+  app_destroy(&app);
+}
+
+static void feed_cover(uint32_t cid, uint8_t idx, int in_order) {
+  static uint8_t c[RA_COVER_BYTES];
+  memset(c, (uint8_t)(idx * 0x11), 1728);
+  for (unsigned i = 0; i < 16; i++) { /* palette entry i: a colour of its own; the chosen one is 0x07E0 */
+    c[1728 + 2 * i] = (uint8_t)(i == idx ? 0xE0 : i);
+    c[1729 + 2 * i] = (uint8_t)(i == idx ? 0x07 : 0);
+  }
+  for (unsigned k = 0; k < 8; k++) {
+    unsigned off = (in_order ? k : 7 - k) * 220, n = RA_COVER_BYTES - off < 220 ? RA_COVER_BYTES - off : 220;
+    CT_EQ(ra_cover_chunk(cid, off, c + off, n), k == 7 ? 1 : 0);
+  }
+}
+
+static void test_cover_cache(void) {
+  ra_cover_reset();
+  static uint8_t z[220];
+  CT_EQ(ra_cover_chunk(0, 0, z, 10), 0);       /* cid 0 is no cover */
+  CT_EQ(ra_cover_chunk(1, 1700, z, 100), -1);  /* overruns the cover */
+  CT_EQ(ra_cover_chunk(1, RA_COVER_BYTES + 1, z, 1), -1);
+  CT_CHECK(!ra_cover_have(1) && ra_cover_expand(1) == NULL);
+  feed_cover(11, 1, 0); /* back to front */
+  CT_CHECK(ra_cover_have(11));
+  const uint16_t *e = ra_cover_expand(11);
+  CT_CHECK(e && e[0] == 0x07E0 && e[RA_COVER_W * RA_COVER_H - 1] == 0x07E0);
+  CT_EQ(ra_cover_chunk(11, 0, z, 0), 0); /* nothing new: still complete */
+  CT_CHECK(ra_cover_have(11));
+  feed_cover(12, 2, 1);
+  feed_cover(13, 3, 1);
+  feed_cover(14, 4, 1);
+  CT_CHECK(ra_cover_have(11) && ra_cover_have(12) && ra_cover_have(13) && ra_cover_have(14));
+  CT_CHECK(ra_cover_expand(11) != NULL); /* 11 was used last: it outlives the oldest */
+  feed_cover(15, 5, 1);
+  CT_CHECK(ra_cover_have(11) && !ra_cover_have(12) && ra_cover_have(15)); /* 4 covers: the least recently used went */
+  e = ra_cover_expand(15);
+  CT_CHECK(e && e[0] == 0x07E0);
+  CT_EQ(ra_cover_chunk(16, 0, z, 220), 0); /* a half-fed cover takes a slot but is a miss */
+  CT_CHECK(!ra_cover_have(16) && ra_cover_expand(16) == NULL);
+}
+
+static void test_cover_art_draws(void) {
+  fresh_app();
+  ra_cover_reset();
+  ra_ui_set_activity(&app.ui, 0, 1);
+  hp_page_t p = np_page();
+  ra_np_t n = np_state(1, 0, 100, 9, 0);
+  render(&p);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 1);
+  render(&p);
+  CT_CHECK(lv_obj_check_type(lv_obj_get_child(app.ui.np_art, 0), &lv_label_class));
+  int x1, y1, x2, y2;
+  ra_ui_widget_box(&app.ui.page, &app.ui.page.widgets[0], &x1, &y1, &x2, &y2);
+  feed_cover(9, 1, 0);
+  ra_ui_np_cover(&app.ui, 8); /* another cid: nothing changes */
+  CT_CHECK(lv_obj_check_type(lv_obj_get_child(app.ui.np_art, 0), &lv_label_class));
+  ra_ui_np_cover(&app.ui, 9);
+  refresh();
+  CT_CHECK(lv_obj_check_type(lv_obj_get_child(app.ui.np_art, 0), &lv_image_class));
+  CT_EQ(app.ui.np_cid_drawn, 9u);
+  CT_EQ(px(x1 + 4 + 24, y1 + 4 + 36), 0x07E0);
+  CT_EQ(px(x1 + 4 + 8, y1 + 4 + 8), 0x07E0);
+  CT_EQ(px(x1 + 4 + 40, y1 + 4 + 64), 0x07E0);
+  /* a new item whose cover is not here yet: the glyph; one that is cached: drawn at once */
+  n = np_state(1, 0, 100, 10, 0);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 0);
+  CT_CHECK(lv_obj_check_type(lv_obj_get_child(app.ui.np_art, 0), &lv_label_class));
+  CT_EQ(app.ui.np_cid_drawn, 0u);
+  n = np_state(1, 0, 100, 9, 0);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 0);
+  CT_CHECK(lv_obj_check_type(lv_obj_get_child(app.ui.np_art, 0), &lv_image_class));
+  app_destroy(&app);
+}
+
+static void test_now_playing_activity_change_and_suspend_gap(void) {
+  fresh_app();
+  ra_cover_reset();
+  ra_ui_set_activity(&app.ui, 0, 1);
+  hp_page_t p = np_page();
+  render(&p);
+  ra_np_t n = np_state(1, 100, 2706, 7, 1000);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 1);
+  render(&p);
+  /* 1 s awake, then 60 s asleep (the monotonic clock did not run) */
+  ra_ui_np_skip(&app.ui, 2000, 60000);
+  ra_ui_np_tick(&app.ui, 2000);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "2:41 / 45:06")); /* 100 + 1 + 60 */
+  ra_ui_np_skip(&app.ui, 3000, 0);
+  CT_EQ(app.ui.np.pos, 162u);
+  /* power off then on again: the old track must not come back */
+  ra_ui_set_activity(&app.ui, 0, 0);
+  CT_EQ(app.ui.np.flags, 0);
+  ra_ui_set_activity(&app.ui, 0, 1);
+  render(&p);
+  CT_EQ(app.ui.np_idx, -1);
+  CT_EQ(app.ui.page.count, 3);
+  n = np_state(1, 5, 100, 7, 0);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 1);
+  ra_ui_set_activity(&app.ui, 1, 1); /* another activity */
+  CT_EQ(app.ui.np.flags, 0);
+  CT_EQ(app.ui.np.cid, 0u);
+  app_destroy(&app);
+}
+
 int main(void) {
   CT_RUN(test_tokens_are_rgb565_exact);
   CT_RUN(test_goldens);
@@ -567,5 +847,11 @@ int main(void) {
   CT_RUN(test_state_screens);
   CT_RUN(test_low_battery_toast);
   CT_RUN(test_tile_text);
+  CT_RUN(test_app_ring_and_badge);
+  CT_RUN(test_now_playing_card);
+  CT_RUN(test_now_playing_row_choice);
+  CT_RUN(test_cover_cache);
+  CT_RUN(test_cover_art_draws);
+  CT_RUN(test_now_playing_activity_change_and_suspend_gap);
   return CT_DONE();
 }

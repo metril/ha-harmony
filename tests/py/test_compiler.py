@@ -45,7 +45,9 @@ pages:
 
 
 def model(text, **kw):
-    return parse_model(text, "/cfg/hub.yaml", **kw)
+    from grid_layout import grid
+
+    return parse_model(grid(text), "/cfg/hub.yaml", **kw)
 
 
 def test_key_table_sane():
@@ -115,7 +117,7 @@ def test_docs_example_compiles():
     assert c.activities == ["Watch TV", "Stream"]
     assert len(c.pages) == 1 and len(c.tiles) == 1
     assert {"volume_up", "home", "tap_mute", "tap_off", "tap_temp"} <= set(c.key_names.values())
-    assert len(text.splitlines()) < 420  # 300 + "Colours and themes" + "Naming your hub" + "Bluetooth"
+    assert len(text.splitlines()) < 450  # 300 + "Colours and themes" + "Naming your hub" + "Bluetooth" + "App rings"
 
 
 def test_empty_file_is_empty_model():

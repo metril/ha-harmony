@@ -163,8 +163,8 @@ export class HhInspector extends LitElement {
     const page = this.cfg.pages?.[pi];
     const list = !!page?.list;
     const shape = w.shape ?? (navVal || list ? 'row' : 'card');
-    const ok = !!page && alignApplies({ cols: page.list ? 1 : page.cols ?? 4, rows: page.list ? page.list.rows : page.rows ?? 6 }, { type: w.type, shape, icon_only: w.icon_only, x: list ? 0 : w.x ?? 0, y: list ? wi : w.y ?? 0, w: list ? 1 : w.w ?? 1, h: list ? 1 : w.h ?? 1 });
-    const why = 'Small buttons, tiles and icon-only buttons are always centred';
+    const ok = !!page && alignApplies({ cols: page.list ? 1 : page.cols ?? 4, rows: page.list ? page.list.rows : page.rows ?? 6, fixed: page.layout === 'fixed' }, { type: w.type, shape, icon_only: w.icon_only, x: list ? 0 : w.x ?? 0, y: list ? wi : w.y ?? 0, w: list ? 1 : w.w ?? 1, h: list ? 1 : w.h ?? 1 });
+    const why = page?.layout === 'fixed' ? 'Fixed pages always read left to right' : 'Small buttons, tiles and icon-only buttons are always centred';
     return html`<div class="ali"><span id="ali-l">Align</span><div class="grp" role="group" aria-labelledby="ali-l" title=${ok ? '' : why}>${ALIGNS.map((o) => html`<button type="button" ?disabled=${!ok} aria-pressed=${(ok ? w.align ?? 'center' : 'center') === o.v} aria-label=${o.name} title=${ok ? o.name : why} @click=${() => this.widgetPatch(pi, wi, { align: o.v === 'center' ? undefined : o.v })}>${svg`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d=${o.d}></path></svg>`}</button>`)}</div></div>${ok ? nothing : html`<p class="why" role="note">${why}.</p>`}`;
   }
 

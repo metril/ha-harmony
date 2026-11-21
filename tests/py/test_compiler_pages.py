@@ -6,9 +6,17 @@ from pathlib import Path
 import pytest
 
 from harmony_core.compiler import CompileError, compile_config
-from harmony_core.config_model import ConfigError, parse_model
+from harmony_core.config_model import ConfigError
 from harmony_core.icons import ICON_IDS
 from harmony_core.page_codec import decode_page, encode
+
+from grid_layout import grid  # noqa: E402
+from harmony_core.config_model import parse_model as _parse_model  # noqa: E402
+
+
+def parse_model(text, *a, **k):
+    return _parse_model(grid(text), *a, **k)
+
 
 GOLDEN = json.loads((Path(__file__).parent / "fixtures" / "pages_v1_goldens.json").read_text())
 
@@ -383,3 +391,77 @@ def test_align_reaches_the_wire_and_centre_is_the_default():
     assert len(encode(comp(page(btn("a", 0, 0, "A", ", align: right"))).models[0], 2)) == len(plain)
     with pytest.raises(ConfigError):
         comp(page(btn("a", 0, 0, "A", ", align: justify")))
+
+
+# ---------------------------------------------------------------- fixed layout, exit-pops
+def fixed_page(widgets: str, rows: int = 16, extra: str = "") -> str:
+    return f"pages:\n  - {{id: p, layout: fixed, rows: {rows}, {extra} widgets: [{widgets}]}}\n"
+
+
+def test_fixed_page_encodes_flag_compact_and_stays_unsplit_when_it_fits():
+    ws = ", ".join(
+        [btn("a", 0, 0, extra=", w: 6, compact: true"), btn("b", 6, 0, extra=", w: 6")]
+    )
+    c = comp(fixed_page(ws, 2))
+    (m,) = c.models
+    assert m.fixed and m.cols == 12 and (m.seq_idx, m.seq_cnt) == (0, 0)
+    assert [w.compact for w in m.widgets] == [True, False]
+    assert decode_page(c.pages_v2[0]) == m
+
+
+def test_fixed_page_splits_by_grid_rows_with_seq():
+    # five 80 px card rows: 3 fit (80+8+80+8+80 = 256), the rest go to page 2 and the rows renumber from 0
+    ws = ", ".join(btn(f"k{i}", 0, i, extra=", w: 12") for i in range(5))
+    c = comp(fixed_page(ws, 5))
+    assert [(m.seq_idx, m.seq_cnt) for m in c.models] == [(1, 2), (2, 2)]
+    assert [[w.y for w in m.widgets] for m in c.models] == [[0, 1, 2], [0, 1]]
+    assert all(m.fixed for m in c.models)
+
+
+def test_fixed_page_config_errors():
+    assert "w 12, 6, 4 or 3" in comp_err(fixed_page(btn("a", 0, 0, extra=", w: 5"), 1))
+    assert "w 12, 6, 4 or 3" in comp_err(fixed_page(btn("a", 0, 0, extra=", w: 6, h: 2"), 1))
+    assert "layout: fixed" in comp_err(page(btn("a", 0, 0, extra=", w: 2, compact: true")))
+    assert "6-wide card" in comp_err(fixed_page(btn("a", 0, 0, extra=", w: 4, compact: true"), 1))
+
+
+def comp_err(cfg: str) -> str:
+    with pytest.raises((CompileError, ConfigError)) as e:
+        comp(cfg)
+    return str(e.value)
+
+
+def _back_of(keys_global: str, music_keys: str, pages: str):
+    cfg = BASE.replace(
+        "  - {id: music, name: Music, devices: [{device: tv}]}",
+        f"  - {{id: music, name: Music, devices: [{{device: tv}}]{music_keys}}}",
+    )
+    c = compile_config(parse_model(cfg + keys_global + pages, "t.yaml"))
+    return [m.back for m in c.models]
+
+
+EXITKEY = "keys: {exit: {device: tv, command: mute}}"
+PAGES = (
+    "pages:\n"
+    "  - {id: h, kind: home, cols: 1, rows: 1, widgets: []}\n"
+    "  - {id: f, kind: favorites, cols: 1, rows: 1, widgets: []}\n"
+    "  - {id: a, cols: 1, rows: 1, activity: watch, widgets: []}\n"
+    "  - {id: b, cols: 1, rows: 1, activity: music, widgets: []}\n"
+    "  - {id: n, cols: 1, rows: 1, widgets: []}\n"
+    "  - {id: x, cols: 1, rows: 1, back: false, activity: watch, widgets: []}\n"
+    "  - {id: y, cols: 1, rows: 1, back: true, widgets: []}\n"
+)
+
+
+def test_back_default_home_and_favorites_never_explicit_wins():
+    assert _back_of("", "", PAGES) == [False, False, True, True, True, False, True]
+
+
+def test_back_default_follows_the_pages_activity_exit_mapping():
+    got = _back_of("", ", " + EXITKEY, PAGES)
+    # a (watch) has no Exit: BACK; b (music) maps it: none; n has no activity and music maps Exit: none
+    assert got == [False, False, True, False, False, False, True]
+
+
+def test_back_default_global_exit_clears_every_default():
+    assert _back_of(EXITKEY + "\n", "", PAGES) == [False, False, False, False, False, False, True]
