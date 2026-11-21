@@ -56,6 +56,10 @@
 #define RF_LINK_SYNC_COALESCE_MS 250 /* triggers closer than this share one pulse (resume + wake) */
 #define RF_LINK_SYNC_QUERY_MS 5      /* the quick uplink (remote_info) follows the pulse after this, as stock's sync request */
 #define RF_LINK_RING 16
+/* Now Playing: now_playing (29) and cover_chunk (42) from the hub become APP_LINK_EV_NOW_PLAYING / _COVER; the hub only sends
+ * them to a remote it heard awake, so nothing is asked for and no caps bit is needed. */
+#define RA_NP_TEXT 48
+#define RA_COVER_CHUNK_MAX 220
 
 typedef struct {
   ra_sys_t sys; /* own instance: only the sysfs soc read and the clock are used */

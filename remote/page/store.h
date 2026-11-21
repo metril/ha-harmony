@@ -18,7 +18,13 @@
 #define HP_STORE_OK 0
 #define HP_STORE_CLEARED 1 /* stored, and the pages of an older gen were dropped */
 #define HP_STORE_SAME 2    /* hp_store_theme: identical to the slot, nothing changed */
-#define HP_THEME_BYTES 99  /* the wire theme (harmony_core/themes.py) */
+#define HP_THEME_BYTES 99
+/* App status of a button (tile_state on a button's id, stored in its tstate): none, open (ring), playing (ring + play glyph),
+ * paused (ring + pause glyph). docs/proto/page-format.md. */
+#define HP_APP_NONE 0
+#define HP_APP_OPEN 1
+#define HP_APP_PLAYING 2
+#define HP_APP_PAUSED 3  /* the wire theme (harmony_core/themes.py) */
 
 typedef struct {
     uint8_t len; /* 0 = absent */
@@ -74,7 +80,8 @@ int hp_store_find_kind(const hp_store_t *, uint8_t kind);
 int hp_store_find_act(const hp_store_t *, uint8_t act);
 /* The page shown first: the home page, else page 0, else the lowest stored id (an incomplete set); -1 if none. */
 int hp_store_start(const hp_store_t *);
-/* Records live state for a tile (state: hp_tile_state_t). 0; -HP_E_INVAL bad UTF-8. */
+/* Records live state for a tile (state: hp_tile_state_t), or for a BUTTON the app status (HP_APP_*: the same tile_state
+ * message, the widget kind picks the meaning; text unused). 0; -HP_E_INVAL bad UTF-8. */
 int hp_store_tile(hp_store_t *, uint8_t page, uint8_t tile, uint8_t state, const char *text, size_t len);
 
 #endif

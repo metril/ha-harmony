@@ -132,6 +132,7 @@ if(NOT CMAKE_CROSSCOMPILING OR HP_TARGET STREQUAL "remote")
     remote/app/app.c
     remote/app/cli.c
     remote/app/rf_link.c
+    remote/app/cover.c
   )
   target_link_libraries(hp_remote_app PUBLIC hp_core lvgl)
   if(CMAKE_CROSSCOMPILING)
