@@ -209,10 +209,10 @@ static void test_hook_log_is_shipped_once_then_followed(void) {
     static sink_t s;
     static hp_hublog_t l;
     static hp_hooklog_t h;
-    char path[] = "/tmp/hublogXXXXXX", hook[] = "/tmp/hubhookXXXXXX";
+    char path[] = "/tmp/hublogXXXXXX", hook[] = "/tmp/hubhookXXXXXX.log";
     int fd = setup(&l, &s, path);
     s.up = true;
-    int hf = mkstemp(hook);
+    int hf = mkstemps(hook, 4);
     CT_CHECK(hf >= 0);
     CT_EQ(write(hf, "[t] ha-harmony: starting\n[t] ha-harmony: respawn 1 of 3 in 5s\n", 62), 62);
     hp_hooklog_start(&h, &l, hook); /* the file as the daemon finds it at start */
@@ -241,10 +241,72 @@ static void test_hook_log_is_shipped_once_then_followed(void) {
              !strcmp(out, "/var/volatile/ha-harmony-hook.log"));
     close(hf);
     unlink(hook);
+    unlink(h.offpath);
+    teardown(fd, path);
+}
+
+/* A respawned daemon (a fresh hp_hooklog_t) continues from the offset kept in tmpfs; a truncated log restarts at 0. */
+static void test_hook_offset_survives_a_respawn(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    static hp_hooklog_t h1, h2, h3;
+    char path[] = "/tmp/hublogXXXXXX", hook[] = "/tmp/hubhookXXXXXX.log";
+    int fd = setup(&l, &s, path);
+    s.up = true;
+    int hf = mkstemps(hook, 4);
+    CT_CHECK(hf >= 0);
+    CT_EQ(write(hf, "one\ntwo\n", 8), 8);
+    hp_hooklog_start(&h1, &l, hook);
+    hp_hublog_service(&l);
+    CT_EQ(s.n, 2);
+    CT_CHECK(strlen(h1.offpath) > 0 && access(h1.offpath, R_OK) == 0); /* the offset file is beside the log, on tmpfs */
+    CT_EQ(write(hf, "three\n", 6), 6); /* written while the daemon is down (a respawn note) */
+    hp_hooklog_start(&h2, &l, hook);    /* the new daemon */
+    hp_hublog_service(&l);
+    CT_EQ(s.n, 3); /* only the new line */
+    CT_CHECK(!strcmp(s.msg[2], "[boot-hook] three"));
+    CT_EQ(ftruncate(hf, 0), 0); /* a new boot truncates the log: the stored offset is stale */
+    CT_EQ(pwrite(hf, "x\n", 2, 0), 2);
+    hp_hooklog_start(&h3, &l, hook);
+    hp_hublog_service(&l);
+    CT_EQ(s.n, 4);
+    CT_CHECK(!strcmp(s.msg[3], "[boot-hook] x"));
+    close(hf);
+    unlink(hook);
+    unlink(h1.offpath);
+    teardown(fd, path);
+}
+
+static int rf_send(void *self, const uint8_t *f, size_t n) { (void)self; (void)f; (void)n; return 0; }
+static int rf_recv(void *self, uint8_t *f, size_t cap, int ms) { (void)self; (void)f; (void)cap; (void)ms; return 0; }
+static int rf_claim(void *self) { (void)self; return 0; }
+
+/* --rf-debug link lines go through hp_log (so they ship), not straight to stderr. */
+static void test_rf_link_log_goes_through_hp_log(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    static hub_ctx_t h;
+    char path[] = "/tmp/hublogXXXXXX";
+    int fd = setup(&l, &s, path);
+    s.up = true;
+    hub_ctx_init(&h);
+    hp_rf_transport tp = {NULL, rf_send, rf_recv, rf_claim, NULL, NULL, NULL};
+    h.sinks.rf = &tp;
+    h.rf_debug = true;
+    hub_pump_rf(&h); /* binds the link */
+    CT_CHECK(h.link.log != NULL);
+    h.link.log(h.link.log_ctx, "link 1 ms: up");
+    hp_hublog_service(&l);
+    CT_EQ(s.n, 1);
+    CT_CHECK(!strcmp(s.msg[0], "link 1 ms: up"));
+    char buf[64] = "";
+    CT_CHECK(pread(fd, buf, sizeof buf - 1, 0) > 0 && !strcmp(buf, "link 1 ms: up\n"));
     teardown(fd, path);
 }
 
 int main(void) {
+    CT_RUN(test_hook_offset_survives_a_respawn);
+    CT_RUN(test_rf_link_log_goes_through_hp_log);
     CT_RUN(test_hook_log_is_shipped_once_then_followed);
     CT_RUN(test_push_when_up);
     CT_RUN(test_line_reaches_the_file_synchronously);

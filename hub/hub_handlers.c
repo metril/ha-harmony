@@ -124,12 +124,17 @@ static void link_deliver(void *ctx, const hp_rf_msg_t *m) { handle_rf_msg(ctx, m
 
 static void link_result(void *ctx, hp_msg_type_t type, const uint8_t *body, size_t len, bool ok);
 
+static void rf_log(void *c, const char *s) {
+    (void)c;
+    hp_log("%s", s);
+}
+
 /* The link is bound lazily: callers install sinks.rf (and rf_inner_blocks) after hub_ctx_init. */
 static void rf_link_ensure(hub_ctx_t *h) {
     if (h->link_bound) return;
     hp_rf_link_init(&h->link, h->sinks.rf, !h->rf_inner_blocks, HUB_RF_SLOT, link_deliver, h);
     h->link.strict = true; /* one downlink frame in the radio at a time (only where TX status exists) */
-    if (h->rf_debug) hp_rf_link_set_log(&h->link, hp_rf_log_stderr, NULL);
+    if (h->rf_debug) hp_rf_link_set_log(&h->link, rf_log, NULL); /* via hp_log: the lines ship to HA too */
     h->link.result = link_result;
     h->link.result_ctx = h;
     h->link_bound = true;

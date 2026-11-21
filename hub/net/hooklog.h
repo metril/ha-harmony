@@ -13,7 +13,8 @@
 
 typedef struct {
     int ino; /* inotify fd, -1 when unavailable (the file is then read once) */
-    char path[256];
+    char path[256], offpath[264]; /* the hook log, and the tmpfs file remembering how much of it was shipped */
+    off_t saved;
     off_t off;
     hp_linebuf_t lb;
     hp_hublog_t *log;
