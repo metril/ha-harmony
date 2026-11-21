@@ -1028,29 +1028,20 @@ static void test_rejoin_silent_while_link_up(void) {
   teardown();
 }
 
-static void test_rejoin_on_loss_then_capped_backoff(void) {
+static void test_rejoin_on_loss_once_and_no_timer(void) {
   setup();
   DRAIN();
   fh.drop_all = 1; /* the hub stays unreachable */
   idle_awake(1000);
   CT_EQ(count_syncs(), 0);
   remote_chip_link(0); /* status 0x47 */
-  CT_EQ(count_syncs(), 1); /* the loss itself: one immediate attempt */
-  idle_awake(1000);
+  CT_EQ(count_syncs(), 1); /* the loss itself: one attempt */
+  idle_awake(200000); /* no retry timer: nothing more without an event */
   CT_EQ(count_syncs(), 1);
-  idle_awake(1000); /* +2 s */
-  CT_EQ(count_syncs(), 2);
-  idle_awake(4000); /* +4 s */
-  CT_EQ(count_syncs(), 3);
-  idle_awake(8000);
-  CT_EQ(count_syncs(), 4);
-  idle_awake(16000);
-  CT_EQ(count_syncs(), 5);
-  idle_awake(120000); /* capped: nothing more without an event */
-  CT_EQ(count_syncs(), 5);
-  remote_chip_link(1); /* up again: re-armed state cleared, no more pulses */
+  CT_CHECK(rf.awake);
+  remote_chip_link(1);
   idle_awake(60000);
-  CT_EQ(count_syncs(), 5);
+  CT_EQ(count_syncs(), 1);
   teardown();
 }
 
@@ -1059,15 +1050,15 @@ static void test_rejoin_on_keypress_while_lost(void) {
   DRAIN();
   fh.drop_all = 1;
   remote_chip_link(0);
-  idle_awake(40000); /* retries exhausted */
+  idle_awake(40000);
   int base = count_syncs();
-  CT_EQ(base, 5);
+  CT_EQ(base, 1);
   fh.drop_all = 1; /* the hub stays unreachable: no ack brings the link back */
   fk_key(&fk, 0, 115, 1);
   tick(50);
   CT_EQ(count_syncs(), base + 1); /* a press re-initiates the link; the key itself still goes out */
-  idle_awake(3000); /* and re-arms the backoff */
-  CT_EQ(count_syncs(), base + 2);
+  idle_awake(30000); /* and nothing follows */
+  CT_EQ(count_syncs(), base + 1);
   teardown();
 }
 
@@ -1153,7 +1144,7 @@ static void test_rejoin_lost_mid_transfer_pulses_and_does_not_spin(void) {
   app_link_t lk = rf_link_app(&rf);
   CT_CHECK(lk.next_ms(lk.ctx, fk.now) > 0); /* a future deadline, not a busy loop */
   idle_awake(40000);
-  CT_EQ(count_syncs(), RF_LINK_SYNC_MAX_TRIES);
+  CT_EQ(count_syncs(), 1);
   CT_CHECK(lk.next_ms(lk.ctx, fk.now) > 0);
   app.store.have_gen = false;
   teardown();
@@ -1166,7 +1157,7 @@ static void test_rejoin_on_touch_while_lost(void) {
   remote_chip_link(0);
   idle_awake(40000);
   int base = count_syncs();
-  CT_EQ(base, RF_LINK_SYNC_MAX_TRIES);
+  CT_EQ(base, 1);
   fk_touch(&fk, 300, 300, 1);
   tick(50);
   fk_touch(&fk, 300, 300, 0);
@@ -1192,7 +1183,7 @@ int main(void) {
   CT_RUN(test_polls_only_while_awake);
   CT_RUN(test_idle_link_is_silent_and_heartbeats);
   CT_RUN(test_rejoin_silent_while_link_up);
-  CT_RUN(test_rejoin_on_loss_then_capped_backoff);
+  CT_RUN(test_rejoin_on_loss_once_and_no_timer);
   CT_RUN(test_rejoin_on_keypress_while_lost);
   CT_RUN(test_rejoin_on_wake_and_resume);
   CT_RUN(test_rejoin_never_up_remote_pulses);

@@ -134,7 +134,7 @@ static bool link_down(const rf_link_t *l) {
   return l->tp && l->tp->attached && !l->tp->attached(l->tp->self); /* never-up counts as lost */
 }
 
-/* One sync pulse; arms the next backoff step while the link stays down. */
+/* One sync pulse (coalesced with a recent one), then the quick uplink 5 ms later. */
 static void rejoin_attempt(rf_link_t *l, uint64_t now) {
   bool recent = l->synced_once && now - l->last_sync_ms < RF_LINK_SYNC_COALESCE_MS;
   if (!recent && hp_rf_spi_sync(l->tp) == 0) { /* failure is untracked: it never blocks a key send */
@@ -144,15 +144,11 @@ static void rejoin_attempt(rf_link_t *l, uint64_t now) {
     if (!l->info_pending || at < l->next_info_ms) l->next_info_ms = at;
     l->info_pending = true;
   }
-  l->sync_tries++;
-  l->next_sync_ms = l->sync_tries < RF_LINK_SYNC_MAX_TRIES
-                        ? now + ((uint64_t)RF_LINK_SYNC_BASE_MS << (l->sync_tries - 1)) : UINT64_MAX;
 }
 
-/* An event while the link is down: restart the backoff and try now. */
+/* An event while the link is down: pulse now. */
 static void rejoin_event(rf_link_t *l, uint64_t now) {
   if (!link_down(l)) return;
-  l->sync_tries = 0;
   rejoin_attempt(l, now);
 }
 
@@ -224,16 +220,7 @@ static void service(rf_link_t *l, uint64_t now) {
   }
   if (rc == -HP_E_IO) ra_logf(&l->sys, "rf_link: link dead");
   bool att = l->tp->attached ? l->tp->attached(l->tp->self) : l->was_attached;
-  if (att) {
-    l->sync_tries = 0;
-    l->next_sync_ms = UINT64_MAX;
-  }
-  if (!att && l->was_attached) { /* lost just now: one immediate attempt */
-    l->sync_tries = 0;
-    rejoin_attempt(l, now);
-  } else if (!att && l->awake && now >= l->next_sync_ms) {
-    rejoin_attempt(l, now);
-  }
+  if (!att && l->was_attached) rejoin_attempt(l, now); /* lost just now: one attempt, no retry timer */
   if (att && l->lost) { /* re-attached after a loss: tell the hub we are here */
     l->lost = false;
     l->next_batt_ms = now;
@@ -286,7 +273,6 @@ static void rf_set_awake(void *ctx, bool awake) {
   uint64_t now = l->sys.ops.now_ms(l->sys.ops.ctx);
   hp_rf_link_set_awake(&l->link, awake, t32(now));
   if (awake) rejoin_event(l, now);
-  else l->next_sync_ms = UINT64_MAX;
 }
 
 static void rf_resumed(void *ctx, uint64_t now, uint64_t gap_ms) {
@@ -313,10 +299,6 @@ static uint32_t rf_next_ms(void *ctx, uint64_t now) {
     uint64_t d = l->next_info_ms > now ? l->next_info_ms - now : 0;
     if (d < best) best = d;
   }
-  if (l->awake && l->next_sync_ms != UINT64_MAX && link_down(l)) {
-    uint64_t d = l->next_sync_ms > now ? l->next_sync_ms - now : 0;
-    if (d < best) best = d;
-  }
   int r = hp_rf_link_next_timeout_ms(&l->link, t32(now)); /* the retry deadline always bounds the wait */
   if (r >= 0 && (uint64_t)r < best) best = (uint64_t)r;
   return best > UINT32_MAX ? UINT32_MAX : (uint32_t)best;
@@ -327,7 +309,6 @@ void rf_link_init(rf_link_t *l, const ra_ops_t *ops, uint8_t remote_id) {
   ra_sys_init(&l->sys, ops, NULL);
   l->remote = remote_id;
   l->last_pct = -1;
-  l->next_sync_ms = UINT64_MAX;
 }
 
 int rf_link_open(rf_link_t *l, const hp_rf_spi_cfg_t *cfg) {
