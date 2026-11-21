@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.25 (2026-11-21)
+
+- Elite redesign: new icon fonts (more glyphs, icon keywords pick them), 1-2 character pills render in b20, pixel-budget text fit and LVGL-style clipping in the studio preview, starter pages, BT pairing fixes. Needs the matching remote firmware.
+
 ## 0.3.24 (2026-11-21)
 
 - Alignment: every button is centred by default, rows included (centred in the space left of the chevron). Per-widget `align: left | center | right`; the editor's Align control is a three-icon toggle, disabled where alignment has no effect (small buttons, tiles, icon-only).
