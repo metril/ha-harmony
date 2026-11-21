@@ -22,3 +22,8 @@ def test_known_widths():
     m = gen.build()
     assert [m["b13"][str(c)] for c in (32, 65, 105)] == [3, 8, 3]
     assert set(m) == set(gen.FONTS)
+
+
+def test_line_height_recorded():
+    m = gen.build()
+    assert m["b13"]["lh"] == 16

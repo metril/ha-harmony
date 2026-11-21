@@ -357,13 +357,20 @@ export function labelRoom(p: Page, index: number, budget = PAGE_BUDGET): number 
 // ---------------------------------------------------------------- pixel budget (the remote cuts labels by pixels, not bytes)
 export interface Meter { font: Font; px: number; used: number; over: number }
 export interface Overflow extends Meter { index: number; label: string; advice: string }
+function wireWidget(page: Page, pp: PreviewPage | null, wi: number) {
+  const wp = pp?.wire_pages[0]?.page;
+  const map = wp && !page.list ? wireMap(page, wp.widgets.length) : null;
+  return { wp, wire: map && (map[wi] ?? -1) >= 0 ? wp?.widgets[map[wi] as number] : undefined };
+}
+/** Is the widget drawn icon-only? The compiled widget's value (the compiler defaults it on), else the config's. */
+export function wireIconOnly(page: Page, pp: PreviewPage | null, wi: number): boolean {
+  return wireWidget(page, pp, wi).wire?.icon_only ?? !!page.widgets[wi]?.icon_only;
+}
 /** The widget as the remote will draw it: the wire page's copy when there is a preview (icons inferred, icon-only defaulted), else a config estimate. */
 function fitInputs(page: Page, pp: PreviewPage | null, wi: number): { p: { cols: number; rows: number }; w: FitWidget } | null {
   const w = page.widgets[wi];
   if (!w) return null;
-  const wp = pp?.wire_pages[0]?.page;
-  const map = wp && !page.list ? wireMap(page, wp.widgets.length) : null;
-  const wire = map && (map[wi] ?? -1) >= 0 ? wp?.widgets[map[wi] as number] : undefined;
+  const { wp, wire } = wireWidget(page, pp, wi);
   if (wp && wire) return { p: { cols: wp.cols, rows: wp.rows }, w: { ...wire, label: w.label ?? wire.label } };
   const { cols, rows } = gridOf(page);
   const nav = typeof w['nav'] === 'string' ? (w['nav'] as string) : '';

@@ -79,6 +79,7 @@ export class HhApplyDialog extends StoreElement {
     if (changed.has('open') && this.open) {
       this.phase = 'review';
       this.message = '';
+      this.cutOk = false;
       this.ack = 'unknown';
       if (this.target !== this.store.hub) {
         this.target = this.store.hub;

@@ -8,7 +8,7 @@ import { svg, type TemplateResult } from 'lit';
 import { iconInner } from './icon-shapes';
 import type { V2Page, V2Widget } from './api';
 import { THEMES, css as hex } from './themes';
-import { clip, fitLabel, labelBudget, textPx, type Font } from './text-fit';
+import { clip, fitLabel, labelBudget, lineHeight, textPx, type Font } from './text-fit';
 import { DEFAULT_THEME, labelColor, presetTheme, widgetColors, type RenderTheme, type TileState } from './theme-model';
 
 export const SCREEN_W = 240;
@@ -195,25 +195,33 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
   if (tile) {
     const val = tile.text;
     const vf: Font = bw >= 80 ? 'b20' : 'b13';
-    if (w.icon_only && hasIcon) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: icon, wi });
-    else if (bh >= 52) {
-      if (hasIcon) out.push({ t: 'icon', id: w.icon, x: x + 8, y: y + 8, size: 16, color: icon, wi });
-      if (!w.icon_only) out.push({ t: 'text', x: x + (hasIcon ? 28 : 10), y: y + 20, s: fit(w.label, 'r12', bw - (hasIcon && bh >= 56 && bw >= 56 ? 38 : 8)), size: 12, fill: cap, anchor: 'start', wi });
-      out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 18, s: fit(val, vf, bw - 8), size: FONT_SIZE[vf], fill: ink, anchor: 'middle', weight: 700, wi });
-    } else out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 5, s: fit(`${w.label}  ${val}`, 'b13', bw - 8), size: 13, fill: ink, anchor: 'middle', wi });
+    // remote/app/ui.c: a tile ignores icon_only; the icon needs bh >= 56 and bw >= 56, the caption bh >= 44
+    const showIcon = hasIcon && bh >= 56 && bw >= 56;
+    const capH = bh >= 44 && !!w.label;
+    if (showIcon) out.push({ t: 'icon', id: w.icon, x: x + 8, y: y + 8, size: 16, color: icon, wi });
+    if (capH) out.push({ t: 'text', x: showIcon ? x + 32 : x + bw / 2, y: y + 20, s: fit(w.label, 'r12', bw - (showIcon ? 38 : 8)), size: 12, fill: cap, anchor: showIcon ? 'start' : 'middle', wi });
+    out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + (capH ? 18 : FONT_SIZE[vf] * 0.35), s: fit(val, vf, bw - 8), size: FONT_SIZE[vf], fill: ink, anchor: 'middle', weight: 700, wi });
     return;
   }
   const legacyDanger = p.version === 1 && w.kind === 'button' && /^power off$/i.test(w.label);
   const text = legacyDanger ? hex(k.bad) : ink;
   const label = w.icon_only ? '' : w.label;
   if (hasIcon && !label) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: icon, wi });
-  else if (hasIcon && !rowPath && bh >= 56) {
+  else if (hasIcon && !rowPath) {
     // stacked: icon over label; the big card (bw >= 100, bh >= 80) honours align, a dense one is always centred
     const al = big ? w.align ?? 'center' : 'center';
     const ax = al === 'left' ? x + 12 : al === 'right' ? x + bw - 12 : x + bw / 2;
     const anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
-    out.push({ t: 'icon', id: w.icon, x: al === 'left' ? ax : al === 'right' ? ax - 22 : ax - 11, y: y + bh / 2 - 22, size: 22, color: icon, wi });
-    out.push({ t: 'text', x: ax, y: y + bh / 2 + 22, s: fit(label, font, room0), size, fill: text, anchor, weight, wi });
+    if (big || bh >= 56) {
+      out.push({ t: 'icon', id: w.icon, x: al === 'left' ? ax : al === 'right' ? ax - 22 : ax - 11, y: y + bh / 2 - 22, size: 22, color: icon, wi });
+      out.push({ t: 'text', x: ax, y: y + bh / 2 + 22, s: fit(label, font, room0), size, fill: text, anchor, weight, wi });
+    } else {
+      // a short dense button (ui.c): icon at the top, label at the bottom, the free height split in thirds
+      const isz = bh >= 64 ? 24 : 20;
+      const gap = Math.max(0, Math.floor((bh - isz - lineHeight(font)) / 3));
+      out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - isz / 2, y: y + gap + 1, size: isz, color: icon, wi });
+      out.push({ t: 'text', x: x + bw / 2, y: y + bh - gap - lineHeight(font) * 0.22, s: fit(label, font, room0), size, fill: text, anchor: 'middle', weight, wi });
+    }
   } else if (hasIcon) {
     const al = rowPath ? w.align ?? 'center' : 'center';
     const isz = 20;

@@ -14,10 +14,13 @@ const GAP = 8;
 
 const M = metrics as Record<Font, Record<string, number>>;
 
-/** Width of `s` in `font`; a code point the font lacks counts as "?". */
+/** The baked font's line height in px. */
+export const lineHeight = (font: Font): number => M[font]['lh'] as number;
+
+/** Width of `s` in `font`; a code point the font lacks is LVGL's placeholder, line_height / 2 + 2. */
 export function textPx(s: string, font: Font): number {
   const m = M[font];
-  const fb = m['63'] as number;
+  const fb = Math.floor((m['lh'] as number) / 2) + 2; // LV_USE_FONT_PLACEHOLDER (lv_font.c)
   let w = 0;
   for (const c of s) w += m[String(c.codePointAt(0))] ?? fb;
   return w;
@@ -27,9 +30,13 @@ export function textPx(s: string, font: Font): number {
 export function clip(s: string, font: Font, px: number): { text: string; over: number } {
   const w = textPx(s, font);
   if (w <= px) return { text: s, over: 0 };
-  const dots = textPx(DOTS, font);
   const chars = Array.from(s);
+  if (chars.length <= DOTS.length) return { text: s, over: w - px }; // lv_label: never turn all the letters into dots
+  const dots = textPx(DOTS, font);
   while (chars.length && textPx(chars.join(''), font) + dots > px) chars.pop();
+  // lv_label.c: "be sure there is space for the dots" - they overwrite 3 bytes, so step back until they fit the text
+  const bytes = (t: string): number => new TextEncoder().encode(t).length;
+  while (chars.length && bytes(chars.join('')) + DOTS.length > bytes(s)) chars.pop();
   return { text: chars.join('') + DOTS, over: w - px };
 }
 

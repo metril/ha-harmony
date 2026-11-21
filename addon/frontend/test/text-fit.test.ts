@@ -22,5 +22,5 @@ describe('text-fit: shared vectors', () => {
   for (const c of fixture.clip) it(`clip ${c.s}`, () => expect(clip(c.s, c.font as Font, c.px)).toEqual({ text: c.shown, over: c.over }));
   it.each(keyFixture.display as [string, string][])('displayName %s -> %s', (a, b) => expect(displayName(a)).toBe(b));
   it.each(keyFixture.abbreviate as [string, string][])('abbreviate %s -> %s', (a, b) => expect(abbreviate(a)).toBe(b));
-  it('counts an unknown glyph as "?"', () => expect(textPx('中', 'b13')).toBe(textPx('?', 'b13')));
+  it('counts an unknown glyph as the LVGL placeholder (line height / 2 + 2)', () => expect(textPx('中', 'b13')).toBe(16 / 2 + 2));
 });

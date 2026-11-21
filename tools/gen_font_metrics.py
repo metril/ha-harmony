@@ -50,6 +50,8 @@ def parse(src: str) -> dict[str, int]:
             pairs = [(start + off, gid0 + k) for k, off in enumerate(lists[ul.group(1)])]
         for cp, gid in pairs:
             out[str(cp)] = (adv[gid] + 8) >> 4
+    # LV_USE_FONT_PLACEHOLDER: a missing glyph is line_height / 2 + 2 wide (lv_font.c); stored as "lh"
+    out["lh"] = _int(r"\.line_height = (\d+)", src)
     return out
 
 

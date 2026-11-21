@@ -47,5 +47,6 @@ def test_abbreviate(raw, want):
     assert abbreviate(raw) == want
 
 
-def test_unknown_glyph_counts_as_question_mark():
-    assert text_px("中", "b13") == text_px("?", "b13")
+def test_unknown_glyph_is_lvgl_placeholder_width():
+    # LV_USE_FONT_PLACEHOLDER: line_height / 2 + 2
+    assert text_px("中", "b13") == 16 // 2 + 2

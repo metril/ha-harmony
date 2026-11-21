@@ -3,7 +3,7 @@ import { Assigner, moveCursor, type Spot } from '../src/lib/assigner';
 import type { Config, Device, Page } from '../src/lib/model';
 import {
   assign, deviceChips, duplicatePage, errorTarget, firstFree, fits, groupCommand, isRefusal, labelRoom, movePage, moveBox, pageBytes, pageIndexForLayer,
-  placeWidget, resizeBox, setKey, templatePage, trimToBytes, defaultService, type Source, type Target,
+  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, templatePage, trimToBytes, defaultService, type Source, type Target,
 } from '../src/lib/studio-model';
 
 const cfg = (): Config => ({
@@ -256,5 +256,19 @@ describe('assignment state machine', () => {
     a.pick(vol);
     a.choose(moveCursor(spots, 'a', 'down')!.target);
     expect(log[0]![1]).toEqual({ kind: 'key', name: 'c' });
+  });
+});
+
+describe('icon-only state', () => {
+  const pg = { id: 'p', cols: 4, rows: 2, widgets: [{ type: 'button', id: 'a', x: 0, y: 0, w: 1, h: 1, label: 'Apps', icon: 'apps' }] } as Page;
+  const pp = (io: boolean) => ({ wire_pages: [{ page: { cols: 4, rows: 2, widgets: [{ icon_only: io }] } }] }) as never;
+  it('follows the compiled widget (the compiler defaults it on), else the config', () => {
+    expect(wireIconOnly(pg, pp(true), 0)).toBe(true);
+    expect(wireIconOnly(pg, pp(false), 0)).toBe(false);
+    expect(wireIconOnly(pg, null, 0)).toBe(false);
+  });
+  it('an explicit false survives setWidget', () => {
+    const c = { pages: [pg] } as Config;
+    expect(setWidget(c, 0, 0, { icon_only: false }).pages![0]!.widgets[0]!.icon_only).toBe(false);
   });
 });

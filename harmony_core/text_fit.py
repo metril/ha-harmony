@@ -24,9 +24,9 @@ def _metrics() -> dict[str, dict[str, int]]:
 
 
 def text_px(s: str, font: str) -> int:
-    """Width of `s` in `font` (b13 m16 b18 b20 r12); a code point the font lacks counts as '?'."""
+    """Width of `s` in `font` (b13 m16 b18 b20 r12); a code point the font lacks is LVGL's placeholder, line_height / 2 + 2."""
     m = _metrics()[font]
-    fallback = m["63"]
+    fallback = m["lh"] // 2 + 2  # LV_USE_FONT_PLACEHOLDER (lv_font.c)
     return sum(m.get(str(ord(c)), fallback) for c in s)
 
 
@@ -35,9 +35,14 @@ def clip(s: str, font: str, px: int) -> tuple[str, int]:
     w = text_px(s, font)
     if w <= px:
         return s, 0
+    if len(s) <= len(DOTS):  # lv_label: never turn all the letters into dots
+        return s, w - px
     dots = text_px(DOTS, font)
     chars = list(s)
     while chars and text_px("".join(chars), font) + dots > px:
+        chars.pop()
+    # lv_label.c: "be sure there is space for the dots" - the dots overwrite 3 bytes, so step back until they fit the text
+    while chars and len("".join(chars).encode()) + len(DOTS) > len(s.encode()):
         chars.pop()
     return "".join(chars) + DOTS, w - px
 

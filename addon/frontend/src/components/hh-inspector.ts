@@ -16,7 +16,7 @@ import type { AddPaletteDetail } from './hh-colour-field';
 import { PALETTE_NAMES } from '../lib/themes';
 import { PRESETS, activeName, activeTheme, colourBytes, widgetColors } from '../lib/theme-model';
 import {
-  DEFAULT_LAYER, LABEL_MAX, PAGE_BUDGET, describeAction, errorTarget, gridOf, isList, labelBytes, labelMeter, labelRoom, pageBytes, pageOverflow, setPage, setWidget, trimToBytes,
+  DEFAULT_LAYER, LABEL_MAX, PAGE_BUDGET, describeAction, errorTarget, gridOf, isList, labelBytes, labelMeter, labelRoom, pageBytes, pageOverflow, setPage, setWidget, trimToBytes, wireIconOnly,
   sourceAction, type Source,
 } from '../lib/studio-model';
 import type { Page, Widget } from '../lib/model';
@@ -224,7 +224,7 @@ export class HhInspector extends LitElement {
             <span id="ico-l">Icon</span>
             <hh-icon-picker aria-labelledby="ico-l" .value=${w.icon && w.icon !== 'none' ? w.icon : ''} .command=${String((w['action'] as { command?: string } | undefined)?.command ?? '')} .label=${w.label ?? ''}
               @hh-icon=${(e: CustomEvent<string | undefined>) => this.widgetPatch(pi, wi, { icon: e.detail })}></hh-icon-picker>
-            <label class="chk"><input type="checkbox" .checked=${!!w.icon_only} @change=${(e: Event) => this.widgetPatch(pi, wi, { icon_only: (e.target as HTMLInputElement).checked || undefined })} /> Icon only (the label is kept but not drawn)</label>
+            <label class="chk"><input type="checkbox" .checked=${wireIconOnly(page, pp, wi)} @change=${(e: Event) => this.widgetPatch(pi, wi, { icon_only: (e.target as HTMLInputElement).checked })} /> Icon only (the label is kept but not drawn)</label>
           </div>`
         : nothing}
       ${w.type === 'label' ? html`<div class="sec"><h3>Look</h3>${this.colourRows(pi, wi, w)}</div>` : nothing}

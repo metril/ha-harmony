@@ -315,6 +315,15 @@ describe('apply dialog', () => {
     expect(store.errors).toEqual([]);
   });
 
+  it('forgets the "apply anyway" confirmation when the dialog opens again', async () => {
+    const { app } = await boot({ draft: true });
+    const dlg = app.shadowRoot!.querySelector('hh-apply-dialog') as HTMLElement & { open: boolean; cutOk: boolean };
+    dlg.cutOk = true;
+    dlg.open = true;
+    await settle(dlg);
+    expect(dlg.cutOk).toBe(false);
+  });
+
   it('moves from waiting to done when a status push carries the ack of the applied bundle rev', async () => {
     const { app, store, pushStatus } = await boot({ draft: true, statuses: [status()] });
     store.edit((c) => (c.devices![0]!.name = 'Renamed TV'));
