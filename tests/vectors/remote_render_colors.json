@@ -1,10 +1,10 @@
 {
  "hash": "fnv1a-64 over the 240x320 RGB565 framebuffer; coloured reference screens",
  "screens": {
-  "default": "76979486c9ef5aa8",
-  "midnight": "c475b2d609d310e9",
-  "daylight": "5fceef1469397e94",
-  "pressed": "40ecdc4cc4ce08b4",
-  "stale_daylight": "6423691e99b3c37e"
+  "default": "fb83e4f96385f116",
+  "midnight": "d5de6b6aedcb282e",
+  "daylight": "bd58a2b87c257ab2",
+  "pressed": "069ddd2146553b63",
+  "stale_daylight": "64f3dfe223e272e2"
  }
 }

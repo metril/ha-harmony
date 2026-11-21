@@ -9,7 +9,7 @@ import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import {
-  DEFAULT_LAYER, pageCap, addPage, assign, deletePage, describeSource, duplicatePage, errorTarget, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePages, MAX_PAGES,
+  DEFAULT_LAYER, studioChecks, pageCap, addPage, assign, deletePage, describeSource, duplicatePage, errorTarget, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePages, MAX_PAGES,
   type Source, type Target,
 } from '../lib/studio-model';
 import { StoreElement, confirmAction } from '../components/base';
@@ -83,6 +83,10 @@ export class HhStudio extends StoreElement implements StudioHost {
       .first h2 { margin: 0; font-size: 16px; }
       .first p { margin: 0; color: var(--tx2); }
       .errbar { flex: none; margin: 0 0 10px; padding: 8px 12px; border-radius: var(--r2); background: var(--bads); border: 1px solid var(--bad); color: var(--tx); display: grid; gap: 4px; font-size: 13px; max-width: 520px; align-self: center; width: 100%; }
+      .warnbar { flex: none; margin: 0 0 10px; padding: 8px 12px; border-radius: var(--r2); background: var(--sf); border: 1px solid var(--warn, var(--line)); color: var(--tx); display: grid; gap: 4px; font-size: 13px; max-width: 520px; align-self: center; width: 100%; }
+      .warnbar div { display: flex; gap: 10px; align-items: center; }
+      .warnbar span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+      .warnbar button { height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--line); background: var(--sf); color: var(--tx); cursor: pointer; font-weight: 600; flex: none; }
       .errbar div { display: flex; gap: 10px; align-items: center; }
       .errbar span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .errbar button { height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--bad); background: var(--sf); color: var(--tx); cursor: pointer; font-weight: 600; flex: none; }
@@ -592,7 +596,7 @@ export class HhStudio extends StoreElement implements StudioHost {
             ${picked
               ? html`<div class="banner2" role="status"><span>Click a key or the screen for ${describeSource(s.config, picked)}</span><span class="sp"></span><button @click=${() => this.assigner.cancel()}>Cancel</button></div>`
               : nothing}
-            ${this.errorBar()}
+            ${this.errorBar()}${this.checkBar()}
             ${s.isFirstRun
               ? html`<div class="first" role="status">
                   <h2>Set Up Your First Hub Config</h2>
@@ -634,6 +638,20 @@ export class HhStudio extends StoreElement implements StudioHost {
     const shown = errs.slice(0, 2);
     return html`<div class="errbar" role="alert">${shown.map((e) => html`<div><span>${e.msg}</span>${errorTarget(e.path) ? html`<button @click=${() => this.showError(e.path)}>Show</button>` : nothing}</div>`)}
       ${errs.length > 2 ? html`<span class="muted">and ${errs.length - 2} more in the draft bar</span>` : nothing}</div>`;
+  }
+  /** Warnings that are not errors: a label over its class budget, a device with no glyph, a row with no action. */
+  private checkBar() {
+    const checks = studioChecks(this.store.config, (i) => this.st.previewOf(i));
+    if (!checks.length) return nothing;
+    const shown = checks.slice(0, 3);
+    return html`<div class="warnbar" role="status" aria-label="Checks">${shown.map((c) => html`<div><span>${c.msg}</span>${c.page !== undefined ? html`<button @click=${() => this.showCheck(c.page as number, c.index)}>Show</button>` : nothing}</div>`)}
+      ${checks.length > 3 ? html`<span class="muted">and ${checks.length - 3} more</span>` : nothing}</div>`;
+  }
+  private showCheck(page: number, index: number | undefined): void {
+    this.pop = null;
+    this.st.setPage(page, false);
+    if (index !== undefined) this.st.set({ sel: { kind: 'widget', page, index } });
+    this.st.say('Showing the check');
   }
   private pager() {
     const pp = this.st.previewOf(this.st.page);

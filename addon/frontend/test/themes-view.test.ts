@@ -106,12 +106,12 @@ describe('theme editor preview', () => {
     const root = el.shadowRoot!;
     const svg = root.querySelector('svg.pv')!;
     expect(svg.getBoundingClientRect).toBeTruthy();
-    // the sample's "Main" button: ACC text on S2
+    // the sample's "Main" button: ACC text on S1
     const texts = [...svg.querySelectorAll('g[data-i] text')];
     const main = texts.find((t) => t.textContent === 'Main')!;
     main.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
     await settle(el);
-    expect([...root.querySelectorAll('.tk.hl')].map((r) => r.getAttribute('data-token')).sort()).toEqual(['acc', 's2']);
+    expect([...root.querySelectorAll('.tk.hl')].map((r) => r.getAttribute('data-token')).sort()).toEqual(['acc', 's1']);
     const row = root.querySelector('[data-token="bad"]')!;
     row.dispatchEvent(new MouseEvent('mouseenter'));
     await settle(el);

@@ -18,7 +18,7 @@ import { deleteDevice, deleteItem, describeRef, findRefs, refHref, renameItem, t
 import { hashFor } from '../lib/router';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
-import { GROUPS, pretty, sourceAction, groupCommand, type Group, type Source } from '../lib/studio-model';
+import { GROUPS, derivedInputs, derivedInputsNote, materializeInputs, pretty, sourceAction, groupCommand, type Group, type Source } from '../lib/studio-model';
 import { byteCounter } from '../lib/codes';
 import { problemList } from '../components/parts';
 import { problemsFor, type Problem } from '../lib/problems';
@@ -118,6 +118,8 @@ export class HhDevices extends StoreElement {
   @state() private sel: string[] = [];
   @state() private adding: { where: 'inputs' | 'commands'; name: string } | null = null;
   @state() private bulkPorts = 7;
+  /** the derived-inputs editor: one row per input found in the commands */
+  @state() private derived: { device: string; rows: { command: string; label: string; name: string; hidden: boolean }[] } | null = null;
   private ha = new StudioState(this.store);
 
   override connectedCallback(): void {
@@ -291,8 +293,26 @@ export class HhDevices extends StoreElement {
     return html`
       <section class="grp" aria-label="Power keys"><h2>${stockIconSvg(groupIconId('power'))} Power</h2><div class="keys">${this.powerKeys(d)}${(by.get('power') ?? []).map(([n, c]) => this.key(d, 'commands', n, c))}${!d.power ? html`<span class="muted">No power control (see Power on the right)</span>` : nothing}</div></section>
       ${GROUPS.filter((g) => g !== 'power' && g !== 'inputs' && (by.get(g)?.length ?? 0) > 0).map((g) => this.groupBlock(d, g, by.get(g) ?? [], 'commands'))}
+      ${this.derivedBlock(d)}
       ${this.groupBlock(d, 'inputs', Object.entries(d.inputs ?? {}), 'inputs')}
       <div class="keys">${this.placeholder(d, 'commands', 'command')}</div>`;
+  }
+
+  /** "4 inputs found in commands": rename or hide each, then save them as the device's own inputs. */
+  private derivedBlock(d: Device) {
+    const note = derivedInputsNote(d);
+    if (!note) return nothing;
+    const ed = this.derived?.device === d.id ? this.derived : null;
+    if (!ed)
+      return html`<section class="card" aria-label="Derived inputs"><h2>Inputs</h2><p class="why">${note}. They show as rows on device and activity pages.</p>
+        <button class="btn sm" @click=${() => (this.derived = { device: d.id, rows: derivedInputs(d).map((i) => ({ command: i.command, label: i.label, name: i.label, hidden: false })) })}>Rename Or Hide</button></section>`;
+    const set = (i: number, patch: Partial<(typeof ed.rows)[number]>) => (this.derived = { ...ed, rows: ed.rows.map((r, n) => (n === i ? { ...r, ...patch } : r)) });
+    const next = materializeInputs(this.store.config, d.id, ed.rows);
+    return html`<section class="card" aria-label="Derived inputs"><h2>Inputs</h2><p class="why">${note}. Rename or hide each, then save.</p>
+      ${ed.rows.map((r, i) => html`<div class="haact"><label class="f">${r.label}<input type="text" aria-label="Name of ${r.label}" .value=${r.name} ?disabled=${r.hidden} @input=${(e: Event) => set(i, { name: (e.target as HTMLInputElement).value })} /></label>
+        <label class="f"><span><input type="checkbox" aria-label="Hide ${r.label}" .checked=${r.hidden} @change=${(e: Event) => set(i, { hidden: (e.target as HTMLInputElement).checked })} /> Hide</span></label></div>`)}
+      <div class="row"><button class="btn sm pri" ?disabled=${!next} @click=${() => { if (next) { this.put(next, undefined, `Save inputs of ${d.name ?? d.id}`); this.derived = null; } }}>Save As Inputs</button>
+        <button class="btn sm" @click=${() => (this.derived = null)}>Cancel</button>${next ? nothing : html`<span class="hint" role="alert">Each shown input needs its own name</span>`}</div></section>`;
   }
 
   // ------------------------------------------------------------ list view

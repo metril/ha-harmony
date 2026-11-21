@@ -139,11 +139,11 @@ export function widgetColors(w: WSpec, o: { active?: boolean; state?: TileState;
   }
   if (o.active) return wc(T.acc, T.onacc);
   switch (w.role) {
-    case 'primary': return wc(T.s2, T.acc, T.acc, T.tx2);
+    case 'primary': return wc(T.s1, T.acc, T.acc, T.tx2);
     case 'secondary': return wc(T.s1, T.tx2, T.tx3, T.tx3);
-    case 'danger': return wc(T.s2, T.bad);
-    case 'nav': return wc(T.s1, T.tx, T.acc, T.tx2);
-    default: return wc(T.s2, T.tx, T.tx2, T.tx2);
+    case 'danger': return wc(T.s1, T.bad);
+    case 'nav': return wc(T.s1, T.tx, T.tx, T.tx2);
+    default: return wc(T.s1, T.tx, T.tx, T.tx2);
   }
 }
 /** A coloured section label: its colour when readable on the ground, else TX. */

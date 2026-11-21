@@ -44,8 +44,9 @@ typedef struct {
   int title_idx;  /* widget shown as the bar title instead of in the grid, or -1 */
   int pressed;    /* widget index drawn pressed, or -1 */
   /* state screens and the empty page: main message and caption labels (else NULL) */
-  lv_obj_t *msg, *cap;
-  int msg_bad;          /* msg drawn in the BAD colour (else TX) */
+  lv_obj_t *msg, *cap, *msg_ico;
+  int msg_bad;          /* msg drawn in the BAD colour (else TX); the icon is BAD too, else ACC */
+  uint8_t nav_depth;    /* back stack depth of the page on screen (app.c); the header shows a chevron above 1 */
   lv_obj_t *err_msg;    /* the error overlay's headline */
   lv_obj_t *prog_fill;  /* receiving screen: progress bar fill */
   int recv_total;       /* receiving screen showing "k of N" (N), else 0 */
@@ -72,11 +73,13 @@ void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p); /* a v2 page also applies
 /* The custom theme (99-byte wire form) for pages with theme id 7; until one is set such pages use the default preset.
  * 0 ok, -1 invalid (the previous one is kept). */
 int ra_ui_set_custom_theme(const uint8_t *bytes, size_t n);
-void ra_ui_show_boot(ra_ui_t *ui);      /* "Connecting" */
+/* Back stack depth of the page about to be shown (app.c sets it before ra_ui_show_page); > 1 draws the header chevron. */
+void ra_ui_set_depth(ra_ui_t *ui, unsigned depth);
+void ra_ui_show_boot(ra_ui_t *ui);      /* "Connecting to Hub" */
 void ra_ui_show_receiving(ra_ui_t *ui); /* hub heard, no page yet */
-/* "Receiving page k of N" with a progress bar; called again it only updates the texts and the bar. */
+/* "Receiving Pages", "k of N" and a progress bar; called again it only updates the texts and the bar. */
 void ra_ui_show_receiving_n(ra_ui_t *ui, unsigned k, unsigned n);
-void ra_ui_show_fallback(ra_ui_t *ui);  /* "Hub unreachable" */
+void ra_ui_show_fallback(ra_ui_t *ui);  /* "Hub Unreachable" */
 /* 0 ok; <0 as hp_page_set_tile_text, or -HP_E_NOENT when page_id is not the page on screen. */
 int ra_ui_tile_text(ra_ui_t *ui, uint8_t page_id, uint8_t tile_id, const char *text, size_t len);
 /* tile_state: sets the tile's state (hp_tile_state_t) and text on the page on screen and redraws only that tile. */

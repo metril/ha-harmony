@@ -8,7 +8,7 @@ import { abbreviate, displayName } from '../src/lib/key-names';
 describe('text-fit: shared vectors', () => {
   for (const c of fixture.cases) {
     it(c.name, () => {
-      const page = { cols: c.cols, rows: c.rows };
+      const page = { cols: c.cols, rows: c.rows, fixed: 'fixed' in c };
       const w = c.widget as FitWidget;
       const b = labelBudget(page, w);
       if (c.expect === null) return expect(b).toBeNull();

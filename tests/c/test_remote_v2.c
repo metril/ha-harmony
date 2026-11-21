@@ -152,7 +152,7 @@ static void test_fill_receiving_then_home(void) {
   push(0, 4, 5, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "Zero", a, 1);
   step();
   CT_EQ(app.ui.page.page_id, RA_UI_PAGE_RECEIVING);
-  CT_CHECK(!strcmp(msg_text(), "Receiving page"));
+  CT_CHECK(!strcmp(msg_text(), "Receiving Pages"));
   CT_CHECK(!strcmp(cap_text(), "1 of 4"));
   push(2, 4, 5, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "Two", a, 1); /* out of order is fine */
   step();
@@ -570,12 +570,14 @@ static void test_tile_state_is_kept_for_pages_off_screen(void) {
   CT_EQ(hp_store_get(&app.store, 1, &p), 0);
   CT_EQ(p.widgets[0].tstate, HP_TILE_ON);
   CT_CHECK(!strcmp(p.widgets[0].text, "On"));
-  /* a stale caption while the link is lost, gone when the hub speaks */
+  /* the state reads "stale" while the link is lost (the name stays), back when the hub speaks */
   fkl_push_kind(&lk, APP_LINK_EV_FAILED);
   step();
-  CT_CHECK(!strcmp(lv_label_get_text(app.ui.wcap[0]), "stale"));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.lbl[0]), "stale"));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.wcap[0]), "Lamp"));
   fkl_push_kind(&lk, APP_LINK_EV_ALIVE);
   step();
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.lbl[0]), "n/a"));
   CT_CHECK(!strcmp(lv_label_get_text(app.ui.wcap[0]), "Lamp"));
   app_destroy(&app);
 }
@@ -591,7 +593,7 @@ static void test_v1_page_still_works_and_is_not_stored(void) {
   app_destroy(&app);
 }
 
-/* the icon + label group's left and right margins inside widget i (label text clipped to its width) */
+/* the icon + label group's visible left and right margins inside widget i (label text clipped to its width; the surface has 4 px side padding) */
 static void margins(int i, int *left, int *right) {
   lv_obj_update_layout(app.ui.lbl[i]);
   int bw = lv_obj_get_width(lv_obj_get_parent(app.ui.lbl[i]));
@@ -601,8 +603,8 @@ static void margins(int i, int *left, int *right) {
     if (il < gl) gl = il;
     if (ir > gr) gr = ir;
   }
-  *left = gl;
-  *right = bw - gr;
+  *left = gl + 4;
+  *right = bw - gr - 4;
 }
 #define near(a, b) do { int na_ = (a), nb_ = (b); if (na_ - nb_ > 3 || nb_ - na_ > 3) fprintf(stderr, "near %d vs %d\n", na_, nb_); CT_CHECK(na_ - nb_ <= 3 && nb_ - na_ <= 3); } while (0)
 
@@ -620,8 +622,8 @@ static void test_align_wide_short_card(void) {
   margins(0, &l0, &r0); margins(1, &l1, &r1); margins(2, &l2, &r2);
   near(l0, r0);
   CT_CHECK(l0 > 20);
-  near(l1, 12);
-  near(r2, 12);
+  near(l1, 10);
+  near(r2, 10);
   g_cols = 2; g_rows = 3;
   app_destroy(&app);
 }
@@ -643,8 +645,8 @@ static void test_align_big_card(void) {
   int x[3], iw = lv_obj_get_width(app.ui.ico[0]);
   for (int i = 0; i < 3; i++) x[i] = lv_obj_get_x(app.ui.ico[i]);
   near(x[0] * 2 + iw, cw); /* centred */
-  near(x[1], 12); /* left */
-  near(cw - (x[2] + iw), 12); /* right */
+  near(x[1] + 4, 10); /* left: the icon cell starts 10 px in, the 32 px glyph 12 */
+  near(cw + 4 - (x[2] + iw), 10); /* right */
   CT_CHECK(lv_obj_get_style_text_align(app.ui.lbl[0], 0) == LV_TEXT_ALIGN_CENTER);
   CT_CHECK(lv_obj_get_style_text_align(app.ui.lbl[1], 0) == LV_TEXT_ALIGN_LEFT);
   CT_CHECK(lv_obj_get_style_text_align(app.ui.lbl[2], 0) == LV_TEXT_ALIGN_RIGHT);
@@ -686,10 +688,10 @@ static void test_align_row(void) {
   CT_CHECK(l[0] > 20);
   near(l[1], 12);
   near(r[2], 12);
-  /* with the chevron: the group lives in the width left of it (36 px) */
-  near(l[3], r[3] - 36);
-  near(l[4], 12);
-  near(r[5], 36 + 12);
+  /* with the chevron: the group lives in the width left of it (8 + 20 + 10 px) */
+  near(l[3], r[3] - 38);
+  near(l[4], 10);
+  near(r[5], 38 + 10);
   g_cols = 2; g_rows = 3;
   app_destroy(&app);
 }
