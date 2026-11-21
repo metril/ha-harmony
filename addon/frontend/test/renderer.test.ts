@@ -74,23 +74,52 @@ describe('page renderer: v2 looks', () => {
     const idle = layoutPage(full, { activeAct: null }).prims.find((p) => p.t === 'rect' && p.wi === 0);
     expect(idle).toMatchObject({ fill: PAL.s2 });
   });
-  it('align centre moves a row button\'s icon + label group to the middle; default stays left', () => {
-    const row = { kind: 'button', id: 1, x: 0, y: 0, w: 2, h: 1, label: 'Go', role: 'default', shape: 'row', icon_only: false, icon: 1, bind: null } as V2Page['widgets'][number];
-    const at = (w: V2Page['widgets'][number]) => layoutPage({ ...full, widgets: [w] }).prims.find((p) => p.t === 'icon' && p.wi === 0) as Extract<Prim, { t: 'icon' }>;
-    expect(at(row).x).toBeLessThan(30);
-    expect(at({ ...row, align_center: true }).x).toBeGreaterThan(36);
+  type W = V2Page['widgets'][number];
+  const mk = (o: Partial<W>): W => ({ kind: 'button', id: 1, x: 0, y: 0, w: 2, h: 1, label: 'Go', role: 'default', shape: 'row', icon_only: false, icon: 1, bind: null, ...o }) as W;
+  const prim = (page: V2Page, wi: number, t: 'icon' | 'text', id?: number) => layoutPage(page).prims.find((p) => p.t === t && p.wi === wi && (id === undefined || (p as Extract<Prim, { t: 'icon' }>).id === id)) as never as { x: number; anchor?: string };
+  const one = (w: W, cols = 4, rows = 8) => ({ ...full, cols, rows, widgets: [w] }) as V2Page;
+  it('every shape centres by default; left and right are explicit (row, pill, wide card)', () => {
+    for (const shape of ['row', 'pill', 'card']) {
+      const w = mk({ shape, w: 4 });
+      const c = prim(one(w), 0, 'icon', 1).x;
+      const l = prim(one({ ...w, align: 'left' }), 0, 'icon', 1).x;
+      const r = prim(one({ ...w, align: 'right' }), 0, 'icon', 1).x;
+      expect(c).toBeGreaterThan(36);
+      expect(l).toBeLessThan(c - 20);
+      expect(r).toBeGreaterThan(c);
+    }
   });
-  it('trailing draws a right-aligned chevron and centres in the width left of it', () => {
-    const row = { kind: 'button', id: 1, x: 0, y: 0, w: 2, h: 1, label: 'Go', role: 'default', shape: 'row', icon_only: false, icon: 1, bind: null } as V2Page['widgets'][number];
-    const ic = (w: V2Page['widgets'][number], id: number) => layoutPage({ ...full, widgets: [w] }).prims.find((p) => p.t === 'icon' && p.wi === 0 && p.id === id) as Extract<Prim, { t: 'icon' }>;
+  it('a 1-column page: card buttons and row buttons are both centred', () => {
+    const page = { ...full, cols: 1, rows: 6, widgets: [mk({ w: 1, shape: 'card', icon: 0, label: 'Watch TV' }), mk({ id: 2, y: 1, w: 1, shape: 'row', icon: 0, label: 'Listen' })] } as V2Page;
+    for (const wi of [0, 1]) expect(prim(page, wi, 'text')).toMatchObject({ anchor: 'middle' });
+    const left = { ...page, widgets: page.widgets.map((w) => ({ ...w, align: 'left' as const })) } as V2Page;
+    for (const wi of [0, 1]) expect(prim(left, wi, 'text')).toMatchObject({ anchor: 'start' });
+  });
+  it('a big card stacks icon over label and honours align; a dense card stays centred', () => {
+    const big = mk({ shape: 'card', w: 4, h: 3, label: 'Big' });
+    const rect = layoutPage(one(big)).prims.find((p) => p.t === 'rect' && p.wi === 0) as Extract<Prim, { t: 'rect' }>;
+    expect(rect.w).toBeGreaterThanOrEqual(100);
+    expect(rect.h).toBeGreaterThanOrEqual(80);
+    expect(prim(one(big), 0, 'text')).toMatchObject({ anchor: 'middle' });
+    expect(prim(one({ ...big, align: 'left' }), 0, 'text')).toMatchObject({ anchor: 'start', x: rect.x + 12 });
+    expect(prim(one({ ...big, align: 'right' }), 0, 'text')).toMatchObject({ anchor: 'end', x: rect.x + rect.w - 12 });
+    const dense = mk({ shape: 'card', w: 1, h: 3, label: 'D' });
+    expect(prim(one({ ...dense, align: 'left' }), 0, 'text')).toMatchObject({ anchor: 'middle' });
+  });
+  it('trailing draws a right-aligned chevron on a row; align works in the width left of it', () => {
+    const row = mk({ w: 4 });
+    const ic = (w: W, id: number) => prim(one(w), 0, 'icon', id);
     expect(ic(row, 8)).toBeUndefined();
     const t = { ...row, trailing: true };
-    const rect = layoutPage({ ...full, widgets: [t] }).prims.find((p) => p.t === 'rect' && p.wi === 0) as Extract<Prim, { t: 'rect' }>;
+    const rect = layoutPage(one(t)).prims.find((p) => p.t === 'rect' && p.wi === 0) as Extract<Prim, { t: 'rect' }>;
     expect(ic(t, 8).x + 24).toBeCloseTo(rect.x + rect.w - 8 - 2, 0);
-    expect(ic({ ...t, align_center: true }, 1).x).toBeLessThan(ic({ ...row, align_center: true }, 1).x);
-    const lab = (w: V2Page['widgets'][number]) => layoutPage({ ...full, widgets: [w] }).prims.find((p) => p.t === 'text' && p.wi === 0) as Extract<Prim, { t: 'text' }>;
-    const nl = { ...row, icon: 0, align_center: true };
+    expect(ic(t, 1).x).toBeLessThan(ic(row, 1).x);
+    expect(ic({ ...t, align: 'right' }, 1).x).toBeGreaterThan(ic(t, 1).x);
+    expect(ic({ ...t, align: 'right' }, 1).x).toBeLessThan(ic({ ...row, align: 'right' }, 1).x);
+    const lab = (w: W) => prim(one(w), 0, 'text');
+    const nl = { ...row, icon: 0 };
     expect(lab({ ...nl, trailing: true }).x).toBeLessThan(lab(nl).x);
+    expect(lab({ ...nl, trailing: true, align: 'right' }).x).toBeLessThan(lab({ ...nl, align: 'right' }).x);
   });
   it('tiles show on, off and unavailable', () => {
     const page: V2Page = { ...full, back: false, seq: null, widgets: [0, 1, 2].map((i) => ({ kind: 'tile', id: i, x: 0, y: i * 2, w: 4, h: 2, label: 'T' + i, role: 'default', shape: 'card', icon_only: false, icon: 0, bind: null })) };

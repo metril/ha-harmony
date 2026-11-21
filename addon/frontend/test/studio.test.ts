@@ -171,6 +171,22 @@ describe('remote studio', () => {
     await tick(insp);
   };
 
+  it('Align: a three-way icon toggle; Center is the default and clears the key', async () => {
+    const { insp, store } = await inspectorFor({ kind: 'widget', page: 0, index: 0 });
+    const btn = (n: string) => insp.shadowRoot.querySelector(`.ali button[aria-label="${n}"]`) as HTMLButtonElement;
+    expect(['Align Left', 'Align Center', 'Align Right'].map((n) => btn(n).getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false']);
+    btn('Align Right').click();
+    await tick(insp);
+    expect(store.config.pages![0]!.widgets[0]!.align).toBe('right');
+    expect(btn('Align Right').getAttribute('aria-pressed')).toBe('true');
+    btn('Align Left').click();
+    await tick(insp);
+    expect(store.config.pages![0]!.widgets[0]!.align).toBe('left');
+    btn('Align Center').click();
+    await tick(insp);
+    expect('align' in store.config.pages![0]!.widgets[0]!).toBe(false);
+  });
+
   it('tile "When Tapped": Automatic by default and says what runs; Toggle, Action and Nothing write the tap schema', async () => {
     const { insp, store } = await inspectorFor({ kind: 'widget', page: 0, index: 1 });
     expect(insp.shadowRoot.textContent).toContain('Automatic: a tap runs light.toggle on light.lamp.');

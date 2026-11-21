@@ -500,12 +500,14 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
       lv_obj_align(ch, LV_ALIGN_RIGHT_MID, -8, 0);
     }
     int x0 = 12, gap = ic ? px + 8 : 0;
-    if (w->align_center && l) { /* icon + label as one group, centred in the space left of the chevron */
+    if (w->align != HP_ALIGN_LEFT && l) { /* icon + label as one group, in the space left of the chevron */
       int room = bw - (w->trailing ? 8 + 28 : 0);
       int tw = lv_text_get_width(txt, (uint32_t)strlen(txt), lv_obj_get_style_text_font(l, 0), 0) + 2;
       int lw = lbl_w;
       if (tw < lw) { lv_obj_set_width(l, tw); lw = tw; }
-      if (room - gap - lw >= 24) x0 = (room - gap - lw) / 2;
+      if (w->align == HP_ALIGN_RIGHT) {
+        if (room - gap - lw - 12 >= 12) x0 = room - gap - lw - 12;
+      } else if (room - gap - lw >= 24) x0 = (room - gap - lw) / 2;
     }
     if (ic) lv_obj_align(ic, LV_ALIGN_LEFT_MID, x0, 0);
     if (l) {
@@ -513,11 +515,13 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
       lv_obj_align(l, LV_ALIGN_LEFT_MID, x0 + gap, 0);
     }
   } else if (big) {
-    int c = w->align_center;
-    if (ic) lv_obj_align(ic, c ? LV_ALIGN_TOP_MID : LV_ALIGN_TOP_LEFT, c ? 0 : 12, 12);
+    lv_align_t ia = w->align == HP_ALIGN_LEFT ? LV_ALIGN_TOP_LEFT : w->align == HP_ALIGN_RIGHT ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_MID;
+    lv_align_t la = w->align == HP_ALIGN_LEFT ? LV_ALIGN_BOTTOM_LEFT : w->align == HP_ALIGN_RIGHT ? LV_ALIGN_BOTTOM_RIGHT : LV_ALIGN_BOTTOM_MID;
+    int dx = w->align == HP_ALIGN_LEFT ? 12 : w->align == HP_ALIGN_RIGHT ? -12 : 0;
+    if (ic) lv_obj_align(ic, ia, dx, 12);
     if (l) {
-      lv_obj_set_style_text_align(l, c ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT, 0);
-      lv_obj_align(l, c ? LV_ALIGN_BOTTOM_MID : LV_ALIGN_BOTTOM_LEFT, c ? 0 : 12, -12);
+      lv_obj_set_style_text_align(l, w->align == HP_ALIGN_LEFT ? LV_TEXT_ALIGN_LEFT : w->align == HP_ALIGN_RIGHT ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_CENTER, 0);
+      lv_obj_align(l, la, dx, -12);
     }
   } else if (ic && l) { /* dense: icon over label, both centred */
     int ih = lv_font_get_line_height(icon_font(px)), lh = lv_font_get_line_height(lv_obj_get_style_text_font(l, 0));

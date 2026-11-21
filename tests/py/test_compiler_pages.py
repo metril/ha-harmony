@@ -359,18 +359,27 @@ def test_device_icon_must_be_a_known_stock_icon_and_is_valid_on_every_device_kin
     assert parse_model(bt, "t.yaml")["devices"][0]["icon"] == "game"
 
 
-def test_align_center_reaches_the_wire_and_default_is_unchanged():
+def test_align_reaches_the_wire_and_centre_is_the_default():
     c = comp(
         page(
-            btn("a", 0, 0, "A", ", align: center")
+            btn("a", 0, 0, "A", ", align: left")
             + ","
-            + btn("b", 1, 0, "B")
+            + btn("b", 1, 0, "B", ", align: center")
             + ","
-            + btn("c", 2, 0, "C", ", align: left")
+            + btn("c", 2, 0, "C")
+            + ","
+            + btn("d", 3, 0, "D", ", shape: row, align: right")
+            + ","
+            + btn("e", 0, 1, "E", ", shape: row")
+            + ","
+            + btn("f", 1, 1, "F", ", shape: pill, align: left")
         )
     )
-    a, b, d = decode_page(encode(c.models[0], 2)).widgets[:3]
-    assert (a.align_center, b.align_center, d.align_center) == (True, False, False)
-    assert a.label == "A" and not a.trailing
+    ws = decode_page(encode(c.models[0], 2)).widgets[:6]
+    assert [w.align for w in ws] == ["left", "center", "center", "right", "center", "left"]
+    assert ws[0].label == "A" and not ws[0].trailing
+    # alignment rides in the kind byte: no extra bytes
+    plain = encode(comp(page(btn("a", 0, 0, "A"))).models[0], 2)
+    assert len(encode(comp(page(btn("a", 0, 0, "A", ", align: right"))).models[0], 2)) == len(plain)
     with pytest.raises(ConfigError):
-        comp(page(btn("a", 0, 0, "A", ", align: right")))
+        comp(page(btn("a", 0, 0, "A", ", align: justify")))

@@ -1,4 +1,4 @@
-import { LitElement, css, html, nothing } from 'lit';
+import { LitElement, css, html, nothing, svg } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Assigner } from '../lib/assigner';
 import { stockIconSvg } from '../lib/icon-shapes';
@@ -23,6 +23,12 @@ import { tileDefaultTap } from '../lib/permissions';
 
 const ROLES = ['default', 'primary', 'secondary', 'danger'] as const;
 const SHAPES = ['card', 'row', 'pill', 'monogram'] as const;
+/** Alignment of the icon + label group; centre is the default for every shape, so choosing it clears `align`. */
+const ALIGNS = [
+  { v: 'left', name: 'Align Left', d: 'M4 6h16M4 12h10M4 18h13' },
+  { v: 'center', name: 'Align Center', d: 'M4 6h16M7 12h10M5.5 18h13' },
+  { v: 'right', name: 'Align Right', d: 'M4 6h16M10 12h10M7 18h13' },
+] as const;
 
 /** Right pane: layer summary, hard key, widget or page settings. */
 @customElement('hh-inspector')
@@ -42,6 +48,11 @@ export class HhInspector extends LitElement {
       .seg { display: flex; flex-wrap: wrap; gap: 4px; }
       .seg button { height: 30px; padding: 0 10px; border-radius: 15px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); cursor: pointer; font-size: 12px; font-weight: 600; text-transform: capitalize; }
       .seg button[aria-pressed="true"] { background: var(--accs); border-color: var(--acc); color: var(--tx); }
+      .ali { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 500; color: var(--tx2); }
+      .ali .grp { display: flex; gap: 4px; }
+      .ali button { width: 36px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx2); cursor: pointer; }
+      .ali button[aria-pressed="true"] { background: var(--accs); border-color: var(--acc); color: var(--tx); }
+      .ali svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
       .sw { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
       .sw button { display: grid; gap: 4px; justify-items: center; padding: 6px 2px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx2); font-size: 11px; cursor: pointer; text-transform: capitalize; }
       .sw button[aria-pressed="true"] { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); color: var(--tx); }
@@ -191,7 +202,9 @@ export class HhInspector extends LitElement {
         ? html`<div class="sec"><h3>Look</h3>
             <div class="sw" role="group" aria-label="Role">${ROLES.map((r) => html`<button class="r-${r}" aria-pressed=${(w.role ?? 'default') === r} ?disabled=${!!navVal} @click=${() => this.widgetPatch(pi, wi, { role: r === 'default' ? undefined : r })}><i></i>${r}</button>`)}</div>
             <div class="sw" role="group" aria-label="Shape">${SHAPES.map((s) => html`<button class="s-${s}" aria-pressed=${(w.shape ?? 'card') === s} @click=${() => this.widgetPatch(pi, wi, { shape: s === 'card' ? undefined : s })}><i></i>${s}</button>`)}</div>
-            <label>Align <select @change=${(e: Event) => this.widgetPatch(pi, wi, { align: (e.target as HTMLSelectElement).value || undefined })}>${[['', 'Default'], ['left', 'Left'], ['center', 'Center']].map(([v, n]) => html`<option value=${v} ?selected=${(w.align ?? '') === v}>${n}</option>`)}</select></label>
+            ${w.icon_only || w.shape === 'monogram'
+              ? nothing
+              : html`<div class="ali"><span id="ali-l">Align</span><div class="grp" role="group" aria-labelledby="ali-l">${ALIGNS.map((o) => html`<button type="button" aria-pressed=${(w.align ?? 'center') === o.v} aria-label=${o.name} title=${o.name} @click=${() => this.widgetPatch(pi, wi, { align: o.v === 'center' ? undefined : o.v })}>${svg`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d=${o.d}></path></svg>`}</button>`)}</div></div>`}
             ${this.colourRows(pi, wi, w)}
             <label>Icon <input type="search" placeholder="Search icons" .value=${this.iconQ} @input=${(e: Event) => (this.iconQ = (e.target as HTMLInputElement).value)} /></label>
             <div class="icons" role="group" aria-label="Icon">

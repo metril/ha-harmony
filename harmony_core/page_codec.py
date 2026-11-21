@@ -25,15 +25,15 @@ _KIND_NAMES = {v: k for k, v in KINDS.items()}
 PAGE_KINDS = ("normal", "home", "favorites")
 ROLES = ("default", "primary", "secondary", "danger", "nav")
 SHAPES = ("card", "row", "pill", "monogram")
+ALIGNS = ("center", "left", "right")  # kind bits 2-3: 0 centre (default), 1 left, 2 right, 3 rejected
 ICON_STOCK_MAX = 159
 ICON_CUSTOM_MAX = 254
 
 # widget kind byte
 _HAS_STYLE, _HAS_ICON, _HAS_BIND, _HAS_COLOR = 0x10, 0x20, 0x40, 0x80
-_KIND_RESERVED = 0x0C  # bits 2, 3
+_ALIGN_SHIFT = 2  # kind bits 2-3: alignment, an index into ALIGNS
 _ICON_ONLY = 0x20
 _TRAILING = 0x40  # style bit 6: trailing chevron (nav role only)
-_ALIGN_CENTER = 0x80  # style bit 7: centre the icon + label group (default: left)
 _BACK = 0x04
 _THEME_SHIFT, _THEME_MASK = (
     3,
@@ -62,7 +62,7 @@ class Widget:
     )
     on_color: str | None = None  # v2, tiles only: fill when on; same forms
     trailing: bool = False  # v2: draw a trailing chevron (nav role only)
-    align_center: bool = False  # v2: centre the icon + label group instead of left-aligning
+    align: str = "center"  # v2: kind bits 2-3 (centre is the default and costs nothing)
 
 
 @dataclass(frozen=True)
@@ -213,7 +213,6 @@ def widget_cost(w: Widget) -> dict[str, int]:
         | SHAPES.index(w.shape) << 3
         | (_ICON_ONLY if w.icon_only else 0)
         | (_TRAILING if w.trailing else 0)
-        | (_ALIGN_CENTER if w.align_center else 0)
     )
     return {
         "base": WIDGET_BYTES,
@@ -230,13 +229,13 @@ def _widget_bytes(w: Widget, v2: bool) -> bytes:
     kind = KINDS[w.kind]
     extra = b""
     if v2:
+        kind |= ALIGNS.index(w.align) << _ALIGN_SHIFT
         style = (
             ROLES.index(w.role)
             | SHAPES.index(w.shape) << 3
             | (_ICON_ONLY if w.icon_only else 0)
             | (_TRAILING if w.trailing else 0)
-            | (_ALIGN_CENTER if w.align_center else 0)
-        )
+            )
         if style:
             kind |= _HAS_STYLE
             extra += bytes([style])
@@ -375,10 +374,11 @@ def decode_page(data: bytes) -> Page:
         off += 1
         if not v2 and kind > 2:
             raise ValueError(f"unknown widget kind {kind}")
-        if v2 and (kind & _KIND_RESERVED or kind & 3 == 3):
+        if v2 and (kind & 3 == 3 or (kind >> _ALIGN_SHIFT) & 3 == 3):
             raise ValueError(f"bad widget kind byte {kind:#04x}")
         role, shape, icon_only, icon, bind = "default", "card", False, 0, None
-        trailing = align_center = False
+        trailing = False
+        align = ALIGNS[(kind >> _ALIGN_SHIFT) & 3] if v2 else "center"
         color = on_color = None
         wid, xy, wh = data[off : off + 3]
         off += 3
@@ -393,7 +393,6 @@ def decode_page(data: bytes) -> Page:
                     raise ValueError(f"bad style byte {s:#04x}")
                 role, shape, icon_only = ROLES[s & 7], SHAPES[(s >> 3) & 3], bool(s & _ICON_ONLY)
                 trailing = bool(s & _TRAILING)
-                align_center = bool(s & _ALIGN_CENTER)
             if kind & _HAS_ICON:
                 icon = data[off]
                 off += 1
@@ -439,7 +438,7 @@ def decode_page(data: bytes) -> Page:
                 color,
                 on_color,
                 trailing,
-                align_center,
+                align,
             )
         )
     if off != len(data):
@@ -481,7 +480,7 @@ def page_to_dict(page: Page) -> dict[str, Any]:
                 "color": w.color,
                 "on_color": w.on_color,
                 **({"trailing": True} if w.trailing else {}),
-                **({"align_center": True} if w.align_center else {}),
+                **({"align": w.align} if w.align != "center" else {}),
             }
             for w in page.widgets
         ],

@@ -1993,7 +1993,7 @@ exports[`page renderer: shared golden vectors > draws v2_all_options 1`] = `
       "size": 20,
       "t": "icon",
       "wi": 0,
-      "x": 20,
+      "x": 26.4,
       "y": 48,
     },
     {
@@ -2004,7 +2004,7 @@ exports[`page renderer: shared golden vectors > draws v2_all_options 1`] = `
       "t": "text",
       "weight": 500,
       "wi": 0,
-      "x": 48,
+      "x": 54.4,
       "y": 63.6,
     },
     {
@@ -2044,7 +2044,7 @@ exports[`page renderer: shared golden vectors > draws v2_all_options 1`] = `
       "size": 20,
       "t": "icon",
       "wi": 2,
-      "x": 20,
+      "x": 16,
       "y": 94,
     },
     {
@@ -2055,7 +2055,7 @@ exports[`page renderer: shared golden vectors > draws v2_all_options 1`] = `
       "t": "text",
       "weight": 500,
       "wi": 2,
-      "x": 48,
+      "x": 44,
       "y": 108.2,
     },
     {

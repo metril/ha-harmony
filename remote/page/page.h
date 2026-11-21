@@ -40,11 +40,13 @@ typedef struct {
     uint16_t value; /* palette index (1..12) or RGB565 */
 } hp_color_t;
 
+typedef enum { HP_ALIGN_CENTER = 0, HP_ALIGN_LEFT = 1, HP_ALIGN_RIGHT = 2 } hp_align_t;
+
 typedef struct {
     uint8_t kind, id, x, y, w, h;
     uint8_t role, shape, icon_only; /* v2; v1: default / card / 0 */
     uint8_t trailing;               /* nav row: chevron at the right edge */
-    uint8_t align_center;           /* centre the icon + label group (default: left) */
+    uint8_t align;                  /* hp_align_t: icon + label group alignment (kind bits 2-3) */
     uint8_t icon;                   /* 0 none, 1..159 stock, 160..254 custom */
     uint8_t has_bind, bind;         /* role nav: target page id; else the activity index that makes it "active" */
     uint8_t tstate;                 /* live tile state (hp_tile_state_t), not on the wire in the page */

@@ -128,7 +128,7 @@ pages:
   Home Assistant and any other action runs on the hub.
 - **Widget keys**: `icon: <name>|none` (`proto/icons.yaml`), `role: default|primary|secondary|danger`,
   `shape: card|row|pill|monogram` (list pages and `nav` default `row`), `icon_only: true` (label kept, not drawn),
-  `align: left|center` (default `left`: icon + label sit at the left of row and big-card buttons; `center` centres them as a group, left of a nav chevron; dense buttons are always centred),
+  `align: left|center|right` (default `center` for every shape: the icon + label group sits in the middle of the button, in the width left of a nav chevron; `left` / `right` put it at that side with a 12 px inset; dense and icon-only buttons are always centred),
   `nav: next|prev|home|<page id>` (button without `action`; handled on the remote, no key event).
 - **Inference** (compiler only; explicit keys always win): `{activity: off}` or a label like "power
   off"/"all off" -> role `danger`, icon `power`; `{activity: X}` -> `bind` X (active highlight) and an

@@ -25,10 +25,12 @@ static void settle(void) {
 
 /* ---- a tiny v2 encoder: header + widgets ---- */
 typedef struct {
-  uint8_t kind, id, x, y, w, h, role, shape, icon, only; /* only: 1 = icon_only, 2 = align center (style bit 7) */
+  uint8_t kind, id, x, y, w, h, role, shape, icon, only; /* only: 1 = icon_only, 3 = trailing chevron */
   int bind; /* -1 none */
   const char *label;
+  uint8_t align; /* 0 centre (default), 1 left, 2 right: kind bits 2-3 */
 } ws_t;
+static int g_cols = 2, g_rows = 3; /* the grid push() encodes */
 
 static size_t enc(uint8_t *o, int id, int total, int gen, int kind, int back, int idx, int cnt, int act, const char *title,
                   int cols, int rows, const ws_t *w, int n) {
@@ -39,8 +41,8 @@ static size_t enc(uint8_t *o, int id, int total, int gen, int kind, int back, in
   if (tl) memcpy(o + k, title, tl);
   k += tl;
   for (int i = 0; i < n; i++) {
-    uint8_t style = (uint8_t)(w[i].role | (w[i].shape << 3) | (w[i].only == 1 ? 0x20 : 0) | (w[i].only == 2 ? 0x80 : 0));
-    uint8_t kb = (uint8_t)(w[i].kind | (style ? 0x10 : 0) | (w[i].icon ? 0x20 : 0) | (w[i].bind >= 0 ? 0x40 : 0));
+    uint8_t style = (uint8_t)(w[i].role | (w[i].shape << 3) | (w[i].only == 1 ? 0x20 : 0) | (w[i].only == 3 ? 0x40 : 0));
+    uint8_t kb = (uint8_t)(w[i].kind | (w[i].align << 2) | (style ? 0x10 : 0) | (w[i].icon ? 0x20 : 0) | (w[i].bind >= 0 ? 0x40 : 0));
     o[k++] = kb; o[k++] = w[i].id; o[k++] = (uint8_t)((w[i].x << 4) | w[i].y); o[k++] = (uint8_t)((w[i].w << 4) | w[i].h);
     if (style) o[k++] = style;
     if (w[i].icon) o[k++] = w[i].icon;
@@ -56,7 +58,7 @@ static size_t enc(uint8_t *o, int id, int total, int gen, int kind, int back, in
 static void push(int id, int total, int gen, int kind, int back, int idx, int cnt, int act, const char *title, const ws_t *w,
                  int n) {
   uint8_t raw[HP_PAGE_MAX_BYTES];
-  size_t len = enc(raw, id, total, gen, kind, back, idx, cnt, act, title, 2, 3, w, n);
+  size_t len = enc(raw, id, total, gen, kind, back, idx, cnt, act, title, g_cols, g_rows, w, n);
   CT_CHECK(len <= HP_PAGE_MAX_BYTES);
   fkl_push_page(&lk, raw, len);
 }
@@ -77,7 +79,7 @@ static void tilestate(int page, int tile, int st, const char *text) {
   snprintf(e->text, sizeof e->text, "%s", text);
 }
 
-static const ws_t BTN = {HP_WIDGET_BUTTON, 1, 0, 0, 2, 1, HP_ROLE_DEFAULT, HP_SHAPE_CARD, RA_ICON_TV, 0, 0, "Go"};
+static const ws_t BTN = {HP_WIDGET_BUTTON, 1, 0, 0, 2, 1, HP_ROLE_DEFAULT, HP_SHAPE_CARD, RA_ICON_TV, 0, 0, "Go", 0};
 static ws_t one(int id, int role, int icon, int bind, const char *label) {
   ws_t w = BTN;
   w.id = (uint8_t)id;
@@ -427,7 +429,7 @@ static void test_missing_nav_target_toasts_and_stays(void) {
 
 /* ---- review fixes: receiving timeout, dead touch, v1 <-> v2 ---- */
 
-static const ws_t A1 = {HP_WIDGET_BUTTON, 1, 0, 0, 2, 1, 0, 0, 0, 0, -1, "A"};
+static const ws_t A1 = {HP_WIDGET_BUTTON, 1, 0, 0, 2, 1, 0, 0, 0, 0, -1, "A", 0};
 
 static void test_incomplete_set_shows_best_page_after_10s(void) {
   start();
@@ -554,7 +556,7 @@ static void test_v1_then_identical_v2_set_switches_to_v2(void) {
 
 static void test_tile_state_is_kept_for_pages_off_screen(void) {
   start();
-  ws_t t[] = {{HP_WIDGET_TILE, 1, 0, 0, 2, 1, 0, 0, RA_ICON_BULB, 0, -1, "Lamp"}};
+  ws_t t[] = {{HP_WIDGET_TILE, 1, 0, 0, 2, 1, 0, 0, RA_ICON_BULB, 0, -1, "Lamp", 0}};
   push(0, 2, 4, HP_PAGE_KIND_HOME, 0, 0, 0, 0, "Home", t, 1);
   push(1, 2, 4, HP_PAGE_KIND_NORMAL, 0, 0, 0, 0, "Other", t, 1);
   settle();
@@ -589,22 +591,90 @@ static void test_v1_page_still_works_and_is_not_stored(void) {
   app_destroy(&app);
 }
 
-static void test_align_center_moves_row_label_right(void) {
+/* the icon + label group's left and right margins inside widget i (label text clipped to its width) */
+static void margins(int i, int *left, int *right) {
+  lv_obj_update_layout(app.ui.lbl[i]);
+  int bw = lv_obj_get_width(lv_obj_get_parent(app.ui.lbl[i]));
+  int gl = lv_obj_get_x(app.ui.lbl[i]), gr = gl + lv_obj_get_width(app.ui.lbl[i]);
+  if (app.ui.ico[i]) {
+    int il = lv_obj_get_x(app.ui.ico[i]), ir = il + lv_obj_get_width(app.ui.ico[i]);
+    if (il < gl) gl = il;
+    if (ir > gr) gr = ir;
+  }
+  *left = gl;
+  *right = bw - gr;
+}
+#define near(a, b) do { int na_ = (a), nb_ = (b); if (na_ - nb_ > 3 || nb_ - na_ > 3) fprintf(stderr, "near %d vs %d\n", na_, nb_); CT_CHECK(na_ - nb_ <= 3 && nb_ - na_ <= 3); } while (0)
+
+/* a short wide card draws as one line (icon + label) but is centred by default; left/right are explicit */
+static void test_align_wide_short_card(void) {
+  start();
+  g_cols = 2; g_rows = 8;
+  ws_t w[3] = {BTN, BTN, BTN};
+  for (int i = 0; i < 3; i++) { w[i].id = (uint8_t)(i + 1); w[i].y = (uint8_t)i; w[i].label = "Go"; }
+  w[1].align = 1;
+  w[2].align = 2;
+  push(0, 1, 5, 1, 0, 0, 0, 0, "", w, 3);
+  settle();
+  int l0, r0, l1, r1, l2, r2;
+  margins(0, &l0, &r0); margins(1, &l1, &r1); margins(2, &l2, &r2);
+  near(l0, r0);
+  CT_CHECK(l0 > 20);
+  near(l1, 12);
+  near(r2, 12);
+  g_cols = 2; g_rows = 3;
+  app_destroy(&app);
+}
+
+/* a big card stacks the icon over the label: centred by default, left or right (12 px inset) when asked */
+static void test_align_big_card(void) {
   start();
   ws_t w[3] = {BTN, BTN, BTN};
-  for (int i = 0; i < 3; i++) { w[i].id = (uint8_t)(i + 1); w[i].y = (uint8_t)i; w[i].shape = HP_SHAPE_ROW; w[i].label = "Go"; }
-  w[1].only = 2;
-  w[2].icon = 0; w[2].only = 2;
+  for (int i = 0; i < 3; i++) { w[i].id = (uint8_t)(i + 1); w[i].x = 0; w[i].y = (uint8_t)i; w[i].w = 2; w[i].h = 1; w[i].label = "Go"; }
+  w[1].align = 1;
+  w[2].align = 2;
   push(0, 1, 5, 1, 0, 0, 0, 0, "", w, 3);
   settle();
   for (int i = 0; i < 3; i++) lv_obj_update_layout(app.ui.lbl[i]);
-  int x0 = lv_obj_get_x(app.ui.lbl[0]), x1 = lv_obj_get_x(app.ui.lbl[1]), x2 = lv_obj_get_x(app.ui.lbl[2]);
-  CT_CHECK(x1 > x0 + 20); /* the icon + label group is centred, the default stays at the left */
-  CT_CHECK(x2 > x0 + 20);
-  /* the group's centre is the button's centre: left margin == right margin (within the label's rounding) */
-  int bw = lv_obj_get_width(lv_obj_get_parent(app.ui.lbl[1]));
-  int left = lv_obj_get_x(app.ui.ico[1]), right = bw - (x1 + lv_obj_get_width(app.ui.lbl[1]));
-  CT_CHECK(left - right <= 2 && right - left <= 2);
+  CT_CHECK(lv_obj_get_height(lv_obj_get_parent(app.ui.lbl[0])) >= 80);
+  lv_obj_t *par = lv_obj_get_parent(app.ui.ico[0]);
+  int cw = lv_obj_get_content_width(par);
+  for (int i = 0; i < 3; i++) lv_obj_update_layout(app.ui.ico[i]);
+  int x[3], iw = lv_obj_get_width(app.ui.ico[0]);
+  for (int i = 0; i < 3; i++) x[i] = lv_obj_get_x(app.ui.ico[i]);
+  near(x[0] * 2 + iw, cw); /* centred */
+  near(x[1], 12); /* left */
+  near(cw - (x[2] + iw), 12); /* right */
+  CT_CHECK(lv_obj_get_style_text_align(app.ui.lbl[0], 0) == LV_TEXT_ALIGN_CENTER);
+  CT_CHECK(lv_obj_get_style_text_align(app.ui.lbl[1], 0) == LV_TEXT_ALIGN_LEFT);
+  CT_CHECK(lv_obj_get_style_text_align(app.ui.lbl[2], 0) == LV_TEXT_ALIGN_RIGHT);
+  app_destroy(&app);
+}
+
+/* a row is centred by default (in the space left of a trailing chevron); left and right are explicit */
+static void test_align_row(void) {
+  start();
+  g_cols = 1; g_rows = 8;
+  ws_t w[6] = {BTN, BTN, BTN, BTN, BTN, BTN};
+  for (int i = 0; i < 6; i++) { w[i].id = (uint8_t)(i + 1); w[i].x = 0; w[i].w = 1; w[i].y = (uint8_t)i; w[i].shape = HP_SHAPE_ROW; w[i].label = "Go"; }
+  w[1].align = 1;
+  w[2].align = 2;
+  for (int i = 3; i < 6; i++) { w[i].role = HP_ROLE_NAV; w[i].bind = 0; w[i].only = 3; w[i].icon = 0; w[i].label = "Next"; }
+  w[4].align = 1;
+  w[5].align = 2;
+  push(0, 1, 5, 1, 0, 0, 0, 0, "", w, 6);
+  settle();
+  int l[6], r[6];
+  for (int i = 0; i < 6; i++) margins(i, &l[i], &r[i]);
+  near(l[0], r[0]);
+  CT_CHECK(l[0] > 20);
+  near(l[1], 12);
+  near(r[2], 12);
+  /* with the chevron: the group lives in the width left of it (36 px) */
+  near(l[3], r[3] - 36);
+  near(l[4], 12);
+  near(r[5], 36 + 12);
+  g_cols = 2; g_rows = 3;
   app_destroy(&app);
 }
 
@@ -626,6 +696,8 @@ int main(void) {
   CT_RUN(test_v1_then_identical_v2_set_switches_to_v2);
   CT_RUN(test_tile_state_is_kept_for_pages_off_screen);
   CT_RUN(test_v1_page_still_works_and_is_not_stored);
-  CT_RUN(test_align_center_moves_row_label_right);
+  CT_RUN(test_align_wide_short_card);
+  CT_RUN(test_align_big_card);
+  CT_RUN(test_align_row);
   return CT_DONE();
 }

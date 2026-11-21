@@ -181,6 +181,9 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
   out.push({ t: 'rect', x: x + sw / 2, y: y + sw / 2, w: bw - sw, h: bh - sw, r: Math.max(0, radius - sw / 2), fill: hex(c.fill), stroke, sw: sw || undefined, wi });
   const size = bh < 30 || bw < 56 ? 12 : bw >= 100 ? 16 : 14;
   const hasIcon = w.icon > 0;
+  // the remote's layout choice (remote/app/ui.c): a row/pill or any wide, short button is one line; a big card stacks
+  const rowPath = w.shape === 'row' || w.shape === 'pill' || (bh < 44 && bw >= 100);
+  const big = w.shape === 'card' && !rowPath && bw >= 100 && bh >= 80;
   if (tile) {
     const val = tile.text;
     if (w.icon_only && hasIcon) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: icon, wi });
@@ -195,27 +198,34 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
   const text = legacyDanger ? hex(k.bad) : ink;
   const label = w.icon_only ? '' : w.label;
   if (hasIcon && !label) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: icon, wi });
-  else if (hasIcon && w.shape === 'card' && bh >= 56) {
-    out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 11, y: y + bh / 2 - 22, size: 22, color: icon, wi });
-    out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 22, s: fit(label, bw - 8, size), size, fill: text, anchor: 'middle', weight: 500, wi });
+  else if (hasIcon && !rowPath && bh >= 56) {
+    // stacked: icon over label; the big card (bw >= 100, bh >= 80) honours align, a dense one is always centred
+    const al = big ? w.align ?? 'center' : 'center';
+    const ax = al === 'left' ? x + 12 : al === 'right' ? x + bw - 12 : x + bw / 2;
+    const anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
+    out.push({ t: 'icon', id: w.icon, x: al === 'left' ? ax : al === 'right' ? ax - 22 : ax - 11, y: y + bh / 2 - 22, size: 22, color: icon, wi });
+    out.push({ t: 'text', x: ax, y: y + bh / 2 + 22, s: fit(label, bw - 8, size), size, fill: text, anchor, weight: 500, wi });
   } else if (hasIcon) {
-    const left = (w.shape === 'row' || w.shape === 'pill') && !w.align_center;
+    const al = rowPath ? w.align ?? 'center' : 'center';
     const isz = 20;
-    const chev = !!w.trailing && (w.shape === 'row' || w.shape === 'pill');
+    const chev = !!w.trailing && rowPath;
     if (chev) chevPrim(out, x, y, bw, bh, icon, wi);
     const span = chev ? bw - CHEV_ROOM : bw;
     const room = span - 16 - isz - 8 - (chev ? 4 : 0);
     const s = fit(label, room, size);
     const tw = Math.min(room, s.length * size * 0.54);
-    const gx = left ? x + 12 : x + span / 2 - (isz + 8 + tw) / 2;
+    const gw = isz + 8 + tw;
+    const gx = al === 'left' ? x + 12 : al === 'right' ? x + span - 12 - gw : x + span / 2 - gw / 2;
     out.push({ t: 'icon', id: w.icon, x: gx, y: y + bh / 2 - isz / 2, size: isz, color: icon, wi });
     out.push({ t: 'text', x: gx + isz + 8, y: y + bh / 2 + size * 0.35, s, size, fill: text, anchor: 'start', weight: 500, wi });
   } else if (label) {
-    const left = w.shape === 'row' && !w.align_center;
-    const chev = !!w.trailing && (w.shape === 'row' || w.shape === 'pill');
+    const al = rowPath || big ? w.align ?? 'center' : 'center';
+    const chev = !!w.trailing && rowPath;
     if (chev) chevPrim(out, x, y, bw, bh, icon, wi);
     const span = chev ? bw - CHEV_ROOM : bw;
-    out.push({ t: 'text', x: left ? x + 14 : x + span / 2, y: y + bh / 2 + size * 0.35, s: fit(label, span - 12 - (chev ? 4 : 0), size), size, fill: text, anchor: left ? 'start' : 'middle', weight: 500, wi });
+    const tx = al === 'left' ? x + 12 : al === 'right' ? x + span - 12 : x + span / 2;
+    const anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
+    out.push({ t: 'text', x: tx, y: y + bh / 2 + size * 0.35, s: fit(label, span - 12 - (chev ? 4 : 0), size), size, fill: text, anchor, weight: 500, wi });
   }
 }
 

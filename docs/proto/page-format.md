@@ -72,14 +72,14 @@ config and every page layout; a new gen clears the remote's page store) · `tota
 
 ## Widget: `kind id xy wh [style] [icon] [bind] [color] len label`
 `kind` bits 0-1: 0 button, 1 tile, 2 label (3 rejected); bit 4 HAS_STYLE, 5 HAS_ICON, 6 HAS_BIND, 7 HAS_COLOR;
-bits 2, 3 must be 0. `color` (after `bind`): low nibble fill, high nibble tile on-fill; 0 default,
+bits 2-3 ALIGN (0 centre, the default; 1 left; 2 right; 3 rejected: the icon + label group's alignment, no extra
+byte; it applies to row/pill and wide, short buttons and to big cards, in the space left of a trailing chevron, with a 12 px inset
+for left/right; dense and icon-only widgets are always centred; any role). `color` (after `bind`): low nibble fill, high nibble tile on-fill; 0 default,
 1..12 palette, 15 = RGB565 big-endian follows (fill, then on), 13/14 and a 0x00 byte rejected, on only
 on tiles; see docs/plans/2026-11-18-page-format-v2.md section 7. `style`: bits 0-2 role (0 default, 1 primary, 2 secondary, 3 danger, 4 nav;
 5-7 rejected), bits 3-4 shape (0 card, 1 row, 2 pill, 3 monogram), bit 5 icon_only, bit 6 TRAILING (draw a chevron at the
 right end of the widget; only valid with role nav; the compiler sets it on `nav: next|<page id>`, which also default to shape row
-and no leading icon; `nav: prev|home` keep their leading chev_left/home icon), bit 7 ALIGN_CENTER (centre the icon + label group
-on row and big-card buttons, in the space left of a trailing chevron; 0 = left-aligned, today's look; no effect on dense or icon-only
-widgets; any role).
+and no leading icon; `nav: prev|home` keep their leading chev_left/home icon), bit 7 unused.
 `icon`: 0 none, 1..159 stock (`proto/icons.yaml`, glyph U+E000+id), 160..254 reserved custom, 255
 rejected. `bind`: role nav -> target page id (< total, a nav widget must have one); otherwise the
 activity index highlighted while `state_update.activity == bind` and power is on. Encoders drop

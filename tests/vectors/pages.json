@@ -2099,13 +2099,8 @@
    "error": "inval"
   },
   {
-   "name": "v2_widget_kind_bit2",
-   "hex": "02000406010001000000000401001100",
-   "error": "inval"
-  },
-  {
-   "name": "v2_widget_kind_bit3",
-   "hex": "02000406010001000000000801001100",
+   "name": "v2_widget_align_3",
+   "hex": "02000406010001000000000c01001100",
    "error": "inval"
   },
   {
@@ -3967,8 +3962,8 @@
    }
   },
   {
-   "name": "v2c_align_center",
-   "hex": "0200040601000100000000100100118002476f",
+   "name": "v2c_align_left",
+   "hex": "02000406010001000000000401001102476f",
    "dict": {
     "version": 2,
     "id": 0,
@@ -3998,7 +3993,44 @@
       "bind": null,
       "color": null,
       "on_color": null,
-      "align_center": true
+      "align": "left"
+     }
+    ]
+   }
+  },
+  {
+   "name": "v2c_align_right",
+   "hex": "0200040601000100000000180100110802476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 4,
+    "rows": 6,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 1,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "row",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "align": "right"
      }
     ]
    }

@@ -32,14 +32,13 @@ static int utf8_valid(const uint8_t *s, size_t n) {
     return 1;
 }
 
-#define KIND_RESERVED 0x0C /* widget kind bits 2, 3 */
+#define KIND_ALIGN_SHIFT 2 /* widget kind bits 2-3: alignment (0 centre, 1 left, 2 right; 3 invalid) */
 #define HAS_COLOR 0x80
 #define HAS_STYLE 0x10
 #define HAS_ICON 0x20
 #define HAS_BIND 0x40
 #define STYLE_ICON_ONLY 0x20
 #define STYLE_TRAILING 0x40
-#define STYLE_ALIGN_CENTER 0x80
 #define PF_BACK 4
 #define PF_THEME_SHIFT 3
 #define PF_THEME_MASK 0x38u
@@ -87,8 +86,9 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
         if (len - off < 5) return -HP_E_INVAL;
         hp_widget_t *w = &p.widgets[i];
         unsigned kind = d[off];
-        if (v2 ? (kind & KIND_RESERVED) || (kind & 3) == 3 : kind > HP_WIDGET_LABEL) return -HP_E_INVAL;
+        if (v2 ? (kind & 3) == 3 || ((kind >> KIND_ALIGN_SHIFT) & 3) == 3 : kind > HP_WIDGET_LABEL) return -HP_E_INVAL;
         w->kind = (uint8_t)(kind & 3);
+        w->align = (uint8_t)((kind >> KIND_ALIGN_SHIFT) & 3);
         w->id = d[off + 1];
         w->x = d[off + 2] >> 4;
         w->y = d[off + 2] & 15;
@@ -105,7 +105,6 @@ int hp_page_decode(const uint8_t *d, size_t len, hp_page_t *out) {
                 w->shape = (uint8_t)((s >> 3) & 3);
                 w->icon_only = (s & STYLE_ICON_ONLY) != 0;
                 w->trailing = (s & STYLE_TRAILING) != 0;
-                w->align_center = (s & STYLE_ALIGN_CENTER) != 0;
             }
             if (kind & HAS_ICON) {
                 w->icon = d[off++];

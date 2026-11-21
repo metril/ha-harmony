@@ -40,6 +40,7 @@ static cJSON *load(void) {
 
 static const char *kind_str[] = {"normal", "home", "favorites"};
 static const char *role_str[] = {"default", "primary", "secondary", "danger", "nav"};
+static const char *align_str[] = {"center", "left", "right", "?"};
 static const char *shape_str[] = {"card", "row", "pill", "monogram"};
 
 static const char *palette_str[] = {"red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo", "purple", "pink"};
@@ -103,7 +104,10 @@ static void check_dict(const char *name, const hp_page_t *p, const cJSON *m) {
         CT_EQ(o->icon_only, cJSON_IsTrue(cJSON_GetObjectItem(w, "icon_only")));
         CT_EQ(o->icon, jint(w, "icon"));
         CT_EQ(o->trailing, cJSON_IsTrue(cJSON_GetObjectItem(w, "trailing")));
-        CT_EQ(o->align_center, cJSON_IsTrue(cJSON_GetObjectItem(w, "align_center")));
+        {
+            const cJSON *al = cJSON_GetObjectItem(w, "align");
+            CT_CHECK(!strcmp(align_str[o->align], al ? al->valuestring : "center"));
+        }
         const cJSON *bd = cJSON_GetObjectItem(w, "bind");
         CT_EQ(o->has_bind, !cJSON_IsNull(bd));
         if (o->has_bind) CT_EQ(o->bind, bd->valueint);

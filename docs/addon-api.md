@@ -154,7 +154,7 @@ when the draft has errors elsewhere:
 `pages` has one entry per **config** page. `page` is the page-format-v2 model of its first wire page
 (`harmony_core.page_codec.page_to_dict`, the editor's rendering contract: `version, id, cols, rows,
 gen, total, kind, back, seq, act, title, widgets: [{kind, id, x, y, w, h, label, role, shape,
-icon_only, icon, bind}]`, plus `trailing` / `align_center` (only when true); roles, shapes, icons and nav binds are already resolved). `wire_pages` lists
+icon_only, icon, bind}]`, plus `trailing` (only when true) / `align` (`left` or `right`, only when set; centre is the default); roles, shapes, icons and nav binds are already resolved). `wire_pages` lists
 every wire page the config page compiles to: one for an ordinary page, several when the compiler
 splits a `list:` page ("2/3" groups), each `{page_id, seq: {idx, cnt}|null, bytes, bytes_v1,
 widgets, page}` (`page` is the same model shape; `page_id` is the wire page number that nav `bind`s

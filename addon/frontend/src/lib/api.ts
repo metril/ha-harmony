@@ -91,8 +91,8 @@ export interface V2Widget {
   role: string;
   shape: string;
   icon_only: boolean;
-  /** centre the icon + label group (default: left-aligned on rows and big cards) */
-  align_center?: boolean;
+  /** icon + label group alignment; absent = centre (the default, for every shape) */
+  align?: 'left' | 'right';
   /** draw the nav chevron at the right edge */
   trailing?: boolean;
   icon: number;

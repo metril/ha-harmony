@@ -337,7 +337,7 @@ export function pageBytes(p: Page): number {
   let n = 11 + utf8(p.title ?? '');
   p.widgets.forEach((w, i) => {
     if (i === promoted) return;
-    const styled = (w.role && w.role !== 'default' && !w.nav) || (w.shape && w.shape !== 'card') || w.icon_only || w.align === 'center';
+    const styled = (w.role && w.role !== 'default' && !w.nav) || (w.shape && w.shape !== 'card') || w.icon_only;
     n += 5 + (styled || w.nav ? 1 : 0) + (w.icon && w.icon !== 'none' ? 1 : 0) + (w.nav || (w['bind'] as unknown) ? 1 : 0) + utf8(w.label ?? '') + colourBytes(w);
   });
   return n;

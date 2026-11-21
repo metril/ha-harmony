@@ -99,7 +99,7 @@ class _Spec:
     nav: str | None
     color: str | None = None
     on_color: str | None = None
-    align_center: bool = False
+    align: str = "center"
     x: int = 0
     y: int = 0
     w: int = 1
@@ -166,19 +166,20 @@ def _spec(
             icon = icon_for_text(label)
     elif kind == "tile" and icon is None:
         icon = ICON_IDS.get(_DOMAIN_ICON.get(w["entity"].split(".")[0], ""), 0)
+    shape = w.get("shape", "row" if in_list or nav is not None else "card")
     return _Spec(
         w,
         kind,
         label,
         role,
-        w.get("shape", "row" if in_list or nav is not None else "card"),
+        shape,
         bool(w.get("icon_only", False)),
         icon or 0,
         bind,
         nav,
         w.get("color"),
         w.get("on_color"),
-        w.get("align") == "center",
+        w.get("align", "center"),
         w.get("x", 0),
         w.get("y", 0),
         w["w"],
@@ -203,7 +204,7 @@ def _probe(s: _Spec) -> Widget:
         s.color,
         s.on_color,
         s.trailing,
-        s.align_center,
+        s.align,
     )
 
 
@@ -362,7 +363,7 @@ def build_pages(
                     s.color,
                     s.on_color,
                     s.trailing,
-                    s.align_center,
+                    s.align,
                 )
             )
         pages.append(
