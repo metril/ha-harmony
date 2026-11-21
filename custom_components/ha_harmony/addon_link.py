@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -72,7 +72,12 @@ class Bundle:
     compiled: Compiled
 
 
-def compile_source(source: Any, hub_id: str, limits: HubLimits | None = None) -> Compiled:
+def compile_source(
+    source: Any,
+    hub_id: str,
+    limits: HubLimits | None = None,
+    source_lists: Mapping[str, Sequence[str]] | None = None,
+) -> Compiled:
     """Validate (no file refs) and compile a source config against the hub's limits (the newest
     firmware's until the hub has reported them). Raises BundleRejected."""
     if not isinstance(source, dict):
@@ -80,14 +85,19 @@ def compile_source(source: Any, hub_id: str, limits: HubLimits | None = None) ->
     try:
         json.dumps(source, allow_nan=False)  # JSON data only (the add-on's own checks use the same dict path)
         model = parse_data(source)  # not the YAML pass: ~50x faster, which matters for thousands of commands
-        return compile_config(model, limits=limits or CURRENT)
+        return compile_config(model, limits=limits or CURRENT, source_lists=source_lists)
     except (ConfigError, CompileError) as exc:
         raise BundleRejected(str(exc)[:300]) from None
     except ValueError, TypeError, RecursionError:
         raise BundleRejected("config is not valid JSON data") from None
 
 
-def parse_bundle(raw: bytes | dict[str, Any], hub_id: str, limits: HubLimits | None = None) -> Bundle:
+def parse_bundle(
+    raw: bytes | dict[str, Any],
+    hub_id: str,
+    limits: HubLimits | None = None,
+    source_lists: Mapping[str, Sequence[str]] | None = None,
+) -> Bundle:
     """Pure: the bundle (bytes, or the channel's already decoded `body`) -> validated Bundle, or BundleRejected.
     Blocking (CPU)."""
     if isinstance(raw, dict):
@@ -119,7 +129,7 @@ def parse_bundle(raw: bytes | dict[str, Any], hub_id: str, limits: HubLimits | N
     if data["hub_id"] != hub_id:
         raise BundleRejected("bundle is for a different hub", rev=rev)
     try:
-        compiled = compile_source(data["config"], hub_id, limits)
+        compiled = compile_source(data["config"], hub_id, limits, source_lists)
     except BundleRejected as exc:
         raise BundleRejected(str(exc), rev=rev) from None
     return Bundle(rev, applied_at, data["config"], compiled)

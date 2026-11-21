@@ -64,6 +64,7 @@ class HaDevice:
     off: HaCall | None
     inputs: dict[str, HaCall] = field(default_factory=dict)
     commands: dict[str, HaCall] = field(default_factory=dict)
+    source_list: bool = False  # inputs come from the entity's source_list attribute
 
     def lookup(self, command: str) -> HaCall | None:
         """`power_on`, `power_off`, `input_<name>` or a configured command -> its call."""
@@ -336,6 +337,16 @@ def compile_config(
     names: dict[int, str] = {}
     ha_devs = {d["id"]: d for d in model["devices"] if d.get("kind") == "ha"}
 
+    def input_call(d: dict[str, Any], name: str, path: list[Any] | None = None) -> HaCall:
+        """`_input_call`, but a name outside the entity's known source_list is an error."""
+        known = (source_lists or {}).get(d.get("entity", ""))
+        if known and d.get("source_list") and name not in d["inputs"] and name not in known:
+            fail(
+                f"{d['id']}: input {name!r} is not in {d['entity']}'s source_list ({', '.join(known)})",
+                path,
+            )
+        return _input_call(d, name)
+
     def ha_of(a: dict[str, Any]) -> HaCall | None:
         """The HA call behind an action: an `ha:` action, or a reference to an HA device."""
         if a["type"] == "ha_call":
@@ -343,7 +354,7 @@ def compile_config(
         if a["type"] == "device" and a["device"] in ha_devs:
             d = ha_devs[a["device"]]
             if "input" in a:
-                return _input_call(d, a["input"])
+                return input_call(d, a["input"])
             if a["command"] in ("power_on", "power_off"):
                 return call_of(d["power"]["on" if a["command"] == "power_on" else "off"])
             return call_of(d["commands"][a["command"]])
@@ -527,6 +538,7 @@ def compile_config(
             call_of(d["power"]["off"]) if d.get("power") else None,
             {n: _input_call(d, n) for n in input_names(d)},
             {n: call_of(x) for n, x in d["commands"].items()},
+            bool(d.get("source_list")),
         )
         for i, d in ha_devs.items()
     }
@@ -541,7 +553,7 @@ def compile_config(
         powered = {s_.device for s_ in start}
         start += [
             HaStep(
-                _input_call(ha_devs[x["device"]], x["input"]),
+                input_call(ha_devs[x["device"]], x["input"]),
                 x["device"],
                 ha_devices[x["device"]].settle_ms if x["device"] in powered else 0,
                 "input",

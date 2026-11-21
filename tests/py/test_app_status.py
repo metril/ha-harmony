@@ -95,8 +95,9 @@ async def test_feed_sends_only_changes_and_resends_on_attach(hass, caplog):
     feed.configure([AppBinding(0, 5, (PLEX,), SHIELD), AppBinding(0, 6, (YT,), SHIELD)])
     hass.states.async_set(SHIELD, "playing", {"app_id": PLEX})
     await hass.async_block_till_done()
-    assert [(a["tile"], a["state"]) for a in client.sent] == [(5, 2)]
+    assert [(a["tile"], a["state"]) for a in client.sent] == [(5, 0), (6, 0), (5, 2)]  # baseline, then the change
     assert client.sent[0]["text"] == "" and client.sent[0]["remote"] == 1
+    del client.sent[:2]
     hass.states.async_set(SHIELD, "playing", {"app_id": PLEX, "x": 1})  # same status: nothing
     await hass.async_block_till_done()
     assert len(client.sent) == 1
@@ -113,7 +114,7 @@ async def test_feed_sends_only_changes_and_resends_on_attach(hass, caplog):
     n = len(client.sent)
     feed.on_remote_attached(1)  # the remote lost its rings: the live one comes again
     await hass.async_block_till_done()
-    assert [(a["tile"], a["state"]) for a in client.sent[n:]] == [(5, 2)]
+    assert [(a["tile"], a["state"]) for a in client.sent[n:]] == [(5, 2), (6, 0)]
     feed.stop()
 
 

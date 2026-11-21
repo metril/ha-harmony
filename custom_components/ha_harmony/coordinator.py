@@ -220,6 +220,16 @@ async def _sleep_hook(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
+def _config_of(raw: Any) -> Any:
+    """The `config` of a bundle (bytes or dict), best effort: only used to find source_list entities."""
+    if isinstance(raw, bytes):
+        try:
+            raw = json.loads(raw)
+        except ValueError, RecursionError:
+            return None
+    return raw.get("config") if isinstance(raw, dict) else None
+
+
 def _empty_compiled() -> Compiled:
     return compile_config(parse_model(""))
 
@@ -330,7 +340,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             lambda remote: self._rlink(remote).attached and self._rlink(remote).tile_state,
             lambda coro, name: entry.async_create_background_task(hass, coro, name=name),
             self._cur,
+            lambda: self.current_activity_id,
         )
+        self._source_cfg: dict[str, Any] | None = None  # the applied source config (recompiled on a source_list change)
+        self._sl_used: dict[str, tuple[str, ...]] = {}  # entity -> the source_list the compile saw
         self.async_set_updated_data(None)
 
     async def _async_update_data(self) -> None:  # push only
@@ -478,8 +491,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return False
         try:
             compiled = await self.hass.async_add_executor_job(
-                compile_source, data.get("config"), self.hub_id, self.client.limits
+                compile_source, data.get("config"), self.hub_id, self.client.limits, self._source_lists(data.get("config"))
             )
+            self._source_cfg = data.get("config")
         except BundleRejected as exc:
             _LOGGER.warning("The cached add-on config is unusable and ignored: %s", exc)
             return False
@@ -496,7 +510,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         async with self._apply_lock:
             t0 = time.monotonic()
             try:
-                bundle = await self.hass.async_add_executor_job(parse_bundle, raw, self.hub_id, self.client.limits)
+                bundle = await self.hass.async_add_executor_job(
+                    parse_bundle, raw, self.hub_id, self.client.limits, self._source_lists(_config_of(raw))
+                )
                 self.timings["compile_ms"] = round((time.monotonic() - t0) * 1000, 1)
             except BundleRejected as exc:
                 self._reject(exc)
@@ -506,6 +522,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self.last_error = None
             changed = bundle.rev != self.rev or not self.managed
             self.rev, self.applied_at, self.managed = bundle.rev, bundle.applied_at, True
+            self._source_cfg = bundle.source
             self._known_rev = bundle.rev
             self._notify(TOPIC_LINK)
             if changed:
@@ -784,6 +801,47 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if key != self._sent_identity:
             self._sent_identity = key
             self.addon_send("identity", **fields)
+
+    def _source_lists(self, config: Any) -> dict[str, tuple[str, ...]]:
+        """The `source_list` attribute of the entity of each `source_list` device of `config` (cheap scan;
+        entities whose state has no list are left out, so nothing is checked against them)."""
+        out: dict[str, tuple[str, ...]] = {}
+        devices = config.get("devices") if isinstance(config, dict) else None
+        for d in devices if isinstance(devices, list) else ():
+            ent = d.get("entity") if isinstance(d, dict) and d.get("source_list") else None
+            if isinstance(ent, str):
+                st = self.hass.states.get(self._cur(ent))
+                lst = st.attributes.get("source_list") if st else None
+                if isinstance(lst, list | tuple) and lst:
+                    out[ent] = tuple(str(x) for x in lst)
+        self._sl_used.update(out)
+        return out
+
+    @callback
+    def _on_source_list(self, entity: str, new: State | None) -> None:
+        """A source_list device's entity changed: recompile when its list did (push only)."""
+        lst = new.attributes.get("source_list") if new else None
+        if not isinstance(lst, list | tuple) or tuple(map(str, lst)) == self._sl_used.get(entity):
+            return
+        if self._source_cfg is not None and self.managed:
+            self.config_entry.async_create_background_task(
+                self.hass, self._recompile(), name=f"{DOMAIN} source_list"
+            )
+
+    async def _recompile(self) -> None:
+        async with self._apply_lock:
+            cfg = self._source_cfg
+            try:
+                compiled = await self.hass.async_add_executor_job(
+                    compile_source, cfg, self.hub_id, self.client.limits, self._source_lists(cfg)
+                )
+            except BundleRejected as exc:
+                _LOGGER.warning("The new source_list of an entity does not fit the config: %s", exc)
+                return
+            if compiled == self.pending:
+                return
+            self._apply_compiled(compiled)
+        await self.async_sync_config()
 
     def _apply_compiled(self, compiled: Compiled) -> None:
         """Record the newest config; it becomes the runtime one at once only when the hub already
@@ -1267,6 +1325,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return
         watched = {t.entity_id for t in self.compiled.tiles}
         watched |= {d.entity for d in self.compiled.ha_devices.values() if d.entity}
+        watched |= {e for m in self.compiled.media.values() for e in m.values()}
         moved = [cfg for cfg in watched if self._cur(cfg) == old]
         if not moved:
             return
@@ -1314,6 +1373,14 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 # a playing media_player changes attributes every few seconds: only a change of
                 # the derived power/input reaches the entities of that device
                 new = _ha_device_state(event.data["new_state"])
+                if any(self.compiled.ha_devices[i].source_list for i in dev_of.get(event.data["entity_id"], ())):
+                    self._on_source_list(
+                        next(
+                            d.entity for d in self.compiled.ha_devices.values()
+                            if d.entity and self._cur(d.entity) == event.data["entity_id"]
+                        ),
+                        event.data["new_state"],
+                    )
                 for dev_id in dev_of.get(event.data["entity_id"], ()):
                     if self.device_states.get(dev_id) != new:
                         self.device_states[dev_id] = new
@@ -1350,11 +1417,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     def _apply_media(self) -> None:
         """Point the app rings and Now Playing at the entities of the live config's `media:`."""
         self.app_status.configure(self.compiled.apps)
-        media = self.compiled.media.values()
-        self.now_playing.configure(
-            next((m["apps_entity"] for m in media if m.get("apps_entity")), None),
-            next((m["now_playing_entity"] for m in media if m.get("now_playing_entity")), None),
-        )
+        media = list(self.compiled.media.values())
+        pick = lambda k: next((self._cur(m[k]) for m in media if m.get(k)), None)  # noqa: E731
+        self.now_playing.configure(pick("apps_entity"), pick("now_playing_entity"))
 
     async def _send_tiles(self, entities: set[str], remotes: tuple[int, ...]) -> None:
         """Send each tile whose rendered (state, text) pair changed since the last send. Nothing is
@@ -1476,6 +1541,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._note_activity(before, self.current_activity_id, bool(data["power"]))
             if idx_before != (self._current_idx, self._last_idx):
                 self._notify(TOPIC_ACTIVITY)
+            if before != self.current_activity_id:
+                self.app_status.refresh()
         elif mtype is MsgType.KEY_EVENT:
             self._remote_seen()
             action = KEY_ACTIONS.get(data["action"], "press")

@@ -81,21 +81,25 @@ class AppBinding:
     widget: int  # wire id of the button
     app_ids: tuple[str, ...]
     entity_id: str
+    activity: str | None = None  # the ring shows only while this activity runs
 
 
-def _apps_entity(model: Model, page: dict[str, Any], action: dict[str, Any]) -> str | None:
+def _apps_entity(
+    model: Model, page: dict[str, Any], action: dict[str, Any]
+) -> tuple[str, str] | tuple[None, None]:
     """The apps_entity behind a button: its page's activity, else the activity that uses the button's
     device, else the only one the config names."""
     acts = {a["id"]: a for a in model["activities"]}
     media = lambda a: (a.get("media") or {}).get("apps_entity")  # noqa: E731
     if page.get("activity") in acts:
-        return media(acts[page["activity"]])
+        a = acts[page["activity"]]
+        return (media(a), a["id"]) if media(a) else (None, None)
     if action["type"] == "device":
         for a in model["activities"]:
             if any(d["device"] == action["device"] for d in a["devices"]) and media(a):
-                return media(a)
-    found = {media(a) for a in model["activities"]} - {None}
-    return next(iter(found)) if len(found) == 1 else None
+                return media(a), a["id"]
+    found = [a for a in model["activities"] if media(a)]
+    return (media(found[0]), found[0]["id"]) if len(found) == 1 else (None, None)
 
 
 @dataclass(frozen=True)
@@ -525,9 +529,9 @@ def build_pages(
                 keys[str(code)] = s.cfg["action"]
                 if apps is not None and s.cfg["action"]["type"] != "activity":
                     ids = s.cfg.get("app_id") or infer_app_ids(s.label, s.cfg.get("icon"))
-                    ent = _apps_entity(model, cfg[u.cfg_index], s.cfg["action"]) if ids else None
+                    ent, act = _apps_entity(model, cfg[u.cfg_index], s.cfg["action"]) if ids else (None, None)
                     if ent:
-                        apps.append(AppBinding(pid, wire, tuple(ids), ent))
+                        apps.append(AppBinding(pid, wire, tuple(ids), ent, act))
             else:
                 tiles.append(Tile(pid, wire, s.cfg["entity"], s.label))
                 tap = s.cfg.get("tap")

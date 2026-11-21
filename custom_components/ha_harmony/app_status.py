@@ -32,8 +32,10 @@ NONE, OPEN, PLAYING, PAUSED = 0, 1, 2, 3
 _OFF_STATES = ("off", "unavailable", "unknown", "standby")
 
 
-def status(binding: AppBinding, player: State | None) -> int:
-    """The ring of one button for the player's current state."""
+def status(binding: AppBinding, player: State | None, running: str | None = None) -> int:
+    """The ring of one button for the player's current state, while its activity runs."""
+    if binding.activity is not None and running != binding.activity:
+        return NONE
     if player is None or player.state in _OFF_STATES:
         return NONE
     if player.attributes.get("app_id") not in binding.app_ids:
@@ -52,9 +54,11 @@ class AppStatusFeed:
         ready: Callable[[int], bool],
         spawn: Callable[[Awaitable[None], str], asyncio.Task[None]],
         resolve: Callable[[str], str] = lambda e: e,
+        running: Callable[[], str | None] = lambda: None,
     ) -> None:
         self.hass, self.client = hass, client
         self._remotes, self._ready, self._spawn, self._resolve = remotes, ready, spawn, resolve
+        self._running = running
         self._bindings: tuple[AppBinding, ...] = ()
         self._sent: dict[tuple[int, int, int], int] = {}  # (remote, page, widget) -> status on the remote
         self._unsub: Callable[[], None] | None = None
@@ -72,6 +76,7 @@ class AppStatusFeed:
         entities = sorted({self._resolve(b.entity_id) for b in self._bindings})
         if entities:
             self._unsub = async_track_state_change_event(self.hass, entities, self._on_event)
+            self._on_event(None)  # type: ignore[arg-type]  # every remote gets every ring, 0 included
 
     def stop(self) -> None:
         if self._unsub:
@@ -86,6 +91,11 @@ class AppStatusFeed:
         self._dirty = True
         if self._task is None or self._task.done():
             self._task = self._spawn(self._run(), "ha_harmony app status")
+
+    def refresh(self) -> None:
+        """The running activity changed: rings of the other activities clear."""
+        if self._bindings:
+            self._on_event(None)  # type: ignore[arg-type]
 
     def on_remote_attached(self, remote: int) -> None:
         """A remote (re)joined or got its pages again: it holds no ring, send them all."""
@@ -108,15 +118,16 @@ class AppStatusFeed:
             _LOGGER.info("app %s is not in the app table: no status ring for it", app)
 
     async def _push(self, remotes: tuple[int, ...]) -> None:
+        running = self._running()
         for b in self._bindings:
             self._note_unknown(self.hass.states.get(self._resolve(b.entity_id)))
         for remote in remotes:
             if not self._ready(remote) or not self.client.connected:
                 continue
             for b in self._bindings:
-                want = status(b, self.hass.states.get(self._resolve(b.entity_id)))
+                want = status(b, self.hass.states.get(self._resolve(b.entity_id)), running)
                 key = (remote, b.page, b.widget)
-                if self._sent.get(key, NONE) == want:
+                if self._sent.get(key) == want:
                     continue
                 args = {"remote": remote, "page": b.page, "tile": b.widget, "text": "", "state": want}
                 try:
