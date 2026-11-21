@@ -201,16 +201,28 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
   } else if (hasIcon) {
     const left = (w.shape === 'row' || w.shape === 'pill') && !w.align_center;
     const isz = 20;
-    const room = bw - 16 - isz - 8;
+    const chev = !!w.trailing && (w.shape === 'row' || w.shape === 'pill');
+    if (chev) chevPrim(out, x, y, bw, bh, icon, wi);
+    const span = chev ? bw - CHEV_ROOM : bw;
+    const room = span - 16 - isz - 8 - (chev ? 4 : 0);
     const s = fit(label, room, size);
     const tw = Math.min(room, s.length * size * 0.54);
-    const gx = left ? x + 12 : x + bw / 2 - (isz + 8 + tw) / 2;
+    const gx = left ? x + 12 : x + span / 2 - (isz + 8 + tw) / 2;
     out.push({ t: 'icon', id: w.icon, x: gx, y: y + bh / 2 - isz / 2, size: isz, color: icon, wi });
     out.push({ t: 'text', x: gx + isz + 8, y: y + bh / 2 + size * 0.35, s, size, fill: text, anchor: 'start', weight: 500, wi });
   } else if (label) {
     const left = w.shape === 'row' && !w.align_center;
-    out.push({ t: 'text', x: left ? x + 14 : x + bw / 2, y: y + bh / 2 + size * 0.35, s: fit(label, bw - 12, size), size, fill: text, anchor: left ? 'start' : 'middle', weight: 500, wi });
+    const chev = !!w.trailing && (w.shape === 'row' || w.shape === 'pill');
+    if (chev) chevPrim(out, x, y, bw, bh, icon, wi);
+    const span = chev ? bw - CHEV_ROOM : bw;
+    out.push({ t: 'text', x: left ? x + 14 : x + span / 2, y: y + bh / 2 + size * 0.35, s: fit(label, span - 12 - (chev ? 4 : 0), size), size, fill: text, anchor: left ? 'start' : 'middle', weight: 500, wi });
   }
+}
+
+/** the remote's trailing nav chevron: a 24 px glyph in a 28 px box, 8 px in from the right edge */
+const CHEV_ROOM = 36;
+function chevPrim(out: Prim[], x: number, y: number, bw: number, bh: number, color: string, wi: number): void {
+  out.push({ t: 'icon', id: 8, x: x + bw - CHEV_ROOM + 2, y: y + bh / 2 - 12, size: 24, color, wi });
 }
 
 export function layoutPage(p: V2Page, opts: RenderOpts = {}): Scene {

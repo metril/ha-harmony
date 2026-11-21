@@ -93,6 +93,8 @@ export interface V2Widget {
   icon_only: boolean;
   /** centre the icon + label group (default: left-aligned on rows and big cards) */
   align_center?: boolean;
+  /** draw the nav chevron at the right edge */
+  trailing?: boolean;
   icon: number;
   bind: number | null;
   /** palette name or `#RRGGBB`; null = the role's colour */

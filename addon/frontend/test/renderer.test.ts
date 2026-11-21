@@ -80,6 +80,18 @@ describe('page renderer: v2 looks', () => {
     expect(at(row).x).toBeLessThan(30);
     expect(at({ ...row, align_center: true }).x).toBeGreaterThan(36);
   });
+  it('trailing draws a right-aligned chevron and centres in the width left of it', () => {
+    const row = { kind: 'button', id: 1, x: 0, y: 0, w: 2, h: 1, label: 'Go', role: 'default', shape: 'row', icon_only: false, icon: 1, bind: null } as V2Page['widgets'][number];
+    const ic = (w: V2Page['widgets'][number], id: number) => layoutPage({ ...full, widgets: [w] }).prims.find((p) => p.t === 'icon' && p.wi === 0 && p.id === id) as Extract<Prim, { t: 'icon' }>;
+    expect(ic(row, 8)).toBeUndefined();
+    const t = { ...row, trailing: true };
+    const rect = layoutPage({ ...full, widgets: [t] }).prims.find((p) => p.t === 'rect' && p.wi === 0) as Extract<Prim, { t: 'rect' }>;
+    expect(ic(t, 8).x + 24).toBeCloseTo(rect.x + rect.w - 8 - 2, 0);
+    expect(ic({ ...t, align_center: true }, 1).x).toBeLessThan(ic({ ...row, align_center: true }, 1).x);
+    const lab = (w: V2Page['widgets'][number]) => layoutPage({ ...full, widgets: [w] }).prims.find((p) => p.t === 'text' && p.wi === 0) as Extract<Prim, { t: 'text' }>;
+    const nl = { ...row, icon: 0, align_center: true };
+    expect(lab({ ...nl, trailing: true }).x).toBeLessThan(lab(nl).x);
+  });
   it('tiles show on, off and unavailable', () => {
     const page: V2Page = { ...full, back: false, seq: null, widgets: [0, 1, 2].map((i) => ({ kind: 'tile', id: i, x: 0, y: i * 2, w: 4, h: 2, label: 'T' + i, role: 'default', shape: 'card', icon_only: false, icon: 0, bind: null })) };
     const prims = layoutPage(page).prims;
