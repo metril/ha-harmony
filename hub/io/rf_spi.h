@@ -122,5 +122,9 @@ int hp_rf_spi_write_for_test(hp_rf_transport *t, const uint8_t *buf, size_t n);
 /* Explicit-only radio commands. 0, -HP_E_INVAL, -HP_E_BUSY (write backoff), -HP_E_IO. */
 int hp_rf_spi_set_pairing(hp_rf_transport *t, unsigned seconds); /* 10 FF 80 B2 01 00 <secs>, secs 1..255 */
 int hp_rf_spi_unpair(hp_rf_transport *t, unsigned slot);         /* 10 FF 80 B2 03 <slot> 00, slot 1..15 */
+/* Remote role only: the 10-byte active-dongle sync pulse `12 01 00 00 00 00 00 00 00 00` that makes the remote's
+ * CC2544 re-align its channel hopping with the hub (stock remote_ui sends it on display wake, key wake, resume and
+ * while the link is lost; upstream-ref harmony-ng docs/HARMONY_RF_PROTOCOL.md 3.4). -HP_E_INVAL on the hub role. */
+int hp_rf_spi_sync(hp_rf_transport *t);
 
 #endif

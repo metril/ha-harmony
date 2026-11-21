@@ -563,6 +563,12 @@ int hp_rf_spi_unpair(hp_rf_transport *t, unsigned slot) {
     return spi_write(t->self, cmd, sizeof cmd);
 }
 
+int hp_rf_spi_sync(hp_rf_transport *t) {
+    if (!t || t->recv != spi_recv || ((spi_t *)t->self)->role != HP_RF_SPI_ROLE_REMOTE) return -HP_E_INVAL;
+    const uint8_t cmd[10] = {0x12, 0x01};
+    return spi_write(t->self, cmd, sizeof cmd);
+}
+
 int hp_rf_spi_write_for_test(hp_rf_transport *t, const uint8_t *buf, size_t n) {
     if (!t || t->recv != spi_recv || !buf) return -HP_E_INVAL;
     return spi_write(t->self, buf, n);

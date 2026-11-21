@@ -990,6 +990,103 @@ static void test_full_session_is_safe_with_rf(void) {
   CT_CHECK(rf_log_is_safe(&fr));
 }
 
+/* ---- rejoin: sync pulse (12 01 00 ...) on events only ---- */
+
+static int count_syncs(void) {
+  int n = 0;
+  for (int i = 0; i < fr.nw && i < 512; i++)
+    if (fr.w[i].len == 10 && fr.w[i].head[0] == 0x12 && fr.w[i].head[1] == 0x01) n++;
+  return n;
+}
+static int chip_attached(void) { return rf.tp->attached(rf.tp->self); }
+static void remote_chip_link(int up) {
+  const uint8_t up_r[7] = {0x10, 0x01, 0x41, 0x04, 0x07, 0x0B, 0x88};
+  const uint8_t lost_r[7] = {0x10, 0x01, 0x41, 0x04, 0x47, 0x0B, 0x88};
+  feed(&fr, up ? up_r : lost_r, 7);
+  for (int i = 0; i < 3000 && chip_attached() != up; i++) ms_sleep(1);
+  CT_EQ(chip_attached(), up);
+  settle(3);
+}
+/* idle for `ms` in 1 s steps, with a touch every 5 s on empty glass so the screen stays awake without a link event */
+static void idle_awake(uint64_t ms) {
+  for (uint64_t t = 0; t < ms; t += 1000) {
+    if (t % 5000 == 0) { fk_touch(&fk, 300, 300, 1); fk_touch(&fk, 300, 300, 0); }
+    tick(1000);
+  }
+}
+
+static void test_rejoin_silent_while_link_up(void) {
+  setup();
+  idle_awake(20000);
+  CT_EQ(count_syncs(), 0);
+  teardown();
+}
+
+static void test_rejoin_on_loss_then_capped_backoff(void) {
+  setup();
+  DRAIN();
+  idle_awake(1000);
+  CT_EQ(count_syncs(), 0);
+  remote_chip_link(0); /* status 0x47 */
+  CT_EQ(count_syncs(), 1); /* the loss itself: one immediate attempt */
+  idle_awake(1000);
+  CT_EQ(count_syncs(), 1);
+  idle_awake(1000); /* +2 s */
+  CT_EQ(count_syncs(), 2);
+  idle_awake(4000); /* +4 s */
+  CT_EQ(count_syncs(), 3);
+  idle_awake(8000);
+  CT_EQ(count_syncs(), 4);
+  idle_awake(16000);
+  CT_EQ(count_syncs(), 5);
+  idle_awake(120000); /* capped: nothing more without an event */
+  CT_EQ(count_syncs(), 5);
+  remote_chip_link(1); /* up again: re-armed state cleared, no more pulses */
+  idle_awake(60000);
+  CT_EQ(count_syncs(), 5);
+  teardown();
+}
+
+static void test_rejoin_on_keypress_while_lost(void) {
+  setup();
+  DRAIN();
+  remote_chip_link(0);
+  idle_awake(40000); /* retries exhausted */
+  int base = count_syncs();
+  CT_EQ(base, 5);
+  fh.drop_all = 1; /* the hub stays unreachable: no ack brings the link back */
+  fk_key(&fk, 0, 115, 1);
+  tick(50);
+  CT_EQ(count_syncs(), base + 1); /* a press re-initiates the link; the key itself still goes out */
+  idle_awake(3000); /* and re-arms the backoff */
+  CT_EQ(count_syncs(), base + 2);
+  teardown();
+}
+
+static void test_rejoin_on_wake_and_resume(void) {
+  setup();
+  DRAIN();
+  remote_chip_link(0);
+  int base = count_syncs();
+  for (int i = 0; i < 50; i++) tick(1000); /* backlight off: asleep, retries stopped */
+  CT_EQ(app.power.state, RA_PW_OFF);
+  int quiet = count_syncs();
+  CT_CHECK(quiet <= base + 4);
+  for (int i = 0; i < 30; i++) tick(1000);
+  CT_EQ(count_syncs(), quiet); /* asleep: no activity */
+  fk_touch(&fk, 300, 300, 1); /* display wake */
+  fk_touch(&fk, 300, 300, 0);
+  tick(50);
+  CT_EQ(count_syncs(), quiet + 1);
+  app_link_t lk = rf_link_app(&rf);
+  lk.resumed(lk.ctx, fk.now, 60000); /* resume from suspend */
+  CT_EQ(count_syncs(), quiet + 2);
+  remote_chip_link(1);
+  lk.resumed(lk.ctx, fk.now, 60000); /* link is up: resume sends nothing */
+  CT_EQ(count_syncs(), quiet + 2);
+  teardown();
+}
+
 int main(void) {
   CT_RUN(test_page_push_renders_golden);
   CT_RUN(test_theme_chain_renders_like_a_direct_render);
@@ -1006,6 +1103,10 @@ int main(void) {
   CT_RUN(test_peer_that_never_acks_shows_fallback_only);
   CT_RUN(test_polls_only_while_awake);
   CT_RUN(test_idle_link_is_silent_and_heartbeats);
+  CT_RUN(test_rejoin_silent_while_link_up);
+  CT_RUN(test_rejoin_on_loss_then_capped_backoff);
+  CT_RUN(test_rejoin_on_keypress_while_lost);
+  CT_RUN(test_rejoin_on_wake_and_resume);
   CT_RUN(test_heartbeat_unreadable_soc);
   CT_RUN(test_wait_includes_link_fd_and_deadline);
   CT_RUN(test_open_refused_when_hal_alive);

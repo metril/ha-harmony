@@ -50,6 +50,13 @@
 #define RF_LINK_RETRY_MS 5000
 #define RF_LINK_POLL_MS HP_LINK_POLL_MS          /* poll gap while an object awaits its ack */
 #define RF_LINK_IDLE_POLL_MS HP_LINK_IDLE_POLL_MS /* poll gap otherwise, while awake */
+/* REJOIN. While the chip reports the link lost, the link writes the sync pulse (hp_rf_spi_sync) on events only: the
+ * loss itself, a key or tap, a display wake and a resume from suspend. Each event restarts a capped exponential
+ * backoff for the attempts the pulse needs to land (the hub may still be booting): attempt n (1-based) is followed by
+ * a retry after RF_LINK_SYNC_BASE_MS << (n-1), at most RF_LINK_SYNC_MAX_TRIES attempts, then silence until the next
+ * event. A deadline, not a poll: nothing runs while the link is up or the remote is asleep. */
+#define RF_LINK_SYNC_BASE_MS 2000
+#define RF_LINK_SYNC_MAX_TRIES 5
 #define RF_LINK_RING 16
 
 typedef struct {
@@ -67,6 +74,9 @@ typedef struct {
   uint8_t told_gen, told_pages; /* what the last remote_info said about it */
   int last_pct;
   bool was_attached, lost, dead_reported;
+  bool ever_up, awake;
+  unsigned sync_tries;
+  uint64_t next_sync_ms; /* UINT64_MAX = no retry armed */
 } rf_link_t;
 
 /* No device access. Until rf_link_open() succeeds the link reports one APP_LINK_EV_FAILED. */
