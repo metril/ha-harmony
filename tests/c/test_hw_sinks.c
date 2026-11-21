@@ -268,10 +268,10 @@ static void test_writes(void) {
     F.fail_req = HP_I2S_START;
     CHECK(open_hw(0) == 0);
     CHECK(send_ir(0, s) == -HP_E_IO && F.closes == 0);
-    F.nlog = 0;
+    F.nlog = 0; F.fail_req = 0;
     hp_hw_sinks_close(g_h);
     CHECK(F.nlog == 2 && F.log[0].req == HP_I2S_START && F.log[1].req == HP_I2S_DRAIN && F.closes == 0);
-    F.fail_req = 0; F.nlog = 0;
+    F.nlog = 0;
     CHECK(send_ir(0, s) == 0 && F.log[0].op == 'o');
     /* flush START failing: no DRAIN, no FREQ/write, send refused; retry after recovery flushes and sends */
     setup();
