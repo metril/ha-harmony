@@ -9,7 +9,7 @@ import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import {
-  DEFAULT_LAYER, pageCap, addPage, assign, deletePage, describeSource, duplicatePage, errorTarget, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePage,
+  DEFAULT_LAYER, pageCap, addPage, assign, deletePage, describeSource, duplicatePage, errorTarget, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePages, MAX_PAGES,
   type Source, type Target,
 } from '../lib/studio-model';
 import { StoreElement, confirmAction } from '../components/base';
@@ -325,12 +325,17 @@ export class HhStudio extends StoreElement implements StudioHost {
     }
     if (o.op === 'add') {
       if (o.template === 'lights' || o.template === 'activity') void this.st.loadHa();
-      const page = templatePage(cfg, o.template ?? 'blank', { entities: this.st.entities ?? [], activity: this.st.layer === DEFAULT_LAYER ? undefined : this.st.layer });
+      const made = templatePages(cfg, o.template ?? 'blank', { entities: this.st.entities ?? [], activity: this.st.layer === DEFAULT_LAYER ? undefined : this.st.layer });
+      const room = Math.max(1, MAX_PAGES - (cfg.pages?.length ?? 0));
       const at = (cfg.pages?.length ?? 0) === 0 ? 0 : this.st.page + 1;
-      this.store.replace(addPage(cfg, page, at));
+      const kept = made.slice(0, room);
+      let next = cfg;
+      kept.forEach((pg, i) => (next = addPage(next, pg, at + i)));
+      this.store.replace(next);
       this.st.setPage(at);
-      this.st.say(`Added page ${page.title ?? page.id}`);
-      this.store.toast(`Added page ${page.title ?? page.id}`, 'info', true);
+      const what = kept.length > 1 ? `${kept.length} pages` : `page ${kept[0]?.title ?? kept[0]?.id}`;
+      this.st.say(`Added ${what}`);
+      this.store.toast(`Added ${what}`, 'info', true);
     } else if (o.op === 'dup') {
       this.store.replace(duplicatePage(cfg, idx));
       this.st.setPage(idx + 1);

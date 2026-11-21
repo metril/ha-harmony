@@ -4,7 +4,7 @@ import { displayCommand } from './key-names';
 import { commandNames } from './bt';
 import { trimBytes } from './codes';
 import { activityOf } from './refs';
-import { addPage, describeAction, firstFree, pageDims, templatePage, trimToBytes, uniqueWidgetId, LABEL_MAX, type Action } from './studio-model';
+import { addPage, describeAction, firstFree, pageDims, templatePages, trimToBytes, uniqueWidgetId, LABEL_MAX, type Action } from './studio-model';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 type Rec = Record<string, unknown>;
@@ -320,6 +320,6 @@ export function addStartButton(cfg: Config, id: string): { config: Config; messa
 /** A control page from the "Activity control" template that shows while this activity runs. */
 export function addControlPage(cfg: Config, id: string): Config {
   const first = chainOrder(cfg, id).find((d) => (cfg.devices ?? []).find((x) => x.id === d)?.commands) ?? undefined;
-  const page = templatePage(cfg, 'activity', { activity: id, ...(first ? { device: first } : {}) });
-  return addPage(cfg, page);
+  const pages = templatePages(cfg, 'activity', { activity: id, ...(first ? { device: first } : {}) });
+  return pages.reduce((c, page) => addPage(c, page), cfg);
 }

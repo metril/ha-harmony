@@ -1,11 +1,22 @@
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { displayKey } from '../lib/key-names';
+import { isNewIcon, suggestIcons } from '../lib/icon-suggest';
 import { stockIconSvg } from '../lib/icon-shapes';
-import { STOCK_ICONS } from '../lib/stock-icons';
+import { STOCK_ICONS, type StockIcon } from '../lib/stock-icons';
 import { shared } from '../lib/styles';
 
-/** A searchable grid of the remote's stock icons. `value` is the icon name ('' = the default); fires `hh-icon` with the new name or undefined. */
+/** Picker sections, in order; an icon appears in the first section that lists it. Proposed glyphs (not yet in the firmware) get their own. */
+const SECTIONS: { title: string; names: string[] }[] = [
+  { title: 'Media', names: ['play', 'pause', 'stop', 'record', 'rewind', 'ffwd', 'skip_next', 'skip_prev', 'replay10', 'skip10', 'shuffle', 'repeat', 'vol_up', 'vol_down', 'mute', 'audio', 'audio_track', 'cc', 'music', 'film', 'picture', 'aspect'] },
+  { title: 'Navigation', names: ['up', 'down', 'chev_left', 'chev_right', 'back', 'home', 'menu', 'check', 'enter', 'search', 'grid_apps', 'list', 'guide', 'info', 'settings', 'input', 'ch', 'prev_ch', 'numpad', 'keyboard', 'sleep_timer'] },
+  { title: 'Home & Devices', names: ['tv', 'game', 'radio', 'app', 'power', 'bulb', 'scene', 'thermo', 'blinds', 'switch', 'fan', 'lock', 'sun', 'moon', 'star', 'plus', 'minus', 'sync', 'warn', 'rf', 'rf_off'] },
+];
+
+/**
+ * A searchable picker of the remote's stock icons. `value` is the icon name ('' = the default); fires `hh-icon` with the new name or undefined.
+ * With `command` / `label` it opens on a Suggested row (best matches first, each with the reason it matched).
+ */
 @customElement('hh-icon-picker')
 export class HhIconPicker extends LitElement {
   static override styles = [
@@ -13,27 +24,52 @@ export class HhIconPicker extends LitElement {
     css`
       :host { display: block; }
       input[type="search"] { height: 34px; width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; margin-bottom: 8px; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; max-height: 220px; overflow: auto; padding: 2px; }
-      .grid button { height: 44px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf2); color: var(--tx); cursor: pointer; font-size: 11.5px; }
-      .grid button:hover { background: var(--sf3); }
-      .grid button[aria-pressed="true"] { background: var(--acc); color: var(--onacc); border-color: var(--acc); }
-      .grid .sic { width: 24px; height: 24px; }
+      .scroll { max-height: 260px; overflow: auto; padding: 2px; }
+      h4 { margin: 10px 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--tx2); }
+      h4:first-child { margin-top: 0; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; }
+      .sug { display: grid; gap: 4px; }
+      button.ic { position: relative; height: 44px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf2); color: var(--tx); cursor: pointer; font-size: 11.5px; }
+      button.ic:hover { background: var(--sf3); }
+      button.ic[aria-pressed="true"] { background: var(--acc); color: var(--onacc); border-color: var(--acc); }
+      button.ic .sic { width: 24px; height: 24px; }
+      button.row { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px; justify-content: flex-start; }
+      button.row .why { font-size: 11.5px; color: var(--tx2); }
+      button.ic[aria-pressed="true"] .why { color: inherit; }
+      .new::after { content: 'new'; position: absolute; top: -5px; right: -4px; font-size: 9px; line-height: 1; padding: 2px 4px; border-radius: 6px; background: var(--acc); color: var(--onacc); }
       .none { margin: 8px 0 0; }
     `,
   ];
   @property() value = '';
+  /** the command the widget runs, its label and its device's icon: what the Suggested row matches */
+  @property() command = '';
+  @property() label = '';
+  @property({ attribute: 'device-icon' }) deviceIcon = '';
   @state() private q = '';
   private pick(name: string | undefined): void {
     this.dispatchEvent(new CustomEvent('hh-icon', { detail: name, bubbles: true, composed: true }));
   }
+  private btn(i: StockIcon, why = '') {
+    const name = displayKey(i.name);
+    return html`<button class="ic ${isNewIcon(i) ? 'new' : ''} ${why ? 'row' : ''}" aria-pressed=${this.value === i.name} aria-label=${why ? `${name}: ${why}` : name} title=${why ? `${name}: ${why}` : name} @click=${() => this.pick(i.name)}>${stockIconSvg(i.id)}${why ? html`<span>${name}</span><span class="why">${why}</span>` : nothing}</button>`;
+  }
   protected override render() {
     const q = this.q.trim().toLowerCase();
-    const icons = STOCK_ICONS.filter((i) => !q || i.name.includes(q) || i.keywords.some((k) => k.includes(q)));
+    const found = STOCK_ICONS.filter((i) => !q || i.name.includes(q) || displayKey(i.name).toLowerCase().includes(q) || i.keywords.some((k) => k.includes(q)));
+    const sug = q ? [] : suggestIcons(this.command, this.label, this.deviceIcon).slice(0, 6);
+    const shown = new Set<string>();
+    const groups = [
+      ...SECTIONS.map((s) => ({ title: s.title, icons: s.names.flatMap((n) => found.filter((i) => i.name === n && !isNewIcon(i))) })),
+      { title: 'Proposed Glyphs', icons: found.filter(isNewIcon) },
+    ].map((g) => ({ ...g, icons: g.icons.filter((i) => !shown.has(i.name) && shown.add(i.name)) }));
+    const rest = found.filter((i) => !shown.has(i.name));
+    if (rest.length) groups.push({ title: 'More', icons: rest });
     return html`<input type="search" placeholder="Search icons" aria-label="Search icons" .value=${this.q} @input=${(e: Event) => (this.q = (e.target as HTMLInputElement).value)} />
-      <div class="grid" role="group" aria-label="Icon">
-        ${icons.map((i) => html`<button aria-pressed=${this.value === i.name} aria-label=${displayKey(i.name)} title=${displayKey(i.name)} @click=${() => this.pick(i.name)}>${stockIconSvg(i.id)}</button>`)}
+      <div class="scroll" role="group" aria-label="Icon">
+        ${sug.length ? html`<h4>Suggested</h4><div class="sug">${sug.map((s) => this.btn(s.icon, s.reason))}</div>` : nothing}
+        ${groups.filter((g) => g.icons.length).map((g) => html`<h4>${g.title}</h4><div class="grid">${g.icons.map((i) => this.btn(i))}</div>`)}
       </div>
-      ${icons.length ? '' : html`<p class="muted">No icon matches.</p>`}
+      ${found.length ? '' : html`<p class="muted">No icon matches.</p>`}
       <button class="btn sm none" ?disabled=${!this.value} @click=${() => this.pick(undefined)}>Use the Default Icon</button>`;
   }
 }

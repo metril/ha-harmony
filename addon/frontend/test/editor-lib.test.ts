@@ -195,7 +195,7 @@ describe('auto-create', () => {
     const r = addStartButton(full(), 'watch_tv');
     expect('config' in r && r.config.pages?.[0]?.widgets.at(-1)).toMatchObject({ type: 'button', label: 'Watch TV', action: { activity: 'watch_tv' } });
     const c = addControlPage(full(), 'watch_tv');
-    expect(c.pages?.at(-1)).toMatchObject({ activity: 'watch_tv', back: true, title: 'Living room TV' });
+    expect(c.pages?.find((p) => p.activity === 'watch_tv')).toMatchObject({ activity: 'watch_tv', back: true, title: 'Watch TV' });
     expect(addStartButton({ ...full(), pages: [] }, 'watch_tv')).toHaveProperty('refused');
   });
 });

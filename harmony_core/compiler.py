@@ -16,7 +16,15 @@ from .harmony_proto import SOFT_KEY_BASE
 from .hub_limits import CURRENT, HubLimits, estimate_bytes
 from .keymap import effective
 from .keys import KEY_NAMES, UNKNOWN_KEY, key_code
-from .page_build import MAX_PAGES, MAX_SOFT_KEYS, CompileError, Tile, build_pages, encode_pages
+from .page_build import (
+    MAX_PAGES,
+    MAX_SOFT_KEYS,
+    CompileError,
+    Tile,
+    build_pages,
+    encode_pages,
+    overflow_warnings,
+)
 from .page_codec import MAX_BYTES, MAX_WIDGETS, Page, page_size
 from .theme_build import (
     CAP_THEME_COLOR,
@@ -550,7 +558,7 @@ def compile_config(
         theme_wire=at.wire,
         theme_name=at.name,
         theme_base=at.base,
-        warnings=theme_warnings(model),
+        warnings=[*theme_warnings(model), *overflow_warnings(models, cfg_ids, model)],
         cfg_ids=cfg_ids,
         seed=seed,
         page_of=page_of,

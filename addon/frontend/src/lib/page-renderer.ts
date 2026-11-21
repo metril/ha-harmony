@@ -8,6 +8,7 @@ import { svg, type TemplateResult } from 'lit';
 import { iconInner } from './icon-shapes';
 import type { V2Page, V2Widget } from './api';
 import { THEMES, css as hex } from './themes';
+import { clip, fitLabel, labelBudget, textPx, type Font } from './text-fit';
 import { DEFAULT_THEME, labelColor, presetTheme, widgetColors, type RenderTheme, type TileState } from './theme-model';
 
 export const SCREEN_W = 240;
@@ -44,6 +45,8 @@ export interface RenderOpts {
   noStatus?: boolean;
   /** the config's active theme (`activeTheme(config).theme`); default: the preset the page names */
   theme?: RenderTheme;
+  /** studio: outline every label the remote would cut, with a -N px badge */
+  flagOverflow?: boolean;
 }
 export interface Scene {
   w: number;
@@ -104,11 +107,11 @@ export function hitWidget(p: V2Page, px: number, py: number): number {
   return p.widgets.findIndex((w) => c.x >= w.x && c.x < w.x + w.w && c.y >= w.y && c.y < w.y + w.h);
 }
 
-const fit = (s: string, px: number, size: number): string => {
-  const chars = Array.from(s);
-  const max = Math.max(1, Math.floor(px / (size * 0.54)));
-  return chars.length <= max ? s : chars.slice(0, Math.max(0, max - 1)).join('') + '…';
-};
+const FONT_SIZE: Record<Font, number> = { b13: 13, m16: 16, b18: 18, b20: 20, r12: 12 };
+const FONT_WEIGHT: Record<Font, number> = { b13: 700, m16: 500, b18: 700, b20: 700, r12: 400 };
+/** `s` as the remote draws it in `font` within `px`: cut with LVGL's three-period dots, never "…". */
+const fit = (s: string, font: Font, px: number): string => clip(s, font, Math.max(0, px)).text;
+const DANGER = '#ff3b30';
 
 export function sampleTile(p: V2Page, w: V2Widget, opts: RenderOpts): TileSample {
   const given = opts.tiles?.[w.id];
@@ -132,7 +135,7 @@ function barPrims(p: V2Page, o: RenderOpts, T: RenderTheme, out: Prim[]): void {
   }
   const paged = p.seq ? `${p.seq.idx}/${p.seq.cnt}` : '';
   const room = (o.noStatus ? 228 : paged ? 126 : 140) - tx;
-  out.push({ t: 'text', x: tx, y: 22, s: fit(title, room, 16), size: 16, fill: hex(k.tx), anchor: 'start', weight: 500 });
+  out.push({ t: 'text', x: tx, y: 22, s: fit(title, 'm16', room), size: 16, fill: hex(k.tx), anchor: 'start', weight: 500 });
   if (paged) out.push({ t: 'text', x: o.noStatus ? 228 : 146, y: 21, s: paged, size: 12, fill: hex(k.tx2), anchor: 'end', weight: 600 });
   if (!o.noStatus) {
     out.push({ t: 'path', d: 'M152 21v-3M157 21v-6M162 21v-9M167 21v-12', stroke: hex(k.acc), sw: 2.2 });
@@ -153,7 +156,7 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
   if (w.kind === 'label') {
     if (p.version === 1 && wi === titleIndex(p)) return;
     const col = labelColor(w.color, T) ?? T.tokens.tx2;
-    out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 4.5, s: fit(w.label, bw - 4, 13), size: 13, fill: hex(col), anchor: 'middle', weight: 600, wi });
+    out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 4.5, s: fit(w.label, 'b13', bw - 4), size: 13, fill: hex(col), anchor: 'middle', weight: 600, wi });
     return;
   }
   const active = w.bind !== null && w.role !== 'nav' && o.activeAct != null && w.bind === o.activeAct;
@@ -175,23 +178,29 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
     out.push({ t: 'circle', x: cx, y: cy, r: rad - sw / 2, fill: hex(c.fill), stroke, sw: sw || undefined, wi });
     if (w.icon) out.push({ t: 'icon', id: w.icon, x: cx - rad * 0.5, y: cy - rad * 0.5, size: rad, color: icon, wi });
     else out.push({ t: 'text', x: cx, y: cy + rad * 0.34, s: (Array.from(w.label)[0] ?? '?').toUpperCase(), size: Math.max(12, rad * 0.95), fill: ink, anchor: 'middle', weight: 600, wi });
-    if (bh >= 64 && w.label && !w.icon_only) out.push({ t: 'text', x: cx, y: y + bh - 4, s: fit(w.label, bw, 12), size: 12, fill: cap, anchor: 'middle', wi });
+    if (bh >= 64 && w.label && !w.icon_only) out.push({ t: 'text', x: cx, y: y + bh - 4, s: fit(w.label, 'r12', bw), size: 12, fill: cap, anchor: 'middle', wi });
     return;
   }
   out.push({ t: 'rect', x: x + sw / 2, y: y + sw / 2, w: bw - sw, h: bh - sw, r: Math.max(0, radius - sw / 2), fill: hex(c.fill), stroke, sw: sw || undefined, wi });
-  const size = bh < 30 || bw < 56 ? 12 : bw >= 100 ? 16 : 14;
+  const sh = rowShift(p);
+  const lb = labelBudget({ cols: p.cols, rows: p.rows - sh }, { ...w, y: w.y - sh });
+  const font: Font = lb?.font ?? 'b13';
+  const size = FONT_SIZE[font];
+  const weight = FONT_WEIGHT[font];
+  const room0 = lb?.px ?? 0;
   const hasIcon = w.icon > 0;
   // the remote's layout choice (remote/app/ui.c): a row/pill or any wide, short button is one line; a big card stacks
   const rowPath = w.shape === 'row' || w.shape === 'pill' || (bh < 44 && bw >= 100);
   const big = w.shape === 'card' && !rowPath && bw >= 100 && bh >= 80;
   if (tile) {
     const val = tile.text;
+    const vf: Font = bw >= 80 ? 'b20' : 'b13';
     if (w.icon_only && hasIcon) out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 12, y: y + bh / 2 - 12, size: 24, color: icon, wi });
     else if (bh >= 52) {
       if (hasIcon) out.push({ t: 'icon', id: w.icon, x: x + 8, y: y + 8, size: 16, color: icon, wi });
-      if (!w.icon_only) out.push({ t: 'text', x: x + (hasIcon ? 28 : 10), y: y + 20, s: fit(w.label, bw - (hasIcon ? 36 : 18), 12), size: 12, fill: cap, anchor: 'start', wi });
-      out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 18, s: fit(val, bw - 12, 22), size: 22, fill: ink, anchor: 'middle', weight: 600, wi });
-    } else out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 5, s: fit(`${w.label}  ${val}`, bw - 8, size), size, fill: ink, anchor: 'middle', wi });
+      if (!w.icon_only) out.push({ t: 'text', x: x + (hasIcon ? 28 : 10), y: y + 20, s: fit(w.label, 'r12', bw - (hasIcon && bh >= 56 && bw >= 56 ? 38 : 8)), size: 12, fill: cap, anchor: 'start', wi });
+      out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 18, s: fit(val, vf, bw - 8), size: FONT_SIZE[vf], fill: ink, anchor: 'middle', weight: 700, wi });
+    } else out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 5, s: fit(`${w.label}  ${val}`, 'b13', bw - 8), size: 13, fill: ink, anchor: 'middle', wi });
     return;
   }
   const legacyDanger = p.version === 1 && w.kind === 'button' && /^power off$/i.test(w.label);
@@ -204,20 +213,19 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
     const ax = al === 'left' ? x + 12 : al === 'right' ? x + bw - 12 : x + bw / 2;
     const anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
     out.push({ t: 'icon', id: w.icon, x: al === 'left' ? ax : al === 'right' ? ax - 22 : ax - 11, y: y + bh / 2 - 22, size: 22, color: icon, wi });
-    out.push({ t: 'text', x: ax, y: y + bh / 2 + 22, s: fit(label, big ? bw - 24 : bw - 8, size), size, fill: text, anchor, weight: 500, wi });
+    out.push({ t: 'text', x: ax, y: y + bh / 2 + 22, s: fit(label, font, room0), size, fill: text, anchor, weight, wi });
   } else if (hasIcon) {
     const al = rowPath ? w.align ?? 'center' : 'center';
     const isz = 20;
     const chev = !!w.trailing && rowPath;
     if (chev) chevPrim(out, x, y, bw, bh, icon, wi);
     const span = chev ? bw - CHEV_ROOM : bw;
-    const room = span - 16 - isz - 8 - (chev ? 4 : 0);
-    const s = fit(label, room, size);
-    const tw = Math.min(room, s.length * size * 0.54);
+    const s = fit(label, font, room0);
+    const tw = Math.min(room0, textPx(s, font));
     const gw = isz + 8 + tw;
     const gx = al === 'left' ? x + 12 : al === 'right' ? x + span - 12 - gw : x + span / 2 - gw / 2;
     out.push({ t: 'icon', id: w.icon, x: gx, y: y + bh / 2 - isz / 2, size: isz, color: icon, wi });
-    out.push({ t: 'text', x: gx + isz + 8, y: y + bh / 2 + size * 0.35, s, size, fill: text, anchor: 'start', weight: 500, wi });
+    out.push({ t: 'text', x: gx + isz + 8, y: y + bh / 2 + size * 0.35, s, size, fill: text, anchor: 'start', weight, wi });
   } else if (label) {
     const al = rowPath || big ? w.align ?? 'center' : 'center';
     const chev = !!w.trailing && rowPath;
@@ -225,7 +233,7 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
     const span = chev ? bw - CHEV_ROOM : bw;
     const tx = al === 'left' ? x + 12 : al === 'right' ? x + span - 12 : x + span / 2;
     const anchor = al === 'left' ? 'start' : al === 'right' ? 'end' : 'middle';
-    out.push({ t: 'text', x: tx, y: y + bh / 2 + size * 0.35, s: fit(label, big ? bw - 24 : rowPath ? span - 24 - (chev ? 4 : 0) : bw - 8, size), size, fill: text, anchor, weight: 500, wi });
+    out.push({ t: 'text', x: tx, y: y + bh / 2 + size * 0.35, s: fit(label, font, room0), size, fill: text, anchor, weight, wi });
   }
 }
 
@@ -245,11 +253,27 @@ function chevPrim(out: Prim[], x: number, y: number, bw: number, bh: number, col
   out.push({ t: 'icon', id: 8, x: x + bw - CHEV_ROOM + 2, y: y + bh / 2 - 12, size: 24, color, wi });
 }
 
+/** Studio: a dashed red outline and a "-N px" badge on a widget whose label the remote would cut. */
+function flagPrims(p: V2Page, w: V2Widget, wi: number, out: Prim[]): void {
+  const sh = rowShift(p);
+  const f = fitLabel({ cols: p.cols, rows: p.rows - sh }, { ...w, y: w.y - sh });
+  if (!f) return;
+  const r = widgetRect(p, w);
+  const text = `\u2212${f.over} px`;
+  const bwid = textPx(`-${f.over} px`, 'r12') + 8;
+  out.push({ t: 'rect', x: r.x1 - 1, y: r.y1 - 1, w: r.x2 - r.x1 + 3, h: r.y2 - r.y1 + 3, r: 9, fill: 'none', stroke: DANGER, sw: 1.5, dash: true, wi });
+  out.push({ t: 'rect', x: r.x2 - bwid + 2, y: r.y1 - 5, w: bwid, h: 12, r: 3, fill: DANGER, wi });
+  out.push({ t: 'text', x: r.x2 - bwid / 2 + 2, y: r.y1 + 4, s: text, size: 9, fill: '#ffffff', anchor: 'middle', weight: 700, wi });
+}
+
 export function layoutPage(p: V2Page, opts: RenderOpts = {}): Scene {
   const T = opts.theme ?? themeOfPage(p);
   const prims: Prim[] = [{ t: 'rect', x: 0, y: 0, w: SCREEN_W, h: SCREEN_H, r: 0, fill: hex(T.tokens.bg) }];
   barPrims(p, opts, T, prims);
-  p.widgets.forEach((w, i) => widgetPrims(p, w, i, opts, T, prims));
+  p.widgets.forEach((w, i) => {
+    widgetPrims(p, w, i, opts, T, prims);
+    if (opts.flagOverflow) flagPrims(p, w, i, prims);
+  });
   return { w: SCREEN_W, h: SCREEN_H, prims };
 }
 

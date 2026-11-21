@@ -8,6 +8,7 @@ const NAMES: Record<string, string> = {
   select: 'OK', ok: 'OK', dvr: 'DVR', tv: 'TV', fast_forward: 'Fast Forward', play_pause: 'Play/Pause',
   arrowup: 'Arrow Up', arrowdown: 'Arrow Down', arrowleft: 'Arrow Left', arrowright: 'Arrow Right', arrow_up: 'Arrow Up', arrow_down: 'Arrow Down', arrow_left: 'Arrow Left', arrow_right: 'Arrow Right',
   direction_up: 'Up', direction_down: 'Down', direction_left: 'Left', direction_right: 'Right',
+  directionup: 'Up', directiondown: 'Down', directionleft: 'Left', directionright: 'Right',
   capslock: 'Caps Lock', caps_lock: 'Caps Lock',
 };
 /** What a screen reader and the palette search get for names that are printed as a symbol. */
@@ -91,6 +92,29 @@ export function displayKey(name: string): string {
   if (/^[A-Za-z]+\+[A-Za-z0-9]+$/.test(name)) return name.split('+').map((x) => (x.length <= 1 ? x.toUpperCase() : cap(x.toLowerCase()))).join('+');
   const words = tokens(name);
   return words.length ? title(words) : name;
+}
+
+const HDMI_INPUT = /^input_hdmi_?(\d+)$/;
+/** What a page button says for a command: the short name a person reads, with no device prefix ("DirectionUp" -> "Up", "InputHdmi1" -> "HDMI 1"). */
+export function displayName(name: string): string {
+  const h = HDMI_INPUT.exec(lookup(name));
+  return h ? `HDMI ${h[1]}` : displayCommand(name);
+}
+
+/** Abbreviations for labels that are over their pixel budget; never used otherwise. Phrases first, then single words. */
+const SHORT_PHRASES: [RegExp, string][] = [[/\bPicture Mode\b/g, 'Pic Mode'], [/\bAspect Ratio\b/g, 'Aspect'], [/\bInput HDMI\b/g, 'HDMI'], [/\bFast Forward\b/g, 'FF']];
+export const SHORT: Record<string, string> = { Volume: 'Vol', Channel: 'Ch', Previous: 'Prev', Settings: 'Setup', Favourite: 'Fav', Favorite: 'Fav', Favourites: 'Favs', Favorites: 'Favs', Subtitles: 'CC' };
+export function abbreviate(label: string): string {
+  let out = label;
+  for (const [re, to] of SHORT_PHRASES) out = out.replace(re, to);
+  return out.split(' ').map((w) => SHORT[w] ?? w).join(' ');
+}
+/** The label for a command in a cell that holds `fits` pixels: the display name, abbreviated only when it does not fit. */
+export function fitName(name: string, fits: (s: string) => boolean): string {
+  const full = displayName(name);
+  if (fits(full)) return full;
+  const short = abbreviate(full);
+  return short !== full ? short : full;
 }
 
 /** The spoken form of a key name for aria-labels and titles ("Home Control Plus" where displayKey shows "Home Control +"). */

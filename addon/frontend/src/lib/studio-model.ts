@@ -5,6 +5,11 @@ import { commandNames } from './bt';
 import type { Config, Device, IrAction, Page, Widget } from './model';
 import { tileDefaultTap } from './permissions';
 import { colourBytes } from './theme-model';
+import { bestIcon } from './icon-suggest';
+import { abbreviate, dn, fitName } from './key-names';
+import { stockIconByName, stockIconId } from './stock-icons';
+import type { PreviewPage } from './api';
+import { labelBudget, textPx, type FitWidget, type Font } from './text-fit';
 
 export type Action = Record<string, unknown>;
 export type Layer = string; // 'default' or an activity id
@@ -349,6 +354,58 @@ export function labelRoom(p: Page, index: number, budget = PAGE_BUDGET): number 
   const others = pageBytes(p) - utf8(w.label ?? '');
   return Math.max(0, Math.min(LABEL_MAX, budget - others));
 }
+// ---------------------------------------------------------------- pixel budget (the remote cuts labels by pixels, not bytes)
+export interface Meter { font: Font; px: number; used: number; over: number }
+export interface Overflow extends Meter { index: number; label: string; advice: string }
+/** The widget as the remote will draw it: the wire page's copy when there is a preview (icons inferred, icon-only defaulted), else a config estimate. */
+function fitInputs(page: Page, pp: PreviewPage | null, wi: number): { p: { cols: number; rows: number }; w: FitWidget } | null {
+  const w = page.widgets[wi];
+  if (!w) return null;
+  const wp = pp?.wire_pages[0]?.page;
+  const map = wp && !page.list ? wireMap(page, wp.widgets.length) : null;
+  const wire = map && (map[wi] ?? -1) >= 0 ? wp?.widgets[map[wi] as number] : undefined;
+  if (wp && wire) return { p: { cols: wp.cols, rows: wp.rows }, w: { ...wire, label: w.label ?? wire.label } };
+  const { cols, rows } = gridOf(page);
+  const nav = typeof w['nav'] === 'string' ? (w['nav'] as string) : '';
+  const shape = w.shape ?? (page.list || nav ? 'row' : 'card');
+  const list = !!page.list;
+  return {
+    p: { cols: list ? 1 : cols, rows: list ? page.list?.rows ?? 6 : rows },
+    w: { kind: w.type, x: list ? 0 : w.x ?? 0, y: list ? wi : w.y ?? 0, w: list ? 1 : w.w ?? 1, h: list ? 1 : w.h ?? 1, label: w.label ?? '', shape, icon: stockIconId(w.icon ?? ''), icon_only: !!w.icon_only, trailing: !!nav && !['prev', 'home'].includes(nav) },
+  };
+}
+/** Pixel meter of one widget's label: the font, the room, what the text needs. Null when no label is drawn. */
+export function labelMeter(page: Page, pp: PreviewPage | null, wi: number, label?: string): Meter | null {
+  const f = fitInputs(page, pp, wi);
+  if (!f) return null;
+  const w = label === undefined ? f.w : { ...f.w, label };
+  const b = labelBudget(f.p, w);
+  if (!b) return null;
+  const used = textPx(w.label, b.font);
+  return { font: b.font, px: b.px, used, over: Math.max(0, used - b.px) };
+}
+/** One line of advice for a label that will be cut: a hard key, an icon, the device prefix or an abbreviation. */
+function adviceFor(page: Page, w: Widget, m: Meter): string {
+  const cmd = String((w['action'] as { command?: string } | undefined)?.command ?? '');
+  const label = w.label ?? '';
+  if (cmd && isHardKey(cmd)) return 'this is a hard key, so remove it';
+  const prefix = (page.title ?? '').trim();
+  if (prefix && label.toLowerCase().startsWith(`${prefix.toLowerCase()} `)) return `the page title already says "${prefix}": drop the prefix`;
+  const short = abbreviate(label);
+  if (short !== label && textPx(short, m.font) <= m.px) return `use "${short}"`;
+  if (bestIcon(cmd, label)) return 'use an icon';
+  return 'shorten it';
+}
+/** Every label on this page the remote would cut, with the pixels over and what to do about it. */
+export function pageOverflow(page: Page, pp: PreviewPage | null): Overflow[] {
+  const out: Overflow[] = [];
+  page.widgets.forEach((w, index) => {
+    const m = labelMeter(page, pp, index);
+    if (m && m.over > 0) out.push({ ...m, index, label: w.label ?? '', advice: adviceFor(page, w, m) });
+  });
+  return out;
+}
+
 export function trimToBytes(s: string, max: number): string {
   let out = '';
   for (const ch of s) {
@@ -551,15 +608,35 @@ export function deletePage(cfg: Config, index: number): Config {
 export type TemplateId = 'activities' | 'activity' | 'numbers' | 'lights' | 'devices' | 'blank';
 export const TEMPLATES: { id: TemplateId; name: string; note: string }[] = [
   { id: 'activities', name: 'Activities Home', note: 'One button per activity, plus All off' },
-  { id: 'activity', name: 'Activity Control', note: 'Transport and volume of the first device' },
+  { id: 'activity', name: 'Activity Control', note: 'Home, Apps, Extras and Numbers pages for the activity' },
   { id: 'numbers', name: 'Number Pad', note: '0-9 of the first device that has them' },
   { id: 'lights', name: 'Lights and Scenes', note: 'Tiles for Home Assistant lights' },
-  { id: 'devices', name: 'Device List', note: 'One row per device command' },
+  { id: 'devices', name: 'Device List', note: 'A row per device, with a command page for each' },
   { id: 'blank', name: 'Blank', note: 'Empty 4x6 grid' },
 ];
-export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { entity_id: string; name?: string }[]; activity?: string; device?: string } = {}): Page {
+
+// ---------------------------------------------------------------- starter pages
+/** Commands the remote's own hard keys already carry; starter pages leave them out. */
+const HARD = /^(?:vol(?:ume)?_?(?:up|down|plus|minus)|ch(?:annel)?_?(?:up|down|plus|minus)|mute|(?:direction_?|arrow_?|dpad_?|cursor_?)?(?:up|down|left|right)|ok|select|center|dpad_center|play|pause|play_?pause|ff|fast_?forward|rew|rewind|stop|rec|record|red|green|yellow|blue|menu|exit|return|back|guide|info|dvr)$/;
+const snake = (n: string): string => n.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[\s-]+/g, '_').toLowerCase();
+export const isHardKey = (cmd: string): boolean => HARD.test(snake(cmd));
+const UTILITY = /^(?:home|apps?|app_?list|search|settings?|setup|keyboard|sleep(?:_?timer)?)$/;
+const EXTRAS = /replay|skip_?\d|(?:rew|rewind|forward|ffwd)_?\d|subtitle|caption|^cc$|audio|aspect|sleep|shuffle|repeat|angle|zoom|picture|pic_?mode/;
+
+/** The stock icon name when this build's icon set has it; a glyph that is not shipped yet is simply not used. */
+const iconIf = (name: string): string | undefined => (stockIconByName(name) ? name : undefined);
+
+/** The pages a template adds, in order; the first is the one that opens. Ids are unique among the config's pages and each other. */
+export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { entity_id: string; name?: string }[]; activity?: string; device?: string } = {}): Page[] {
   const devices = cfg.devices ?? [];
-  const pid = uniquePageId(cfg, id === 'activities' ? 'home' : id);
+  const taken = new Set((cfg.pages ?? []).map((p) => p.id));
+  const pid = (base: string): string => {
+    let n = 1;
+    let out = base;
+    while (taken.has(out)) out = `${base}_${++n}`;
+    taken.add(out);
+    return out;
+  };
   const used = new Set((cfg.pages ?? []).flatMap((pg) => pg.widgets.map((w) => w.id)));
   const mk = (base: string) => {
     let n = 1;
@@ -568,49 +645,117 @@ export function templatePage(cfg: Config, id: TemplateId, ctx: { entities?: { en
     return `${base}${n}`;
   };
   const btn = (x: number, y: number, label: string, action: Action, extra: Partial<Widget> = {}, w = 2): Widget => ({ type: 'button', id: mk('btn'), x, y, w, h: 1, label: trimToBytes(label, LABEL_MAX), action, ...extra });
+  /** A command button: the display name (abbreviated only when over budget), the stock icon alone in a 1-wide 4-column cell. */
+  const cmdBtn = (dev: Device, cmd: string, grid: { cols: number; rows: number }, b: Box, extra: Partial<Widget> = {}): Widget => {
+    const icon = bestIcon(cmd);
+    const only = !!icon && grid.cols === 4 && b.w === 1;
+    const fits = (s: string): boolean => {
+      const lb = labelBudget(grid, { kind: 'button', ...b, label: s, shape: extra.shape ?? 'card', icon: icon ? 1 : 0, icon_only: only });
+      return !lb || textPx(s, lb.font) <= lb.px;
+    };
+    return btn(b.x, b.y, fitName(cmd, fits), { device: dev.id, command: cmd }, { ...(icon ? { icon } : {}), ...(only ? { icon_only: true } : {}), ...extra }, b.w);
+  };
+  const act = (cfg.activities ?? []).find((a) => a.id === ctx.activity);
+  const actDevices = (act?.devices ?? []).map((d) => devices.find((x) => x.id === d.device)).filter((d): d is Device => !!d);
+  const pool = actDevices.length ? actDevices : [devices.find((x) => x.id === ctx.device) ?? devices[0]].filter((d): d is Device => !!d);
+
+  /** 3x4 keypad: digits as b20 pills, Prev Ch and Enter as icons. */
+  const numbersPage = (page: string, d: Device | undefined, back: boolean): Page => {
+    const widgets: Widget[] = [];
+    const names = d ? commandNames(d) : [];
+    for (let n = 1; n <= 10 && d; n++) {
+      const c = n % 10;
+      const cmd = names.find((k) => RE.numbers.test(k.toLowerCase()) && k.endsWith(String(c)));
+      if (cmd) widgets.push(btn(c === 0 ? 1 : (n - 1) % 3, c === 0 ? 3 : Math.floor((n - 1) / 3), String(c), { device: d.id, command: cmd }, { shape: 'pill' }, 1));
+    }
+    const side = (re: RegExp, x: number, label: string, icon: string | undefined) => {
+      const cmd = names.find((k) => re.test(snake(k)));
+      if (cmd && d) widgets.push(btn(x, 3, label, { device: d.id, command: cmd }, { shape: 'pill', ...(icon ? { icon, icon_only: true } : {}) }, 1));
+    };
+    side(/^(?:prev(?:ious)?_?ch(?:annel)?|last(?:_?ch(?:annel)?)?)$/, 0, 'Prev Ch', iconIf('prev_ch'));
+    side(/^enter$/, 2, 'Enter', iconIf('enter'));
+    return { id: page, cols: 3, rows: 4, title: 'Numbers', ...(back ? { back: true } : {}), widgets };
+  };
+
   switch (id) {
     case 'activities': {
       const acts = (cfg.activities ?? []).slice(0, 5);
       const widgets = acts.map((a, i) => btn(0, i, a.name ?? a.id, { activity: a.id }, {}, 4));
       widgets.push(btn(0, Math.min(acts.length, 5), 'All Off', { activity: 'off' }, { role: 'danger' }, 4));
       const hasHome = (cfg.pages ?? []).some((p) => p.kind === 'home');
-      return { id: pid, cols: 4, rows: 6, ...(hasHome ? {} : { kind: 'home' as const }), title: 'Activities', widgets };
+      return [{ id: pid('home'), cols: 4, rows: 6, ...(hasHome ? {} : { kind: 'home' as const }), title: 'Activities', widgets }];
     }
     case 'activity': {
-      const d = devices.find((x) => x.id === ctx.device) ?? devices[0];
-      const names = new Set(d ? commandNames(d) : []);
-      const pick = (...c: string[]) => c.find((n) => names.has(n));
-      const slots: [string, string | undefined][] = [['Vol +', pick('vol_up', 'volume_up')], ['Vol -', pick('vol_down', 'volume_down')], ['Mute', pick('mute')], ['Play', pick('play', 'play_pause')], ['Pause', pick('pause')], ['Stop', pick('stop')]];
-      const widgets: Widget[] = [];
-      slots.forEach(([label, cmd]) => {
-        if (cmd && d && widgets.length < 6) widgets.push(btn((widgets.length % 2) * 2, Math.floor(widgets.length / 2), label, { device: d.id, command: cmd }));
-      });
-      return { id: pid, cols: 4, rows: 6, title: d?.name ?? 'Control', ...(ctx.activity ? { activity: ctx.activity } : {}), back: true, widgets };
+      type Cmd = { dev: Device; cmd: string };
+      const all: Cmd[] = [];
+      for (const dev of pool) for (const cmd of commandNames(dev)) if (!isHardKey(cmd) && !all.some((c) => c.cmd === cmd)) all.push({ dev, cmd });
+      const numbersDev = pool.find((dv) => commandNames(dv).some((n) => groupCommand(n) === 'numbers'));
+      const rest = all.filter((c) => groupCommand(c.cmd) !== 'numbers' && !/^(?:enter|prev_?ch(?:annel)?|last)$/.test(snake(c.cmd)));
+      const utils = rest.filter((c) => UTILITY.test(snake(c.cmd))).slice(0, 4);
+      const extras = rest.filter((c) => !utils.includes(c) && EXTRAS.test(snake(c.cmd))).slice(0, 16);
+      const apps = rest.filter((c) => !utils.includes(c) && !extras.includes(c) && groupCommand(c.cmd) === 'other');
+      const name = pool.length === 1 ? (pool[0]?.name ?? pool[0]?.id ?? 'Control') : (act?.name ?? pool[0]?.name ?? 'Control');
+      const ids = { home: pid('activity'), apps: pid('apps'), extras: pid('extras'), numbers: pid('numbers') };
+      const nav: { page: string; label: string; icon: string | undefined }[] = [];
+      if (apps.length > 2) nav.push({ page: ids.apps, label: 'Apps', icon: iconIf('grid_apps') ?? iconIf('app') });
+      if (extras.length) nav.push({ page: ids.extras, label: 'Extras', icon: iconIf('list') });
+      if (numbersDev) nav.push({ page: ids.numbers, label: 'Numbers', icon: iconIf('numpad') });
+      // Home: apps as big cards, utilities as icon-only cells, then a row per sub-page
+      const homeRows = (apps.length ? 2 : 0) + (utils.length ? 1 : 0) + nav.length;
+      const g = { cols: 4, rows: Math.max(homeRows, 3) };
+      const home: Widget[] = [];
+      let y = 0;
+      apps.slice(0, 2).forEach((c, i) => home.push(cmdBtn(c.dev, c.cmd, g, { x: i * 2, y: 0, w: 2, h: 2 }, { shape: 'card' })));
+      if (apps.length) y = 2;
+      utils.forEach((c, i) => home.push(cmdBtn(c.dev, c.cmd, g, { x: i, y, w: 1, h: 1 })));
+      if (utils.length) y++;
+      nav.forEach((n) => home.push({ type: 'button', id: mk('btn'), x: 0, y: y++, w: 4, h: 1, label: n.label, nav: n.page, shape: 'row', align: 'left', ...(n.icon ? { icon: n.icon } : {}) }));
+      const pages: Page[] = [{ id: ids.home, cols: 4, rows: g.rows, title: name, back: true, ...(ctx.activity ? { activity: ctx.activity } : {}), widgets: home }];
+      if (apps.length > 2) {
+        const rows = Math.min(6, Math.ceil(apps.length / 2));
+        const ag = { cols: 4, rows };
+        pages.push({ id: ids.apps, cols: 4, rows, title: 'Apps', back: true, widgets: apps.slice(0, 12).map((c, i) => cmdBtn(c.dev, c.cmd, ag, { x: (i % 2) * 2, y: Math.floor(i / 2), w: 2, h: 1 })) });
+      }
+      if (extras.length) {
+        const rows = Math.min(6, Math.ceil(extras.length / 4));
+        const eg = { cols: 4, rows };
+        pages.push({ id: ids.extras, cols: 4, rows, title: 'Extras', back: true, widgets: extras.map((c, i) => cmdBtn(c.dev, c.cmd, eg, { x: i % 4, y: Math.floor(i / 4), w: 1, h: 1 })) });
+      }
+      if (numbersDev) pages.push({ ...numbersPage(ids.numbers, numbersDev, true) });
+      return pages;
     }
     case 'numbers': {
       const d = devices.find((dv) => commandNames(dv).some((n) => groupCommand(n) === 'numbers')) ?? devices[0];
-      const widgets: Widget[] = [];
-      for (let n = 1; n <= 10 && d; n++) {
-        const c = n % 10;
-        const cmd = commandNames(d).find((k) => RE.numbers.test(k.toLowerCase()) && k.endsWith(String(c)));
-        if (cmd) widgets.push(btn(c === 0 ? 1 : (n - 1) % 3, c === 0 ? 3 : Math.floor((n - 1) / 3), String(c), { device: d.id, command: cmd }, { shape: 'pill' }, 1));
-      }
-      return { id: pid, cols: 3, rows: 4, title: 'Numbers', back: true, widgets };
+      return [numbersPage(pid('numbers'), d, true)];
     }
     case 'lights': {
       const lights = (ctx.entities ?? []).filter((e) => entityDomain(e.entity_id) === 'light').slice(0, 8);
       const widgets: Widget[] = lights.map((e, i) => ({ type: 'tile', id: mk('tile'), x: (i % 2) * 2, y: Math.floor(i / 2), w: 2, h: 1, label: trimToBytes(e.name ?? e.entity_id, LABEL_MAX), entity: e.entity_id, icon: 'bulb' }));
-      return { id: pid, cols: 4, rows: 6, title: 'Lights', back: true, widgets };
+      return [{ id: pid('lights'), cols: 4, rows: 6, title: 'Lights', back: true, widgets }];
     }
     case 'devices': {
-      const widgets: Widget[] = [];
-      devices.forEach((d) => commandNames(d).slice(0, 12).forEach((c) => widgets.length < 30 && widgets.push({ type: 'button', id: mk('btn'), label: trimToBytes(`${d.name ?? d.id} ${c}`, LABEL_MAX), action: { device: d.id, command: c } })));
-      return { id: pid, cols: 1, list: { rows: 6 }, title: 'Devices', back: true, widgets };
+      const listId = pid('devices');
+      const withCmds = devices.filter((d) => commandNames(d).some((c) => !isHardKey(c)));
+      const grids = withCmds.map((d) => ({ d, id: pid(`dev_${d.id}`.slice(0, 31)) }));
+      const rows: Widget[] = devices.map((d) => {
+        const g = grids.find((x) => x.d === d);
+        const icon = d.icon && stockIconByName(d.icon) ? d.icon : undefined;
+        return { type: 'button', id: mk('btn'), label: trimToBytes(dn(d.name, d.id), LABEL_MAX), ...(g ? { nav: g.id } : { action: { none: true } }), ...(icon ? { icon } : {}) };
+      });
+      const pages: Page[] = [{ id: listId, cols: 1, list: { rows: 6 }, title: 'Devices', back: true, widgets: rows }];
+      for (const { d, id: gid } of grids) {
+        const cmds = commandNames(d).filter((c) => !isHardKey(c)).slice(0, 12);
+        const gr = { cols: 3, rows: Math.max(1, Math.min(4, Math.ceil(cmds.length / 3))) };
+        pages.push({ id: gid, cols: 3, rows: gr.rows, title: trimToBytes(dn(d.name, d.id), 24), back: true, widgets: cmds.map((c, i) => cmdBtn(d, c, gr, { x: i % 3, y: Math.floor(i / 3), w: 1, h: 1 })) });
+      }
+      return pages;
     }
     default:
-      return { id: pid, cols: 4, rows: 6, title: 'New Page', widgets: [] };
+      return [{ id: pid('blank'), cols: 4, rows: 6, title: 'New Page', widgets: [] }];
   }
 }
+/** The first page a template adds (the others, when it adds several, come from `templatePages`). */
+export const templatePage = (cfg: Config, id: TemplateId, ctx: Parameters<typeof templatePages>[2] = {}): Page => templatePages(cfg, id, ctx)[0] as Page;
 export function addPage(cfg: Config, page: Page, at?: number): Config {
   const next = clone(cfg);
   next.pages = next.pages ?? [];

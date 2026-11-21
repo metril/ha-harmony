@@ -538,7 +538,7 @@ export class HhRemote extends LitElement {
       <path class="seam" d=${`M${BODY.x + 1} ${GRIP_Y}h${BODY.w - 2}`}></path>
       <rect class="glass" x=${GLASS.x} y=${GLASS.y} width=${GLASS.w} height=${GLASS.h} rx=${GLASS.r}></rect>
       <svg class="scr" x=${SCREEN.x} y=${SCREEN.y} width=${SCREEN.w} height=${SCREEN.h} viewBox="0 0 240 320" @pointerdown=${(e: PointerEvent) => this.onScreenDown(e)}>
-        ${v2 ? pageGroup(v2, { activeAct: activityIndex(this.store.config, st.layer), theme: activeTheme(this.store.config).theme }) : svg`<rect width="240" height="320" fill="#101820"></rect><text x="120" y="164" font-size="13" fill="#687888" text-anchor="middle">${this.store.pages.length || !this.store.loaded ? 'No preview for this page' : 'Add a page to see the screen'}</text>`}
+        ${v2 ? pageGroup(v2, { activeAct: activityIndex(this.store.config, st.layer), theme: activeTheme(this.store.config).theme, flagOverflow: true }) : svg`<rect width="240" height="320" fill="#101820"></rect><text x="120" y="164" font-size="13" fill="#687888" text-anchor="middle">${this.store.pages.length || !this.store.loaded ? 'No preview for this page' : 'Add a page to see the screen'}</text>`}
         ${this.screenOverlay()}
       </svg>
       <rect class=${frame ? 'screen-frame tgt' : 'screen-frame'} x=${SCREEN.x - 2} y=${SCREEN.y - 2} width=${SCREEN.w + 4} height=${SCREEN.h + 4} rx="4"></rect>
