@@ -94,7 +94,12 @@ export function labelBudget(p: FitPage, w: FitWidget): { font: Font; px: number 
   }
   if (w.shape === 'pill') return { font: Array.from(w.label).length <= 2 ? 'b20' : 'm16', px: Math.max(0, bw - 8) }; // a digit reads at b20
   if (bw >= 100) {
-    if (w.compact || bh < 72) return { font: 'b13', px: Math.max(0, 2 * (bw - (hasIcon ? 44 : 10) - 10) - 4) }; // two lines beside the glyph
+    if (w.compact || bh < 72) {
+      // two lines beside the glyph, wrapped at spaces only: a word wider than the line would break mid-word, so nothing fits
+      const line = bw - (hasIcon ? 44 : 10) - 10;
+      if (w.label.split(/\s+/).some((word) => textPx(word, 'b13') > line)) return { font: 'b13', px: Math.max(0, line - 1) };
+      return { font: 'b13', px: Math.max(0, 2 * line - 4) };
+    }
     return { font: hasIcon ? 'b13' : 'm16', px: Math.max(0, bw - 24) };
   }
   return { font: hasIcon ? 'r12' : 'b13', px: Math.max(0, bw - 6) };

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Config } from '../src/lib/model';
 import type { Device } from '../src/lib/model';
 import vectors from '../../../tests/vectors/inputs.json';
-import { activityIcon, derivedInputs, derivedInputsNote, deviceInputs, materializeInputs, studioChecks, inferDeviceIcon, inputIcon, isHardKey, labelMeter, normalizeInput, pageOverflow, templatePages } from '../src/lib/studio-model';
+import { activityIcon, fitShort, fitTitle, derivedInputs, derivedInputsNote, deviceInputs, materializeInputs, studioChecks, inferDeviceIcon, inputIcon, isHardKey, labelMeter, normalizeInput, pageOverflow, templatePages } from '../src/lib/studio-model';
 import { bestIcon, suggestIcons } from '../src/lib/icon-suggest';
 
 const ir = { proto: 'nec', addr: 1, cmd: 1 };
@@ -175,8 +175,8 @@ describe('visual pass: FIXED templates, checks and input editing', () => {
     const [home] = templatePages(c, 'activities');
     expect([home!.layout, home!.cols, home!.kind]).toEqual(['fixed', 12, 'home']);
     expect(home!.widgets[0]).toMatchObject({ label: 'Shield TV', w: 6, x: 0, y: 0, align: 'left', icon: 'nvidia', icon_only: false });
-    expect(home!.widgets.slice(1).map((w) => [w.label, w.shape, w.nav ?? null])).toEqual([['Devices', 'row', 'devices'], ['Favorites', 'row', 'favorites'], ['All Off', 'row', null]]);
-    expect(home!.widgets.at(-1)).toMatchObject({ role: 'danger', action: { activity: 'off' } });
+    expect(home!.widgets.slice(1).map((w) => [w.label, w.shape, w.nav ?? null])).toEqual([['Devices', 'row', 'devices'], ['All Off', 'row', null], ['Favorites', 'row', 'favorites']]);
+    expect(home!.widgets.find((w) => w.label === 'All Off')).toMatchObject({ role: 'danger', action: { activity: 'off' } });
   });
 
   it('the activity page: app cards, Apps and Inputs rows, an Inputs page, Tools kept off the apps', () => {
@@ -186,7 +186,7 @@ describe('visual pass: FIXED templates, checks and input editing', () => {
     const rows = home.widgets.filter((w) => w.shape === 'row');
     expect(rows.map((w) => w.label)).toEqual(['Apps', 'Inputs']);
     expect(home.widgets.filter((w) => w.shape !== 'row').every((w) => w.w === 6)).toBe(true);
-    const inputs = pages.find((p) => p.title === 'Living TV Inputs')!;
+    const inputs = pages.find((p) => p.title === 'Inputs')!;
     expect(inputs.widgets.map((w) => [w.label, w.icon, w.w])).toEqual([['HDMI 1', 'hdmi1', 12], ['HDMI 2', 'hdmi2', 12], ['HDMI 3', 'hdmi3', 12]]);
     expect(pages.flatMap((p) => p.widgets.map((w) => w.label))).not.toContain('Tools');
     expect(rows.find((w) => w.label === 'Inputs')?.nav).toBe(inputs.id);
@@ -200,6 +200,27 @@ describe('visual pass: FIXED templates, checks and input editing', () => {
     expect(a6.widgets).toHaveLength(6);
     expect(a6.widgets.every((w) => w.compact === true && w.w === 6)).toBe(true);
     expect(a6.widgets.map((w) => [w.x, w.y])).toEqual([[0, 0], [6, 0], [0, 1], [6, 1], [0, 2], [6, 2]]);
+  });
+
+  it('Home uses compact cards from 3 activities and keeps All Off before the rows that may page', () => {
+    const c = { ...cfgInputs(), activities: ['a', 'b', 'c'].map((id) => ({ id, name: id.toUpperCase(), devices: [{ device: 'tv' }] })) } as unknown as Config;
+    const home = templatePages(c, 'activities')[0]!;
+    expect(home.widgets.filter((w) => w.w === 6).every((w) => w.compact === true)).toBe(true);
+    expect(home.widgets.findIndex((w) => w.label === 'All Off')).toBe(3);
+  });
+
+  it('a Home Assistant app device gets the Apps layout: labelled cards up to 4, compact from 5', () => {
+    const ha = (n: number): Config => ({ devices: [{ id: 'sa', name: 'Shield Apps', kind: 'ha', entity: 'media_player.x', icon: 'grid_apps', commands: many(n) }], activities: [], pages: [] }) as unknown as Config;
+    const p4 = templatePages(ha(4), 'devices')[1]!;
+    expect(p4.widgets.every((w) => w.w === 6 && !w.compact && w.icon_only === false)).toBe(true);
+    const p6 = templatePages(ha(6), 'devices')[1]!;
+    expect(p6.widgets.every((w) => w.w === 6 && w.compact === true)).toBe(true);
+  });
+
+  it('short captions drop trailing words; page titles fit the header', () => {
+    expect(fitShort('Sleep Timer', (t) => t.length <= 6)).toBe('Sleep');
+    expect(fitTitle('Speaker Power')).toBe('Speaker');
+    expect(fitTitle('Living TV Inputs', 'Inputs')).toBe('Inputs');
   });
 
   it('an activity icon is a brand logo when the name has one, else a glyph', () => {

@@ -110,8 +110,11 @@ def label_budget(page: Any, w: Any) -> tuple[str, int] | None:
     if w.shape == "pill":
         return ("b20" if len(w.label) <= 2 else "m16"), max(0, bw - 8)  # a digit reads at b20
     if bw >= 100:
-        if getattr(w, "compact", False) or bh < 72:  # two lines beside the glyph, a little slack for the word wrap
-            return "b13", max(0, 2 * (bw - (44 if has_icon else 10) - 10) - 4)
+        if getattr(w, "compact", False) or bh < 72:  # two lines beside the glyph, wrapped at spaces only
+            line = bw - (44 if has_icon else 10) - 10
+            if any(text_px(word, "b13") > line for word in w.label.split()):
+                return "b13", max(0, line - 1)  # a word wider than the line would break mid-word: never fits
+            return "b13", max(0, 2 * line - 4)
         return ("b13" if has_icon else "m16"), max(0, bw - 24)
     return ("r12" if has_icon else "b13"), max(0, bw - 6)
 
