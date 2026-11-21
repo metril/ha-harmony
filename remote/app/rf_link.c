@@ -136,8 +136,6 @@ static bool link_down(const rf_link_t *l) {
 
 /* One sync pulse; arms the next backoff step while the link stays down. */
 static void rejoin_attempt(rf_link_t *l, uint64_t now) {
-  bool receiving = l->store && l->store->have_gen && hp_store_count(l->store) > 0 && !hp_store_complete(l->store);
-  if (receiving) return; /* a page-set transfer is under way: no re-sync (stock skips it during config sync / OTA) */
   bool recent = l->synced_once && now - l->last_sync_ms < RF_LINK_SYNC_COALESCE_MS;
   if (!recent && hp_rf_spi_sync(l->tp) == 0) { /* failure is untracked: it never blocks a key send */
     l->synced_once = true;

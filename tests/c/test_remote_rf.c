@@ -1140,26 +1140,22 @@ static void test_rejoin_followed_by_quick_uplink_in_5ms(void) {
   teardown();
 }
 
-static void test_rejoin_skipped_during_page_transfer(void) {
+static void test_rejoin_lost_mid_transfer_pulses_and_does_not_spin(void) {
   setup();
   DRAIN();
-  fh.drop_all = 1; /* the hub stays unreachable */
+  fh.drop_all = 1;
   app.store.have_gen = true;
   app.store.gen = 1;
   app.store.total = 3;
   app.store.count = 1; /* a page set is arriving */
   remote_chip_link(0);
-  CT_EQ(count_syncs(), 0);
-  fk_touch(&fk, 300, 300, 1);
-  fk_touch(&fk, 300, 300, 0);
-  tick(50);
-  CT_EQ(count_syncs(), 0);
+  CT_EQ(count_syncs(), 1); /* sent despite the transfer */
+  app_link_t lk = rf_link_app(&rf);
+  CT_CHECK(lk.next_ms(lk.ctx, fk.now) > 0); /* a future deadline, not a busy loop */
+  idle_awake(40000);
+  CT_EQ(count_syncs(), RF_LINK_SYNC_MAX_TRIES);
+  CT_CHECK(lk.next_ms(lk.ctx, fk.now) > 0);
   app.store.have_gen = false;
-  tick(RF_LINK_SYNC_COALESCE_MS + 10);
-  fk_touch(&fk, 300, 300, 1);
-  fk_touch(&fk, 300, 300, 0);
-  tick(50);
-  CT_EQ(count_syncs(), 1);
   teardown();
 }
 
@@ -1202,7 +1198,7 @@ int main(void) {
   CT_RUN(test_rejoin_never_up_remote_pulses);
   CT_RUN(test_rejoin_failed_pulse_does_not_block_key);
   CT_RUN(test_rejoin_followed_by_quick_uplink_in_5ms);
-  CT_RUN(test_rejoin_skipped_during_page_transfer);
+  CT_RUN(test_rejoin_lost_mid_transfer_pulses_and_does_not_spin);
   CT_RUN(test_rejoin_on_touch_while_lost);
   CT_RUN(test_heartbeat_unreadable_soc);
   CT_RUN(test_wait_includes_link_fd_and_deadline);
