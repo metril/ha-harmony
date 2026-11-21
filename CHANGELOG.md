@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.23 (2026-11-20)
+
+- Elite strip keys fixed: ACTIVITIES now opens the `kind: home` page and DEVICES the `kind: favorites` page (the driver's key codes were swapped). Needs the matching remote firmware.
+- New per-widget `align: left | center` (editor: Align next to Shape). Centred rows keep the trailing chevron at the right edge. Needs the matching remote firmware.
+- Editor preview draws the trailing chevron on nav rows, matching the remote.
+
 ## 0.3.22 (2026-11-20)
 
 A hub request that gets no answer now reports "request timed out after 10 s" instead of an empty "hub is unreachable" reason.
