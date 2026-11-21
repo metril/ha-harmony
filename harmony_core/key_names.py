@@ -192,3 +192,19 @@ def abbreviate(label: str) -> str:
     for a, b in _PHRASES:
         label = re.sub(rf"\b{a}\b", b, label)
     return " ".join(SHORT.get(w, w) for w in label.split(" "))
+
+
+_INPUT_HDMI = re.compile(r"^(?:input_)?hdmi_?(\d+)(?:_?mhl|_?arc|_?earc)?$")
+_INPUT_PORT = re.compile(r"^input_(av|usb|tv)(?:_?\d+)?$")
+
+
+def normalize_input(name: str) -> str | None:
+    """"InputHdmi1", "HDMI1", "Input HDMI 2" -> "HDMI 1" / "HDMI 2"; "InputAv" -> "AV", "InputUsb" -> "USB",
+    "InputTv" -> "TV". None when the command is not an input selector (twin of studio-model.ts
+    `normalizeInput`; both run tests/vectors/inputs.json)."""
+    c = _lookup(name.strip())
+    h = _INPUT_HDMI.match(c)
+    if h:
+        return f"HDMI {int(h.group(1))}"
+    p = _INPUT_PORT.match(c)
+    return p.group(1).upper() if p else None

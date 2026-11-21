@@ -24,10 +24,12 @@ def test_devices_favorites_navigate_to_device_pages_and_home_has_nav():
     assert navs("devices") == {
         "TV": "dev_tv",
         "Shield": "dev_shield",
+        "Shield Apps": "dev_shield_apps",
         "Speakers": "dev_speakers",
+        "Speaker Power": "dev_speaker_power",
         "KVM": "dev_kvm",
     }
-    assert navs("home") == {"Lights": "lights", "Scenes": "scenes", "Blinds": "blinds"}
+    assert navs("home") == {"Lights": "lights", "Scenes": "scenes", "Blinds": "blinds", "Favorites": "favorites"}
     c = compile_config(model)
     nav = [w for p in c.models for w in p.widgets if w.role == "nav"]
-    assert nav and all(w.trailing and w.shape == "row" and w.icon == 0 for w in nav)
+    assert nav and all(w.trailing and w.shape == "row" and w.icon for w in nav)

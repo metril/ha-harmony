@@ -1,0 +1,17 @@
+[
+  ["InputHdmi1", "HDMI 1"],
+  ["HDMI1", "HDMI 1"],
+  ["Input HDMI 2", "HDMI 2"],
+  ["input_hdmi_3", "HDMI 3"],
+  ["hdmi4", "HDMI 4"],
+  ["InputHdmi2MHL", "HDMI 2"],
+  ["InputAv", "AV"],
+  ["InputAv1", "AV"],
+  ["InputUsb", "USB"],
+  ["InputTv", "TV"],
+  ["Input TV", "TV"],
+  ["Volume Up", null],
+  ["TV", null],
+  ["Source", null],
+  ["Input", null]
+]
