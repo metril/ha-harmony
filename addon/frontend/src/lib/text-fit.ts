@@ -1,5 +1,5 @@
 // Label pixel budgets on the Elite's 240x320 screen: what fits and what the remote clips.
-// A port of ra_ui_widget_rect and the font / label-width rules of build_v2_content (remote/app/ui.c), measured with the
+// A port of ra_ui_widget_rect and the class font / label-width rules of build_v2_content / build_tile (remote/app/ui.c), measured with the
 // baked fonts' advance widths (font_metrics.json, from tools/gen_font_metrics.py). Twin of harmony_core/text_fit.py;
 // both run tests/vectors/text_fit.json.
 import metrics from '@shared/font_metrics.json';
@@ -49,11 +49,26 @@ function inset(lo: number, hi: number, a: number, b: number): [number, number] {
   return [lo + a, hi - b];
 }
 
-export interface FitPage { cols: number; rows: number }
-export interface FitWidget { kind: string; x: number; y: number; w: number; h: number; label: string; shape: string; icon: number; icon_only: boolean; trailing?: boolean }
+export interface FitPage { cols: number; rows: number; fixed?: boolean }
+export interface FitWidget { kind: string; x: number; y: number; w: number; h: number; label: string; shape: string; icon: number; icon_only: boolean; trailing?: boolean; compact?: boolean }
 
-/** Width and height of a widget's drawn rectangle (v2 pages: no title-row shift). */
-export function widgetSize(p: FitPage, w: Pick<FitWidget, 'x' | 'y' | 'w' | 'h'>): [number, number] {
+/** FIXED layout class size of a widget (docs/proto/page-format.md); null for a cell the layout cannot place. */
+function fixedSize(w: Pick<FitWidget, 'kind' | 'x' | 'w' | 'h' | 'shape' | 'compact'>): [number, number] | null {
+  const sp = w.w;
+  if (w.h !== 1 || ![12, 6, 4, 3].includes(sp) || w.x % sp) return null;
+  if (w.compact && (w.kind !== 'button' || w.shape !== 'card' || sp !== 6)) return null;
+  const n = 12 / sp;
+  const bw = Math.floor((224 - (n - 1) * 8) / n);
+  const bh = w.kind === 'label' || w.shape === 'row' ? 44 : w.kind === 'tile' ? 64 : w.shape === 'pill' ? 52 : sp >= 6 ? (w.compact ? 56 : 80) : 52;
+  return [bw, bh];
+}
+
+/** Width and height of a widget's drawn rectangle (v2 pages: no title-row shift); a FIXED page gives the class size. */
+export function widgetSize(p: FitPage, w: Pick<FitWidget, 'kind' | 'x' | 'y' | 'w' | 'h' | 'shape' | 'compact'>): [number, number] {
+  if (p.fixed) {
+    const f = fixedSize(w);
+    if (f) return f;
+  }
   let x1 = edge(w.x, p.cols, SCREEN_W);
   let x2 = edge(w.x + w.w, p.cols, SCREEN_W) - 1;
   let y1 = BAR_H + edge(w.y, p.rows, SCREEN_H - BAR_H);
@@ -63,34 +78,26 @@ export function widgetSize(p: FitPage, w: Pick<FitWidget, 'x' | 'y' | 'w' | 'h'>
   return [x2 - x1 + 1, y2 - y1 + 1];
 }
 
-/** The font and maximum label pixels the remote gives this widget's label; null when it draws no label. */
+/**
+ * The font and maximum label pixels the remote gives this widget's label; null when it draws no label.
+ * The class rules of build_v2_content / build_tile (remote/app/ui.c): row m16, card b13 (compact: two lines beside the
+ * glyph), key r12 caption under a glyph, pill b20 digit, tile name m16.
+ */
 export function labelBudget(p: FitPage, w: FitWidget): { font: Font; px: number } | null {
   const [bw, bh] = widgetSize(p, w);
   const hasIcon = w.icon > 0;
-  if (w.kind === 'tile') {
-    if (!(bh >= 44 && w.label)) return null;
-    return { font: 'r12', px: bw - (hasIcon && bh >= 56 && bw >= 56 ? 38 : 8) };
-  }
+  if (w.kind === 'tile') return w.label ? { font: 'm16', px: Math.max(0, bh >= 56 && bw >= 80 ? bw - 20 : bw - 64) } : null;
   if (w.kind !== 'button' || !w.label || w.shape === 'monogram' || (w.icon_only && hasIcon)) return null;
-  const row = w.shape === 'row' || w.shape === 'pill' || (bh < 44 && bw >= 100);
-  const big = w.shape === 'card' && !row && bw >= 100 && bh >= 80;
-  const px = row ? 24 : big ? 32 : bh >= 64 ? 24 : 20;
-  let font: Font;
-  let lw: number;
-  if (big) {
-    font = 'b18';
-    lw = bw - 24;
-  } else {
-    font = row || bw >= 100 ? 'm16' : 'b13';
-    lw = bw - 8;
+  if (w.shape === 'row' || (bh < 44 && bw >= 100)) {
+    const px = bh < 36 ? 20 : 24;
+    return { font: 'm16', px: Math.max(0, bw - 10 - (hasIcon ? px + 10 : 0) - 8 - (w.trailing ? 30 : 0)) };
   }
-  if (row) {
-    // a keypad pill with a 1-2 character label (a digit) is set in b20
-    if (w.shape === 'pill' && Array.from(w.label).length <= 2) font = 'b20';
-    lw = hasIcon ? bw - 12 - px - 16 : bw - 24;
-    if (w.trailing) lw -= 28;
+  if (w.shape === 'pill') return { font: Array.from(w.label).length <= 2 ? 'b20' : 'm16', px: Math.max(0, bw - 8) }; // a digit reads at b20
+  if (bw >= 100) {
+    if (w.compact || bh < 72) return { font: 'b13', px: Math.max(0, 2 * (bw - (hasIcon ? 44 : 10) - 10) - 4) }; // two lines beside the glyph
+    return { font: hasIcon ? 'b13' : 'm16', px: Math.max(0, bw - 24) };
   }
-  return { font, px: Math.max(0, lw) };
+  return { font: hasIcon ? 'r12' : 'b13', px: Math.max(0, bw - 6) };
 }
 
 /** Font, budget and pixels over for a widget whose label the remote would cut; null when it fits (or has no label). */

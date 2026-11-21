@@ -15,9 +15,7 @@
 
 static void paint(ra_ui_t *ui, unsigned i);
 static void np_forget(ra_ui_t *ui);
-static const char *tile_caption(const ra_ui_t *ui, const hp_widget_t *w);
-
-static void stale_caption(ra_ui_t *ui, unsigned i);
+static const char *tile_state_text(const ra_ui_t *ui, const hp_widget_t *w);
 
 void ra_ui_widget_box(const hp_page_t *p, const hp_widget_t *w, int *x1, int *y1, int *x2, int *y2) {
   if (hp_page_box(p, w, x1, y1, x2, y2)) *x1 = *y1 = *x2 = *y2 = 0;
@@ -117,9 +115,9 @@ static void chrome_apply(ra_ui_t *ui) {
 }
 
 #define SEQ_RIGHT 142 /* right edge of the "idx/cnt" label, left of the RF bars */
-#define BACK_W 24     /* back chevron cell; a tap on x < BACK_TAP_W goes Home (app.c) */
+#define BACK_W 24     /* back chevron cell; a tap on x < BACK_TAP_W goes back (app.c) */
 
-/* The bar's page context: a back chevron (BACK pages) and "idx/cnt" (paged groups). */
+/* The bar's page context: a back chevron (back stack deeper than Home) and "idx/cnt" (paged groups). */
 typedef struct {
   int back;
   unsigned seq_idx, seq_cnt;
@@ -135,7 +133,7 @@ static int bar_build(ra_ui_t *ui, lv_obj_t *scr, const char *title, const bar_ct
   if (bc && bc->back) {
     tx += BACK_W + 2;
     tw -= BACK_W + 2;
-    lv_obj_t *b = make_label(bar, RA_GLYPH_BACK, &ra_st_txt_cap, &ra_icons_24, BACK_W);
+    lv_obj_t *b = make_label(bar, RA_GLYPH_CHEV_LEFT, &ra_st_txt_cap, &ra_icons_24, BACK_W);
     if (!b) return -1;
     lv_obj_set_pos(b, 4, 4);
     ui->back = b;
@@ -143,13 +141,14 @@ static int bar_build(ra_ui_t *ui, lv_obj_t *scr, const char *title, const bar_ct
   if (bc && bc->seq_cnt) {
     char sq[24];
     snprintf(sq, sizeof sq, "%u/%u", bc->seq_idx, bc->seq_cnt);
-    lv_obj_t *q = make_label(bar, sq, &ra_st_txt_cap, NULL, 40);
+    int sw = lv_text_get_width(sq, (uint32_t)strlen(sq), &ra_font_r12, 0) + 2;
+    lv_obj_t *q = make_label(bar, sq, &ra_st_txt_cap, NULL, sw);
     if (!q) return -1;
     lv_obj_set_style_text_align(q, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_color(q, ra_color(TH->tx3), 0);
-    lv_obj_set_pos(q, SEQ_RIGHT - 40, 9);
+    lv_obj_set_pos(q, SEQ_RIGHT - sw, 9);
     ui->seq = q;
-    tw = SEQ_RIGHT - 40 - 4 - tx;
+    tw = SEQ_RIGHT - sw - 6 - tx;
   }
   lv_obj_t *t = make_label(bar, title, &ra_st_txt_title, NULL, tw);
   if (!t) return -1;
@@ -191,8 +190,7 @@ void ra_ui_set_link(ra_ui_t *ui, int lost) {
   if (ui->page.version != 2) return;
   for (unsigned i = 0; i < ui->page.count; i++) { /* v2 tiles say "stale" while the link is lost */
     if (ui->page.widgets[i].kind != HP_WIDGET_TILE || !ui->obj[i]) continue;
-    if (!ui->wcap[i] && lost) stale_caption(ui, i); /* a tile without a name gets its caption now (optional: skipped when memory is tight) */
-    if (ui->wcap[i]) lv_label_set_text(ui->wcap[i], tile_caption(ui, &ui->page.widgets[i]));
+    if (ui->lbl[i]) lv_label_set_text(ui->lbl[i], tile_state_text(ui, &ui->page.widgets[i]));
     paint(ui, i);
   }
 }
@@ -216,7 +214,7 @@ static void fail(ra_ui_t *ui) {
   memset(ui->ico, 0, sizeof ui->ico);
   memset(ui->wcap, 0, sizeof ui->wcap);
   ui->active = 0;
-  ui->msg = ui->cap = ui->prog_fill = ui->bar = ui->title = ui->pct = ui->batt = ui->batt_fill = ui->back = ui->seq = NULL;
+  ui->msg = ui->cap = ui->msg_ico = ui->prog_fill = ui->bar = ui->title = ui->pct = ui->batt = ui->batt_fill = ui->back = ui->seq = NULL;
   ui->recv_total = 0;
   ui->rf[0] = ui->rf[1] = ui->rf[2] = NULL;
   np_forget(ui);
@@ -255,7 +253,7 @@ static int screen_reset(ra_ui_t *ui, const char *title, unsigned widgets, unsign
   memset(ui->ico, 0, sizeof ui->ico);
   memset(ui->wcap, 0, sizeof ui->wcap);
   ui->active = 0;
-  ui->msg = ui->cap = ui->prog_fill = NULL;
+  ui->msg = ui->cap = ui->msg_ico = ui->prog_fill = NULL;
   ui->np_art = ui->np_t1 = ui->np_t2 = ui->np_gly = ui->np_tm = ui->np_bar = ui->np_fill = NULL;
   ui->recv_total = 0;
   ui->title_idx = -1;
@@ -267,19 +265,41 @@ static int screen_reset(ra_ui_t *ui, const char *title, unsigned widgets, unsign
   return 0;
 }
 
-/* Centred two-line state message in the content area; 0 ok, -1 out of memory. */
-static int message(ra_ui_t *ui, const char *head, const char *sub, int head_bad) {
+/* State screen: an optional 32 px glyph, a b20 title and an r12 caption, centred in the 288 px content area (with room
+ * for the 6 px progress bar when `bar`). 0 ok, -1 out of memory. */
+#define ST_ICON_H 32
+#define ST_TITLE_H 24
+#define ST_SUB_H 16
+#define PROG_X 40
+#define PROG_W 160
+#define PROG_H 6
+
+static int msg_sub_y; /* y of the caption of the state screen just built (the progress bar sits under it) */
+
+static int message(ra_ui_t *ui, const char *glyph_s, const char *head, const char *sub, int head_bad, int bar) {
   lv_obj_t *scr = lv_screen_active();
+  int h = (glyph_s ? ST_ICON_H + 6 : 0) + ST_TITLE_H + 6 + ST_SUB_H + (bar ? 12 + PROG_H : 0);
+  int y = RA_BAR_H + (HP_PAGE_SCREEN_H - RA_BAR_H - h) / 2;
+  ui->msg_bad = head_bad;
+  if (glyph_s) {
+    lv_obj_t *ic = make_label(scr, glyph_s, &ra_st_txt_cap, &ra_icons_32, 40);
+    if (!ic) return -1;
+    lv_obj_set_style_text_color(ic, ra_color(head_bad ? TH->bad : TH->acc), 0);
+    lv_obj_set_pos(ic, (HP_PAGE_SCREEN_W - 40) / 2, y);
+    ui->msg_ico = ic;
+    y += ST_ICON_H + 6;
+  }
   lv_obj_t *m = make_label(scr, head, &ra_st_txt_display, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
   if (!m) return -1;
   ui->msg = m;
-  ui->msg_bad = head_bad;
   lv_obj_set_style_text_color(m, ra_color(head_bad ? TH->bad : TH->tx), 0);
-  lv_obj_set_pos(m, RA_MARGIN, 148);
-  lv_obj_t *c = make_label(scr, sub, &ra_st_txt_cap, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
+  lv_obj_set_pos(m, RA_MARGIN, y);
+  y += ST_TITLE_H + 6;
+  lv_obj_t *c = make_label(scr, sub, &ra_st_txt_cap, NULL, 200);
   if (!c) return -1;
   ui->cap = c;
-  lv_obj_set_pos(c, RA_MARGIN, 176);
+  lv_obj_set_pos(c, (HP_PAGE_SCREEN_W - 200) / 2, y);
+  msg_sub_y = y;
   return 0;
 }
 
@@ -349,11 +369,11 @@ static wcol_t widget_colors(const ra_ui_t *ui, const hp_widget_t *w, int active)
   }
   if (active) return WC(TH->acc, TH->onacc, TH->onacc, TH->onacc);
   switch (w->role) {
-  case HP_ROLE_PRIMARY: return WC(TH->s2, TH->acc, TH->acc, TH->tx2);
+  case HP_ROLE_PRIMARY: return WC(TH->s1, TH->acc, TH->acc, TH->tx2);
   case HP_ROLE_SECONDARY: return WC(TH->s1, TH->tx2, TH->tx3, TH->tx3);
-  case HP_ROLE_DANGER: return WC(TH->s2, TH->bad, TH->bad, TH->bad);
-  case HP_ROLE_NAV: return WC(TH->s1, TH->tx, TH->acc, TH->tx2);
-  default: return WC(TH->s2, TH->tx, TH->tx2, TH->tx2);
+  case HP_ROLE_DANGER: return WC(TH->s1, TH->bad, TH->bad, TH->bad);
+  case HP_ROLE_NAV: return WC(TH->s1, TH->tx, TH->tx, TH->tx2);
+  default: return WC(TH->s1, TH->tx, TH->tx, TH->tx2);
   }
 }
 
@@ -361,11 +381,25 @@ static int widget_active(const ra_ui_t *ui, const hp_widget_t *w) {
   return ui->act_on && w->kind == HP_WIDGET_BUTTON && w->role != HP_ROLE_NAV && w->has_bind && w->bind == ui->act_idx;
 }
 
-/* The text a tile shows: "n/a" while unavailable. */
-static const char *tile_value(const hp_widget_t *w) { return w->tstate == HP_TILE_UNAVAILABLE ? "n/a" : w->text; }
+/* The state a tile shows (r12, top right): "n/a" while unavailable, "stale" while the link is lost. */
+static const char *tile_state_text(const ra_ui_t *ui, const hp_widget_t *w) {
+  if (ui->link_lost && w->tstate != HP_TILE_ON) return "stale";
+  return w->tstate == HP_TILE_UNAVAILABLE ? "n/a" : w->text;
+}
 
-/* Caption of a v2 tile: "stale" while the link is lost, else its name. */
-static const char *tile_caption(const ra_ui_t *ui, const hp_widget_t *w) { return ui->link_lost ? "stale" : w->label; }
+/* Widget classes (docs/design remote redesign sizing table). A class fixes the icon size, the fonts and the layout, so a
+ * widget looks the same whatever the page holds: ROW 24 px glyph + m16 label (+ 20 px chevron); CARD 32 px glyph over a b13
+ * label; compact CARD 24 px glyph beside a b13 label of up to 2 lines; KEY 24 px glyph over an r12 caption; glyph KEY a
+ * 24 px glyph alone; PILL a b20 digit or a 24 px glyph. Tiles are laid out by build_tile. */
+typedef enum { WC_MONO, WC_ROW, WC_PILL, WC_CARD, WC_CCARD, WC_KEY } wclass_t;
+
+static wclass_t wclass(const hp_widget_t *w, int bw, int bh) {
+  if (w->shape == HP_SHAPE_MONOGRAM) return WC_MONO;
+  if (w->shape == HP_SHAPE_ROW || (bh < 44 && bw >= 100)) return WC_ROW; /* wide and short: a row */
+  if (w->shape == HP_SHAPE_PILL) return WC_PILL;
+  if (bw >= 100) return w->compact || bh < 72 ? WC_CCARD : WC_CARD;
+  return WC_KEY;
+}
 
 /* (Re)paints widget i from its role, state and the activity / link state: fill and ink colours only, so only that
  * widget's area is invalidated. */
@@ -400,9 +434,16 @@ static void paint(ra_ui_t *ui, unsigned i) {
     lv_obj_remove_local_style_prop(o, LV_STYLE_BORDER_WIDTH, 0);
     lv_obj_remove_local_style_prop(o, LV_STYLE_BORDER_COLOR, 0);
   }
-  if (ui->lbl[i]) lv_obj_set_style_text_color(ui->lbl[i], ra_color(c.ink), 0);
+  int tile = w->kind == HP_WIDGET_TILE;
+  int key_cap = 0; /* a KEY's label is a caption */
+  if (!tile && w->kind == HP_WIDGET_BUTTON && ui->ico[i] && ui->lbl[i]) {
+    int x1, y1, x2, y2;
+    ra_ui_widget_rect(&ui->page, w, &x1, &y1, &x2, &y2);
+    key_cap = wclass(w, x2 - x1 + 1, y2 - y1 + 1) == WC_KEY;
+  }
+  if (ui->lbl[i]) lv_obj_set_style_text_color(ui->lbl[i], ra_color(tile || key_cap ? c.cap : c.ink), 0);
   if (ui->ico[i]) lv_obj_set_style_text_color(ui->ico[i], ra_color(c.icon), 0);
-  if (w->kind == HP_WIDGET_TILE && ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], ra_color(c.cap), 0);
+  if (tile && ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], ra_color(c.ink), 0);
   if (w->kind == HP_WIDGET_BUTTON) { /* app status: an accent ring (2 px, inside the box) and, in wcap, the play / pause glyph */
     int ring = w->tstate != HP_APP_NONE && !act;
     if (ring) {
@@ -469,117 +510,190 @@ static int badge_sync(ra_ui_t *ui, unsigned i) {
   return 0;
 }
 
+#define PADX 4 /* the surface's left padding (theme.c): child positions are relative to the content box */
+/* Child at absolute x (from the widget's left edge) and y. */
+static void at(lv_obj_t *o, int x, int y) { lv_obj_set_pos(o, x - PADX, y); }
+
+static int class_radius(wclass_t c, int bh) {
+  switch (c) {
+  case WC_PILL: return bh / 2;
+  case WC_CARD:
+  case WC_CCARD: return 14;
+  default: return 10;
+  }
+}
+
+/* A label of up to two lines (LVGL "..." after the second), as tall as its text. */
+static lv_obj_t *make_label2(lv_obj_t *parent, const char *text, const lv_style_t *st, int w, int *h_out) {
+  lv_obj_t *l = creation_fails() ? NULL : lv_label_create(parent);
+  if (!l) return NULL;
+  lv_obj_add_style(l, st, 0);
+  const lv_font_t *f = lv_obj_get_style_text_font(l, 0);
+  int lh = lv_font_get_line_height(f);
+  lv_point_t sz;
+  lv_text_get_size(&sz, text, f, 0, 0, w, LV_TEXT_FLAG_NONE);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+  *h_out = sz.y > lh ? 2 * lh : lh;
+  lv_obj_set_size(l, w, *h_out);
+  lv_label_set_text(l, text);
+  return l;
+}
+
+/* A tile: glyph 20 top left, the state (r12) top right, the name (m16) at the bottom. lbl = state, wcap = name. */
+static int build_tile(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh) {
+  const hp_widget_t *w = &ui->page.widgets[i];
+  char gb[4];
+  const char *g = glyph(w->icon, gb);
+  int roomy = bh >= 56 && bw >= 80;
+  lv_obj_t *ic = NULL;
+  if (g && roomy) {
+    ic = make_label(o, g, &ra_st_txt_cap, &ra_icons_20, 24);
+    if (!ic) return -1;
+    at(ic, 8, 8);
+  }
+  int lh = lv_font_get_line_height(&ra_font_r12);
+  int sx = ic ? 34 : 10; /* the state sits right of the glyph, right aligned */
+  lv_obj_t *st = make_label(o, tile_state_text(ui, w), &ra_st_txt_cap, NULL, bw - sx - 10);
+  if (!st) return -1;
+  lv_obj_set_style_text_align(st, LV_TEXT_ALIGN_RIGHT, 0);
+  at(st, sx, roomy ? 12 : (bh - lh) / 2);
+  ui->lbl[i] = st;
+  ui->ico[i] = ic;
+  if (w->label[0]) {
+    int nh = lv_font_get_line_height(&ra_font_m16);
+    int nw = roomy ? bw - 20 : bw - 20 - 44;
+    lv_obj_t *nm = make_label(o, w->label, &ra_st_txt_body, NULL, nw);
+    if (!nm) return -1;
+    lv_obj_set_style_text_align(nm, LV_TEXT_ALIGN_LEFT, 0);
+    at(nm, 10, roomy ? bh - 10 - nh : (bh - nh) / 2);
+    ui->wcap[i] = nm;
+  }
+  return 0;
+}
+
 /* Builds the content of a v2 button / tile on its surface `o`. 0 ok, -1 out of memory. */
 static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh) {
   const hp_widget_t *w = &ui->page.widgets[i];
-  int tile = w->kind == HP_WIDGET_TILE;
+  if (w->kind == HP_WIDGET_TILE) return build_tile(ui, i, o, bw, bh);
   char gb[4];
   const char *g = glyph(w->icon, gb);
-  int draw_label = !(w->icon_only && g) && w->label[0];
+  wclass_t c = wclass(w, bw, bh);
+  int align = ui->page.fixed ? HP_ALIGN_LEFT : w->align; /* FIXED pages: rows and cards read left to right */
   lv_obj_t *l = NULL, *ic = NULL;
-  if (tile) {
-    int big = bw >= 80;
-    int cap_h = bh >= 44 && (w->label[0] || ui->link_lost);
-    if (g && bh >= 56 && bw >= 56) {
-      ic = make_label(o, g, &ra_st_txt_cap, &ra_icons_20, 24);
-      if (!ic) return -1;
-      lv_obj_set_pos(ic, 8, 6);
-    }
-    l = make_label(o, tile_value(w), big ? &ra_st_txt_display : &ra_st_txt_btn, NULL, bw - 8);
-    if (!l) return -1;
-    lv_obj_align(l, LV_ALIGN_CENTER, 0, cap_h ? 6 : 0);
-    if (cap_h) {
-      lv_obj_t *c = make_label(o, tile_caption(ui, w), &ra_st_txt_cap, NULL, bw - (ic ? 38 : 8));
-      if (!c) return -1;
-      if (ic) {
-        lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_LEFT, 0);
-        lv_obj_set_pos(c, 32, 8);
-      }
-      else lv_obj_align(c, LV_ALIGN_TOP_MID, 0, 6);
-      ui->wcap[i] = c;
-    }
-    ui->lbl[i] = l;
-    ui->ico[i] = ic;
-    return 0;
-  }
   const char *txt = w->label;
   char mono[8];
-  if (w->shape == HP_SHAPE_MONOGRAM) { /* a round badge: the icon, else the label's first letter */
+  int draw_label = !(w->icon_only && g) && w->label[0];
+  if (c == WC_MONO) { /* a round badge: the icon, else the label's first letter */
     draw_label = !g && w->label[0];
     size_t k = first_char_len(w->label);
     memcpy(mono, w->label, k);
     mono[k] = 0;
     if (k == 1) mono[0] = (char)toupper((unsigned char)mono[0]);
     txt = mono;
+    int mp = bw < bh ? bw : bh;
+    int px = mp >= 72 ? 32 : mp >= 44 ? 24 : 20;
+    if (g) {
+      ic = make_label(o, g, &ra_st_txt_cap, icon_font(px), px + 4);
+      if (!ic) return -1;
+      lv_obj_align(ic, LV_ALIGN_CENTER, 0, 0);
+    } else if (draw_label) {
+      l = make_label(o, txt, &ra_st_txt_display, NULL, bw - 8);
+      if (!l) return -1;
+      lv_obj_center(l);
+    }
+    ui->lbl[i] = l;
+    ui->ico[i] = ic;
+    return 0;
   }
-  int row = w->shape == HP_SHAPE_ROW || w->shape == HP_SHAPE_PILL || (bh < 44 && bw >= 100); /* wide and short: a row */
-  int big = w->shape == HP_SHAPE_CARD && !row && bw >= 100 && bh >= 80;
-  int mono_px = bw < bh ? bw : bh;
-  int px = w->shape == HP_SHAPE_MONOGRAM ? (mono_px >= 72 ? 32 : mono_px >= 44 ? 24 : 20)
-           : row ? 24 : big ? 32 : bh >= 64 ? 24 : 20;
+  int px = c == WC_CARD ? 32 : 24;
+  if ((c == WC_KEY && bh < 48) || (c == WC_ROW && bh < 36)) px = 20;
   if (g) {
     ic = make_label(o, g, &ra_st_txt_cap, icon_font(px), px + 4);
     if (!ic) return -1;
   }
-  int lbl_w = 0; /* the label's max width */
-  if (draw_label) {
-    const lv_style_t *ts = w->shape == HP_SHAPE_MONOGRAM ? &ra_st_txt_display : big ? &ra_st_txt_display
-                           : row ? &ra_st_txt_body : (bw >= 100 ? &ra_st_txt_body : &ra_st_txt_btn);
-    const lv_font_t *tf = big ? &ra_font_b18 : NULL;
-    if (w->shape == HP_SHAPE_PILL && txt[0] && first_char_len(txt) + first_char_len(txt + first_char_len(txt)) == strlen(txt))
-      tf = &ra_font_b20; /* a 1-2 character pill (keypad digit) reads at b20 */
-    int lw = big ? bw - 24 : bw - 8;
-    if (row && ic) lw = bw - 12 - px - 8 - 8;
-    else if (row) lw = bw - 24;
-    if (row && w->trailing) lw -= 24 + 4; /* room for the chevron */
-    if (lw < 0) lw = 0;
-    lbl_w = lw;
-    l = make_label(o, txt, ts, tf, lw);
-    if (!l) return -1;
-  }
-  /* placement */
-  if (ic && (w->icon_only || w->shape == HP_SHAPE_MONOGRAM || !draw_label)) {
+  int ih = ic ? lv_font_get_line_height(icon_font(px)) : 0;
+  if (ic && (!draw_label || c == WC_PILL)) { /* a glyph alone (glyph key, icon-only, no label, or a pill): centred */
     lv_obj_align(ic, LV_ALIGN_CENTER, 0, 0);
-    if (l) { lv_obj_delete(l); l = NULL; }
-  } else if (row) {
+    ui->ico[i] = ic;
+    return 0;
+  }
+  if (!draw_label) return 0;
+  switch (c) {
+  case WC_ROW: {
+    int chev = w->trailing ? 20 + 10 : 0, x0 = 10, gap = ic ? px + 10 : 0;
+    int lw = bw - x0 - gap - 8 - chev;
+    if (lw < 0) lw = 0;
+    l = make_label(o, txt, &ra_st_txt_body, NULL, lw);
+    if (!l) return -1;
     if (w->trailing) {
-      lv_obj_t *ch = make_label(o, RA_GLYPH_CHEV_RIGHT, &ra_st_txt_cap, icon_font(24), 28);
+      lv_obj_t *ch = make_label(o, RA_GLYPH_CHEV_RIGHT, &ra_st_txt_cap, &ra_icons_20, 20);
       if (!ch) return -1;
-      lv_obj_align(ch, LV_ALIGN_RIGHT_MID, -8, 0);
+      lv_obj_align(ch, LV_ALIGN_RIGHT_MID, -4, 0);
     }
-    int x0 = 12, gap = ic ? px + 8 : 0;
-    if (w->align != HP_ALIGN_LEFT && l) { /* icon + label as one group, in the space left of the chevron */
-      int room = bw - (w->trailing ? 8 + 28 : 0);
+    if (align != HP_ALIGN_LEFT) { /* icon + label as one group, in the space left of the chevron */
+      int room = bw - (w->trailing ? 8 + 20 + 10 : 0);
       int tw = lv_text_get_width(txt, (uint32_t)strlen(txt), lv_obj_get_style_text_font(l, 0), 0) + 2;
-      int lw = lbl_w;
-      if (tw < lw) { lv_obj_set_width(l, tw); lw = tw; }
-      if (w->align == HP_ALIGN_RIGHT) {
-        if (room - gap - lw - 12 >= 12) x0 = room - gap - lw - 12;
-      } else if (room - gap - lw >= 24) x0 = (room - gap - lw) / 2;
+      if (tw < lw) {
+        lv_obj_set_width(l, tw);
+        lw = tw;
+      }
+      if (align == HP_ALIGN_RIGHT) {
+        if (room - gap - lw - 10 >= 10) x0 = room - gap - lw - 10;
+      } else if (room - gap - lw >= 20) x0 = (room - gap - lw) / 2;
     }
-    if (ic) lv_obj_align(ic, LV_ALIGN_LEFT_MID, x0, 0);
-    if (l) {
-      lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_LEFT, 0);
-      lv_obj_align(l, LV_ALIGN_LEFT_MID, x0 + gap, 0);
+    if (ic) lv_obj_align(ic, LV_ALIGN_LEFT_MID, x0 - PADX, 0);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, x0 + gap - PADX, 0);
+    break;
+  }
+  case WC_CARD: {
+    int lh = lv_font_get_line_height(&ra_font_b13);
+    int lw = bw - 24;
+    int ix = align == HP_ALIGN_RIGHT ? bw - 10 - (px + 4) : align == HP_ALIGN_LEFT ? 10 : (bw - (px + 4)) / 2; /* the glyph cell is 4 px wider than the glyph */
+    l = make_label(o, txt, ic ? &ra_st_txt_btn : &ra_st_txt_body, NULL, lw);
+    if (!l) return -1;
+    lv_obj_set_style_text_align(l, align == HP_ALIGN_LEFT ? LV_TEXT_ALIGN_LEFT : align == HP_ALIGN_RIGHT ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_CENTER, 0);
+    if (ic) {
+      at(ic, ix, 12);
+      at(l, 12, bh - 12 - lh);
+    } else {
+      at(l, 12, (bh - lv_font_get_line_height(&ra_font_m16)) / 2);
     }
-  } else if (big) {
-    lv_align_t ia = w->align == HP_ALIGN_LEFT ? LV_ALIGN_TOP_LEFT : w->align == HP_ALIGN_RIGHT ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_MID;
-    lv_align_t la = w->align == HP_ALIGN_LEFT ? LV_ALIGN_BOTTOM_LEFT : w->align == HP_ALIGN_RIGHT ? LV_ALIGN_BOTTOM_RIGHT : LV_ALIGN_BOTTOM_MID;
-    int dx = w->align == HP_ALIGN_LEFT ? 12 : w->align == HP_ALIGN_RIGHT ? -12 : 0;
-    if (ic) lv_obj_align(ic, ia, dx, 12);
-    if (l) {
-      lv_obj_set_style_text_align(l, w->align == HP_ALIGN_LEFT ? LV_TEXT_ALIGN_LEFT : w->align == HP_ALIGN_RIGHT ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_CENTER, 0);
-      if (ic) lv_obj_align(l, la, dx, -12);
-      else lv_obj_align(l, w->align == HP_ALIGN_LEFT ? LV_ALIGN_LEFT_MID : w->align == HP_ALIGN_RIGHT ? LV_ALIGN_RIGHT_MID : LV_ALIGN_CENTER, dx, 0); /* label only: vertically centred */
-    }
-  } else if (ic && l) { /* dense: icon over label, both centred */
-    int ih = lv_font_get_line_height(icon_font(px)), lh = lv_font_get_line_height(lv_obj_get_style_text_font(l, 0));
-    int gap = (bh - ih - lh) / 3;
-    if (gap < 0) gap = 0;
-    lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, gap + 1);
-    lv_obj_align(l, LV_ALIGN_BOTTOM_MID, 0, -gap);
-  } else if (l) {
+    break;
+  }
+  case WC_CCARD: {
+    int x0 = ic ? 10 + px + 10 : 10;
+    int lh2 = 0;
+    l = make_label2(o, txt, &ra_st_txt_btn, bw - x0 - 10, &lh2);
+    if (!l) return -1;
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_LEFT, 0);
+    if (ic) at(ic, 10 - 2, (bh - ih) / 2);
+    at(l, x0, (bh - lh2) / 2);
+    break;
+  }
+  case WC_PILL: {
+    int digit = first_char_len(txt) + first_char_len(txt + first_char_len(txt)) == strlen(txt);
+    l = make_label(o, txt, digit ? &ra_st_txt_display : &ra_st_txt_body, NULL, bw - 8);
+    if (!l) return -1;
     lv_obj_center(l);
+    break;
+  }
+  default: { /* KEY: glyph over an r12 caption (a label without a glyph: b13, centred) */
+    if (!ic) {
+      l = make_label(o, txt, &ra_st_txt_btn, NULL, bw - 6);
+      if (!l) return -1;
+      lv_obj_center(l);
+      break;
+    }
+    int lh = lv_font_get_line_height(&ra_font_r12), gap = bh >= 52 ? 4 : 2;
+    int top = (bh - ih - gap - lh) / 2;
+    if (top < 0) top = 0;
+    l = make_label(o, txt, &ra_st_txt_cap, NULL, bw - 6);
+    if (!l) return -1;
+    lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, top);
+    at(l, 3, top + ih + gap);
+    break;
+  }
   }
   ui->lbl[i] = l;
   ui->ico[i] = ic;
@@ -605,14 +719,14 @@ static void build(ra_ui_t *ui) {
     int x1, y1, x2, y2;
     ra_ui_widget_rect(p, w, &x1, &y1, &x2, &y2);
     int bw = x2 - x1 + 1, bh = y2 - y1 + 1, icon = w->icon && w->icon <= RA_ICON_MAX;
-    if (w->kind == HP_WIDGET_TILE) /* as build_v2_content: the icon needs a 56 px cell, the caption 44 px of height */
-      extra += (icon && bh >= 56 && bw >= 56) + (bh >= 44 && (w->label[0] || ui->link_lost));
-    else if (w->kind == HP_WIDGET_BUTTON) extra += icon;
+    if (w->kind == HP_WIDGET_TILE) /* as build_tile: the glyph needs a 56 x 80 cell, the name is a label of its own */
+      extra += (icon && bh >= 56 && bw >= 80) + (w->label[0] != 0);
+    else if (w->kind == HP_WIDGET_BUTTON) extra += icon + (w->trailing != 0);
     extra += 2 * (w->color_fill.kind || w->color_on.kind); /* local styles */
     extra += w->kind == HP_WIDGET_BUTTON && (w->tstate == HP_APP_PLAYING || w->tstate == HP_APP_PAUSED);
   }
   if (v2 && ui->np_idx >= 0) extra += 9; /* the Now Playing card: art, 4 labels, bar */
-  bar_ctx_t bc = {.back = v2 && p->back, .seq_idx = v2 ? p->seq_idx : 0, .seq_cnt = v2 ? p->seq_cnt : 0};
+  bar_ctx_t bc = {.back = v2 && ui->nav_depth > 1, .seq_idx = v2 ? p->seq_idx : 0, .seq_cnt = v2 ? p->seq_cnt : 0};
   if (screen_reset(ui, title, p->count, extra, &bc) < 0) return;
   ui->title_idx = title_idx;
   int interactive_or_text = 0;
@@ -647,9 +761,8 @@ static void build(ra_ui_t *ui) {
       continue;
     }
     if (v2) {
-      int r = w->shape == HP_SHAPE_MONOGRAM ? LV_RADIUS_CIRCLE : w->shape == HP_SHAPE_PILL ? bh / 2
-              : w->shape == HP_SHAPE_ROW ? 12 : -1;
-      if (r >= 0) lv_obj_set_style_radius(o, r, 0);
+      int r = w->kind == HP_WIDGET_TILE ? 14 : w->shape == HP_SHAPE_MONOGRAM ? LV_RADIUS_CIRCLE : class_radius(wclass(w, bw, bh), bh);
+      lv_obj_set_style_radius(o, r, 0);
       if (build_v2_content(ui, i, o, bw, bh) < 0) return fail(ui);
       paint(ui, i);
       if (badge_sync(ui, i) < 0) return fail(ui);
@@ -663,7 +776,7 @@ static void build(ra_ui_t *ui) {
     if (btn && !strcasecmp(w->label, "Power Off")) lv_obj_set_style_text_color(l, ra_color(TH->bad), 0);
     ui->lbl[i] = l;
   }
-  if (!interactive_or_text && message(ui, "No activities yet", "Add some in Home Assistant", 0) < 0) fail(ui);
+  if (!interactive_or_text && message(ui, NULL, "No Activities Yet", "Add some in Home Assistant", 0, 0) < 0) fail(ui);
 }
 
 /* The custom theme slot (wire form), kept for pages with theme id 7. */
@@ -695,6 +808,8 @@ static void page_theme(ra_ui_t *ui, const hp_page_t *p) {
 
 static void np_prepare(ra_ui_t *ui);
 
+void ra_ui_set_depth(ra_ui_t *ui, unsigned depth) { ui->nav_depth = depth > 255 ? 255 : (uint8_t)depth; }
+
 void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p) {
   page_theme(ui, p);
   ui->page = *p;
@@ -703,13 +818,13 @@ void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p) {
   build(ui);
 }
 
-static void show_builtin(ra_ui_t *ui, uint8_t id, const char *head, const char *sub, int head_bad) {
+static void show_builtin(ra_ui_t *ui, uint8_t id, const char *glyph_s, const char *head, const char *sub, int head_bad, int bar) {
   memset(&ui->page, 0, sizeof ui->page);
   np_forget(ui);
   ui->page.page_id = id;
   ui->page.cols = ui->page.rows = 1;
   if (screen_reset(ui, "Harmony", 0, 0, NULL) < 0) return;
-  if (message(ui, head, sub, head_bad) < 0) fail(ui);
+  if (message(ui, glyph_s, head, sub, head_bad, bar) < 0) fail(ui);
 }
 
 /* Theme switched: recolour what carries a local colour (the shared styles were already updated in place). */
@@ -718,6 +833,7 @@ static void retheme(void *ctx) {
   chrome_apply(ui);
   if (ui->seq) lv_obj_set_style_text_color(ui->seq, ra_color(TH->tx3), 0);
   if (ui->msg) lv_obj_set_style_text_color(ui->msg, ra_color(ui->msg_bad ? TH->bad : TH->tx), 0);
+  if (ui->msg_ico) lv_obj_set_style_text_color(ui->msg_ico, ra_color(ui->msg_bad ? TH->bad : TH->acc), 0);
   if (ui->err_msg) lv_obj_set_style_text_color(ui->err_msg, ra_color(TH->bad), 0);
   if (ui->prog_fill) lv_obj_set_style_bg_color(ui->prog_fill, ra_color(TH->acc), 0);
   if (ui->page.page_id >= RA_UI_PAGE_ERROR) return; /* built-in screens: no widgets */
@@ -740,7 +856,7 @@ void ra_ui_init(ra_ui_t *ui) {
   /* The error state, built once while the pool is empty and kept hidden on the top layer. */
   ui->err = rect(lv_layer_top(), 0, 0, HP_PAGE_SCREEN_W, HP_PAGE_SCREEN_H, &ra_st_screen);
   if (ui->err) {
-    lv_obj_t *m = make_label(ui->err, "Display error", &ra_st_txt_display, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
+    lv_obj_t *m = make_label(ui->err, "Display Error", &ra_st_txt_display, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
     lv_obj_t *c = make_label(ui->err, "Waiting for the next page", &ra_st_txt_cap, NULL, HP_PAGE_SCREEN_W - 2 * RA_MARGIN);
     ui->err_msg = m;
     if (m) {
@@ -754,19 +870,14 @@ void ra_ui_init(ra_ui_t *ui) {
 }
 
 void ra_ui_show_boot(ra_ui_t *ui) {
-  show_builtin(ui, RA_UI_PAGE_BOOT, "Connecting" ELLIPSIS, "Looking for the hub", 0);
+  show_builtin(ui, RA_UI_PAGE_BOOT, RA_GLYPH_RF, "Connecting to Hub", "Looking for the hub", 0, 0);
   ui->fallback = 0;
 }
 
 void ra_ui_show_receiving(ra_ui_t *ui) {
-  show_builtin(ui, RA_UI_PAGE_RECEIVING, "Receiving config" ELLIPSIS, "Waiting for the first page", 0);
+  show_builtin(ui, RA_UI_PAGE_RECEIVING, RA_GLYPH_SYNC, "Receiving Pages", "Waiting for the first page", 0, 0);
   ui->fallback = 0;
 }
-
-#define PROG_X RA_MARGIN
-#define PROG_Y 208
-#define PROG_W (HP_PAGE_SCREEN_W - 2 * RA_MARGIN)
-#define PROG_H 6
 
 static void recv_texts(ra_ui_t *ui, unsigned k, unsigned n) {
   char b[32];
@@ -783,10 +894,10 @@ void ra_ui_show_receiving_n(ra_ui_t *ui, unsigned k, unsigned n) {
     recv_texts(ui, k, n); /* same screen: only the numbers change */
     return;
   }
-  show_builtin(ui, RA_UI_PAGE_RECEIVING, "Receiving page", "", 0);
+  show_builtin(ui, RA_UI_PAGE_RECEIVING, RA_GLYPH_SYNC, "Receiving Pages", "", 0, 1);
   if (ui->page.page_id != RA_UI_PAGE_RECEIVING) return; /* the error state */
   lv_obj_t *scr = lv_screen_active();
-  lv_obj_t *track = rect(scr, PROG_X, PROG_Y, PROG_W, PROG_H, &ra_st_btn);
+  lv_obj_t *track = rect(scr, PROG_X, msg_sub_y + ST_SUB_H + 12, PROG_W, PROG_H, &ra_st_btn);
   lv_obj_t *fill = track ? rect(track, 0, 0, 1, PROG_H, &ra_st_ink) : NULL;
   if (!track || !fill) return fail(ui);
   lv_obj_set_style_radius(track, 3, 0);
@@ -799,32 +910,14 @@ void ra_ui_show_receiving_n(ra_ui_t *ui, unsigned k, unsigned n) {
 }
 
 void ra_ui_show_fallback(ra_ui_t *ui) {
-  show_builtin(ui, RA_UI_PAGE_FALLBACK, "Hub unreachable", "Reconnecting automatically", 1);
+  show_builtin(ui, RA_UI_PAGE_FALLBACK, RA_GLYPH_RF_OFF, "Hub Unreachable", "Reconnecting automatically", 1, 0);
   ui->fallback = 1;
-}
-
-static void stale_caption(ra_ui_t *ui, unsigned i) {
-  const hp_widget_t *w = &ui->page.widgets[i];
-  int x1, y1, x2, y2;
-  ra_ui_widget_rect(&ui->page, w, &x1, &y1, &x2, &y2);
-  int bw = x2 - x1 + 1, bh = y2 - y1 + 1;
-  if (bh < 44 || !enough_memory(4096)) return;
-  lv_obj_t *c = make_label(ui->obj[i], "stale", &ra_st_txt_cap, NULL, bw - (ui->ico[i] ? 38 : 8));
-  if (!c) return;
-  if (ui->ico[i]) {
-    lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_set_pos(c, 32, 8);
-  } else {
-    lv_obj_align(c, LV_ALIGN_TOP_MID, 0, 6);
-  }
-  ui->wcap[i] = c;
-  lv_obj_align(ui->lbl[i], LV_ALIGN_CENTER, 0, 6);
 }
 
 /* Live text / state of a tile on screen: the label text and colours only. */
 static void tile_refresh(ra_ui_t *ui, unsigned i) {
   const hp_widget_t *w = &ui->page.widgets[i];
-  if (ui->lbl[i]) lv_label_set_text(ui->lbl[i], ui->page.version == 2 ? tile_value(w) : w->text);
+  if (ui->lbl[i]) lv_label_set_text(ui->lbl[i], ui->page.version == 2 ? tile_state_text(ui, w) : w->text);
   if (ui->page.version == 2) paint(ui, i);
 }
 

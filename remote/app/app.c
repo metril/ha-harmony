@@ -36,6 +36,7 @@ static void show_cur(app_t *a) {
   hp_page_t p;
   if ((hp_store_complete(&a->store) || a->partial) && a->cur >= 0 && hp_store_ready(&a->store, (uint8_t)a->cur) &&
       hp_store_get(&a->store, (uint8_t)a->cur, &p) == 0) { /* never with a stale or missing custom theme */
+    ra_ui_set_depth(&a->ui, a->depth);
     ra_ui_show_page(&a->ui, &p);
     return;
   }

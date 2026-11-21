@@ -472,13 +472,13 @@ static void test_state_screens(void) {
   ra_ui_show_receiving(&app.ui);
   refresh();
   CT_EQ(app.ui.page.page_id, RA_UI_PAGE_RECEIVING);
-  CT_CHECK(strstr(lv_label_get_text(app.ui.msg), "Receiving config") != NULL);
+  CT_CHECK(strstr(lv_label_get_text(app.ui.msg), "Receiving Pages") != NULL);
   CT_CHECK(!app.ui.fallback);
   /* hub unreachable: red headline */
   ra_ui_show_fallback(&app.ui);
   refresh();
   CT_CHECK(app.ui.fallback);
-  CT_CHECK(!strcmp(lv_label_get_text(app.ui.msg), "Hub unreachable"));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.msg), "Hub Unreachable"));
   int red = 0;
   for (int x = 8; x < 232; x++)
     for (int y = 148; y < 172; y++) red += px(x, y) == RGB565(RA_HEX_BAD);
@@ -488,7 +488,7 @@ static void test_state_screens(void) {
   hp_page_t e;
   CT_EQ(hp_page_decode(raw, sizeof raw, &e), 0);
   render(&e);
-  CT_CHECK(app.ui.msg && strstr(lv_label_get_text(app.ui.msg), "No activities") != NULL);
+  CT_CHECK(app.ui.msg && strstr(lv_label_get_text(app.ui.msg), "No Activities") != NULL);
   CT_CHECK(rect_has_ink(8, 148, 232, 170));
   /* a page with widgets has no such message */
   render(&p);

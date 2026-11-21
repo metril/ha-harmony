@@ -113,7 +113,7 @@ static void check_rules(int theme) {
   CT_EQ(px(x1 + 6, (y1 + y2) / 2), c565(t->s1));
   /* a role button without a colour keeps its default look */
   cell(&p, 10, &x1, &y1, &x2, &y2);
-  CT_EQ(px(x1 + 6, (y1 + y2) / 2), c565(t->s2));
+  CT_EQ(px(x1 + 6, (y1 + y2) / 2), c565(t->s1));
   /* stale: coloured off tiles fall back to the theme's state colours, an ON tile keeps its colour */
   ra_ui_set_link(&app.ui, 1);
   refresh();

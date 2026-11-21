@@ -91,7 +91,7 @@ def test_no_icon_means_no_icon_only():
 
 
 def test_overflow_is_a_warning_not_an_error():
-    c, _ = widgets(btn(1, "Zzyzx Deluxe Edition", "plex", w=2))
+    c, _ = widgets(btn(1, "Zzyzx Deluxe Edition", "plex"))
     msgs = [w["msg"] for w in c.warnings]
     assert any("Zzyzx Deluxe Edition" in m and "px too wide" in m for m in msgs)
     assert all(w["severity"] == "warning" for w in c.warnings)
