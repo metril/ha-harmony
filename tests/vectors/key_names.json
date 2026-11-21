@@ -1,0 +1,13 @@
+{
+ "display": [
+  ["DirectionUp", "Up"], ["direction_down", "Down"], ["directionleft", "Left"], ["InputHdmi1", "HDMI 1"], ["input_hdmi_2", "HDMI 2"],
+  ["hdmi1", "HDMI 1"], ["vol_up", "Volume Up"], ["ch_down", "Channel Down"], ["power_on", "Power On"], ["PowerOff", "Power Off"],
+  ["InputA1", "Input A1"], ["select", "OK"], ["play_pause", "Play/Pause"], ["FastForward", "Fast Forward"], ["key_105", "5"],
+  ["Num7", "7"], ["key_7", "Key 7"], ["pic_mode", "Pic Mode"], ["settings", "Settings"], ["Watch TV", "Watch TV"], ["watch tv", "Watch Tv"],
+  ["sleep_timer", "Sleep Timer"], ["aspect_ratio", "Aspect Ratio"], ["PictureMode", "Picture Mode"]
+ ],
+ "abbreviate": [
+  ["Volume Up", "Vol Up"], ["Channel Down", "Ch Down"], ["Previous Channel", "Prev Ch"], ["Settings", "Setup"], ["Picture Mode", "Pic Mode"],
+  ["Aspect Ratio", "Aspect"], ["Input HDMI 1", "HDMI 1"], ["Favourite", "Fav"], ["Subtitles", "CC"], ["Fast Forward", "FF"], ["Plex", "Plex"]
+ ]
+}

@@ -1,0 +1,549 @@
+{
+ "cases": [
+  {
+   "name": "4col 1w mid, Apps",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 1,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Apps",
+    "shape": "card",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b13",
+    "px": 44,
+    "text_px": 30,
+    "fits": true,
+    "over": 0,
+    "shown": "Apps"
+   }
+  },
+  {
+   "name": "4col 1w edge, Menu",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Menu",
+    "shape": "card",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b13",
+    "px": 40,
+    "text_px": 32,
+    "fits": true,
+    "over": 0,
+    "shown": "Menu"
+   }
+  },
+  {
+   "name": "4col 1w, long label",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 1,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Shield TV Menu",
+    "shape": "card",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b13",
+    "px": 44,
+    "text_px": 88,
+    "fits": false,
+    "over": 44,
+    "shown": "Shield..."
+   }
+  },
+  {
+   "name": "3col 1w, Power On + icon",
+   "cols": 3,
+   "rows": 4,
+   "widget": {
+    "kind": "button",
+    "x": 1,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Power On",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b13",
+    "px": 64,
+    "text_px": 58,
+    "fits": true,
+    "over": 0,
+    "shown": "Power On"
+   }
+  },
+  {
+   "name": "3col 1w edge, Power Off + icon",
+   "cols": 3,
+   "rows": 4,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Power Off",
+    "shape": "card",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b13",
+    "px": 60,
+    "text_px": 61,
+    "fits": false,
+    "over": 1,
+    "shown": "Power O..."
+   }
+  },
+  {
+   "name": "4col 2w, Prime Video",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 2,
+    "h": 1,
+    "label": "Prime Video",
+    "shape": "card",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "m16",
+    "px": 100,
+    "text_px": 88,
+    "fits": true,
+    "over": 0,
+    "shown": "Prime Video"
+   }
+  },
+  {
+   "name": "4col 2w, YouTube prefixed",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 2,
+    "y": 0,
+    "w": 2,
+    "h": 1,
+    "label": "Shield TV YouTube",
+    "shape": "card",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "m16",
+    "px": 100,
+    "text_px": 133,
+    "fits": false,
+    "over": 33,
+    "shown": "Shield TV Yo..."
+   }
+  },
+  {
+   "name": "4col 2w, Settings prefixed",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 2,
+    "y": 1,
+    "w": 2,
+    "h": 1,
+    "label": "Shield TV Settings",
+    "shape": "card",
+    "icon": 24,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "m16",
+    "px": 100,
+    "text_px": 128,
+    "fits": false,
+    "over": 28,
+    "shown": "Shield TV Se..."
+   }
+  },
+  {
+   "name": "row with icon",
+   "cols": 1,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Dinner Party Lights",
+    "shape": "row",
+    "icon": 38,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "m16",
+    "px": 172,
+    "text_px": 137,
+    "fits": true,
+    "over": 0,
+    "shown": "Dinner Party Lights"
+   }
+  },
+  {
+   "name": "row icon + chevron",
+   "cols": 1,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Movie Night",
+    "shape": "row",
+    "icon": 2,
+    "icon_only": false,
+    "trailing": true
+   },
+   "expect": {
+    "font": "m16",
+    "px": 144,
+    "text_px": 87,
+    "fits": true,
+    "over": 0,
+    "shown": "Movie Night"
+   }
+  },
+  {
+   "name": "row icon + chevron, long",
+   "cols": 1,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Living Room Lights Dimmer",
+    "shape": "row",
+    "icon": 38,
+    "icon_only": false,
+    "trailing": true
+   },
+   "expect": {
+    "font": "m16",
+    "px": 144,
+    "text_px": 197,
+    "fits": false,
+    "over": 53,
+    "shown": "Living Room Light..."
+   }
+  },
+  {
+   "name": "4col wide short row",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 1,
+    "label": "Numbers",
+    "shape": "row",
+    "icon": 7,
+    "icon_only": false,
+    "trailing": true
+   },
+   "expect": {
+    "font": "m16",
+    "px": 144,
+    "text_px": 65,
+    "fits": true,
+    "over": 0,
+    "shown": "Numbers"
+   }
+  },
+  {
+   "name": "big card, Plex",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 2,
+    "h": 2,
+    "label": "Plex",
+    "shape": "card",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b18",
+    "px": 84,
+    "text_px": 35,
+    "fits": true,
+    "over": 0,
+    "shown": "Plex"
+   }
+  },
+  {
+   "name": "big card with icon, long",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 2,
+    "h": 2,
+    "label": "Prime Video Extended",
+    "shape": "card",
+    "icon": 6,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b18",
+    "px": 84,
+    "text_px": 181,
+    "fits": false,
+    "over": 97,
+    "shown": "Prime Vi..."
+   }
+  },
+  {
+   "name": "keypad pill digit",
+   "cols": 3,
+   "rows": 4,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "7",
+    "shape": "pill",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b20",
+    "px": 44,
+    "text_px": 11,
+    "fits": true,
+    "over": 0,
+    "shown": "7"
+   }
+  },
+  {
+   "name": "keypad pill two digits",
+   "cols": 3,
+   "rows": 4,
+   "widget": {
+    "kind": "button",
+    "x": 1,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "10",
+    "shape": "pill",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b20",
+    "px": 48,
+    "text_px": 22,
+    "fits": true,
+    "over": 0,
+    "shown": "10"
+   }
+  },
+  {
+   "name": "keypad pill word",
+   "cols": 3,
+   "rows": 4,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Enter",
+    "shape": "pill",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "m16",
+    "px": 44,
+    "text_px": 39,
+    "fits": true,
+    "over": 0,
+    "shown": "Enter"
+   }
+  },
+  {
+   "name": "icon only draws no label",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Menu",
+    "shape": "card",
+    "icon": 18,
+    "icon_only": true,
+    "trailing": false
+   },
+   "expect": null
+  },
+  {
+   "name": "monogram draws no label",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Plex",
+    "shape": "monogram",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": null
+  },
+  {
+   "name": "tile caption",
+   "cols": 4,
+   "rows": 5,
+   "widget": {
+    "kind": "tile",
+    "x": 0,
+    "y": 0,
+    "w": 2,
+    "h": 1,
+    "label": "Living Room Lamp",
+    "shape": "card",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "r12",
+    "px": 100,
+    "text_px": 99,
+    "fits": true,
+    "over": 0,
+    "shown": "Living Room Lamp"
+   }
+  },
+  {
+   "name": "tile too short for a caption",
+   "cols": 4,
+   "rows": 6,
+   "widget": {
+    "kind": "tile",
+    "x": 0,
+    "y": 0,
+    "w": 2,
+    "h": 1,
+    "label": "Lamp",
+    "shape": "card",
+    "icon": 0,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": null
+  },
+  {
+   "name": "dense 4x6 cell",
+   "cols": 4,
+   "rows": 6,
+   "widget": {
+    "kind": "button",
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "label": "Fast Forward",
+    "shape": "card",
+    "icon": 30,
+    "icon_only": false,
+    "trailing": false
+   },
+   "expect": {
+    "font": "b13",
+    "px": 40,
+    "text_px": 78,
+    "fits": false,
+    "over": 38,
+    "shown": "Fast ..."
+   }
+  }
+ ],
+ "clip": [
+  {
+   "s": "Shield TV YouTube",
+   "font": "m16",
+   "px": 100,
+   "shown": "Shield TV Yo...",
+   "over": 33
+  },
+  {
+   "s": "Plex",
+   "font": "b18",
+   "px": 84,
+   "shown": "Plex",
+   "over": 0
+  }
+ ]
+}
