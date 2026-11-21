@@ -90,6 +90,7 @@ add_library(hp_core STATIC
   hub/rf/rf_payload.c
   hub/io/rf_spi.c
   hub/net/hublog.c
+  hub/net/crash.c
   remote/page/page.c
   remote/page/store.c
 )

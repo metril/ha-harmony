@@ -10,6 +10,7 @@
 
 #include "hub/bt_link.h"
 #include "hub/hp_errors.h"
+#include "hub/net/crash.h"
 
 /* --- real syscalls ------------------------------------------------------------------------ */
 
@@ -134,6 +135,7 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     if (!sig || sig->once_n == 0 || sig->once_n > HP_IR_MAX_DUR) return -HP_E_INVAL;
     int ports = map_ports(h, port_mask);
     if (ports < 0) return ports;
+    hp_crumb("ir ports=%d n=%u hz=%u", ports, (unsigned)sig->once_n, (unsigned)sig->carrier_hz);
     hp_hw_wave_t w;
     int rc = hp_hw_ir_build(sig->us, sig->once_n, sig->carrier_hz, 1, h->buf, sizeof h->buf, &w);
     if (rc < 0) return rc; /* too big for the ring: reject, nothing touches the device */

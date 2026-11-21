@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "hub/net/crash.h"
 #include "hub/net/hooklog.h"
 #include "hub/net/hublog.h"
 #include "common/ota/ota_image.h"
@@ -345,6 +346,12 @@ int main(int argc, char **argv) {
     }
 
 
+#ifndef __SANITIZE_ADDRESS__ /* under ASan its own report is the diagnosis */
+    {
+        char hl[256];
+        hp_crash_install(health_file && hp_hooklog_path_beside(health_file, hl, sizeof hl) ? hl : NULL);
+    }
+#endif
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = on_signal; /* no SA_RESTART: poll returns EINTR */

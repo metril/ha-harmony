@@ -1191,3 +1191,24 @@ def test_health_file_appears_at_the_health_mark_and_goes_while_an_update_is_unpr
     (_hub_dir(root) / "go").touch()
     _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "updated build healthy")
     assert hf.exists()  # proven again
+
+
+# --- why the daemon died --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("body", "want"),
+    [
+        ("sleep 0.6; exit 3", "status 3"),
+        ("sleep 0.6; kill -SEGV $$", "status 139 (killed by signal 11 SIGSEGV)"),
+        ("sleep 0.6; kill -ABRT $$", "status 134 (killed by signal 6 SIGABRT)"),
+    ],
+)
+def test_respawn_logs_how_the_daemon_died(root: Path, body: str, want: str) -> None:
+    install_daemon(root, 'echo x >>"$(dirname "$0")/runs"; ' + body)
+    install_conf(root, "token=t\nrespawn_max=1\n")
+    source_hook(root, extra_env=FAST)
+    vlog = root / "var" / "volatile" / "ha-harmony-hook.log"
+    _wait_text(vlog, "respawn 1 of 1")
+    assert f"daemon ended: {want}" in vlog.read_text()
+    assert not (root / "cache" / "ha-harmony.status").exists(), "the exit status lives in tmpfs, never on flash"

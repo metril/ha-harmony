@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "hub/net/hublog.h"
+#include "hub/net/crash.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -109,6 +110,7 @@ void hp_log(const char *fmt, ...) {
     if (n < 0) return;
     if ((size_t)n > sizeof b - 2) n = sizeof b - 2;
     if (!n || b[n - 1] != '\n') b[n++] = '\n';
+    hp_crumb_raw(b, (size_t)n); /* the crash handler reports the last few lines */
     hp_hublog_t *l = g_cur;
     out_line(l, b, (size_t)n); /* first, synchronously: the file has it before anything else can go wrong */
     size_t st = 0;

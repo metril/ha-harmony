@@ -10,6 +10,7 @@
 
 #include "hub/bt_link.h"
 #include "hub/hp_errors.h"
+#include "hub/net/crash.h"
 #include "hub/rf/rf_payload.h"
 #include "remote/page/page.h"
 
@@ -988,6 +989,7 @@ static int on_command(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *
     const char *cmd = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "command")->valuestring;
     const cJSON *args = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "args");
     int rc;
+    hp_crumb("cmd %.24s %.32s", dev, cmd);
     if (!strcmp(dev, "hub") && !strcmp(cmd, "start_activity")) {
         const cJSON *n = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive((cJSON *)args, "name") : NULL;
         if (!cJSON_IsString(n)) return reply_ok(id, "command_result", false, "args.name required", reply, cap, len);
