@@ -13,6 +13,8 @@
 #include "remote/app/ui.h"
 #include "remote/page/store.h"
 
+#define APP_STACK 8 /* back stack depth */
+
 typedef enum {
   APP_LINK_EV_NONE = 0,
   APP_LINK_EV_PAGE_PUSH,   /* page, data[0..len) */
@@ -79,6 +81,8 @@ typedef struct {
   bool partial;           /* the set is incomplete and the best stored page is shown (timeout, or the user pressed Home) */
   uint64_t last_page_ms;  /* when the last new v2 page arrived */
   int cur;
+  uint8_t stack[APP_STACK]; /* page ids, oldest first; the top is `cur` */
+  uint8_t depth;
   uint8_t key_up, key_down, key_exit, key_home, key_fav; /* logical ids of the hard keys the app handles itself */
   uint8_t swallowed;                                     /* bit 0..2: Up, Down, Exit were consumed at press: their holds / release too */
   unsigned last_batt_polls; /* power.batt_polls already shown in the status bar */

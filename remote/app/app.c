@@ -55,8 +55,21 @@ static void goto_page(app_t *a, int id) {
     return;
   }
   if (id == a->cur && on_stored_page(a)) return;
+  if (a->depth >= APP_STACK) { /* full: the oldest entry drops */
+    memmove(a->stack, a->stack + 1, APP_STACK - 1);
+    a->depth = APP_STACK - 1;
+  }
+  a->stack[a->depth++] = (uint8_t)id;
   a->cur = id;
   show_cur(a);
+}
+
+/* The stack becomes [home] (+ `top` when >= 0 and not home); `cur` is its top. */
+static void stack_reset(app_t *a, int home, int top) {
+  a->depth = 0;
+  a->stack[a->depth++] = (uint8_t)home;
+  if (top >= 0 && top != home) a->stack[a->depth++] = (uint8_t)top;
+  a->cur = a->stack[a->depth - 1];
 }
 
 /* To the start page (home, else page 0, else the lowest stored) from any state: also the receiving and error screens. */
@@ -64,9 +77,23 @@ static void go_home(app_t *a) {
   int id = hp_store_start(&a->store);
   if (id < 0) return;
   if (!hp_store_complete(&a->store)) a->partial = true; /* the user asked for a page: show what there is */
-  if (id == a->cur && on_stored_page(a)) return;
-  a->cur = id;
+  if (id == a->cur && on_stored_page(a) && a->depth == 1) return;
+  stack_reset(a, id, -1);
   show_cur(a);
+}
+
+/* One page back (the chevron, Exit on a BACK page): pops to the previous stored page, Home when nothing is left. */
+static void go_back(app_t *a) {
+  while (a->depth > 1) {
+    a->depth--;
+    int id = a->stack[a->depth - 1];
+    if (hp_store_has(&a->store, (uint8_t)id)) {
+      a->cur = id;
+      show_cur(a);
+      return;
+    }
+  }
+  go_home(a);
 }
 
 /* Incomplete set, nothing new for APP_PARTIAL_MS: show the best stored page and keep filling in the background. */
@@ -81,8 +108,10 @@ static void partial_check(app_t *a, uint64_t now) {
 
 static void page_step(app_t *a, int dir) {
   const hp_page_t *p = &a->ui.page;
-  if (dir > 0 && p->seq_idx < p->seq_cnt) goto_page(a, a->cur + 1);
-  else if (dir < 0 && p->seq_idx > 1) goto_page(a, a->cur - 1);
+  int id = dir > 0 && p->seq_idx < p->seq_cnt ? a->cur + 1 : dir < 0 && p->seq_idx > 1 ? a->cur - 1 : -1;
+  if (id < 0 || (unsigned)id >= hp_store_need(&a->store) || !hp_store_has(&a->store, (uint8_t)id)) return;
+  if (a->depth) a->depth--; /* paging replaces the top */
+  goto_page(a, id);
 }
 
 /* Hard keys the app acts on itself. Returns true when the key is consumed (not forwarded). Up / Down page a paged
@@ -107,7 +136,8 @@ static bool local_key(app_t *a, uint8_t code, uint8_t action) {
   if (bit == 2) {
     if (stored && !p->back) return false; /* a plain page: Exit goes to the hub; the receiving / error screens go Home */
     a->swallowed |= 4;
-    go_home(a);
+    if (stored) go_back(a);
+    else go_home(a);
     return true;
   }
   if (action != HP_KEY_ACTION_PRESS) return false;
@@ -123,7 +153,10 @@ static bool sink_widget(void *ctx, const hp_widget_t *w) {
     /* tapping the already-running activity: the hub sees a redundant start and sends no state change, so show its act page here */
     if (w->kind == HP_WIDGET_BUTTON && a->ui.act_on && w->bind == a->ui.act_idx) {
       int pg = hp_store_find_act(&a->store, (uint8_t)(w->bind + 1));
-      if (pg >= 0) goto_page(a, pg);
+      if (pg >= 0 && hp_store_has(&a->store, (uint8_t)pg)) {
+        stack_reset(a, hp_store_start(&a->store), pg); /* the re-tap path: [home, act page] */
+        show_cur(a);
+      }
     }
     return false;
   }
@@ -135,7 +168,8 @@ static void sink_bar(void *ctx, int x, int y) {
   app_t *a = ctx;
   (void)y;
   if (x >= 40 || !a->v2) return;
-  if (!on_stored_page(a) || a->ui.page.back) go_home(a); /* the back chevron; on the receiving / error screens the same corner */
+  if (!on_stored_page(a)) go_home(a); /* the receiving / error screens: the same corner */
+  else go_back(a); /* the back chevron ignores the BACK bit */
 }
 
 static void sink_emit(void *ctx, uint8_t code, uint8_t action) {
@@ -192,6 +226,7 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
   }
   ra_ui_init(&a->ui);
   a->cur = -1;
+  a->depth = 0;
   const hp_hwkey_t *k;
   a->key_up = (k = hp_hwkey_by_name("Up")) ? k->id : HP_KEY_NONE;
   a->key_down = (k = hp_hwkey_by_name("Down")) ? k->id : HP_KEY_NONE;
@@ -235,11 +270,13 @@ static void push_v2(app_t *a, const uint8_t *raw, size_t len, uint64_t now) {
     a->v2 = true;
     a->have_saved = false;
     a->cur = -1;
+    a->depth = 0;
     a->partial = false;
   }
   a->last_page_ms = now;
   if (r == HP_STORE_CLEARED) {
     a->cur = -1;
+    a->depth = 0;
     a->partial = false;
   }
   settle(a, raw[1]);
@@ -254,11 +291,9 @@ static void settle(app_t *a, int page) {
     return;
   }
   if (a->cur < 0) { /* the set just completed: pick what to show */
-    a->cur = hp_store_start(&a->store);
-    if (a->last_power) {
-      int pg = hp_store_find_act(&a->store, (uint8_t)(a->last_activity + 1));
-      if (pg >= 0) a->cur = pg;
-    }
+    int pg = -1;
+    if (a->last_power) pg = hp_store_find_act(&a->store, (uint8_t)(a->last_activity + 1));
+    stack_reset(a, hp_store_start(&a->store), pg);
     show_cur(a);
   } else if (page < 0 || page == a->cur || !on_stored_page(a)) { /* the visible page was replaced, or the screen is not a stored page */
     if (hp_store_has(&a->store, (uint8_t)a->cur)) show_cur(a);
@@ -279,6 +314,7 @@ static void theme_v2(app_t *a, uint8_t gen, const uint8_t *bytes, size_t len, ui
   a->last_page_ms = now;
   if (r == HP_STORE_CLEARED) { /* the held set is stale: off the screen before the new theme is applied */
     a->cur = -1;
+    a->depth = 0;
     a->partial = false;
     if (a->v2) show_cur(a);
   }
@@ -298,7 +334,10 @@ static void state_v2(app_t *a, uint8_t activity, bool power) {
   if (!a->v2 || !changed || !(hp_store_complete(&a->store) || a->partial)) return;
   if (power) {
     int pg = hp_store_find_act(&a->store, (uint8_t)(activity + 1));
-    if (pg >= 0) goto_page(a, pg);
+    if (pg >= 0 && hp_store_has(&a->store, (uint8_t)pg)) {
+      stack_reset(a, hp_store_start(&a->store), pg); /* [home, act page] */
+      show_cur(a);
+    }
   } else {
     go_home(a);
   }
@@ -323,6 +362,7 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
         a->v2 = false;
         a->partial = false;
         a->cur = -1;
+        a->depth = 0;
         hp_store_init(&a->store);
       }
       a->saved = p;
