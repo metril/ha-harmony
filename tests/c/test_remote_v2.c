@@ -25,7 +25,7 @@ static void settle(void) {
 
 /* ---- a tiny v2 encoder: header + widgets ---- */
 typedef struct {
-  uint8_t kind, id, x, y, w, h, role, shape, icon, only;
+  uint8_t kind, id, x, y, w, h, role, shape, icon, only; /* only: 1 = icon_only, 2 = align center (style bit 7) */
   int bind; /* -1 none */
   const char *label;
 } ws_t;
@@ -39,7 +39,7 @@ static size_t enc(uint8_t *o, int id, int total, int gen, int kind, int back, in
   if (tl) memcpy(o + k, title, tl);
   k += tl;
   for (int i = 0; i < n; i++) {
-    uint8_t style = (uint8_t)(w[i].role | (w[i].shape << 3) | (w[i].only ? 0x20 : 0));
+    uint8_t style = (uint8_t)(w[i].role | (w[i].shape << 3) | (w[i].only == 1 ? 0x20 : 0) | (w[i].only == 2 ? 0x80 : 0));
     uint8_t kb = (uint8_t)(w[i].kind | (style ? 0x10 : 0) | (w[i].icon ? 0x20 : 0) | (w[i].bind >= 0 ? 0x40 : 0));
     o[k++] = kb; o[k++] = w[i].id; o[k++] = (uint8_t)((w[i].x << 4) | w[i].y); o[k++] = (uint8_t)((w[i].w << 4) | w[i].h);
     if (style) o[k++] = style;
@@ -589,6 +589,25 @@ static void test_v1_page_still_works_and_is_not_stored(void) {
   app_destroy(&app);
 }
 
+static void test_align_center_moves_row_label_right(void) {
+  start();
+  ws_t w[3] = {BTN, BTN, BTN};
+  for (int i = 0; i < 3; i++) { w[i].id = (uint8_t)(i + 1); w[i].y = (uint8_t)i; w[i].shape = HP_SHAPE_ROW; w[i].label = "Go"; }
+  w[1].only = 2;
+  w[2].icon = 0; w[2].only = 2;
+  push(0, 1, 5, 1, 0, 0, 0, 0, "", w, 3);
+  settle();
+  for (int i = 0; i < 3; i++) lv_obj_update_layout(app.ui.lbl[i]);
+  int x0 = lv_obj_get_x(app.ui.lbl[0]), x1 = lv_obj_get_x(app.ui.lbl[1]), x2 = lv_obj_get_x(app.ui.lbl[2]);
+  CT_CHECK(x1 > x0 + 20); /* the icon + label group is centred, the default stays at the left */
+  CT_CHECK(x2 > x0 + 20);
+  /* the group's centre is the button's centre: left margin == right margin (within the label's rounding) */
+  int bw = lv_obj_get_width(lv_obj_get_parent(app.ui.lbl[1]));
+  int left = lv_obj_get_x(app.ui.ico[1]), right = bw - (x1 + lv_obj_get_width(app.ui.lbl[1]));
+  CT_CHECK(left - right <= 2 && right - left <= 2);
+  app_destroy(&app);
+}
+
 int main(void) {
   CT_RUN(test_fill_receiving_then_home);
   CT_RUN(test_no_home_shows_page_zero_and_new_gen_clears);
@@ -607,5 +626,6 @@ int main(void) {
   CT_RUN(test_v1_then_identical_v2_set_switches_to_v2);
   CT_RUN(test_tile_state_is_kept_for_pages_off_screen);
   CT_RUN(test_v1_page_still_works_and_is_not_stored);
+  CT_RUN(test_align_center_moves_row_label_right);
   return CT_DONE();
 }

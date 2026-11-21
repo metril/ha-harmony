@@ -173,6 +173,12 @@ describe('byte counter', () => {
     expect(pageBytes({ ...base, widgets: [{ ...w, role: 'primary', icon: 'tv' }] })).toBe(11 + 5 + 1 + 1 + 2);
     expect(pageBytes({ ...base, widgets: [{ ...w, nav: 'next', action: undefined }] })).toBe(11 + 5 + 1 + 1 + 2);
   });
+  it('counts the style byte for a centred button', () => {
+    const base: Page = { id: 'x', cols: 4, rows: 6, widgets: [] };
+    const w = { type: 'button', x: 0, y: 0, label: 'Go', action: { none: true } };
+    expect(pageBytes({ ...base, widgets: [{ ...w, align: 'center' }] })).toBe(11 + 5 + 1 + 2);
+    expect(pageBytes({ ...base, widgets: [{ ...w, align: 'left' }] })).toBe(11 + 5 + 2);
+  });
   it('limits a label to 24 bytes and to what is left of the page budget', () => {
     const base: Page = { id: 'x', cols: 4, rows: 6, widgets: [{ type: 'button', x: 0, y: 0, label: 'abc' }] };
     expect(labelRoom(base, 0)).toBe(24);

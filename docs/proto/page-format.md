@@ -77,7 +77,9 @@ bits 2, 3 must be 0. `color` (after `bind`): low nibble fill, high nibble tile o
 on tiles; see docs/plans/2026-11-18-page-format-v2.md section 7. `style`: bits 0-2 role (0 default, 1 primary, 2 secondary, 3 danger, 4 nav;
 5-7 rejected), bits 3-4 shape (0 card, 1 row, 2 pill, 3 monogram), bit 5 icon_only, bit 6 TRAILING (draw a chevron at the
 right end of the widget; only valid with role nav; the compiler sets it on `nav: next|<page id>`, which also default to shape row
-and no leading icon; `nav: prev|home` keep their leading chev_left/home icon), bit 7 must be 0.
+and no leading icon; `nav: prev|home` keep their leading chev_left/home icon), bit 7 ALIGN_CENTER (centre the icon + label group
+on row and big-card buttons, in the space left of a trailing chevron; 0 = left-aligned, today's look; no effect on dense or icon-only
+widgets; any role).
 `icon`: 0 none, 1..159 stock (`proto/icons.yaml`, glyph U+E000+id), 160..254 reserved custom, 255
 rejected. `bind`: role nav -> target page id (< total, a nav widget must have one); otherwise the
 activity index highlighted while `state_update.activity == bind` and power is on. Encoders drop

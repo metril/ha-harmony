@@ -483,3 +483,15 @@ async def test_preview_survives_a_button_that_starts_an_unknown_activity(c):
     }
     st, body = await preview(c, cfg)
     assert st == 200 and body["ok"] is False and body["errors"]
+
+
+async def test_preview_carries_widget_align_to_the_model(c):
+    cfg = _list_cfg()
+    cfg["pages"][0]["widgets"][0]["align"] = "center"
+    _, body = await preview(c, cfg)
+    assert body["ok"], body["errors"]
+    assert body["pages"][0]["page"]["widgets"][0]["align_center"] is True
+    bad = _list_cfg()
+    bad["pages"][0]["widgets"][0]["align"] = "right"
+    _, body = await preview(c, bad)
+    assert not body["ok"]

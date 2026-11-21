@@ -199,7 +199,7 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
     out.push({ t: 'icon', id: w.icon, x: x + bw / 2 - 11, y: y + bh / 2 - 22, size: 22, color: icon, wi });
     out.push({ t: 'text', x: x + bw / 2, y: y + bh / 2 + 22, s: fit(label, bw - 8, size), size, fill: text, anchor: 'middle', weight: 500, wi });
   } else if (hasIcon) {
-    const left = w.shape === 'row' || w.shape === 'pill';
+    const left = (w.shape === 'row' || w.shape === 'pill') && !w.align_center;
     const isz = 20;
     const room = bw - 16 - isz - 8;
     const s = fit(label, room, size);
@@ -208,7 +208,7 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
     out.push({ t: 'icon', id: w.icon, x: gx, y: y + bh / 2 - isz / 2, size: isz, color: icon, wi });
     out.push({ t: 'text', x: gx + isz + 8, y: y + bh / 2 + size * 0.35, s, size, fill: text, anchor: 'start', weight: 500, wi });
   } else if (label) {
-    const left = w.shape === 'row';
+    const left = w.shape === 'row' && !w.align_center;
     out.push({ t: 'text', x: left ? x + 14 : x + bw / 2, y: y + bh / 2 + size * 0.35, s: fit(label, bw - 12, size), size, fill: text, anchor: left ? 'start' : 'middle', weight: 500, wi });
   }
 }

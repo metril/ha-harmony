@@ -74,6 +74,12 @@ describe('page renderer: v2 looks', () => {
     const idle = layoutPage(full, { activeAct: null }).prims.find((p) => p.t === 'rect' && p.wi === 0);
     expect(idle).toMatchObject({ fill: PAL.s2 });
   });
+  it('align centre moves a row button\'s icon + label group to the middle; default stays left', () => {
+    const row = { kind: 'button', id: 1, x: 0, y: 0, w: 2, h: 1, label: 'Go', role: 'default', shape: 'row', icon_only: false, icon: 1, bind: null } as V2Page['widgets'][number];
+    const at = (w: V2Page['widgets'][number]) => layoutPage({ ...full, widgets: [w] }).prims.find((p) => p.t === 'icon' && p.wi === 0) as Extract<Prim, { t: 'icon' }>;
+    expect(at(row).x).toBeLessThan(30);
+    expect(at({ ...row, align_center: true }).x).toBeGreaterThan(36);
+  });
   it('tiles show on, off and unavailable', () => {
     const page: V2Page = { ...full, back: false, seq: null, widgets: [0, 1, 2].map((i) => ({ kind: 'tile', id: i, x: 0, y: i * 2, w: 4, h: 2, label: 'T' + i, role: 'default', shape: 'card', icon_only: false, icon: 0, bind: null })) };
     const prims = layoutPage(page).prims;

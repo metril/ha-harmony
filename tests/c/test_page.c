@@ -103,6 +103,7 @@ static void check_dict(const char *name, const hp_page_t *p, const cJSON *m) {
         CT_EQ(o->icon_only, cJSON_IsTrue(cJSON_GetObjectItem(w, "icon_only")));
         CT_EQ(o->icon, jint(w, "icon"));
         CT_EQ(o->trailing, cJSON_IsTrue(cJSON_GetObjectItem(w, "trailing")));
+        CT_EQ(o->align_center, cJSON_IsTrue(cJSON_GetObjectItem(w, "align_center")));
         const cJSON *bd = cJSON_GetObjectItem(w, "bind");
         CT_EQ(o->has_bind, !cJSON_IsNull(bd));
         if (o->has_bind) CT_EQ(o->bind, bd->valueint);

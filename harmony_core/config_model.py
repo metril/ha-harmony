@@ -498,6 +498,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("role"): vol.In(ROLES),
         vol.Optional("shape"): vol.In(SHAPES),
         vol.Optional("icon_only"): bool,
+        vol.Optional("align"): vol.In(["left", "center"]),
         vol.Optional("color"): _color,
         vol.Optional("on_color"): _color,
         vol.Optional("nav"): vol.All(str, vol.Match(_NAV, msg="use next, prev, home or a page id")),

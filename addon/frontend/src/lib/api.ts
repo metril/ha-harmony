@@ -91,6 +91,8 @@ export interface V2Widget {
   role: string;
   shape: string;
   icon_only: boolean;
+  /** centre the icon + label group (default: left-aligned on rows and big cards) */
+  align_center?: boolean;
   icon: number;
   bind: number | null;
   /** palette name or `#RRGGBB`; null = the role's colour */

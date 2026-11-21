@@ -191,6 +191,7 @@ export class HhInspector extends LitElement {
         ? html`<div class="sec"><h3>Look</h3>
             <div class="sw" role="group" aria-label="Role">${ROLES.map((r) => html`<button class="r-${r}" aria-pressed=${(w.role ?? 'default') === r} ?disabled=${!!navVal} @click=${() => this.widgetPatch(pi, wi, { role: r === 'default' ? undefined : r })}><i></i>${r}</button>`)}</div>
             <div class="sw" role="group" aria-label="Shape">${SHAPES.map((s) => html`<button class="s-${s}" aria-pressed=${(w.shape ?? 'card') === s} @click=${() => this.widgetPatch(pi, wi, { shape: s === 'card' ? undefined : s })}><i></i>${s}</button>`)}</div>
+            <label>Align <select @change=${(e: Event) => this.widgetPatch(pi, wi, { align: (e.target as HTMLSelectElement).value || undefined })}>${[['', 'Default'], ['left', 'Left'], ['center', 'Center']].map(([v, n]) => html`<option value=${v} ?selected=${(w.align ?? '') === v}>${n}</option>`)}</select></label>
             ${this.colourRows(pi, wi, w)}
             <label>Icon <input type="search" placeholder="Search icons" .value=${this.iconQ} @input=${(e: Event) => (this.iconQ = (e.target as HTMLInputElement).value)} /></label>
             <div class="icons" role="group" aria-label="Icon">
@@ -313,7 +314,7 @@ export class HhInspector extends LitElement {
   private setType(pi: number, wi: number, type: string) {
     const w = this.cfg.pages?.[pi]?.widgets[wi];
     if (!w || w.type === type) return;
-    if (type === 'label') this.widgetPatch(pi, wi, { type, action: undefined, entity: undefined, nav: undefined, id: undefined, icon: undefined, role: undefined, shape: undefined, icon_only: undefined });
+    if (type === 'label') this.widgetPatch(pi, wi, { type, action: undefined, entity: undefined, nav: undefined, id: undefined, icon: undefined, role: undefined, shape: undefined, icon_only: undefined, align: undefined });
     else if (type === 'tile') this.widgetPatch(pi, wi, { type, action: undefined, nav: undefined, entity: 'sensor.choose_entity', id: w.id ?? `tile_${wi + 1}` });
     else this.widgetPatch(pi, wi, { type, entity: undefined, on_color: undefined, action: { none: true }, id: w.id ?? `btn_${wi + 1}` });
   }

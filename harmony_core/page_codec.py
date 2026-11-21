@@ -33,6 +33,7 @@ _HAS_STYLE, _HAS_ICON, _HAS_BIND, _HAS_COLOR = 0x10, 0x20, 0x40, 0x80
 _KIND_RESERVED = 0x0C  # bits 2, 3
 _ICON_ONLY = 0x20
 _TRAILING = 0x40  # style bit 6: trailing chevron (nav role only)
+_ALIGN_CENTER = 0x80  # style bit 7: centre the icon + label group (default: left)
 _BACK = 0x04
 _THEME_SHIFT, _THEME_MASK = (
     3,
@@ -61,6 +62,7 @@ class Widget:
     )
     on_color: str | None = None  # v2, tiles only: fill when on; same forms
     trailing: bool = False  # v2: draw a trailing chevron (nav role only)
+    align_center: bool = False  # v2: centre the icon + label group instead of left-aligning
 
 
 @dataclass(frozen=True)
@@ -211,6 +213,7 @@ def widget_cost(w: Widget) -> dict[str, int]:
         | SHAPES.index(w.shape) << 3
         | (_ICON_ONLY if w.icon_only else 0)
         | (_TRAILING if w.trailing else 0)
+        | (_ALIGN_CENTER if w.align_center else 0)
     )
     return {
         "base": WIDGET_BYTES,
@@ -229,9 +232,10 @@ def _widget_bytes(w: Widget, v2: bool) -> bytes:
     if v2:
         style = (
             ROLES.index(w.role)
-        | SHAPES.index(w.shape) << 3
-        | (_ICON_ONLY if w.icon_only else 0)
-        | (_TRAILING if w.trailing else 0)
+            | SHAPES.index(w.shape) << 3
+            | (_ICON_ONLY if w.icon_only else 0)
+            | (_TRAILING if w.trailing else 0)
+            | (_ALIGN_CENTER if w.align_center else 0)
         )
         if style:
             kind |= _HAS_STYLE
@@ -374,7 +378,7 @@ def decode_page(data: bytes) -> Page:
         if v2 and (kind & _KIND_RESERVED or kind & 3 == 3):
             raise ValueError(f"bad widget kind byte {kind:#04x}")
         role, shape, icon_only, icon, bind = "default", "card", False, 0, None
-        trailing = False
+        trailing = align_center = False
         color = on_color = None
         wid, xy, wh = data[off : off + 3]
         off += 3
@@ -385,10 +389,11 @@ def decode_page(data: bytes) -> Page:
             if kind & _HAS_STYLE:
                 s = data[off]
                 off += 1
-                if s & 7 > 4 or s & 0x80 or (s & _TRAILING and s & 7 != 4):
+                if s & 7 > 4 or (s & _TRAILING and s & 7 != 4):
                     raise ValueError(f"bad style byte {s:#04x}")
                 role, shape, icon_only = ROLES[s & 7], SHAPES[(s >> 3) & 3], bool(s & _ICON_ONLY)
                 trailing = bool(s & _TRAILING)
+                align_center = bool(s & _ALIGN_CENTER)
             if kind & _HAS_ICON:
                 icon = data[off]
                 off += 1
@@ -434,6 +439,7 @@ def decode_page(data: bytes) -> Page:
                 color,
                 on_color,
                 trailing,
+                align_center,
             )
         )
     if off != len(data):
@@ -475,6 +481,7 @@ def page_to_dict(page: Page) -> dict[str, Any]:
                 "color": w.color,
                 "on_color": w.on_color,
                 **({"trailing": True} if w.trailing else {}),
+                **({"align_center": True} if w.align_center else {}),
             }
             for w in page.widgets
         ],

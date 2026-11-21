@@ -2129,11 +2129,6 @@
    "error": "inval"
   },
   {
-   "name": "v2_style_bit7",
-   "hex": "0200040601000100000000100100118000",
-   "error": "inval"
-  },
-  {
    "name": "v2_icon_255",
    "hex": "020004060100010000000020010011ff00",
    "error": "inval"
@@ -3967,6 +3962,43 @@
       "color": null,
       "on_color": null,
       "trailing": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "v2c_align_center",
+   "hex": "0200040601000100000000100100118002476f",
+   "dict": {
+    "version": 2,
+    "id": 0,
+    "cols": 4,
+    "rows": 6,
+    "gen": 0,
+    "total": 1,
+    "kind": "normal",
+    "back": false,
+    "seq": null,
+    "act": 0,
+    "title": "",
+    "theme": 0,
+    "widgets": [
+     {
+      "kind": "button",
+      "id": 1,
+      "x": 0,
+      "y": 0,
+      "w": 1,
+      "h": 1,
+      "label": "Go",
+      "role": "default",
+      "shape": "card",
+      "icon_only": false,
+      "icon": 0,
+      "bind": null,
+      "color": null,
+      "on_color": null,
+      "align_center": true
      }
     ]
    }

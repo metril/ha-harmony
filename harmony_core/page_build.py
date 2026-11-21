@@ -99,6 +99,7 @@ class _Spec:
     nav: str | None
     color: str | None = None
     on_color: str | None = None
+    align_center: bool = False
     x: int = 0
     y: int = 0
     w: int = 1
@@ -177,6 +178,7 @@ def _spec(
         nav,
         w.get("color"),
         w.get("on_color"),
+        w.get("align") == "center",
         w.get("x", 0),
         w.get("y", 0),
         w["w"],
@@ -201,6 +203,7 @@ def _probe(s: _Spec) -> Widget:
         s.color,
         s.on_color,
         s.trailing,
+        s.align_center,
     )
 
 
@@ -359,6 +362,7 @@ def build_pages(
                     s.color,
                     s.on_color,
                     s.trailing,
+                    s.align_center,
                 )
             )
         pages.append(
