@@ -785,8 +785,10 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
                 fail([*path, "device"], f"unknown device {a['device']!r}")
                 return
             if "command" in a:
+                pw = d.get("power") or {}
+                want = {"power_on": "on", "power_off": "off"}.get(a["command"])
                 ok = a["command"] in d["commands"] or (
-                    a["command"] in ("power_on", "power_off") and "power" in d
+                    want is not None and (want in pw or ("toggle" in pw and d.get("kind") != "ha"))
                 )
                 if not ok:
                     fail([*path, "command"], f"{a['device']} has no {a['command']!r}")

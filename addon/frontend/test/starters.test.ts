@@ -77,6 +77,12 @@ describe('starter pages', () => {
     expect(pages[2]!.widgets.map((w) => w.icon)).toEqual(['hdmi1', 'hdmi2', 'hdmi3', 'hdmi4', 'av']);
   });
 
+  it('only the power buttons whose code exists are added; AV 1 and AV 2 stay separate', () => {
+    const c = { devices: [{ id: 'p', name: 'P', power: { on: ir }, commands: cmds('InputAv1', 'InputAv2') }], activities: [], pages: [] } as unknown as Config;
+    const pg = templatePages(c, 'devices')[1]!;
+    expect(pg.widgets.map((w) => w.label)).toEqual(['Power On', 'AV 1', 'AV 2']);
+  });
+
   it('a device without anything to press gets no row', () => {
     const c = { devices: [{ id: 'x', name: 'Empty' }], activities: [], pages: [] } as unknown as Config;
     expect(templatePages(c, 'devices')[0]!.widgets).toEqual([]);

@@ -641,8 +641,8 @@ export function normalizeInput(name: string): string | null {
   const c = snake(name.trim().replace(/([A-Za-z])(\d)/g, '$1_$2'));
   const h = /^(?:input_)?hdmi_?(\d+)(?:_?mhl|_?arc|_?earc)?$/.exec(c);
   if (h) return `HDMI ${Number(h[1])}`;
-  const p = /^input_(av|usb|tv)(?:_?\d+)?$/.exec(c);
-  return p ? (p[1] as string).toUpperCase() : null;
+  const p = /^input_(av|usb|tv)(?:_?(\d+))?$/.exec(c);
+  return p ? (p[1] as string).toUpperCase() + (p[2] ? ` ${Number(p[2])}` : '') : null;
 }
 /** A device's inputs: the configured ones, else derived from commands named like InputHdmi1 (label = the normalised name). */
 export function deviceInputs(d: Device): { label: string; action: Action }[] {
@@ -819,12 +819,11 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
         const inputs = deviceInputs(d);
         const power: Widget[] = [];
         if (d.power?.on || d.power?.off || d.power?.toggle) {
-          const both = !!(d.power.on && d.power.off) || (!!d.power.on !== !!d.power.off);
-          if (d.power.toggle && !d.power.on && !d.power.off) power.push({ type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label: 'Power', icon: 'power', action: { device: d.id, command: 'power_on' } });
-          else if (both) {
-            power.push({ type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label: 'Power On', icon: 'power', role: 'accent', action: { device: d.id, command: 'power_on' } });
-            power.push({ type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label: 'Power Off', icon: 'power', action: { device: d.id, command: 'power_off' } });
-          }
+          const { on, off, toggle } = d.power;
+          const mk1 = (label: string, command: string, extra: Partial<Widget> = {}): Widget => ({ type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label, icon: 'power', action: { device: d.id, command }, ...extra });
+          if (on) power.push(mk1('Power On', 'power_on', { role: 'accent' }));
+          if (off) power.push(mk1('Power Off', 'power_off'));
+          if (toggle && !on && !off) power.push(mk1('Power', 'power_on'));
         }
         const keys = commandNames(d).filter((c) => !isHardKey(c) && !isInputCommand(d, c) && !/^power_(?:on|off)$/.test(c)).map((c) => key(d, c));
         if (power.length || keys.length || inputs.length) plans.push({ d, id: pid(`dev_${d.id}`.slice(0, 31)), power, keys, inputs });

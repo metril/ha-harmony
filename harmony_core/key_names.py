@@ -195,7 +195,7 @@ def abbreviate(label: str) -> str:
 
 
 _INPUT_HDMI = re.compile(r"^(?:input_)?hdmi_?(\d+)(?:_?mhl|_?arc|_?earc)?$")
-_INPUT_PORT = re.compile(r"^input_(av|usb|tv)(?:_?\d+)?$")
+_INPUT_PORT = re.compile(r"^input_(av|usb|tv)(?:_?(\d+))?$")
 
 
 def normalize_input(name: str) -> str | None:
@@ -207,4 +207,6 @@ def normalize_input(name: str) -> str | None:
     if h:
         return f"HDMI {int(h.group(1))}"
     p = _INPUT_PORT.match(c)
-    return p.group(1).upper() if p else None
+    if not p:
+        return None
+    return p.group(1).upper() + (f" {int(p.group(2))}" if p.group(2) else "")

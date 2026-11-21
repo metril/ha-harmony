@@ -70,3 +70,30 @@ def test_nav_icon_order_device_icon_brand_keyword():
     assert nav_icon("Speakers", {}, {}) == ICON_IDS["speaker"]  # name keyword
     assert nav_icon("Zzz Qqq", {}, {}) == 0
     assert nav_icon("Next", {}, {}) == 0  # chevron words: the row draws its own
+
+
+def test_numbered_inputs_stay_separate():
+    assert [normalize_input(n) for n in ("InputAv", "InputAv1", "InputAv2", "InputUsb2")] == ["AV", "AV 1", "AV 2", "USB 2"]
+    d, cs, path = load("Sony", "KV-32V42.json")
+    d = {k: v for k, v in d.items() if k != "inputs"}
+    cs = copy.deepcopy(cs)
+    for cmd, new in zip(cs["commands"][:3], ("InputAv1", "InputAv2", "InputUsb"), strict=True):
+        cmd["name"] = new
+    b = build_device(d, cs, mfr="S", model_file="f.json", codeset_path=path, imported_at="x")
+    assert list(b.device["inputs"]) == ["AV 1", "AV 2", "USB"]
+
+
+def test_power_off_without_an_off_code_is_a_config_error():
+    cfg = """
+devices:
+  - id: tv
+    power: {'on': {proto: nec, addr: 4, cmd: 8}}
+    commands: {mute: {proto: nec, addr: 4, cmd: 9}}
+pages:
+  - id: p
+    cols: 1
+    rows: 1
+    widgets: [{type: button, id: b, x: 0, y: 0, label: Off, action: {device: tv, command: power_off}}]
+"""
+    with pytest.raises(Exception, match="power needs both"):
+        parse_model(cfg, "t.yaml")
