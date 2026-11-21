@@ -258,6 +258,21 @@ static void test_writes(void) {
     CHECK(send_ir(0, s) == -HP_E_IO);
     CHECK(F.closes == 0);
     for (int i = 0; i < F.nlog; i++) CHECK(!(F.log[i].op == 'i' && F.log[i].req == HP_I2S_START));
+    /* the partial bytes are flushed (START+DRAIN) before the next send's FREQ/write */
+    F.nlog = 0; F.nsteps = 0; F.step = 0;
+    CHECK(send_ir(0, s) == 0);
+    CHECK(F.log[0].req == HP_I2S_START && F.log[0].arg == 0x10000 && F.log[1].req == HP_I2S_DRAIN &&
+          F.log[2].req == HP_I2S_FREQ && F.log[3].op == 'w');
+    /* START failure after a full write: same flush on the next send, and on close */
+    setup();
+    F.fail_req = HP_I2S_START;
+    CHECK(open_hw(0) == 0);
+    CHECK(send_ir(0, s) == -HP_E_IO && F.closes == 0);
+    F.nlog = 0;
+    hp_hw_sinks_close(g_h);
+    CHECK(F.nlog == 2 && F.log[0].req == HP_I2S_START && F.log[1].req == HP_I2S_DRAIN && F.closes == 0);
+    F.fail_req = 0; F.nlog = 0;
+    CHECK(send_ir(0, s) == 0 && F.log[0].op == 'o');
     /* a failed ioctl keeps the fd too */
     setup();
     F.fail_req = HP_I2S_FREQ;

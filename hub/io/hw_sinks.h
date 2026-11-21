@@ -82,6 +82,7 @@ typedef struct {
     bool rf_claimed;
     hp_rf_transport *rfspi; /* the real radio when cfg.rf was given; sinks.rf then points at it */
     bool pending;          /* START issued, DRAIN owed */
+    uint8_t flush_ports;   /* nonzero: a failed send left queued bytes; START+DRAIN them before the next use */
     bool configured;       /* DSIZE/MODE/VOLUME done on fd */
     int fd;                /* /dev/i2s, opened on first send and held for the daemon's life (like hal); -1 before */
     uint8_t buf[HP_HW_RING_BYTES];

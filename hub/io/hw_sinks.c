@@ -100,6 +100,11 @@ static int ioc(hp_hw_t *h, unsigned long req, unsigned long arg) {
 /* DRAIN the previous waveform. The fd is never closed: stock hal holds /dev/i2s for its whole life, and closing
  * frees the DMA ring while IRQ 23 can still fire (hard lockup). */
 static void drain_prev(hp_hw_t *h) {
+    if (h->flush_ports) { /* a failed send left bytes queued: no reset/flush ioctl exists, so play them out */
+        (void)ioc(h, HP_I2S_START, (unsigned long)((uint32_t)h->flush_ports << 16));
+        h->flush_ports = 0;
+        h->pending = true;
+    }
     if (!h->pending) return;
     (void)ioc(h, HP_I2S_DRAIN, 0); /* normally returns at once: irout books the line for the waveform */
     h->pending = false;
@@ -148,10 +153,16 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     for (size_t off = 0; off < w.nbytes;) {
         ssize_t n = h->ops.write(h->ops.ctx, h->fd, h->buf + off, w.nbytes - off);
         if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) return -HP_E_IO;
+        if (n <= 0) {
+            if (off) h->flush_ports = (uint8_t)ports; /* partial waveform is in the ring */
+            return -HP_E_IO;
+        }
         off += (size_t)n; /* short write: keep going, never truncate the waveform */
     }
-    if ((rc = ioc(h, HP_I2S_START, (unsigned long)((uint32_t)ports << 16))) < 0) return rc;
+    if ((rc = ioc(h, HP_I2S_START, (unsigned long)((uint32_t)ports << 16))) < 0) {
+        h->flush_ports = (uint8_t)ports; /* all bytes queued, not started */
+        return rc;
+    }
     h->pending = true;
     return 0; /* DRAIN is deferred to the next send / hp_hw_sinks_close, so the loop never blocks */
 }
