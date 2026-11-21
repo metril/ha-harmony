@@ -84,6 +84,41 @@ static void deliver(void *ctx, const hp_rf_msg_t *m) {
     }
     break;
   }
+  case HP_MSG_NOW_PLAYING: {
+    hp_rf_val_t n[7];
+    if (hp_rf_unpack(m->type, m->payload, m->len, n, 7) == 0 && n[2].u <= 2 && n[3].u <= 0xFFFF && n[4].u <= 0xFFFF &&
+        n[5].len <= RA_NP_TEXT && n[6].len <= RA_NP_TEXT) {
+      app_link_event_t *e = ring_push(l);
+      if (!e) return;
+      e->kind = APP_LINK_EV_NOW_PLAYING;
+      e->cid = n[1].u;
+      e->flags = (uint8_t)n[2].u;
+      e->pos = (uint16_t)n[3].u;
+      e->dur = (uint16_t)n[4].u;
+      memcpy(e->data, n[5].p, n[5].len);
+      e->data[n[5].len] = 0;
+      memcpy(e->data + RA_NP_TEXT + 1, n[6].p, n[6].len);
+      e->data[RA_NP_TEXT + 1 + n[6].len] = 0;
+    } else {
+      ra_logf(&l->sys, "rf_link: bad now_playing dropped");
+    }
+    break;
+  }
+  case HP_MSG_COVER_CHUNK: {
+    hp_rf_val_t c[4];
+    if (hp_rf_unpack(m->type, m->payload, m->len, c, 4) == 0 && c[2].u <= 0xFFFF && c[3].len <= RA_COVER_CHUNK_MAX) {
+      app_link_event_t *e = ring_push(l);
+      if (!e) return;
+      e->kind = APP_LINK_EV_COVER;
+      e->cid = c[1].u;
+      e->off = (uint16_t)c[2].u;
+      memcpy(e->data, c[3].p, c[3].len);
+      e->len = c[3].len;
+    } else {
+      ra_logf(&l->sys, "rf_link: bad cover_chunk dropped");
+    }
+    break;
+  }
   case HP_MSG_STATE_UPDATE:
     if (hp_rf_unpack(m->type, m->payload, m->len, v, 2) == 0) {
       app_link_event_t *e = ring_push(l);

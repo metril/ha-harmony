@@ -121,6 +121,22 @@ global key map) maps the Exit key.
 ids; labels and nav widgets take page-local ids, so v1 bytes differ from pre-v2 output only in ids when
 a label precedes a button.
 
+## App status and Now Playing (remote)
+**App status ring.** `tile_state` addressed to a *button* widget id (ids are unique per page) sets the app status of that
+button instead of a tile state; `text` is empty. `state`: 0 none (no ring), 1 open (2 px accent ring inside the box), 2 playing
+(ring + 16 px play glyph at the top right, 12 px in, 8 on a COMPACT card), 3 paused (ring + pause glyph). The remote keeps it in
+its tile overlay (survives the page leaving the screen; a re-push of the page drops it) and reports no new caps bit. E2 emits one
+`tile_state` per app button whose status changed.
+
+**Now Playing card** (`now_playing` 29 + `cover_chunk` 42). On a FIXED v2 page whose `act` is the running activity (+ 1, power
+on) and while `flags` != 0, the card (224x80, 4 px pad: 48x72 art, m16 title, r12 subtitle, an r12 accent line with the play or
+pause glyph and `m:ss / m:ss` (`Paused · ` before it when paused), a 3 px bar) replaces the page's first grid row (lowest y)
+whose widgets are all non-compact button cards of span 12 or 6 (80 px class); the row's widgets are not drawn nor tappable.
+A page with no such row shows none. A tap on the card sends the hard keys Pause (while playing) or Play (while paused) as a
+key_event, so the activity's own Play / Pause mapping applies. The position advances locally (once a second, only while awake
+and playing; `pos` is as of arrival). The art slot shows the Plex glyph until the cover of `cid` is complete in the 4-cover cache
+(1760 B in `cover_chunk`s of any order and size, 1728 B of 4 bpp indices high nibble first, then 16 RGB565 LE palette entries).
+
 ## New messages
 `remote_info` (18, both): `{remote, page_fmt, caps, icons, gen, pages}` (`gen`/`pages`: the v2 set held in the page store, 0/0 when none); `tile_state` (19, rf): `{remote, page, tile,
 state, text}` with state 0 value-only, 1 off, 2 on, 3 unavailable. Code that predates them drops both.

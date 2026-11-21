@@ -6,6 +6,7 @@
 
 #include "hub/hp_errors.h"
 #include "proto/gen/harmony_proto.h"
+#include "remote/app/cover.h"
 #include "remote/app/theme_derive.h"
 
 #define LINK_POLL_MS 100 /* select() timeout cap for a link with no fd to wait on */
@@ -146,8 +147,18 @@ static bool local_key(app_t *a, uint8_t code, uint8_t action) {
   return false;
 }
 
+static void sink_emit(void *ctx, uint8_t code, uint8_t action);
+
 static bool sink_widget(void *ctx, const hp_widget_t *w) {
   app_t *a = ctx;
+  if (a->v2 && on_stored_page(a) && ra_ui_is_np(&a->ui, w)) { /* the Now Playing card: play / pause, as the hard keys */
+    uint8_t code = (a->ui.np.flags & 1) ? a->key_pause : a->key_play;
+    if (code != HP_KEY_NONE) {
+      sink_emit(a, code, HP_KEY_ACTION_PRESS);
+      sink_emit(a, code, HP_KEY_ACTION_RELEASE);
+    }
+    return true;
+  }
   if (!a->v2 || !on_stored_page(a) || !w->has_bind) return false;
   if (w->role != HP_ROLE_NAV) {
     /* tapping the already-running activity: the hub sees a redundant start and sends no state change, so show its act page here */
@@ -233,6 +244,9 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
   a->key_exit = (k = hp_hwkey_by_name("Exit")) ? k->id : HP_KEY_NONE;
   a->key_home = (k = hp_hwkey_by_name("Home")) ? k->id : HP_KEY_NONE;
   a->key_fav = (k = hp_hwkey_by_name("Favorites")) ? k->id : HP_KEY_NONE;
+  a->key_play = (k = hp_hwkey_by_name("Play")) ? k->id : HP_KEY_NONE;
+  a->key_pause = (k = hp_hwkey_by_name("Pause")) ? k->id : HP_KEY_NONE;
+  ra_cover_reset();
   ra_input_sink_t sink = {.ctx = a, .emit = sink_emit, .gate = sink_gate, .activity = sink_activity, .page = sink_page,
                        .touch = sink_touch, .widget = sink_widget, .bar = sink_bar};
   if (ra_input_open(&a->input, &a->sys, &sink) < 0) {
@@ -392,6 +406,23 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
     if (ra_ui_tile_text(&a->ui, ev->page, ev->tile, ev->text, strlen(ev->text)) < 0)
       ra_logf(&a->sys, "tile_update %u/%u ignored", ev->page, ev->tile);
     break;
+  case APP_LINK_EV_NOW_PLAYING: {
+    heard(a, now);
+    ra_display_note(&a->display, RA_WHY_STATUS, 0);
+    ra_np_t n = {.flags = ev->flags, .pos = ev->pos, .dur = ev->dur, .cid = ev->cid, .at = now};
+    memcpy(n.t1, ev->data, sizeof n.t1); /* rf_link left both NUL-terminated within 49 bytes */
+    memcpy(n.t2, ev->data + 49, sizeof n.t2);
+    n.t1[48] = n.t2[48] = 0;
+    if (ra_ui_set_np(&a->ui, &n) && a->v2 && on_stored_page(a)) show_cur(a); /* the card appears or goes away */
+    break;
+  }
+  case APP_LINK_EV_COVER:
+    heard(a, now);
+    if (ra_cover_chunk(ev->cid, ev->off, ev->data, ev->len) == 1) {
+      ra_display_note(&a->display, RA_WHY_STATUS, 0);
+      ra_ui_np_cover(&a->ui, ev->cid);
+    }
+    break;
   case APP_LINK_EV_STATE_UPDATE:
     heard(a, now);
     a->state_updates++;
@@ -443,6 +474,7 @@ static void suspend_now(app_t *a) {
   ra_logf(&a->sys, "resumed after %llu ms asleep (woke: %s; %u suspends, %llu ms total)", (unsigned long long)gap, ev,
           a->power.suspends + 1, (unsigned long long)(a->power.suspended_ms + gap));
   ra_power_resumed(&a->power, now, gap);
+  ra_ui_np_skip(&a->ui, now, gap);
   a->last_rx_ms = now; /* the hub was silent for the sleep, not failing: no fallback page for it */
   a->fail_run = 0;
   if (a->link.resumed) a->link.resumed(a->link.ctx, now, gap);
@@ -459,9 +491,11 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   if (lfd >= 0) fds[nfd++] = lfd;
   uint32_t cap = lfd >= 0 ? APP_LINK_IDLE_WAIT_MS : LINK_POLL_MS;
   uint32_t t = max_wait_ms < cap ? max_wait_ms : cap;
-  uint32_t d[5] = {lv_ms, ra_power_next_ms(&a->power, now), ra_input_next_ms(&a->input, now),
-                   a->link.next_ms ? a->link.next_ms(a->link.ctx, now) : UINT32_MAX, partial_wait_ms(a, now)};
-  for (int i = 0; i < 5; i++)
+  /* the Now Playing position moves on the loop's own wait: due once a second while the card plays and the screen is on */
+  uint32_t d[6] = {lv_ms, ra_power_next_ms(&a->power, now), ra_input_next_ms(&a->input, now),
+                   a->link.next_ms ? a->link.next_ms(a->link.ctx, now) : UINT32_MAX, partial_wait_ms(a, now),
+                   a->power.state != RA_PW_OFF ? ra_ui_np_next_ms(&a->ui, now) : UINT32_MAX};
+  for (int i = 0; i < 6; i++)
     if (d[i] < t) t = d[i];
   int ready[3] = {0, 0, 0};
   int w = a->sys.ops.wait(a->sys.ops.ctx, fds, nfd, t, ready);
@@ -501,6 +535,7 @@ void app_step(app_t *a, unsigned max_wait_ms) {
   a->last_awake = awake;
   app_link_event_t ev;
   for (int i = 0; i < LINK_EVENTS_PER_STEP && a->link.poll(a->link.ctx, now, &ev) > 0; i++) handle_link_event(a, &ev, now);
+  if (awake) ra_ui_np_tick(&a->ui, now);
   if (a->home_req) {
     a->home_req = false;
     go_home(a);

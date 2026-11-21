@@ -134,7 +134,34 @@ static void test_a_replaced_set_keeps_the_slot(void) {
     CT_CHECK(hp_store_complete(&S));
 }
 
+/* App status of a button: tile_state on a button id is kept in the overlay and lands in the decoded widget's tstate; a
+ * re-put of the page drops it; a tile's own state is unaffected. */
+static void test_button_app_status_overlay(void) {
+    hp_store_init(&S);
+    uint8_t raw[32];
+    size_t n = mkpage(raw, 0, 1, 3, 0, 1);
+    CT_EQ(hp_store_put(&S, raw, n), HP_STORE_OK);
+    hp_page_t p;
+    CT_EQ(hp_store_get(&S, 0, &p), 0);
+    CT_EQ(p.widgets[0].kind, HP_WIDGET_BUTTON);
+    CT_EQ(p.widgets[0].tstate, HP_APP_NONE);
+    CT_EQ(hp_store_tile(&S, 0, p.widgets[0].id, HP_APP_PLAYING, "", 0), 0);
+    CT_EQ(hp_store_get(&S, 0, &p), 0);
+    CT_EQ(p.widgets[0].tstate, HP_APP_PLAYING);
+    CT_EQ(hp_store_tile(&S, 0, p.widgets[0].id, HP_APP_PAUSED, "", 0), 0); /* the same id: replaced, not added */
+    CT_EQ(hp_store_get(&S, 0, &p), 0);
+    CT_EQ(p.widgets[0].tstate, HP_APP_PAUSED);
+    CT_EQ(hp_store_tile(&S, 0, 99, HP_APP_OPEN, "", 0), 0); /* an id the page does not have: harmless */
+    CT_EQ(hp_store_get(&S, 0, &p), 0);
+    CT_EQ(p.widgets[0].tstate, HP_APP_PAUSED);
+    CT_EQ(hp_store_put(&S, raw, n), HP_STORE_OK); /* the page is stored again: its overlay is dropped */
+    CT_EQ(hp_store_get(&S, 0, &p), 0);
+    CT_EQ(p.widgets[0].tstate, HP_APP_NONE);
+}
+
+
 int main(void) {
+    CT_RUN(test_button_app_status_overlay);
     CT_RUN(test_theme_then_pages);
     CT_RUN(test_pages_then_late_theme);
     CT_RUN(test_a_preset_set_never_needs_the_slot);

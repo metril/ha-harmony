@@ -22,13 +22,17 @@ typedef enum {
   APP_LINK_EV_TILE_STATE,  /* page, tile, state, text (hp_tile_state_t) */
   APP_LINK_EV_STATE_UPDATE,/* activity, power */
   APP_LINK_EV_THEME_PUSH,  /* gen, data[0..len) = the 99-byte custom theme */
+  APP_LINK_EV_NOW_PLAYING, /* cid, flags (1 playing, 2 paused, 0 none), pos / dur seconds, data = t1 NUL, data + 49 = t2 NUL */
+  APP_LINK_EV_COVER,       /* cid, off, data[0..len) = one slice of the cover */
   APP_LINK_EV_FAILED,      /* a send failed after all retries (fatal: the link cannot work at all) */
   APP_LINK_EV_ALIVE        /* any frame arrived from the hub */
 } app_link_event_kind_t;
 
 typedef struct {
   app_link_event_kind_t kind;
-  uint8_t page, tile, activity, state, gen;
+  uint8_t page, tile, activity, state, gen, flags;
+  uint16_t pos, dur, off;
+  uint32_t cid;
   bool power, fatal; /* fatal: FAILED that shows the fallback at once */
   uint8_t data[HP_PAGE_MAX_BYTES];
   size_t len;
@@ -83,6 +87,7 @@ typedef struct {
   int cur;
   uint8_t stack[APP_STACK]; /* page ids, oldest first; the top is `cur` */
   uint8_t depth;
+  uint8_t key_play, key_pause;                          /* the Now Playing card's tap */
   uint8_t key_up, key_down, key_exit, key_home, key_fav; /* logical ids of the hard keys the app handles itself */
   uint8_t swallowed;                                     /* bit 0..2: Up, Down, Exit were consumed at press: their holds / release too */
   unsigned last_batt_polls; /* power.batt_polls already shown in the status bar */

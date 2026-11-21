@@ -6,12 +6,15 @@
 #include <strings.h>
 
 #include "hub/hp_errors.h"
+#include "remote/app/cover.h"
+#include "remote/page/store.h"
 
 #define TH (ra_theme_cur())
 
 #define ELLIPSIS "\xe2\x80\xa6"
 
 static void paint(ra_ui_t *ui, unsigned i);
+static void np_forget(ra_ui_t *ui);
 static const char *tile_caption(const ra_ui_t *ui, const hp_widget_t *w);
 
 static void stale_caption(ra_ui_t *ui, unsigned i);
@@ -216,6 +219,7 @@ static void fail(ra_ui_t *ui) {
   ui->msg = ui->cap = ui->prog_fill = ui->bar = ui->title = ui->pct = ui->batt = ui->batt_fill = ui->back = ui->seq = NULL;
   ui->recv_total = 0;
   ui->rf[0] = ui->rf[1] = ui->rf[2] = NULL;
+  np_forget(ui);
   ui->page.count = 0;
   ui->page.page_id = RA_UI_PAGE_ERROR;
   ui->title_idx = ui->pressed = -1;
@@ -252,6 +256,7 @@ static int screen_reset(ra_ui_t *ui, const char *title, unsigned widgets, unsign
   memset(ui->wcap, 0, sizeof ui->wcap);
   ui->active = 0;
   ui->msg = ui->cap = ui->prog_fill = NULL;
+  ui->np_art = ui->np_t1 = ui->np_t2 = ui->np_gly = ui->np_tm = ui->np_bar = ui->np_fill = NULL;
   ui->recv_total = 0;
   ui->title_idx = -1;
   ui->pressed = -1;
@@ -364,9 +369,14 @@ static const char *tile_caption(const ra_ui_t *ui, const hp_widget_t *w) { retur
 
 /* (Re)paints widget i from its role, state and the activity / link state: fill and ink colours only, so only that
  * widget's area is invalidated. */
+static void np_paint(ra_ui_t *ui);
 static void paint(ra_ui_t *ui, unsigned i) {
   const hp_widget_t *w = &ui->page.widgets[i];
   if (!ui->obj[i]) return;
+  if ((int)i == ui->np_idx) {
+    np_paint(ui);
+    return;
+  }
   if (w->kind == HP_WIDGET_LABEL) { /* a coloured section label: its colour when readable on the ground, else TX */
     ra_swatch_t sw;
     int ol;
@@ -392,7 +402,18 @@ static void paint(ra_ui_t *ui, unsigned i) {
   }
   if (ui->lbl[i]) lv_obj_set_style_text_color(ui->lbl[i], ra_color(c.ink), 0);
   if (ui->ico[i]) lv_obj_set_style_text_color(ui->ico[i], ra_color(c.icon), 0);
-  if (ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], ra_color(c.cap), 0);
+  if (w->kind == HP_WIDGET_TILE && ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], ra_color(c.cap), 0);
+  if (w->kind == HP_WIDGET_BUTTON) { /* app status: an accent ring (2 px, inside the box) and, in wcap, the play / pause glyph */
+    int ring = w->tstate != HP_APP_NONE && !act;
+    if (ring) {
+      lv_obj_set_style_border_width(o, 2, 0);
+      lv_obj_set_style_border_color(o, ra_color(TH->acc), 0);
+    } else if (!c.local) {
+      lv_obj_remove_local_style_prop(o, LV_STYLE_BORDER_WIDTH, 0);
+      lv_obj_remove_local_style_prop(o, LV_STYLE_BORDER_COLOR, 0);
+    }
+    if (ui->wcap[i]) lv_obj_set_style_text_color(ui->wcap[i], ra_color(act ? TH->onacc : TH->acc), 0);
+  }
   if (act) ui->active |= 1u << i;
   else ui->active &= ~(1u << i);
 }
@@ -416,6 +437,36 @@ static size_t first_char_len(const char *s) {
   size_t n = 0;
   while (n < k && s[n]) n++;
   return n;
+}
+
+/* The status glyph at the top right of an app button: play / pause while its status says so (16 px glyph, 12 px from the
+ * edges, 8 on a compact card). 0 ok (also when skipped for memory: it is optional at run time), -1 creation failed. */
+static int badge_sync(ra_ui_t *ui, unsigned i) {
+  const hp_widget_t *w = &ui->page.widgets[i];
+  if (w->kind != HP_WIDGET_BUTTON || !ui->obj[i] || (int)i == ui->np_idx) return 0;
+  if (w->tstate != HP_APP_PLAYING && w->tstate != HP_APP_PAUSED) {
+    if (ui->wcap[i]) {
+      lv_obj_delete(ui->wcap[i]);
+      ui->wcap[i] = NULL;
+    }
+    return 0;
+  }
+  const char *g = w->tstate == HP_APP_PLAYING ? RA_GLYPH_PLAY : RA_GLYPH_PAUSE;
+  if (ui->wcap[i]) {
+    lv_label_set_text(ui->wcap[i], g);
+    return 0;
+  }
+  if (!enough_memory(2048)) return 0;
+  int x1, y1, x2, y2;
+  ra_ui_widget_rect(&ui->page, w, &x1, &y1, &x2, &y2);
+  int bw = x2 - x1 + 1, in = w->compact ? 8 : 12;
+  lv_obj_t *b = make_label(ui->obj[i], g, &ra_st_txt_cap, &ra_icons_20, 24);
+  if (!b) return -1;
+  lv_obj_set_style_text_align(b, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_pos(b, bw - in - 22, in - 2);
+  ui->wcap[i] = b;
+  paint(ui, i);
+  return 0;
 }
 
 /* Builds the content of a v2 button / tile on its surface `o`. 0 ok, -1 out of memory. */
@@ -535,6 +586,8 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
   return 0;
 }
 
+static int np_build(ra_ui_t *ui, lv_obj_t *o, int bw, int bh);
+
 static void build(ra_ui_t *ui) {
   lv_obj_t *scr = lv_screen_active();
   const hp_page_t *p = &ui->page;
@@ -556,7 +609,9 @@ static void build(ra_ui_t *ui) {
       extra += (icon && bh >= 56 && bw >= 56) + (bh >= 44 && (w->label[0] || ui->link_lost));
     else if (w->kind == HP_WIDGET_BUTTON) extra += icon;
     extra += 2 * (w->color_fill.kind || w->color_on.kind); /* local styles */
+    extra += w->kind == HP_WIDGET_BUTTON && (w->tstate == HP_APP_PLAYING || w->tstate == HP_APP_PAUSED);
   }
+  if (v2 && ui->np_idx >= 0) extra += 9; /* the Now Playing card: art, 4 labels, bar */
   bar_ctx_t bc = {.back = v2 && p->back, .seq_idx = v2 ? p->seq_idx : 0, .seq_cnt = v2 ? p->seq_cnt : 0};
   if (screen_reset(ui, title, p->count, extra, &bc) < 0) return;
   ui->title_idx = title_idx;
@@ -587,12 +642,17 @@ static void build(ra_ui_t *ui) {
     if (!o) return fail(ui);
     lv_obj_add_style(o, btn ? &ra_st_btn_pr : &ra_st_card_pr, LV_STATE_PRESSED);
     ui->obj[i] = o;
+    if ((int)i == ui->np_idx) {
+      if (np_build(ui, o, bw, bh) < 0) return fail(ui);
+      continue;
+    }
     if (v2) {
       int r = w->shape == HP_SHAPE_MONOGRAM ? LV_RADIUS_CIRCLE : w->shape == HP_SHAPE_PILL ? bh / 2
               : w->shape == HP_SHAPE_ROW ? 12 : -1;
       if (r >= 0) lv_obj_set_style_radius(o, r, 0);
       if (build_v2_content(ui, i, o, bw, bh) < 0) return fail(ui);
       paint(ui, i);
+      if (badge_sync(ui, i) < 0) return fail(ui);
       continue;
     }
     const char *txt = btn ? w->label : w->text;
@@ -633,15 +693,19 @@ static void page_theme(ra_ui_t *ui, const hp_page_t *p) {
   else if (ra_theme_apply_preset(p->theme) < 0) ra_theme_apply_preset(RA_THEME_DEFAULT);
 }
 
+static void np_prepare(ra_ui_t *ui);
+
 void ra_ui_show_page(ra_ui_t *ui, const hp_page_t *p) {
   page_theme(ui, p);
   ui->page = *p;
   ui->fallback = 0;
+  np_prepare(ui);
   build(ui);
 }
 
 static void show_builtin(ra_ui_t *ui, uint8_t id, const char *head, const char *sub, int head_bad) {
   memset(&ui->page, 0, sizeof ui->page);
+  np_forget(ui);
   ui->page.page_id = id;
   ui->page.cols = ui->page.rows = 1;
   if (screen_reset(ui, "Harmony", 0, 0, NULL) < 0) return;
@@ -671,6 +735,7 @@ void ra_ui_init(ra_ui_t *ui) {
   ra_theme_init();
   ra_theme_set_listener(retheme, ui);
   ui->soc = -1;
+  ui->np_row = ui->np_idx = -1;
   ui->title_idx = ui->pressed = -1;
   /* The error state, built once while the pool is empty and kept hidden on the top layer. */
   ui->err = rect(lv_layer_top(), 0, 0, HP_PAGE_SCREEN_W, HP_PAGE_SCREEN_H, &ra_st_screen);
@@ -774,6 +839,17 @@ int ra_ui_tile_text(ra_ui_t *ui, uint8_t page_id, uint8_t tile_id, const char *t
 
 int ra_ui_tile_state(ra_ui_t *ui, uint8_t page_id, uint8_t tile_id, uint8_t state, const char *text, size_t len) {
   if (page_id != ui->page.page_id) return -HP_E_NOENT;
+  for (unsigned i = 0; i < ui->page.count; i++) { /* a button: its app status (ring, glyph) */
+    hp_widget_t *w = &ui->page.widgets[i];
+    if (w->id != tile_id || w->kind != HP_WIDGET_BUTTON || (int)i == ui->np_idx) continue;
+    if (state > HP_APP_PAUSED) return -HP_E_INVAL;
+    w->tstate = state;
+    if (ui->obj[i]) {
+      paint(ui, i);
+      (void)badge_sync(ui, i);
+    }
+    return 0;
+  }
   int r = hp_page_set_tile_text(&ui->page, tile_id, text, len);
   if (r < 0) return r;
   for (unsigned i = 0; i < ui->page.count; i++) {
@@ -791,6 +867,8 @@ void ra_ui_set_activity(ra_ui_t *ui, uint8_t activity, int power) {
   if (ui->act_idx == activity && ui->act_on == power) return;
   ui->act_idx = activity;
   ui->act_on = power;
+  ui->np.flags = 0; /* the track belonged to the previous activity: the hub pushes a fresh now_playing */
+  ui->np.cid = 0;
   if (ui->page.version != 2) return;
   for (unsigned i = 0; i < ui->page.count; i++) {
     const hp_widget_t *w = &ui->page.widgets[i];
@@ -856,4 +934,213 @@ void ra_ui_toast(ra_ui_t *ui, const char *line1, const char *line2) {
   }
   lv_timer_set_repeat_count(ui->toast_timer, 1);
   ui->toast = t;
+}
+
+/* ---- Now Playing card ---- */
+
+#define NP_PAD 4
+#define NP_ART_W RA_COVER_W
+#define NP_ART_H RA_COVER_H
+#define NP_TX (NP_PAD + NP_ART_W + 10) /* text column x */
+
+static lv_image_dsc_t cover_dsc = {
+    .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565, .w = RA_COVER_W, .h = RA_COVER_H, .stride = RA_COVER_W * 2},
+    .data_size = RA_COVER_W * RA_COVER_H * 2};
+
+static void np_forget(ra_ui_t *ui) {
+  ui->np_row = ui->np_idx = -1;
+  ui->np_art = ui->np_t1 = ui->np_t2 = ui->np_gly = ui->np_tm = ui->np_bar = ui->np_fill = NULL;
+  ui->np_cid_drawn = 0;
+}
+
+static int np_wanted(const ra_ui_t *ui) {
+  const hp_page_t *p = &ui->page;
+  return p->version == 2 && p->fixed && ui->np.flags && ui->act_on && p->act && p->act == ui->act_idx + 1;
+}
+
+/* Finds the grid row the card may replace (the first whose widgets are all 80 px buttons: span 12 or 6, not compact) and,
+ * when the card is wanted, swaps the row's widgets for one span-12 button (the card). */
+static void np_prepare(ra_ui_t *ui) {
+  hp_page_t *p = &ui->page;
+  np_forget(ui);
+  if (p->version != 2 || !p->fixed) return;
+  for (int y = 0; y < HP_PAGE_MAX_GRID && ui->np_row < 0; y++) {
+    int any = 0, ok = 1;
+    for (unsigned i = 0; i < p->count; i++) {
+      const hp_widget_t *w = &p->widgets[i];
+      if (w->y != y) continue;
+      any = 1;
+      if (w->kind != HP_WIDGET_BUTTON || w->shape != HP_SHAPE_CARD || w->w < 6 || w->compact) ok = 0;
+    }
+    if (any && ok) ui->np_row = y;
+  }
+  if (ui->np_row < 0 || !np_wanted(ui)) return;
+  unsigned first = p->count, n = 0;
+  for (unsigned i = 0; i < p->count; i++) {
+    if (p->widgets[i].y != ui->np_row) {
+      p->widgets[n++] = p->widgets[i];
+      continue;
+    }
+    if (first == p->count) { /* the card takes the place of the row's first widget */
+      first = n;
+      memset(&p->widgets[n], 0, sizeof p->widgets[n]);
+      p->widgets[n].kind = HP_WIDGET_BUTTON;
+      p->widgets[n].shape = HP_SHAPE_CARD;
+      p->widgets[n].y = (uint8_t)ui->np_row;
+      p->widgets[n].w = 12;
+      p->widgets[n].h = 1;
+      n++;
+    }
+  }
+  p->count = (uint8_t)n;
+  ui->np_idx = (int)first;
+}
+
+int ra_ui_is_np(const ra_ui_t *ui, const hp_widget_t *w) { return ui->np_idx >= 0 && w == &ui->page.widgets[ui->np_idx]; }
+
+static unsigned np_pos(const ra_ui_t *ui, uint64_t now) {
+  unsigned p = ui->np.pos;
+  if ((ui->np.flags & 1) && now > ui->np.at) p += (unsigned)((now - ui->np.at) / 1000);
+  if (ui->np.dur && p > ui->np.dur) p = ui->np.dur;
+  return p;
+}
+
+static void np_time_text(const ra_ui_t *ui, unsigned sec, char *b, size_t n) {
+  const char *pre = ui->np.flags == 2 ? "Paused \xC2\xB7 " : "";
+  if (ui->np.dur) snprintf(b, n, "%s%u:%02u / %u:%02u", pre, sec / 60, sec % 60, ui->np.dur / 60u, ui->np.dur % 60u);
+  else snprintf(b, n, "%s%u:%02u", pre, sec / 60, sec % 60);
+}
+
+#define NP_TW (HP_PAGE_SCREEN_W - 2 * RA_MARGIN - NP_TX - 10) /* text column width */
+
+static void np_draw_time(ra_ui_t *ui, unsigned sec) {
+  char b[48];
+  ui->np_sec_drawn = sec;
+  np_time_text(ui, sec, b, sizeof b);
+  if (ui->np_tm) lv_label_set_text(ui->np_tm, b);
+  if (ui->np_fill) {
+    int w = ui->np.dur ? (int)((unsigned long)NP_TW * (sec > ui->np.dur ? ui->np.dur : sec) / ui->np.dur) : 0;
+    if (w > 0) lv_obj_set_width(ui->np_fill, w);
+    set_hidden(ui->np_fill, w <= 0);
+  }
+}
+
+/* The art slot: the cover when it is complete, else the Plex glyph. */
+static int np_draw_art(ra_ui_t *ui) {
+  if (!ui->np_art) return 0;
+  lv_obj_clean(ui->np_art);
+  ui->np_cid_drawn = 0;
+  const uint16_t *px = ra_cover_expand(ui->np.cid);
+  if (px) {
+    lv_obj_t *im = creation_fails() ? NULL : lv_image_create(ui->np_art);
+    if (!im) return -1;
+    cover_dsc.data = (const uint8_t *)px;
+    lv_image_set_src(im, &cover_dsc);
+    lv_obj_set_pos(im, 0, 0);
+    ui->np_cid_drawn = ui->np.cid;
+    return 0;
+  }
+  lv_obj_t *g = make_label(ui->np_art, RA_GLYPH_PLEX, &ra_st_txt_cap, &ra_icons_32, NP_ART_W);
+  if (!g) return -1;
+  lv_obj_set_style_text_align(g, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_color(g, ra_color(TH->tx2), 0);
+  lv_obj_align(g, LV_ALIGN_CENTER, 0, 0);
+  return 0;
+}
+
+static void np_paint(ra_ui_t *ui) {
+  lv_obj_t *o = ui->np_idx >= 0 ? ui->obj[ui->np_idx] : NULL;
+  if (!o) return;
+  lv_obj_set_style_bg_color(o, ra_color(TH->s2), 0);
+  lv_obj_set_style_border_width(o, 2, 0);
+  lv_obj_set_style_border_color(o, ra_color(TH->acc), 0);
+  if (ui->np_art) lv_obj_set_style_bg_color(ui->np_art, ra_color(TH->s3), 0);
+  if (ui->np_t1) lv_obj_set_style_text_color(ui->np_t1, ra_color(TH->tx), 0);
+  if (ui->np_t2) lv_obj_set_style_text_color(ui->np_t2, ra_color(TH->tx2), 0);
+  if (ui->np_gly) lv_obj_set_style_text_color(ui->np_gly, ra_color(TH->acc), 0);
+  if (ui->np_tm) lv_obj_set_style_text_color(ui->np_tm, ra_color(TH->acc), 0);
+  if (ui->np_bar) lv_obj_set_style_bg_color(ui->np_bar, ra_color(TH->s3), 0);
+  if (ui->np_fill) lv_obj_set_style_bg_color(ui->np_fill, ra_color(TH->acc), 0);
+}
+
+/* 224x80: 48x72 art at 4 px, then m16 title, r12 subtitle, an r12 accent line (glyph + time) and a 3 px bar. */
+static int np_build(ra_ui_t *ui, lv_obj_t *o, int bw, int bh) {
+  (void)bw;
+  lv_obj_set_style_radius(o, RA_RADIUS_CARD, 0);
+  ui->np_art = rect(o, NP_PAD, NP_PAD, NP_ART_W, NP_ART_H, &ra_st_ink);
+  if (!ui->np_art) return -1;
+  lv_obj_set_style_bg_opa(ui->np_art, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(ui->np_art, 8, 0);
+  lv_obj_set_style_clip_corner(ui->np_art, true, 0);
+  int h1 = lv_font_get_line_height(&ra_font_m16), h2 = lv_font_get_line_height(&ra_font_r12);
+  int y = (bh - (h1 + 2 + h2 + 4 + h2 + 4 + 3)) / 2;
+  ui->np_t1 = make_label(o, ui->np.t1, &ra_st_txt_body, &ra_font_m16, NP_TW);
+  if (!ui->np_t1) return -1;
+  lv_obj_set_pos(ui->np_t1, NP_TX, y);
+  y += h1 + 2;
+  ui->np_t2 = make_label(o, ui->np.t2, &ra_st_txt_cap, &ra_font_r12, NP_TW);
+  if (!ui->np_t2) return -1;
+  lv_obj_set_pos(ui->np_t2, NP_TX, y);
+  y += h2 + 4;
+  ui->np_gly = make_label(o, ui->np.flags == 2 ? RA_GLYPH_PAUSE : RA_GLYPH_PLAY, &ra_st_txt_cap, &ra_icons_20, 20);
+  ui->np_tm = make_label(o, "", &ra_st_txt_cap, &ra_font_r12, NP_TW - 18);
+  if (!ui->np_gly || !ui->np_tm) return -1;
+  lv_obj_set_style_text_align(ui->np_t1, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_set_style_text_align(ui->np_t2, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_set_style_text_align(ui->np_tm, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_set_pos(ui->np_gly, NP_TX - 2, y + (h2 - lv_font_get_line_height(&ra_icons_20)) / 2);
+  lv_obj_set_pos(ui->np_tm, NP_TX + 18, y);
+  y += h2 + 4;
+  ui->np_bar = rect(o, NP_TX, y, NP_TW, 3, &ra_st_ink);
+  if (!ui->np_bar) return -1;
+  lv_obj_set_style_radius(ui->np_bar, 2, 0);
+  ui->np_fill = rect(ui->np_bar, 0, 0, 1, 3, &ra_st_ink);
+  if (!ui->np_fill) return -1;
+  lv_obj_set_style_radius(ui->np_fill, 2, 0);
+  if (np_draw_art(ui) < 0) return -1;
+  np_draw_time(ui, np_pos(ui, ui->np.at));
+  np_paint(ui);
+  return 0;
+}
+
+int ra_ui_set_np(ra_ui_t *ui, const ra_np_t *np) {
+  int shown = ui->np_idx >= 0;
+  uint32_t old_cid = ui->np.cid;
+  ui->np = *np;
+  int want = np_wanted(ui) && ui->np_row >= 0;
+  if (want != shown) return 1;
+  if (!shown || ui->np_idx >= (int)ui->page.count || !ui->obj[ui->np_idx]) return 0;
+  lv_label_set_text(ui->np_t1, np->t1);
+  lv_label_set_text(ui->np_t2, np->t2);
+  lv_label_set_text(ui->np_gly, np->flags == 2 ? RA_GLYPH_PAUSE : RA_GLYPH_PLAY);
+  if (np->cid != old_cid || ui->np_cid_drawn != (ra_cover_have(np->cid) ? np->cid : 0)) {
+    if (np_draw_art(ui) < 0) fail(ui);
+  }
+  np_draw_time(ui, np_pos(ui, np->at));
+  return 0;
+}
+
+void ra_ui_np_cover(ra_ui_t *ui, uint32_t cid) {
+  if (ui->np_idx < 0 || !ui->np_art || ui->np.cid != cid) return;
+  if (np_draw_art(ui) < 0) fail(ui);
+}
+
+void ra_ui_np_tick(ra_ui_t *ui, uint64_t now) {
+  if (ui->np_idx < 0 || !ui->np_tm || !(ui->np.flags & 1)) return;
+  unsigned sec = np_pos(ui, now);
+  if (sec != ui->np_sec_drawn) np_draw_time(ui, sec);
+}
+
+uint32_t ra_ui_np_next_ms(const ra_ui_t *ui, uint64_t now) {
+  if (ui->np_idx < 0 || !(ui->np.flags & 1)) return UINT32_MAX;
+  if (ui->np.dur && np_pos(ui, now) >= ui->np.dur) return UINT32_MAX; /* at the end: nothing moves */
+  return 1000 - (uint32_t)((now - ui->np.at) % 1000);
+}
+
+void ra_ui_np_skip(ra_ui_t *ui, uint64_t now, uint64_t gap_ms) {
+  if (!(ui->np.flags & 1)) return;
+  unsigned long pos = np_pos(ui, now) + (unsigned long)(gap_ms / 1000); /* the monotonic clock stood still while asleep */
+  if (ui->np.dur && pos > ui->np.dur) pos = ui->np.dur;
+  ui->np.pos = pos > 0xFFFF ? 0xFFFF : (uint16_t)pos;
+  ui->np.at = now;
 }
