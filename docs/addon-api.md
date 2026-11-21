@@ -287,6 +287,7 @@ Integration -> add-on:
 | `bt_state` | `online: bool`, `supported: bool`, `state?`, `limits?` | the hub's Bluetooth state changed (also sent once after `hello`); `state` is the hub's `bt_state` |
 | `bt_result` | `id`, `ok: bool`, `code?`, `msg?`, `state?` | outcome of a `bt_cmd` (sent as soon as it finishes) |
 | `bt_key` | `slot`, `page`, `usage`, `down: bool` | a remote key, only while the add-on asked `listen on` |
+| `hub_log` | `level: "info"\|"warning"`, `msg: str (<= 400)`, `ts?: int` (hub uptime ms), `dropped?: int` | one hub daemon log line, relayed by the integration as the hub produces it; the add-on logs it to stdout as `hub.<id>` at INFO / WARNING (the `log_level` option does not hide it); `dropped` = lines the hub's ring lost before it |
 | `hub` | `online: bool` | the hub link went up or down (also sent once after `hello`) |
 
 Add-on -> integration:

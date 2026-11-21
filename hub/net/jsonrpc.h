@@ -20,6 +20,7 @@ _Static_assert(HP_MSG_MAX_CODE < 128, "handler tables are indexed by message cod
 typedef struct {
     bool authed; /* set by a successful hello */
     bool bt_listen; /* bt_listen on: wants bt_remote_key pushes; reset by hello */
+    bool log_sink;  /* hello client "home-assistant": wants hub_log pushes (docs/proto/hub-log.md); reset by hello */
 } hp_session_t;
 
 /* Called for a validated, authenticated message. `d` is the (possibly empty)

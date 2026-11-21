@@ -38,6 +38,7 @@ static void on_signal(int sig) { (void)sig; g_stop = 1; }
 
 static hp_handler_tbl_t g_tbl;
 static hub_ctx_t g_hub;
+static hp_hublog_t g_log;
 static hp_sim_t g_sim;
 static hp_hw_t g_hw;
 static hp_peers_t g_peers; /* authenticated peers: ARP keepalive (hub/net/peers.h) */
@@ -74,6 +75,8 @@ static void peers_keepalive(hp_ws_server_t *srv) {
     }
 }
 
+static void log_release(void) { hp_hublog_release(&g_log); }
+
 static int peers_next(void) { return hp_peers_next_ms(&g_peers, mono_ms()); }
 
 static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
@@ -93,6 +96,7 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     if (sess->authed) hp_ws_conn_set_authed(c);
     if (!was_authed && sess->authed) {
         hub_send_state(&g_hub, c); /* live state right after hello_ack */
+        hp_hublog_service(&g_log);  /* lines queued while nobody was connected */
         hp_peers_cancel(&g_peers, hp_ws_conn_peer(c));
         if (hp_peers_note(&g_peers, hp_ws_conn_peer(c), mono_ms()) &&
             hp_peers_save(&g_peers) < 0)
@@ -123,6 +127,8 @@ static int rf_fds(void *arg, int out[8]) {
     int spi = hp_rf_spi_wake_fd(g_hub.sinks.rf); /* the real radio's reader thread wakes the poll */
     if (spi >= 0 && n < 8) out[n++] = spi;
     if (n < 8 && g_mdns.fd >= 0) out[n++] = g_mdns.fd;
+    int lfd = hp_hublog_wake_fd(&g_log); /* a new stderr line to ship */
+    if (n < 8 && lfd >= 0) out[n++] = lfd;
     int bfd = bt_link_poll_fd(); /* the Bluetooth helper's socket (-1 when none runs) */
     if (n < 8 && bfd >= 0) out[n++] = bfd;
     return n;
@@ -332,6 +338,10 @@ int main(int argc, char **argv) {
         return 2;
     }
 
+    /* From here every stderr line is also queued for Home Assistant (hub/net/hublog.h); the atexit drain keeps the
+     * tmpfs log complete on the early `return 1` paths. */
+    if (hp_hublog_init(&g_log, hub_log_emit, &g_hub) == 0 && hp_hublog_capture(&g_log) == 0) atexit(log_release);
+
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = on_signal; /* no SA_RESTART: poll returns EINTR */
@@ -523,6 +533,7 @@ int main(int argc, char **argv) {
         if (bt_wait >= 0 && (wait < 0 || bt_wait < wait)) wait = bt_wait;
 #endif
         hp_ws_poll(srv, wait);
+        hp_hublog_service(&g_log);
 #ifdef HH_BT
         if (bt_run) { /* the helper's socket, supervision, then the broadcasts its changes queued */
             bt_wait = bt_link_service();
@@ -539,6 +550,7 @@ int main(int argc, char **argv) {
     hub_shutdown(&g_hub);
     if (!sim) hp_hw_sinks_close(&g_hw);
     hp_ws_close(srv);
+    hp_hublog_release(&g_log);
     hp_rf_pair_destroy(rf);
     hp_map_free(&g_hub.map);
     return g_hub.ota.restart ? HP_EXIT_OTA_RESTART : 0; /* the boot hook relaunches the new binary */

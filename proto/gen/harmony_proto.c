@@ -223,6 +223,13 @@ static const hp_field_desc_t hp_fields_bt_listen[] = {
     {"on", HP_T_BOOL, false, NULL},
 };
 
+static const hp_field_desc_t hp_fields_hub_log[] = {
+    {"level", HP_T_STR, false, NULL},
+    {"msg", HP_T_STR, false, NULL},
+    {"ts", HP_T_U32, false, NULL},
+    {"dropped", HP_T_U32, true, NULL},
+};
+
 static const hp_msg_desc_t hp_msgs[] = {
     {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
     {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 13, hp_fields_hello_ack},
@@ -263,6 +270,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"bt_key", HP_MSG_BT_KEY, HP_TRANSPORT_WS, 4, hp_fields_bt_key},
     {"bt_remote_key", HP_MSG_BT_REMOTE_KEY, HP_TRANSPORT_WS, 4, hp_fields_bt_remote_key},
     {"bt_listen", HP_MSG_BT_LISTEN, HP_TRANSPORT_WS, 1, hp_fields_bt_listen},
+    {"hub_log", HP_MSG_HUB_LOG, HP_TRANSPORT_WS, 4, hp_fields_hub_log},
 };
 
 const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT] = {

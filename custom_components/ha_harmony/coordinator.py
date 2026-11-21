@@ -84,6 +84,9 @@ from .ota import CHUNK, TARGET_HUB, UPLOAD_ATTEMPTS, Image, encode_chunk
 from .tile_format import tile_state, tile_text
 
 _LOGGER = logging.getLogger(__name__)
+# The hub daemon's own log lines, relayed as they are produced (hub_log). HA's default level hides INFO from
+# custom components, so a hub warning also shows in the HA log; everything also goes to the add-on's log.
+HUB_LOGGER = logging.getLogger("custom_components.ha_harmony.hub_log")
 
 __all__ = ["HarmonyCoordinator", "tile_text"]
 
@@ -1462,12 +1465,25 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._on_remote_attached()
         elif mtype is MsgType.REMOTE_INFO:
             self._on_remote_info(data)
+        elif mtype is MsgType.HUB_LOG:
+            self._on_hub_log(data)
         elif mtype is MsgType.BATTERY:
             self._remote_seen()
             new_b = (data["percent"], data["millivolts"])
             if self.battery.get(data["remote"]) != new_b:
                 self.battery[data["remote"]] = new_b
                 self._notify(topic_battery(data["remote"]))
+
+    def _on_hub_log(self, data: dict[str, Any]) -> None:
+        """One hub daemon log line: to HA's log under `custom_components.ha_harmony.hub_log`, and on to the add-on."""
+        level = "warning" if data["level"] == "warning" else "info"
+        HUB_LOGGER.log(
+            logging.WARNING if level == "warning" else logging.INFO, "[%s] %s", self.hub_id, data["msg"]
+        )
+        fields: dict[str, Any] = {"level": level, "msg": data["msg"][:400], "ts": data["ts"]}
+        if data.get("dropped"):
+            fields["dropped"] = data["dropped"]
+        self.addon_send("hub_log", **fields)
 
     # ------------------------------------------------------------ firmware update
     def _set_ota(self, state: str, *, progress: int | None = None, error: str | None = None) -> None:

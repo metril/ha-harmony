@@ -31,6 +31,18 @@ MAX_FRAME = 1 << 20
 HELLO_KEY = web.AppKey("hello_timeout", float)
 CHANNEL_KEY = web.AppKey("channel", object)
 
+# The hub daemon's own log lines (relayed by the integration) go to the add-on's stdout, one logger per hub
+# (`hub.<id>`), pinned to INFO so the add-on's log_level option cannot hide them.
+logging.getLogger("hub").setLevel(logging.INFO)
+_HUB_LOG = vol.Schema(
+    {
+        vol.Required("level"): vol.In(("info", "warning")),
+        vol.Required("msg"): vol.All(str, vol.Length(max=400)),
+        vol.Optional("ts"): int,
+        vol.Optional("dropped"): int,
+    },
+    extra=vol.ALLOW_EXTRA,
+)
 _HUB_FRAME = vol.Schema({vol.Required("online"): bool}, extra=vol.ALLOW_EXTRA)
 _BT_STATE = vol.Schema(
     {
@@ -198,6 +210,16 @@ async def _on_frame(app: web.Application, conn: Conn, f: dict[str, Any]) -> None
             h.key_seq += 1
             key = {k: ev[k] for k in ("slot", "page", "usage", "down")}
             live.publish_key(app, hub, {"seq": h.key_seq, **key, "ts": int(app[CLOCK_KEY]())})
+    elif t == "hub_log":
+        try:
+            ln = _HUB_LOG(f)
+        except vol.Invalid:
+            await conn.send({"t": "error", "code": "bad_frame"})
+            return
+        lg = logging.getLogger(f"hub.{hub}")
+        if ln.get("dropped"):
+            lg.warning("%d hub log line(s) were lost before this one (hub ring full)", ln["dropped"])
+        lg.log(logging.WARNING if ln["level"] == "warning" else logging.INFO, "%s", ln["msg"])
     elif t == "hub":
         try:
             online = _HUB_FRAME(f)["online"]

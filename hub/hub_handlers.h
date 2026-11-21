@@ -80,6 +80,7 @@
 #include "hub/engine/sched.h"
 #include "hub/rf/framing.h"
 #include "hub/rf/link.h"
+#include "hub/net/hublog.h"
 #include "hub/net/ident.h"
 #include "hub/net/jsonrpc.h"
 #include "hub/net/ws.h"
@@ -190,5 +191,7 @@ void hub_shutdown(hub_ctx_t *);
 void hub_pump_rf(hub_ctx_t *);
 /* Sends {v,id:0,t:type,d} to every authenticated connection; takes ownership of d. */
 void hub_broadcast(hub_ctx_t *, const char *type, cJSON *d);
+/* hp_log_emit_fn (ctx = hub_ctx_t *): one hub_log to every authenticated client that said client "home-assistant" in its hello; false (nothing sent) while there is none. */
+bool hub_log_emit(void *hub, const hp_logline_t *l);
 
 #endif

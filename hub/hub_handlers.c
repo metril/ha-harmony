@@ -372,6 +372,38 @@ static void broadcast_except(hub_ctx_t *h, const char *type, cJSON *d, const hp_
 
 void hub_broadcast(hub_ctx_t *h, const char *type, cJSON *d) { broadcast_ex(h, type, d, NULL, false); }
 
+static void count_sinks(hp_ws_conn_t *c, void *arg) {
+    const hp_session_t *s = hp_ws_conn_user(c);
+    if (s && s->authed && s->log_sink) ++*(int *)arg;
+}
+
+static void send_sink(hp_ws_conn_t *c, void *arg) {
+    const hp_session_t *s = hp_ws_conn_user(c);
+    const bcast_t *b = arg;
+    if (s && s->authed && s->log_sink) hp_ws_send(c, b->msg, b->len);
+}
+
+bool hub_log_emit(void *hub, const hp_logline_t *l) {
+    hub_ctx_t *h = hub;
+    int n = 0;
+    if (!h->srv) return false;
+    hp_ws_foreach(h->srv, count_sinks, &n);
+    if (!n) return false;
+    cJSON *d = cJSON_CreateObject();
+    if (!d) return false;
+    cJSON_AddStringToObject(d, "level", l->level);
+    cJSON_AddStringToObject(d, "msg", l->msg);
+    cJSON_AddNumberToObject(d, "ts", l->ts);
+    if (l->dropped) cJSON_AddNumberToObject(d, "dropped", l->dropped);
+    static char buf[1024]; /* event-loop thread only */
+    size_t len = 0;
+    if (h->bcast_hook) h->bcast_hook(h->bcast_ctx, "hub_log", d);
+    if (hp_make_reply(0, "hub_log", d, buf, sizeof buf, &len) != 0) return true; /* d is consumed; cannot happen at 192 B */
+    bcast_t b = {buf, len, NULL, false};
+    hp_ws_foreach(h->srv, send_sink, &b);
+    return true;
+}
+
 static cJSON *activities_json(const hub_ctx_t *h) {
     cJSON *a = cJSON_CreateArray();
     if (!a) return NULL;

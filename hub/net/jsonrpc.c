@@ -164,6 +164,8 @@ int hp_dispatch(const char *json, size_t len, const hp_handler_tbl_t *tbl, void 
         }
         sess->authed = true;
         sess->bt_listen = false;
+        const cJSON *cl = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "client");
+        sess->log_sink = cJSON_IsString(cl) && strcmp(cl->valuestring, "home-assistant") == 0;
         cJSON *ack = cJSON_CreateObject();
         if (!ack) {
             rc = -HP_E_INVAL;
