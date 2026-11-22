@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.4 (2026-11-22)
+
+- Hub: the boot hook now holds /dev/i2s for the daemon's whole life and hands it over (`--i2s-fd`), so a daemon crash, kill or OTA restart can no longer close the device and hard-freeze the hub. A missing or unopenable device counts as a failed boot. Update the hub (and re-run `tools/install_boot_hook.py`).
+- Labels never end in an ellipsis: common abbreviations (Vol, Ch, Pg Up, Pg Dn, Fwd), two-line wrap, then icon-only. Icons are also inferred from the command or service name, and select tiles get the input glyph.
+- Studio measures the label the remote actually shows (fixes a false "too wide" warning that shrank the preview).
+- The hub announces a silently attaching remote reliably (test harness).
+
 ## 0.4.3 (2026-11-21)
 
 - Now Playing appears when the activity starts while something is already playing (the remote clears the card on an activity change; the integration now sends the current state again, with the right position). Update the integration; no hub or remote update needed.
