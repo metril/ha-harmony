@@ -290,7 +290,7 @@ pages:
     title: Shield
     layout: fixed
     cols: 12
-    rows: 4
+    rows: 5
     widgets:
       - {type: button, id: sh_on, x: 0, y: 0, w: 4, label: Power On, icon: power, role: primary, action: {device: shield_ha, command: power_on}}
       - {type: button, id: sh_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: shield_ha, command: power_off}}
@@ -302,6 +302,17 @@ pages:
       - {type: button, id: yt, app_id: org.smarttube.stable, x: 6, y: 2, w: 6, shape: card, align: left, compact: true, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
       - {type: button, id: cam, x: 0, y: 3, w: 6, shape: card, align: left, compact: true, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
       - {type: button, id: camx, x: 6, y: 3, w: 6, shape: card, align: left, compact: true, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
+      - {type: button, id: sh_all, x: 0, y: 4, w: 12, shape: row, label: All Commands, icon: list, nav: dev_shield_all}
+
+  - id: dev_shield_all
+    title: Commands
+    layout: fixed
+    cols: 12
+    rows: 1
+    widgets:
+      - {type: button, id: sh_play, x: 0, y: 0, w: 4, label: Play/Pause, icon: play, action: {device: shield, command: PlayPause}}
+      - {type: button, id: sh_stop, x: 4, y: 0, w: 4, label: Stop, icon: stop, action: {device: shield, command: Stop}}
+      - {type: button, id: sh_gar, x: 8, y: 0, w: 4, label: Garage Cam, icon: garage, action: {device: shield_ha, command: Garage Cam}}
 
   - id: dev_speakers
     title: Speakers

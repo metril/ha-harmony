@@ -159,6 +159,17 @@ describe('starter pages', () => {
       expect(pageOverflow(pg, null)).toEqual([]);
     });
 
+    it('nothing is hidden behind All Commands unless there is more than a page of plain keys; apps are never dropped', () => {
+      const c = grouped(Array.from({ length: 20 }, (_, i) => `App ${i + 1}`));
+      c.devices![0]!.commands = cmds('Settings', 'Subtitles', 'Num1', 'Aspect', 'Zoom', 'Mode', 'Sleep', 'Eject', 'Angle', 'Repeat');
+      const pages = templatePages(c, 'devices');
+      const pg = pages.find((p) => p.id === 'dev_shield')!;
+      expect(pg.widgets.filter((w) => w.shape === 'card')).toHaveLength(20);
+      expect(pg.widgets.some((w) => w.label === 'All Commands')).toBe(false);
+      expect(pages.some((p) => p.id === 'dev_shield_all')).toBe(false);
+      expect(pg.widgets.filter((w) => w.w === 4 && w.shape !== 'card')).toHaveLength(12); // 2 power + 10 keys
+    });
+
     it('inputs of the members merge without duplicates', () => {
       const c = grouped();
       c.devices![0]!.commands = cmds('Settings', 'InputHdmi1');

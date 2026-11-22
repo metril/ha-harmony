@@ -961,7 +961,7 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
         const allKeys = [...p.power, ...p.keys];
         // Apps layout: cards for up to 4 apps, compact cards from 5 (the page pages when it runs long)
         const compact = p.apps.length > 4;
-        const nApps = Math.min(16, p.apps.length);
+        const nApps = p.apps.length;
         const appsH = nApps ? Math.ceil(nApps / 2) * (compact ? 56 : 80) + 8 : 0;
         const cap = Math.max(276 - appsH, keysH(2) + 8 + rowH(1)); // two key rows and the All Commands row stay, the page pages for the rest
         let nav = inline ? p.inputs.length : p.inputs.length ? 1 : 0;
@@ -971,7 +971,8 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
           while (k < 16 && keysH(k + 1) + (n ? 8 + rowH(n) : 0) <= cap && k * 3 < allKeys.length) k++;
           return k * 3;
         };
-        let fit = Math.min(allKeys.length, room(nav));
+        const onePage = 12; // a full page of plain command keys: up to this many all stay on the page, which then pages
+        let fit = allKeys.length <= onePage ? allKeys.length : Math.min(allKeys.length, room(nav));
         if (fit < allKeys.length) {
           nav += 1;
           fit = Math.min(allKeys.length, room(nav));
@@ -988,7 +989,7 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
           const lb = labelBudget({ cols: 12, rows: 16, fixed: true }, { kind: 'button', x: 0, y: 0, w: 6, h: 1, label: s, shape: 'card', icon: 1, icon_only: false, compact });
           return !lb || textPx(s, lb.font) <= lb.px;
         };
-        p.apps.slice(0, 16).forEach((k, i) => {
+        p.apps.forEach((k, i) => {
           const cmd = String((k['action'] as { command?: string }).command ?? k.label ?? '');
           const label = fitShort(cmd, fitsCard);
           const cut = !fitsCard(label) && !!k.icon;
@@ -998,11 +999,11 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
         if (rest.length) widgets.push(rowBtn('All Commands', iconIf('list'), y++, { nav: restId }));
         devPages.push({ id: p.id, layout: 'fixed', cols: 12, rows: Math.max(1, y), title, widgets });
         if (!inline) {
-          const ws = p.inputs.slice(0, 16).map((i, n) => rowBtn(i.label, inputIcon(i.label), n, { action: i.action }));
+          const ws = p.inputs.map((i, n) => rowBtn(i.label, inputIcon(i.label), n, { action: i.action }));
           extra.push({ id: inputsId, layout: 'fixed', cols: 12, rows: ws.length, title: fitTitle(`${title} Inputs`, 'Inputs'), widgets: ws });
         }
         if (rest.length) {
-          const ws = grid(rest.slice(0, 48));
+          const ws = grid(rest);
           extra.push({ id: restId, layout: 'fixed', cols: 12, rows: Math.ceil(ws.length / 3), title: 'Commands', widgets: ws });
         }
       }
