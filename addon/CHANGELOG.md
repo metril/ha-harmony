@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 (2026-11-21)
+
+- A config can have up to 252 pages (was 32); ids 252-255 stay reserved for the remote's built-in screens. The integration's wait for the remote to confirm a config scales with the page count and restarts while delivery is progressing, so large configs are no longer re-sent mid-delivery.
+- Studio: the inspector loads after the editor paints, keeping the first download under budget.
+- Flash the remote, update the hub, update the integration with the add-on.
+
 ## 0.4.0 (2026-11-21)
 
 - Remote redesign. Every page uses fixed sizes per widget type (44 px rows, 108x80 cards, 52 px keys, 64 px tiles), so nothing stretches; overflow pages show 1/2. Hand-written pages are converted automatically (opt out with `layout: grid`).
