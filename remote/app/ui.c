@@ -677,7 +677,7 @@ static int build_v2_content(ra_ui_t *ui, unsigned i, lv_obj_t *o, int bw, int bh
   case WC_CCARD: {
     int x0 = ic ? 10 + px + 10 : 10;
     int lh2 = 0;
-    l = make_label2(o, txt, &ra_st_txt_btn, bw - x0 - 10, &lh2);
+    l = make_label2(o, txt, &ra_st_txt_btn, bw - x0 - 8, &lh2);
     if (!l) return -1;
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_LEFT, 0);
     if (ic) at(ic, 10 - 2, (bh - ih) / 2);

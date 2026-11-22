@@ -179,7 +179,6 @@ _PHRASES = (
     ("Page Up", "Pg Up"),
     ("Skip Forward", "Skip Fwd"),
     ("Skip Back", "Skip Back"),
-    ("MacBook Pro", "MBP"),
 )
 SHORT = {
     "Volume": "Vol",

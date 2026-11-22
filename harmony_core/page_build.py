@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import zlib
+from functools import lru_cache
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Any
@@ -118,6 +119,7 @@ def _words(text: str) -> list[str]:
     return _TOKEN.findall(re.sub(r"[_\s]+", " ", _CAMEL.sub(" ", text)).lower())
 
 
+@lru_cache(maxsize=4096)
 def icon_for_text(text: str) -> int:
     """Stock icon for a command or label; 0 if none.
 

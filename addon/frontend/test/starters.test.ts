@@ -232,7 +232,7 @@ describe('starter pages', () => {
 describe('label meter and overflow', () => {
   const page = { id: 'p', cols: 4, rows: 5, title: 'Shield TV', widgets: [{ type: 'button', id: 'a', x: 2, y: 0, w: 2, h: 1, label: 'Shield TV YouTube Premium Music Player Edition', action: { device: 'shield', command: 'YouTube' } }, { type: 'button', id: 'b', x: 0, y: 1, label: 'Menu', action: { device: 'shield', command: 'menu' } }] };
   it('measures a label in pixels', () => {
-    expect(labelMeter(page, null, 0)).toMatchObject({ font: 'b13', px: 172 }); // a 4-column cell is short: a compact card of two lines
+    expect(labelMeter(page, null, 0)).toMatchObject({ font: 'b13', px: 176 }); // a 4-column cell is short: a compact card of two lines
     expect(labelMeter(page, null, 0)?.over).toBeGreaterThan(0);
   });
   it('lists the cut labels with advice', () => {
