@@ -135,7 +135,7 @@ class FakeHub:
                 return 1, b"", b"No such file"
             self.files[a[2]] = self.files.pop(a[1])
             return 0, b"", b""
-        if a[:2] == ["sh", "-c"] and a[2].startswith("p=$(") and a[2].endswith("echo $p"):
+        if a[:2] == ["sh", "-c"] and a[2].startswith("p=$(") and a[2].endswith("echo $h"):
             self.detached.append(a[2])
             return (0, b"4242\n", b"") if self.detach_alive else (1, b"", b"")
         if a == ["cat", dh.DETACH_LOG]:
@@ -397,7 +397,7 @@ def test_run_foreground_after_quiesce_and_missing_hub():
         d.run_hub([])
     hub.files[dh.REMOTE_HUB] = b"x"
     assert d.run_hub(["--token", "t; rm -rf /"]) == 0
-    assert hub.fg == [[dh.REMOTE_HUB, "--token", "t; rm -rf /"]]
+    assert hub.fg == [["sh", "-c", dh.HOLDER, dh.REMOTE_HUB, "--token", "t; rm -rf /"]]
 
 
 def test_run_help_allowed_while_hal_alive():
@@ -542,7 +542,7 @@ def test_cli_run_passes_args_after_double_dash():
     d.quiesce()
     hub.files[dh.REMOTE_HUB] = b"x"
     assert dh.main(["run", "--yes", "--", "--port", "8099"], deployer=d) == 0
-    assert hub.fg == [[dh.REMOTE_HUB, "--port", "8099"]]
+    assert hub.fg == [["sh", "-c", dh.HOLDER, dh.REMOTE_HUB, "--port", "8099"]]
 
 
 # --- safety: allow-list over the recorded ssh command log -----------------------------------
@@ -564,8 +564,9 @@ def violations(remote: str) -> list[str]:
         ok = a0[1] == a0[2] + ".new" and dh.under_write_root(a0[2])
         return [] if ok and a0[2] == dh.REMOTE_HUB else [f"not allowed: {remote!r}"]
     if re.fullmatch(
-        re.escape(f"p=$({dh.REMOTE_HUB}") + r"[^;&|`$]* </dev/null >" + re.escape(dh.DETACH_LOG)
-        + r" 2>&1 & echo \$!\); sleep \d+; kill -0 \$p && echo \$p",
+        re.escape(f"p=$(sh -c {shlex.quote(dh.HOLDER)} {dh.REMOTE_HUB}") + r"[^;&|`$]* </dev/null >"
+        + re.escape(dh.DETACH_LOG) + r" 2>&1 & echo \$!\); sleep \d+; "
+        + re.escape(f"read h <{dh.DETACH_PID} && kill -0 $h && echo $h"),
         a0[2] if a0[:2] == ["sh", "-c"] and len(a0) == 3 else "",
     ):
         return []
@@ -590,6 +591,8 @@ def violations(remote: str) -> list[str]:
     if prog == "chmod" and len(rest) == 2 and rest[0] == "755":
         return [] if dh.under_write_root(rest[1]) else bad
     if a == ["cat", dh.DETACH_LOG]:
+        return []
+    if a[:4] == ["sh", "-c", dh.HOLDER, dh.REMOTE_HUB]:  # foreground run under the /dev/i2s holder
         return []
     if prog == "rm" and len(rest) == 2 and rest[0] == "-f":
         ok = dh.under_write_root(rest[1]) and rest[1] not in dh.WRITE_ROOTS
@@ -859,8 +862,8 @@ def test_run_detach_command_shape():
     assert hub.fg == [], "detach must not use the TTY foreground path"
     assert hub.detached == [
         (
-            f"p=$({dh.REMOTE_HUB} --port 8099 --rf-spi </dev/null >{dh.DETACH_LOG} 2>&1 & echo $!); "
-            "sleep 3; kill -0 $p && echo $p"
+            f"p=$(sh -c {shlex.quote(dh.HOLDER)} {dh.REMOTE_HUB} --port 8099 --rf-spi </dev/null "
+            f">{dh.DETACH_LOG} 2>&1 & echo $!); sleep 3; read h <{dh.DETACH_PID} && kill -0 $h && echo $h"
         )
     ]
     assert "pidof" not in hub.detached[0], "must report the pid we started, not any hub"
@@ -885,3 +888,32 @@ def test_run_detach_quotes_hostile_args():
     hub.files[dh.REMOTE_HUB] = b"x"
     d.run_detached(["--token", "a b; rm -rf /"])
     assert "'a b; rm -rf /'" in hub.detached[0]
+
+
+@pytest.mark.parametrize("shell", [["/bin/sh"], ["busybox", "sh"]])
+def test_holder_records_the_hubs_own_pid_not_the_holders(tmp_path, shell):
+    import shutil
+    import subprocess
+    import time
+
+    if shell[0] != "/bin/sh" and not shutil.which(shell[0]):
+        pytest.skip("no busybox")
+    pidf, out = tmp_path / "pid", tmp_path / "hubpid"
+    hub = tmp_path / "hub"
+    hub.write_text(f'#!/bin/sh\necho $$ >{out}\nsleep 30\n')
+    hub.chmod(0o755)
+    script = dh.HOLDER.replace(dh.DETACH_PID, str(pidf)).replace("/dev/i2s", str(tmp_path / "i2s"))
+    (tmp_path / "i2s").write_text("")
+    p = subprocess.Popen([*shell, "-c", script, str(hub)], start_new_session=True)
+    try:
+        for _ in range(100):
+            if pidf.exists() and pidf.read_text().strip() and out.exists() and out.read_text().strip():
+                break
+            time.sleep(0.05)
+        assert pidf.read_text().strip() == out.read_text().strip()
+        assert pidf.read_text().strip() != str(p.pid), "must not be the parked holder's pid"
+    finally:
+        import os
+        import signal
+
+        os.killpg(p.pid, signal.SIGKILL)

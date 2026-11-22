@@ -2,7 +2,6 @@
 #include "hub/io/hw_sinks.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <time.h>
@@ -14,10 +13,8 @@
 
 /* --- real syscalls ------------------------------------------------------------------------ */
 
-static int real_open(void *c, const char *p, int f) { (void)c; return open(p, f); }
 static ssize_t real_write(void *c, int fd, const void *b, size_t n) { (void)c; return write(fd, b, n); }
 static int real_ioctl(void *c, int fd, unsigned long r, unsigned long a) { (void)c; return ioctl(fd, r, a); }
-static int real_close(void *c, int fd) { (void)c; return close(fd); }
 static uint64_t real_now(void *c) {
     (void)c;
     struct timespec t;
@@ -25,7 +22,7 @@ static uint64_t real_now(void *c) {
     return (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u;
 }
 
-static const hp_hw_ops_t REAL_OPS = {NULL, real_open, real_write, real_ioctl, real_close, real_now};
+static const hp_hw_ops_t REAL_OPS = {NULL, real_write, real_ioctl, real_now};
 
 /* --- bitstream ---------------------------------------------------------------------------- */
 
@@ -98,8 +95,8 @@ static int ioc(hp_hw_t *h, unsigned long req, unsigned long arg) {
     return -HP_E_IO;
 }
 
-/* DRAIN the previous waveform. The fd is never closed: stock hal holds /dev/i2s for its whole life, and closing
- * frees the DMA ring while IRQ 23 can still fire (hard lockup). */
+/* DRAIN the previous waveform. The fd is never closed: closing a speaker fd frees the DMA ring while IRQ 23 can
+ * still fire (hard lockup), and the boot hook holds the file open anyway. */
 static int drain_prev(hp_hw_t *h) {
     if (h->flush_ports) { /* a failed send left bytes queued: no reset/flush ioctl exists, so play them out */
         int rc = ioc(h, HP_I2S_START, (unsigned long)((uint32_t)h->flush_ports << 16));
@@ -111,16 +108,6 @@ static int drain_prev(hp_hw_t *h) {
     (void)ioc(h, HP_I2S_DRAIN, 0); /* normally returns at once: irout books the line for the waveform */
     h->pending = false;
     return 0;
-}
-
-static int open_dev(hp_hw_t *h) {
-    const char *p = h->cfg.dev_path ? h->cfg.dev_path : HP_HW_DEFAULT_DEV;
-    int fd;
-    do fd = h->ops.open(h->ops.ctx, p, O_WRONLY);
-    while (fd < 0 && errno == EINTR);
-    if (fd >= 0) return fd;
-    if (errno == EBUSY || errno == EACCES) return -HP_E_HALBUSY;
-    return errno == ENOENT || errno == ENODEV ? -HP_E_NOENT : -HP_E_IO;
 }
 
 /* Port mapping: see the header comment. Returns START's `ports` byte, or -HP_E_INVAL. */
@@ -140,14 +127,8 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     int rc = hp_hw_ir_build(sig->us, sig->once_n, sig->carrier_hz, 1, h->buf, sizeof h->buf, &w);
     if (rc < 0) return rc; /* too big for the ring: reject, nothing touches the device */
 
-    if (h->fd >= 0) {
-        if ((rc = drain_prev(h)) < 0) return rc;
-    } else {
-        int fd = open_dev(h); /* first send (or retry after a failed open); then held for the daemon's life */
-        if (fd < 0) return fd;
-        h->fd = fd;
-        h->configured = false;
-    }
+    if (h->fd < 0) return -HP_E_IO; /* after hp_hw_sinks_close */
+    if ((rc = drain_prev(h)) < 0) return rc;
     if (!h->configured) {
         if ((rc = ioc(h, HP_I2S_DSIZE, 16)) < 0 || (rc = ioc(h, HP_I2S_MODE, 2)) < 0 ||
             (rc = ioc(h, HP_I2S_VOLUME, 15)) < 0)
@@ -190,19 +171,18 @@ static int rf_claim(void *self) {
 }
 
 int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *h) {
-    if (!cfg || !h) return -HP_E_INVAL;
+    if (!cfg || !h || cfg->dev_fd < 0) return -HP_E_INVAL;
     memset(h, 0, sizeof *h);
     h->cfg = *cfg;
     if (!h->cfg.ir_ports) h->cfg.ir_ports = HP_HW_DEFAULT_IR_PORTS;
     h->ops = cfg->ops ? *cfg->ops : REAL_OPS;
-    h->fd = -1;
+    h->fd = cfg->dev_fd;
+    h->configured = false; /* DSIZE/MODE/VOLUME are issued once per daemon life, on the first send */
+    hp_crumb("i2s fd=%d adopted", h->fd);
     h->ir = (hp_ir_sink){h, ir_send};
     h->bt = (hp_bt_sink){h, bt_key};
     h->rf = (hp_rf_transport){h, rf_send, rf_recv, rf_claim, NULL, NULL, NULL};
     h->sinks = (hp_sinks_t){&h->ir, &h->bt, &h->rf};
-    int fd = open_dev(h);
-    if (fd < 0) return fd;
-    (void)h->ops.close(h->ops.ctx, fd);
     if (cfg->rf) {
         int rc = hp_rf_spi_open(cfg->rf, &h->rfspi);
         if (rc < 0) return rc;
@@ -214,7 +194,7 @@ int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *h) {
 void hp_hw_sinks_close(hp_hw_t *h) {
     if (!h) return;
     if (h->fd >= 0) drain_prev(h);
-    h->fd = -1; /* deliberately not closed, see drain_prev */
+    h->fd = -1; /* deliberately not closed: the boot hook holds the file */
     hp_rf_spi_destroy(h->rfspi);
     h->rfspi = NULL;
 }

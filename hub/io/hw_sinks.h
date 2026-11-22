@@ -20,8 +20,9 @@
  *
  * BLOCKING. hp_ir_sink.send must not block, but DRAIN blocks for the whole waveform (324 ms
  * for one Samsung frame). Resolution: send() does everything up to and including START, then
- * returns with the fd held open (never closed, like stock hal; closing frees the DMA ring while
- * IRQ 23 may still fire and hard-locks the hub). DRAIN happens at the start of the next
+ * returns with the fd held open. The daemon never opens or closes /dev/i2s: the boot hook opens it once
+ * and passes the fd (cfg.dev_fd), so even a daemon crash cannot reach ath_i2s_close (closing frees the
+ * DMA ring while IRQ 23 may still fire and hard-locks the hub). DRAIN happens at the start of the next
  * send / at hp_hw_sinks_close(). hub/engine/irout.c already books the line busy for the
  * waveform duration plus a guard and defers further keyed sends, so in practice the previous
  * DRAIN is already complete when the next send runs. In the paths where irout sends
@@ -38,7 +39,6 @@
 
 #define HP_HW_RING_BYTES (512u * 768u) /* driver ring: a larger stream is rejected, never split */
 #define HP_HW_DEFAULT_IR_PORTS 0x01u   /* engine bit 0 == START bit 16 == built-in emitter */
-#define HP_HW_DEFAULT_DEV "/dev/i2s"
 
 #define HP_I2S_VOLUME 0x80044e20u
 #define HP_I2S_FREQ 0x80044e21u
@@ -50,15 +50,13 @@
 /* Syscall seam. Failures return -1 with errno set, as the real calls do. */
 typedef struct hp_hw_ops {
     void *ctx;
-    int (*open)(void *ctx, const char *path, int flags);
     ssize_t (*write)(void *ctx, int fd, const void *buf, size_t n);
     int (*ioctl)(void *ctx, int fd, unsigned long req, unsigned long arg);
-    int (*close)(void *ctx, int fd);
     uint64_t (*now_ms)(void *ctx); /* monotonic */
 } hp_hw_ops_t;
 
 typedef struct {
-    const char *dev_path;       /* NULL = /dev/i2s */
+    int dev_fd;                 /* /dev/i2s write fd, opened by the boot hook and inherited (--i2s-fd); never closed here */
     uint8_t ir_ports;           /* emitter ports wired; 0 = HP_HW_DEFAULT_IR_PORTS */
     const hp_hw_ops_t *ops;     /* NULL = real syscalls + CLOCK_MONOTONIC */
     const hp_rf_spi_cfg_t *rf;  /* non-NULL = also open the CC2544 radio (hub/io/rf_spi.h); NULL = RF stays a stub */
@@ -84,7 +82,7 @@ typedef struct {
     bool pending;          /* START issued, DRAIN owed */
     uint8_t flush_ports;   /* nonzero: a failed send left queued bytes; START+DRAIN them before the next use */
     bool configured;       /* DSIZE/MODE/VOLUME done on fd */
-    int fd;                /* /dev/i2s, opened on first send and held for the daemon's life (like hal); -1 before */
+    int fd;                /* cfg.dev_fd: held by the boot hook too, so never closed by us */
     uint8_t buf[HP_HW_RING_BYTES];
 } hp_hw_t;
 
@@ -94,8 +92,7 @@ typedef struct {
 int hp_hw_ir_build(const uint16_t *us, size_t n, uint32_t carrier_hz, unsigned repeat,
                    uint8_t *buf, size_t cap, hp_hw_wave_t *w);
 
-/* Probes the device (write-open + close) so a held device fails at startup. Returns 0,
- * -HP_E_HALBUSY (EBUSY/EACCES: stock hal holds /dev/i2s), or -HP_E_IO / -HP_E_NOENT. */
+/* Adopts cfg->dev_fd (no open, no probe). Returns 0, or -HP_E_INVAL (bad args / fd < 0), or the RF open error. */
 int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *out);
 void hp_hw_sinks_close(hp_hw_t *h); /* drains (bounded by the waveform); never closes the fd */
 

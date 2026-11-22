@@ -52,6 +52,13 @@
 #     file content is only ever matched with `case`, never fed to $(( ));
 #   * `exit`, `set -e`, `cd`, `trap`, `shift`, changed IFS/umask: none, so nothing leaks.
 #
+# HOLDING /dev/i2s. The kernel runs ath_i2s_close on the LAST close of the open file, and a close
+# of a speaker fd frees the DMA ring under live IRQs (hard freeze). So the daemon never opens or
+# closes /dev/i2s: the watcher subshell write-opens it ONCE (fd 9, O_WRONLY: `9<>` would pick the
+# mic slot) and the daemon inherits it as `--i2s-fd 9`. A daemon exit then never reaches the
+# driver's release, because the watcher still holds the file. The watcher therefore never ends
+# without a reboot: every path parks in a sleep loop. Never kill this shell (`killall sh`).
+#
 # BusyBox 1.13.4 floor: no timeout, no nohup, no setsid, no wc, no head, no find,
 # no `command` builtin, no `grep -E`. Nothing here may use them.
 
@@ -65,6 +72,7 @@ hah_dir="$hah_root/data/ha-harmony"
 hah_daemon="$hah_dir/hub"
 hah_conf="$hah_dir/hub.conf"
 hah_nowd="$hah_root/etc/nowatchdog"
+hah_i2s="${HAH_I2S_DEV:-/dev/i2s}"
 # Signed-update files (written by the daemon, hub/ota/hub_ota.h): hub.prev = the build before the last
 # update, ota-pending = "build=N" for a fresh build that has not reached the health mark, ota-restart =
 # the daemon exited to be relaunched into the new build (its exit status, 42, is not visible to us),
@@ -385,6 +393,7 @@ else
 					[ "$hah_rdebug" = 1 ] && set -- "$@" --rf-debug
 					set -- "$@" --health-file "$hah_health"
 					[ "$hah_otadev" = 1 ] && set -- "$@" --ota-allow-dev
+					set -- "$@" --i2s-fd 9
 
 					# Daemon output is prefixed with uptime, line by line.
 					hah_tsloop() {
@@ -398,6 +407,8 @@ else
 					# The launcher shell stays as the daemon's parent only to record how it ended ($? = 128+N for a
 					# signal N) in the tmpfs exit file; the pid we supervise (and kill -9) is the daemon's own.
 					hah_launch() {
+						# A D-state daemon still holds fd 9 and the ring: never run two writers.
+						while [ -n "$hah_pid" ] && kill -0 "$hah_pid" 2>/dev/null; do sleep "$hah_nap"; done
 						rm -f "$hah_pidfile" "$hah_exitf" 2>/dev/null
 						sh -c 'p="$1"; x="$2"; shift 2; "$@" & echo $! >"$p"; wait $!; echo $? >"$x"' sh "$hah_pidfile" "$hah_exitf" "$hah_daemon" "$@" 2>&1 </dev/null |
 							hah_tsloop >>"$hah_dlog" 2>/dev/null &
@@ -445,189 +456,210 @@ else
 						hah_blog "daemon ended: $hah_xw"
 					}
 
+					# No /dev/i2s: DEMO_MODE is already 1 so there is no stock stack either. Same rule as an early death,
+					# regardless of the switch: reboot while the persisted strike advances to stock after hah_limit boots.
+					hah_nodev() {
+						hah_blog "cannot open $hah_i2s - no daemon, strike $hah_n stands"
+						if [ "$(cat "$hah_counter" 2>/dev/null)" = "$hah_n" ]; then
+							hah_blog "rebooting (no $hah_i2s)"
+							hah_blog "watcher done"
+							reboot
+						else
+							hah_blog "not rebooting (strike not persisted)"
+						fi
+					}
+
 					sleep "$hah_delay"
 					if [ "$hah_stoplua" = 1 ]; then
 						# stock lua appears in ps as `lua` (and `luaworks` before it execs)
 						killall lua luaworks luadraws >/dev/null 2>&1
 						hah_blog "stopped lua/luaworks/luadraws"
 					fi
-					: >"$hah_dlog" 2>/dev/null
-					rm -f "$hah_health" 2>/dev/null
-					hah_launch "$@"
+					if [ -e "$hah_i2s" ]; then
+						{
+						: >"$hah_dlog" 2>/dev/null
+						rm -f "$hah_health" 2>/dev/null
+						hah_launch "$@"
 
-					# Health window: poll (no `timeout` applet). Alive at the end means
-					# port bound and radio held (the daemon exits non-zero otherwise).
-					[ -n "$hah_polls" ] || hah_polls=$((hah_healthy / hah_step))
-					hah_t=0
-					hah_up=1
-					while [ "$hah_t" -lt "$hah_polls" ]; do
-						sleep "$hah_nap"
-						hah_t=$((hah_t + 1))
-						if ! kill -0 "$hah_pid" 2>/dev/null; then
-							if [ -e "$hah_restart" ]; then
-								# a planned relaunch into an applied update, not a death: no strike, and the
-								# new build gets a fresh health window
-								rm -f "$hah_restart" 2>/dev/null
-								hah_blog "daemon exited for a signed update inside the health window - launching the new build"
-								hah_launch "$@"
-								[ -n "$hah_pid" ] || {
-									hah_up=0
-									break
-								}
-								hah_t=0
-								continue
-							fi
-							if [ -e "$hah_pending" ]; then
-								# the updated build died inside the window: previous build, once
-								hah_blog "updated build died inside the health window"
-								hah_rollback died_early
-								hah_launch "$@"
-								[ -n "$hah_pid" ] || {
-									hah_up=0
-									break
-								}
-								hah_t=0
-								continue
-							fi
-							hah_endnote
-							hah_up=0
-							break
-						fi
-					done
-					if [ "$hah_up" = 1 ]; then
-						rm -f "$hah_counter" "$hah_pending" 2>/dev/null
-						: >"$hah_health" 2>/dev/null
-						hah_blog "healthy after ${hah_healthy}s - strikes cleared"
-						# Supervision (after the health mark only). hah_used is the respawn
-						# budget spent; it refills after hah_refill s of continuous uptime.
-						hah_used=0
-						hah_rs=''
-						while :; do
-							hah_stamp
-							hah_rs="$hah_now"
-							hah_hl=0
-							hah_why=died
-							while kill -0 "$hah_pid" 2>/dev/null; do
-								sleep "$hah_nap"
-								# Cap the tmpfs daemon log by LINE count. The daemon holds it open
-								# O_APPEND (>>), so truncating in place is safe: its next write lands
-								# at the new end, no hole. Byte size cannot be read portably: BusyBox
-								# 1.13 `ls -l` has no date columns and `ls -ln` has extra ones, while
-								# host `ls -l` has dates; there is no wc/stat. Counting lines with
-								# `read` works everywhere (counting stops once over the cap).
-								hah_nl=0
-								# shellcheck disable=SC2034
-								while IFS= read -r hah_l; do
-									hah_nl=$((hah_nl + 1))
-									[ "$hah_nl" -gt "$hah_logmax" ] && break
-								done <"$hah_dlog" 2>/dev/null
-								if [ "$hah_nl" -gt "$hah_logmax" ]; then
-									: >"$hah_dlog" 2>/dev/null
-								fi
-								[ "$hah_rmax" != 0 ] || continue
-								hah_stamp
-								[ -n "$hah_now" ] && [ -n "$hah_rs" ] || continue
-								if [ "$hah_used" -gt 0 ] && [ $((hah_now - hah_rs)) -ge "$hah_refill" ]; then
-									hah_used=0
-									hah_blog "respawn budget refilled after ${hah_refill}s of uptime"
-								fi
-								# Wedge cover: the daemon writes its uptime seconds to the heartbeat
-								# file; a stale (or never written) one means it is alive but stuck.
-								hah_h=''
-								read -r hah_h 2>/dev/null <"$hah_hb"
-								# An empty or unparsable read is no information: keep the last good value.
-								case "$hah_h" in '' | *[!0-9]* | 0[0-9]*) hah_h="$hah_hl" ;; *) hah_hl="$hah_h" ;; esac
-								hah_ref="$hah_rs"
-								[ "$hah_h" -gt "$hah_ref" ] && hah_ref="$hah_h"
-								if [ $((hah_now - hah_ref)) -gt "$hah_stale" ]; then
-									hah_blog "heartbeat stale for over ${hah_stale}s - killing the wedged daemon"
-									kill -9 "$hah_pid" 2>/dev/null
-									wait "$hah_pid" 2>/dev/null
-									hah_why=wedged
-									break
-								fi
-							done
-							[ -e "$hah_restart" ] || hah_endnote
-							if [ -e "$hah_restart" ]; then
-								# The daemon applied a signed update and exited (status 42) to be relaunched:
-								# no budget spent. The new build gets one health window; dying inside it
-								# restores hub.prev once and relaunches that instead.
-								rm -f "$hah_restart" 2>/dev/null
-								hah_blog "daemon exited for a signed update - launching the new build"
-								rm -f "$hah_health" 2>/dev/null # no further update until this build is proven
-								hah_launch "$@"
-								if [ -z "$hah_pid" ]; then
-									hah_blog "update relaunch: no pid recorded - not supervising any further (no respawn, no reboot)"
-									break
-								fi
-								hah_t=0
-								hah_ok=1
-								while [ "$hah_t" -lt "$hah_polls" ]; do
-									sleep "$hah_nap"
-									hah_t=$((hah_t + 1))
-									if ! kill -0 "$hah_pid" 2>/dev/null; then
-										hah_ok=0
+						# Health window: poll (no `timeout` applet). Alive at the end means
+						# port bound and radio held (the daemon exits non-zero otherwise).
+						[ -n "$hah_polls" ] || hah_polls=$((hah_healthy / hah_step))
+						hah_t=0
+						hah_up=1
+						while [ "$hah_t" -lt "$hah_polls" ]; do
+							sleep "$hah_nap"
+							hah_t=$((hah_t + 1))
+							if ! kill -0 "$hah_pid" 2>/dev/null; then
+								if [ -e "$hah_restart" ]; then
+									# a planned relaunch into an applied update, not a death: no strike, and the
+									# new build gets a fresh health window
+									rm -f "$hah_restart" 2>/dev/null
+									hah_blog "daemon exited for a signed update inside the health window - launching the new build"
+									hah_launch "$@"
+									[ -n "$hah_pid" ] || {
+										hah_up=0
 										break
-									fi
-								done
-								if [ "$hah_ok" = 1 ]; then
-									rm -f "$hah_pending" 2>/dev/null
-									: >"$hah_health" 2>/dev/null
-									hah_blog "updated build healthy after ${hah_healthy}s - previous build kept as hub.prev"
-								else
-									hah_blog "updated build died within ${hah_healthy}s"
+									}
+									hah_t=0
+									continue
+								fi
+								if [ -e "$hah_pending" ]; then
+									# the updated build died inside the window: previous build, once
+									hah_blog "updated build died inside the health window"
 									hah_rollback died_early
 									hah_launch "$@"
-									: >"$hah_health" 2>/dev/null # the restored build is the proven one
-									if [ -z "$hah_pid" ]; then
-										hah_blog "rollback relaunch: no pid recorded - not supervising any further (no respawn, no reboot)"
+									[ -n "$hah_pid" ] || {
+										hah_up=0
 										break
-									fi
+									}
+									hah_t=0
+									continue
 								fi
-								continue
-							fi
-							if [ "$hah_rmax" = 0 ]; then
-								hah_blog "daemon died after health mark - no reboot, no respawn"
-								break
-							fi
-							if [ "$hah_used" -ge "$hah_rmax" ]; then
-								hah_blog "daemon $hah_why after health mark - respawn budget exhausted ($hah_used of $hah_rmax), leaving the hub inert (no reboot)"
-								break
-							fi
-							case "$hah_used" in
-							0) hah_bo="$hah_b1" ;;
-							1) hah_bo="$hah_b2" ;;
-							*) hah_bo="$hah_b3" ;;
-							esac
-							hah_used=$((hah_used + 1))
-							hah_blog "daemon $hah_why after health mark - respawn $hah_used of $hah_rmax in ${hah_bo}s (no reboot)"
-							sleep "$hah_bo"
-							hah_launch "$@"
-							if [ -z "$hah_pid" ]; then
-								hah_blog "respawn: no pid recorded (pid file unwritable?) - not supervising any further (no respawn, no reboot)"
+								hah_endnote
+								hah_up=0
 								break
 							fi
 						done
-					else
-						hah_blog "died within ${hah_healthy}s - strike $hah_n stands"
-						# Reboot only if THIS boot's strike is really persisted, so the
-						# strike counter bounds the reboot loop (boot 3 goes to stock).
-						if [ "$hah_reboot" = 1 ] && [ "$(cat "$hah_counter" 2>/dev/null)" = "$hah_n" ]; then
-							hah_blog "rebooting (reboot_on_early_death)"
-							hah_blog "watcher done"
-							reboot
+						if [ "$hah_up" = 1 ]; then
+							rm -f "$hah_counter" "$hah_pending" 2>/dev/null
+							: >"$hah_health" 2>/dev/null
+							hah_blog "healthy after ${hah_healthy}s - strikes cleared"
+							# Supervision (after the health mark only). hah_used is the respawn
+							# budget spent; it refills after hah_refill s of continuous uptime.
+							hah_used=0
+							hah_rs=''
+							while :; do
+								hah_stamp
+								hah_rs="$hah_now"
+								hah_hl=0
+								hah_why=died
+								while kill -0 "$hah_pid" 2>/dev/null; do
+									sleep "$hah_nap"
+									# Cap the tmpfs daemon log by LINE count. The daemon holds it open
+									# O_APPEND (>>), so truncating in place is safe: its next write lands
+									# at the new end, no hole. Byte size cannot be read portably: BusyBox
+									# 1.13 `ls -l` has no date columns and `ls -ln` has extra ones, while
+									# host `ls -l` has dates; there is no wc/stat. Counting lines with
+									# `read` works everywhere (counting stops once over the cap).
+									hah_nl=0
+									# shellcheck disable=SC2034
+									while IFS= read -r hah_l; do
+										hah_nl=$((hah_nl + 1))
+										[ "$hah_nl" -gt "$hah_logmax" ] && break
+									done <"$hah_dlog" 2>/dev/null
+									if [ "$hah_nl" -gt "$hah_logmax" ]; then
+										: >"$hah_dlog" 2>/dev/null
+									fi
+									[ "$hah_rmax" != 0 ] || continue
+									hah_stamp
+									[ -n "$hah_now" ] && [ -n "$hah_rs" ] || continue
+									if [ "$hah_used" -gt 0 ] && [ $((hah_now - hah_rs)) -ge "$hah_refill" ]; then
+										hah_used=0
+										hah_blog "respawn budget refilled after ${hah_refill}s of uptime"
+									fi
+									# Wedge cover: the daemon writes its uptime seconds to the heartbeat
+									# file; a stale (or never written) one means it is alive but stuck.
+									hah_h=''
+									read -r hah_h 2>/dev/null <"$hah_hb"
+									# An empty or unparsable read is no information: keep the last good value.
+									case "$hah_h" in '' | *[!0-9]* | 0[0-9]*) hah_h="$hah_hl" ;; *) hah_hl="$hah_h" ;; esac
+									hah_ref="$hah_rs"
+									[ "$hah_h" -gt "$hah_ref" ] && hah_ref="$hah_h"
+									if [ $((hah_now - hah_ref)) -gt "$hah_stale" ]; then
+										hah_blog "heartbeat stale for over ${hah_stale}s - killing the wedged daemon"
+										kill -9 "$hah_pid" 2>/dev/null
+										wait "$hah_pid" 2>/dev/null
+										hah_why=wedged
+										break
+									fi
+								done
+								[ -e "$hah_restart" ] || hah_endnote
+								if [ -e "$hah_restart" ]; then
+									# The daemon applied a signed update and exited (status 42) to be relaunched:
+									# no budget spent. The new build gets one health window; dying inside it
+									# restores hub.prev once and relaunches that instead.
+									rm -f "$hah_restart" 2>/dev/null
+									hah_blog "daemon exited for a signed update - launching the new build"
+									rm -f "$hah_health" 2>/dev/null # no further update until this build is proven
+									hah_launch "$@"
+									if [ -z "$hah_pid" ]; then
+										hah_blog "update relaunch: no pid recorded - not supervising any further (no respawn, no reboot)"
+										break
+									fi
+									hah_t=0
+									hah_ok=1
+									while [ "$hah_t" -lt "$hah_polls" ]; do
+										sleep "$hah_nap"
+										hah_t=$((hah_t + 1))
+										if ! kill -0 "$hah_pid" 2>/dev/null; then
+											hah_ok=0
+											break
+										fi
+									done
+									if [ "$hah_ok" = 1 ]; then
+										rm -f "$hah_pending" 2>/dev/null
+										: >"$hah_health" 2>/dev/null
+										hah_blog "updated build healthy after ${hah_healthy}s - previous build kept as hub.prev"
+									else
+										hah_blog "updated build died within ${hah_healthy}s"
+										hah_rollback died_early
+										hah_launch "$@"
+										: >"$hah_health" 2>/dev/null # the restored build is the proven one
+										if [ -z "$hah_pid" ]; then
+											hah_blog "rollback relaunch: no pid recorded - not supervising any further (no respawn, no reboot)"
+											break
+										fi
+									fi
+									continue
+								fi
+								if [ "$hah_rmax" = 0 ]; then
+									hah_blog "daemon died after health mark - no reboot, no respawn"
+									break
+								fi
+								if [ "$hah_used" -ge "$hah_rmax" ]; then
+									hah_blog "daemon $hah_why after health mark - respawn budget exhausted ($hah_used of $hah_rmax), leaving the hub inert (no reboot)"
+									break
+								fi
+								case "$hah_used" in
+								0) hah_bo="$hah_b1" ;;
+								1) hah_bo="$hah_b2" ;;
+								*) hah_bo="$hah_b3" ;;
+								esac
+								hah_used=$((hah_used + 1))
+								hah_blog "daemon $hah_why after health mark - respawn $hah_used of $hah_rmax in ${hah_bo}s (no reboot)"
+								sleep "$hah_bo"
+								hah_launch "$@"
+								if [ -z "$hah_pid" ]; then
+									hah_blog "respawn: no pid recorded (pid file unwritable?) - not supervising any further (no respawn, no reboot)"
+									break
+								fi
+							done
 						else
-							hah_blog "not rebooting (switch off or strike not persisted)"
+							hah_blog "died within ${hah_healthy}s - strike $hah_n stands"
+							# Reboot only if THIS boot's strike is really persisted, so the
+							# strike counter bounds the reboot loop (boot 3 goes to stock).
+							if [ "$hah_reboot" = 1 ] && [ "$(cat "$hah_counter" 2>/dev/null)" = "$hah_n" ]; then
+								hah_blog "rebooting (reboot_on_early_death)"
+								hah_blog "watcher done"
+								reboot
+							else
+								hah_blog "not rebooting (switch off or strike not persisted)"
+							fi
 						fi
+							# Never fall off the end: the watcher holds /dev/i2s for the life of the boot.
+							hah_blog "holding $hah_i2s, parked"
+							while :; do sleep 3600; done
+						} 9>"$hah_i2s" || hah_nodev
+					else
+						hah_nodev
 					fi
-					hah_blog "watcher done"
 				) >/dev/null 2>&1 &
 			fi
 		fi
 	fi
 fi
 
-unset hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
+unset hah_i2s hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
 unset hah_otadev hah_bfile hah_health hah_rbp hah_rbnote hah_prev hah_pending hah_restart hah_rbfile hah_rbl hah_t hah_ok hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
 unset hah_exitf hah_xs hah_xi hah_xw hah_xn hah_xg
 unset hah_rf hah_slot hah_budget hah_budnote hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr

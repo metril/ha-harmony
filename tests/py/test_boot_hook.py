@@ -147,8 +147,12 @@ def source_hook(
     # PATH, and a real `killall`/`reboot` must never reach the host.
     guards = "".join(f'{n}() {{ echo "$@" >>"{root}/{n}.log"; }}; ' for n in ("killall", "reboot"))
     script = f'{guards}{prelude}. "{HOOK}"; echo "__DEMO__=${{DEMO_MODE:-unset}}"'
+    fake_i2s = root / "dev-i2s"  # a regular file stands in for the char device; the hook never creates it
+    if not fake_i2s.exists() and not (extra_env and "HAH_I2S_DEV" in extra_env):
+        fake_i2s.write_text("")
     env = {
         "HAH_ROOT": str(root),
+        "HAH_I2S_DEV": str(fake_i2s),
         "HAH_HEALTHY_SECS": str(healthy),
         "HAH_MAX_UNCLEAN": str(limit),
         "HAH_START_DELAY": str(delay),
@@ -672,7 +676,7 @@ def test_reboot_switch_off(root: Path) -> None:
     install_conf(root, "token=t\nreboot_on_early_death=0\n")
     source_hook(root, healthy=2)
     # The watcher's own final lines say whether it decided against rebooting: no race.
-    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "parked")
     assert "died within" in log and "not rebooting" in log
     assert not (root / "reboot.log").exists()
 
@@ -681,7 +685,7 @@ def test_no_reboot_after_the_health_mark(root: Path) -> None:
     install_daemon(root, "sleep 0.25")  # health window is 0.1 s, dies later
     install_conf(root, "token=benchtok\nrespawn_max=0\n")
     source_hook(root, healthy=1)
-    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "parked")
     assert "daemon died after health mark" in log and "rebooting" not in log.replace(
         "no reboot", ""
     )
@@ -1061,13 +1065,13 @@ def test_rollback_happens_once_only_then_normal_strikes_apply(root: Path) -> Non
     _arm_pending_boot(root, bad, bad, counter="1")
     install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=0\n")
     source_hook(root, healthy=1)
-    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "parked")
     first = (_hub_dir(root) / "ota-rollback").read_text()
     assert "reason=boot_unclean" in first
     (_hub_dir(root) / "ota-rollback").unlink()
     # the restored build is bad too: boots 2 and 3 are ordinary strikes, never another rollback
     source_hook(root, healthy=1)  # strike 2
-    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "parked")
     assert not (_hub_dir(root) / "ota-rollback").exists()
     assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "2"
     _, demo = source_hook(root, healthy=1)  # strike 3: back to stock semantics, hook disables itself
@@ -1212,3 +1216,133 @@ def test_respawn_logs_how_the_daemon_died(root: Path, body: str, want: str) -> N
     _wait_text(vlog, "respawn 1 of 1")
     assert f"daemon ended: {want}" in vlog.read_text()
     assert not (root / "cache" / "ha-harmony.status").exists(), "the exit status lives in tmpfs, never on flash"
+
+
+# --- /dev/i2s holder: the watcher holds the device so a daemon exit never closes it --------------
+# The kernel runs ath_i2s_close on the LAST close of the file; while the watcher holds fd 9 a daemon
+# death (any cause) cannot reach it. A regular file stands in for the device (HAH_I2S_DEV).
+
+
+def _holders(path: Path) -> list[int]:
+    """Pids that have `path` open, found the way `ls -l /proc/*/fd` would."""
+    out = []
+    for p in Path("/proc").iterdir():
+        if not p.name.isdigit():
+            continue
+        try:
+            for fd in (p / "fd").iterdir():
+                if os.readlink(fd) == str(path):
+                    out.append(int(p.name))
+                    break
+        except OSError:
+            continue
+    return out
+
+
+FD9 = 'readlink /proc/self/fd/9 >"$(dirname "$0")/fd9.txt"; '
+
+
+def _assert_held_and_parked(root: Path) -> None:
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "parked")
+    assert _holders(root / "dev-i2s"), "nobody holds /dev/i2s after the daemon is gone"
+    assert "watcher done" not in log, "the watcher must never finish without a reboot"
+
+
+def test_daemon_inherits_the_held_device_on_fd_9(root: Path) -> None:
+    install_daemon(root, FD9 + 'echo "$@" >"$(dirname "$0")/argv.txt"; sleep 30')
+    install_conf(root)
+    source_hook(root)
+    assert "--i2s-fd 9" in _argv(root)
+    fd9 = root / "data" / "ha-harmony" / "fd9.txt"
+    _wait_for(fd9)
+    assert fd9.read_text().strip() == str(root / "dev-i2s")
+
+
+def test_held_after_early_death_with_reboot_switch_off(root: Path) -> None:
+    install_daemon(root, "exit 1")
+    install_conf(root, "token=t\nreboot_on_early_death=0\n")
+    source_hook(root, healthy=2)
+    _assert_held_and_parked(root)
+
+
+def test_held_after_early_death_that_reboots(root: Path) -> None:
+    install_daemon(root, "exit 1")
+    install_conf(root)
+    source_hook(root, healthy=2)
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
+    _wait_for(root / "reboot.log")  # "watcher done" only ever precedes a reboot
+    assert _holders(root / "dev-i2s")
+
+
+def test_held_across_respawns_and_after_the_budget_is_exhausted(root: Path) -> None:
+    install_daemon(root, MORTAL)
+    install_conf(root, "token=t\nrespawn_max=2\n")
+    source_hook(root, extra_env=FAST)
+    _wait_runs(root, 2)
+    assert _holders(root / "dev-i2s"), "the watcher must hold the device between daemons"
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "budget exhausted")
+    _assert_held_and_parked(root)
+
+
+def test_held_when_respawn_max_is_zero(root: Path) -> None:
+    install_daemon(root, MORTAL)
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    source_hook(root, extra_env=FAST)
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "no respawn")
+    _assert_held_and_parked(root)
+
+
+def test_held_through_an_ota_restart_and_a_rollback(root: Path) -> None:
+    install_daemon(root, OLD_APPLIER)
+    _install_new(root, NEW_BAD)
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    source_hook(root, healthy=1)
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy after")
+    (_hub_dir(root) / "go").touch()  # the old build applies the update and exits 42 (restart)
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "launching the new build")
+    assert _holders(root / "dev-i2s")
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "restored hub.prev")  # rollback
+    _wait_count(root, "runs_old", 2)
+    assert _holders(root / "dev-i2s")
+
+
+def _assert_no_device_reboots_and_counts(root: Path, dev: Path, conf: str = "token=t\n") -> None:
+    install_daemon(root, 'echo x >>"$(dirname "$0")/runs"; sleep 30')
+    install_conf(root, conf)
+    source_hook(root, extra_env={"HAH_I2S_DEV": str(dev)})
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
+    assert "cannot open" in log and "strike 1 stands" in log and "rebooting" in log
+    _wait_for(root / "reboot.log")
+    time.sleep(0.3)
+    assert _runs(root) == 0, "no device, no daemon"
+    assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
+
+
+def test_missing_device_reboots_and_counts_the_strike(root: Path) -> None:
+    gone = root / "no-such-i2s"
+    _assert_no_device_reboots_and_counts(root, gone)
+    assert not gone.exists(), "the hook must never create the device node"
+
+
+def test_missing_device_reboots_even_with_the_reboot_switch_off(root: Path) -> None:
+    _assert_no_device_reboots_and_counts(root, root / "no-such-i2s", "token=t\nreboot_on_early_death=0\n")
+
+
+def test_unopenable_device_reboots_and_counts_the_strike(root: Path) -> None:
+    bad = root / "i2s-dir"
+    bad.mkdir()  # exists, but `9>` on a directory fails
+    _assert_no_device_reboots_and_counts(root, bad)
+
+
+def test_restart_waits_for_the_old_pid_to_be_gone() -> None:
+    """A D-state daemon would otherwise leave two writers on the ring."""
+    code = re.sub(r"#.*", "", HOOK.read_text())
+    m = re.search(r"hah_launch\(\) \{(.*?)rm -f \"\$hah_pidfile\"", code, re.DOTALL)
+    assert m and 'kill -0 "$hah_pid"' in m.group(1)
+
+
+def test_hook_opens_the_device_write_only_and_only_inside_the_watcher() -> None:
+    code = re.sub(r"#.*", "", HOOK.read_text())
+    assert '9>"$hah_i2s"' in code and "9<" not in code
+    assert re.search(r'\[ -e "\$hah_i2s" \]', code), "never create a regular file in /dev"
+    assert "$hah_i2s" not in _sync_code().replace('hah_i2s="${HAH_I2S_DEV:-/dev/i2s}"', "")

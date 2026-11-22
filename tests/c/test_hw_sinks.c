@@ -43,10 +43,8 @@ static uint32_t fnv(const uint8_t *b, size_t n) {
 
 enum { MAXLOG = 64, WCAP = 1 << 20 };
 typedef struct {
-    int open_errno;          /* nonzero: open fails with it */
-    int closes, opens;
-    int nlog;
-    struct { char op; unsigned long req, arg; } log[MAXLOG]; /* o open, i ioctl, w write, c close */
+    int nlog, badfd;
+    struct { char op; unsigned long req, arg; } log[MAXLOG]; /* i ioctl, w write; the ops table has no open/close at all */
     int wsteps[16], nsteps, step; /* write script: >0 limit, 0 = fail EIO, -1 = EINTR */
     unsigned long fail_req;          /* ioctl request that fails (0 = none) */
     uint8_t *wbuf;
@@ -57,17 +55,9 @@ typedef struct {
 static void lg(fake_t *f, char op, unsigned long req, unsigned long arg) {
     if (f->nlog < MAXLOG) { f->log[f->nlog].op = op; f->log[f->nlog].req = req; f->log[f->nlog].arg = arg; f->nlog++; }
 }
-static int f_open(void *c, const char *p, int fl) {
-    fake_t *f = c;
-    (void)p; (void)fl;
-    lg(f, 'o', 0, 0);
-    if (f->open_errno) { errno = f->open_errno; return -1; }
-    f->opens++;
-    return 7;
-}
 static ssize_t f_write(void *c, int fd, const void *b, size_t n) {
     fake_t *f = c;
-    (void)fd;
+    if (fd != 7) f->badfd++;
     int s = f->step < f->nsteps ? f->wsteps[f->step++] : (int)n;
     if (s < 0) { errno = EINTR; return -1; }
     if (s == 0) { errno = EIO; return -1; }
@@ -79,12 +69,11 @@ static ssize_t f_write(void *c, int fd, const void *b, size_t n) {
 }
 static int f_ioctl(void *c, int fd, unsigned long r, unsigned long a) {
     fake_t *f = c;
-    (void)fd;
+    if (fd != 7) f->badfd++;
     lg(f, 'i', r, a);
     if (r == f->fail_req) { errno = EIO; return -1; }
     return 0;
 }
-static int f_close(void *c, int fd) { fake_t *f = c; (void)fd; lg(f, 'c', 0, 0); f->closes++; return 0; }
 static uint64_t f_now(void *c) { return ((fake_t *)c)->now; }
 
 static hp_hw_t *g_h; /* ~384 KiB: keep off the stack */
@@ -95,12 +84,12 @@ static void setup(void) {
     uint8_t *wb = F.wbuf;
     memset(&F, 0, sizeof F);
     F.wbuf = wb ? wb : malloc(WCAP);
-    OPS = (hp_hw_ops_t){&F, f_open, f_write, f_ioctl, f_close, f_now};
+    OPS = (hp_hw_ops_t){&F, f_write, f_ioctl, f_now};
 }
 static int open_hw(uint8_t ports) {
-    hp_hw_cfg_t c = {NULL, ports, &OPS, NULL};
+    hp_hw_cfg_t c = {7, ports, &OPS, NULL};
     int r = hp_hw_sinks_open(&c, g_h);
-    F.nlog = 0; F.opens = F.closes = 0; /* forget the startup probe */
+    F.nlog = 0;
     return r;
 }
 static hp_ir_signal_t *mk(const uint16_t *us, size_t n, uint32_t hz) {
@@ -198,11 +187,11 @@ static void test_sequence(void) {
     CHECK(hp_hw_ir_build(s->us, s->once_n, 37900, 1, ref, sizeof ref, &w) == 0);
     const unsigned long exp[][2] = {{HP_I2S_DSIZE, 16}, {HP_I2S_MODE, 2}, {HP_I2S_VOLUME, 15},
                                     {HP_I2S_FREQ, 0x0036f999}};
-    CHECK(F.log[0].op == 'o');
-    for (int i = 0; i < 4; i++) CHECK(F.log[1 + i].op == 'i' && F.log[1 + i].req == exp[i][0] && F.log[1 + i].arg == exp[i][1]);
-    CHECK(F.log[5].op == 'w' && F.log[5].req == w.nbytes);
-    CHECK(F.log[6].op == 'i' && F.log[6].req == HP_I2S_START && F.log[6].arg == 0x10000);
-    CHECK(F.nlog == 7 && F.closes == 0); /* send returns before DRAIN: it must not block */
+    /* adopting the fd issues nothing; the configure ioctls come with the first send */
+    for (int i = 0; i < 4; i++) CHECK(F.log[i].op == 'i' && F.log[i].req == exp[i][0] && F.log[i].arg == exp[i][1]);
+    CHECK(F.log[4].op == 'w' && F.log[4].req == w.nbytes);
+    CHECK(F.log[5].op == 'i' && F.log[5].req == HP_I2S_START && F.log[5].arg == 0x10000);
+    CHECK(F.nlog == 6); /* send returns before DRAIN: it must not block */
     CHECK(F.wlen == w.nbytes && memcmp(F.wbuf, ref, w.nbytes) == 0);
     CHECK(w.dur_ms == 109); /* one frame: 49152 bits x 2199 ns (the bench's 324.1 ms was 3 repeats) */
     /* later sends: same fd, config once, per send DRAIN(prev) FREQ write START; never a close or reopen */
@@ -215,9 +204,9 @@ static void test_sequence(void) {
         CHECK(F.log[2].op == 'w' && F.log[2].req == w.nbytes);
         CHECK(F.log[3].op == 'i' && F.log[3].req == HP_I2S_START && F.log[3].arg == 0x10000);
     }
-    CHECK(F.opens == 1 && F.closes == 0);
+    CHECK(F.badfd == 0); /* every call used the adopted fd */
     hp_hw_sinks_close(g_h);
-    CHECK(F.log[F.nlog - 1].req == HP_I2S_DRAIN && F.closes == 0); /* exit drains, still no close */
+    CHECK(F.log[F.nlog - 1].req == HP_I2S_DRAIN); /* exit drains; there is no close path */
 }
 
 static void test_ports(void) {
@@ -234,6 +223,7 @@ static void test_ports(void) {
     CHECK(open_hw(0x06) == 0); /* --ir-ports 6: bits 1 and 2 wired */
     CHECK(send_ir(0, s) == 0 && F.log[F.nlog - 1].arg == 0x60000);
     hp_hw_sinks_close(g_h);
+    CHECK(open_hw(0x06) == 0);
     CHECK(send_ir(0x04, s) == 0 && F.log[F.nlog - 1].arg == 0x40000);
     hp_hw_sinks_close(g_h);
 }
@@ -256,7 +246,6 @@ static void test_writes(void) {
     F.wsteps[0] = 500; F.wsteps[1] = 0; F.nsteps = 2;
     CHECK(open_hw(0) == 0);
     CHECK(send_ir(0, s) == -HP_E_IO);
-    CHECK(F.closes == 0);
     for (int i = 0; i < F.nlog; i++) CHECK(!(F.log[i].op == 'i' && F.log[i].req == HP_I2S_START));
     /* the partial bytes are flushed (START+DRAIN) before the next send's FREQ/write */
     F.nlog = 0; F.nsteps = 0; F.step = 0;
@@ -267,12 +256,12 @@ static void test_writes(void) {
     setup();
     F.fail_req = HP_I2S_START;
     CHECK(open_hw(0) == 0);
-    CHECK(send_ir(0, s) == -HP_E_IO && F.closes == 0);
+    CHECK(send_ir(0, s) == -HP_E_IO);
     F.nlog = 0; F.fail_req = 0;
     hp_hw_sinks_close(g_h);
-    CHECK(F.nlog == 2 && F.log[0].req == HP_I2S_START && F.log[1].req == HP_I2S_DRAIN && F.closes == 0);
+    CHECK(F.nlog == 2 && F.log[0].req == HP_I2S_START && F.log[1].req == HP_I2S_DRAIN);
     F.nlog = 0;
-    CHECK(send_ir(0, s) == 0 && F.log[0].op == 'o');
+    CHECK(send_ir(0, s) == -HP_E_IO); /* fd forgotten at close: refused, nothing touches the device */
     /* flush START failing: no DRAIN, no FREQ/write, send refused; retry after recovery flushes and sends */
     setup();
     F.fail_req = HP_I2S_START;
@@ -295,10 +284,10 @@ static void test_writes(void) {
     setup();
     F.fail_req = HP_I2S_FREQ;
     CHECK(open_hw(0) == 0);
-    CHECK(send_ir(0, s) == -HP_E_IO && F.closes == 0 && F.wlen == 0);
+    CHECK(send_ir(0, s) == -HP_E_IO && F.wlen == 0);
     /* and a later send still works (no stuck pending state) */
     F.fail_req = 0; F.nlog = 0;
-    CHECK(send_ir(0, s) == 0 && F.wlen == w.nbytes && F.opens == 1 && F.closes == 0);
+    CHECK(send_ir(0, s) == 0 && F.wlen == w.nbytes);
     hp_hw_sinks_close(g_h);
 }
 
@@ -317,24 +306,20 @@ static void test_oversize(void) {
     CHECK(send_ir(0, s) == -HP_E_INVAL && F.nlog == 0);
 }
 
-static void test_open_errors(void) {
+static void test_adopt(void) {
     setup();
-    F.open_errno = EBUSY;
-    CHECK(open_hw(0) == -HP_E_HALBUSY);
-    setup();
-    F.open_errno = EACCES;
-    CHECK(open_hw(0) == -HP_E_HALBUSY);
-    setup();
-    F.open_errno = ENOENT;
-    CHECK(open_hw(0) == -HP_E_NOENT);
-    /* hal grabs the device after startup: send reports it, writes nothing */
-    setup();
+    hp_hw_cfg_t bad = {-1, 0, &OPS, NULL};
+    CHECK(hp_hw_sinks_open(&bad, g_h) == -HP_E_INVAL); /* no fd, no hardware */
     CHECK(open_hw(0) == 0);
-    F.open_errno = EBUSY;
-    CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 100000)) == -HP_E_HALBUSY && F.wlen == 0);
-    /* the failed open is retried on the next send */
-    F.open_errno = 0;
-    CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 100000)) == 0 && F.opens == 1 && F.wlen > 0);
+    CHECK(F.nlog == 0 && F.wlen == 0); /* adopting touches nothing */
+    CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 100000)) == 0 && F.wlen > 0 && F.badfd == 0);
+    /* DSIZE/MODE/VOLUME exactly once per daemon life */
+    int cfg = 0;
+    for (int i = 0; i < F.nlog; i++) cfg += F.log[i].op == 'i' && (F.log[i].req == HP_I2S_DSIZE || F.log[i].req == HP_I2S_MODE || F.log[i].req == HP_I2S_VOLUME);
+    CHECK(cfg == 3);
+    F.nlog = 0;
+    CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 100000)) == 0);
+    for (int i = 0; i < F.nlog; i++) CHECK(!(F.log[i].req == HP_I2S_DSIZE || F.log[i].req == HP_I2S_MODE || F.log[i].req == HP_I2S_VOLUME));
 }
 
 static void test_stubs(void) {
@@ -358,7 +343,7 @@ int main(int argc, char **argv) {
     test_ports();
     test_writes();
     test_oversize();
-    test_open_errors();
+    test_adopt();
     test_stubs();
     free(F.wbuf);
     free(g_h);

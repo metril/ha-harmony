@@ -42,7 +42,18 @@ ARMED_WARNING = (
     "NOTE: if the boot hook is armed, stopping the daemon by hand within ~140 s of boot makes the hub "
     "reboot (reboot_on_early_death). Run `install_boot_hook.py disarm --yes` first."
 )
-DETACH_SETTLE_S = 3  # on-device `sleep` before asking pidof
+DETACH_SETTLE_S = 3  # on-device `sleep` before checking the hub pid
+DETACH_PID = "/tmp/ha-harmony-hub.pid"  # tmpfs; the hub's own pid, written by the holder
+# The daemon never opens or closes /dev/i2s (a close frees the DMA ring under live IRQs and freezes the hub), so it
+# runs under a holder shell, like the boot hook: the shell write-opens the device once (fd 9, O_WRONLY: `9<>` would
+# pick the mic slot) and the hub inherits it as --i2s-fd 9. The shell ignores INT/TERM/HUP (the hub gets them back)
+# and parks when the hub ends, so the device is never released; only a reboot (`restore`) clears it.
+# A failing `exec 9>` exits the shell on BusyBox (rc 2), which is the wanted outcome: no device, no hub.
+HOLDER = (
+    f'rm -f {DETACH_PID}; trap "" INT TERM HUP; exec 9>/dev/i2s || exit 1; '
+    f'(trap - INT TERM HUP; read -r h _ </proc/self/stat; echo "$h" >{DETACH_PID}; exec "$0" --i2s-fd 9 "$@"); '
+    "while :; do sleep 3600; done"
+)
 WRITE_ROOTS = (REMOTE_DIR, "/tmp")  # the only places this tool may write
 DATA_MOUNT = "/data"
 DEVICES = ("/dev/i2s", "/dev/rfspi")
@@ -400,8 +411,11 @@ class Deployer:
         if self.r.run(["test", "-x", REMOTE_HUB])[0] != 0:
             raise DeployError(f"{REMOTE_HUB} missing or not executable: run push first")
         self.out(ARMED_WARNING)
-        self.out(f"running {REMOTE_HUB} {shlex.join(args)} (foreground; Ctrl-C stops it)")
-        return self.r.run_foreground([REMOTE_HUB, *args])
+        self.out(
+            f"running {REMOTE_HUB} {shlex.join(args)} under the /dev/i2s holder (foreground). When the hub ends the "
+            "holder parks, still holding /dev/i2s: kill the ssh client, then `restore --yes` (reboot) to release it."
+        )
+        return self.r.run_foreground(["sh", "-c", HOLDER, REMOTE_HUB, *args])
 
     def run_detached(self, args: list[str]) -> int:
         """Start the daemon with no TTY, output to a tmpfs log, and report its pid.
@@ -418,11 +432,11 @@ class Deployer:
             raise DeployError(f"devices still held by pids {sorted({p for p, _ in held})}")
         if self.r.run(["test", "-x", REMOTE_HUB])[0] != 0:
             raise DeployError(f"{REMOTE_HUB} missing or not executable: run push first")
-        # $! is the pid of the process WE started (pidof hub would also match a boot-launched
-        # daemon); confirm that exact pid is still alive after the settle time.
+        # The holder writes the hub's own pid (pidof hub would also match a boot-launched daemon); confirm that
+        # exact pid is still alive after the settle time.
         script = (
-            f"p=$({shlex.join([REMOTE_HUB, *args])} </dev/null >{DETACH_LOG} 2>&1 & echo $!); "
-            f"sleep {DETACH_SETTLE_S}; kill -0 $p && echo $p"
+            f"p=$(sh -c {shlex.quote(HOLDER)} {shlex.join([REMOTE_HUB, *args])} </dev/null >{DETACH_LOG} 2>&1 & echo $!); "
+            f"sleep {DETACH_SETTLE_S}; read h <{DETACH_PID} && kill -0 $h && echo $h"
         )
         rc, out, _ = self.r.run(["sh", "-c", script])
         pid = out.decode("utf-8", "replace").split()

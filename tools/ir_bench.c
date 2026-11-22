@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
      * 9 and 11; any future receive probe must read() at least once before closing.
      *
      * Write-open + close is the safe availability test, and is what the daemon's
-     * own startup probe does (hp_hw_sinks_open), verified on hardware. */
+     * own startup probe did before the daemon began adopting the hook's fd, verified on hardware. */
     int fd = open("/dev/i2s", O_WRONLY);
     printf("open /dev/i2s O_WRONLY -> %d%s%s\n", fd, fd < 0 ? " errno=" : "",
            fd < 0 ? strerror(errno) : "");
