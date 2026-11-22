@@ -641,7 +641,7 @@ export class HhStudio extends StoreElement implements StudioHost {
   }
   /** Warnings that are not errors: a label over its class budget, a device with no glyph, a row with no action. */
   private checkBar() {
-    const checks = studioChecks(this.store.config, (i) => this.st.previewOf(i));
+    const checks = studioChecks(this.store.config, (i) => this.st.previewOf(i), true);
     if (!checks.length) return nothing;
     const shown = checks.slice(0, 3);
     return html`<div class="warnbar" role="status" aria-label="Checks">${shown.map((c) => html`<div><span>${c.msg}</span>${c.page !== undefined ? html`<button @click=${() => this.showCheck(c.page as number, c.index)}>Show</button>` : nothing}</div>`)}

@@ -371,7 +371,7 @@ function fitInputs(page: Page, pp: PreviewPage | null, wi: number): { p: { cols:
   const w = page.widgets[wi];
   if (!w) return null;
   const { wp, wire } = wireWidget(page, pp, wi);
-  if (wp && wire) return { p: { cols: wp.cols, rows: wp.rows, fixed: !!(wp as { fixed?: boolean }).fixed }, w: { ...wire, label: w.label ?? wire.label } };
+  if (wp && wire) return { p: { cols: wp.cols, rows: wp.rows, fixed: !!(wp as { fixed?: boolean }).fixed }, w: { ...wire, label: wire.label ?? w.label ?? '' } };
   const { cols, rows } = gridOf(page);
   const nav = typeof w['nav'] === 'string' ? (w['nav'] as string) : '';
   const shape = w.shape ?? (page.list || nav ? 'row' : 'card');
@@ -1056,10 +1056,12 @@ export const deviceHasGlyph = (d: Device): boolean => !!inferDeviceIcon(d);
  * What the Studio warns about before a config is applied: a label over its class budget (the remote would cut it), a device
  * with no glyph, and a row with no action (it would do nothing when tapped). `preview(i)` is page i's compiled preview, or null.
  */
-export function studioChecks(cfg: Config, preview: (page: number) => PreviewPage | null = () => null): StudioCheck[] {
+export function studioChecks(cfg: Config, preview: (page: number) => PreviewPage | null = () => null, needPreview = false): StudioCheck[] {
   const out: StudioCheck[] = [];
   (cfg.pages ?? []).forEach((pg, pi) => {
-    for (const o of pageOverflow(pg, preview(pi))) out.push({ kind: 'label', page: pi, index: o.index, msg: `${pg.title || pg.id}: "${o.label}" is ${o.over} px too wide for its ${o.font} slot; ${o.advice}` });
+    const pp = preview(pi);
+    // with needPreview a label is judged only on the compiled page: the config estimate flags captions the compiler will shorten
+    for (const o of needPreview && !pp ? [] : pageOverflow(pg, pp)) out.push({ kind: 'label', page: pi, index: o.index, msg: `${pg.title || pg.id}: "${o.label}" is ${o.over} px too wide for its ${o.font} slot; ${o.advice}` });
     pg.widgets.forEach((w, wi) => {
       if (w.type === 'button' && w.shape === 'row' && !w['action'] && !w.nav) out.push({ kind: 'action', page: pi, index: wi, msg: `${pg.title || pg.id}: the row "${w.label ?? ''}" does nothing; give it an action or a page` });
     });

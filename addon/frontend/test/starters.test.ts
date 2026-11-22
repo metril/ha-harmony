@@ -341,6 +341,17 @@ describe('visual pass: FIXED templates, checks and input editing', () => {
     expect(studioChecks({ ...c, pages: [] } as Config)).toEqual([]);
   });
 
+  it('with needPreview, a label is not judged until the page is compiled (the compiler shortens it)', () => {
+    const c = {
+      devices: [],
+      activities: [],
+      pages: [{ id: 'p', layout: 'fixed', cols: 12, rows: 2, title: 'P', widgets: [
+        { type: 'button', id: 'c', x: 0, y: 1, w: 6, h: 1, label: 'A Very Long Card Label That Cannot Fit', icon: 'tv', action: { activity: 'off' } },
+      ] }],
+    } as unknown as Config;
+    expect(studioChecks(c, () => null, true).map((k) => k.kind)).not.toContain('label');
+  });
+
   it("derived inputs can be renamed or hidden: they become the device's own inputs", () => {
     const d = cfgInputs().devices![0] as Device;
     expect(derivedInputs(d).map((i) => i.label)).toEqual(['HDMI 1', 'HDMI 2', 'HDMI 3']);
