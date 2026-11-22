@@ -267,7 +267,7 @@ class NowPlayingFeed:
     async def _attach_push(self, cur: Playing, remote: int) -> None:
         try:
             await self._push(cur, (remote,), force=True)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.exception("now playing attach push failed")
 
     def _build(self) -> Playing | None:
@@ -292,7 +292,7 @@ class NowPlayingFeed:
                 continue
             try:
                 await self._push(cur, tuple(self._remotes()))
-            except Exception:  # noqa: BLE001  (one bad push must not end the feed)
+            except Exception:
                 _LOGGER.exception("now playing push failed")
 
     def _changed(self, cur: Playing) -> bool:
