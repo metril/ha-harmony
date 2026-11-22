@@ -96,7 +96,7 @@ export function labelBudget(p: FitPage, w: FitWidget): { font: Font; px: number 
   if (bw >= 100) {
     if (w.compact || bh < 72) {
       // two lines beside the glyph, wrapped at spaces only: a word wider than the line would break mid-word, so nothing fits
-      const line = bw - (hasIcon ? 44 : 10) - 10;
+      const line = bw - (hasIcon ? 44 : 10) - 8;
       if (w.label.split(/\s+/).some((word) => textPx(word, 'b13') > line)) return { font: 'b13', px: Math.max(0, line - 1) };
       return { font: 'b13', px: Math.max(0, 2 * line - 4) };
     }

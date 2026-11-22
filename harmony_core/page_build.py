@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import zlib
+from functools import lru_cache
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Any
@@ -17,7 +18,7 @@ from .config_model import Model, infer_app_ids
 from .ha_actions import default_tap
 from .harmony_proto import SOFT_KEY_BASE
 from .icons import BRAND_COLORS, ICON_IDS, ICONS
-from .key_names import display_name
+from .key_names import abbreviate, display_name
 from .keys import key_code
 from .page_codec import (
     FIXED_MAX,
@@ -55,7 +56,8 @@ _DOMAIN_ICON = {
     "script": "scene",
     "media_player": "tv",
     "sun": "sun",
-    "input_select": "settings",
+    "input_select": "input",
+    "select": "input",
 }
 _SERVICE_ICON = {"open_cover": "up", "close_cover": "down"}
 _NAV_ICON_LEAD = {"prev": "chev_left", "home": "home"}
@@ -117,6 +119,7 @@ def _words(text: str) -> list[str]:
     return _TOKEN.findall(re.sub(r"[_\s]+", " ", _CAMEL.sub(" ", text)).lower())
 
 
+@lru_cache(maxsize=4096)
 def icon_for_text(text: str) -> int:
     """Stock icon for a command or label; 0 if none.
 
@@ -253,6 +256,9 @@ def _spec(
             icon = ICON_IDS.get(_SERVICE_ICON.get(name) or _DOMAIN_ICON.get(dom, ""), None)
         if icon is None:
             icon = icon_for_text(label)
+            if not icon:  # then the command (or the service target) name: "Clear Camera" -> cctv_off
+                hint = action.get("command") or str(action.get("entity_id") or action.get("target", "")).split(".")[-1]
+                icon = icon_for_text(str(hint)) if hint else 0
     elif kind == "tile" and icon is None:
         icon = ICON_IDS.get(_DOMAIN_ICON.get(w["entity"].split(".")[0], ""), 0)
     shape = w.get("shape", "row" if in_list or nav is not None else "card")
@@ -322,7 +328,11 @@ def _default_icon_only(s: _Spec, cols: int, rows: int, fixed: bool = False) -> N
     if s.icon in BRAND_COLORS and (not fixed or (s.w <= 4 and s.shape == "card")):
         s.icon_only = True
         return
-    if (cols == 4 and s.w == 1) or fit_label(SimpleNamespace(cols=cols, rows=rows, fixed=fixed), _probe(s)):
+    if cols == 4 and s.w == 1:
+        s.icon_only = True
+    elif (over := lambda x: fit_label(SimpleNamespace(cols=cols, rows=rows, fixed=fixed), _probe(x)))(s):
+        if s.shape == "card" and _shrink(s, over):
+            return  # a shorter caption keeps the glyph and the caption (MacBook Pro -> MBP)
         s.icon_only = True
 
 
@@ -426,39 +436,50 @@ def _over(s: _Spec) -> bool:
     return fit_label(_FIT_PAGE, _probe(replace(s, x=0, y=0, h=1))) is not None
 
 
-_ABBREV = {"volume": "Vol", "channel": "Ch", "previous": "Prev", "settings": "Setup", "navigation": "Nav", "subtitles": "Subs"}
-
-
-def _abbrev(label: str) -> str:
-    return " ".join(_ABBREV.get(w.lower(), w) for w in label.split())
+def _shrink(s: _Spec, over: Any = None) -> bool:
+    """Make the caption fit without an ellipsis: the abbreviation table first (Power Toggle -> Power,
+    Volume Up -> Vol Up), then trailing words dropped. True when it fits; the label is untouched when not."""
+    full = s.label
+    short = abbreviate(full)
+    words = short.split()
+    tries = [short] if short != full else []
+    tries += [" ".join(words[:k]) for k in range(len(words) - 1, 0, -1)]
+    for t in tries:
+        s.label = t
+        if not (over or _over)(s):
+            return True
+    s.label = full
+    return False
 
 
 def _shorten_key(s: _Spec) -> bool:
-    """A glyph key whose caption is cut gets a shorter one (Volume Up -> Vol Up) before it loses the caption."""
+    """A glyph key whose caption is cut gets a shorter one before it loses the caption."""
     if s.kind != "button" or s.w > 4 or s.shape != "card" or not s.icon or s.icon_only or s.icon in BRAND_COLORS:
         return False
-    if not _over(s):
-        return False
-    short = _abbrev(s.label)
-    if short == s.label:
-        return False
-    full, s.label = s.label, short
-    if _over(s):
-        s.label = full
-        return False
-    return True
+    return _over(s) and _shrink(s)
+
+
+def _refit(s: _Spec) -> None:
+    """Last pass on a placed card (the layout may have compacted it): shorten, else drop to the glyph alone."""
+    if s.kind != "button" or s.shape in ("row", "pill", "monogram") or s.icon_only or s.nav is not None or not s.label:
+        return
+    if s.icon in BRAND_COLORS or not _over(s) or _shrink(s):
+        return
+    if s.icon and "icon_only" not in s.cfg:
+        s.icon_only = True
 
 
 def _caption_rows(specs: list[_Spec]) -> None:
     """In one row of glyph keys either every key has a caption or none does (logo keys excepted)."""
     rows: dict[int, list[_Spec]] = {}
     for s in specs:
-        if s.kind == "button" and s.w <= 4 and s.shape == "card" and s.icon and s.icon not in BRAND_COLORS and s.nav is None:
+        if s.kind == "button" and s.w <= 6 and s.shape == "card" and s.icon and s.icon not in BRAND_COLORS and s.nav is None:
             rows.setdefault(s.y, []).append(s)
     for row in rows.values():
-        if any(s.label != _abbrev(s.label) for s in row) and any(s.label != s.cfg["label"] for s in row):
+        if any(s.label != s.cfg["label"] for s in row):
             for s in row:  # one wording across the row (Vol Up beside Vol Down)
-                s.label = _abbrev(s.label)
+                if s.label == s.cfg["label"]:
+                    s.label = abbreviate(s.label)
         if any(s.icon_only for s in row) and not all(s.icon_only for s in row):
             for s in row:
                 if s.cfg.get("icon_only") is not False:
@@ -631,6 +652,9 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
                     groups = _split_fixed(placed, p, pi, base)
                 for g in groups:
                     g.sort(key=lambda s: s.order)
+                for s in placed:
+                    _refit(s)
+                _caption_rows(placed)
             if len(groups) > MAX_PAGE_GROUP:
                 raise CompileError(
                     f"page {p['id']!r}: needs {len(groups)} pages (at most {MAX_PAGE_GROUP});"

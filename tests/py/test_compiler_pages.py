@@ -243,7 +243,7 @@ def test_page_activity_and_second_home_errors():
 
 # ---------------------------------------------------------------- budget
 def test_over_budget_reports_exact_overage():
-    ws = ", ".join(btn(f"b{i}", i % 16, i // 16, "abcdefgh") for i in range(20))
+    ws = ", ".join(btn(f"b{i}", i % 16, i // 16, "abcdefgh", ", icon: none") for i in range(20))
     with pytest.raises(CompileError) as e:
         comp(page(ws, cols=16, rows=2))
     # 20 widgets * 13 + header 11 = 271: exactly 20 over
@@ -255,7 +255,7 @@ def test_over_budget_reports_exact_overage():
     assert n > 0
     # dropping exactly that many label bytes makes it fit exactly at 251
     short = ", ".join(
-        btn(f"b{i}", i % 16, i // 16, "abcdefgh"[: 8 - (1 if i < n else 0)]) for i in range(20)
+        btn(f"b{i}", i % 16, i // 16, "abcdefgh"[: 8 - (1 if i < n else 0)], ", icon: none") for i in range(20)
     )
     c = comp(page(short, cols=16, rows=2))
     assert len(c.pages_v2[0]) == 251

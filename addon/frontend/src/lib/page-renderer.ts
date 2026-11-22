@@ -319,7 +319,7 @@ function widgetPrims(p: V2Page, w: V2Widget, wi: number, o: RenderOpts, T: Rende
     }
   } else if (cls === 'ccard') {
     const x0 = hasIcon ? 10 + px + 10 : 10;
-    const lines = wrap2(label, 'b13', bw - x0 - 10);
+    const lines = wrap2(label, 'b13', bw - x0 - 8);
     const lh = lineHeight('b13');
     if (hasIcon) out.push({ t: 'icon', id: w.icon, x: x + 10, y: y + bh / 2 - px / 2, size: px, color: icon, wi });
     const top = y + (bh - lines.length * lh) / 2;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayCommand, displayKey, gridStyle, spokenKey } from '../src/lib/key-names';
+import { abbreviate, displayCommand, displayKey, gridStyle, spokenKey } from '../src/lib/key-names';
 import { keyLabel } from '../src/lib/bt-model';
 import { keyTitle } from '../src/lib/remote-layout';
 
@@ -87,4 +87,18 @@ describe('displayKey', () => {
     expect(keyLabel('volume_up')).toBe('Volume Up');
     expect(keyLabel('key_103')).toBe('Digit 3');
   });
+});
+
+describe('caption abbreviations', () => {
+  it.each([
+    ['Power Toggle', 'Power'],
+    ['Context Menu', 'Menu'],
+    ['Page Down', 'Pg Dn'],
+    ['Page Up', 'Pg Up'],
+    ['Skip Forward', 'Skip Fwd'],
+    ['Skip Back', 'Skip Back'],
+    ['Volume Up', 'Vol Up'],
+    ['Channel Down', 'Ch Down'],
+    ['Computer 4', 'PC 4'],
+  ])('%s -> %s', (a, b) => expect(abbreviate(a)).toBe(b));
 });

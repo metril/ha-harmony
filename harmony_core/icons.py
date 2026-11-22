@@ -113,7 +113,7 @@ ICONS: tuple[Icon, ...] = (
     Icon(97, 'kvm', ('kvm', 'matrix', 'hdmiswitch', 'switcher')),
     Icon(98, 'plug', ('socket', 'smartplug')),
     Icon(99, 'pc', ('pc', 'computer', 'desktop', 'workstation')),
-    Icon(100, 'laptop', ('laptop', 'notebook', 'macbook')),
+    Icon(100, 'laptop', ('laptop', 'notebook', 'macbook', 'mac')),
     Icon(101, 'hdmi1', ('port1',)),
     Icon(102, 'hdmi2', ('port2',)),
     Icon(103, 'hdmi3', ('port3',)),
@@ -121,7 +121,7 @@ ICONS: tuple[Icon, ...] = (
     Icon(105, 'av', ('av', 'composite', 'rca', 'analog')),
     Icon(106, 'usb', ('usb',)),
     Icon(107, 'cctv', ('cctv', 'camera', 'security', 'doorbell')),
-    Icon(108, 'cctv_off', ('cameraoff', 'cctvoff', 'privacy')),
+    Icon(108, 'cctv_off', ('cameraoff', 'cctvoff', 'privacy', 'clear')),
     Icon(109, 'garage', ('garage', 'garagedoor', 'carport')),
 )
 ICON_IDS: dict[str, int] = {i.name: i.id for i in ICONS}

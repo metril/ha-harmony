@@ -143,7 +143,7 @@
    },
    "expect": {
     "font": "b13",
-    "px": 172,
+    "px": 176,
     "text_px": 71,
     "fits": true,
     "over": 0,
@@ -168,7 +168,7 @@
    },
    "expect": {
     "font": "b13",
-    "px": 172,
+    "px": 176,
     "text_px": 108,
     "fits": true,
     "over": 0,
@@ -193,7 +193,7 @@
    },
    "expect": {
     "font": "b13",
-    "px": 104,
+    "px": 108,
     "text_px": 104,
     "fits": true,
     "over": 0,
@@ -686,7 +686,7 @@
    },
    "expect": {
     "font": "b13",
-    "px": 104,
+    "px": 108,
     "text_px": 80,
     "fits": true,
     "over": 0,
@@ -713,10 +713,10 @@
    },
    "expect": {
     "font": "b13",
-    "px": 104,
+    "px": 108,
     "text_px": 171,
     "fits": false,
-    "over": 67,
+    "over": 63,
     "shown": "Clear Garage Ca..."
    }
   },
@@ -915,10 +915,10 @@
    },
    "expect": {
     "font": "b13",
-    "px": 53,
+    "px": 55,
     "text_px": 116,
     "fits": false,
-    "over": 63,
+    "over": 61,
     "shown": "Keyboa..."
    }
   }
@@ -967,10 +967,10 @@
    "over": 7
   },
   {
-   "s": "中文字符串",
+   "s": "\u4e2d\u6587\u5b57\u7b26\u4e32",
    "font": "b13",
    "px": 49,
-   "shown": "中文字符...",
+   "shown": "\u4e2d\u6587\u5b57\u7b26...",
    "over": 1
   }
  ]

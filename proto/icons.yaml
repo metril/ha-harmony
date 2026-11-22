@@ -99,7 +99,7 @@ icons:
   - {id: 97, name: kvm, keywords: [kvm, matrix, hdmiswitch, switcher]}
   - {id: 98, name: plug, keywords: [socket, smartplug]}
   - {id: 99, name: pc, keywords: [pc, computer, desktop, workstation]}
-  - {id: 100, name: laptop, keywords: [laptop, notebook, macbook]}
+  - {id: 100, name: laptop, keywords: [laptop, notebook, macbook, mac]}
   - {id: 101, name: hdmi1, keywords: [port1]}
   - {id: 102, name: hdmi2, keywords: [port2]}
   - {id: 103, name: hdmi3, keywords: [port3]}
@@ -107,5 +107,5 @@ icons:
   - {id: 105, name: av, keywords: [av, composite, rca, analog]}
   - {id: 106, name: usb, keywords: [usb]}
   - {id: 107, name: cctv, keywords: [cctv, camera, security, doorbell]}
-  - {id: 108, name: cctv_off, keywords: [cameraoff, cctvoff, privacy]}
+  - {id: 108, name: cctv_off, keywords: [cameraoff, cctvoff, privacy, clear]}
   - {id: 109, name: garage, keywords: [garage, garagedoor, carport]}

@@ -173,6 +173,12 @@ _PHRASES = (
     ("Aspect Ratio", "Aspect"),
     ("Input HDMI", "HDMI"),
     ("Fast Forward", "FF"),
+    ("Power Toggle", "Power"),
+    ("Context Menu", "Menu"),
+    ("Page Down", "Pg Dn"),
+    ("Page Up", "Pg Up"),
+    ("Skip Forward", "Skip Fwd"),
+    ("Skip Back", "Skip Back"),
 )
 SHORT = {
     "Volume": "Vol",
@@ -184,6 +190,7 @@ SHORT = {
     "Favourites": "Favs",
     "Favorites": "Favs",
     "Subtitles": "CC",
+    "Computer": "PC",
 }
 
 
