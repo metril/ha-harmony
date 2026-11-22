@@ -1,4 +1,8 @@
-import '../src/components/hh-colour-field'; // lazy in the app; loaded up front here (happy-dom cannot upgrade late)
+import '../src/components/hh-colour-field'; // lazy in the app; every lazy studio part is loaded up front here (happy-dom cannot upgrade late)
+import '../src/components/hh-palette';
+import '../src/components/hh-inspector';
+import '../src/components/hh-page-strip';
+import '../src/components/hh-action-picker';
 import '../src/components/hh-ha-browser';
 import { beforeEach, describe, expect, it } from 'vitest';
 import '../src/components/hh-app';
