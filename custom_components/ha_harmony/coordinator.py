@@ -1423,6 +1423,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         await self._send_tiles({self._cur(t.entity_id) for t in self.compiled.tiles}, (remote,))
         self.app_status.on_remote_attached(remote)  # a page push drops the rings too
 
+    def _np_activity(self, after: str | None) -> None:
+        """The remote drops its Now Playing card on an activity change: when the activity that just
+        started shows the feed's player, send the current state again."""
+        media = self.compiled.media.get(after) if after else None
+        if media and self._cur(media.get("now_playing_entity") or "") == self.now_playing.plex:
+            self.now_playing.resend()
+
     def _apply_media(self) -> None:
         """Point the app rings and Now Playing at the entities of the live config's `media:`."""
         self.app_status.configure(self.compiled.apps)
@@ -1552,6 +1559,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 self._notify(TOPIC_ACTIVITY)
             if before != self.current_activity_id:
                 self.app_status.refresh()
+                self._np_activity(self.current_activity_id)
         elif mtype is MsgType.KEY_EVENT:
             self._remote_seen()
             action = KEY_ACTIONS.get(data["action"], "press")
