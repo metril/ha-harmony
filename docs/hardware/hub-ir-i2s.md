@@ -68,7 +68,7 @@ cycle.
   `0xb80b0000`, `udelay(100)`) and finally writes `0x62` to `0xb80a0010`.
 - `release` clears all descriptors' owner bits, pauses DMA, unmaps/frees the
   ring and clears the slot flag (@0x758-0x8cc). `hal` never closes in normal
-  operation.
+  operation; neither does our daemon (the boot hook holds the fd, section 10).
 
 ## 3. ioctl commands
 
@@ -460,12 +460,18 @@ duration: the daemon was emitting a correct waveform into a gated-off output.
 Implements the section 9 sequence behind `hp_ir_sink`; host-tested with injected syscalls and
 diffed byte-for-byte against `tools/ir_bench.c --out`. Engine `port_mask` bit n maps to START bit
 16+n (`--ir-ports`, default `0x01` = bit 16, the built-in emitter; mask 0 = all configured ports;
-an empty result is `-HP_E_INVAL`). `/dev/i2s` is opened on the first send and
-held for the daemon's life, like stock `hal` (DSIZE/MODE/VOLUME once; per send FREQ, write, START;
-DRAIN of the previous waveform at the start of the next send). It is never closed during operation:
-closing frees the DMA ring while IRQ 23 may still fire, which hard-froze the hub right after an
-activity's IR sends (the old close ~25 ms after DRAIN). No timer reaping. Not yet verified on the
-device: the held-fd flow, any carrier other than 37900 Hz.
+an empty result is `-HP_E_INVAL`). The daemon **never opens or closes `/dev/i2s`**: the boot hook
+(or `deploy_hub.py run`'s holder shell) write-opens it once on fd 9 (`9>`, O_WRONLY; `9<>` would pick the
+mic slot) and the daemon adopts it with `--i2s-fd 9` (DSIZE/MODE/VOLUME once per daemon life; per send FREQ,
+write, START; DRAIN of the previous waveform at the start of the next send). Why: the kernel runs
+`ath_i2s_release` on the last `fput` of the struct file, and dup/fork/inherit share it, so while the hook
+shell holds the file a daemon exit (crash, SIGKILL, OTA restart) never reaches `ath_i2s_close`, which frees
+the DMA ring while IRQ 23 may still fire and hard-froze the hub (a daemon close ~25 ms after DRAIN, then a
+daemon crash after `send_ir`). The speaker slot is single-open (a second write-open is EBUSY), so the
+holder must be the only opener. The daemon sets FD_CLOEXEC on the fd (bt-helper must not inherit it) and
+validates it (`fstat` S_ISCHR, writable); without `--i2s-fd` it exits 1 before touching any device. No timer
+reaping, no fallback for a hook without the holder. Not yet verified on the device: the holder flow, any
+carrier other than 37900 Hz.
 
 ## 11. Capture (receive) path
 

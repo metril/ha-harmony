@@ -1,9 +1,12 @@
 import asyncio
 import json
+import os
+import re
 import signal
 import socket
 import struct
 import subprocess
+import time
 from pathlib import Path
 
 import aiohttp
@@ -160,6 +163,77 @@ def test_real_backend_without_i2s_exits_nonzero(built_binaries):
         check=False, capture_output=True, text=True, timeout=5,
     )
     assert res.returncode != 0 and "/dev/i2s" in res.stderr
+
+
+def test_real_backend_requires_the_i2s_fd_from_the_boot_hook(built_binaries):
+    # The daemon never opens /dev/i2s itself (a close of it freezes the hub): no --i2s-fd, no hardware.
+    res = subprocess.run(
+        [str(built_binaries / "hub"), "--token", "t", "--no-mdns", "--port", "0"],
+        check=False, capture_output=True, text=True, timeout=5,
+    )
+    assert res.returncode == 1 and "--i2s-fd" in res.stderr
+
+
+@pytest.mark.parametrize("fd", ["2", "1024", "x"])
+def test_i2s_fd_is_range_checked(built_binaries, fd):
+    res = subprocess.run(
+        [str(built_binaries / "hub"), "--token", "t", "--no-mdns", "--i2s-fd", fd],
+        check=False, capture_output=True, text=True, timeout=5,
+    )
+    assert res.returncode != 0 and "--i2s-fd" in res.stderr
+
+
+def _hub_with_fd9(built_binaries, src_fd, *args, **kw):
+    """Start the hub with src_fd as its fd 9, set up in the child only (never clobbers the test runner's fds)."""
+    return subprocess.Popen(
+        [str(built_binaries / "hub"), "--token", "t", "--no-mdns", "--i2s-fd", "9", *args],
+        pass_fds=(src_fd, 9), preexec_fn=lambda: os.dup2(src_fd, 9), text=True, **kw,
+    )  # fmt: skip
+
+
+def test_i2s_fd_must_be_a_writable_char_device(built_binaries, tmp_path):
+    plain = os.open(tmp_path / "f", os.O_WRONLY | os.O_CREAT)  # a regular file, not a device
+    ro = os.open("/dev/null", os.O_RDONLY)
+    try:
+        for src in (plain, ro):
+            p = _hub_with_fd9(built_binaries, src, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            err = p.communicate(timeout=5)[1]
+            assert p.returncode == 1 and "writable character device" in err
+    finally:
+        os.close(plain)
+        os.close(ro)
+
+
+def test_hub_starts_with_a_held_i2s_fd_and_never_closes_it(built_binaries, tmp_path):
+    src = os.open("/dev/null", os.O_WRONLY)  # stands in for the hook's `9>/dev/i2s`
+    try:
+        proc = _hub_with_fd9(
+            built_binaries, src, "--port", "0", "--cache", str(tmp_path / "c.json"),
+            "--state", str(tmp_path / "s.json"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )  # fmt: skip
+    finally:
+        os.close(src)
+    try:
+        time.sleep(1.0)
+        assert proc.poll() is None, "the hub must start with the adopted fd"
+        info = Path(f"/proc/{proc.pid}/fdinfo/9").read_text()  # close-on-exec: bt-helper must not inherit it
+        assert int(re.search(r"flags:\s*(\d+)", info).group(1), 8) & 0o2000000
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_hub_sources_never_open_or_close_the_i2s_fd():
+    """No open()/close() of the i2s fd anywhere in hub/: the boot hook is its only opener."""
+    root = Path(__file__).resolve().parents[2] / "hub"
+    bad = re.compile(r"\bopen\s*\([^)]*i2s|\bclose\s*\([^)]*(i2s|dev_fd|\bh->fd)|HP_HW_DEFAULT_DEV")
+    for src in [*root.rglob("*.c"), *root.rglob("*.h")]:
+        code = re.sub(r"/\*.*?\*/|//[^\n]*", "", src.read_text(), flags=re.DOTALL)
+        if src.name.startswith("hw_sinks") and re.search(r"ops\.(open|close)|\(\*(open|close)\)", code):
+            raise AssertionError(f"{src}: the hw ops table must have no open/close")
+        for m in bad.finditer(code):
+            line = code[: m.start()].count("\n")
+            assert False, f"{src}:{line}: {m.group(0)!r} opens or closes the /dev/i2s fd"
 
 
 def test_rf_debug_flag_parses(built_binaries):

@@ -38,10 +38,18 @@ run_hook() {
 		killall() { :; }
 		# each sleep the hook starts is one line in $SELFTEST_POLLMARK: cases sync on it, not on timing
 		sleep() {
+			# the hook's parked watcher (sleep 3600 forever) exits once the run is over
+			if [ "$1" = 3600 ]; then
+				while [ ! -e "$T/unpark" ]; do command sleep "${HAH_SELFTEST_TICK:-1}"; done
+				exit 0
+			fi
 			[ -n "${SELFTEST_POLLMARK:-}" ] && echo "$1" >>"$SELFTEST_POLLMARK"
 			command sleep "$@"
 		}
 		reboot() { echo reboot >>"$T/reboot.log"; }
+		: >"$T/fake-i2s" # a regular file stands in for /dev/i2s; the hook never creates it
+		HAH_I2S_DEV="$T/fake-i2s"
+		export HAH_I2S_DEV
 		HAH_ROOT="$R" HAH_START_DELAY=0 HAH_HEALTHY_SECS=1 HAH_POLL_SECS=1
 		HAH_POLL_SLEEP="${HAH_SELFTEST_NAP:-}" HAH_HEALTHY_POLLS="${HAH_SELFTEST_POLLS:-}"
 		HAH_LOG_MAX_LINES="${SELFTEST_LOGMAX:-}"
@@ -94,6 +102,7 @@ wait_log() {
 			while IFS= read -r l; do
 				case "$l" in
 				*"$1"*) return 0 ;;
+				*"parked"*) [ "$1" = "watcher done" ] && return 0 ;; # the watcher never ends: it parks holding /dev/i2s
 				esac
 			done <"$(CLOG)"
 		fi
@@ -127,7 +136,7 @@ echo "selftest in $T (hook $HOOK)"
 # 1. conf loop terminates, including a last line with no trailing newline
 mkroot 'port=8099\ntoken=lastline'
 run_hook
-if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "--token-file $R/data/ha-harmony/hub.conf --port 8099 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy" ]; then
+if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "--token-file $R/data/ha-harmony/hub.conf --port 8099 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy --i2s-fd 9" ]; then
 	pass "conf without trailing newline"
 else
 	fail "conf without trailing newline (DEMO=$DEMO argv=$(cat "$T/argv" 2>/dev/null))"
@@ -170,7 +179,7 @@ if [ "$nl" = 4 ]; then pass "read-based line count stops over the cap"; else fai
 # 5. optional argv pieces expand correctly (${var:+...})
 mkroot 'token=abc==\nhub_id=my-hub\nrf=spi\nrf_slot=2\nport=8100\nconfig_budget_kib=4096\n'
 run_hook
-want="--token-file $R/data/ha-harmony/hub.conf --port 8100 --hub-id my-hub --rf-spi --rf-slot 2 --config-budget 4096 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy"
+want="--token-file $R/data/ha-harmony/hub.conf --port 8100 --hub-id my-hub --rf-spi --rf-slot 2 --config-budget 4096 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy --i2s-fd 9"
 if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ]; then
 	pass "argv quoting with rf, hub_id and '=' in token"
 else
@@ -180,7 +189,7 @@ fi
 # 5a. rf=spi alone: the radio is enabled and no slot flag is passed (the hub learns it)
 mkroot 'token=abc\nrf=spi\n'
 run_hook
-want="--token-file $R/data/ha-harmony/hub.conf --port 8099 --rf-spi --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy"
+want="--token-file $R/data/ha-harmony/hub.conf --port 8099 --rf-spi --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy --i2s-fd 9"
 if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ]; then
 	pass "rf=spi without rf_slot passes no --rf-slot"
 else
@@ -198,7 +207,7 @@ if [ "$DEMO" = unset ]; then pass "bad config_budget_kib: stock"; else fail "bad
 # 5d. config_budget_kib below the daemon's 256 floor is ignored with a log line, the daemon still starts
 mkroot 'token=abc\nconfig_budget_kib=100\n'
 run_hook
-want="--token-file $R/data/ha-harmony/hub.conf --port 8099 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy"
+want="--token-file $R/data/ha-harmony/hub.conf --port 8099 --heartbeat $R/var/volatile/ha-harmony.hb --health-file $R/var/volatile/ha-harmony.healthy --i2s-fd 9"
 if [ "$DEMO" = 1 ] && [ "$(cat "$T/argv" 2>/dev/null)" = "$want" ] && grep -q 'config_budget_kib=100 is below 256 - ignored' "$(CLOG)" 2>/dev/null; then
 	pass "config_budget_kib below 256: ignored, logged, daemon starts without --config-budget"
 else
@@ -547,6 +556,7 @@ fi
 : >"$T/stop"
 wait_log "watcher done"
 
+: >"$T/unpark"
 sleep "${HAH_SELFTEST_FINAL:-3}" # let the 1 s watchers finish before the caller deletes the directory
 echo "selftest done: $fails failure(s)"
 [ "$fails" = 0 ]

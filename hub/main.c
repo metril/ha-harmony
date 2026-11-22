@@ -272,6 +272,7 @@ int main(int argc, char **argv) {
     long hb_secs = 5;
     long budget_kib = HP_MAP_BUDGET_BYTES / 1024; /* --config-budget */
     long ir_ports = HP_HW_DEFAULT_IR_PORTS;
+    long i2s_fd = -1; /* --i2s-fd: /dev/i2s write fd opened and held by the boot hook */
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
     const char *bt_helper = NULL, *bt_dir = NULL; /* --bt-helper (tests: the fake helper), --bt-dir (default: next to the state file) */
     int mdns = -1; /* -1 = default: on for the real daemon, off under --sim */
@@ -307,6 +308,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--ident-dir") && i + 1 < argc) ident_dir = argv[++i];
         else if (!strcmp(argv[i], "--hw-id") && i + 1 < argc) hw_id = argv[++i];
         else if (!strcmp(argv[i], "--fw-version") && i + 1 < argc) fw_version = argv[++i];
+        else if (!strcmp(argv[i], "--i2s-fd") && i + 1 < argc) { if (hp_parse_num(argv[++i], 3, 1023, &i2s_fd)) return bad_num("--i2s-fd", argv[i]); }
         else if (!strcmp(argv[i], "--ir-ports") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, 255, &ir_ports)) return bad_num("--ir-ports", argv[i]); }
         else if (!strcmp(argv[i], "--bt-helper") && i + 1 < argc) bt_helper = argv[++i];
         else if (!strcmp(argv[i], "--bt-dir") && i + 1 < argc) bt_dir = argv[++i];
@@ -319,7 +321,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--idle-timeout-ms") && i + 1 < argc) { if (hp_parse_num(argv[++i], 1, INT32_MAX, &idle_ms)) return bad_num("--idle-timeout-ms", argv[i]); }
         else {
             hp_log("usage: hub [--sim] [--port N] (--token T | --token-file PATH) [--cache PATH] [--state PATH] [--rf PATH | --rf-spi [--rf-slot N] [--rf-debug]] "
-                            "[--ota-dir DIR [--ota-target FILE] [--ota-allow-dev] [--health-file FILE]] [--hub-id ID] [--ident-dir DIR] [--hw-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] "
+                            "[--ota-dir DIR [--ota-target FILE] [--ota-allow-dev] [--health-file FILE]] [--hub-id ID] [--ident-dir DIR] [--hw-id ID] [--fw-version V] [--heartbeat PATH [--heartbeat-secs N]] [--ir-ports MASK] [--i2s-fd N] "
                             "[--config-budget KiB] [--auth-timeout-ms N] [--idle-timeout-ms N] [--mdns|--no-mdns] [--mdns-port N] "
                             "[--mdns-addr A] [--mdns-dest A:P] [--bt-helper EXE] [--bt-dir DIR]\n");
             return 2;
@@ -378,15 +380,23 @@ int main(int argc, char **argv) {
             if (dl < 200) snprintf(slot_file, sizeof slot_file, "%.*srf_slot", dl, state);
         }
         hp_rf_spi_cfg_t rc_cfg = {NULL, (uint8_t)rf_slot, NULL, HP_RF_SPI_ROLE_HUB, 0, rf_debug, NULL, NULL, slot_file};
-        hp_hw_cfg_t hc = {NULL, (uint8_t)ir_ports, NULL, rf_spi ? &rc_cfg : NULL};
-        int hr = hp_hw_sinks_open(&hc, &g_hw);
-        if (hr == -HP_E_HALBUSY) {
-            hp_log("hub: stock hal holds the hardware (or could not be ruled out): "
-                            "run `tools/deploy_hub.py quiesce` first\n");
+        /* The daemon never opens or closes /dev/i2s (a close frees the DMA ring under live IRQs and freezes the
+         * hub): the boot hook holds the file and passes the fd. No fd, no hardware. */
+        if (i2s_fd < 0) {
+            hp_log("hub: --i2s-fd N is required (the boot hook opens /dev/i2s and passes it; see tools/boot/rcS.harmony)\n");
             return 1;
         }
+        struct stat ist;
+        int ifl = fcntl((int)i2s_fd, F_GETFL);
+        if (fstat((int)i2s_fd, &ist) != 0 || !S_ISCHR(ist.st_mode) || ifl < 0 || (ifl & O_ACCMODE) == O_RDONLY) {
+            hp_log("hub: --i2s-fd %ld is not a writable character device\n", i2s_fd);
+            return 1;
+        }
+        (void)fcntl((int)i2s_fd, F_SETFD, FD_CLOEXEC); /* bt-helper must not inherit it */
+        hp_hw_cfg_t hc = {(int)i2s_fd, (uint8_t)ir_ports, NULL, rf_spi ? &rc_cfg : NULL};
+        int hr = hp_hw_sinks_open(&hc, &g_hw);
         if (hr < 0) {
-            hp_log("hub: cannot open /dev/i2s (%d)\n", hr);
+            hp_log("hub: cannot start the hardware backend (%d)\n", hr);
             return 1;
         }
         g_hub.sinks = g_hw.sinks;

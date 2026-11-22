@@ -24,6 +24,20 @@ Armed means: on boot our `hub` daemon replaces stock `hal` (`DEMO_MODE=1`), star
    after the reboot command, the daemon listens about 45 s in, the health mark lands at about 150 s uptime.
    The daemon is started with `--token-file hub.conf`, so the token is not on its argv. The `rf_spi: link up` line may appear late.
 
+## Who holds /dev/i2s
+
+The boot hook's background watcher shell write-opens `/dev/i2s` once (fd 9) and passes it to the daemon as
+`--i2s-fd 9`; the daemon never opens or closes it. So a daemon crash or kill never closes the device (a close
+frees the DMA ring and froze the hub). `ls -l /proc/*/fd | grep ' -> /dev/i2s'` shows `sh` and `hub`.
+
+- When the daemon is gone for good (respawn budget exhausted, `respawn_max=0`, no pid, early death without a
+  reboot) the watcher logs `holding /dev/i2s, parked` and sleeps forever, still holding the device. The hub still
+  answers ping/SSH; there is just no daemon until the next reboot.
+- If `/dev/i2s` cannot be opened the watcher logs `cannot open ... no daemon, strike N stands` and starts nothing.
+- **Never kill the hook shell** (`killall sh`, `kill` of the watcher): that releases the device, and the next close
+  can freeze the hub. Reboot instead.
+- `deploy_hub.py run` uses the same holder (and parks after the hub exits); `restore` reboots.
+
 ## Status / disarm
 
 - `tools/install_boot_hook.py status`: marker, binary md5, token-redacted conf, strike counter, tails of the
