@@ -184,3 +184,37 @@ async def test_attach_resend_runs_pos_on_and_a_failed_cover_fetch_is_retried(has
     last = [a for c, a in client.sent if c == "now_playing"][-1]
     assert last["pos"] == 130
     feed.stop()
+
+
+async def test_text_goes_out_even_when_the_cover_cannot_be_fetched(hass):
+    """Field bug: with no HA URL configured the default cover fetch raised NoURLAvailableError, which killed
+    the push before the now_playing text was sent (and nothing logged it)."""
+    client = FakeClient()
+    feed = npl.NowPlayingFeed(hass, client, lambda: (1,), lambda r: True, lambda coro, name: hass.async_create_task(coro, name))
+    feed.start()
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=dt_util.utcnow(), **PLEX_ATTRS)
+    await hass.async_block_till_done()
+    assert {c for c, _ in client.sent} == {"now_playing"} and client.sent[-1][1]["t1"] == "Severance"
+    assert feed.sent_now_playing >= 1 and feed.cover_errors == 1
+    feed.stop()
+    await asyncio.sleep(0)
+
+
+async def test_feed_primes_from_the_current_state_on_start_and_on_attach(hass):
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=dt_util.utcnow(), **dict(PLEX_ATTRS, entity_picture=None))
+    client, up = FakeClient(), [False]
+    client.connected = False
+    feed = npl.NowPlayingFeed(
+        hass, client, lambda: (1,), lambda r: up[0], lambda coro, name: hass.async_create_task(coro, name)
+    )
+    feed.start()  # nothing has changed since: the start itself must read the state
+    await hass.async_block_till_done()
+    assert client.sent == []
+    client.connected = up[0] = True
+    feed.on_remote_attached(1)
+    await hass.async_block_till_done()
+    assert [c for c, _ in client.sent] == ["now_playing"]
+    feed.stop()
+    await asyncio.sleep(0)
