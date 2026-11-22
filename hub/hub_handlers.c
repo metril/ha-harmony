@@ -104,6 +104,9 @@ int hub_next_timeout_ms(const hub_ctx_t *c) {
         int r = hp_rf_link_next_timeout_ms(&c->link, hp_sched_now(&c->sched));
         if (r >= 0 && (t < 0 || r < t)) t = r;
     }
+    /* A silent remote may have been accepted by a transport probe (rf_up) after this iteration's pump looked: nothing
+     * else would wake the loop to announce it, so pump again at once (rf_link_up clears this). */
+    if (c->sinks.rf && c->sinks.rf->attached && !c->rf_attached && c->sinks.rf->attached(c->sinks.rf->self)) t = 0;
     return t;
 }
 void hub_run_timers(hub_ctx_t *c) {

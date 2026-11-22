@@ -317,6 +317,19 @@ static void test_link_up_resets_in_flight_counters(void) {
     CT_EQ(H.page_out[3], 0);
 }
 
+/* a silent remote accepted by a transport probe after the pump looked (rf_up in a flush or timer) is announced by
+ * the very next loop iteration: the poll must not sleep on it, nothing else would wake the hub */
+static void test_silent_attach_after_pump_wakes_the_loop(void) {
+    world();
+    pump();
+    CT_CHECK(streq(seq(), ""));
+    r_up(); /* accepted outside the pump's own check; the remote sends nothing */
+    CT_EQ(hub_next_timeout_ms(&H), 0);
+    pump();
+    CT_CHECK(streq(seq(), "a"));
+    CT_CHECK(hub_next_timeout_ms(&H) != 0);
+}
+
 int main(void) {
     test_attach_during_pump_recv();
     test_attach_between_recv_and_flag();
@@ -327,5 +340,6 @@ int main(void) {
     test_frames_before_loss_delivered_then_cleared();
     test_first_frame_announces_first();
     test_link_up_resets_in_flight_counters();
+    test_silent_attach_after_pump_wakes_the_loop();
     return CT_DONE();
 }
