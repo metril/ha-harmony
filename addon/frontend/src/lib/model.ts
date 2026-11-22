@@ -34,6 +34,8 @@ export interface Device {
   /** stock icon name (proto/icons.yaml): shown for the device and the default icon of widgets that target it */
   icon?: string;
   aliases?: string[];
+  /** devices sharing a group are one physical box: one row and page in the Device List template */
+  group?: string;
   settle_ms?: number;
   power?: { on?: IrAction; off?: IrAction; toggle?: IrAction };
   inputs?: Record<string, IrAction>;
@@ -86,6 +88,8 @@ export interface Page {
 }
 export interface Config {
   devices?: Device[];
+  /** optional name / icon per device group (default: the first member's own) */
+  groups?: Record<string, { name?: string; icon?: string }>;
   activities?: Activity[];
   keys?: Record<string, unknown>;
   pages?: Page[];

@@ -102,6 +102,15 @@ pages:
   device's stock numeric id and stock name as aliases, so an automation written for the stock
   integration (`device: "51887071"`) needs only its `entity_id` changed. An alias may not equal
   another device's id or be shared by two devices.
+- **Device `group`** (optional id, 1-31 of `a-z0-9_`; valid on `ir`, `ha` and `bt` devices): devices that
+  share a group are one physical box controlled several ways (the Shield: a Bluetooth device for keys plus a
+  Home Assistant device for app launching). The Device List page template makes one row and one page per
+  group instead of per device: power keys, then command keys, then inputs (merged, no duplicates), then the
+  app / script cards of the Home Assistant member (up to 4 cards, then compact cards), then All Commands.
+  The row's name and icon come from the group's first device (in `devices` order) unless a top-level
+  `groups:` entry overrides them: `groups: {shield: {name: Shield, icon: nvidia}}` (both keys optional).
+  Only the template reads groups; hand-built pages, activities
+  and the compiled config are unchanged.
 - **Keys** are the Elite's 35 physical keys, written as the snake_case form of stock's name
   (`volume_up`, `select`, `home_control_1`, ...; the stock spelling `VolumeUp` is accepted too) or
   `key_<0..127>` for a raw logical code. The table is `proto/schema.yaml` (`keys:`): up, down, left,

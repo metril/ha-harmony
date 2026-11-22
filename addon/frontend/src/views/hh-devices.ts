@@ -63,6 +63,7 @@ export class HhDevices extends StoreElement {
       .dbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
       .back { display: inline-flex; align-items: center; gap: 4px; color: var(--tx2); text-decoration: none; font-weight: 600; height: 36px; }
       .name { font-size: 20px; font-weight: 650; border: 1px solid transparent; border-radius: var(--r1); background: transparent; color: var(--tx); padding: 2px 8px; min-width: 0; flex: 1 1 200px; height: 40px; }
+      .grp { width: 110px; height: 30px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf); color: var(--tx); padding: 0 8px; }
       .name:hover, .name:focus { border-color: var(--line); background: var(--sf); }
       .seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--sf2); border-radius: var(--r1); }
       .seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 5px; background: transparent; color: var(--tx2); font-weight: 600; font-size: 12px; cursor: pointer; }
@@ -437,6 +438,8 @@ export class HhDevices extends StoreElement {
         <details class="iconpick"><summary aria-label="Device icon">${deviceArt(d, 'dic')}<span>Icon</span></summary>
           <hh-icon-picker .value=${d.icon ?? ''} @hh-icon=${(e: CustomEvent<string | undefined>) => this.put(patchDevice(this.store.config, d.id, { icon: e.detail }), undefined, e.detail ? `Icon of ${d.name ?? d.id} set to ${e.detail}` : `${d.name ?? d.id} uses the default icon`)}></hh-icon-picker></details>
         <input class="name" aria-label="Device name" .value=${d.name ?? d.id} @change=${(e: Event) => this.put(patchDevice(this.store.config, d.id, { name: trimBytes((e.target as HTMLInputElement).value.trim()) || undefined }), `name${d.id}`)} />
+        <label class="muted" title="Devices with the same group are one box: one row and page in the Device List template">Group <input type="text" class="grp" list="hh-dev-groups" aria-label="Device group" placeholder="none" .value=${d.group ?? ''} @change=${(e: Event) => this.put(patchDevice(this.store.config, d.id, { group: (e.target as HTMLInputElement).value.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').slice(0, 31) || undefined }), `group${d.id}`)} /></label>
+        <datalist id="hh-dev-groups">${[...new Set(this.devices.map((x) => x.group).filter((g): g is string => !!g))].map((g) => html`<option value=${g}></option>`)}</datalist>
         <span class="muted">${bytes.used}/31 B · id <span class="mono">${d.id}</span> · ${sourceLabel(d)}${this.errorsOf(idx) ? ` · ${this.errorsOf(idx)} errors` : ''}</span>
       </div>
       ${bt

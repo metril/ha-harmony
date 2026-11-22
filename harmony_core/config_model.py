@@ -433,6 +433,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             vol.Optional("name"): _name,
             vol.Optional("aliases", default=list): [_name],
             vol.Optional("icon"): vol.In(list(ICON_IDS), msg="unknown icon"),
+            vol.Optional("group"): _slug,
             # The entity whose state is the device's state (on = not off/standby/unavailable).
             vol.Optional("entity"): vol.All(str, vol.Match(_ENTITY, msg="not an entity id")),
             vol.Optional("power"): vol.All(
@@ -457,6 +458,8 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("aliases", default=list): [_name],
         # Stock icon shown for the device in the editor and the default for widgets that target it.
         vol.Optional("icon"): vol.In(list(ICON_IDS), msg="unknown icon"),
+        # Devices sharing a `group` are one physical box: one row and one page on the remote's Devices list.
+        vol.Optional("group"): _slug,
         vol.Optional("power"): power,
         vol.Optional("inputs", default=dict): {_name: ir},
         vol.Optional("settle_ms"): _int(0, 60000),
@@ -472,6 +475,7 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             vol.Optional("name"): _name,
             vol.Optional("aliases", default=list): [_name],
             vol.Optional("icon"): vol.In(list(ICON_IDS), msg="unknown icon"),
+            vol.Optional("group"): _slug,
             vol.Optional("address"): _bt_address,  # none until the host is paired
             vol.Optional("transport", default="auto"): vol.In(TRANSPORTS),
             vol.Optional("commands"): {_cmd_name: _bt_command},  # default: every built-in
@@ -563,6 +567,8 @@ def _build_schema(r: _Resolver) -> vol.Schema:
     return vol.Schema(
         {
             vol.Optional("devices", default=list): [any_device],
+            # Optional name / icon per device group (default: the first member's own).
+            vol.Optional("groups"): {_slug: {vol.Optional("name"): _name, vol.Optional("icon"): vol.In(list(ICON_IDS), msg="unknown icon")}},
             vol.Optional("activities", default=list): [activity],
             vol.Optional("keys", default=dict): keys,
             vol.Optional("bt_remotes"): [bt_rem],
