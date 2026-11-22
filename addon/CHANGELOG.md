@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3 (2026-11-21)
+
+- Now Playing appears when the activity starts while something is already playing (the remote clears the card on an activity change; the integration now sends the current state again, with the right position). Update the integration; no hub or remote update needed.
+
 ## 0.4.2 (2026-11-21)
 
 - Now Playing works: the cover is read from the Plex entity in-process (no Home Assistant URL needed; a missing URL used to stop the feed before the title was sent), the feed sends what is already playing on start and when the remote reattaches, failed sends are retried, and the position after a reattach is correct. Send counters are in the integration diagnostics; the hub and remote log Now Playing and cover traffic.
