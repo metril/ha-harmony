@@ -25,11 +25,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-import aiohttp
+from homeassistant.components.media_player import DATA_COMPONENT
 from homeassistant.core import Event, HomeAssistant, State, callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import EventStateChangedData, async_track_state_change_event
-from homeassistant.helpers.network import get_url
 from homeassistant.util import dt as dt_util
 
 from .api import HarmonyCommandError, HarmonyConnectionError
@@ -209,14 +207,18 @@ class NowPlayingFeed:
         self._unsub: Callable[[], None] | None = None
         self._task: asyncio.Task[None] | None = None
         self._dirty = False
-        self._last: Playing | None = None
-        self._start = 0.0  # estimated media start (seconds, clock epoch) of the last send
+        self._last: Playing | None = None  # the latest built state (what an attaching remote is shown)
+        self._sent: Playing | None = None  # the state last handed to the hub for the remotes then attached
+        self._start = 0.0  # estimated media start (clock epoch seconds) of _last
+        self._sent_start = 0.0  # the same for _sent
         self._cover: tuple[int, str] | None = None  # (cid, base64) of the cover for _last
         self._cover_sent: int | None = None  # cid last handed to the hub (it keeps it; resent on a rejoin only)
         self._warned: set[int] = set()
         self._cover_for: int | None = None  # cid the cover above (or a fetch in flight) belongs to
         self.sent_now_playing = 0
         self.sent_covers = 0
+        self.failed_sends = 0
+        self.cover_errors = 0
 
     # -- lifecycle (events only: nothing here schedules a timer)
     def start(self) -> None:
@@ -224,6 +226,7 @@ class NowPlayingFeed:
         self._unsub = async_track_state_change_event(
             self.hass, [self.shield, self.plex], self._on_event
         )
+        self._on_event(None)  # type: ignore[arg-type]  # prime from the current state
 
     def configure(self, shield: str | None, plex: str | None) -> None:
         """Use the entities of the live config (None keeps the option default)."""
@@ -231,10 +234,9 @@ class NowPlayingFeed:
         if (shield, plex) == (self.shield, self.plex):
             return
         self.shield, self.plex = shield, plex
-        self._last = None
-        if self._unsub:  # started: follow the new entities
+        self._last = self._sent = None
+        if self._unsub:  # started: follow the new entities (start() primes)
             self.start()
-            self._on_event(None)  # type: ignore[arg-type]
 
     def stop(self) -> None:
         if self._unsub:
@@ -253,41 +255,62 @@ class NowPlayingFeed:
 
     def on_remote_attached(self, remote: int) -> None:
         """A remote (re)joined: it knows nothing, show it the current state again."""
-        if self._last is None:
-            return
-        self._spawn(self._push(self._last, (remote,), force=True), "ha_harmony now playing attach")
+        cur = self._last
+        if cur is None:
+            cur = self._build()
+            if cur is None:
+                return
+            self._start = self._clock().timestamp() - cur.pos
+        self._last = cur
+        self._spawn(self._attach_push(cur, remote), "ha_harmony now playing attach")
+
+    async def _attach_push(self, cur: Playing, remote: int) -> None:
+        try:
+            await self._push(cur, (remote,), force=True)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("now playing attach push failed")
+
+    def _build(self) -> Playing | None:
+        return build(
+            self.hass.states.get(self.shield),
+            self.hass.states.get(self.plex),
+            self._clock(),
+            self.plex_apps,
+            self.font,
+        )
 
     # -- work
     async def _run(self) -> None:
         while self._dirty:
             self._dirty = False
-            cur = build(
-                self.hass.states.get(self.shield),
-                self.hass.states.get(self.plex),
-                self._clock(),
-                self.plex_apps,
-                self.font,
-            )
-            if cur is None or not self._changed(cur):
+            cur = self._build()
+            if cur is None:
                 continue
-            await self._push(cur, tuple(self._remotes()))
-
-    def _changed(self, cur: Playing) -> bool:
-        last = self._last
-        start = self._clock().timestamp() - cur.pos
-        same = last is not None and cur.sig == last.sig
-        return not (same and (cur.flags != PLAYING or abs(start - self._start) <= _SEEK_SLACK))
-
-    async def _push(self, cur: Playing, remotes: tuple[int, ...], force: bool = False) -> None:
-        if not force:
             self._last = cur
             self._start = self._clock().timestamp() - cur.pos
+            if not self._changed(cur):
+                continue
+            try:
+                await self._push(cur, tuple(self._remotes()))
+            except Exception:  # noqa: BLE001  (one bad push must not end the feed)
+                _LOGGER.exception("now playing push failed")
+
+    def _changed(self, cur: Playing) -> bool:
+        last = self._sent
+        same = last is not None and cur.sig == last.sig
+        return not (same and (cur.flags != PLAYING or abs(self._start - self._sent_start) <= _SEEK_SLACK))
+
+    async def _push(self, cur: Playing, remotes: tuple[int, ...], force: bool = False) -> None:
         targets = [r for r in remotes if self._attached(r) and self.client.connected]
         if not targets:
             return
         if cur.cid and cur.picture and self._cover_for != cur.cid:
-            raw = await self._fetch(cur.picture)
-            why = "fetch failed"
+            try:
+                raw = await self._fetch(self.plex)
+            except Exception as exc:  # noqa: BLE001  (the cover is optional: the text must still go out)
+                raw, why = None, f"fetch error: {exc!r}"
+            else:
+                why = "fetch failed"
             if raw is not None:
                 try:
                     data = await self.hass.async_add_executor_job(quantize_cover, raw)
@@ -296,17 +319,21 @@ class NowPlayingFeed:
                 else:
                     self._cover_for, self._cover = cur.cid, (cur.cid, base64.b64encode(data).decode())
                     why = ""
+            if why:
+                self.cover_errors += 1
             if why and cur.cid not in self._warned:  # retried on the next push; logged once per cid
                 self._warned.add(cur.cid)
-                _LOGGER.warning("cover for %s: %s", cur.picture, why)
+                _LOGGER.warning("cover for %s: %s", self.plex, why)
         if self._cover and self._cover[0] == cur.cid and (force or self._cover_sent != cur.cid):
-            self._cover_sent = cur.cid
             for r in targets:
                 if await self._send(CMD_COVER, {"remote": r, "cid": cur.cid, "data": self._cover[1]}):
+                    self._cover_sent = cur.cid
                     self.sent_covers += 1
+                    _LOGGER.debug("cover %08x sent to remote %s", cur.cid, r)
         pos = cur.pos
         if force and cur.flags == PLAYING:  # the stored pos is old: run it on like the hub does
             pos = max(int(self._clock().timestamp() - self._start), 0)
+        ok = False
         for r in targets:
             if await self._send(
                 CMD_NOW_PLAYING,
@@ -320,7 +347,14 @@ class NowPlayingFeed:
                     "t2": cur.t2,
                 },
             ):
+                ok = True
                 self.sent_now_playing += 1
+                _LOGGER.debug(
+                    "now_playing sent to remote %s: flags=%s pos=%s dur=%s t1=%r t2=%r",
+                    r, cur.flags, pos, cur.dur, cur.t1, cur.t2,
+                )
+        if ok and not force:  # a failed send leaves it unset: the next event tries again
+            self._sent, self._sent_start = cur, self._start
 
     async def _send(self, command: str, args: dict[str, Any]) -> bool:
         try:
@@ -328,18 +362,16 @@ class NowPlayingFeed:
                 MsgType.COMMAND, {"device": HUB_DEVICE, "command": command, "args": args}
             )
         except (HarmonyCommandError, HarmonyConnectionError) as exc:
+            self.failed_sends += 1
             _LOGGER.debug("%s not delivered: %s", command, exc)
             return False
         return True
 
-    async def _fetch_picture(self, picture: str) -> bytes | None:
-        """The entity picture through HA itself (a relative path is HA's own proxy)."""
-        url = picture if "://" in picture else f"{get_url(self.hass)}{picture}"
-        try:
-            async with async_get_clientsession(self.hass).get(url) as resp:
-                if resp.status != 200:
-                    return None
-                return await resp.read()
-        except (TimeoutError, aiohttp.ClientError) as exc:
-            _LOGGER.debug("cover fetch %s failed: %s", picture, exc)
+    async def _fetch_picture(self, entity_id: str) -> bytes | None:
+        """The player's cover bytes, in process (no URL, token or TLS): the entity's own image getter."""
+        comp = self.hass.data.get(DATA_COMPONENT)
+        entity = comp.get_entity(entity_id) if comp is not None else None
+        if entity is None:
             return None
+        raw, _ctype = await entity.async_get_media_image()
+        return raw

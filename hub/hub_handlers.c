@@ -357,6 +357,14 @@ static bool remote_awake(const hub_ctx_t *h) {
     return h->link.rx_frames && (int32_t)(hp_sched_now(&h->sched) - h->link.last_rx) < HUB_AWAKE_MS;
 }
 
+/* One shipped line per kind at most every 2 s (the first always): a playing track resends often, the log must not flood. */
+static bool np_log_ok(hub_ctx_t *h, unsigned kind) {
+    uint32_t now = hp_sched_now(&h->sched);
+    if (h->np_log_at[kind] && (int32_t)(now - h->np_log_at[kind]) < 2000) return false;
+    h->np_log_at[kind] = now ? now : 1;
+    return true;
+}
+
 static hub_cover_t *cover_slot(hub_ctx_t *h, uint8_t remote) {
     for (unsigned i = 0; i < HUB_COVER_MAX; i++)
         if (h->cover[i].used && h->cover[i].remote == remote) return &h->cover[i];
@@ -431,6 +439,7 @@ static void cover_np_flush(hub_ctx_t *h) {
             if (c->off >= HUB_COVER_BYTES) {
                 c->hold = false;
                 cover_mark_sent(c, c->cid);
+                if (np_log_ok(h, 3)) hp_log("hub: cover %08x sent over RF to remote %u\n", (unsigned)c->cid, (unsigned)c->remote);
             }
         }
     }
@@ -454,6 +463,9 @@ static void cover_np_flush(hub_ctx_t *h) {
         int rc = hp_rf_link_send(&h->link, HP_MSG_NOW_PLAYING, pl, pn, hp_sched_now(&h->sched));
         if (rc == -HP_E_BUSY || rc == -HP_E_NOENT) return;
         p->hold = false;
+        if (np_log_ok(h, 1))
+            hp_log("hub: now_playing sent over RF to remote %u (cid %08x flags %u pos %u)\n", (unsigned)p->remote,
+                   (unsigned)p->cid, (unsigned)p->flags, (unsigned)pos);
     }
 }
 
@@ -920,6 +932,9 @@ static int cmd_now_playing(hub_ctx_t *h, uint32_t id, const cJSON *args, char *r
     p->l2 = (uint8_t)hp_text_cut(t2->valuestring, strlen(t2->valuestring), HUB_NP_TEXT);
     memcpy(p->t1, t1->valuestring, p->l1);
     memcpy(p->t2, t2->valuestring, p->l2);
+    if (np_log_ok(h, 0))
+        hp_log("hub: now_playing held for remote %u (cid %08x flags %u awake %d)\n", (unsigned)r, (unsigned)cid, (unsigned)fl,
+               (int)remote_awake(h));
     cover_np_flush(h);
     return reply_ok(id, "command_result", true, NULL, reply, cap, len);
 }
@@ -950,6 +965,7 @@ static int cmd_cover(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply, 
     c->tries = 0;
     c->hold = true;
     memcpy(c->data, buf, n);
+    if (np_log_ok(h, 2)) hp_log("hub: cover %08x held for remote %u (awake %d)\n", (unsigned)cid, (unsigned)r, (int)remote_awake(h));
     cover_np_flush(h);
     return reply_ok(id, "command_result", true, NULL, reply, cap, len);
 }

@@ -49,7 +49,17 @@ async def async_get_config_entry_diagnostics(
             "attached": link.attached,
             "last_push_ms": link.push_ms,
         }
+    np = c.now_playing
     return {
+        "now_playing": {
+            "shield": np.shield,
+            "plex": np.plex,
+            "sent_now_playing": np.sent_now_playing,
+            "sent_covers": np.sent_covers,
+            "failed_sends": np.failed_sends,
+            "cover_errors": np.cover_errors,
+            "last": None if np._last is None else {"flags": np._last.flags, "t1": np._last.t1, "t2": np._last.t2},
+        },
         "entry": {
             "data": async_redact_data(dict(entry.data), TO_REDACT),
             "options": dict(entry.options),

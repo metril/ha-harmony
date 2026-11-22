@@ -410,6 +410,8 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
   case APP_LINK_EV_NOW_PLAYING: {
     heard(a, now);
     ra_display_note(&a->display, RA_WHY_STATUS, 0);
+    ra_logf(&a->sys, "now_playing rx cid %08x flags %u act %u on %d", (unsigned)ev->cid, (unsigned)ev->flags,
+            (unsigned)a->ui.act_idx, a->ui.act_on);
     ra_np_t n = {.flags = ev->flags, .pos = ev->pos, .dur = ev->dur, .cid = ev->cid, .at = now};
     memcpy(n.t1, ev->data, sizeof n.t1); /* rf_link left both NUL-terminated within 49 bytes */
     memcpy(n.t2, ev->data + 49, sizeof n.t2);
@@ -419,6 +421,7 @@ static void handle_link_event(app_t *a, const app_link_event_t *ev, uint64_t now
   }
   case APP_LINK_EV_COVER:
     heard(a, now);
+    if (ev->off == 0) ra_logf(&a->sys, "cover rx cid %08x (first chunk)", (unsigned)ev->cid);
     if (ra_cover_chunk(ev->cid, ev->off, ev->data, ev->len) == 1) {
       ra_display_note(&a->display, RA_WHY_STATUS, 0);
       ra_ui_np_cover(&a->ui, ev->cid);
