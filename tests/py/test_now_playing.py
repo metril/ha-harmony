@@ -218,3 +218,93 @@ async def test_feed_primes_from_the_current_state_on_start_and_on_attach(hass):
     assert [c for c, _ in client.sent] == ["now_playing"]
     feed.stop()
     await asyncio.sleep(0)
+
+
+def _feed(hass, client, now, **kw):
+    return npl.NowPlayingFeed(
+        hass, client, lambda: (1,), lambda r: True,
+        lambda coro, name: hass.async_create_task(coro, name), clock=lambda: now[0], **kw,
+    )
+
+
+def _playing(hass, now, **extra):
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **dict(PLEX_ATTRS, entity_picture=None, **extra))
+
+
+async def test_attach_after_a_prime_with_no_remote_runs_the_position_on(hass):
+    client, now = FakeClient(), [dt_util.utcnow()]
+    client.connected = False
+    feed = _feed(hass, client, now)
+    _playing(hass, now)
+    feed.start()
+    await hass.async_block_till_done()
+    now[0] += timedelta(seconds=30)
+    client.connected = True
+    feed.on_remote_attached(1)
+    await hass.async_block_till_done()
+    assert client.sent[-1][1]["pos"] == 130
+    feed.stop()
+    await asyncio.sleep(0)
+
+
+async def test_a_failed_send_is_retried_on_the_next_event(hass):
+    from custom_components.ha_harmony.api import HarmonyConnectionError
+
+    class Flaky(FakeClient):
+        fail = True
+
+        async def async_send(self, _type, data):
+            if self.fail:
+                raise HarmonyConnectionError("down")
+            return await super().async_send(_type, data)
+
+    client, now = Flaky(), [dt_util.utcnow()]
+    feed = _feed(hass, client, now)
+    feed.start()
+    _playing(hass, now)
+    await hass.async_block_till_done()
+    assert client.sent == [] and feed.failed_sends >= 1
+    client.fail = False
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **dict(PLEX_ATTRS, entity_picture=None, media_position=101))
+    await hass.async_block_till_done()  # same content, same sig: only a retry sends it
+    assert [c for c, _ in client.sent] == ["now_playing"]
+    feed.stop()
+    await asyncio.sleep(0)
+
+
+async def test_cover_comes_from_the_player_entity_in_process(hass):
+    from homeassistant.components.media_player import DATA_COMPONENT
+
+    class Player:
+        async def async_get_media_image(self):
+            return _png(), "image/png"
+
+    class Comp:
+        def get_entity(self, entity_id):
+            return Player() if entity_id == PLEX else None
+
+    hass.data[DATA_COMPONENT] = Comp()
+    client, now = FakeClient(), [dt_util.utcnow()]
+    feed = _feed(hass, client, now)
+    feed.start()
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **PLEX_ATTRS)
+    await hass.async_block_till_done()
+    cover = next(a for c, a in client.sent if c == "cover")
+    assert len(base64.b64decode(cover["data"])) == 1760
+    feed.stop()
+    await asyncio.sleep(0)
+
+
+async def test_attach_push_errors_are_logged(hass, caplog):
+    class Boom(FakeClient):
+        async def async_send(self, _type, data):
+            raise RuntimeError("boom")
+
+    now = [dt_util.utcnow()]
+    feed = _feed(hass, Boom(), now)
+    _playing(hass, now)
+    feed.on_remote_attached(1)
+    await hass.async_block_till_done()
+    assert "attach push failed" in caplog.text
