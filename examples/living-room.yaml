@@ -53,12 +53,14 @@ devices:
     kind: bt            # pair it in the editor; address is optional until then
     name: Shield
     icon: nvidia
+    group: shield       # the Shield is one box: this Bluetooth device (keys) and shield_ha (apps) share one Devices row
     transport: auto
 
   - id: shield_ha
     kind: ha
     name: Shield Apps
     icon: grid_apps
+    group: shield
     entity: media_player.nvidia_shield_tv
     power:
       'on': {ha: {service: media_player.turn_on, target: {entity_id: media_player.nvidia_shield_tv}}}
@@ -218,14 +220,13 @@ pages:
     title: Devices
     layout: fixed
     cols: 12
-    rows: 6
+    rows: 5
     widgets:
       - {type: button, id: n_tv, x: 0, y: 0, w: 12, label: TV, icon: tv, nav: dev_tv}
       - {type: button, id: n_shield, x: 0, y: 1, w: 12, label: Shield, icon: nvidia, nav: dev_shield}
-      - {type: button, id: n_shield_apps, x: 0, y: 2, w: 12, label: Shield Apps, icon: grid_apps, nav: dev_shield_apps}
-      - {type: button, id: n_spk, x: 0, y: 3, w: 12, label: Speakers, icon: speaker, nav: dev_speakers}
-      - {type: button, id: n_spk_pwr, x: 0, y: 4, w: 12, label: Speaker Power, icon: plug, nav: dev_speaker_power}
-      - {type: button, id: n_kvm, x: 0, y: 5, w: 12, label: KVM, icon: kvm, nav: dev_kvm}
+      - {type: button, id: n_spk, x: 0, y: 2, w: 12, label: Speakers, icon: speaker, nav: dev_speakers}
+      - {type: button, id: n_spk_pwr, x: 0, y: 3, w: 12, label: Speaker Power, icon: plug, nav: dev_speaker_power}
+      - {type: button, id: n_kvm, x: 0, y: 4, w: 12, label: KVM, icon: kvm, nav: dev_kvm}
 
   - id: lights
     title: Lights
@@ -285,31 +286,22 @@ pages:
       - {type: button, id: tv_h3, x: 0, y: 3, w: 12, shape: row, label: HDMI 3, icon: hdmi3, action: {device: tv, input: HDMI 3}}
       - {type: button, id: tv_ant, x: 0, y: 4, w: 12, shape: row, label: TV, icon: tv, action: {device: tv, input: TV}}
 
-  - id: dev_shield
+  - id: dev_shield          # one page for the Shield group: power, keys (Bluetooth), then app cards (Home Assistant)
     title: Shield
     layout: fixed
     cols: 12
-    rows: 2
+    rows: 4
     widgets:
-      - {type: button, id: sh_home, x: 0, y: 0, w: 4, label: Home, icon: home, action: {device: shield, command: Home}}
-      - {type: button, id: sh_back, x: 4, y: 0, w: 4, label: Back, icon: back, action: {device: shield, command: Back}}
-      - {type: button, id: sh_menu, x: 8, y: 0, w: 4, label: Menu, icon: menu, action: {device: shield, command: Menu}}
-      - {type: button, id: sh_info, x: 0, y: 1, w: 4, label: Info, icon: info, action: {device: shield, command: Info}}
-      - {type: button, id: sh_play, x: 4, y: 1, w: 4, label: Play/Pause, icon: play, action: {device: shield, command: PlayPause}}
-      - {type: button, id: sh_stop, x: 8, y: 1, w: 4, label: Stop, icon: stop, action: {device: shield, command: Stop}}
-
-  - id: dev_shield_apps
-    title: Shield Apps
-    layout: fixed
-    cols: 12
-    rows: 5
-    widgets:
-      - {type: button, id: sa_on, x: 0, y: 0, w: 4, label: Power On, icon: power, action: {device: shield_ha, command: power_on}}
-      - {type: button, id: sa_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: shield_ha, command: power_off}}
-      - {type: button, id: plex, app_id: com.plexapp.android, x: 0, y: 1, w: 12, shape: row, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}, icon_only: false}
-      - {type: button, id: yt, app_id: org.smarttube.stable, x: 0, y: 2, w: 12, shape: row, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}, icon_only: false}
-      - {type: button, id: cam, x: 0, y: 3, w: 12, shape: row, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
-      - {type: button, id: camx, x: 0, y: 4, w: 12, shape: row, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
+      - {type: button, id: sh_on, x: 0, y: 0, w: 4, label: Power On, icon: power, role: primary, action: {device: shield_ha, command: power_on}}
+      - {type: button, id: sh_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: shield_ha, command: power_off}}
+      - {type: button, id: sh_home, x: 8, y: 0, w: 4, label: Home, icon: home, action: {device: shield, command: Home}}
+      - {type: button, id: sh_back, x: 0, y: 1, w: 4, label: Back, icon: back, action: {device: shield, command: Back}}
+      - {type: button, id: sh_menu, x: 4, y: 1, w: 4, label: Menu, icon: menu, action: {device: shield, command: Menu}}
+      - {type: button, id: sh_info, x: 8, y: 1, w: 4, label: Info, icon: info, action: {device: shield, command: Info}}
+      - {type: button, id: plex, app_id: com.plexapp.android, x: 0, y: 2, w: 6, shape: card, align: left, compact: true, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}}
+      - {type: button, id: yt, app_id: org.smarttube.stable, x: 6, y: 2, w: 6, shape: card, align: left, compact: true, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
+      - {type: button, id: cam, x: 0, y: 3, w: 6, shape: card, align: left, compact: true, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
+      - {type: button, id: camx, x: 6, y: 3, w: 6, shape: card, align: left, compact: true, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
 
   - id: dev_speakers
     title: Speakers

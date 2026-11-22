@@ -746,6 +746,39 @@ export function fitTitle(full: string, short?: string, px = 100): string {
 /** A device that is a list of apps (a Home Assistant media player): its page uses the Apps layout. */
 const isAppDevice = (d: Device): boolean => inferDeviceIcon(d) === 'grid_apps';
 
+/**
+ * The physical boxes of a config, in first-member order: devices sharing a `group` are one box, the rest are a box each.
+ * Name and icon: the `groups:` entry, else the first member's own name and icon (its brand or kind when it sets none; a Home
+ * Assistant app list gives way to the next member's glyph, since it is not the box itself).
+ */
+export function deviceGroups(cfg: Config): { id: string; name: string | undefined; icon: string | undefined; members: Device[] }[] {
+  const out: { id: string; name: string | undefined; icon: string | undefined; members: Device[] }[] = [];
+  const byKey = new Map<string, Device[]>();
+  for (const d of cfg.devices ?? []) {
+    const k = d.group ? `g:${d.group}` : `d:${d.id}`;
+    const m = byKey.get(k);
+    if (m) m.push(d);
+    else {
+      const members = [d];
+      byKey.set(k, members);
+      out.push({ id: d.group ?? d.id, name: undefined, icon: undefined, members });
+    }
+  }
+  for (const g of out) {
+    const first = g.members[0] as Device;
+    const own = groupGlyph(first, g.members);
+    const o = first.group ? cfg.groups?.[g.id] : undefined;
+    g.name = o?.name ?? first.name;
+    g.icon = o?.icon && stockIconByName(o.icon) ? o.icon : own;
+  }
+  return out;
+}
+const groupGlyph = (first: Device, members: Device[]): string | undefined => {
+  const icon = inferDeviceIcon(first);
+  if (icon !== 'grid_apps' || first.icon) return icon;
+  return members.map((m) => inferDeviceIcon(m)).find((i) => i && i !== 'grid_apps') ?? icon;
+};
+
 /** The glyph for an activity card: a brand logo matched by name (Shield TV -> NVIDIA), else the best keyword match, else the TV. */
 export function activityIcon(name: string): string | undefined {
   const brand = (name.toLowerCase().match(/[a-z0-9]+/g) ?? []).map((w) => BRAND_WORDS[w]).find((n) => n && stockIconByName(n));
@@ -888,25 +921,33 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       // Every device with something to press gets a row (a glyph on each) and a page: power keys, commands as keys, inputs inline
       // (up to 4) or behind an Inputs row (5 or more), and All Commands for the keys that do not fit.
       const listId = pid('devices');
-      type Plan = { d: Device; id: string; power: Widget[]; keys: Widget[]; inputs: { label: string; action: Action }[] };
+      type Plan = { id: string; name: string | undefined; icon: string | undefined; power: Widget[]; keys: Widget[]; inputs: { label: string; action: Action }[]; apps: Widget[] };
       const plans: Plan[] = [];
       const key = (dev: Device, cmd: string): Widget => {
         const icon = bestIcon(cmd);
         const label = fitShort(cmd, (s) => textPx(s, 'r12') <= 61);
         return { type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label: trimToBytes(label, LABEL_MAX), action: { device: dev.id, command: cmd }, ...(icon ? { icon } : {}) };
       };
-      for (const d of devices.slice(0, 16)) {
-        const inputs = deviceInputs(d);
+      for (const g of deviceGroups({ ...cfg, devices: devices.slice(0, 16) })) {
         const power: Widget[] = [];
-        if (d.power?.on || d.power?.off || d.power?.toggle) {
-          const { on, off, toggle } = d.power;
-          const mk1 = (label: string, command: string, extra: Partial<Widget> = {}): Widget => ({ type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label, icon: 'power', action: { device: d.id, command }, ...extra });
-          if (on) power.push(mk1('Power On', 'power_on', { role: 'primary' }));
-          if (off) power.push(mk1('Power Off', 'power_off'));
-          if (toggle && !on && !off) power.push(mk1('Power', 'power_on'));
+        const keys: Widget[] = [];
+        const apps: Widget[] = [];
+        const inputs: { label: string; action: Action }[] = [];
+        for (const d of g.members) {
+          const own = deviceInputs(d);
+          if (d.power?.on || d.power?.off || d.power?.toggle) {
+            const { on, off, toggle } = d.power;
+            const mk1 = (label: string, command: string, extra: Partial<Widget> = {}): Widget => ({ type: 'button', id: mk('btn'), x: 0, y: 0, w: 4, h: 1, label, icon: 'power', action: { device: d.id, command }, ...extra });
+            if (on) power.push(mk1('Power On', 'power_on', { role: 'primary' }));
+            if (off) power.push(mk1('Power Off', 'power_off'));
+            if (toggle && !on && !off) power.push(mk1('Power', 'power_on'));
+          }
+          const ks = commandNames(d).filter((c) => !isHardKey(c) && !isInputCommand(d, c) && !/^power_(?:on|off)$/.test(c)).map((c) => key(d, c));
+          if (isAppDevice(d) && ks.length && !own.length) apps.push(...ks);
+          else keys.push(...ks);
+          for (const i of own) if (!inputs.some((o) => o.label === i.label)) inputs.push(i);
         }
-        const keys = commandNames(d).filter((c) => !isHardKey(c) && !isInputCommand(d, c) && !/^power_(?:on|off)$/.test(c)).map((c) => key(d, c));
-        if (power.length || keys.length || inputs.length) plans.push({ d, id: pid(`dev_${d.id}`.slice(0, 31)), power, keys, inputs });
+        if (power.length || keys.length || inputs.length || apps.length) plans.push({ id: pid(`dev_${g.id}`.slice(0, 31)), name: g.name, icon: g.icon, power, keys, inputs, apps });
       }
       const hasFav = (cfg.pages ?? []).some((p) => p.kind === 'favorites');
       const rowH = (n: number): number => (n ? n * 44 + (n - 1) * 2 : 0);
@@ -915,36 +956,22 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
       const grid = (ws: Widget[], y0 = 0): Widget[] => ws.map((w, i) => ({ ...w, x: (i % 3) * 4, y: y0 + Math.floor(i / 3) }));
       const devPages: Page[] = [];
       for (const p of plans) {
-        const title = fitTitle(trimToBytes(dn(p.d.name, p.d.id), LABEL_MAX));
-        if (isAppDevice(p.d) && p.keys.length && !p.inputs.length) {
-          // Apps layout: the power keys, then cards for up to 4 apps, compact cards from 5
-          const compact = p.keys.length > 4;
-          const y0 = Math.ceil(p.power.length / 3);
-          const fits = (s: string): boolean => {
-            const lb = labelBudget({ cols: 12, rows: 16, fixed: true }, { kind: 'button', x: 0, y: 0, w: 6, h: 1, label: s, shape: 'card', icon: 1, icon_only: false, compact });
-            return !lb || textPx(s, lb.font) <= lb.px;
-          };
-          const apps = p.keys.slice(0, 16).map((k, i): Widget => {
-            const cmd = String((k['action'] as { command?: string }).command ?? k.label ?? '');
-            const label = fitShort(cmd, fits);
-            const cut = !fits(label) && !!k.icon;
-            return { ...k, label: trimToBytes(label, LABEL_MAX), w: 6, x: (i % 2) * 6, y: y0 + Math.floor(i / 2), shape: 'card', align: 'left', icon_only: cut, ...(compact ? { compact: true } : {}) };
-          });
-          const ws = [...grid(p.power), ...apps];
-          devPages.push({ id: p.id, layout: 'fixed', cols: 12, rows: Math.max(...ws.map((w) => (w.y ?? 0) + 1)), title, widgets: ws });
-          continue;
-        }
+        const title = fitTitle(trimToBytes(dn(p.name, p.id), LABEL_MAX));
         const inline = p.inputs.length <= 4;
         const allKeys = [...p.power, ...p.keys];
+        // Apps layout: cards for up to 4 apps, compact cards from 5 (the page pages when it runs long)
+        const compact = p.apps.length > 4;
+        const nApps = Math.min(16, p.apps.length);
+        const appsH = nApps ? Math.ceil(nApps / 2) * (compact ? 56 : 80) + 8 : 0;
+        const cap = Math.max(276 - appsH, keysH(2) + 8 + rowH(1)); // two key rows and the All Commands row stay, the page pages for the rest
         let nav = inline ? p.inputs.length : p.inputs.length ? 1 : 0;
         // keys that do not fit above the rows go to All Commands, which then takes one row itself
-        let fit = allKeys.length;
         const room = (n: number): number => {
           let k = 0;
-          while (k < 16 && keysH(k + 1) + (n ? 8 + rowH(n) : 0) <= 276 && k * 3 < allKeys.length) k++;
+          while (k < 16 && keysH(k + 1) + (n ? 8 + rowH(n) : 0) <= cap && k * 3 < allKeys.length) k++;
           return k * 3;
         };
-        fit = Math.min(allKeys.length, room(nav));
+        let fit = Math.min(allKeys.length, room(nav));
         if (fit < allKeys.length) {
           nav += 1;
           fit = Math.min(allKeys.length, room(nav));
@@ -957,6 +984,17 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
         const restId = rest.length ? pid(`${p.id}_all`.slice(0, 31)) : '';
         if (inline) for (const i of p.inputs) widgets.push(rowBtn(i.label, inputIcon(i.label), y++, { action: i.action }));
         else if (p.inputs.length) widgets.push(rowBtn('Inputs', iconIf('input'), y++, { nav: inputsId }));
+        const fitsCard = (s: string): boolean => {
+          const lb = labelBudget({ cols: 12, rows: 16, fixed: true }, { kind: 'button', x: 0, y: 0, w: 6, h: 1, label: s, shape: 'card', icon: 1, icon_only: false, compact });
+          return !lb || textPx(s, lb.font) <= lb.px;
+        };
+        p.apps.slice(0, 16).forEach((k, i) => {
+          const cmd = String((k['action'] as { command?: string }).command ?? k.label ?? '');
+          const label = fitShort(cmd, fitsCard);
+          const cut = !fitsCard(label) && !!k.icon;
+          widgets.push({ ...k, label: trimToBytes(label, LABEL_MAX), w: 6, x: (i % 2) * 6, y: y + Math.floor(i / 2), shape: 'card', align: 'left', icon_only: cut, ...(compact ? { compact: true } : {}) });
+        });
+        y += Math.ceil(nApps / 2);
         if (rest.length) widgets.push(rowBtn('All Commands', iconIf('list'), y++, { nav: restId }));
         devPages.push({ id: p.id, layout: 'fixed', cols: 12, rows: Math.max(1, y), title, widgets });
         if (!inline) {
@@ -968,10 +1006,7 @@ export function templatePages(cfg: Config, id: TemplateId, ctx: { entities?: { e
           extra.push({ id: restId, layout: 'fixed', cols: 12, rows: Math.ceil(ws.length / 3), title: 'Commands', widgets: ws });
         }
       }
-      const rows = plans.map((p, i): Widget => {
-        const icon = inferDeviceIcon(p.d);
-        return rowBtn(dn(p.d.name, p.d.id), icon, i, { nav: p.id });
-      });
+      const rows = plans.map((p, i): Widget => rowBtn(dn(p.name, p.id), p.icon, i, { nav: p.id }));
       const list: Page = { id: listId, layout: 'fixed', cols: 12, rows: Math.max(1, rows.length), ...(hasFav ? {} : { kind: 'favorites' as const }), title: 'Devices', widgets: rows };
       return [list, ...devPages, ...extra];
     }

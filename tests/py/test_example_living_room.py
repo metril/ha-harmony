@@ -24,7 +24,6 @@ def test_devices_favorites_navigate_to_device_pages_and_home_has_nav():
     assert navs("devices") == {
         "TV": "dev_tv",
         "Shield": "dev_shield",
-        "Shield Apps": "dev_shield_apps",
         "Speakers": "dev_speakers",
         "Speaker Power": "dev_speaker_power",
         "KVM": "dev_kvm",

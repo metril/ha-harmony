@@ -53,7 +53,7 @@ def test_living_room_pages_fit_and_every_nav_row_has_a_glyph():
     assert len(c.models) <= MAX_PAGES
     assert all(w.icon for p in c.models for w in p.widgets if w.role == "nav")
     ids = {p["id"] for p in model["pages"]}
-    assert {"dev_tv", "dev_shield", "dev_shield_apps", "dev_speakers", "dev_speaker_power", "dev_kvm", "favorites"} <= ids
+    assert {"dev_tv", "dev_shield", "dev_speakers", "dev_speaker_power", "dev_kvm", "favorites"} <= ids
     fav = next(p for p in model["pages"] if p["id"] == "favorites")
     assert all(w.get("compact") and w["w"] == 6 for w in fav["widgets"])
 

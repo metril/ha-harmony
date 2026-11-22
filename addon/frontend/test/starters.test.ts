@@ -89,6 +89,93 @@ describe('starter pages', () => {
     expect(templatePages(c, 'devices')[0]!.widgets).toEqual([]);
   });
 
+  describe('device groups', () => {
+    const ha = (apps: string[], extra: object = {}) => ({ id: 'shield_ha', kind: 'ha', name: 'Shield Apps', icon: 'grid_apps', entity: 'media_player.nvidia_shield_tv', power: { on: ir, off: ir }, commands: cmds(...apps), ...extra });
+    const grouped = (apps = ['Plex', 'YouTube'], over: object = {}): Config =>
+      ({
+        devices: [
+          { id: 'shield', kind: 'bt', name: 'Shield', group: 'shield', commands: cmds('Plex Key', 'Settings', 'Subtitles') },
+          { id: 'tv', name: 'TV', commands: cmds('Subtitles') },
+          { ...ha(apps), group: 'shield' },
+        ],
+        activities: [],
+        pages: [],
+        ...over,
+      }) as unknown as Config;
+
+    it('one row and one page per group, named and iconed from the first member', () => {
+      const pages = templatePages(grouped(), 'devices');
+      expect(pages.map((p) => p.id)).toEqual(['devices', 'dev_shield', 'dev_tv']);
+      expect(pages[0]!.widgets.map((w) => [w.label, w.icon, w.nav])).toEqual([['Shield', 'nvidia', 'dev_shield'], ['TV', 'tv', 'dev_tv']]);
+      expect(pages[1]!.title).toBe('Shield');
+    });
+
+    it('the groups section overrides the row name and icon', () => {
+      const c = grouped(undefined, { groups: { shield: { name: 'Living Box', icon: 'streamer' } } });
+      expect(templatePages(c, 'devices')[0]!.widgets[0]).toMatchObject({ label: 'Living Box', icon: 'streamer' });
+    });
+
+    it('a group whose first member is the app list takes the next member glyph', () => {
+      const c = grouped();
+      c.devices = [{ ...c.devices![2]!, icon: undefined } as Device, c.devices![0]!];
+      expect(templatePages(c, 'devices')[0]!.widgets[0]).toMatchObject({ label: 'Shield Apps', icon: 'nvidia' });
+    });
+
+    it('the page runs power, keys, inputs, app cards, then All Commands', () => {
+      const c = grouped();
+      c.devices![0]!.commands = cmds('Settings', 'Subtitles', 'Num1', 'Aspect', 'Zoom', 'Mode', 'Sleep', 'Eject', 'Info Panel', 'Angle', 'Repeat', 'Random', 'Clear', 'Display', 'Setup', 'Title', 'Search', 'Audio', 'Slow', 'Step', 'Marker', 'Return To');
+      c.devices![0]!.inputs = { 'HDMI 1': ir } as never;
+      const pages = templatePages(c, 'devices');
+      const pg = pages.find((p) => p.id === 'dev_shield')!;
+      const ws = pg.widgets;
+      const kind = (w: (typeof ws)[number]): string => (w.label === 'All Commands' ? 'all' : w.shape === 'card' ? 'app' : w.shape === 'row' ? 'input' : w.icon === 'power' ? 'power' : 'key');
+      const seq = ws.map(kind).filter((k, i, a) => a[i - 1] !== k);
+      expect(seq).toEqual(['power', 'key', 'input', 'app', 'all']);
+      const y = (k: string): number => Math.min(...ws.filter((w) => kind(w) === k).map((w) => w.y ?? 0));
+      expect([y('power'), y('key'), y('input'), y('app'), y('all')].every((v, i, a) => i === 0 || v >= (a[i - 1] as number))).toBe(true);
+      expect(ws.filter((w) => kind(w) === 'app').map((w) => [w.label, (w.action as { device: string }).device, w.compact])).toEqual([['Plex', 'shield_ha', undefined], ['YouTube', 'shield_ha', undefined]]);
+      expect(pages.some((p) => p.id === 'dev_shield_all')).toBe(true);
+      expect(pg.widgets.at(-1)).toMatchObject({ label: 'All Commands', nav: 'dev_shield_all' });
+    });
+
+    it('apps past 4 turn compact, two a row', () => {
+      const pg = templatePages(grouped(['Plex', 'YouTube', 'Kodi', 'Netflix', 'Disney', 'Prime']), 'devices').find((p) => p.id === 'dev_shield')!;
+      const cards = pg.widgets.filter((w) => w.shape === 'card');
+      expect(cards).toHaveLength(6);
+      expect(cards.every((w) => w.compact && w.w === 6)).toBe(true);
+      expect(cards.map((w) => (w.y ?? 0) - (cards[0]!.y ?? 0))).toEqual([0, 0, 1, 1, 2, 2]);
+    });
+
+    it('too much content pages: 8 compact cards keep at least two key rows, the rest go to All Commands, no label is cut', () => {
+      const c = grouped(['Plex', 'YouTube', 'Kodi', 'Netflix', 'Disney', 'Prime', 'Hulu', 'Max']);
+      c.devices![0]!.commands = cmds('Settings', 'Subtitles', 'Num1', 'Aspect', 'Zoom', 'Mode', 'Sleep', 'Eject', 'Angle', 'Repeat', 'Random', 'Clear');
+      const pages = templatePages(c, 'devices');
+      const pg = pages.find((p) => p.id === 'dev_shield')!;
+      expect(pg.widgets.filter((w) => w.shape === 'card')).toHaveLength(8);
+      const keys = pg.widgets.filter((w) => w.w === 4 && w.shape !== 'card');
+      expect(keys.length).toBeGreaterThanOrEqual(6);
+      expect(pg.widgets.at(-1)).toMatchObject({ label: 'All Commands' });
+      expect(pages.find((p) => p.id === 'dev_shield_all')!.widgets.length).toBeGreaterThan(0);
+      expect(pageOverflow(pg, null)).toEqual([]);
+    });
+
+    it('inputs of the members merge without duplicates', () => {
+      const c = grouped();
+      c.devices![0]!.commands = cmds('Settings', 'InputHdmi1');
+      (c.devices![2] as Device).inputs = { 'HDMI 1': ir, 'HDMI 2': ir } as never;
+      const pg = templatePages(c, 'devices').find((p) => p.id === 'dev_shield')!;
+      const rows = pg.widgets.filter((w) => w.shape === 'row');
+      expect(rows.map((w) => w.label)).toEqual(['HDMI 1', 'HDMI 2']);
+    });
+
+    it('apps keep their HA device action so the app status binding still resolves', () => {
+      const pg = templatePages(grouped(), 'devices').find((p) => p.id === 'dev_shield')!;
+      const cards = pg.widgets.filter((w) => w.shape === 'card');
+      expect(cards.map((w) => w.action)).toEqual([{ device: 'shield_ha', command: 'Plex' }, { device: 'shield_ha', command: 'YouTube' }]);
+      expect(cards.map((w) => w.icon)).toEqual(['plex', 'youtube']);
+    });
+  });
+
   it('the favorites starter is a page of 6-wide compact cards', () => {
     const f = templatePages(cfg(), 'favorites')[0]!;
     expect(f.layout).toBe('fixed');
