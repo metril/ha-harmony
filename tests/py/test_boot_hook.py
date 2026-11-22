@@ -1306,17 +1306,32 @@ def test_held_through_an_ota_restart_and_a_rollback(root: Path) -> None:
     assert _holders(root / "dev-i2s")
 
 
-def test_missing_device_is_logged_starts_no_daemon_and_keeps_the_strike(root: Path) -> None:
+def _assert_no_device_reboots_and_counts(root: Path, dev: Path, conf: str = "token=t\n") -> None:
     install_daemon(root, 'echo x >>"$(dirname "$0")/runs"; sleep 30')
-    install_conf(root)
-    gone = root / "no-such-i2s"
-    source_hook(root, extra_env={"HAH_I2S_DEV": str(gone)})
-    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "cannot open")
+    install_conf(root, conf)
+    source_hook(root, extra_env={"HAH_I2S_DEV": str(dev)})
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "watcher done")
+    assert "cannot open" in log and "strike 1 stands" in log and "rebooting" in log
+    _wait_for(root / "reboot.log")
     time.sleep(0.3)
     assert _runs(root) == 0, "no device, no daemon"
-    assert not gone.exists(), "the hook must never create the device node"
     assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "1"
-    assert "strike 1 stands" in log and "parked" not in log
+
+
+def test_missing_device_reboots_and_counts_the_strike(root: Path) -> None:
+    gone = root / "no-such-i2s"
+    _assert_no_device_reboots_and_counts(root, gone)
+    assert not gone.exists(), "the hook must never create the device node"
+
+
+def test_missing_device_reboots_even_with_the_reboot_switch_off(root: Path) -> None:
+    _assert_no_device_reboots_and_counts(root, root / "no-such-i2s", "token=t\nreboot_on_early_death=0\n")
+
+
+def test_unopenable_device_reboots_and_counts_the_strike(root: Path) -> None:
+    bad = root / "i2s-dir"
+    bad.mkdir()  # exists, but `9>` on a directory fails
+    _assert_no_device_reboots_and_counts(root, bad)
 
 
 def test_restart_waits_for_the_old_pid_to_be_gone() -> None:

@@ -456,6 +456,19 @@ else
 						hah_blog "daemon ended: $hah_xw"
 					}
 
+					# No /dev/i2s: DEMO_MODE is already 1 so there is no stock stack either. Same rule as an early death,
+					# regardless of the switch: reboot while the persisted strike advances to stock after hah_limit boots.
+					hah_nodev() {
+						hah_blog "cannot open $hah_i2s - no daemon, strike $hah_n stands"
+						if [ "$(cat "$hah_counter" 2>/dev/null)" = "$hah_n" ]; then
+							hah_blog "rebooting (no $hah_i2s)"
+							hah_blog "watcher done"
+							reboot
+						else
+							hah_blog "not rebooting (strike not persisted)"
+						fi
+					}
+
 					sleep "$hah_delay"
 					if [ "$hah_stoplua" = 1 ]; then
 						# stock lua appears in ps as `lua` (and `luaworks` before it execs)
@@ -636,9 +649,9 @@ else
 							# Never fall off the end: the watcher holds /dev/i2s for the life of the boot.
 							hah_blog "holding $hah_i2s, parked"
 							while :; do sleep 3600; done
-						} 9>"$hah_i2s" || hah_blog "cannot open $hah_i2s - no daemon, strike $hah_n stands"
+						} 9>"$hah_i2s" || hah_nodev
 					else
-						hah_blog "cannot open $hah_i2s - no daemon, strike $hah_n stands"
+						hah_nodev
 					fi
 				) >/dev/null 2>&1 &
 			fi

@@ -48,9 +48,10 @@ DETACH_PID = "/tmp/ha-harmony-hub.pid"  # tmpfs; the hub's own pid, written by t
 # runs under a holder shell, like the boot hook: the shell write-opens the device once (fd 9, O_WRONLY: `9<>` would
 # pick the mic slot) and the hub inherits it as --i2s-fd 9. The shell ignores INT/TERM/HUP (the hub gets them back)
 # and parks when the hub ends, so the device is never released; only a reboot (`restore`) clears it.
+# A failing `exec 9>` exits the shell on BusyBox (rc 2), which is the wanted outcome: no device, no hub.
 HOLDER = (
     f'rm -f {DETACH_PID}; trap "" INT TERM HUP; exec 9>/dev/i2s || exit 1; '
-    f'(trap - INT TERM HUP; echo $$ >{DETACH_PID}; exec "$0" --i2s-fd 9 "$@"); '
+    f'(trap - INT TERM HUP; read -r h _ </proc/self/stat; echo "$h" >{DETACH_PID}; exec "$0" --i2s-fd 9 "$@"); '
     "while :; do sleep 3600; done"
 )
 WRITE_ROOTS = (REMOTE_DIR, "/tmp")  # the only places this tool may write
