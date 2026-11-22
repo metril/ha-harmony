@@ -6,7 +6,7 @@
 #include "remote/page/page.h"
 #include "remote/page/store.h"
 
-#define LOG_MAX 128
+#define LOG_MAX 512
 static hp_rf_msg_t rlog[LOG_MAX];
 static int nlog;
 static void log_msg(const hp_rf_msg_t *m) {
@@ -660,21 +660,22 @@ static void test_cover_hold_supersedes_never_evicts_pages_and_skips_sleep(void) 
     run(900);
     CT_CHECK(!R.up);
     uint8_t raw[40];
-    for (uint8_t i = 0; i < 40; i++) {
-        size_t n = mkpage(raw, i, 40, 5, 0, 0);
-        CT_CHECK(push_raw(i, raw, n));
+    for (uint8_t i = 0; i < HUB_PEND_MAX; i++) { /* v1 pages: distinct ids, no gen purge */
+        uint8_t b[] = {1, i, 1, 1, 0};
+        CT_CHECK(push_raw(i, b, sizeof b));
     }
-    CT_EQ(H.npend, 40); /* the page queue is full */
+    (void)raw;
+    CT_EQ(H.npend, HUB_PEND_MAX); /* the page queue is full */
     CT_CHECK(cover_cmd(21, 1));
     CT_CHECK(cover_cmd(22, 9)); /* supersedes the held 21 */
     CT_CHECK(np_cmd(22, 1, 100));
-    CT_EQ(H.npend, 40); /* no page lost to the cover or the now_playing */
+    CT_EQ(H.npend, HUB_PEND_MAX); /* no page lost to the cover or the now_playing */
     CT_EQ(H.pend_dropped, 0u);
     CT_EQ(count_type(HP_MSG_COVER_CHUNK) + count_type(HP_MSG_NOW_PLAYING), 0); /* nothing over the sleep path */
     run(2000);
     CT_EQ(count_type(HP_MSG_COVER_CHUNK), 0);
     hp_rf_link_set_awake(&RL, true, R.now);
-    run(8000);
+    run(150000); /* 255 held pages go first */
     CT_EQ(chunks_of(21, 1), 0); /* superseded: never sent */
     CT_EQ(chunks_of(22, 9), 8);
     const hp_rf_msg_t *m = last_of(HP_MSG_NOW_PLAYING);

@@ -1206,8 +1206,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return info is not None and info.gen == rp.gen and info.pages == len(rp.pages_v2)
 
     async def _await_theme_ack(self, link: RemoteLink, rp: RemotePages) -> bool:
-        """Up to THEME_ACK_WAIT seconds for the remote_info that says the set is complete."""
-        timer = asyncio.ensure_future(self._sleep(const.THEME_ACK_WAIT))
+        """Wait for the remote_info that says the set is complete. One deadline of THEME_ACK_WAIT plus
+        THEME_ACK_PER_PAGE per page (a big set takes the RF link that long); a remote_info that shows more
+        pages of this set than before restarts it, so a slow delivery that keeps progressing is never cut off."""
+        wait = const.THEME_ACK_WAIT + const.THEME_ACK_PER_PAGE * len(rp.pages_v2)
+        timer = asyncio.ensure_future(self._sleep(wait))
+        best = link.info.pages if link.info is not None and link.info.gen == rp.gen else 0
         try:
             while not self._theme_acked(link, rp):
                 link.info_event.clear()
@@ -1216,7 +1220,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     await asyncio.wait({waiter, timer}, return_when=asyncio.FIRST_COMPLETED)
                 finally:
                     waiter.cancel()
-                if timer.done():
+                info = link.info
+                if info is not None and info.gen == rp.gen and info.pages > best:
+                    best = info.pages  # progress: the window starts again
+                    timer.cancel()
+                    timer = asyncio.ensure_future(self._sleep(wait))
+                elif timer.done():
                     break
         finally:
             timer.cancel()

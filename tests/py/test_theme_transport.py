@@ -319,3 +319,20 @@ async def test_tiles_are_resent_after_the_pages_of_an_ack_timeout_resend(hass, r
     last_page = max(i for i, (t, _) in enumerate(hub.got) if t == "page_push")
     after = [d["args"] for t, d in hub.got[last_page + 1 :] if t == "command" and d["command"] == "tile_update"]
     assert any(a["text"] == "22 C" for a in after)  # every tile value again, after the final page
+
+
+async def test_a_slow_delivery_that_keeps_progressing_is_never_pushed_again(hass, rig, clock):  # noqa: F811
+    hub, c = await start(hass, rig)
+    rp = c.compiled.for_caps(15)
+    n = len(rp.pages_v2)
+    await settle(hass, lambda: len(sent(hub)) == 1 + n)
+    await settle(hass, clock.active)
+    want = const.THEME_ACK_WAIT + const.THEME_ACK_PER_PAGE * n
+    assert clock.waits[-1] == want  # the window scales with the set
+    for k in range(1, n):  # the remote stores page after page; each remote_info restarts the window
+        await hub.push("remote_info", {**FULL, "caps": 15, "gen": rp.gen, "pages": k})
+        await settle(hass, lambda k=k: clock.waits.count(want) >= 1 + k)
+    assert len(sent(hub)) == 1 + n  # nothing was sent a second time
+    await hub.push("remote_info", info_of(c))
+    await idle(hass, c)
+    assert c.links[1].pushed is not None and len(sent(hub)) == 1 + n

@@ -52,6 +52,7 @@ CAP_PAGING = 2
 # bit 2 = CAP_THEME_COLOR (palette + presets), bit 3 = CAP_THEME_CUSTOM (free colours + user theme)
 PUSH_RETRY_BASE = 15.0  # seconds before the first re-push of a set the remote did not confirm; doubles each time
 PUSH_RETRY_MAX = 300.0  # ... up to this
+THEME_ACK_PER_PAGE = 0.5  # extra seconds per page of the set (RF delivery is up to ~0.31 s a page)
 THEME_ACK_WAIT = 20.0  # seconds a pushed custom theme gets to show up as a complete set in the remote's remote_info
 TILE_TEXT_MAX = 31  # bytes, docs/proto/page-format.md
 

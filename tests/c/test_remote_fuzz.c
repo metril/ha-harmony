@@ -57,8 +57,8 @@ static void gen_event(void) {
   if (rnd(30) == 0) { st = 1 + rnd(6); sg = 1 + rnd(2); }
   unsigned total = rnd(10) ? st : 1 + rnd(6), gen = rnd(10) ? sg : 1 + rnd(2);
   switch (rnd(12)) {
-  case 0: case 1: case 2: case 3: { /* a valid page (the total is sometimes 0 or over 32: refused) */
-    unsigned t = rnd(12) == 0 ? (rnd(2) ? 0 : 33 + rnd(200)) : total;
+  case 0: case 1: case 2: case 3: { /* a valid page (the total is sometimes 0 or over HP_STORE_MAX: refused) */
+    unsigned t = rnd(12) == 0 ? (rnd(2) ? 0 : rnd(2) ? 253 + rnd(3) : 33 + rnd(220)) : total;
     ev_page(raw, gen_page(raw, rnd(t ? t : 1), t, gen));
     break;
   }
