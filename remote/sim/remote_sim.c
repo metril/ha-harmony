@@ -196,7 +196,7 @@ static int dump_page(long timeout_ms) {
     }
 }
 
-#define SIM_PAGES 32
+#define SIM_PAGES 252
 
 static struct {
     hp_page_t pages[SIM_PAGES];

@@ -6,7 +6,7 @@
 #include "remote/page/page.h"
 #include "remote/page/store.h"
 
-#define LOG_MAX 128
+#define LOG_MAX 512
 static hp_rf_msg_t rlog[LOG_MAX];
 static int nlog;
 static void log_msg(const hp_rf_msg_t *m) {
@@ -202,20 +202,20 @@ static void test_newer_gen_drops_held_pages_of_older_gen(void) {
     CT_EQ(count_pend(HP_MSG_PAGE_PUSH), 4);
 }
 
-/* 40 pages (32 of a config, 8 more of a bigger one would not exist: the cap is the store's 32) held while the
- * remote is away are all delivered, in order, when it comes back, and the page store fills from them. */
+/* A full set (HP_STORE_MAX pages) plus tiles, held while the
+ * remote is away, is all delivered, in order, when it comes back, and the page store fills from them. */
 static hp_store_t ST;
-static uint8_t order[64];
+static uint8_t order[256];
 static int norder;
 static void store_hook(const hp_rf_msg_t *m) {
     hp_rf_val_t v[3];
     if (m->type != HP_MSG_PAGE_PUSH || hp_rf_unpack(m->type, m->payload, m->len, v, 3) != 0) return;
-    if (norder < 64) order[norder++] = (uint8_t)v[1].u;
+    if (norder < 256) order[norder++] = (uint8_t)v[1].u;
     CT_EQ(hp_store_put(&ST, v[2].p, v[2].len), HP_STORE_OK);
 }
 static void store_reset(void) { norder = 0; hp_store_init(&ST); }
 
-static void test_forty_held_pages_fill_the_store_in_order(void) {
+static void test_max_held_pages_fill_the_store_in_order(void) {
     remote_hook = store_hook;
     world_reset_hook = store_reset;
     world_init(true, MODEL_S3);
@@ -224,17 +224,18 @@ static void test_forty_held_pages_fill_the_store_in_order(void) {
     run(900);
     CT_CHECK(!R.up);
     uint8_t raw[40];
-    for (uint8_t id = 0; id < 32; id++) CT_CHECK(push_raw(id, raw, mkpage(raw, id, 32, 0x55, id == 3 ? 1 : 0, 0)));
-    for (uint8_t t = 0; t < 8; t++) CT_CHECK(tile_cmd((uint8_t)(t + 1), 1, "t", -1));
-    CT_EQ(H.npend, 40); /* HUB_PEND_MAX: nothing was pushed out */
+    for (unsigned id = 0; id < HP_STORE_MAX; id++) CT_CHECK(push_raw((uint8_t)id, raw, mkpage(raw, (uint8_t)id, HP_STORE_MAX, 0x55, id == 3 ? 1 : 0, 0)));
+    for (uint8_t t = 0; t < 2; t++) CT_CHECK(tile_cmd((uint8_t)(t + 1), 1, "t", -1));
+    CT_EQ(H.npend, HP_STORE_MAX + 2); /* every page of a full set and the tiles fit HUB_PEND_MAX: nothing was pushed out */
+    CT_CHECK(H.npend <= HUB_PEND_MAX);
     run(300);
     CT_EQ(norder, 0);
     hp_rf_link_set_awake(&RL, true, R.now);
     run(20000);
-    CT_EQ(norder, 32);
+    CT_EQ(norder, HP_STORE_MAX);
     for (int i = 0; i < norder; i++) CT_EQ(order[i], i); /* in order */
     CT_EQ(H.npend, 0);
-    CT_EQ(hp_store_count(&ST), 32);
+    CT_EQ(hp_store_count(&ST), HP_STORE_MAX);
     CT_CHECK(hp_store_complete(&ST));
     CT_EQ(hp_store_find_kind(&ST, HP_PAGE_KIND_HOME), 3);
     CT_EQ(hp_rf_link_status(&H.link).failures, 0u);
@@ -252,11 +253,11 @@ static void test_tile_burst_never_evicts_pages(void) {
     CT_CHECK(!R.up);
     uint8_t raw[40];
     for (uint8_t id = 0; id < 10; id++) CT_CHECK(push_raw(id, raw, mkpage(raw, id, 10, 0x66, id == 2 ? 1 : 0, 0)));
-    for (int t = 0; t < 100; t++) CT_CHECK(tile_cmd((uint8_t)(t / 10), (uint8_t)(t % 10), "v", -1));
+    for (int t = 0; t < 300; t++) CT_CHECK(tile_cmd((uint8_t)(t / 30), (uint8_t)(t % 30), "v", -1));
     CT_EQ(count_pend(HP_MSG_PAGE_PUSH), 10);
     CT_EQ(H.npend, HUB_PEND_MAX);
     /* the newest tiles are the ones kept */
-    CT_CHECK(H.pend[H.npend - 1].type == HP_MSG_TILE_UPDATE && H.pend[H.npend - 1].page == 9 && H.pend[H.npend - 1].tile == 9);
+    CT_CHECK(H.pend[H.npend - 1].type == HP_MSG_TILE_UPDATE && H.pend[H.npend - 1].page == 9 && H.pend[H.npend - 1].tile == 29);
     hp_rf_link_set_awake(&RL, true, R.now);
     run(20000);
     CT_EQ(norder, 10);
@@ -272,7 +273,7 @@ static void test_full_queue_of_pages_refuses_tiles_and_drops_oldest_page(void) {
     CT_CHECK(!R.up);
     uint8_t raw[40];
     const uint8_t v1[] = {1, 9, 1, 1, 0}; /* v1 pages: no gen, so no older-gen purge */
-    for (uint8_t id = 0; id < HUB_PEND_MAX; id++) {
+    for (uint8_t id = 0; id < HUB_PEND_MAX; id++) { /* ids 0..254; 255 is a fresh key */
         uint8_t b[sizeof v1];
         memcpy(b, v1, sizeof v1);
         b[1] = id;
@@ -282,7 +283,7 @@ static void test_full_queue_of_pages_refuses_tiles_and_drops_oldest_page(void) {
     CT_CHECK(tile_cmd(1, 1, "x", -1)); /* dropped: still ok to the caller, no page lost */
     CT_EQ(count_pend(HP_MSG_PAGE_PUSH), HUB_PEND_MAX);
     CT_EQ(H.pend_dropped, 1u);
-    CT_CHECK(push_raw(50, raw, mkpage(raw, 0, 1, 0x70, 0, 0)));
+    CT_CHECK(push_raw(255, raw, mkpage(raw, 0, 1, 0x70, 0, 0)));
     CT_EQ(H.npend, HUB_PEND_MAX);
     CT_EQ(H.pend[0].page, 1); /* page 0 was the oldest */
     CT_EQ(H.pend_dropped, 2u);
@@ -659,21 +660,22 @@ static void test_cover_hold_supersedes_never_evicts_pages_and_skips_sleep(void) 
     run(900);
     CT_CHECK(!R.up);
     uint8_t raw[40];
-    for (uint8_t i = 0; i < 40; i++) {
-        size_t n = mkpage(raw, i, 40, 5, 0, 0);
-        CT_CHECK(push_raw(i, raw, n));
+    for (uint8_t i = 0; i < HUB_PEND_MAX; i++) { /* v1 pages: distinct ids, no gen purge */
+        uint8_t b[] = {1, i, 1, 1, 0};
+        CT_CHECK(push_raw(i, b, sizeof b));
     }
-    CT_EQ(H.npend, 40); /* the page queue is full */
+    (void)raw;
+    CT_EQ(H.npend, HUB_PEND_MAX); /* the page queue is full */
     CT_CHECK(cover_cmd(21, 1));
     CT_CHECK(cover_cmd(22, 9)); /* supersedes the held 21 */
     CT_CHECK(np_cmd(22, 1, 100));
-    CT_EQ(H.npend, 40); /* no page lost to the cover or the now_playing */
+    CT_EQ(H.npend, HUB_PEND_MAX); /* no page lost to the cover or the now_playing */
     CT_EQ(H.pend_dropped, 0u);
     CT_EQ(count_type(HP_MSG_COVER_CHUNK) + count_type(HP_MSG_NOW_PLAYING), 0); /* nothing over the sleep path */
     run(2000);
     CT_EQ(count_type(HP_MSG_COVER_CHUNK), 0);
     hp_rf_link_set_awake(&RL, true, R.now);
-    run(8000);
+    run(150000); /* 255 held pages go first */
     CT_EQ(chunks_of(21, 1), 0); /* superseded: never sent */
     CT_EQ(chunks_of(22, 9), 8);
     const hp_rf_msg_t *m = last_of(HP_MSG_NOW_PLAYING);
@@ -718,7 +720,7 @@ int main(void) {
     test_tile_state_only_for_remotes_that_announce_it();
     test_tile_update_and_state_share_one_held_key();
     test_newer_gen_drops_held_pages_of_older_gen();
-    test_forty_held_pages_fill_the_store_in_order();
+    test_max_held_pages_fill_the_store_in_order();
     test_tile_burst_never_evicts_pages();
     test_full_queue_of_pages_refuses_tiles_and_drops_oldest_page();
     test_failed_page_push_is_resent_while_attached();

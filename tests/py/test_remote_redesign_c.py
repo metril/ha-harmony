@@ -60,7 +60,7 @@ def test_living_room_pages_fit_and_every_nav_row_has_a_glyph():
 
 def test_too_many_pages_is_a_clear_error():
     pages = "".join(f"  - {{id: p{i}, cols: 1, rows: 1, title: P{i}, widgets: []}}\n" for i in range(MAX_PAGES + 1))
-    with pytest.raises(CompileError, match=r"too many pages: 33 \(the remote holds at most 32\)"):
+    with pytest.raises(CompileError, match=rf"too many pages: {MAX_PAGES + 1} \(the remote holds at most {MAX_PAGES}\)"):
         compile_config(parse_model("pages:\n" + pages, "t.yaml"))
 
 

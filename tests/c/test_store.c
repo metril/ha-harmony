@@ -24,12 +24,30 @@ static void test_changed_total_with_same_gen_is_a_new_set(void) {
     CT_EQ(hp_store_find_kind(&S, HP_PAGE_KIND_HOME), -1); /* the old home is gone */
 }
 
-static void test_total_over_32_is_refused(void) {
+/* HP_STORE_MAX = 252: ids 0xFC..0xFF belong to the UI's built-in screens (RA_UI_PAGE_*). */
+static void test_total_over_the_max_is_refused(void) {
     hp_store_init(&S);
     uint8_t raw[40];
-    CT_EQ(hp_store_put(&S, raw, mkpage(raw, 0, 33, 1, 0, 0)), -HP_E_TOOBIG);
+    CT_EQ(HP_STORE_MAX, 252);
+    CT_EQ(hp_store_put(&S, raw, mkpage(raw, 0, HP_STORE_MAX + 1, 1, 0, 0)), -HP_E_TOOBIG);
+    CT_EQ(hp_store_put(&S, raw, mkpage(raw, HP_STORE_MAX, 255, 1, 0, 0)), -HP_E_TOOBIG); /* id past the last slot */
     CT_EQ(hp_store_count(&S), 0u);
-    CT_EQ(hp_store_put(&S, raw, mkpage(raw, 0, 32, 1, 0, 0)), HP_STORE_OK);
+    CT_EQ(hp_store_put(&S, raw, mkpage(raw, 0, HP_STORE_MAX, 1, 0, 0)), HP_STORE_OK);
+}
+
+static void test_a_full_store_holds_every_id_up_to_the_last(void) {
+    hp_store_init(&S);
+    uint8_t raw[40];
+    for (unsigned i = 0; i < HP_STORE_MAX; i++)
+        CT_CHECK(hp_store_put(&S, raw, mkpage(raw, (uint8_t)i, HP_STORE_MAX, 9, i == 0, 0)) >= 0);
+    CT_EQ(hp_store_count(&S), (unsigned)HP_STORE_MAX);
+    CT_EQ(hp_store_need(&S), (unsigned)HP_STORE_MAX);
+    CT_CHECK(hp_store_complete(&S));
+    hp_page_t p;
+    CT_EQ(hp_store_get(&S, HP_STORE_MAX - 1, &p), 0); /* nav to the last id */
+    CT_EQ(p.page_id, HP_STORE_MAX - 1);
+    CT_CHECK(hp_store_ready(&S, HP_STORE_MAX - 1));
+    CT_EQ(hp_store_start(&S), 0);
 }
 
 static void test_lookups_never_return_an_id_past_total(void) {
@@ -170,7 +188,8 @@ int main(void) {
     CT_RUN(test_wrong_length_theme_is_refused);
     CT_RUN(test_a_replaced_set_keeps_the_slot);
     CT_RUN(test_changed_total_with_same_gen_is_a_new_set);
-    CT_RUN(test_total_over_32_is_refused);
+    CT_RUN(test_total_over_the_max_is_refused);
+    CT_RUN(test_a_full_store_holds_every_id_up_to_the_last);
     CT_RUN(test_lookups_never_return_an_id_past_total);
     return CT_DONE();
 }

@@ -50,7 +50,7 @@ export const RULES: Record<string, RuleUi> = {
   'duplicate page id': P('uniquePageId'),
   'unknown activity on a page': P('select of existing activities; deleting an activity clears it'),
   'max 32 widgets per page': P('drops refused with widgetCap'),
-  'max 32 pages': P('Add / Duplicate page refuse with pageCap'),
+  'max 252 pages': P('Add / Duplicate page refuse with pageCap'),
   'max 128 soft keys': P('drops refused with widgetCap (soft-key total)'),
   'widget label 24 bytes': P('label input stops at the page budget'),
   'page 251 bytes': I('page byte meter and the compiler message in the page inspector; thumbnail turns red'),
