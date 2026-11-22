@@ -286,11 +286,11 @@ pages:
       - {type: button, id: tv_h3, x: 0, y: 3, w: 12, shape: row, label: HDMI 3, icon: hdmi3, action: {device: tv, input: HDMI 3}}
       - {type: button, id: tv_ant, x: 0, y: 4, w: 12, shape: row, label: TV, icon: tv, action: {device: tv, input: TV}}
 
-  - id: dev_shield          # one page for the Shield group: power, keys (Bluetooth), then app cards (Home Assistant)
+  - id: dev_shield          # one page for the Shield group: power, keys (Bluetooth), app cards (Home Assistant), All Commands; it pages 1/2
     title: Shield
     layout: fixed
     cols: 12
-    rows: 5
+    rows: 7
     widgets:
       - {type: button, id: sh_on, x: 0, y: 0, w: 4, label: Power On, icon: power, role: primary, action: {device: shield_ha, command: power_on}}
       - {type: button, id: sh_off, x: 4, y: 0, w: 4, label: Power Off, icon: power, action: {device: shield_ha, command: power_off}}
@@ -298,21 +298,25 @@ pages:
       - {type: button, id: sh_back, x: 0, y: 1, w: 4, label: Back, icon: back, action: {device: shield, command: Back}}
       - {type: button, id: sh_menu, x: 4, y: 1, w: 4, label: Menu, icon: menu, action: {device: shield, command: Menu}}
       - {type: button, id: sh_info, x: 8, y: 1, w: 4, label: Info, icon: info, action: {device: shield, command: Info}}
-      - {type: button, id: plex, app_id: com.plexapp.android, x: 0, y: 2, w: 6, shape: card, align: left, compact: true, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}}
-      - {type: button, id: yt, app_id: org.smarttube.stable, x: 6, y: 2, w: 6, shape: card, align: left, compact: true, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
-      - {type: button, id: cam, x: 0, y: 3, w: 6, shape: card, align: left, compact: true, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
-      - {type: button, id: camx, x: 6, y: 3, w: 6, shape: card, align: left, compact: true, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
-      - {type: button, id: sh_all, x: 0, y: 4, w: 12, shape: row, label: All Commands, icon: list, nav: dev_shield_all}
+      - {type: button, id: sh_play, x: 0, y: 2, w: 4, label: Play/Pause, icon: play, action: {device: shield, command: PlayPause}}
+      - {type: button, id: sh_stop, x: 4, y: 2, w: 4, label: Stop, icon: stop, action: {device: shield, command: Stop}}
+      - {type: button, id: plex, app_id: com.plexapp.android, x: 0, y: 3, w: 6, shape: card, align: left, compact: true, label: Plex, icon: plex, action: {device: shield_ha, command: Plex}}
+      - {type: button, id: yt, app_id: org.smarttube.stable, x: 6, y: 3, w: 6, shape: card, align: left, compact: true, label: YouTube, icon: youtube, action: {device: shield_ha, command: YouTube}}
+      - {type: button, id: cam, x: 0, y: 4, w: 6, shape: card, align: left, compact: true, label: Show Camera, icon: cctv, action: {device: shield_ha, command: Show Camera}}
+      - {type: button, id: camx, x: 6, y: 4, w: 6, shape: card, align: left, compact: true, label: Clear Camera, icon: cctv_off, action: {device: shield_ha, command: Clear Camera}}
+      - {type: button, id: sh_gar, x: 0, y: 5, w: 6, shape: card, align: left, compact: true, label: Garage Cam, icon: garage, action: {device: shield_ha, command: Garage Cam}}
+      - {type: button, id: sh_all, x: 0, y: 6, w: 12, shape: row, label: All Commands, icon: list, nav: dev_shield_all}
 
   - id: dev_shield_all
     title: Commands
     layout: fixed
     cols: 12
-    rows: 1
+    rows: 2
     widgets:
-      - {type: button, id: sh_play, x: 0, y: 0, w: 4, label: Play/Pause, icon: play, action: {device: shield, command: PlayPause}}
-      - {type: button, id: sh_stop, x: 4, y: 0, w: 4, label: Stop, icon: stop, action: {device: shield, command: Stop}}
-      - {type: button, id: sh_gar, x: 8, y: 0, w: 4, label: Garage Cam, icon: garage, action: {device: shield_ha, command: Garage Cam}}
+      - {type: button, id: sh_sel, x: 0, y: 0, w: 4, label: Select, icon: check, action: {device: shield, command: Select}}
+      - {type: button, id: sh_pause, x: 4, y: 0, w: 4, label: Pause, icon: pause, action: {device: shield, command: Pause}}
+      - {type: button, id: sh_rw, x: 8, y: 0, w: 4, label: Rewind, icon: rewind, action: {device: shield, command: Rewind}}
+      - {type: button, id: sh_ff, x: 0, y: 1, w: 4, label: Fast Fwd, icon: ffwd, action: {device: shield, command: FastForward}}
 
   - id: dev_speakers
     title: Speakers

@@ -58,6 +58,16 @@ def test_app_buttons_on_the_merged_page_still_bind_to_the_apps_entity():
     assert {b.entity_id for b in mine} == {"media_player.nvidia_shield_tv"}
 
 
+def test_every_configured_widget_reaches_some_compiled_page():
+    """No widget is dropped by the split or the wire budget."""
+    m = parse_model(EX.read_text(), "living-room.yaml")
+    c = compile_config(m)
+    # the compiler may shorten labels, never drop a widget
+    assert sum(len(p.widgets) for p in c.models) >= sum(len(p["widgets"]) for p in m["pages"])
+    shield = {w.label for p in c.models if p.title == "Shield" for w in p.widgets}
+    assert {"Play/Pause", "Stop", "Garage Cam", "All Commands", "Plex", "Power On"} <= shield
+
+
 def test_template_style_buttons_without_app_id_bind_by_label_on_a_merged_page():
     text = (
         BASE
