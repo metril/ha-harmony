@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 (2026-11-21)
+
+- Now Playing works: the cover is read from the Plex entity in-process (no Home Assistant URL needed; a missing URL used to stop the feed before the title was sent), the feed sends what is already playing on start and when the remote reattaches, failed sends are retried, and the position after a reattach is correct. Send counters are in the integration diagnostics; the hub and remote log Now Playing and cover traffic.
+- Device groups: devices that control the same box (for example the Shield over Bluetooth and its Home Assistant media player) share `group:` and show as one row and one page on the remote, with keys, inputs and app cards together; nothing is dropped, long pages split 1/2.
+- Update the integration with the add-on. Flashing the remote and updating the hub only adds the Now Playing log lines.
+
 ## 0.4.1 (2026-11-21)
 
 - A config can have up to 252 pages (was 32); ids 252-255 stay reserved for the remote's built-in screens. The integration's wait for the remote to confirm a config scales with the page count and restarts while delivery is progressing, so large configs are no longer re-sent mid-delivery.
