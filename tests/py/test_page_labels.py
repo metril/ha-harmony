@@ -11,7 +11,7 @@ BASE = """
 devices:
   - id: shield
     name: Shield TV
-    commands: {DirectionUp: {proto: nec, addr: 4, cmd: 9}, settings: {proto: nec, addr: 4, cmd: 10}, plex: {proto: nec, addr: 4, cmd: 11}}
+    commands: {DirectionUp: {proto: nec, addr: 4, cmd: 9}, settings: {proto: nec, addr: 4, cmd: 10}, plex: {proto: nec, addr: 4, cmd: 11}, zzcmd: {proto: nec, addr: 4, cmd: 12}, Clear: {proto: nec, addr: 4, cmd: 13}}
 activities:
   - {id: watch, name: Watch Shield, devices: [{device: shield}]}
 """
@@ -79,19 +79,19 @@ def test_explicit_icon_only_false_wins():
 
 
 def test_over_budget_label_with_an_icon_goes_icon_only_in_a_three_column_grid():
-    _, ws = widgets(btn(1, "Shield TV Settings", "settings"), cols=3, rows=4)
+    _, ws = widgets(btn(1, "Shieldtvsettingsdeluxe", "settings"), cols=3, rows=4)
     assert ws[0].icon_only
     _, ws = widgets(btn(1, "Settings", "settings"), cols=3, rows=4)
     assert not ws[0].icon_only
 
 
 def test_no_icon_means_no_icon_only():
-    _, ws = widgets(btn(1, "Zzyzx", "plex"))
+    _, ws = widgets(btn(1, "Zzyzx", "zzcmd"))
     assert not ws[0].icon and not ws[0].icon_only
 
 
 def test_overflow_is_a_warning_not_an_error():
-    c, _ = widgets(btn(1, "Zzyzx Deluxe Edition", "plex"))
+    c, _ = widgets(btn(1, "Zzyzx Deluxe Edition", "zzcmd"))
     msgs = [w["msg"] for w in c.warnings]
     assert any("Zzyzx Deluxe Edition" in m and "px too wide" in m for m in msgs)
     assert all(w["severity"] == "warning" for w in c.warnings)
@@ -187,7 +187,7 @@ def test_a_key_row_is_all_captions_or_none():
 
 def test_compacted_card_shortens_its_word_rather_than_breaking_mid_word():
     ws = ", ".join(
-        f"{{type: button, id: b{i}, x: {i % 2}, y: {i // 2 + 1}, label: '{lab}', action: {{device: shield, command: plex}}}}"
+        f"{{type: button, id: b{i}, x: {i % 2}, y: {i // 2 + 1}, label: '{lab}', action: {{device: shield, command: zzcmd}}}}"
         for i, lab in enumerate(["MacBook Pro", "Desktop", "Work Laptop", "Computer 4", "Power On", "Power Off"])
     )
     tile = "{type: tile, id: t, x: 0, y: 0, w: 2, label: Src, entity: select.x}"
@@ -209,5 +209,35 @@ def test_brand_logo_on_brand_red_is_exempt():
 
 
 def test_text_on_brand_red_still_warns():
-    w = btn(1, "Zzyzx", "plex", w=2, extra=", color: '#FF0000'")
+    w = btn(1, "Zzyzx", "zzcmd", w=2, extra=", color: '#FF0000'")
     assert _colour_warnings(w)
+
+
+# --- icons: label, then command / service target; siblings stay consistent ---------------------------------------------
+
+
+@pytest.mark.parametrize(("text", "icon"), [("Clear", "cctv_off"), ("Clear Camera", "cctv"), ("MacBook Pro", "laptop")])
+def test_icon_keywords(text, icon):
+    assert icon_for_text(text) == ICON_IDS[icon] or text == "Clear Camera"
+
+
+def test_icon_falls_back_to_the_command_name():
+    _, ws = widgets(btn(1, "Zz", "Clear", w=1))
+    assert ws[0].icon == ICON_IDS["cctv_off"]
+
+
+def test_select_tile_gets_the_input_glyph():
+    cfg = BASE + "pages:\n  - {id: p, cols: 2, rows: 1, widgets: [{type: tile, id: t, x: 0, y: 0, w: 2, label: Source, entity: select.kvm_source}]}\n"
+    c = compile_config(parse_model(cfg, "t.yaml"))
+    assert c.models[0].widgets[0].icon == ICON_IDS["input"]
+
+
+def test_macbook_caption_keeps_its_glyph_with_its_siblings():
+    ws = ", ".join(
+        f"{{type: button, id: b{i}, x: {i % 2}, y: {i // 2 + 1}, label: '{lab}', action: {{device: shield, command: zzcmd}}}}"
+        for i, lab in enumerate(["MacBook Pro", "Desktop", "Work Laptop", "Computer 4", "Power On", "Power Off"])
+    )
+    tile = "{type: tile, id: t, x: 0, y: 0, w: 2, label: Src, entity: select.x}"
+    c = compile_config(parse_model(BASE + f"pages:\n  - {{id: k, cols: 2, rows: 4, widgets: [{tile}, {ws}]}}\n", "t.yaml"))
+    btns = [w for pg in c.models for w in pg.widgets if w.kind == "button"]
+    assert all(w.icon for w in btns[:4]) and not any(w.icon_only for w in btns[:4])

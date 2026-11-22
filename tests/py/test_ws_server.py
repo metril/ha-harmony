@@ -194,19 +194,33 @@ def test_bad_numeric_flag_exits_2(built_binaries, flag, val):
 
 def test_heartbeat_file_tracks_monotonic_uptime(start_hub, tmp_path):
     # The boot hook's wedge watcher compares this to /proc/uptime: written at startup, refreshed.
+    # The deadline is generous and reads tolerate a half-written file: under a loaded -n auto run the 1 s
+    # refresh can be late by seconds, which made a 4 s window flaky.
     import time
 
     hb = tmp_path / "hb"
     start_hub("--heartbeat", str(hb), "--heartbeat-secs", "1")
-    first = int(hb.read_text())
-    assert first >= 0
-    deadline = time.monotonic() + 4
-    while time.monotonic() < deadline and int(hb.read_text() or first) <= first:
+
+    def read() -> int | None:
+        try:
+            return int(hb.read_text())
+        except (ValueError, OSError):
+            return None
+
+    deadline = time.monotonic() + 15
+    first = read()
+    while first is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+        first = read()
+    assert first is not None and first >= 0
+    now = first
+    while time.monotonic() < deadline and now <= first:
         time.sleep(0.1)
-    assert int(hb.read_text()) > first, "heartbeat was not refreshed"
+        now = read() or now
+    assert now > first, "heartbeat was not refreshed"
     up = float(Path("/proc/uptime").read_text().split()[0])
-    assert abs(up - int(hb.read_text())) < 3600 * 24  # same scale (seconds), not epoch
-    assert int(hb.read_text()) < 10**8  # not a wall-clock epoch
+    assert abs(up - now) < 3600 * 24  # same scale (seconds), not epoch
+    assert now < 10**8  # not a wall-clock epoch
 
 
 def test_heartbeat_secs_is_validated(built_binaries):
