@@ -264,6 +264,25 @@ class NowPlayingFeed:
         self._last = cur
         self._spawn(self._attach_push(cur, remote), "ha_harmony now playing attach")
 
+    def resend(self) -> None:
+        """The running activity changed: the remote dropped its card and no player event follows,
+        so send the current state to every attached remote (one now_playing; the position runs on
+        from the stored start estimate)."""
+        cur = self._last
+        if cur is None:
+            cur = self._build()
+            if cur is None:
+                return
+            self._start = self._clock().timestamp() - cur.pos
+            self._last = cur
+        self._spawn(self._resend_push(cur), "ha_harmony now playing resend")
+
+    async def _resend_push(self, cur: Playing) -> None:
+        try:
+            await self._push(cur, tuple(self._remotes()), force=True)
+        except Exception:
+            _LOGGER.exception("now playing resend failed")
+
     async def _attach_push(self, cur: Playing, remote: int) -> None:
         try:
             await self._push(cur, (remote,), force=True)
