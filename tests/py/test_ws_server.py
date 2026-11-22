@@ -185,9 +185,11 @@ def test_i2s_fd_is_range_checked(built_binaries, fd):
 
 def _hub_with_fd9(built_binaries, src_fd, *args, **kw):
     """Start the hub with src_fd as its fd 9, set up in the child only (never clobbers the test runner's fds)."""
+    # bash does the dup2 (dash cannot name fds above 9) in the child (preexec_fn is unsafe with threads): `9>&N` then exec the hub
     return subprocess.Popen(
-        [str(built_binaries / "hub"), "--token", "t", "--no-mdns", "--i2s-fd", "9", *args],
-        pass_fds=(src_fd, 9), preexec_fn=lambda: os.dup2(src_fd, 9), text=True, **kw,
+        ["bash", "-c", f'exec "$0" "$@" 9>&{src_fd}', str(built_binaries / "hub"),
+         "--token", "t", "--no-mdns", "--i2s-fd", "9", *args],
+        pass_fds=(src_fd,), text=True, **kw,
     )  # fmt: skip
 
 
