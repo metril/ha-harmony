@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 import zlib
-from functools import lru_cache
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from types import SimpleNamespace
 from typing import Any
 
