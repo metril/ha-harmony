@@ -339,7 +339,7 @@ def test_nav_to_the_last_page_compiles():
 
     n = MAX_PAGES
     pages = "".join(f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(n - 1))
-    pages += f"  - {{id: last, cols: 1, rows: 1, widgets: []}}\n"
+    pages += "  - {id: last, cols: 1, rows: 1, widgets: []}\n"
     pages = pages.replace(
         "id: p0, cols: 1, rows: 1, widgets: []",
         "id: p0, cols: 1, rows: 1, widgets: [{type: button, label: Go, x: 0, y: 0, nav: last}]",
