@@ -102,8 +102,8 @@ export function displayName(name: string): string {
 }
 
 /** Abbreviations for labels that are over their pixel budget; never used otherwise. Phrases first, then single words. */
-const SHORT_PHRASES: [RegExp, string][] = [[/\bPicture Mode\b/g, 'Pic Mode'], [/\bAspect Ratio\b/g, 'Aspect'], [/\bInput HDMI\b/g, 'HDMI'], [/\bFast Forward\b/g, 'FF']];
-export const SHORT: Record<string, string> = { Volume: 'Vol', Channel: 'Ch', Previous: 'Prev', Settings: 'Setup', Favourite: 'Fav', Favorite: 'Fav', Favourites: 'Favs', Favorites: 'Favs', Subtitles: 'CC' };
+const SHORT_PHRASES: [RegExp, string][] = [[/\bPicture Mode\b/g, 'Pic Mode'], [/\bAspect Ratio\b/g, 'Aspect'], [/\bInput HDMI\b/g, 'HDMI'], [/\bFast Forward\b/g, 'FF'], [/\bPower Toggle\b/g, 'Power'], [/\bContext Menu\b/g, 'Menu'], [/\bPage Down\b/g, 'Pg Dn'], [/\bPage Up\b/g, 'Pg Up'], [/\bSkip Forward\b/g, 'Skip Fwd'], [/\bSkip Back\b/g, 'Skip Back']];
+export const SHORT: Record<string, string> = { Volume: 'Vol', Channel: 'Ch', Previous: 'Prev', Settings: 'Setup', Favourite: 'Fav', Favorite: 'Fav', Favourites: 'Favs', Favorites: 'Favs', Subtitles: 'CC', Computer: 'PC' };
 export function abbreviate(label: string): string {
   let out = label;
   for (const [re, to] of SHORT_PHRASES) out = out.replace(re, to);

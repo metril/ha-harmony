@@ -107,3 +107,107 @@ def test_brand_logo_defaults_to_icon_only_even_in_a_wide_cell():
     assert all(w.icon and w.icon_only for w in ws)
     _, ws = widgets(btn(1, "YouTube", "plex", w=2, extra=", icon_only: false"))
     assert not ws[0].icon_only
+
+
+# --- captions never ellipsize: abbreviation table, trailing words, then the glyph alone ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("full", "short"),
+    [
+        ("Power Toggle", "Power"),
+        ("Context Menu", "Menu"),
+        ("Page Down", "Pg Dn"),
+        ("Page Up", "Pg Up"),
+        ("Skip Forward", "Skip Fwd"),
+        ("Skip Back", "Skip Back"),
+        ("Volume Up", "Vol Up"),
+        ("Channel Down", "Ch Down"),
+        ("Computer 4", "PC 4"),
+    ],
+)
+def test_abbreviation_table(full, short):
+    from harmony_core.key_names import abbreviate
+
+    assert abbreviate(full) == short
+
+
+KEYS = [
+    ("Home", "home", "home"),
+    ("Skip Forward", "fwd", "skip10"),
+    ("Skip Back", "back", "back"),
+    ("Power Toggle", "pwr", "power"),
+    ("Context Menu", "ctx", "menu"),
+    ("Page Up", "pgu", "up"),
+    ("Page Down", "pgd", "down"),
+    ("Zzyzxdeluxeedition", "zz", "search"),
+]
+
+
+def keys_page(extra=""):
+    ws = [
+        f"{{type: button, id: k{i}, x: {(i % 3) * 4}, y: {i // 3}, w: 4, h: 1, label: '{lab}', icon: {ic},"
+        f" action: {{device: shield, command: {cmd}}}{extra}}}"
+        for i, (lab, cmd, ic) in enumerate(KEYS)
+    ]
+    cmds = ", ".join(f"{c}: {{proto: nec, addr: 4, cmd: {i + 20}}}" for i, (_, c, _i) in enumerate(KEYS))
+    cfg = BASE.replace("settings:", f"{cmds}, settings:")
+    cfg += f"pages:\n  - {{id: p, layout: fixed, cols: 12, rows: 3, widgets: [{', '.join(ws)}]}}\n"
+    return compile_config(parse_model(cfg, "t.yaml"))
+
+
+def test_glyph_keys_shorten_instead_of_ellipsizing():
+    from harmony_core.text_fit import fit_label
+
+    c = keys_page(", icon_only: false")
+    got = {w.label for pg in c.models for w in pg.widgets}
+    for want in ("Skip Fwd", "Power", "Menu", "Pg Up"):
+        assert want in got, got
+    for pg in c.models:
+        for w in pg.widgets:
+            assert "..." not in w.label
+            if w.label != "Zzyzxdeluxeedition":
+                assert fit_label(pg, w) is None, w.label
+
+
+def test_a_caption_that_cannot_be_shortened_drops_to_the_glyph_not_dots():
+    c = keys_page()
+    got = {w.label: w for pg in c.models for w in pg.widgets}
+    assert got["Zzyzxdeluxeedition"].icon_only
+
+
+def test_a_key_row_is_all_captions_or_none():
+    c = keys_page()
+    for pg in c.models:
+        rows = {}
+        for w in pg.widgets:
+            rows.setdefault(w.y, []).append(w.icon_only)
+        assert all(len(set(r)) == 1 for r in rows.values())
+
+
+def test_compacted_card_shortens_its_word_rather_than_breaking_mid_word():
+    ws = ", ".join(
+        f"{{type: button, id: b{i}, x: {i % 2}, y: {i // 2 + 1}, label: '{lab}', action: {{device: shield, command: plex}}}}"
+        for i, lab in enumerate(["MacBook Pro", "Desktop", "Work Laptop", "Computer 4", "Power On", "Power Off"])
+    )
+    tile = "{type: tile, id: t, x: 0, y: 0, w: 2, label: Src, entity: select.x}"
+    c = compile_config(parse_model(BASE + f"pages:\n  - {{id: k, cols: 2, rows: 4, widgets: [{tile}, {ws}]}}\n", "t.yaml"))
+    assert not [w for w in c.warnings if "too wide" in w["msg"]]
+
+
+# --- contrast: a brand logo is exempt, text on a brand fill is not ---------------------------------------------------
+
+
+def _colour_warnings(widget: str):
+    cfg = BASE + f"pages:\n  - {{id: p, cols: 4, rows: 2, widgets: [{widget}]}}\n"
+    return [w for w in compile_config(parse_model(cfg, "t.yaml")).warnings if "best text" in w["msg"]]
+
+
+def test_brand_logo_on_brand_red_is_exempt():
+    w = btn(1, "YouTube", "plex", w=2, extra=", icon: youtube, icon_only: true, color: '#FF0000'")
+    assert _colour_warnings(w) == []
+
+
+def test_text_on_brand_red_still_warns():
+    w = btn(1, "Zzyzx", "plex", w=2, extra=", color: '#FF0000'")
+    assert _colour_warnings(w)

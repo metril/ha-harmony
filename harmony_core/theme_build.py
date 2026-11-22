@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
+from .icons import BRAND_COLORS, ICON_IDS
 from .page_codec import Page, Widget
 from .theme_math import (
     INK_MIN,
@@ -107,6 +108,8 @@ def theme_warnings(model: dict[str, Any]) -> list[dict[str, Any]]:
     toks = dict(at.tokens)
     for i, pg in enumerate(model.get("pages", [])):
         for j, w in enumerate(pg.get("widgets", [])):
+            if _logo_only(w):  # a brand logo key draws no text on its fill: the brand colour is the point
+                continue
             for key in ("color", "on_color"):
                 v = w.get(key)
                 if not isinstance(v, str) or not v.startswith("#"):
@@ -123,6 +126,17 @@ def theme_warnings(model: dict[str, Any]) -> list[dict[str, Any]]:
                         )
                     )
     return out
+
+
+def _logo_only(w: dict[str, Any]) -> bool:
+    """A button that shows a brand logo and no caption (explicit icon_only)."""
+    icon = w.get("icon")
+    return (
+        w.get("type") == "button"
+        and isinstance(icon, str)
+        and ICON_IDS.get(icon) in BRAND_COLORS
+        and w.get("icon_only") is True
+    )
 
 
 def _is_free(c: str | None) -> bool:

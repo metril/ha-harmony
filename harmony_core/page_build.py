@@ -17,7 +17,7 @@ from .config_model import Model, infer_app_ids
 from .ha_actions import default_tap
 from .harmony_proto import SOFT_KEY_BASE
 from .icons import BRAND_COLORS, ICON_IDS, ICONS
-from .key_names import display_name
+from .key_names import abbreviate, display_name
 from .keys import key_code
 from .page_codec import (
     FIXED_MAX,
@@ -426,27 +426,37 @@ def _over(s: _Spec) -> bool:
     return fit_label(_FIT_PAGE, _probe(replace(s, x=0, y=0, h=1))) is not None
 
 
-_ABBREV = {"volume": "Vol", "channel": "Ch", "previous": "Prev", "settings": "Setup", "navigation": "Nav", "subtitles": "Subs"}
-
-
-def _abbrev(label: str) -> str:
-    return " ".join(_ABBREV.get(w.lower(), w) for w in label.split())
+def _shrink(s: _Spec) -> bool:
+    """Make the caption fit without an ellipsis: the abbreviation table first (Power Toggle -> Power,
+    Volume Up -> Vol Up), then trailing words dropped. True when it fits; the label is untouched when not."""
+    full = s.label
+    short = abbreviate(full)
+    words = short.split()
+    tries = [short] if short != full else []
+    tries += [" ".join(words[:k]) for k in range(len(words) - 1, 0, -1)]
+    for t in tries:
+        s.label = t
+        if not _over(s):
+            return True
+    s.label = full
+    return False
 
 
 def _shorten_key(s: _Spec) -> bool:
-    """A glyph key whose caption is cut gets a shorter one (Volume Up -> Vol Up) before it loses the caption."""
+    """A glyph key whose caption is cut gets a shorter one before it loses the caption."""
     if s.kind != "button" or s.w > 4 or s.shape != "card" or not s.icon or s.icon_only or s.icon in BRAND_COLORS:
         return False
-    if not _over(s):
-        return False
-    short = _abbrev(s.label)
-    if short == s.label:
-        return False
-    full, s.label = s.label, short
-    if _over(s):
-        s.label = full
-        return False
-    return True
+    return _over(s) and _shrink(s)
+
+
+def _refit(s: _Spec) -> None:
+    """Last pass on a placed card (the layout may have compacted it): shorten, else drop to the glyph alone."""
+    if s.kind != "button" or s.shape in ("row", "pill", "monogram") or s.icon_only or s.nav is not None or not s.label:
+        return
+    if s.icon in BRAND_COLORS or not _over(s) or _shrink(s):
+        return
+    if s.icon and "icon_only" not in s.cfg:
+        s.icon_only = True
 
 
 def _caption_rows(specs: list[_Spec]) -> None:
@@ -456,9 +466,10 @@ def _caption_rows(specs: list[_Spec]) -> None:
         if s.kind == "button" and s.w <= 4 and s.shape == "card" and s.icon and s.icon not in BRAND_COLORS and s.nav is None:
             rows.setdefault(s.y, []).append(s)
     for row in rows.values():
-        if any(s.label != _abbrev(s.label) for s in row) and any(s.label != s.cfg["label"] for s in row):
+        if any(s.label != s.cfg["label"] for s in row):
             for s in row:  # one wording across the row (Vol Up beside Vol Down)
-                s.label = _abbrev(s.label)
+                if s.label == s.cfg["label"]:
+                    s.label = abbreviate(s.label)
         if any(s.icon_only for s in row) and not all(s.icon_only for s in row):
             for s in row:
                 if s.cfg.get("icon_only") is not False:
@@ -631,6 +642,9 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
                     groups = _split_fixed(placed, p, pi, base)
                 for g in groups:
                     g.sort(key=lambda s: s.order)
+                for s in placed:
+                    _refit(s)
+                _caption_rows(placed)
             if len(groups) > MAX_PAGE_GROUP:
                 raise CompileError(
                     f"page {p['id']!r}: needs {len(groups)} pages (at most {MAX_PAGE_GROUP});"
