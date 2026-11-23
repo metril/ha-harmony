@@ -638,7 +638,7 @@ static void test_now_playing_card_and_cover_over_rf(void) {
   fk_touch(&fk, 100, 60, 0);
   tick(50);
   TWAIT(nhkeys == base + 2);
-  CT_EQ(hkeys[base].key, hp_hwkey_by_name("Pause")->id);
+  CT_EQ(hkeys[base].key, hp_hwkey_by_name("PlayPause")->id);
   CT_EQ(hkeys[base + 1].action, HP_KEY_ACTION_RELEASE);
   CT_EQ(send_np(0xC0FFEE, 2, 300, 2706, "VisionQuest", "S1 E2"), 0);
   TWAIT(app.ui.np.flags == 2);
@@ -648,7 +648,7 @@ static void test_now_playing_card_and_cover_over_rf(void) {
   fk_touch(&fk, 100, 60, 0);
   tick(50);
   TWAIT(nhkeys == base + 4);
-  CT_EQ(hkeys[base + 2].key, hp_hwkey_by_name("Play")->id);
+  CT_EQ(hkeys[base + 2].key, hp_hwkey_by_name("PlayPause")->id);
   /* nothing playing: the cards come back */
   CT_EQ(send_np(0, 0, 0, 0, "", ""), 0);
   TWAIT(app.ui.np_idx < 0);
@@ -1068,10 +1068,10 @@ static void test_full_session_is_safe_with_rf(void) {
   DRAIN();
   tick(11000); /* dim */
   tick(20000); /* off */
-  fk_key(&fk, 0, 115, 1); /* the waking press is consumed, never sent */
+  fk_key(&fk, 0, 115, 1); /* a hard key wakes the screen and acts: press + release sent */
   fk_key(&fk, 0, 115, 0);
   tick(100);
-  CT_EQ(nhkeys, 7);
+  WAIT_FOR(nhkeys == 9);
   tick(RF_LINK_BATTERY_MS);
   DRAIN();
   CT_CHECK(nhbatt >= 2);

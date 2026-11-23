@@ -334,7 +334,7 @@ async def channel(request: web.Request) -> web.StreamResponse:
             t.cancel()
         t = asyncio.ensure_future(
             _close_quiet(old.ws, 4002, b"replaced")
-        )  # not awaited: a stuck old peer must not stall
+        )  # not awaited here: a stuck old peer must not stall the new socket
         _BG.add(t)
         t.add_done_callback(_BG.discard)
     try:
