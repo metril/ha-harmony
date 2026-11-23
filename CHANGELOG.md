@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.8 (2026-11-23)
+
+- Fix false loop-stall warnings that flooded the hub log. Update the hub.
+
 ## 0.4.7 (2026-11-23)
 
 - Diagnostics for stalled remote commands: timestamped hub log lines, a loop-stall watchdog, and logs for dropped keys, the RF link and Home Assistant connection drops. Update the hub and the remote.

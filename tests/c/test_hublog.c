@@ -343,6 +343,11 @@ static void test_stall_watchdog_threshold(void) {
     /* the poll's own overrun only: time inside ws callbacks and the requested wait are not "poll wake" */
     CT_CHECK(!hp_stall_poll(5000, 5000 + 1000 + 900, 1000, 900)); /* slow callback, on-time poll */
     CT_CHECK(!hp_stall_poll(5000, 5000 + 4000, -1, 4000));        /* woken, all spent in callbacks */
+    CT_CHECK(!hp_stall_poll(5000, 5000 + 100, 1000, 0));          /* early wake: nothing */
+    CT_CHECK(!hp_stall_poll(5000, 5000 + 150 + 40, 1000, 40));    /* early wake with callback time */
+    CT_CHECK(!hp_stall_poll(0xFFFFFF00u, 0x00000040u, 1000, 0));  /* early wake across the 32-bit wrap */
+    CT_CHECK(hp_stall_poll(0xFFFFFF00u, 1044u, 1000, 0));         /* 300 late across the wrap */
+    CT_CHECK(!hp_stall_check("clock back", 5000, 4990));          /* now before t0: no stall */
     CT_CHECK(hp_stall_poll(5000, 5000 + 1000 + 900 + 300, 1000, 900)); /* 300 ms late beyond both */
     CT_CHECK(pread(fd, buf, sizeof buf - 1, 0) > 0);
     CT_CHECK(strstr(buf, "hub: loop stall 300 ms in poll wake\n"));

@@ -21,16 +21,18 @@ static uint32_t mono_ms(void) {
 
 uint32_t hp_mono_ms(void) { return mono_ms(); }
 
-bool hp_stall_check(const char *what, uint32_t t0, uint32_t now) {
-    uint32_t d = now - t0;
-    if (d <= HP_STALL_MS) return false;
-    hp_log("hub: loop stall %u ms in %s\n", (unsigned)d, what);
+static bool stall_log(const char *what, int32_t late) {
+    if (late <= (int32_t)HP_STALL_MS) return false; /* signed: an early wake or a clock step logs nothing */
+    hp_log("hub: loop stall %u ms in %s\n", (unsigned)late, what);
     return true;
 }
 
+bool hp_stall_check(const char *what, uint32_t t0, uint32_t now) { return stall_log(what, (int32_t)(now - t0)); }
+
 bool hp_stall_poll(uint32_t t0, uint32_t t1, int wait_ms, uint32_t cb_ms) {
     if (wait_ms < 0) wait_ms = 0; /* slept until woken: any wake is on time, but the callbacks still ran */
-    return hp_stall_check("poll wake", t0 + (uint32_t)wait_ms + cb_ms, t1);
+    /* Overrun past the requested wait and the callback time; negative when poll woke early. */
+    return stall_log("poll wake", (int32_t)(t1 - t0) - wait_ms - (int32_t)cb_ms);
 }
 
 bool hp_stall_end(const char *what, uint32_t t0) { return hp_stall_check(what, t0, mono_ms()); }
