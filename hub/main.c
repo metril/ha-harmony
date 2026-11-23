@@ -92,7 +92,9 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     static char reply[REPLY_CAP];
     size_t rl = 0;
     bool was_authed = sess->authed;
+    uint32_t t0 = hp_mono_ms();
     int r = hp_dispatch(msg, len, &g_tbl, sess, reply, sizeof reply, &rl);
+    hp_stall_end("ws dispatch", t0); /* the handlers' own IR / SPI sends included */
     if (r < 0) { hp_ws_conn_close(c, 1011); return; }
     if (rl && hp_ws_send(c, reply, rl) < 0) { hp_ws_conn_close(c, 1011); return; }
     if (sess->authed) hp_ws_conn_set_authed(c);
@@ -256,7 +258,7 @@ int main(int argc, char **argv) {
 #ifdef HH_BT
     if (argc >= 2 && !strcmp(argv[1], "bt-helper")) return bt_helper_main(argc - 2, argv + 2);
 #endif
-    if (hp_hublog_init(&g_log, hub_log_emit, &g_hub) == 0) hp_hublog_install(&g_log); /* else: file only */
+    if (hp_hublog_init(&g_log, hub_log_emit, &g_hub) == 0) { g_log.stamp = true; hp_hublog_install(&g_log); } /* else: file only */
     bool sim = false, rf_spi = false;
     bool rf_debug = false;
     long rf_slot = 0; /* 0 = learn it from the radio's link-up report */
@@ -557,19 +559,35 @@ int main(int argc, char **argv) {
 #ifdef HH_BT
         if (bt_wait >= 0 && (wait < 0 || bt_wait < wait)) wait = bt_wait;
 #endif
+        /* Watchdog: each dispatch is timed; > HP_STALL_MS logs "loop stall <ms> ms in <handler>". Two clock reads per
+         * stage, no timers. The poll sleeps by design: only its overrun past the requested wait counts (a late wake). */
+        uint32_t t0 = hp_mono_ms();
         hp_ws_poll(srv, wait);
+        uint32_t t1 = hp_mono_ms();
+        if (wait >= 0 && t1 - t0 > (uint32_t)wait) hp_stall_check("poll wake", t0 + (uint32_t)wait, t1);
         hp_hooklog_service(&g_hook);
         hp_hublog_service(&g_log);
+        hp_stall_end("log service", t1);
 #ifdef HH_BT
         if (bt_run) { /* the helper's socket, supervision, then the broadcasts its changes queued */
+            t1 = hp_mono_ms();
             bt_wait = bt_link_service();
             hub_flush_pending(&g_hub);
+            hp_stall_end("bt service", t1);
         }
 #endif
+        t1 = hp_mono_ms();
         hub_pump_rf(&g_hub);
+        hp_stall_end("rf rx", t1);
+        t1 = hp_mono_ms();
         hp_mdns_srv_service(&g_mdns);
+        hp_stall_end("mdns", t1);
+        t1 = hp_mono_ms();
         hub_run_timers(&g_hub);
+        hp_stall_end("timers", t1);
+        t1 = hp_mono_ms();
         peers_keepalive(srv);
+        hp_stall_end("peers", t1);
         if (g_hub.ota.restart && ++restart_polls >= 3) break;
     }
     hp_mdns_srv_stop(&g_mdns); /* goodbye (TTL 0) */

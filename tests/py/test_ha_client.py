@@ -1,6 +1,7 @@
 """Client-level behaviour that needs a misbehaving hub: heartbeat loss, mismatched `v` pushes."""
 
 import asyncio
+import logging
 
 import aiohttp
 import pytest
@@ -283,3 +284,28 @@ async def test_unanswered_request_error_says_timed_out(fake_hub):
     finally:
         await c.async_close()
         await session.close()
+
+
+async def test_ws_drop_and_reconnect_are_logged_at_warning_with_reason_and_downtime(
+    fake_hub, caplog
+):
+    async def handler(ws, env):
+        await ws.send_json(_ack(env))
+        if hub.connections == 1:
+            await ws.close(code=1001)
+
+    hub = await fake_hub(handler)
+    c, session = await _client(hub)
+    caplog.set_level(logging.DEBUG, logger="custom_components.ha_harmony.api")
+    await c.async_connect()
+    try:
+        await _wait(lambda: hub.connections >= 2 and c.connected)
+        await _wait(lambda: any("reconnected" in r.getMessage() for r in caplog.records))
+    finally:
+        await c.async_close()
+        await session.close()
+    warn = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(m.startswith("hub websocket disconnected after ") and "up:" in m for m in warn), warn
+    assert any(
+        m.startswith("hub websocket reconnected after ") and m.endswith(" s down") for m in warn
+    ), warn

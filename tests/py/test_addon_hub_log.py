@@ -2,6 +2,7 @@
 channel frames; no hub, no Home Assistant."""
 
 import logging
+import re
 
 import pytest
 from addon_ws import TOKEN, connect, drain, recv
@@ -26,6 +27,9 @@ async def test_hub_lines_reach_the_add_on_log_tagged_and_at_info(c, caplog):
     await drain(sock)
     with caplog.at_level(logging.INFO, logger="hub"):
         await sock.send_json({"t": "hub_log", "level": "info", "msg": "hub: build 42", "ts": 5})
+        await sock.send_json(  # the hub's own stamp is kept as is
+            {"t": "hub_log", "level": "info", "msg": "[12:34:56.789 +5000ms] hub: stamped", "ts": 5}
+        )
         await sock.send_json(
             {
                 "t": "hub_log",
@@ -37,11 +41,16 @@ async def test_hub_lines_reach_the_add_on_log_tagged_and_at_info(c, caplog):
         )
         await drain(sock)  # everything sent before the junk frame has been handled
     recs = [r for r in caplog.records if r.name == f"hub.{HUB}"]
-    assert [(r.levelno, r.getMessage()) for r in recs] == [
-        (logging.INFO, "hub: build 42"),
-        (logging.WARNING, "3 hub log line(s) were lost before this one (hub ring full)"),
-        (logging.WARNING, "hub: RF send failed"),
-    ]
+    got = [(r.levelno, r.getMessage()) for r in recs]
+    rx = r"\[\d\d:\d\d:\d\d\.\d{3} rx\] "  # no hub stamp: the receive time is prefixed
+    assert re.fullmatch(rx + "hub: build 42", got[0][1])
+    assert got[1] == (logging.INFO, "[12:34:56.789 +5000ms] hub: stamped")
+    assert got[2] == (
+        logging.WARNING,
+        "3 hub log line(s) were lost before this one (hub ring full)",
+    )
+    assert got[3][0] == logging.WARNING and re.fullmatch(rx + "hub: RF send failed", got[3][1])
+    assert len(got) == 4
     assert (
         logging.getLogger("hub").level == logging.INFO
     )  # the add-on's log_level option cannot hide them

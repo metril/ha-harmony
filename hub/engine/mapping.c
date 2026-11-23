@@ -16,6 +16,7 @@
 
 #include "hub/engine/atomic_file.h"
 #include "hub/hp_errors.h"
+#include "hub/net/hublog.h"
 #include "hub/ir/encode.h"
 #include "vendor/cjson/cJSON.h"
 
@@ -1374,7 +1375,10 @@ static int apply_key_action(hp_map_t *m, const hp_action_t *a, const hp_sinks_t 
     if (m->actops.start) {
         if (a->target == HP_TARGET_OFF) {
             r = m->actops.off(m->actops.ctx);
-            if (r == -HP_E_INVAL) r = 0; /* nothing on: fine */
+            if (r == -HP_E_INVAL) { /* nothing on: fine */
+                r = 0;
+                hp_log("hub: key %u Off ignored: no activity or device tracked on\n", (unsigned)key);
+            }
         } else if (a->target < m->nacts) {
             r = m->actops.start(m->actops.ctx, a->target);
         } else {
@@ -1382,6 +1386,7 @@ static int apply_key_action(hp_map_t *m, const hp_action_t *a, const hp_sinks_t 
         }
         return r < 0 ? r : 0;
     }
+    if (a->target == HP_TARGET_OFF && m->current < 0) hp_log("hub: key %u Off ignored: no activity on\n", (unsigned)key);
     if (a->target == HP_TARGET_OFF) r = m->current < 0 ? 0 : hp_activity_off(m, s);
     else if (a->target < m->nacts) r = hp_activity_set(m, m->acts[a->target].name, s);
     else r = -HP_E_INVAL;
@@ -1467,7 +1472,10 @@ int hp_key_handle(hp_map_t *m, const hp_sinks_t *s, uint8_t remote, uint8_t key,
         hp_action_t a;
         if (hp_map_lookup(m, cur, key, &a) == 1) {
             if (a.type != HP_ACT_ACTIVITY && m->actops.busy && m->actops.busy(m->actops.ctx))
-                rc = 0; /* mid-transition: the key would overlap the planned frames */
+            {
+                hp_log("hub: key %u dropped: activity change in progress\n", (unsigned)key); /* the key would overlap the planned frames */
+                rc = 0; /* mid-transition */
+            }
             else if (a.type == HP_ACT_BT && s->bt) { /* down now, up at the release */
                 rc = s->bt->key(s->bt->self, a.host, a.page, a.usage, true);
                 if (rc >= 0) {

@@ -1,6 +1,7 @@
 """The real (sim) hub binary ships its stderr lines as hub_log to a home-assistant client only, and keeps the tmpfs log."""
 
 import json
+import re
 
 import aiohttp
 
@@ -28,7 +29,10 @@ async def test_startup_lines_are_shipped_after_hello_and_still_in_the_log(start_
         await ws.send_str(env("ping", id=9))  # answered after everything queued before it
         got = await frames_until(ws, "pong")
         logs = [m["d"] for m in got if m["t"] == "hub_log"]
-        assert any(d["msg"].startswith("hub: build ") and d["level"] == "info" for d in logs), got
+        assert any(
+            re.match(r"\[[\d:.]+ \+\d+ms\] hub: build ", d["msg"]) and d["level"] == "info"
+            for d in logs
+        ), got
         assert all(isinstance(d["ts"], int) for d in logs)
         await ws.close()
         plain = await session.ws_connect(hub.url)

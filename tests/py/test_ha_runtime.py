@@ -6,6 +6,7 @@ A scripted hub (no binaries) drives the exact message orders; a manual clock rep
 import asyncio
 import base64
 import logging
+import time
 
 import pytest
 from conftest import HUB_ID, make_entry
@@ -826,3 +827,22 @@ async def test_off_list_already_turning_off_shield_gives_one_turn_off(hass, rig,
     await settle(hass, lambda: off)
     await settle(hass)
     assert len(off) == 1
+
+
+async def test_unmapped_key_is_logged_at_info_rate_limited(hass, rig, clock, caplog):
+    _hub, c = await rig()
+    caplog.set_level(logging.INFO, logger="custom_components.ha_harmony.coordinator")
+    c._unmapped_log_at = time.monotonic()  # a line was just logged: the next ones are held back
+    c._dispatch_ha(4, "press")
+    assert "no Home Assistant mapping" not in caplog.text
+    c._unmapped_log_at = time.monotonic() - 10
+    c._dispatch_ha(4, "press")
+    c._dispatch_ha(4, "release")  # inside the window: no second line
+    c._dispatch_ha(4, "hold")  # repeats never log
+    lines = [r for r in caplog.records if "no Home Assistant mapping" in r.getMessage()]
+    assert [(r.levelno, r.getMessage()) for r in lines] == [
+        (
+            logging.INFO,
+            f"key 4 press has no Home Assistant mapping (activity {c.current_activity_id})",
+        )
+    ]

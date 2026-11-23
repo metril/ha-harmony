@@ -177,7 +177,7 @@ typedef struct {
     bool has_last_gen;
     bool info_fresh;         /* a link-up was seen: the next remote_info is broadcast even if identical (one per link-up) */
     uint32_t info_bcast;     /* remote_info broadcasts sent (diagnostics, tests) */
-    uint32_t np_log_at[4]; /* last log line per kind (np held, np sent, cover held, cover sent): rate limit, no storage */
+    uint32_t np_log_at[5]; /* last log line per kind (np held, np sent, cover held, cover sent, held rf key): rate limit, no storage */
     uint32_t pend_dropped; /* held messages lost to a full queue (a tile that found only pages, or the oldest page) */
     hub_info_t info[HUB_INFO_MAX]; /* remote_info per remote; dropped when the RF link is lost */
     void (*bcast_hook)(void *ctx, const char *type, const cJSON *d); /* tests: sees every broadcast, in order */

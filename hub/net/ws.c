@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "hub/hp_errors.h"
+#include "hub/net/hublog.h"
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
@@ -286,6 +287,10 @@ struct hp_ws_conn {
     int64_t idle_dl;  /* 0 = none: next inbound frame must arrive by then */
     void *user;
     uint32_t peer; /* IPv4 of the peer, host order (0 = unknown) */
+    const char *why; /* first reason the connection ended (logged at free) */
+    uint16_t code;   /* its close code, 0 = none */
+    int err;         /* errno of the failing recv/send, 0 = none */
+    int64_t up_at;   /* upgrade time (now_ms) */
 };
 
 struct hp_ws_server {
@@ -395,8 +400,22 @@ void hp_ws_conn_set_user(hp_ws_conn_t *c, void *u) { c->user = u; }
 void *hp_ws_conn_user(const hp_ws_conn_t *c) { return c->user; }
 uint32_t hp_ws_conn_peer(const hp_ws_conn_t *c) { return c->peer; }
 
+/* Ends the connection; the first reason given is the one logged. */
+static void ws_kill(hp_ws_conn_t *c, const char *why, uint16_t code, int err) {
+    if (!c->why) {
+        c->why = why;
+        c->code = code;
+        c->err = err;
+    }
+    c->dead = true;
+}
+
 static void conn_free(hp_ws_conn_t *c) {
     hp_ws_server_t *s = c->srv;
+    if (c->upgraded)
+        hp_log("hub: ws client %u.%u.%u.%u disconnected after %lld ms: %s (code %u, errno %d)\n", (unsigned)(c->peer >> 24),
+               (unsigned)(c->peer >> 16 & 255), (unsigned)(c->peer >> 8 & 255), (unsigned)(c->peer & 255),
+               (long long)(now_ms() - c->up_at), c->why ? c->why : "server shutdown", (unsigned)c->code, c->err);
     if (c->upgraded && s->cb.on_close) s->cb.on_close(c, s->user);
     if (c->fd >= 0) close(c->fd);
     free(c->rbuf);
@@ -409,7 +428,7 @@ static void conn_free(hp_ws_conn_t *c) {
 
 static int out_append(hp_ws_conn_t *c, const uint8_t *p, size_t n) {
     if (c->olen - c->ooff + n > HP_WS_MAX_OUT) {
-        c->dead = true;
+        ws_kill(c, "send buffer full (client not reading)", 0, 0);
         return -HP_E_BUSY;
     }
     if (c->ooff == c->olen) c->ooff = c->olen = 0;
@@ -418,7 +437,7 @@ static int out_append(hp_ws_conn_t *c, const uint8_t *p, size_t n) {
         while (nc < c->olen + n) nc *= 2;
         uint8_t *nb = realloc(c->out, nc);
         if (!nb) {
-            c->dead = true;
+            ws_kill(c, "out of memory", 0, 0);
             return -HP_E_BUSY;
         }
         c->out = nb;
@@ -439,7 +458,7 @@ static void flush_out(hp_ws_conn_t *c) {
         } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
             return;
         } else {
-            c->dead = true;
+            ws_kill(c, "send failed", 0, errno);
             return;
         }
     }
@@ -475,6 +494,10 @@ int hp_ws_send(hp_ws_conn_t *c, const char *text, size_t len) {
 }
 
 void hp_ws_conn_close(hp_ws_conn_t *c, uint16_t code) {
+    if (!c->why && c->state != ST_FREE) { /* a close the hub itself asked for (or a protocol error) */
+        c->why = "closed by hub";
+        c->code = code;
+    }
     if (c->state == ST_OPEN) {
         uint8_t pl[2] = {(uint8_t)(code >> 8), (uint8_t)code};
         send_frame(c, 8, pl, 2);
@@ -542,6 +565,7 @@ static void handle_frame(hp_ws_conn_t *c, const hp_ws_frame_hdr_t *h, uint8_t *p
         uint16_t code = n >= 2 ? (uint16_t)((p[0] << 8) | p[1]) : 1000;
         bool bad = n >= 2 && (code < 1000 || code == 1004 || code == 1005 || code == 1006 ||
                               (code > 1011 && code < 3000) || code >= 5000);
+        if (!c->why) { c->why = "client sent close frame"; c->code = code; }
         hp_ws_conn_close(c, bad ? 1002 : code);
         break;
     }
@@ -567,6 +591,9 @@ static void process_input(hp_ws_conn_t *c) {
                 "Connection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", acc);
             c->state = ST_OPEN;
             c->upgraded = true;
+            c->up_at = now_ms();
+            hp_log("hub: ws client %u.%u.%u.%u connected\n", (unsigned)(c->peer >> 24), (unsigned)(c->peer >> 16 & 255),
+                   (unsigned)(c->peer >> 8 & 255), (unsigned)(c->peer & 255));
             c->deadline = 0;
             c->auth_dl = now_ms() + c->srv->auth_ms;
             c->idle_dl = now_ms() + c->srv->idle_ms;
@@ -600,14 +627,14 @@ static void conn_readable(hp_ws_conn_t *c) {
             process_input(c);
             if (c->dead || c->state == ST_CLOSING) return;
         } else if (n == 0) {
-            c->dead = true;
+            ws_kill(c, "peer closed the TCP connection", 0, 0);
             return;
         } else if (errno == EINTR) {
             continue;
         } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return;
         } else {
-            c->dead = true;
+            ws_kill(c, "recv failed", 0, errno);
             return;
         }
     }
@@ -691,7 +718,7 @@ int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
         if (fds[k].revents & POLLOUT) flush_out(c);
         if (!c->dead && (fds[k].revents & (POLLIN | POLLHUP | POLLERR))) {
             if (c->state == ST_CLOSING) {
-                if (fds[k].revents & (POLLHUP | POLLERR)) c->dead = true;
+                if (fds[k].revents & (POLLHUP | POLLERR)) ws_kill(c, "hangup while closing", 0, 0);
             } else {
                 conn_readable(c);
             }
@@ -701,10 +728,10 @@ int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
     for (int i = 0; i < HP_WS_MAX_CONNS; i++) {
         hp_ws_conn_t *c = &s->conns[i];
         if (c->state == ST_FREE) continue;
-        if (c->deadline && now >= c->deadline) c->dead = true;
+        if (c->deadline && now >= c->deadline) ws_kill(c, c->state == ST_CLOSING ? "close handshake timed out" : "handshake timed out", 0, 0);
         if (c->state == ST_OPEN && !c->dead) {
-            if (c->auth_dl && now >= c->auth_dl) hp_ws_conn_close(c, 1008);
-            else if (c->idle_dl && now >= c->idle_dl) hp_ws_conn_close(c, 1001);
+            if (c->auth_dl && now >= c->auth_dl) { c->why = c->why ? c->why : "hello timeout"; hp_ws_conn_close(c, 1008); }
+            else if (c->idle_dl && now >= c->idle_dl) { c->why = c->why ? c->why : "idle timeout (no frame from client)"; hp_ws_conn_close(c, 1001); }
         }
         if (c->dead) conn_free(c);
     }

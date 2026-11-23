@@ -10,6 +10,7 @@
 #include "hub/bt_link.h"
 #include "hub/hp_errors.h"
 #include "hub/net/crash.h"
+#include "hub/net/hublog.h"
 
 /* --- real syscalls ------------------------------------------------------------------------ */
 
@@ -105,7 +106,9 @@ static int drain_prev(hp_hw_t *h) {
         h->pending = true;
     }
     if (!h->pending) return 0;
+    uint32_t t0 = hp_mono_ms();
     (void)ioc(h, HP_I2S_DRAIN, 0); /* normally returns at once: irout books the line for the waveform */
+    hp_stall_end("i2s drain", t0);
     h->pending = false;
     return 0;
 }

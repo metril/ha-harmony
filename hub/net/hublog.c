@@ -19,6 +19,17 @@ static uint32_t mono_ms(void) {
     return clock_gettime(CLOCK_MONOTONIC, &t) == 0 ? (uint32_t)(t.tv_sec * 1000u + (uint32_t)(t.tv_nsec / 1000000)) : 0;
 }
 
+uint32_t hp_mono_ms(void) { return mono_ms(); }
+
+bool hp_stall_check(const char *what, uint32_t t0, uint32_t now) {
+    uint32_t d = now - t0;
+    if (d <= HP_STALL_MS) return false;
+    hp_log("hub: loop stall %u ms in %s\n", (unsigned)d, what);
+    return true;
+}
+
+bool hp_stall_end(const char *what, uint32_t t0) { return hp_stall_check(what, t0, mono_ms()); }
+
 int hp_hublog_init(hp_hublog_t *l, hp_log_emit_fn emit, void *ctx) {
     memset(l, 0, sizeof *l);
     l->wake[0] = l->wake[1] = -1;
@@ -36,22 +47,35 @@ void hp_hublog_install(hp_hublog_t *l) { g_cur = l; }
 int hp_hublog_wake_fd(const hp_hublog_t *l) { return l->wake[0]; }
 
 const char *hp_hublog_level(const char *m) {
-    static const char *const w[] = {"cannot", "failed", "error", "giving up", "dropping", "refus", "unusable", NULL};
+    static const char *const w[] = {"cannot", "failed", "error", "giving up", "dropping", "refus", "unusable", "stall", "dropped", NULL};
     for (int i = 0; w[i]; i++)
         if (strstr(m, w[i])) return "warning";
     return "info";
 }
 
+/* "[HH:MM:SS.mmm +<uptime ms>ms] " (UTC wall clock, then the monotonic ms the stall lines and `ts` use). Returns its length. */
+static size_t stamp_prefix(char *b, size_t cap, uint32_t ts) {
+    struct timespec t;
+    struct tm tm;
+    if (clock_gettime(CLOCK_REALTIME, &t) != 0 || !gmtime_r(&t.tv_sec, &tm)) return 0;
+    int k = snprintf(b, cap, "[%02d:%02d:%02d.%03d +%ums] ", tm.tm_hour, tm.tm_min, tm.tm_sec, (int)(t.tv_nsec / 1000000),
+                     (unsigned)ts);
+    return k > 0 && (size_t)k < cap ? (size_t)k : 0;
+}
+
 static void push(hp_hublog_t *l, const char *s, size_t n, uint32_t ts) { /* mu held */
-    if (n >= HP_LOG_LINE) n = HP_LOG_LINE - 1;
+    char pre[40];
+    size_t pn = l->stamp ? stamp_prefix(pre, sizeof pre, ts) : 0;
+    if (pn + n >= HP_LOG_LINE) n = HP_LOG_LINE - 1 - pn;
     if (l->count == HP_LOG_RING) {
         l->head = (l->head + 1) % HP_LOG_RING;
         l->count--;
         l->dropped++;
     }
     hp_logline_t *e = &l->ring[(l->head + l->count++) % HP_LOG_RING];
-    memcpy(e->msg, s, n);
-    e->msg[n] = 0;
+    memcpy(e->msg, pre, pn);
+    memcpy(e->msg + pn, s, n);
+    e->msg[pn + n] = 0;
     snprintf(e->level, sizeof e->level, "%s", hp_hublog_level(e->msg));
     e->ts = ts;
     e->dropped = 0;

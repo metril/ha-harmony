@@ -304,11 +304,53 @@ static void test_rf_link_log_goes_through_hp_log(void) {
     teardown(fd, path);
 }
 
+/* A shipped line carries "[HH:MM:SS.mmm +<uptime>ms] "; the file keeps the bare line. */
+static void test_shipped_lines_are_stamped(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    int fd = setup(&l, &s, path);
+    s.up = true;
+    l.stamp = true;
+    g_ms += 1234;
+    hp_log("hub: stamped");
+    hp_hublog_service(&l);
+    CT_EQ(s.n, 1);
+    unsigned hh, mm, ss, ms, up;
+    char rest[64];
+    CT_EQ(sscanf(s.msg[0], "[%2u:%2u:%2u.%3u +%ums] %63[^\n]", &hh, &mm, &ss, &ms, &up, rest), 6);
+    CT_EQ(up, g_ms);
+    CT_CHECK(!strcmp(rest, "hub: stamped"));
+    char buf[64] = "";
+    CT_CHECK(pread(fd, buf, sizeof buf - 1, 0) > 0 && !strcmp(buf, "hub: stamped\n"));
+    teardown(fd, path);
+}
+
+/* The watchdog: > HP_STALL_MS logs "loop stall <ms> ms in <handler>"; at the threshold or below, nothing. */
+static void test_stall_watchdog_threshold(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    int fd = setup(&l, &s, path);
+    CT_CHECK(!hp_stall_check("fast", 1000, 1000 + HP_STALL_MS));
+    CT_CHECK(hp_stall_check("rf_spi write", 1000, 1000 + HP_STALL_MS + 1));
+    CT_CHECK(hp_stall_check("wrap", 0xFFFFFF00u, 0x00000200u)); /* 32-bit wrap: 768 ms */
+    uint32_t t0 = hp_mono_ms();
+    CT_CHECK(!hp_stall_end("now", t0));
+    char buf[256] = "";
+    CT_CHECK(pread(fd, buf, sizeof buf - 1, 0) > 0);
+    CT_CHECK(!strcmp(buf, "hub: loop stall 251 ms in rf_spi write\nhub: loop stall 768 ms in wrap\n"));
+    CT_CHECK(!strcmp(hp_hublog_level("hub: loop stall 251 ms in x"), "warning"));
+    teardown(fd, path);
+}
+
 int main(void) {
     CT_RUN(test_hook_offset_survives_a_respawn);
     CT_RUN(test_rf_link_log_goes_through_hp_log);
     CT_RUN(test_hook_log_is_shipped_once_then_followed);
     CT_RUN(test_push_when_up);
+    CT_RUN(test_shipped_lines_are_stamped);
+    CT_RUN(test_stall_watchdog_threshold);
     CT_RUN(test_line_reaches_the_file_synchronously);
     CT_RUN(test_stalled_ring_never_blocks);
     CT_RUN(test_rate_limit_and_summary);

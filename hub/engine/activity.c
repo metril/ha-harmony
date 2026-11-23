@@ -226,6 +226,12 @@ static bool redundant(const hp_actsm_t *e, const hp_actstep_t *s) {
     }
 }
 
+/* A plan step the tracked state calls unnecessary is not sent: say which (a stale tracked state shows up here). */
+static void log_redundant(const hp_actsm_t *e, const hp_actstep_t *s) {
+    const char *what = s->kind == HP_STEP_PWR_OFF ? "already off" : s->kind == HP_STEP_PWR_ON ? "already on" : "already on that input";
+    hp_log("hub: step skipped, tracked state says %s is %s\n", e->map->devs[s->dev].name, what);
+}
+
 static void set_dev(hp_actsm_t *e, int d, int power, const char *input) {
     hp_devstate_t *ds = &e->dev[d];
     if (ds->power == power && !strcmp(ds->input, input)) return;
@@ -263,6 +269,7 @@ static int run(hp_actsm_t *e) {
         const hp_actstep_t *s = &e->plan[e->pos];
         uint32_t now = now_of(e);
         if (redundant(e, s)) {
+            log_redundant(e, s);
             e->pos++;
             continue;
         }
