@@ -63,7 +63,7 @@ ENUMS: dict[str, dict[str, int]] = {'key_action': {'press': 0, 'release': 1, 'ho
 
 # name -> (code, transport, ((field, wire type, optional), ...))
 MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
-    'hello': (1, 'ws', (('token', 'str', False), ('client', 'str', True), )),
+    'hello': (1, 'ws', (('token', 'str', False), ('client', 'str', True), ('transient', 'bool', True), )),
     'hello_ack': (2, 'ws', (('hub_id', 'str', False), ('fw_version', 'str', True), ('activities', 'json', True), ('config_hash', 'str', True), ('limits', 'json', True), ('fw_build', 'u32', True), ('ota_key', 'str', True), ('name', 'str', True), ('hw_id', 'str', True), ('rename', 'bool', True), ('id_pinned', 'bool', True), ('tcp_keepalive', 'bool', True), ('bt', 'json', True), )),
     'error': (3, 'ws', (('code', 'str', False), ('message', 'str', False), ('ref_id', 'u32', True), )),
     'ping': (4, 'ws', ()),
@@ -73,14 +73,14 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'config_ack': (7, 'ws', (('ok', 'bool', False), ('message', 'str', True), ('config_hash', 'str', True), )),
     'command': (8, 'ws', (('device', 'str', False), ('command', 'str', False), ('args', 'json', True), )),
     'command_result': (9, 'ws', (('ok', 'bool', False), ('message', 'str', True), )),
-    'key_event': (10, 'both', (('remote', 'u8', False), ('key', 'u8', False), ('action', 'enum:key_action', False), )),
+    'key_event': (10, 'both', (('remote', 'u8', False), ('key', 'u8', False), ('action', 'enum:key_action', False), ('activity', 'u8', True), )),
     'state_update': (11, 'both', (('activity', 'u8', False), ('power', 'bool', False), )),
     'page_push': (12, 'both', (('remote', 'u8', False), ('page', 'u8', False), ('data', 'bytes', False), )),
     'battery': (13, 'both', (('remote', 'u8', False), ('percent', 'u8', False), ('millivolts', 'u16', False), )),
     'device_state': (14, 'ws', (('device', 'str', False), ('power', 'bool', False), ('input', 'str', True), )),
     'tile_update': (15, 'rf', (('remote', 'u8', False), ('page', 'u8', False), ('tile', 'u8', False), ('text', 'str', False), )),
     'activity_list': (16, 'ws', (('activities', 'json', False), ('config_hash', 'str', True), )),
-    'remote_attached': (17, 'ws', ()),
+    'remote_attached': (17, 'ws', (('remote', 'u8', True), )),
     'remote_info': (18, 'both', (('remote', 'u8', False), ('page_fmt', 'u8', False), ('caps', 'u8', False), ('icons', 'u8', False), ('gen', 'u8', False), ('pages', 'u8', False), )),
     'tile_state': (19, 'rf', (('remote', 'u8', False), ('page', 'u8', False), ('tile', 'u8', False), ('state', 'u8', False), ('text', 'str', False), )),
     'ota_begin': (20, 'ws', (('target', 'u8', False), ('size', 'u32', False), ('build', 'u32', False), ('sha', 'str', False), )),

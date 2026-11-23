@@ -1683,7 +1683,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         elif mtype is MsgType.KEY_EVENT:
             self._remote_seen()
             action = KEY_ACTIONS.get(data["action"], "press")
-            self._dispatch_ha(data["key"], action)  # first: nothing else delays the service call
+            self._dispatch_ha(
+                data["key"], action, data.get("activity")
+            )  # first: nothing else delays the service call
             for cb in list(self._key_listeners):
                 cb(data["remote"], data["key"], action)
         elif mtype is MsgType.ACTIVITY_LIST:
@@ -1875,8 +1877,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return ids[idx] if idx is not None and 0 <= idx < len(ids) else None
 
     @callback
-    def _dispatch_ha(self, key: int, action: str) -> None:
-        """A key press (or hold repeat) -> the HA service of the hub's current activity layer.
+    def _dispatch_ha(self, key: int, action: str, layer: int | None = None) -> None:
+        """A key press (or hold repeat) -> the HA service of the activity layer the hub resolved the key in
+        (`layer`: its activity index, 255 = none; the hub's keymap switches before state_update arrives, so
+        only a message without it, i.e. a test fixture, falls back to the last state_update).
         Dict lookups only; the call is started in this very callback. Never raises."""
         try:
             if action == "release":
@@ -1886,7 +1890,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             elif key in self._released:
                 return  # a stray hold after the release: repeats stop with the release
             tables = self.compiled.ha_keys
-            table = tables.get(self.current_activity_id)
+            ids = self.compiled.activity_ids
+            if layer is None:
+                act = self.current_activity_id
+            else:
+                act = ids[layer] if 0 <= layer < len(ids) else None
+            table = tables.get(act)
             if table is None:
                 table = tables.get(None)
             call = table.get(key) if table else None

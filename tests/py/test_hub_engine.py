@@ -163,7 +163,12 @@ async def test_malformed_config_keeps_old_map(hub_rf, run_remote):
         read_lines(hub_process, 4)
         assert run_remote(hub_rf.rf, "--press", "2", "--remote", "1").returncode == 0
         ke = await recv(ws)
-        assert ke["t"] == "key_event" and ke["d"] == {"remote": 1, "key": 2, "action": 0}
+        assert ke["t"] == "key_event" and ke["d"] == {
+            "remote": 1,
+            "key": 2,
+            "action": 0,
+            "activity": 0,
+        }
         assert read_lines(hub_process, 1) == ["ir port=3 hz=38029 n=2 us=631,631"]
 
 
@@ -174,7 +179,7 @@ async def test_unmapped_key_still_emits(hub_rf, run_remote):
         res = run_remote(hub_rf.rf, "--press", "200", "--remote", "2", "--action", "1")
         assert res.returncode == 0, res.stderr
         ke = await recv(ws)
-        assert ke["d"] == {"remote": 2, "key": 200, "action": 1}
+        assert ke["d"] == {"remote": 2, "key": 200, "action": 1, "activity": 255}
 
 
 async def test_cache_restores_map_after_restart(start_hub, tmp_path):

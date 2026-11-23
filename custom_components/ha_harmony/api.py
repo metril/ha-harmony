@@ -72,10 +72,14 @@ class HarmonyHubClient:
         backoff_max: float = 30.0,
         request_timeout: float = 10.0,
         stable_after: float = 30.0,
+        transient: bool = False,
         clock: Callable[[], float] = time.monotonic,
         rand: Callable[[], float] = random.random,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
+        # A config / reconfigure flow's short-lived probe: told to the hub, which never closes the entry's
+        # persistent connection (same client id) for it.
+        self._transient = transient
         self._url = f"ws://{host}:{port}/"
         self._token = token
         self._session = session
@@ -197,7 +201,9 @@ class HarmonyHubClient:
             raise HarmonyConnectionError(f"cannot connect to {self._url}: {exc}") from exc
         keepalive_ws(ws)
         try:
-            hello = {"token": self._token, "client": "home-assistant"}
+            hello: dict[str, Any] = {"token": self._token, "client": "home-assistant"}
+            if self._transient:
+                hello["transient"] = True
             await ws.send_json(encode_ws(MsgType.HELLO, hello, 1))
             msg = await ws.receive(timeout=self._req_timeout)
             if msg.type != aiohttp.WSMsgType.TEXT:

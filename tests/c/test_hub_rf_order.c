@@ -33,9 +33,13 @@ static int ncap;
 
 static char LOG[64][24];
 static int nlog;
+static int att_remote = -2; /* the `remote` of the last remote_attached (-1: the field was absent) */
 static void rec(void *ctx, const char *type, const cJSON *d) {
     (void)ctx;
-    (void)d;
+    if (!strcmp(type, "remote_attached")) {
+        const cJSON *r = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "remote");
+        att_remote = cJSON_IsNumber(r) ? (int)r->valuedouble : -1;
+    }
     if (nlog < 64) snprintf(LOG[nlog++], sizeof LOG[0], "%s", type);
 }
 
@@ -117,10 +121,11 @@ static int make_obj(hp_msg_type_t type, const hp_rf_val_t *v, size_t nv) {
     CT_CHECK(ncap > first);
     return first;
 }
-static int make_info(uint32_t caps) {
-    hp_rf_val_t v[6] = {{.u = 1}, {.u = 2}, {.u = caps}, {.u = 50}, {.u = 0}, {.u = 0}};
+static int make_info_gen(uint32_t caps, uint32_t gen) {
+    hp_rf_val_t v[6] = {{.u = 1}, {.u = 2}, {.u = caps}, {.u = 50}, {.u = gen}, {.u = 2}};
     return make_obj(HP_MSG_REMOTE_INFO, v, 6);
 }
+static int make_info(uint32_t caps) { return make_info_gen(caps, 0); }
 static int make_battery(void) {
     hp_rf_val_t v[3] = {{.u = 1}, {.u = 80}, {.u = 3000}};
     return make_obj(HP_MSG_BATTERY, v, 3);
@@ -231,18 +236,91 @@ static void test_loss_and_new_session_frames_are_ordered(void) {
     CT_CHECK(streq(seq(), "ai"));
     int b1 = make_battery(); /* last data of the old link */
     int bn = nframes_since(b1);
-    int i2 = make_info(7); /* what the NEW link's remote says first */
+    int i2 = make_info_gen(7, 1); /* what the NEW link's remote says first (another page set: not a flap) */
     int n2 = nframes_since(i2);
     r_frames(b1, bn);
     r_lost();
     r_up();
     r_frames(i2, n2);
     pump(); /* the old battery, then the loss, then (tail) the new link-up */
-    CT_CHECK(streq(seq(), "aiba")); /* old link's last frames, its loss in order, then the new link's attach */
+    CT_CHECK(streq(seq(), "aib")); /* old link's last frames, its loss in order; the flap re-up waits for the info */
     pump();
     CT_CHECK(streq(seq(), "aibai"));
     CT_CHECK(hub_remote_info(&H, 1) != NULL && hub_remote_info(&H, 1)->caps == 7); /* not wiped by the old loss */
     CT_EQ(count("remote_attached"), 2);
+}
+
+/* 2b. a flap (re-up within 10 s, same remote_info gen): no remote_attached and no cover resend; a changed gen, or a
+ * re-up after the window, is announced as before. The announcement names the remote. */
+static void test_flap_is_not_announced(void) {
+    world();
+    int i1 = make_info_gen(3, 5);
+    r_frames(i1, nframes_since(i1));
+    pump();
+    CT_CHECK(streq(seq(), "ai"));
+    CT_EQ(att_remote, 1); /* named by the remote_info that revealed the link */
+    H.cover[0].used = true;
+    H.cover[0].nsent = 5;
+    H.cover[0].hold = false;
+    r_lost();
+    r_up();
+    pump();
+    CT_CHECK(streq(seq(), "ai")); /* re-up seen, nothing yet */
+    int i2 = make_info_gen(3, 5);
+    r_frames(i2, nframes_since(i2));
+    pump();
+    CT_CHECK(streq(seq(), "aii")); /* the info follows, the announcement does not */
+    CT_EQ(count("remote_attached"), 1);
+    CT_EQ(H.cover[0].nsent, 5); /* the cover is not re-armed */
+    CT_CHECK(!H.cover[0].hold);
+    /* a flap that returns with another gen is a new remote state: announced, covers re-armed */
+    r_lost();
+    r_up();
+    int i3 = make_info_gen(3, 9);
+    r_frames(i3, nframes_since(i3));
+    pump();
+    pump();
+    CT_EQ(count("remote_attached"), 2);
+    CT_CHECK(H.cover[0].nsent < 5); /* started over (the flush may already have sent a chunk) */
+    /* same gen but after the window: announced */
+    pump();
+    r_lost();
+    pump();
+    now_ms += 11000;
+    r_up();
+    int i4 = make_info_gen(3, 9);
+    r_frames(i4, nframes_since(i4));
+    pump();
+    pump();
+    CT_EQ(count("remote_attached"), 3);
+    /* a remote that comes back holding no pages (it lost its store) is always served, whatever the gen */
+    r_lost();
+    hp_rf_val_t e[6] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}, {.u = 9}, {.u = 0}};
+    int i5 = make_obj(HP_MSG_REMOTE_INFO, e, 6);
+    r_up();
+    r_frames(i5, nframes_since(i5));
+    pump();
+    pump();
+    CT_EQ(count("remote_attached"), 4);
+}
+
+/* 2c. a link-up the transport's flag revealed (no frame) names the last remote seen, none before any */
+static void test_flag_attach_names_the_last_remote(void) {
+    world();
+    att_remote = -2;
+    r_up();
+    pump();
+    CT_EQ(att_remote, -1); /* no remote seen yet: the field is absent */
+    int b = make_battery();
+    r_frames(b, nframes_since(b));
+    pump();
+    r_lost();
+    pump();
+    now_ms += 11000;
+    r_up();
+    pump();
+    CT_EQ(count("remote_attached"), 2);
+    CT_EQ(att_remote, 1);
 }
 
 /* 3. no frames: lost and up (twice) between pumps = one announcement per consumed link-up, never two per pump */
@@ -367,6 +445,8 @@ int main(void) {
     test_attach_between_recv_and_flag();
     test_attach_inside_recv();
     test_loss_and_new_session_frames_are_ordered();
+    test_flap_is_not_announced();
+    test_flag_attach_names_the_last_remote();
     test_no_double_attach();
     test_cached_info_follows_the_announcement();
     test_frames_before_loss_delivered_then_cleared();

@@ -18,9 +18,18 @@ static int wire_size(const hp_field_desc_t *f) {
 static const hp_msg_desc_t *rf_desc(hp_msg_type_t t) {
     const hp_msg_desc_t *d = hp_msg_desc(t);
     if (!d || !(d->transport & HP_TRANSPORT_RF)) return NULL;
-    for (size_t i = 0; i < d->field_count; i++)
-        if (d->fields[i].optional || wire_size(&d->fields[i]) < 0) return NULL;
+    bool opt = false;
+    for (size_t i = 0; i < d->field_count; i++) {
+        opt = opt || d->fields[i].optional; /* trailing optional fields are ws-only: not on the RF wire */
+        if ((opt && !d->fields[i].optional) || wire_size(&d->fields[i]) < 0) return NULL;
+    }
     return d;
+}
+
+static size_t rf_nfields(const hp_msg_desc_t *d) {
+    size_t n = 0;
+    while (n < d->field_count && !d->fields[n].optional) n++;
+    return n;
 }
 
 static bool enum_ok(const hp_enum_desc_t *e, uint32_t v) {
@@ -32,9 +41,9 @@ static bool enum_ok(const hp_enum_desc_t *e, uint32_t v) {
 int hp_rf_pack(hp_msg_type_t t, const hp_rf_val_t *vals, size_t nvals, uint8_t *out, size_t cap,
                size_t *out_len) {
     const hp_msg_desc_t *d = rf_desc(t);
-    if (!d || !vals || !out || !out_len || nvals != d->field_count) return -HP_E_INVAL;
+    if (!d || !vals || !out || !out_len || nvals != rf_nfields(d)) return -HP_E_INVAL;
     size_t o = 0;
-    for (size_t i = 0; i < d->field_count; i++) {
+    for (size_t i = 0, nf = rf_nfields(d); i < nf; i++) {
         const hp_field_desc_t *f = &d->fields[i];
         const hp_rf_val_t *v = &vals[i];
         int w = wire_size(f);
@@ -60,9 +69,9 @@ int hp_rf_pack(hp_msg_type_t t, const hp_rf_val_t *vals, size_t nvals, uint8_t *
 
 int hp_rf_unpack(hp_msg_type_t t, const uint8_t *in, size_t len, hp_rf_val_t *vals, size_t nvals) {
     const hp_msg_desc_t *d = rf_desc(t);
-    if (!d || (len && !in) || !vals || nvals < d->field_count) return -HP_E_INVAL;
+    if (!d || (len && !in) || !vals || nvals < rf_nfields(d)) return -HP_E_INVAL;
     size_t o = 0;
-    for (size_t i = 0; i < d->field_count; i++) {
+    for (size_t i = 0, nf = rf_nfields(d); i < nf; i++) {
         const hp_field_desc_t *f = &d->fields[i];
         hp_rf_val_t *v = &vals[i];
         int w = wire_size(f);

@@ -93,6 +93,24 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     hp_stall_check("ws dispatch", t0, t1); /* the handlers' own IR / SPI sends included */
 }
 
+/* A persistent client (named, not transient) authenticated: its older authenticated connections with the same
+ * client id are dead peers (a half-open link the hub has not noticed) and are closed. A transient connection
+ * (a config flow probing the hub) never closes anything. */
+typedef struct { const hp_ws_conn_t *keep; const hp_session_t *s; } supersede_t;
+
+static void supersede_cb(hp_ws_conn_t *c, void *arg) {
+    const supersede_t *a = arg;
+    const hp_session_t *o = hp_ws_conn_user(c);
+    if (c != a->keep && o && o->authed && !o->transient && strcmp(o->client, a->s->client) == 0)
+        hp_ws_conn_close(c, 1000);
+}
+
+static void close_superseded(hp_ws_conn_t *c, const hp_session_t *sess) {
+    if (sess->transient || !sess->client[0]) return;
+    supersede_t a = {c, sess};
+    hp_ws_foreach(g_hub.srv, supersede_cb, &a);
+}
+
 static void on_text_body(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     (void)user;
     hp_session_t *sess = hp_ws_conn_user(c);
@@ -109,6 +127,7 @@ static void on_text_body(hp_ws_conn_t *c, const char *msg, size_t len, void *use
     if (rl && hp_ws_send(c, reply, rl) < 0) { hp_ws_conn_close(c, 1011); return; }
     if (sess->authed) hp_ws_conn_set_authed(c);
     if (!was_authed && sess->authed) {
+        close_superseded(c, sess);  /* a persistent client re-authenticating: its stale older links go */
         hub_send_state(&g_hub, c); /* live state right after hello_ack */
         hp_hublog_service(&g_log);  /* lines queued while nobody was connected */
         hp_peers_cancel(&g_peers, hp_ws_conn_peer(c));

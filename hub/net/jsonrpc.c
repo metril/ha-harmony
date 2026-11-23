@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "hub/hp_errors.h"
@@ -165,7 +166,10 @@ int hp_dispatch(const char *json, size_t len, const hp_handler_tbl_t *tbl, void 
         sess->authed = true;
         sess->bt_listen = false;
         const cJSON *cl = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "client");
-        sess->log_sink = cJSON_IsString(cl) && strcmp(cl->valuestring, "home-assistant") == 0;
+        const cJSON *tr = cJSON_GetObjectItemCaseSensitive((cJSON *)d, "transient");
+        sess->transient = cJSON_IsTrue(tr);
+        snprintf(sess->client, sizeof sess->client, "%s", cJSON_IsString(cl) ? cl->valuestring : "");
+        sess->log_sink = !sess->transient && cJSON_IsString(cl) && strcmp(cl->valuestring, "home-assistant") == 0;
         cJSON *ack = cJSON_CreateObject();
         if (!ack) {
             rc = -HP_E_INVAL;

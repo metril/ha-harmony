@@ -208,7 +208,10 @@ def test_config_ack_hash_and_remote_attached_in_schema():
     msgs = {m.name: m for m in load_schema(REAL_SCHEMA).messages}
     ack = {f.name: f for f in msgs["config_ack"].fields}
     assert ack["config_hash"].type == "str" and ack["config_hash"].optional
-    assert msgs["remote_attached"].transport == "ws" and not msgs["remote_attached"].fields
+    ra = msgs["remote_attached"]
+    assert ra.transport == "ws" and [(f.name, f.type, f.optional) for f in ra.fields] == [
+        ("remote", "u8", True)
+    ]
 
 
 def test_committed_generated_files_are_fresh(tmp_path):

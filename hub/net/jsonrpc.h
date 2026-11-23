@@ -20,6 +20,8 @@ _Static_assert(HP_MSG_MAX_CODE < 128, "handler tables are indexed by message cod
 typedef struct {
     bool authed; /* set by a successful hello */
     bool bt_listen; /* bt_listen on: wants bt_remote_key pushes; reset by hello */
+    bool transient; /* hello transient:true: a short-lived probe; supersedes no older connection; reset by hello */
+    char client[24]; /* hello client id (truncated; "" = none): a persistent re-authentication replaces older ones of it */
     bool log_sink;  /* hello client "home-assistant": wants hub_log pushes (docs/proto/hub-log.md); reset by hello */
 } hp_session_t;
 

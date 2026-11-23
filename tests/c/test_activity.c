@@ -386,6 +386,25 @@ static void test_set_device_errors(void) {
     CT_EQ(hp_actsm_start(&sm, "nope"), -HP_E_INVAL);
 }
 
+static int emitted_layer = -9;
+static void layer_emit(void *ctx, uint8_t remote, uint8_t key, hp_key_action_t action) {
+    (void)ctx; (void)remote; (void)key; (void)action;
+    emitted_layer = map.key_layer;
+}
+
+/* the layer a key event reports is the one the key was resolved in, not the one its own action switches to */
+static void test_emitted_key_layer_is_the_lookup_layer(void) {
+    setup();
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, layer_emit, NULL), 0);
+    CT_EQ(emitted_layer, -1); /* nothing running */
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 1, HP_KEY_ACTION_PRESS, layer_emit, NULL), 0); /* starts activity 0 */
+    CT_EQ(map.current, 0);
+    CT_EQ(emitted_layer, -1); /* looked up before it switched */
+    settle_all();
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, layer_emit, NULL), 0);
+    CT_EQ(emitted_layer, 0);
+}
+
 static void test_key_driven_and_busy_keys(void) {
     setup();
     CT_EQ(hp_key_handle(&map, &sinks, 1, 1, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* activity key */
@@ -1172,6 +1191,7 @@ int main(void) {
     CT_RUN(test_set_device_during_transition_skips_redundant);
     CT_RUN(test_drops_are_logged);
     CT_RUN(test_set_device_errors);
+    CT_RUN(test_emitted_key_layer_is_the_lookup_layer);
     CT_RUN(test_key_driven_and_busy_keys);
     CT_RUN(test_bt_key_released_on_switch_and_off);
     CT_RUN(test_start_event_and_activity_bt_hosts);

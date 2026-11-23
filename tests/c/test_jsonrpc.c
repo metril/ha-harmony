@@ -77,6 +77,11 @@ static void test_auth(void) {
     CT_CHECK(has("\"bad_request\"") && !s.authed);
     CT_EQ(run(&s, "{\"v\":1,\"id\":10,\"t\":\"hello\",\"d\":{\"token\":\"secret\",\"client\":\"ha\"}}"), HP_DISPATCH_OK);
     CT_CHECK(has("\"hello_ack\"") && has("\"hub_id\":\"hub-1\"") && has("\"id\":10") && s.authed);
+    CT_CHECK(!strcmp(s.client, "ha") && !s.transient);
+    CT_EQ(run(&s, "{\"v\":1,\"id\":12,\"t\":\"hello\",\"d\":{\"token\":\"secret\",\"client\":\"home-assistant\",\"transient\":true}}"), HP_DISPATCH_OK);
+    CT_CHECK(!strcmp(s.client, "home-assistant") && s.transient && !s.log_sink); /* a transient probe gets no hub_log */
+    CT_EQ(run(&s, "{\"v\":1,\"id\":13,\"t\":\"hello\",\"d\":{\"token\":\"secret\",\"client\":\"home-assistant\"}}"), HP_DISPATCH_OK);
+    CT_CHECK(!s.transient && s.log_sink);
     CT_EQ(run(&s, "{\"v\":1,\"id\":11,\"t\":\"ping\",\"d\":{}}"), HP_DISPATCH_OK);
     CT_CHECK(has("\"pong\"") && has("\"id\":11"));
     /* no configured token: nothing authenticates */

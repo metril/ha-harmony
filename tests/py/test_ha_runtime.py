@@ -921,3 +921,32 @@ async def test_transition_steps_wait_for_each_call(hass, rig, clock):
         ("start", "media_player.select_source"),
         ("end", "media_player.select_source"),
     ]
+
+
+async def test_key_resolves_in_the_layer_the_hub_names_not_the_last_state_update(hass, rig, clock):
+    import dataclasses
+
+    _hub, c = await rig()
+    ids = c.compiled.activity_ids
+    assert len(ids) >= 1
+    fired = []
+    c._fire = lambda call, **kw: fired.append(call)
+    a, b = HaCall("light.turn_on", ("light.a",)), HaCall("light.turn_off", ("light.b",))
+    c.compiled = dataclasses.replace(c.compiled, ha_keys={ids[0]: {7: a}, None: {7: b}})
+    c._current_idx = None  # state_update lags: the hub already switched
+    c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 7, "action": 0, "activity": 0})
+    c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 7, "action": 0, "activity": 255})
+    assert fired == [a, b]
+
+
+async def test_remote_attached_redoes_only_the_remote_it_names(hass, rig, clock):
+    _hub, c = await rig()
+    c.remotes = (1, 2)
+    pushed = []
+    c._request_push = lambda remote, wait=False: pushed.append(remote)
+    c._on_push(MsgType.REMOTE_ATTACHED, {"remote": 2})
+    assert pushed == [2]
+    c._on_push(
+        MsgType.REMOTE_ATTACHED, {}
+    )  # no id (a hub that has seen no remote yet): all of them
+    assert pushed == [2, 1, 2]

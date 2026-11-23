@@ -13,6 +13,10 @@ messages:
     fields:
       - {name: token, type: str}
       - {name: client, type: str, optional: true}
+      # true = a short-lived connection (a config / reconfigure flow probing the hub) that is not the
+      # client's own persistent link: the hub never closes an older connection of the same `client`
+      # for it, and it receives no hub_log.
+      - {name: transient, type: bool, optional: true}
 
   - name: hello_ack
     code: 2
@@ -102,6 +106,10 @@ messages:
       - {name: remote, type: u8}
       - {name: key, type: u8}
       - {name: action, type: "enum:key_action"}
+      # ws only (the RF wire carries the first three fields): the activity layer (state_update.activity
+      # index; 255 = none running) the hub resolved the key in. Clients resolve their own key tables
+      # from it, not from the last state_update, which lags a transition.
+      - {name: activity, type: u8, optional: true}
 
   - name: state_update
     code: 11
@@ -153,10 +161,15 @@ messages:
       - {name: activities, type: json}
       - {name: config_hash, type: str, optional: true}
 
-  # A remote attached on the RF link (pushed to every authenticated client). The link carries no
-  # remote id until the remote's first message, so there are no fields: clients (re)push pages
-  # and tile texts for every remote they manage.
-  - {name: remote_attached, code: 17, transport: ws, fields: []}
+  # A remote attached on the RF link (pushed to every authenticated client): clients redo their pushes
+  # for it. `remote` = the remote the link carries (named by its first frame, else the last remote this
+  # hub saw); absent only when the hub has not seen any remote yet, then clients redo every remote.
+  # A link that flaps and returns within seconds with an unchanged remote_info gen is not announced.
+  - name: remote_attached
+    code: 17
+    transport: ws
+    fields:
+      - {name: remote, type: u8, optional: true}
 
   # Page format handshake (docs/plans/2026-11-18-page-format-v2.md): the remote's first uplink after
   # each link-up; the hub caches it and relays it on ws. page_fmt 2 = understands v2 pages; caps bit 0

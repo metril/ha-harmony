@@ -289,7 +289,7 @@ async def test_rf_reattach_cycles_do_not_lose_the_next_remote(hub_rf):
             a.close()
             b = rf_attach(hub_rf.rf)
             b.send(rf_codec.split(10, 1, bytes([1, 2, 0]))[0])
-            assert (await recv(ws))["d"] == {"remote": 1, "key": 2, "action": 0}, i
+            assert (await recv(ws))["d"] == {"remote": 1, "key": 2, "action": 0, "activity": 255}, i
             b.close()
 
 
