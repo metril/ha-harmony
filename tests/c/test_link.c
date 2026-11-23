@@ -355,15 +355,44 @@ static void test_stale_dropped_release_kept(void) {
     CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 4); /* young: all kept, no retries */
     CT_EQ(n.ep[0].link.tx.retries, 0);
     run(&n, 700);
+    CT_CHECK(n.now > 0);
     hp_rf_link_status_t st = hp_rf_link_status(&n.ep[0].link);
     CT_EQ(st.queued, 1); /* only the newest RELEASE */
     CT_EQ(st.expired, 3);
     CT_EQ(st.failures, 0);
+    int d = hp_rf_link_next_timeout_ms(&n.ep[0].link, n.now);
+    CT_CHECK(d > HP_RF_RETRY_MS); /* down: no 150 ms retry clock, only the release's cap */
+    run(&n, 1500); /* ...and the kept RELEASE has a lifetime too */
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 0);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).expired, 4);
+    CT_EQ(hp_rf_link_next_timeout_ms(&n.ep[0].link, n.now), -1);
     n.ep[0].down = 0;
     n.ep[0].drop_all = 0;
+    CT_EQ(key_obj(&n, 0, 7, HP_KEY_ACTION_RELEASE), 0);
     run(&n, 300);
     CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 0);
     CT_EQ(n.ep[1].ngot, 1);
+}
+
+/* A key never overtakes an unstarted remote_info. */
+static void test_key_not_ahead_of_remote_info(void) {
+    net_t n;
+    net_init(&n, false);
+    n.ep[0].drop_all = 1;
+    CT_EQ(batt_obj(&n, 0), 0); /* in flight */
+    hp_rf_val_t v[6] = {{.u = 1}, {.u = 2}, {.u = 15}, {.u = 9}, {.u = 0}, {.u = 0}};
+    uint8_t pl[HP_RF_MSG_MAX];
+    size_t pn;
+    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 6, pl, sizeof pl, &pn), 0);
+    CT_EQ(hp_rf_link_send(&n.ep[0].link, HP_MSG_REMOTE_INFO, pl, pn, n.now), 0);
+    CT_EQ(batt_obj(&n, 0), 0);
+    CT_EQ(key_obj(&n, 0, 9, HP_KEY_ACTION_PRESS), 0);
+    n.ep[0].drop_all = 0;
+    run(&n, 1500);
+    CT_EQ(n.ep[1].ngot, 4);
+    CT_EQ(n.ep[1].got[1].type, HP_MSG_REMOTE_INFO);
+    CT_EQ(n.ep[1].got[2].type, HP_MSG_KEY_EVENT); /* behind the info, ahead of the waiting battery */
+    CT_EQ(n.ep[1].got[3].type, HP_MSG_BATTERY);
 }
 
 /* A key goes ahead of objects that have not started; HOLD repeats coalesce; RELEASE drops pending HOLDs. */
@@ -671,6 +700,7 @@ int main(void) {
     test_loss_keeps_queue_and_holds_retries();
     test_stale_dropped_release_kept();
     test_key_priority_and_hold_coalescing();
+    test_key_not_ahead_of_remote_info();
     test_release_never_refused();
     test_busy_is_not_a_retry();
     test_strict_refused_ack_wakes_at_backoff_end();

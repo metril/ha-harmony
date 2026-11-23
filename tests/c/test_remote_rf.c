@@ -1269,7 +1269,7 @@ static void test_loss_keeps_key_no_false_failure(void) {
   idle_awake(1000);
   CT_EQ(msg_count("send FAILED"), 0);
   CT_EQ(msg_count("retry 1 of 3"), 0);
-  CT_CHECK(lk.busy && lk.busy(lk.ctx)); /* queued: the remote must not suspend */
+  CT_CHECK(lk.busy && !lk.busy(lk.ctx)); /* queued but unsendable while down: no suspend hold */
   CT_CHECK(!app.ui.fallback);
   fr.drop_all = 0;
   remote_chip_link(1);

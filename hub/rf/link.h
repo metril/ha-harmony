@@ -25,6 +25,7 @@
 #define HP_LINK_OUT_TIMEOUT_MS 300 /* strict downlink: a written frame with no TX status is taken as done after this */
 #define HP_LINK_UPLINK_RELEASE_MS 5 /* strict downlink: an uplink frame arriving this long after a write finished releases the radio slot */
 #define HP_LINK_STALE_MS 1500      /* non-strict: while the link is down, objects queued longer than this are dropped (the newest key RELEASE per key stays) */
+#define HP_LINK_RELEASE_KEEP_MS 3000 /* ...and the kept newest RELEASE goes too after this (the hub's hold caps end a lost release) */
 #define HP_LINK_WRITE_RETRY_MS 50  /* a write refused (transport backoff): tried again after this */
 #define HP_LINK_POLL_MS 30         /* remote polling: gap while an object awaits its ack */
 #define HP_LINK_IDLE_POLL_MS 250   /* ...and otherwise, while awake */
