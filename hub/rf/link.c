@@ -179,8 +179,9 @@ static void remove_at(hp_rf_link_t *l, size_t i, bool notify) {
 }
 
 /* The newest RELEASE of a key is never dropped: the hub would see the key as held forever. */
-static bool keep_release(hp_rf_link_t *l, size_t i) {
+static bool keep_release(hp_rf_link_t *l, size_t i, uint32_t now) {
     uint32_t code, act, c2, a2;
+    if ((int32_t)(now - qat(l, i)->queued_at) >= HP_LINK_RELEASE_KEEP_MS) return false;
     if (!key_info(qat(l, i), &code, &act) || act != HP_KEY_ACTION_RELEASE) return false;
     for (size_t j = i + 1; j < l->qn; j++)
         if (key_info(qat(l, j), &c2, &a2) && c2 == code && a2 == HP_KEY_ACTION_RELEASE) return false;
@@ -190,7 +191,7 @@ static bool keep_release(hp_rf_link_t *l, size_t i) {
 /* Non-strict, link down: drops the objects older than HP_LINK_STALE_MS. */
 static void expire_stale(hp_rf_link_t *l, uint32_t now) {
     for (size_t i = 0; i < l->qn;) {
-        if ((int32_t)(now - qat(l, i)->queued_at) < HP_LINK_STALE_MS || keep_release(l, i)) {
+        if ((int32_t)(now - qat(l, i)->queued_at) < HP_LINK_STALE_MS || keep_release(l, i, now)) {
             i++;
             continue;
         }
@@ -241,7 +242,9 @@ int hp_rf_link_send(hp_rf_link_t *l, hp_msg_type_t type, const uint8_t *body, si
      * behind the one in flight and the keys already waiting. */
     size_t pos = l->qn;
     if (is_key) {
-        pos = first;
+        pos = first; /* never ahead of an unstarted remote_info: it must reach the hub (and reset its filter) before any key */
+        for (size_t i = first; i < l->qn; i++)
+            if (qat(l, i)->type == HP_MSG_REMOTE_INFO) pos = i + 1;
         while (pos < l->qn && qat(l, pos)->type == HP_MSG_KEY_EVENT) pos++;
     }
     for (size_t k = l->qn; k > pos; k--) *qat(l, k) = *qat(l, k - 1);
@@ -376,7 +379,7 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
 }
 
 static uint32_t poll_iv(const hp_rf_link_t *l, uint32_t now) {
-    bool waiting = l->qn && l->started && l->tx.state == HP_RF_TX_WAIT;
+    bool waiting = l->qn && l->started && l->tx.state == HP_RF_TX_WAIT && (strict_on(l) || link_up(l));
     bool partial = l->as.active && (int32_t)(now - l->last_rx) < 1000; /* the peer has more frames of an object */
     return waiting || partial || !l->idle_poll_ms ? l->poll_ms : l->idle_poll_ms;
 }
@@ -448,6 +451,18 @@ int hp_rf_link_next_timeout_ms(const hp_rf_link_t *l, uint32_t now_ms) {
         if (best < 0 || d < best) best = d;
     }
     if (!l->qn) return best;
+    if (!strict_on(l) && !link_up(l)) { /* down: no retry clock; wake only for the next stale drop (the attach event wakes the loop itself) */
+        int32_t e = INT32_MAX;
+        for (size_t i = 0; i < l->qn; i++) {
+            const hp_rf_link_obj_t *o = &l->q[(l->qhead + i) % HP_LINK_QUEUE];
+            int32_t r = (int32_t)(o->queued_at + HP_LINK_RELEASE_KEEP_MS - now_ms);
+            if (o->type != HP_MSG_KEY_EVENT) r = (int32_t)(o->queued_at + HP_LINK_STALE_MS - now_ms);
+            else r = r < 0 ? 0 : r; /* a key may be kept (newest RELEASE) up to the longer cap; the earlier bound is harmless */
+            if (r < e) e = r;
+        }
+        if (e < 0) e = 0;
+        return best < 0 || e < best ? e : best;
+    }
     uint32_t at = l->started ? l->tx.deadline : l->start_wait ? l->start_at : now_ms;
     if (l->started && l->tx.state == HP_RF_TX_WAIT && l->tx.sent < l->tx.n) at = l->tx.next_at; /* pacing */
     int32_t d = (int32_t)(at - now_ms);

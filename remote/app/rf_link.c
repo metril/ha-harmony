@@ -317,6 +317,8 @@ static void service(rf_link_t *l, uint64_t now) {
   if (ex != l->seen_expired) { /* dropped while the link was down: lost, but no retries were burnt */
     ra_logf(&l->sys, "rf_link: %u object(s) dropped, stale while the link was down", (unsigned)(ex - l->seen_expired));
     l->seen_expired = ex;
+    l->info_pending = true; /* a dropped remote_info must be sent again: when the hub is heard */
+    l->next_info_ms = UINT64_MAX;
     raise_failed(l);
   }
   uint32_t f = hp_rf_link_status(&l->link).failures;
@@ -370,7 +372,7 @@ static void rf_touched(void *ctx) {
 
 static bool rf_busy(void *ctx) {
   rf_link_t *l = ctx;
-  return l->tp && hp_rf_link_status(&l->link).queued > 0;
+  return l->tp && hp_rf_link_status(&l->link).queued > 0 && !link_down(l); /* nothing can be sent while down */
 }
 
 static uint32_t rf_next_ms(void *ctx, uint64_t now) {
