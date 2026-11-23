@@ -340,6 +340,12 @@ static void test_stall_watchdog_threshold(void) {
     char buf[256] = "";
     CT_CHECK(pread(fd, buf, sizeof buf - 1, 0) > 0);
     CT_CHECK(!strcmp(buf, "hub: loop stall 251 ms in rf_spi write\nhub: loop stall 768 ms in wrap\n"));
+    /* the poll's own overrun only: time inside ws callbacks and the requested wait are not "poll wake" */
+    CT_CHECK(!hp_stall_poll(5000, 5000 + 1000 + 900, 1000, 900)); /* slow callback, on-time poll */
+    CT_CHECK(!hp_stall_poll(5000, 5000 + 4000, -1, 4000));        /* woken, all spent in callbacks */
+    CT_CHECK(hp_stall_poll(5000, 5000 + 1000 + 900 + 300, 1000, 900)); /* 300 ms late beyond both */
+    CT_CHECK(pread(fd, buf, sizeof buf - 1, 0) > 0);
+    CT_CHECK(strstr(buf, "hub: loop stall 300 ms in poll wake\n"));
     CT_CHECK(!strcmp(hp_hublog_level("hub: loop stall 251 ms in x"), "warning"));
     teardown(fd, path);
 }

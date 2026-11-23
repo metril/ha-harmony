@@ -71,6 +71,9 @@ uint32_t hp_mono_ms(void);
 #define HP_STALL_MS 250
 bool hp_stall_check(const char *what, uint32_t t0, uint32_t now);
 bool hp_stall_end(const char *what, uint32_t t0);
+/* The poll's own overrun: t0..t1 spans hp_ws_poll, which sleeps up to wait_ms (-1 = until woken) and runs the ws callbacks
+ * (cb_ms, reported by their own stall lines). Logs "poll wake" only for time beyond both. */
+bool hp_stall_poll(uint32_t t0, uint32_t t1, int wait_ms, uint32_t cb_ms);
 
 /* printf-style diagnostics line (newline added when missing). Never blocks on the ring; any thread. */
 void hp_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

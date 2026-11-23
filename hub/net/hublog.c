@@ -28,6 +28,11 @@ bool hp_stall_check(const char *what, uint32_t t0, uint32_t now) {
     return true;
 }
 
+bool hp_stall_poll(uint32_t t0, uint32_t t1, int wait_ms, uint32_t cb_ms) {
+    if (wait_ms < 0) wait_ms = 0; /* slept until woken: any wake is on time, but the callbacks still ran */
+    return hp_stall_check("poll wake", t0 + (uint32_t)wait_ms + cb_ms, t1);
+}
+
 bool hp_stall_end(const char *what, uint32_t t0) { return hp_stall_check(what, t0, mono_ms()); }
 
 int hp_hublog_init(hp_hublog_t *l, hp_log_emit_fn emit, void *ctx) {

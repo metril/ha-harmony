@@ -81,7 +81,19 @@ static void peers_keepalive(hp_ws_server_t *srv) {
 
 static int peers_next(void) { return hp_peers_next_ms(&g_peers, mono_ms()); }
 
+static uint32_t g_cb_ms; /* time spent in ws callbacks during the current hp_ws_poll (not the poll's own wait) */
+
+static void on_text_body(hp_ws_conn_t *c, const char *msg, size_t len, void *user);
+
 static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
+    uint32_t t0 = hp_mono_ms();
+    on_text_body(c, msg, len, user);
+    uint32_t t1 = hp_mono_ms();
+    g_cb_ms += t1 - t0;
+    hp_stall_check("ws dispatch", t0, t1); /* the handlers' own IR / SPI sends included */
+}
+
+static void on_text_body(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     (void)user;
     hp_session_t *sess = hp_ws_conn_user(c);
     if (!sess) {
@@ -92,9 +104,7 @@ static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     static char reply[REPLY_CAP];
     size_t rl = 0;
     bool was_authed = sess->authed;
-    uint32_t t0 = hp_mono_ms();
     int r = hp_dispatch(msg, len, &g_tbl, sess, reply, sizeof reply, &rl);
-    hp_stall_end("ws dispatch", t0); /* the handlers' own IR / SPI sends included */
     if (r < 0) { hp_ws_conn_close(c, 1011); return; }
     if (rl && hp_ws_send(c, reply, rl) < 0) { hp_ws_conn_close(c, 1011); return; }
     if (sess->authed) hp_ws_conn_set_authed(c);
@@ -142,7 +152,15 @@ static int rf_fds(void *arg, int out[8]) {
     return n;
 }
 
+static void on_close_body(hp_ws_conn_t *c, void *user);
+
 static void on_close(hp_ws_conn_t *c, void *user) {
+    uint32_t t0 = hp_mono_ms();
+    on_close_body(c, user);
+    g_cb_ms += hp_mono_ms() - t0;
+}
+
+static void on_close_body(hp_ws_conn_t *c, void *user) {
     (void)user;
     hp_session_t *sess = hp_ws_conn_user(c);
     if (sess && sess->authed) hp_peers_arm(&g_peers, hp_ws_conn_peer(c), mono_ms());
@@ -562,12 +580,15 @@ int main(int argc, char **argv) {
         /* Watchdog: each dispatch is timed; > HP_STALL_MS logs "loop stall <ms> ms in <handler>". Two clock reads per
          * stage, no timers. The poll sleeps by design: only its overrun past the requested wait counts (a late wake). */
         uint32_t t0 = hp_mono_ms();
+        g_cb_ms = 0;
         hp_ws_poll(srv, wait);
         uint32_t t1 = hp_mono_ms();
-        if (wait >= 0 && t1 - t0 > (uint32_t)wait) hp_stall_check("poll wake", t0 + (uint32_t)wait, t1);
+        hp_stall_poll(t0, t1, wait, g_cb_ms); /* the ws callbacks report themselves */
         hp_hooklog_service(&g_hook);
+        hp_stall_end("hooklog service", t1);
+        t1 = hp_mono_ms();
         hp_hublog_service(&g_log);
-        hp_stall_end("log service", t1);
+        hp_stall_end("hublog service", t1);
 #ifdef HH_BT
         if (bt_run) { /* the helper's socket, supervision, then the broadcasts its changes queued */
             t1 = hp_mono_ms();

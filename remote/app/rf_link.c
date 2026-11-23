@@ -189,20 +189,30 @@ static void rejoin_event(rf_link_t *l, uint64_t now, const char *why) {
   rejoin_attempt(l, now, why);
 }
 
+/* The link's object in flight just began transmitting: its seq is the one the hub logs in `rf key ... seq`. */
+static void note_start(rf_link_t *l) {
+  if (!l->link.started || l->link.tx.type != HP_MSG_KEY_EVENT) return;
+  if (l->logged_start && l->logged_seq == l->link.tx.seq && l->logged_type == l->link.tx.type) return;
+  l->logged_start = true;
+  l->logged_seq = l->link.tx.seq;
+  l->logged_type = l->link.tx.type;
+  ra_logf(&l->sys, "rf_link: key sending seq %u", (unsigned)l->link.tx.seq);
+}
+
 static int rf_send_key(void *ctx, uint8_t code, uint8_t action) {
   rf_link_t *l = ctx;
   if (!l->tp) return -HP_E_NOENT;
   hp_rf_val_t v[3] = {{.u = l->remote}, {.u = code}, {.u = action}};
   uint64_t now = l->sys.ops.now_ms(l->sys.ops.ctx);
   if (action == HP_KEY_ACTION_PRESS) rejoin_event(l, now, "key"); /* re-sync first; the key itself still goes out as before */
-  unsigned seq = (unsigned)(l->link.tx.next_seq & 0x0F); /* the link's seq for the next object: the hub logs the same */
   int rc = send_msg(l, HP_MSG_KEY_EVENT, v, 3, now);
   if (rc < 0) {
-    ra_logf(&l->sys, "rf_link: key %u action %u send refused (%d) next seq %u", (unsigned)code, (unsigned)action, rc, seq);
+    ra_logf(&l->sys, "rf_link: key %u action %u send refused (%d)", (unsigned)code, (unsigned)action, rc);
     raise_failed(l);
   } else {
-    ra_logf(&l->sys, "rf_link: key %u action %u queued seq %u (%zu in queue)", (unsigned)code, (unsigned)action, seq,
-            hp_rf_link_status(&l->link).queued);
+    size_t q = hp_rf_link_status(&l->link).queued;
+    ra_logf(&l->sys, "rf_link: key %u action %u queued (%zu ahead)", (unsigned)code, (unsigned)action, q ? q - 1 : 0);
+    note_start(l); /* an idle link starts it at once */
   }
   return rc;
 }
@@ -256,6 +266,7 @@ static void service(rf_link_t *l, uint64_t now) {
     return;
   }
   int rc = hp_rf_link_pump(&l->link, t32(now));
+  note_start(l); /* a queued object whose turn came */
   if (l->link.rx_frames != l->seen_rx) { /* something came from the hub */
     l->seen_rx = l->link.rx_frames;
     if (l->info_pending && l->next_info_ms == UINT64_MAX) l->next_info_ms = now;
