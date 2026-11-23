@@ -366,13 +366,16 @@ static void test_keepalive_on_accept(void) {
     pump(3);
     CT_CHECK(so_has(SOL_SOCKET, SO_KEEPALIVE, 1));
 #ifdef TCP_KEEPIDLE
-    CT_CHECK(so_has(IPPROTO_TCP, TCP_KEEPIDLE, 60));
+    CT_CHECK(so_has(IPPROTO_TCP, TCP_KEEPIDLE, 15));
 #endif
 #ifdef TCP_KEEPINTVL
-    CT_CHECK(so_has(IPPROTO_TCP, TCP_KEEPINTVL, 10));
+    CT_CHECK(so_has(IPPROTO_TCP, TCP_KEEPINTVL, 5));
 #endif
 #ifdef TCP_KEEPCNT
     CT_CHECK(so_has(IPPROTO_TCP, TCP_KEEPCNT, 3));
+#endif
+#ifdef TCP_USER_TIMEOUT
+    CT_CHECK(so_has(IPPROTO_TCP, TCP_USER_TIMEOUT, 20000));
 #endif
     hp_ws_set_setsockopt(NULL);
     close(fd);

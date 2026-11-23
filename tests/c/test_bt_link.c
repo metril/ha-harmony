@@ -308,17 +308,61 @@ static void test_silence_kills(void) {
     setup("hang");
     usual_cfg();
     CT_CHECK(PUMP(ready(), 3000));
-    advance(5000);
+    advance(5000); /* the first PING goes out: silence is counted from it */
     advance(5000);
     advance(4999);
-    CT_CHECK(stats().pid > 0); /* 14.999 s of silence */
+    advance(4999);
+    CT_CHECK(stats().pid > 0); /* 14.998 s without a PONG */
     pump_for(20);
     CT_EQ(stats().deaths, 0);
-    advance(1);
+    advance(2);
     CT_EQ(stats().deaths, 1);
     CT_EQ(stats().pid, 0);
     CT_EQ(st()->status, BT_OFF);
     CT_EQ(stats().bad_frames, 0);
+    bt_link_reset();
+}
+
+/* A stalled main loop (one huge gap between passes) is not a silent helper: a hung one still dies, a healthy one never does. */
+static void test_loop_stall_is_not_silence(void) {
+    setup("normal");
+    usual_cfg();
+    CT_CHECK(PUMP(ready(), 3000));
+    advance(5000);
+    advance(120000); /* the loop was away for two minutes; the PONG is still in the socket */
+    pump_for(30);
+    CT_EQ(stats().deaths, 0);
+    CT_CHECK(stats().pid > 0);
+    bt_link_reset();
+
+    setup("hang");
+    usual_cfg();
+    CT_CHECK(PUMP(ready(), 3000));
+    advance(5000);
+    advance(120000); /* the stall restarts the helper's window... */
+    CT_EQ(stats().deaths, 0);
+    advance(4999);
+    advance(4999);
+    advance(4999);
+    CT_EQ(stats().deaths, 0);
+    advance(10); /* ...but a real hang is still caught */
+    CT_EQ(stats().deaths, 1);
+    bt_link_reset();
+}
+
+/* Crashes far apart do not add up to the respawn cap: a few healthy minutes in READY forgive them. */
+static void test_deaths_reset_after_healthy_ready(void) {
+    setup("normal");
+    usual_cfg();
+    CT_CHECK(PUMP(ready(), 3000));
+    kill(stats().pid, SIGKILL);
+    CT_CHECK(PUMP(stats().deaths == 1, 3000));
+    advance_alive(6000);
+    CT_CHECK(PUMP(ready(), 3000));
+    advance_alive(BT_SUP_HEALTHY_MS - 4000);
+    CT_EQ(stats().deaths, 1); /* not yet */
+    advance_alive(8000);
+    CT_EQ(stats().deaths, 0);
     bt_link_reset();
 }
 
@@ -653,6 +697,8 @@ int main(int argc, char **argv) {
     CT_RUN(test_backoff_and_cap);
     CT_RUN(test_no_adapter);
     CT_RUN(test_silence_kills);
+    CT_RUN(test_loop_stall_is_not_silence);
+    CT_RUN(test_deaths_reset_after_healthy_ready);
     CT_RUN(test_ping_keeps_alive);
     CT_RUN(test_malformed_frames);
     CT_RUN(test_partial_frames);

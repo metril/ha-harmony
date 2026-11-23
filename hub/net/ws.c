@@ -375,7 +375,7 @@ static hp_ws_setsockopt_fn g_setsockopt = setsockopt;
 
 void hp_ws_set_setsockopt(hp_ws_setsockopt_fn fn) { g_setsockopt = fn ? fn : setsockopt; }
 
-/* Kernel liveness: a dead peer is noticed after idle + intvl * cnt (about 90 s). Failures are ignored. */
+/* Kernel liveness: a dead peer is noticed after idle + intvl * cnt (about 30 s). Failures are ignored. */
 static void set_keepalive(int fd) {
     int on = 1;
     (void)g_setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof on);
@@ -390,6 +390,10 @@ static void set_keepalive(int fd) {
 #ifdef TCP_KEEPCNT
     v = HP_WS_KEEPCNT;
     (void)g_setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &v, sizeof v);
+#endif
+#ifdef TCP_USER_TIMEOUT
+    v = HP_WS_USER_TIMEOUT_MS;
+    (void)g_setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &v, sizeof v);
 #endif
 }
 void hp_ws_foreach(hp_ws_server_t *s, void (*fn)(hp_ws_conn_t *, void *), void *arg) {

@@ -16,6 +16,7 @@
 #include "hub/hp_errors.h"
 #include "hub/io/rf_spi.h"
 #include "hub/rf/link.h"
+#include "hub/rf/rf_payload.h"
 
 #define NW 64
 #define NRX 32
@@ -363,6 +364,65 @@ static void test_hub_data_slot_filter_and_stamps(void) {
     CT_EQ(t->send(t->self, fr, 28), 0);
     CT_EQ(t->frame_times(t->self, &rx, &tx), 1);
     CT_EQ(tx, 100400u);
+    hp_rf_spi_destroy(t);
+}
+
+/* One hub report carrying a single-block key_event object (remote 1, key 5, `action`). */
+static void key_report(uint8_t out[30], uint8_t slot, uint8_t seq, unsigned action) {
+    hp_rf_val_t v[3] = {{.u = 1}, {.u = 5}, {.u = action}};
+    uint8_t pl[HP_RF_MSG_MAX];
+    size_t n = 0;
+    hp_rf_inner_t in[2];
+    size_t nin = 0;
+    CT_EQ(hp_rf_pack(HP_MSG_KEY_EVENT, v, 3, pl, sizeof pl, &n), 0);
+    CT_EQ(hp_rf_split(HP_MSG_KEY_EVENT, seq, pl, n, in, 2, &nin), 0);
+    CT_EQ(nin, 1);
+    out[0] = 0x12;
+    out[1] = slot;
+    memcpy(out + 2, in[0].b, HP_RF_INNER_LEN);
+}
+
+/* The reader outruns the hub loop: a full queue evicts the oldest non-release frame, never a key release. */
+static void test_full_queue_keeps_key_release(void) {
+    fake_t f;
+    fake_init(&f);
+    hp_rf_transport *t = NULL;
+    uint8_t fr[64], rep[30];
+    CT_EQ(open_fake(&f, 2, &t), 0);
+    t->claim(t->self);
+    key_report(rep, 2, 1, HP_KEY_ACTION_PRESS);
+    feed(&f, rep, 30);
+    wait_attached(t, true);
+    key_report(rep, 2, 2, HP_KEY_ACTION_RELEASE); /* the oldest of the backlog, behind one press */
+    feed(&f, rep, 30);
+    for (uint8_t i = 3; i < 3 + 40; i++) { /* far more presses than the queue holds */
+        key_report(rep, 2, (uint8_t)(i & 15), HP_KEY_ACTION_PRESS);
+        for (int k = 0; k < 2000; k++) { /* the fake's own ring is small: let the reader keep up with the feed */
+            pthread_mutex_lock(&f.mu);
+            int room = f.rxn < NRX / 2;
+            pthread_mutex_unlock(&f.mu);
+            if (room) break;
+            ms_sleep(1);
+        }
+        feed(&f, rep, 30);
+    }
+    for (int i = 0; i < 2000; i++) { /* the reader has consumed everything */
+        pthread_mutex_lock(&f.mu);
+        int left = f.rxn;
+        pthread_mutex_unlock(&f.mu);
+        if (!left) break;
+        ms_sleep(1);
+    }
+    ms_sleep(250); /* the reader finishes the frame it was on */
+    int n = 0, releases = 0;
+    while (t->recv(t->self, fr, sizeof fr, 0) == 28) {
+        hp_rf_val_t v[3];
+        CT_EQ(hp_rf_unpack(HP_MSG_KEY_EVENT, fr + 4, fr[3], v, 3), 0);
+        if (v[2].u == HP_KEY_ACTION_RELEASE) releases++;
+        n++;
+    }
+    CT_EQ(n, 16);
+    CT_EQ(releases, 1);
     hp_rf_spi_destroy(t);
 }
 
@@ -1350,6 +1410,7 @@ int main(void) {
     CT_RUN(test_two_endpoint_every_size);
     CT_RUN(test_tx_status_surfaced);
     CT_RUN(test_hub_data_slot_filter_and_stamps);
+    CT_RUN(test_full_queue_keeps_key_release);
     CT_RUN(test_link_transition_logs);
     CT_RUN(test_link_up_logged_from_data_frame);
     CT_RUN(test_rf_debug_frames);

@@ -16,6 +16,7 @@
 #include "hub/hp_errors.h"
 #include "hub/io/hal_check.h"
 #include "hub/rf/framing.h"
+#include "hub/rf/rf_payload.h"
 
 #define RXQ 16        /* received inner blocks buffered for recv() */
 #define READ_BUF 128  /* the driver ignores `count` and copies a 64-byte entry: never pass less */
@@ -186,13 +187,28 @@ static void push_event(spi_t *s) {
     wake(s);
 }
 
-/* Appends an entry (frame or lost marker). When full the oldest FRAME goes (the freshest data is kept);
- * a marker is only dropped when the queue holds nothing else. Caller holds mu. */
+/* Appends an entry (frame or lost marker). When full the oldest evictable entry goes (the freshest data is kept):
+ * a lost marker and a key RELEASE frame are evicted only when nothing else is queued (a lost release leaves a key
+ * held forever). Caller holds mu. */
+static bool q_is_release(const spi_t *s, size_t i) {
+    size_t a = (s->qhead + i) % RXQ;
+    if (s->q_lost[a]) return false;
+    const uint8_t *b = s->q[a]; /* first (only) block of a key_event object: kind|first|seq, type, idx 0, len, body */
+    if ((b[0] & 0xE0) != HP_RF_KIND_OBJECT || !(b[0] & HP_RF_FLAG_FIRST) || b[1] != HP_MSG_KEY_EVENT || b[3] > HP_RF_CHUNK - 1)
+        return false;
+    hp_rf_val_t v[3];
+    return hp_rf_unpack(HP_MSG_KEY_EVENT, b + 4, b[3], v, 3) == 0 && v[2].u == HP_KEY_ACTION_RELEASE;
+}
+
 static size_t q_push(spi_t *s, bool lost) {
     if (s->qn == RXQ) {
         size_t drop = 0; /* offset from the head */
-        while (drop < s->qn && s->q_lost[(s->qhead + drop) % RXQ]) drop++;
-        if (drop == s->qn) drop = 0;
+        while (drop < s->qn && (s->q_lost[(s->qhead + drop) % RXQ] || q_is_release(s, drop))) drop++;
+        if (drop == s->qn) { /* only markers and releases queued: drop the oldest frame, markers last */
+            drop = 0;
+            while (drop < s->qn && s->q_lost[(s->qhead + drop) % RXQ]) drop++;
+            if (drop == s->qn) drop = 0;
+        }
         for (size_t i = drop; i + 1 < s->qn; i++) { /* close the gap, keeping the order */
             size_t a = (s->qhead + i) % RXQ, b = (s->qhead + i + 1) % RXQ;
             memcpy(s->q[a], s->q[b], HP_RF_INNER_LEN);

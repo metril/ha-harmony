@@ -510,10 +510,16 @@ static void count_sinks(hp_ws_conn_t *c, void *arg) {
     if (s && s->authed && s->log_sink) ++*(int *)arg;
 }
 
+typedef struct {
+    const char *msg;
+    size_t len;
+    int delivered;
+} sinkmsg_t;
+
 static void send_sink(hp_ws_conn_t *c, void *arg) {
     const hp_session_t *s = hp_ws_conn_user(c);
-    const bcast_t *b = arg;
-    if (s && s->authed && s->log_sink) hp_ws_send(c, b->msg, b->len);
+    sinkmsg_t *b = arg;
+    if (s && s->authed && s->log_sink && hp_ws_send(c, b->msg, b->len) >= 0) b->delivered++;
 }
 
 bool hub_log_emit(void *hub, const hp_logline_t *l) {
@@ -532,9 +538,9 @@ bool hub_log_emit(void *hub, const hp_logline_t *l) {
     size_t len = 0;
     if (h->bcast_hook) h->bcast_hook(h->bcast_ctx, "hub_log", d);
     if (hp_make_reply(0, "hub_log", d, buf, sizeof buf, &len) != 0) return true; /* d is consumed; cannot happen at 192 B */
-    bcast_t b = {buf, len, NULL, false};
+    sinkmsg_t b = {buf, len, 0};
     hp_ws_foreach(h->srv, send_sink, &b);
-    return true;
+    return b.delivered > 0; /* every send failed: the line stays queued for the next sink */
 }
 
 static cJSON *activities_json(const hub_ctx_t *h) {
@@ -1542,10 +1548,26 @@ static void rf_link_lost(hub_ctx_t *h) {
     memset(h->info, 0, sizeof h->info); /* the remote may come back as another firmware: ask again */
 }
 
+/* A press/hold that sat in the receive queue (main loop stalled) longer than this is no longer what the user wants:
+ * it is dropped, never executed. A release is always processed (it ends a hold). */
+#define HUB_KEY_STALE_MS 1500
+
+/* The frame being delivered was stamped by the transport's reader when it arrived (same monotonic ms clock as the
+ * hub's). True (and logged) when it is older than HUB_KEY_STALE_MS; a transport without stamps never drops. */
+static bool key_stale(hub_ctx_t *h, unsigned key) {
+    uint32_t rx_at, tx_at;
+    if (!h->sinks.rf || !h->sinks.rf->frame_times || !h->sinks.rf->frame_times(h->sinks.rf->self, &rx_at, &tx_at)) return false;
+    int32_t age = (int32_t)(hp_sched_now(&h->sched) - rx_at);
+    if (age <= HUB_KEY_STALE_MS) return false;
+    if (np_log_ok(h, 5)) hp_log("hub: key %u dropped: stale (%d ms old)\n", key, (int)age);
+    return true;
+}
+
 static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
     hp_rf_val_t v[6];
     rf_link_up(h); /* a frame proves the link is up, and its link-up must precede what the frame says */
     if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
+        if (v[2].u != HP_KEY_ACTION_RELEASE && key_stale(h, (unsigned)v[1].u)) return;
         /* Every press/release is logged (seq = the remote's link seq, to match its log); a held key repeats, so those are rate limited. */
         if (v[2].u != HP_KEY_ACTION_HOLD || np_log_ok(h, 4))
             hp_log("hub: rf key remote %u key %u action %u seq %u\n", (unsigned)v[0].u, (unsigned)v[1].u, (unsigned)v[2].u,

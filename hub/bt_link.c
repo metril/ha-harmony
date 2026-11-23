@@ -69,6 +69,9 @@ static struct {
     hp_linebuf_t elb;
     uint64_t kill_at;     /* SIGKILL for `reap` when it has not exited by then */
     uint64_t last_rx, next_ping, next_spawn;
+    uint64_t ping_at;     /* when the oldest unanswered PING was sent (0 = none outstanding): the helper is silent only from here */
+    uint64_t last_svc;    /* the previous bt_link_service() time: a long gap is a stalled main loop, not a quiet helper */
+    uint64_t ready_at;    /* since when the helper has been READY (0 = not READY) */
     uint8_t token;
     unsigned deaths, spawns, key_drops, bad_frames;
     bool disabled, io_err;
@@ -350,6 +353,7 @@ static void drop_link(bool signal_kill, int sig) {
 static void failure(const char *why) { /* unexpected death: counts against the budget */
     (void)why;
     drop_link(true, SIGKILL);
+    L.ping_at = L.ready_at = 0;
     L.deaths++;
     static const unsigned delay_s[BT_SUP_MAX_RESPAWNS] = {5, 30, 120, 120, 120};
     if (L.deaths > BT_SUP_MAX_RESPAWNS) {
@@ -552,6 +556,7 @@ static void spawn(uint64_t now) {
     L.pid = pid;
     L.spawns++;
     L.last_rx = now;
+    L.ping_at = L.ready_at = 0;
     L.next_ping = now + BT_SUP_PING_MS;
     L.rx_n = L.out_n = 0;
     L.st.status = BT_STARTING;
@@ -648,6 +653,8 @@ static bool on_state(const uint8_t *p, size_t n) {
     L.hwin = p[1];
     enum bt_link_window w = p[1] == 1 ? BT_WIN_HOST : p[1] == 2 ? BT_WIN_REMOTE : BT_WIN_NONE;
     (void)prev;
+    if (L.st.status != BT_READY) L.ready_at = 0;
+    else if (!L.ready_at) L.ready_at = now_of() ? now_of() : 1;
     if (p[0] == BT_ST_READY && L.pend_pair && try_pend_pair()) w = L.pend_mode == BT_MODE_REMOTE ? BT_WIN_REMOTE : BT_WIN_HOST;
     if (w != BT_WIN_REMOTE) L.n_cand = 0;
     if (w == BT_WIN_NONE && L.window != BT_WIN_NONE) L.win_closed_at = now_of();
@@ -793,6 +800,7 @@ static bool parse_buf(uint64_t now) {
         if (type == BT_IPC_RKEY && L.rk_pass >= RKEYS_PER_PASS) { L.backlog = true; break; }
         if (type == BT_IPC_RKEY) L.rk_pass++;
         L.last_rx = now;
+        L.ping_at = 0; /* any frame proves the helper is alive and reading */
         if (!on_frame(type, pl, len)) { L.bad_frames++; ok = false; break; }
         off += used;
     }
@@ -999,21 +1007,27 @@ int bt_link_service(void) {
     reap(now);
     if (running()) {
         flush_out();
-        if (!read_in(now) || L.io_err) {
+        bool ok_in = read_in(now); /* a PONG already waiting in the socket clears ping_at here */
+        /* The loop itself stalled since the last pass: a PING may only just have been flushed, so the helper gets a fresh window. */
+        if (L.ping_at && L.last_svc && now - L.last_svc > BT_SUP_PING_MS) L.ping_at = now;
+        if (!ok_in || L.io_err) {
             L.io_err = false;
             failure(L.bad_frames ? "malformed frame" : "link closed");
         } else if (check_exit(), !running()) {
             /* exited; failure() ran */
-        } else if (now - L.last_rx >= BT_SUP_SILENCE_MS) {
+        } else if (L.ping_at && now - L.ping_at >= BT_SUP_SILENCE_MS) {
             failure("silent");
         } else if (!wanted(now)) {
             stop_helper();
         } else if (now >= L.next_ping) {
             uint8_t t = ++L.token;
             send_ctl(BT_IPC_PING, &t, 1);
+            if (!L.ping_at) L.ping_at = now ? now : 1;
             L.next_ping = now + BT_SUP_PING_MS;
         }
     }
+    if (L.deaths && L.ready_at && running() && L.st.status == BT_READY && now - L.ready_at >= BT_SUP_HEALTHY_MS) L.deaths = 0; /* a healthy stretch forgives earlier crashes */
+    L.last_svc = now ? now : 1;
     if (!running() && !L.disabled && wanted(now) && L.reap == 0 && now >= L.next_spawn && bluetoothd_clear(now)) spawn(now);
     if (L.rebuild) {
         rebuild();
@@ -1029,7 +1043,7 @@ int bt_link_service(void) {
         if (L.backlog) WAKE(now); /* buffered frames wait for the next pass */
         if (L.pend_pair) WAKE(now + 20);
         WAKE(L.next_ping);
-        WAKE(L.last_rx + BT_SUP_SILENCE_MS);
+        if (L.ping_at) WAKE(L.ping_at + BT_SUP_SILENCE_MS);
         if (L.out_n) WAKE(now + 20);
     } else if (!L.disabled && wanted(now)) {
         if (L.bz && L.bz != 3) WAKE(now + 50);
