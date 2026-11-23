@@ -192,8 +192,14 @@ typedef struct {
     hp_ident_t ident;       /* id, name, hardware id; set_hub_id (docs/proto/hub-identity.md). id[0]==0: no identity (tests) */
     void (*ident_changed)(void *ctx, const hp_ident_t *); /* after a set_hub_id changed the id: re-announce */
     void *ident_ctx;
+    bool ota_end_pend;      /* an ota_end worker runs: its reply goes to ota_end_sess / ota_end_id when it finishes */
+    const void *ota_end_sess;
+    uint32_t ota_end_id;
     hp_ota_t ota;           /* signed firmware update (hub/ota/hub_ota.h); disabled until hp_ota_init gets a dir */
 } hub_ctx_t;
+
+/* The ota_end worker finished (hp_ota_done_fd readable): sends the deferred ota_status/error to the session that asked. */
+void hub_ota_complete(hub_ctx_t *, hp_ws_server_t *);
 
 /* Initialises the context with a CLOCK_MONOTONIC millisecond clock for the timers. */
 void hub_ctx_init(hub_ctx_t *);

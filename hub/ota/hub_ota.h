@@ -81,8 +81,6 @@ extern uint32_t (*hp_build_id_hook)(void); /* tests only */
 void hp_ota_init(hp_ota_t *o, const char *dir, const char *target);
 int hp_ota_begin(hp_ota_t *o, const void *owner, unsigned target, uint32_t size, uint32_t build, const char *sha_hex);
 int hp_ota_chunk(hp_ota_t *o, const void *owner, uint32_t offset, const uint8_t *data, size_t n);
-/* Blocking form (tests, tools): start, wait for the worker, finish. The daemon uses the pair below. */
-int hp_ota_end(hp_ota_t *o, const void *owner, uint32_t *build_out);
 /* Asynchronous end: cheap checks on the caller, then a worker thread does the fsync, digest check, signature
  * verify and file copies. Returns HP_OTA_ASYNC when the worker runs (poll hp_ota_done_fd; when it is readable call
  * hp_ota_end_done), or the same error codes hp_ota_end gives for the immediate refusals. */

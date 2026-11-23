@@ -302,6 +302,7 @@ struct hp_ws_server {
     int auth_ms, idle_ms, hs_ms;
     int (*extra_fds)(void *arg, int out[HP_WS_MAX_EXTRA_FDS]);
     void *extra_arg;
+    int ready[HP_WS_MAX_EXTRA_FDS]; /* extra fds that were readable in the last poll (-1 = unused) */
     hp_ws_conn_t conns[HP_WS_MAX_CONNS];
 };
 
@@ -322,6 +323,7 @@ hp_ws_server_t *hp_ws_listen(uint16_t port, const char *token, const hp_ws_cb_t 
     signal(SIGPIPE, SIG_IGN);
     hp_ws_server_t *s = calloc(1, sizeof *s);
     if (!s) return NULL;
+    for (int k = 0; k < HP_WS_MAX_EXTRA_FDS; k++) s->ready[k] = -1;
     s->cb = *cb;
     s->user = user;
     s->auth_ms = HP_WS_AUTH_MS;
@@ -666,6 +668,12 @@ static void accept_one(hp_ws_server_t *s) {
     c->deadline = now_ms() + s->hs_ms;
 }
 
+bool hp_ws_extra_readable(const hp_ws_server_t *s, int fd) {
+    for (int k = 0; s && fd >= 0 && k < HP_WS_MAX_EXTRA_FDS; k++)
+        if (s->ready[k] == fd) return true;
+    return false;
+}
+
 void hp_ws_set_extra_fds(hp_ws_server_t *s, int (*fn)(void *arg, int out[8]), void *arg) {
     if (!s) return;
     s->extra_fds = fn;
@@ -714,7 +722,10 @@ int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
         }
     }
     int r = poll(fds, (nfds_t)nf, (int)wait);
+    for (int k = 0; k < HP_WS_MAX_EXTRA_FDS; k++) s->ready[k] = -1;
     if (r < 0) return errno == EINTR ? 0 : -HP_E_INVAL;
+    for (int k = 0, e = 0; k < nf && e < HP_WS_MAX_EXTRA_FDS; k++)
+        if (map[k] == -2 && (fds[k].revents & (POLLIN | POLLHUP | POLLERR))) s->ready[e++] = fds[k].fd;
     for (int k = 0; k < nf; k++) {
         if (!fds[k].revents) continue;
         if (map[k] == -2) continue;

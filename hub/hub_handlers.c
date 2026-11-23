@@ -1155,10 +1155,40 @@ static int on_ota_chunk(void *vctx, hp_session_t *sess, uint32_t id, const cJSON
 static int on_ota_end(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap, size_t *len) {
     (void)d;
     hub_ctx_t *h = vctx;
+    int e = hp_ota_end_start(&h->ota, sess);
+    if (e == HP_OTA_ASYNC) { /* the worker runs off the loop; the reply is sent by hub_ota_complete */
+        h->ota_end_pend = true;
+        h->ota_end_sess = sess;
+        h->ota_end_id = id;
+        *len = 0;
+        return 0;
+    }
+    return ota_fail(h, id, e, reply, cap, len);
+}
+
+typedef struct { const void *sess; hp_ws_conn_t *found; } find_conn_t;
+static void find_conn_cb(hp_ws_conn_t *c, void *arg) {
+    find_conn_t *f = arg;
+    if (hp_ws_conn_user(c) == f->sess) f->found = c;
+}
+
+void hub_ota_complete(hub_ctx_t *h, hp_ws_server_t *srv) {
+    if (!h->ota_end_pend) return;
     uint32_t build = 0;
-    int e = hp_ota_end(&h->ota, sess, &build);
-    if (e) return ota_fail(h, id, e, reply, cap, len);
-    return ota_reply(h, id, "applied", &build, reply, cap, len);
+    const void *who = NULL;
+    bool alive = false;
+    int e = hp_ota_end_done(&h->ota, &build, &who, &alive);
+    if (e == HP_OTA_E_STATE) return; /* not finished yet */
+    h->ota_end_pend = false;
+    if (!alive) return; /* the asking connection is gone: the update is applied (or not) regardless */
+    find_conn_t f = {h->ota_end_sess, NULL};
+    hp_ws_foreach(srv, find_conn_cb, &f);
+    if (!f.found) return;
+    char reply[512];
+    size_t len = 0;
+    int r = e ? ota_fail(h, h->ota_end_id, e, reply, sizeof reply, &len)
+              : ota_reply(h, h->ota_end_id, "applied", &build, reply, sizeof reply, &len);
+    if (r == 0 && len) (void)hp_ws_send(f.found, reply, len);
 }
 
 static int on_ota_abort(void *vctx, hp_session_t *sess, uint32_t id, const cJSON *d, char *reply, size_t cap, size_t *len) {

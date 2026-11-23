@@ -4,7 +4,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -293,14 +292,6 @@ int hp_ota_end_done(hp_ota_t *o, uint32_t *build_out, const void **owner_out, bo
         if (build_out) *build_out = o->job.built;
     }
     return rc;
-}
-
-int hp_ota_end(hp_ota_t *o, const void *owner, uint32_t *build_out) {
-    int rc = hp_ota_end_start(o, owner);
-    if (rc != HP_OTA_ASYNC) return rc;
-    struct pollfd p = {o->done[0], POLLIN, 0};
-    while (poll(&p, 1, -1) < 0 && errno == EINTR) {}
-    return hp_ota_end_done(o, build_out, NULL, NULL);
 }
 
 int hp_ota_abort(hp_ota_t *o, const void *owner) {

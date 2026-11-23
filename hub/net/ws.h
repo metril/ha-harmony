@@ -60,10 +60,12 @@ void hp_ws_conn_set_authed(hp_ws_conn_t *);
 void hp_ws_foreach(hp_ws_server_t *, void (*fn)(hp_ws_conn_t *, void *), void *arg);
 /* Optional: fn(arg, out) fills up to 8 extra fds polled for readability each
  * hp_ws_poll; they only wake the poll (the owner services them). */
-#define HP_WS_MAX_EXTRA_FDS 10 /* wake-only fds the owner may add */
+#define HP_WS_MAX_EXTRA_FDS 12 /* wake-only fds the owner may add */
 /* OR this into an extra fd to poll it for POLLOUT as well (a socket with queued output). */
 #define HP_WS_FD_OUT 0x40000000
 void hp_ws_set_extra_fds(hp_ws_server_t *, int (*fn)(void *arg, int out[HP_WS_MAX_EXTRA_FDS]), void *arg);
+/* True when `fd` (an extra fd, flag bits ignored) was readable in the most recent hp_ws_poll. */
+bool hp_ws_extra_readable(const hp_ws_server_t *, int fd);
 /* Per-connection opaque pointer (owner frees it in on_close). */
 void hp_ws_conn_set_user(hp_ws_conn_t *, void *);
 void *hp_ws_conn_user(const hp_ws_conn_t *);
