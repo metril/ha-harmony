@@ -388,7 +388,8 @@ messages:
       - {name: "off", type: u16}
       - {name: data, type: bytes}
 
-# The 35 physical keys of the Harmony Elite remote (docs/hardware/remote-elite.md, "Input").
+# The 35 physical keys of the Harmony Elite remote (docs/hardware/remote-elite.md, "Input"), then PlayPause: a virtual key
+# (evdev 0xFFFF never occurs) the Now Playing card sends on a tap, one toggle whatever the card shows.
 # `id` is the logical key code carried in key_event.key (u8): stable, unique, < 128 (128+ are page
 # soft keys). `evdev` is the Linux input code (event0; Home/Favorites come from event2). `name` is
 # stock's name; the HA event type / YAML key name is its snake_case form.
@@ -428,3 +429,4 @@ keys:
   - {id: 33, evdev: 116, name: PowerOffActivity}
   - {id: 34, evdev: 364, name: Home}
   - {id: 35, evdev: 102, name: Favorites}
+  - {id: 36, evdev: 65535, name: PlayPause}

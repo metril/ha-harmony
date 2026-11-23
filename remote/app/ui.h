@@ -96,6 +96,8 @@ void ra_ui_np_tick(ra_ui_t *ui, uint64_t now);
 void ra_ui_np_skip(ra_ui_t *ui, uint64_t now, uint64_t gap_ms);
 /* Ms to the next whole-second change of the position while the card shows a playing item, else UINT32_MAX. */
 uint32_t ra_ui_np_next_ms(const ra_ui_t *ui, uint64_t now);
+/* A tap on the card: flip playing <-> paused locally (position frozen / resumed at `now`); the hub's next push corrects it. */
+void ra_ui_np_toggle(ra_ui_t *ui, uint64_t now);
 /* The card widget on screen is `w` (a tap on it is play / pause). */
 int ra_ui_is_np(const ra_ui_t *ui, const hp_widget_t *w);
 /* The running activity (index) and power from state_update: widgets whose bind matches turn teal; only those redraw. */

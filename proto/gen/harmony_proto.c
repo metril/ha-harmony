@@ -328,6 +328,7 @@ const hp_hwkey_t hp_hwkeys[HP_KEY_COUNT] = {
     {33, 116, "PowerOffActivity", "power_off_activity"},
     {34, 364, "Home", "home"},
     {35, 102, "Favorites", "favorites"},
+    {36, 65535, "PlayPause", "play_pause"},
 };
 
 const hp_hwkey_t *hp_hwkey_by_id(uint8_t id)

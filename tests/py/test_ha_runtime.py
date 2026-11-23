@@ -846,3 +846,78 @@ async def test_unmapped_key_is_logged_at_info_rate_limited(hass, rig, clock, cap
             f"key 4 press has no Home Assistant mapping (activity {c.current_activity_id})",
         )
     ]
+
+
+async def test_card_toggle_key_runs_play_pause_on_the_shield_unless_mapped(hass, rig, clock):
+    _hub, c = await rig()
+    fired = []
+    c._fire = lambda call, **kw: fired.append(call)
+    key = coord_mod.KEY_PLAY_PAUSE
+    c._dispatch_ha(key, "press")
+    c._dispatch_ha(key, "release")
+    c._dispatch_ha(key, "hold")  # only the press fires
+    assert [(f.service, f.entities) for f in fired] == [
+        ("media_player.media_play_pause", (c.now_playing.shield,))
+    ]
+    fired.clear()
+    mapped = HaCall("media_player.media_stop", ("media_player.x",))
+    import dataclasses
+
+    c.compiled = dataclasses.replace(c.compiled, ha_keys={None: {key: mapped}})
+    c._dispatch_ha(key, "press")
+    assert fired == [mapped]  # a play_pause mapped by the user wins
+
+
+async def test_waits_are_event_driven_with_one_deadline(hass, rig, clock, monkeypatch):
+    _hub, c = await rig()
+
+    async def no_sleep(_s):
+        raise AssertionError("polling")
+
+    monkeypatch.setattr(c, "async_sleep", no_sleep)
+    up = {"on": False}
+    monkeypatch.setattr(type(c.client), "connected", property(lambda _s: up["on"]))
+    task = asyncio.ensure_future(c._wait_connected(5))
+    await asyncio.sleep(0)
+    assert not task.done()
+    up["on"] = True
+    c._ota_wake.set()  # what _on_state does
+    assert await task is True
+    up["on"] = False
+    assert await c._wait_connected(0.05) is False  # the one deadline
+    up["on"] = True
+    c.client.fw_build = 3
+    task = asyncio.ensure_future(c._await_build(7, 5))
+    await asyncio.sleep(0)
+    c._rolled_back.add(7)  # a rollback of that build ends the wait at once
+    c._ota_wake.set()
+    assert await task is False
+
+
+async def test_transition_steps_wait_for_each_call(hass, rig, clock):
+    from custom_components.ha_harmony.harmony_core.compiler import HaStep
+
+    _hub, c = await rig()
+    log = []
+
+    def fire(call, **kw):
+        async def run():
+            log.append(("start", call.service))
+            await asyncio.sleep(0.05)
+            log.append(("end", call.service))
+
+        return asyncio.ensure_future(run())
+
+    c._fire = fire
+    steps = [
+        HaStep(HaCall("media_player.turn_on", ("media_player.a",)), "a", 0, "step"),
+        HaStep(HaCall("media_player.select_source", ("media_player.a",)), "a", 0, "step"),
+    ]
+    c._transition_steps = lambda *a, **k: steps
+    await c._run_transition(None, None)
+    assert log == [
+        ("start", "media_player.turn_on"),
+        ("end", "media_player.turn_on"),
+        ("start", "media_player.select_source"),
+        ("end", "media_player.select_source"),
+    ]

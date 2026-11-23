@@ -7,6 +7,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ifaddrs.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
 #include <net/if.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -206,6 +208,42 @@ static int probe(hp_mdns_srv_t *s, uint32_t *ip, uint32_t *mask) {
 
 static void net_cb(void *arg, uint32_t now);
 
+/* Address changes arrive as rtnetlink messages (RTMGRP_IPV4_IFADDR) on a socket the owner polls (hp_mdns_srv_wake_fd), so
+ * nothing rechecks on a timer. Only the real interface detection uses it; an injected detect (tests) keeps the timer. */
+static void nl_open(hp_mdns_srv_t *s) {
+    s->nl_fd = -1;
+    if (!s->multicast || s->detect != detect_default) return;
+    int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+    if (fd < 0) return;
+    struct sockaddr_nl sa;
+    memset(&sa, 0, sizeof sa);
+    sa.nl_family = AF_NETLINK;
+    sa.nl_groups = RTMGRP_IPV4_IFADDR;
+    if (bind(fd, (struct sockaddr *)&sa, sizeof sa) < 0 || fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0 ||
+        fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+        close(fd);
+        return;
+    }
+    s->nl_fd = fd;
+}
+
+/* True when an address message (or an overrun) was waiting. */
+static int nl_drain(hp_mdns_srv_t *s) {
+    int got = 0;
+    if (s->nl_fd < 0) return 0;
+    for (int i = 0; i < MAX_PER_SERVICE; i++) {
+        uint8_t buf[2048];
+        ssize_t n = recv(s->nl_fd, buf, sizeof buf, 0);
+        if (n < 0) {
+            if (errno == ENOBUFS) got = 1; /* overrun: something changed, look */
+            if (errno == EINTR || errno == ENOBUFS) continue;
+            break;
+        }
+        got = 1;
+    }
+    return got;
+}
+
 /* One connect attempt; schedules the next check (recheck when up, backoff when not). */
 static void net_try(hp_mdns_srv_t *s, uint32_t now) {
     uint32_t ip = 0, mask = 0;
@@ -214,7 +252,7 @@ static void net_try(hp_mdns_srv_t *s, uint32_t now) {
     int ok = probe(s, &ip, &mask) == 0;
     if (s->fd >= 0) {
         if (ok && ip == s->svc.ipv4) { /* unchanged */
-            s->net_timer = hp_sched_after(s->sched, HP_MDNS_RECHECK_MS, net_cb, s);
+            if (s->nl_fd < 0) s->net_timer = hp_sched_after(s->sched, HP_MDNS_RECHECK_MS, net_cb, s);
             return;
         }
         if (s->timer) hp_sched_cancel(s->sched, s->timer);
@@ -227,10 +265,11 @@ static void net_try(hp_mdns_srv_t *s, uint32_t now) {
     if (ok && attach(s, ip, mask) == 0) {
         s->backoff = HP_MDNS_RETRY_MIN_MS;
         log_state(s, 1);
-        s->net_timer = hp_sched_after(s->sched, HP_MDNS_RECHECK_MS, net_cb, s);
+        if (s->nl_fd < 0) s->net_timer = hp_sched_after(s->sched, HP_MDNS_RECHECK_MS, net_cb, s);
         return;
     }
     log_state(s, 2);
+    if (!ok && s->nl_fd >= 0) return; /* no address: the next address message retries, no timer */
     s->net_timer = hp_sched_after(s->sched, s->backoff, net_cb, s);
     s->backoff = hp_mdns_backoff_next(s->backoff);
 }
@@ -245,6 +284,7 @@ int hp_mdns_srv_start(hp_mdns_srv_t *s, hp_sched_t *sched, const hp_mdns_opts_t 
     s->want_port = o->port;
     s->detect = o->detect ? o->detect : detect_default;
     s->backoff = HP_MDNS_RETRY_MIN_MS;
+    s->nl_fd = -1;
     inet_pton(AF_INET, HP_MDNS_GROUP, &s->group);
     s->multicast = 1;
     s->bind_ip.s_addr = htonl(INADDR_ANY);
@@ -275,6 +315,7 @@ int hp_mdns_srv_start(hp_mdns_srv_t *s, hp_sched_t *sched, const hp_mdns_opts_t 
         s->have_dest = 1;
     }
     if (o->hw && strlen(o->hw) < sizeof s->svc.hw) snprintf(s->svc.hw, sizeof s->svc.hw, "%s", o->hw);
+    nl_open(s); /* before the first look: no change can slip between the two */
     net_try(s, hp_sched_now(sched)); /* first attempt now; failures retry from the scheduler */
     return 0;
 }
@@ -295,9 +336,14 @@ int hp_mdns_srv_rename(hp_mdns_srv_t *s, const char *hub_id) {
 }
 
 int hp_mdns_srv_fd(const hp_mdns_srv_t *s) { return s->fd; }
+int hp_mdns_srv_wake_fd(const hp_mdns_srv_t *s) { return s->nl_fd; }
 uint16_t hp_mdns_srv_port(const hp_mdns_srv_t *s) { return s->port; }
 
 void hp_mdns_srv_service(hp_mdns_srv_t *s) {
+    if (nl_drain(s)) { /* an address came, went or changed: look now */
+        if (s->net_timer) hp_sched_cancel(s->sched, s->net_timer);
+        net_try(s, hp_sched_now(s->sched));
+    }
     if (s->fd < 0) return;
     for (int i = 0; i < MAX_PER_SERVICE; i++) {
         uint8_t buf[PKT_CAP];
@@ -326,6 +372,8 @@ void hp_mdns_srv_stop(hp_mdns_srv_t *s) {
     if (s->timer) hp_sched_cancel(s->sched, s->timer);
     if (s->net_timer) hp_sched_cancel(s->sched, s->net_timer);
     s->timer = s->net_timer = 0;
+    if (s->nl_fd >= 0) close(s->nl_fd);
+    s->nl_fd = -1;
     if (s->fd < 0) return;
     if (s->have_dest) send_to(s, &s->dest, HP_MDNS_ALL, HP_MDNS_F_GOODBYE, 0, NULL);
     close(s->fd);

@@ -6,7 +6,9 @@ from .harmony_proto import KEY_BY_NAME, KEYS, SOFT_KEY_BASE
 
 # A key's YAML name and HA event type is its snake_case form (`volume_up`);
 # the wire carries the logical id (< 128; 128+ are page soft keys).
-KEY_CODES: dict[str, int] = {k[3]: k[0] for k in KEYS}
+# PlayPause is virtual (the Now Playing card toggle the remote sends): not a key users map, nor an event type.
+VIRTUAL_KEYS = frozenset({"PlayPause"})
+KEY_CODES: dict[str, int] = {k[3]: k[0] for k in KEYS if k[2] not in VIRTUAL_KEYS}
 KEY_NAMES: dict[int, str] = {code: name for name, code in KEY_CODES.items()}
 UNKNOWN_KEY = "unknown"
 EVENT_TYPES: list[str] = [*KEY_NAMES.values(), UNKNOWN_KEY]

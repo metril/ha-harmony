@@ -38,6 +38,7 @@
 #define BT_DD_CAP 8          /* remembered dropped DOWNs */
 #define RKEYS_PER_PASS 32    /* helper RKEY frames handled per service pass; the rest stays buffered */
 #define KILL_GRACE_MS 2000
+#define STALL_SLACK_MS 1000 /* a pass later than it asked for by more than this: the loop stalled */
 #define NO_SLOT8 0xFF
 
 struct hhost {
@@ -70,7 +71,7 @@ static struct {
     uint64_t kill_at;     /* SIGKILL for `reap` when it has not exited by then */
     uint64_t last_rx, next_ping, next_spawn;
     uint64_t ping_at;     /* when the oldest unanswered PING was sent (0 = none outstanding): the helper is silent only from here */
-    uint64_t last_svc;    /* the previous bt_link_service() time: a long gap is a stalled main loop, not a quiet helper */
+    uint64_t last_svc;    /* the previous bt_link_service() time: a gap well over the ping period is a stalled main loop, not a quiet helper */
     uint64_t ready_at;    /* since when the helper has been READY (0 = not READY) */
     uint8_t token;
     unsigned deaths, spawns, key_drops, bad_frames;
@@ -384,9 +385,36 @@ static void check_exit(void) {
     }
 }
 
+/* SIGCHLD self-pipe: the handler writes a byte, the poll set carries the read end (bt_link_poll_fd) while no helper socket
+ * is open, so a killed helper is reaped when it exits instead of on a timer. */
+static int g_chld[2] = {-1, -1};
+static void on_sigchld(int sig) {
+    (void)sig;
+    int e = errno;
+    char c = 1;
+    ssize_t w = write(g_chld[1], &c, 1);
+    (void)w;
+    errno = e;
+}
+static void chld_init(void) {
+    if (g_chld[0] >= 0 || pipe2(g_chld, O_CLOEXEC | O_NONBLOCK) < 0) return;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_sigchld;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    sigaction(SIGCHLD, &sa, NULL);
+}
+static void chld_drain(void) {
+    char b[16];
+    if (g_chld[0] >= 0)
+        while (read(g_chld[0], b, sizeof b) > 0) {}
+}
+
 /* A killed helper still has to be reaped; SIGKILL it if it ignores the first signal. */
 static void reap(uint64_t now) {
     int st;
+    chld_drain();
     if (L.reap > 0) {
         pid_t r = waitpid(L.reap, &st, WNOHANG);
         if (r == L.reap || (r < 0 && errno == ECHILD)) L.reap = 0;
@@ -514,6 +542,7 @@ static bool bluetoothd_clear(uint64_t now) {
 }
 
 static void spawn(uint64_t now) {
+    chld_init();
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) < 0) { failure("socketpair"); return; }
     int ep[2];
@@ -994,10 +1023,12 @@ void bt_link_connect(unsigned slot) {
     (void)send_ctl(BT_IPC_CONNECT, &s, 1);
 }
 
-int bt_link_poll_fd(void) { return L.fd; }
+/* The helper's socket; while none is open, the SIGCHLD pipe (a killed helper to reap). */
+int bt_link_poll_fd(void) { return L.fd >= 0 ? L.fd : g_chld[0]; }
 int bt_link_log_fd(void) { return L.efd; }
 
-static int ms_until(uint64_t now, uint64_t t) { return t <= now ? 0 : (t - now > 200 ? 200 : (int)(t - now)); }
+/* The real time to `t`; a huge one is clamped only to fit an int. */
+static int ms_until(uint64_t now, uint64_t t) { return t <= now ? 0 : (t - now > 0x7fffffffULL ? 0x7fffffff : (int)(t - now)); }
 
 int bt_link_service(void) {
     uint64_t now = now_of();
@@ -1009,7 +1040,7 @@ int bt_link_service(void) {
         flush_out();
         bool ok_in = read_in(now); /* a PONG already waiting in the socket clears ping_at here */
         /* The loop itself stalled since the last pass: a PING may only just have been flushed, so the helper gets a fresh window. */
-        if (L.ping_at && L.last_svc && now - L.last_svc > BT_SUP_PING_MS) L.ping_at = now;
+        if (L.ping_at && L.last_svc && now - L.last_svc > BT_SUP_PING_MS + STALL_SLACK_MS) L.ping_at = now; /* wakes now come exactly at the ping due time, so the period alone is no stall */
         if (!ok_in || L.io_err) {
             L.io_err = false;
             failure(L.bad_frames ? "malformed frame" : "link closed");
@@ -1026,8 +1057,8 @@ int bt_link_service(void) {
             L.next_ping = now + BT_SUP_PING_MS;
         }
     }
-    if (L.deaths && L.ready_at && running() && L.st.status == BT_READY && now - L.ready_at >= BT_SUP_HEALTHY_MS) L.deaths = 0; /* a healthy stretch forgives earlier crashes */
     L.last_svc = now ? now : 1;
+    if (L.deaths && L.ready_at && running() && L.st.status == BT_READY && now - L.ready_at >= BT_SUP_HEALTHY_MS) L.deaths = 0; /* a healthy stretch forgives earlier crashes */
     if (!running() && !L.disabled && wanted(now) && L.reap == 0 && now >= L.next_spawn && bluetoothd_clear(now)) spawn(now);
     if (L.rebuild) {
         rebuild();
@@ -1045,11 +1076,12 @@ int bt_link_service(void) {
         WAKE(L.next_ping);
         if (L.ping_at) WAKE(L.ping_at + BT_SUP_SILENCE_MS);
         if (L.out_n) WAKE(now + 20);
+        if (L.win_closed_at && !(L.n_ch + L.n_cr > 0 || L.window != BT_WIN_NONE || L.pend_pair)) WAKE(L.win_closed_at + BT_SUP_LINGER_MS); /* the linger ends: stop the helper then */
     } else if (!L.disabled && wanted(now)) {
         if (L.bz && L.bz != 3) WAKE(now + 50);
         else if (L.reap == 0) WAKE(L.next_spawn);
     }
-    if (L.reap > 0) WAKE(now + 100);
+    if (L.reap > 0) WAKE(L.kill_at); /* SIGCHLD wakes the poll (bt_link_poll_fd); this is the SIGKILL deadline */
 #undef WAKE
     return next;
 }

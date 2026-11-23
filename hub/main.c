@@ -135,20 +135,22 @@ static void on_ident_changed(void *ctx, const hp_ident_t *id) {
 }
 
 /* The ws poll's (max 8) extra wake-only fds: RF pair socket(s) + mDNS. */
-static int rf_fds(void *arg, int out[8]) {
+static int rf_fds(void *arg, int out[HP_WS_MAX_EXTRA_FDS]) {
     int n = arg ? hp_rf_pair_fds(arg, out) : 0;
     if (n < 0) n = 0;
     int spi = hp_rf_spi_wake_fd(g_hub.sinks.rf); /* the real radio's reader thread wakes the poll */
-    if (spi >= 0 && n < 8) out[n++] = spi;
-    if (n < 8 && g_mdns.fd >= 0) out[n++] = g_mdns.fd;
+    if (spi >= 0 && n < HP_WS_MAX_EXTRA_FDS) out[n++] = spi;
+    if (n < HP_WS_MAX_EXTRA_FDS && g_mdns.fd >= 0) out[n++] = g_mdns.fd;
+    int nlfd = hp_mdns_srv_wake_fd(&g_mdns); /* an IPv4 address changed */
+    if (n < HP_WS_MAX_EXTRA_FDS && nlfd >= 0) out[n++] = nlfd;
     int lfd = hp_hublog_wake_fd(&g_log); /* a new stderr line to ship */
-    if (n < 8 && lfd >= 0) out[n++] = lfd;
+    if (n < HP_WS_MAX_EXTRA_FDS && lfd >= 0) out[n++] = lfd;
     int hfd = hp_hooklog_fd(&g_hook); /* the boot hook appended to its log */
-    if (n < 8 && hfd >= 0) out[n++] = hfd;
+    if (n < HP_WS_MAX_EXTRA_FDS && hfd >= 0) out[n++] = hfd;
     int blf = bt_link_log_fd(); /* the Bluetooth helper's stderr pipe */
-    if (n < 8 && blf >= 0) out[n++] = blf;
+    if (n < HP_WS_MAX_EXTRA_FDS && blf >= 0) out[n++] = blf;
     int bfd = bt_link_poll_fd(); /* the Bluetooth helper's socket (-1 when none runs) */
-    if (n < 8 && bfd >= 0) out[n++] = bfd;
+    if (n < HP_WS_MAX_EXTRA_FDS && bfd >= 0) out[n++] = bfd;
     return n;
 }
 

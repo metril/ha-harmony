@@ -18,9 +18,9 @@
 typedef struct {
   void *ctx;
   void (*emit)(void *ctx, uint8_t code, uint8_t action);
-  /* A press (key down / touch down) is about to be acted on. Return false when it only woke the
+  /* A press (key down / touch down; touch says which) is about to be acted on. Return false when it only woke the
    * screen: the event, and its release, are then consumed. */
-  bool (*gate)(void *ctx, uint64_t now);
+  bool (*gate)(void *ctx, uint64_t now, bool touch);
   void (*activity)(void *ctx, uint64_t now); /* any other accepted input: restart the idle timer */
   const hp_page_t *(*page)(void *ctx);       /* page used to hit-test taps */
   /* Optional (NULL = none). Finger down / moved at pixel (x,y): down true; lifted: down false.

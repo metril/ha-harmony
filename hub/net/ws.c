@@ -300,7 +300,7 @@ struct hp_ws_server {
     hp_ws_cb_t cb;
     void *user;
     int auth_ms, idle_ms, hs_ms;
-    int (*extra_fds)(void *arg, int out[8]);
+    int (*extra_fds)(void *arg, int out[HP_WS_MAX_EXTRA_FDS]);
     void *extra_arg;
     hp_ws_conn_t conns[HP_WS_MAX_CONNS];
 };
@@ -674,7 +674,7 @@ void hp_ws_set_extra_fds(hp_ws_server_t *s, int (*fn)(void *arg, int out[8]), vo
 
 int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
     if (!s) return -HP_E_INVAL;
-    struct pollfd fds[9 + HP_WS_MAX_CONNS];
+    struct pollfd fds[1 + HP_WS_MAX_EXTRA_FDS + HP_WS_MAX_CONNS];
     int map[9 + HP_WS_MAX_CONNS];
     int nf = 0;
     int64_t now = now_ms();
@@ -703,9 +703,10 @@ int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
         }
     }
     if (s->extra_fds) { /* wake-only: the owner services these fds itself */
-        int ef[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+        int ef[HP_WS_MAX_EXTRA_FDS];
+        for (int k = 0; k < HP_WS_MAX_EXTRA_FDS; k++) ef[k] = -1;
         int ne = s->extra_fds(s->extra_arg, ef);
-        for (int k = 0; k < ne && k < 8; k++) {
+        for (int k = 0; k < ne && k < HP_WS_MAX_EXTRA_FDS; k++) {
             fds[nf].fd = ef[k]; fds[nf].events = POLLIN; fds[nf].revents = 0; map[nf++] = -2;
         }
     }

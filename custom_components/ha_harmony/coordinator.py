@@ -79,7 +79,7 @@ from .harmony_core.compiler import (
 )
 from .harmony_core.config_model import parse_model
 from .harmony_core.ha_actions import HaCall, allowed
-from .harmony_core.harmony_proto import MsgType
+from .harmony_core.harmony_proto import KEY_BY_NAME, MsgType
 from .harmony_core.hub_limits import bt_fit_error
 from .now_playing import NowPlayingFeed
 from .now_playing import options as now_playing_options
@@ -135,6 +135,7 @@ LINK_STATES = (
     "integration_outdated",
 )
 
+KEY_PLAY_PAUSE = KEY_BY_NAME["PlayPause"][0]  # the virtual key the Now Playing card sends
 CALL_TIMEOUT = 15.0  # a service call that has not finished by then is abandoned
 
 
@@ -320,6 +321,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.ota_error: str | None = None
         self.ota_reason: str | None = None  # why the hub rolled back (its boot hook's text)
         self._ota_lock = asyncio.Lock()
+        self._ota_wake = asyncio.Event()  # set on connection / OTA-status events: wakes _wait_for
         self._rolled_back: set[int] = set()  # builds the hub reported rolling back
         self.page_pushes = 0  # page_push requests sent
         self.theme_pushes = 0  # theme_push requests sent
@@ -1351,8 +1353,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             if link.pending and (link.task is None or link.task.done()):
                 self._request_push(remote, wait=False)
 
-    def _on_remote_attached(self) -> None:
-        for remote in self.remotes:
+    def _on_remote_attached(self, data: dict[str, Any] | None = None) -> None:
+        """Redo the attach work for the remote that attached (`remote` in the message), else for all."""
+        only = (data or {}).get("remote")
+        for remote in [only] if only in self.remotes else self.remotes:
             link = self._rlink(remote)
             link.epoch += 1  # the remote may have rebooted and lost its store
             link.info, link.pushed, link.attached = None, None, True
@@ -1530,7 +1534,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """The remote drops its Now Playing card on an activity change: when the activity that just
         started shows the feed's player, send the current state again."""
         media = self.compiled.media.get(after) if after else None
-        if media and self._cur(media.get("now_playing_entity") or "") == self.now_playing.plex:
+        if media and (
+            media.get("now_playing_entity")
+            or media.get("apps_entity")
+            or media.get("session_entity")
+        ):
             self.now_playing.resend()
 
     def _apply_media(self) -> None:
@@ -1615,6 +1623,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     @callback
     def _on_state(self, connected: bool, err: HarmonyError | None) -> None:
         self.available = connected
+        self._ota_wake.set()
         self.addon_send("hub", online=connected)
         self.btm.send_state()
         if connected:
@@ -1635,6 +1644,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._resync = True  # the first report after (re)connecting runs the leaving activity's steps but never sweeps other HA devices (an OTA/power blip)
             self._accepted = False  # the hub may have rebooted: the resync confirms its config
             self.btm.on_connect()
+            self.now_playing.on_reconnect()  # the hub may have restarted: nothing sent before holds
             for link in self.links.values():
                 link.epoch += 1
                 link.info, link.pushed = None, None
@@ -1695,7 +1705,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         elif mtype is MsgType.OTA_STATUS:
             self._on_ota_status(data)
         elif mtype is MsgType.REMOTE_ATTACHED:
-            self._on_remote_attached()
+            self._on_remote_attached(data)
         elif mtype is MsgType.REMOTE_INFO:
             self._on_remote_info(data)
         elif mtype is MsgType.HUB_LOG:
@@ -1738,6 +1748,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         build = data.get("build", 0)
         reason = data.get("reason", "")
         self._rolled_back.add(build)
+        self._ota_wake.set()
         self.ota_reason = reason
         if self.ota_state not in ("uploading", "applying"):
             self.ota_build = build
@@ -1759,12 +1770,19 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             if domain == DOMAIN and issue_id.startswith(prefix):
                 ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
-    async def _wait_connected(self, tries: int = 40) -> bool:
-        for _ in range(tries):
-            if self.client.connected:
-                return True
-            await self.async_sleep(0.5)
-        return self.client.connected
+    async def _wait_for(self, done: Callable[[], bool], timeout: float) -> bool:
+        """Until `done()` holds, woken by connection-state and OTA-status events (no polling), within one overall deadline."""
+        try:
+            async with asyncio.timeout(timeout):
+                while not done():
+                    self._ota_wake.clear()
+                    await self._ota_wake.wait()
+        except TimeoutError:
+            return done()
+        return True
+
+    async def _wait_connected(self, timeout: float = 20.0) -> bool:
+        return await self._wait_for(lambda: self.client.connected, timeout)
 
     def note_ota_key(self) -> None:
         """Repair issue while the hub trusts the public dev key (anyone can sign for it)."""
@@ -1824,16 +1842,17 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._clear_ota_issues()
             self._set_ota("installed", progress=100)
 
-    async def _await_build(self, build: int, tries: int = 480) -> bool:
+    async def _await_build(self, build: int, timeout: float = 240.0) -> bool:
         """Wait (generously: apply + restart is a minute or two) for a connected hub reporting `build`;
         a rollback of that build reported meanwhile ends it."""
-        for _ in range(tries):
-            if self.client.connected and self.client.fw_build == build:
-                return True
-            if build in self._rolled_back:
-                return False
-            await self.async_sleep(0.5)
-        return False
+        await self._wait_for(
+            lambda: (
+                (self.client.connected and self.client.fw_build == build)
+                or build in self._rolled_back
+            ),
+            timeout,
+        )
+        return self.client.connected and self.client.fw_build == build
 
     async def _upload(self, image: Image) -> None:
         reply = await self.client.async_send(
@@ -1871,6 +1890,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             if table is None:
                 table = tables.get(None)
             call = table.get(key) if table else None
+            if call is None and key == KEY_PLAY_PAUSE:
+                # the Now Playing card's tap: one toggle on the Shield player (the androidtv entity sends
+                # KEYCODE_MEDIA_PLAY_PAUSE to whatever app is playing); a mapped play_pause key wins
+                call = HaCall(
+                    "media_player.media_play_pause", (self.now_playing.shield,), {}, False
+                )
             if call is None:
                 self._log_unmapped_key(key, action)
                 return
@@ -1924,7 +1949,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         return {**call.data, "entity_id": list(call.entities)}
 
     @callback
-    def _fire(self, call: HaCall, *, hold: bool = False) -> None:
+    def _fire(self, call: HaCall, *, hold: bool = False) -> asyncio.Task[None] | None:
         """Start one service call now (a key event or an activity step): own context, not awaited
         by the caller, run to completion in its own task and only logged when it fails. A hold
         repeat is dropped while the same call is still running, so a slow service never queues."""
@@ -1936,13 +1961,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 else ("Service %s does not exist; skipping it")
             )
             self._warn_once((call.service,), text, call.service)
-            return
+            return None
         self._warn_missing_entities(call)
         flight = (call.service, call.entities)
         if hold and flight in self._calls:
-            return
+            return None
         self._calls[flight] = self._calls.get(flight, 0) + 1
-        self.config_entry.async_create_background_task(
+        return self.config_entry.async_create_background_task(
             self.hass,
             self._run_call(call, flight),
             name="ha_harmony service call",
@@ -2076,7 +2101,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 ran_power.add(step.device)
             if step.wait_ms and (step.kind != "input" or step.device in ran_power):
                 await self._sleep(step.wait_ms / 1000)
-            self._fire(step.call)
+            if (task := self._fire(step.call)) is not None:
+                await asyncio.shield(
+                    task
+                )  # the call's own timeout bounds it; a newer transition leaves it running
 
     # ------------------------------------------------------------ HA -> hub
     async def async_command(

@@ -669,6 +669,17 @@ static void test_now_playing_card(void) {
   CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "Paused \xC2\xB7 4:07 / 45:06"));
   CT_EQ(ra_ui_np_next_ms(&app.ui, 29000), UINT32_MAX);
   refresh();
+  /* a tap flips the card locally: paused -> playing (position resumes from the frozen one), and back */
+  ra_ui_np_toggle(&app.ui, 30000);
+  CT_EQ(app.ui.np.flags, 1);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_gly), RA_GLYPH_PLAY));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "4:07 / 45:06"));
+  ra_ui_np_toggle(&app.ui, 34000);
+  CT_EQ(app.ui.np.flags, 2);
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_gly), RA_GLYPH_PAUSE));
+  CT_CHECK(!strcmp(lv_label_get_text(app.ui.np_tm), "Paused \xC2\xB7 4:11 / 45:06"));
+  n = np_state(2, 247, 2706, 7, 20000);
+  CT_EQ(ra_ui_set_np(&app.ui, &n), 0);
   /* the end of the item: clamped, then nothing is due */
   n = np_state(1, 2705, 2706, 7, 0);
   CT_EQ(ra_ui_set_np(&app.ui, &n), 0);

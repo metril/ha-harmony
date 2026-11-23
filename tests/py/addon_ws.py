@@ -39,7 +39,9 @@ async def closed(ws, timeout=WAIT):
     """The close code once the server closes the socket."""
     while True:
         msg = await asyncio.wait_for(ws.receive(), timeout)
-        if msg.type.name in ("CLOSE", "CLOSING", "CLOSED"):
+        if msg.type.name == "CLOSE":
+            return msg.data  # the code in the close frame (ws.close_code is set only after the client's own close finishes)
+        if msg.type.name in ("CLOSING", "CLOSED"):
             return ws.close_code
 
 

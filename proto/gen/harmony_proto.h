@@ -104,7 +104,7 @@ const hp_msg_desc_t *hp_msg_desc(hp_msg_type_t type);
 const hp_msg_desc_t *hp_msg_desc_by_name(const char *name);
 
 /* Physical keys: logical id (the u8 in key_event.key, < 128) <-> evdev code <-> names. */
-#define HP_KEY_COUNT 35
+#define HP_KEY_COUNT 36
 #define HP_KEY_NONE 0xFF /* sentinel: no such key */
 #define HP_SOFT_KEY_BASE 128 /* ids >= this are page soft keys */
 

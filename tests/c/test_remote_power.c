@@ -78,7 +78,7 @@ static void test_wake_consumes(void) {
   uint64_t t0 = fk.now;
   /* input while active passes and restarts the idle timer */
   run_to(t0 + 8000);
-  CT_CHECK(ra_power_input(&pw, fk.now));
+  CT_CHECK(ra_power_input(&pw, fk.now, true));
   run_to(t0 + 8000 + 9950);
   CT_EQ(pw.state, RA_PW_ACTIVE);
   run_to(t0 + 8000 + 10000);
@@ -86,16 +86,20 @@ static void test_wake_consumes(void) {
   /* activity() never wakes */
   ra_power_activity(&pw, fk.now);
   CT_EQ(pw.state, RA_PW_DIM);
-  /* from dim: the waking press is consumed */
-  CT_CHECK(!ra_power_input(&pw, fk.now));
+  /* from dim: every press acts, and wakes */
+  CT_CHECK(ra_power_input(&pw, fk.now, true));
   CT_EQ(pw.state, RA_PW_ACTIVE);
   CT_EQ(fk.led_w[fk.nled - 1], 42);
-  CT_CHECK(ra_power_input(&pw, fk.now + 10)); /* the next one is real */
+  CT_CHECK(ra_power_input(&pw, fk.now + 10, true)); /* the next one is real */
   /* from off, too, and the screen fades back up one step at a time */
   run_to(fk.now + 31000);
   CT_EQ(pw.state, RA_PW_OFF);
   CT_EQ(pw.bl, 0);
-  CT_CHECK(!ra_power_input(&pw, fk.now));
+  CT_CHECK(ra_power_input(&pw, fk.now, false)); /* off: a hard key acts and wakes */
+  CT_EQ(pw.state, RA_PW_ACTIVE);
+  run_to(fk.now + 31000);
+  CT_EQ(pw.state, RA_PW_OFF);
+  CT_CHECK(!ra_power_input(&pw, fk.now, true)); /* off: a touch only wakes */
   int n = fk.nbl;
   run_to(fk.now + 50 * 26);
   CT_EQ(pw.bl, 26);

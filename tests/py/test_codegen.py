@@ -319,13 +319,14 @@ STOCK_KEYS = [
     "PowerOffActivity",
     "Home",
     "Favorites",
+    "PlayPause",  # virtual: the Now Playing card's toggle
 ]
 
 
-def test_key_table_is_the_35_confirmed_keys():
+def test_key_table_is_the_35_confirmed_keys_and_the_virtual_toggle():
     keys = load_schema(REAL_SCHEMA).keys
     assert [k.name for k in keys] == STOCK_KEYS
-    assert len({k.id for k in keys}) == len({k.evdev for k in keys}) == 35
+    assert len({k.id for k in keys}) == len({k.evdev for k in keys}) == 36
     assert all(0 < k.id < 128 for k in keys)  # 128+ is reserved for page soft keys
     by = {k.name: k for k in keys}
     assert (by["VolumeUp"].evdev, by["Home"].evdev, by["Favorites"].evdev) == (115, 364, 102)
@@ -338,7 +339,7 @@ def test_python_key_table_round_trips():
     for kid, evdev, name, event in ns["KEYS"]:
         assert ns["KEY_BY_ID"][kid] == ns["KEY_BY_EVDEV"][evdev] == ns["KEY_BY_NAME"][name]
         assert ns["KEY_BY_EVENT"][event][0] == kid
-    assert len(ns["KEYS"]) == 35 and 9999 not in ns["KEY_BY_EVDEV"]
+    assert len(ns["KEYS"]) == 36 and 9999 not in ns["KEY_BY_EVDEV"]
 
 
 @pytest.mark.parametrize(

@@ -103,6 +103,9 @@ class Playing:
         return (self.cid, self.flags, self.dur, self.t1, self.t2)
 
 
+CLEAR = Playing(0, 0, 0, 0, "", "", None)  # nothing playing
+
+
 def _flags(state: State | None) -> int:
     return {"playing": PLAYING, "paused": PAUSED}.get(state.state if state else "", 0)
 
@@ -208,6 +211,7 @@ def quantize_cover(raw: bytes) -> bytes:
 Fetch = Callable[[str], Awaitable[bytes | None]]
 _COVER_MAX = 2 * 1024 * 1024  # largest cover download accepted
 _COVER_TIMEOUT = 10  # seconds
+_COVER_RETRY_S = 900  # a failed cover is tried again only by a later event this long after
 
 
 class NowPlayingFeed:
@@ -250,11 +254,13 @@ class NowPlayingFeed:
         self._start = 0.0  # estimated media start (clock epoch seconds) of _last
         self._sent_start = 0.0  # the same for _sent
         self._cover: tuple[int, str] | None = None  # (cid, base64) of the cover for _last
-        self._cover_sent: int | None = (
-            None  # cid last handed to the hub (it keeps it; resent on a rejoin only)
-        )
+        self._cover_sent: dict[
+            int, int
+        ] = {}  # remote -> cid it holds (it keeps it; cleared on a rejoin)
+        self._cover_failed: dict[int, float] = {}  # cid -> when its cover last failed
+        self._force_all = False
+        self._force_remotes: set[int] = set()
         self._warned: set[int] = set()
-        self._cover_for: int | None = None  # cid the cover above (or a fetch in flight) belongs to
         self.sent_now_playing = 0
         self.sent_covers = 0
         self.failed_sends = 0
@@ -291,44 +297,29 @@ class NowPlayingFeed:
     def _on_event(self, _event: Event[EventStateChangedData]) -> None:
         """Runs one update at a time; events that arrive meanwhile are folded into one more pass."""
         self._dirty = True
-        if self._task is None or self._task.done():
-            self._task = self._spawn(self._run(), "ha_harmony now playing")
+        self._wake()
 
     def on_remote_attached(self, remote: int) -> None:
-        """A remote (re)joined: it knows nothing, show it the current state again."""
-        cur = self._last
-        if cur is None:
-            cur = self._build()
-            if cur is None:
-                return
-            self._start = self._clock().timestamp() - cur.pos
-        self._last = cur
-        self._spawn(self._attach_push(cur, remote), "ha_harmony now playing attach")
+        """A remote (re)joined: it knows nothing (no card, no cover), show it the current state again."""
+        self._cover_sent.pop(remote, None)
+        self._force_remotes.add(remote)
+        self._wake()
 
     def resend(self) -> None:
-        """The running activity changed: the remote dropped its card and no player event follows,
-        so send the current state to every attached remote (one now_playing; the position runs on
-        from the stored start estimate)."""
-        cur = self._last
-        if cur is None:
-            cur = self._build()
-            if cur is None:
-                return
-            self._start = self._clock().timestamp() - cur.pos
-            self._last = cur
-        self._spawn(self._resend_push(cur), "ha_harmony now playing resend")
+        """The running activity changed: the remote dropped its card (not its cover) and no player
+        event follows, so send the current state to every attached remote."""
+        self._force_all = True
+        self._wake()
 
-    async def _resend_push(self, cur: Playing) -> None:
-        try:
-            await self._push(cur, tuple(self._remotes()), force=True)
-        except Exception:
-            _LOGGER.exception("now playing resend failed")
+    def on_reconnect(self) -> None:
+        """The hub link came back (the hub may have restarted): forget what was sent and send it all again."""
+        self._sent = None
+        self._cover_sent.clear()
+        self.resend()
 
-    async def _attach_push(self, cur: Playing, remote: int) -> None:
-        try:
-            await self._push(cur, (remote,), force=True)
-        except Exception:
-            _LOGGER.exception("now playing attach push failed")
+    def _wake(self) -> None:
+        if self._task is None or self._task.done():
+            self._task = self._spawn(self._run(), "ha_harmony now playing")
 
     def _build(self) -> Playing | None:
         return build(
@@ -340,21 +331,36 @@ class NowPlayingFeed:
             self.hass.states.get(self.session) if self.session else None,
         )
 
-    # -- work
+    # -- work: ONE worker does every push, always from the state built at that moment, so an older
+    # state can never overwrite a newer one; events that arrive meanwhile fold into one more pass.
     async def _run(self) -> None:
-        while self._dirty:
-            self._dirty = False
-            cur = self._build()
-            if cur is None:
-                continue
-            self._last = cur
+        while self._dirty or self._force_all or self._force_remotes:
+            dirty, self._dirty = self._dirty, False
+            force_all, self._force_all = self._force_all, False
+            force, self._force_remotes = self._force_remotes, set()
+            built = self._build()
+            cur = (
+                built if built is not None else CLEAR
+            )  # a source gone unavailable: clear the card once
+            self._last = built
             self._start = self._clock().timestamp() - cur.pos
-            if not self._changed(cur):
+            if built is None:  # nothing was ever shown: nothing to clear (unless a remote asks)
+                changed = dirty and self._sent is not None and self._changed(cur)
+            else:
+                changed = dirty and self._changed(cur)
+            if changed or force_all:
+                targets = tuple(dict.fromkeys((*self._remotes(), *force)))
+            elif force:
+                targets = tuple(force)
+            else:
                 continue
             try:
-                await self._push(cur, tuple(self._remotes()))
+                ok = await self._push(cur, targets)
             except Exception:
                 _LOGGER.exception("now playing push failed")
+                continue
+            if changed and ok:  # a failed send leaves it unset: the next event tries again
+                self._sent, self._sent_start = cur, self._start
 
     def _changed(self, cur: Playing) -> bool:
         last = self._sent
@@ -363,45 +369,11 @@ class NowPlayingFeed:
             same and (cur.flags != PLAYING or abs(self._start - self._sent_start) <= _SEEK_SLACK)
         )
 
-    async def _push(self, cur: Playing, remotes: tuple[int, ...], force: bool = False) -> None:
+    async def _push(self, cur: Playing, remotes: tuple[int, ...]) -> bool:
+        """The text first (it must never wait for a cover), then the cover to the remotes lacking it."""
         targets = [r for r in remotes if self._attached(r) and self.client.connected]
         if not targets:
-            return
-        if cur.cid and cur.picture and self._cover_for != cur.cid:
-            try:
-                url = cur.picture.startswith("https://")
-                raw = await (self._fetch_url(cur.picture) if url else self._fetch(self.plex))
-            except Exception as exc:  # noqa: BLE001  (the cover is optional: the text must still go out)
-                raw, why = None, f"fetch error: {exc!r}"
-            else:
-                why = "fetch failed"
-            if raw is not None:
-                try:
-                    data = await self.hass.async_add_executor_job(quantize_cover, raw)
-                except Exception as exc:  # noqa: BLE001  (a bad image is no reason to lose the text)
-                    why = f"not usable: {exc}"
-                else:
-                    self._cover_for, self._cover = (
-                        cur.cid,
-                        (cur.cid, base64.b64encode(data).decode()),
-                    )
-                    why = ""
-            if why:
-                self.cover_errors += 1
-            if why and cur.cid not in self._warned:  # retried on the next push; logged once per cid
-                self._warned.add(cur.cid)
-                _LOGGER.warning("cover for %s: %s", "URL" if url else self.plex, why)
-        if self._cover and self._cover[0] == cur.cid and (force or self._cover_sent != cur.cid):
-            for r in targets:
-                if await self._send(
-                    CMD_COVER, {"remote": r, "cid": cur.cid, "data": self._cover[1]}
-                ):
-                    self._cover_sent = cur.cid
-                    self.sent_covers += 1
-                    _LOGGER.debug("cover %08x sent to remote %s", cur.cid, r)
-        pos = cur.pos
-        if force and cur.flags == PLAYING:  # the stored pos is old: run it on like the hub does
-            pos = max(int(self._clock().timestamp() - self._start), 0)
+            return False
         ok = False
         for r in targets:
             if await self._send(
@@ -410,7 +382,7 @@ class NowPlayingFeed:
                     "remote": r,
                     "cid": cur.cid,
                     "flags": cur.flags,
-                    "pos": min(pos, 65535),
+                    "pos": min(cur.pos, 65535),
                     "dur": min(cur.dur, 65535),
                     "t1": cur.t1,
                     "t2": cur.t2,
@@ -422,13 +394,58 @@ class NowPlayingFeed:
                     "now_playing sent to remote %s: flags=%s pos=%s dur=%s t1=%r t2=%r",
                     r,
                     cur.flags,
-                    pos,
+                    cur.pos,
                     cur.dur,
                     cur.t1,
                     cur.t2,
                 )
-        if ok and not force:  # a failed send leaves it unset: the next event tries again
-            self._sent, self._sent_start = cur, self._start
+        if cur.cid and cur.picture:
+            await self._push_cover(cur, targets)
+        return ok
+
+    async def _push_cover(self, cur: Playing, targets: list[int]) -> None:
+        need = [r for r in targets if self._cover_sent.get(r) != cur.cid]
+        if not need:
+            return
+        if not (self._cover and self._cover[0] == cur.cid):
+            now = self._clock().timestamp()
+            failed = self._cover_failed.get(cur.cid)
+            if failed is not None and now - failed < _COVER_RETRY_S:
+                return  # failed lately: not again until an event arrives after the retry interval
+            data = await self._fetch_cover(cur)
+            if data is None:
+                self._cover_failed[cur.cid] = now
+                while len(self._cover_failed) > 8:
+                    del self._cover_failed[next(iter(self._cover_failed))]
+                return
+            self._cover_failed.pop(cur.cid, None)
+            self._cover = (cur.cid, base64.b64encode(data).decode())
+        if self._dirty:  # the state moved on during the fetch: the next pass sends what is current
+            return
+        for r in need:
+            if await self._send(CMD_COVER, {"remote": r, "cid": cur.cid, "data": self._cover[1]}):
+                self._cover_sent[r] = cur.cid
+                self.sent_covers += 1
+                _LOGGER.debug("cover %08x sent to remote %s", cur.cid, r)
+
+    async def _fetch_cover(self, cur: Playing) -> bytes | None:
+        url = bool(cur.picture and cur.picture.startswith("https://"))
+        try:
+            raw = await (self._fetch_url(cur.picture) if url else self._fetch(self.plex))  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001  (the cover is optional: the text already went out)
+            raw, why = None, f"fetch error: {exc!r}"
+        else:
+            why = "fetch failed"
+        if raw is not None:
+            try:
+                return await self.hass.async_add_executor_job(quantize_cover, raw)
+            except Exception as exc:  # noqa: BLE001  (a bad image is no reason to lose the text)
+                why = f"not usable: {exc}"
+        self.cover_errors += 1
+        if cur.cid not in self._warned:  # logged once per cid
+            self._warned.add(cur.cid)
+            _LOGGER.warning("cover for %s: %s", "URL" if url else self.plex, why)
+        return None
 
     async def _send(self, command: str, args: dict[str, Any]) -> bool:
         try:

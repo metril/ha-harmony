@@ -15,7 +15,7 @@ static void r_emit(void *c, uint8_t code, uint8_t action) {
   rec_t *r = c;
   if (r->n < 256) { r->e[r->n].code = code; r->e[r->n++].action = action; }
 }
-static bool r_gate(void *c, uint64_t now) { (void)now; rec_t *r = c; r->gates++; return r->pass; }
+static bool r_gate(void *c, uint64_t now, bool touch) { (void)now; (void)touch; rec_t *r = c; r->gates++; return r->pass; }
 static void r_act(void *c, uint64_t now) { (void)now; ((rec_t *)c)->activities++; }
 static const hp_page_t *r_page(void *c) { return &((rec_t *)c)->page; }
 
@@ -48,9 +48,9 @@ static void feed(int type, int code, int value, uint64_t now) {
   ra_input_feed(&in, &e, now);
 }
 
-static void test_all_35_keys(void) {
+static void test_all_36_keys(void) {
   begin();
-  CT_EQ(HP_KEY_COUNT, 35);
+  CT_EQ(HP_KEY_COUNT, 36);
   for (int i = 0; i < HP_KEY_COUNT; i++) {
     const hp_hwkey_t *k = &hp_hwkeys[i];
     rec.n = 0;
@@ -77,7 +77,7 @@ static void test_all_35_keys(void) {
 
 static void test_unknown_dropped(void) {
   begin();
-  int unknown[] = {0, 1, 30, 114 + 1000, 330 + 1, 500, 0xFFFF};
+  int unknown[] = {0, 1, 30, 114 + 1000, 330 + 1, 500, 0xFFFE};
   for (unsigned i = 0; i < sizeof unknown / sizeof unknown[0]; i++) {
     feed(EV_KEY, unknown[i], 1, 1000);
     feed(EV_KEY, unknown[i], 0, 1050);
@@ -217,7 +217,7 @@ static void test_read_path(void) {
 }
 
 int main(void) {
-  CT_RUN(test_all_35_keys);
+  CT_RUN(test_all_36_keys);
   CT_RUN(test_unknown_dropped);
   CT_RUN(test_touch);
   CT_RUN(test_hold_repeat);

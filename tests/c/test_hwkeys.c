@@ -5,7 +5,7 @@
 #include "proto/gen/harmony_proto.h"
 
 static void test_round_trip(void) {
-    CT_EQ(HP_KEY_COUNT, 35);
+    CT_EQ(HP_KEY_COUNT, 36);
     for (size_t i = 0; i < HP_KEY_COUNT; i++) {
         const hp_hwkey_t *k = &hp_hwkeys[i];
         CT_CHECK(k->id > 0 && k->id < HP_SOFT_KEY_BASE);
