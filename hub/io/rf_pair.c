@@ -18,6 +18,7 @@
 
 #define RF_MAX 32
 #define ATTACH_BYTE 'A'
+#define PEND_MAX 4
 
 typedef struct {
     hp_rf_transport t; /* first member: transport pointer == pair pointer */
@@ -25,6 +26,8 @@ typedef struct {
     bool claimed;
     int lfd; /* hub: listener */
     int fd;  /* hub: attached peer; remote: the link */
+    int pend[PEND_MAX]; /* hub: connections that arrived behind a hung-up peer */
+    int npend;
     char path[sizeof(((struct sockaddr_un *)0)->sun_path)];
 } pair_t;
 
@@ -57,26 +60,39 @@ static bool peer_hung_up(const pair_t *p) {
     return poll(&f, 1, 0) == 1;
 }
 
+/* Attaches c as the peer: the handshake byte, then it is the link. */
+static bool attach_conn(pair_t *p, int c) {
+    uint8_t a = ATTACH_BYTE;
+    if (set_nonblock_cloexec(c) < 0 || send(c, &a, 1, MSG_NOSIGNAL) != 1) {
+        close(c);
+        return false;
+    }
+    p->fd = c;
+    return true;
+}
+
 /* Accepts pending connections: the first becomes the peer (when none is attached), others are
- * closed immediately (refused). The peer's state is re-checked before EVERY accept: a connection
- * made after the peer hung up must stay queued for the next peer, not be refused as a "second
- * remote" just because this drain already attached the (now dead) peer (an old peer attached and
- * dropped while newcomers queued behind it was the RF reconnect flake). */
+ * closed immediately (refused). A connection made after the peer hung up must never be refused as a
+ * "second remote" (the RF reconnect flake): while the dead peer still has frames to drain, it waits in
+ * p->pend (FIFO) until recv() has reported the departure. The peer's state is checked AFTER accept():
+ * a check before it is a race, since the remote may hang up and its successor connect in between. */
 static void accept_pending(pair_t *p) {
     for (;;) {
-        if (p->fd >= 0 && peer_hung_up(p)) return;
+        while (p->fd < 0 && p->npend > 0) {
+            int c = p->pend[0];
+            memmove(p->pend, p->pend + 1, (size_t)--p->npend * sizeof p->pend[0]);
+            attach_conn(p, c);
+        }
+        if (p->fd >= 0 && peer_hung_up(p)) return; /* let it drain; newcomers stay queued in the kernel */
         int c = accept(p->lfd, NULL, NULL);
         if (c < 0) return;
-        if (p->fd >= 0 || set_nonblock_cloexec(c) < 0) {
+        if (p->fd < 0) {
+            attach_conn(p, c);
+        } else if (peer_hung_up(p) && p->npend < PEND_MAX) {
+            p->pend[p->npend++] = c;
+        } else {
             close(c);
-            continue;
         }
-        uint8_t a = ATTACH_BYTE;
-        if (send(c, &a, 1, MSG_NOSIGNAL) != 1) {
-            close(c);
-            continue;
-        }
-        p->fd = c;
     }
 }
 
@@ -100,7 +116,10 @@ static int hub_recv(void *self, uint8_t *frame, size_t cap, int timeout_ms) {
     if (!p->claimed) return -HP_E_INVAL;
     for (int pass = 0; pass < 2; pass++) {
         int r = peer_read(p, frame, cap);
-        if (r) return r;
+        if (r) {
+            if (r < 0) accept_pending(p); /* the successor attaches now: nothing else would wake the loop for it */
+            return r;
+        }
         accept_pending(p);
         if (pass == 0 && timeout_ms != 0) {
             struct pollfd f[2] = {{p->lfd, POLLIN, 0}, {p->fd, POLLIN, 0}};
@@ -218,6 +237,7 @@ void hp_rf_pair_destroy(hp_rf_transport *t) {
     }
     if (p->fd >= 0) close(p->fd);
     if (p->hub) {
+        for (int i = 0; i < p->npend; i++) close(p->pend[i]);
         close(p->lfd);
         unlink(p->path);
     }
