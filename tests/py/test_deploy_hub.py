@@ -966,3 +966,10 @@ class _RestartHub(FakeHub):
             self.log.append(argv)
             return (0, b"321\n", b"") if self.rc == 0 else (self.rc, b"", b"")
         return super().run(argv)
+
+
+def test_restart_aborts_before_kill_if_marker_write_fails_and_hints_backoff():
+    assert "|| exit 5; kill" in dh.RESTART_SCRIPT
+    d, _hub, _lines = make(_RestartHub(rc=3))
+    with pytest.raises(dh.DeployError, match="backoff"):
+        d.restart()

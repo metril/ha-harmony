@@ -1436,7 +1436,7 @@ def test_planned_restart_inside_the_health_window_is_no_strike(root: Path) -> No
     assert (root / "etc" / "ha-harmony-enable").exists()
 
 
-@pytest.mark.parametrize("content", ["900\n", "2000\n", "junk\n", "", "08\n"])
+@pytest.mark.parametrize("content", ["900\n", "2000\n", "junk\n", "", "08\n", "99999999999\n"])
 def test_stale_or_garbled_planned_marker_is_an_ordinary_death(root: Path, content: str) -> None:
     clock = _fake_clock(root, 1000)
     _start_healthy(root, clock, HAH_BACKOFF1="0.05", HAH_HB_STALE="99999")
@@ -1459,3 +1459,26 @@ def test_unplanned_death_without_marker_is_counted_as_before(root: Path) -> None
 def test_planned_restart_keeps_a_single_i2s_holder() -> None:
     code = re.sub(r"#.*", "", HOOK.read_text())
     assert code.count('9>"$hah_i2s"') == 1, "one fd holder, opened once, never reopened"
+
+
+def test_planned_restart_inside_the_updated_builds_window_is_not_a_rollback(root: Path) -> None:
+    clock = _fake_clock(root, 1000)
+    install_daemon(root, OLD_APPLIER)
+    _install_new(root, NEW_OK)
+    install_conf(root, "token=t\nrespawn_max=0\n")
+    env = {"HAH_HEALTHY_POLLS": "60", "HAH_UPTIME_FILE": str(clock)}
+    source_hook(root, healthy=1, extra_env=env)
+    log_f = root / "var" / "volatile" / "ha-harmony-hook.log"
+    _wait_text(log_f, "healthy after")
+    (_hub_dir(root) / "go").touch()
+    _wait_count(root, "runs_new", 1)
+    _marker(root).write_text("1000\n")
+    _term_daemon(root)
+    _wait_count(root, "runs_new", 2)
+    log = _wait_text(log_f, "updated build's health window")
+    assert "died within" not in log and "restoring" not in log and "rolled back" not in log
+    assert not _marker(root).exists()
+    assert not (_hub_dir(root) / "ota-rollback").exists()
+    assert "runs_old" in (_hub_dir(root) / "hub.prev").read_text()
+    assert "runs_new" in (_hub_dir(root) / "hub").read_text()
+    assert not (root / "reboot.log").exists()

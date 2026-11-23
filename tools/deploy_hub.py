@@ -37,7 +37,7 @@ REMOTE_PIDFILE = "/cache/ha-harmony.pid"
 PLANNED_MARKER = "/tmp/ha-harmony-planned-restart"
 RESTART_SCRIPT = (
     f'read p <{REMOTE_PIDFILE} && kill -0 "$p" 2>/dev/null || exit 3; '
-    f'read u _ </proc/uptime; echo "${{u%%.*}}" >{PLANNED_MARKER}; '
+    f'read u _ </proc/uptime; echo "${{u%%.*}}" >{PLANNED_MARKER} || exit 5; '
     f'kill "$p" || {{ rm -f {PLANNED_MARKER}; exit 4; }}; echo "$p"'
 )
 REMOTE_RF_PROBE = f"{REMOTE_DIR}/rf_probe"
@@ -418,7 +418,8 @@ class Deployer:
         if rc == 3:
             raise DeployError(
                 f"no live daemon in {REMOTE_PIDFILE}: the boot hook is not supervising one, "
-                "so nothing to restart (is the hook installed and the hub booted into it?)"
+                "so nothing to restart. It may be in respawn backoff after a crash (retry shortly), "
+                "or the hook is not installed / the hub has not booted into it."
             )
         if rc != 0:
             raise DeployError(f"restart failed (rc={rc}): {err.decode('utf-8', 'replace')[-200:]}")
