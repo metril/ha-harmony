@@ -109,6 +109,7 @@ typedef struct hp_actsm {
     hp_actcmd_t cq[HP_ACT_CMDQ_MAX];
     uint8_t cq_n;
     hp_sched_handle cq_h;
+    hp_sched_handle kq_h; /* one-shot: replay the queued keys once the devices have settled */
     bool draining;
     void (*irsend_fn)(void *ctx, const char *json);
     void *irsend_ctx;

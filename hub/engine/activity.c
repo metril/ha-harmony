@@ -207,6 +207,8 @@ static void cancel_plan(hp_actsm_t *e) {
     e->running = false;
     e->resync = false;
     e->nplan = e->pos = 0;
+    hp_sched_cancel(e->sched, e->kq_h);
+    e->kq_h = 0;
     hp_map_keyq_drop(e->map); /* key presses queued under the cancelled plan are not replayed */
 }
 
@@ -289,6 +291,21 @@ static void build_plan(hp_actsm_t *e, int idx, int prev, bool resync) {
 
 static void arm_cq(hp_actsm_t *e, uint32_t delay);
 static void drain(hp_actsm_t *e);
+static void after_finish(hp_actsm_t *e);
+static void kq_cb(void *arg, uint32_t now);
+static void cq_drop_inputs(hp_actsm_t *e, const char *dev);
+
+/* Queued keys and commands run once every device has settled (a booting device ignores them). */
+static void after_finish(hp_actsm_t *e) {
+    uint32_t w = settle_wait(e, -1, now_of(e));
+    if (w) {
+        hp_sched_cancel(e->sched, e->kq_h);
+        e->kq_h = hp_sched_after(e->sched, w, kq_cb, e); /* one-shot, tied to the settle time */
+        if (e->kq_h) return;
+    }
+    hp_map_keyq_replay(e->map, e->sinks);
+    drain(e);
+}
 
 static void finish(hp_actsm_t *e) {
     e->running = false;
@@ -298,8 +315,7 @@ static void finish(hp_actsm_t *e) {
     e->map->current = e->target;
     emit(e, HP_ACTSM_EVT_ACTIVITY, e->reported);
     mark_dirty(e); /* the transition's one state write */
-    hp_map_keyq_replay(e->map, e->sinks);
-    drain(e);
+    after_finish(e);
 }
 
 /* The plan could not go on: back to the reported activity, and every client is told so it resyncs. */
@@ -360,14 +376,14 @@ static int run(hp_actsm_t *e) {
         }
         switch (s->kind) {
         case HP_STEP_PWR_ON:
-            if (e->dev[s->dev].power) break; /* a forced resend to a device tracked on: the frame is all that changes */
-            e->dev[s->dev].settling = dv->settle_ms > 0;
+            e->dev[s->dev].settling = dv->settle_ms > 0; /* a forced resend to a device tracked on settles too (it may be booting) */
             e->dev[s->dev].settle_until = now + dv->settle_ms;
-            set_dev(e, s->dev, 1, "");
+            if (!e->dev[s->dev].power) set_dev(e, s->dev, 1, ""); /* ... but keeps its tracked input */
             break;
         case HP_STEP_PWR_OFF:
             e->dev[s->dev].settling = false;
             set_dev(e, s->dev, 0, "");
+            cq_drop_inputs(e, e->dev[s->dev].id);
             break;
         case HP_STEP_INPUT:
             e->dev[s->dev].settling = dv->settle_ms > 0;
@@ -509,6 +525,25 @@ void hp_actsm_set_irsend(hp_actsm_t *e, void (*fn)(void *, const char *), void *
     e->irsend_ctx = ctx;
 }
 
+static void kq_cb(void *arg, uint32_t now) {
+    (void)now;
+    hp_actsm_t *e = arg;
+    e->kq_h = 0;
+    if (e->running) return;
+    after_finish(e);
+}
+
+/* A device that was powered off must not get an input queued behind its power-on. */
+static void cq_drop_inputs(hp_actsm_t *e, const char *dev) {
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < e->cq_n; i++) {
+        bool drop = e->cq[i].kind == 1 && e->cq[i].nopre && !strcmp(e->cq[i].dev, dev);
+        if (drop) hp_log("hub: queued %s %s dropped: device powered off\n", e->cq[i].dev, e->cq[i].cmd);
+        else e->cq[n++] = e->cq[i];
+    }
+    e->cq_n = n;
+}
+
 static void cq_cb(void *arg, uint32_t now) {
     (void)now;
     hp_actsm_t *e = arg;
@@ -538,6 +573,14 @@ static void drain(hp_actsm_t *e) {
                 break;
             }
         }
+        if (c.kind == 1 && c.nopre) { /* its power-on was undone or failed meanwhile: not sent */
+            int d = find_dev(e, c.dev);
+            if (d >= 0 && !e->dev[d].power && e->map->devs[d].pwr != HP_PWR_NONE) {
+                hp_log("hub: queued %s %s dropped: device is off\n", c.dev, c.cmd);
+                cq_pop(e);
+                continue;
+            }
+        }
         cq_pop(e);
         if (c.kind == 2) {
             if (e->irsend_fn) e->irsend_fn(e->irsend_ctx, c.text);
@@ -560,7 +603,10 @@ static void apply_effect(hp_actsm_t *e, int d, int power, const char *input, boo
         e->dev[d].settling = true;
         e->dev[d].settle_until = now + dv->settle_ms;
     }
-    if (power == 0) e->dev[d].settling = false;
+    if (power == 0) {
+        e->dev[d].settling = false;
+        cq_drop_inputs(e, e->dev[d].id);
+    }
     if (power < 0 && !input) return;
     int np = power >= 0 ? power : e->dev[d].power;
     char keep[HP_MAP_NAME_MAX];
@@ -672,9 +718,15 @@ void hp_actsm_reloaded(hp_actsm_t *e) {
     if (e->have_hash && e->loaded_hash == m->hash) {
         /* nothing changed: a running transition goes on; its steps only re-point at the reloaded tables */
         if (e->running && m->format == 2) {
-            uint16_t pos = e->pos;
-            build_plan(e, e->target, resolve_key(e, e->prev_key), e->resync);
-            e->pos = pos < e->nplan ? pos : e->nplan;
+            const hp_activity_t *ta = e->target >= 0 ? &m->acts[e->target] : NULL;
+            int pv = resolve_key(e, e->prev_key);
+            const hp_activity_t *pa = e->target < 0 && pv >= 0 ? &m->acts[pv] : NULL;
+            uint8_t nx = 0, no = 0;
+            for (uint16_t i = 0; i < e->nplan; i++) { /* same steps, pointers into the reloaded tables */
+                hp_actstep_t *st = &e->plan[i];
+                if (st->kind == HP_STEP_EXTRA && ta && nx < ta->nsteps) st->act = &ta->steps[nx++];
+                else if (st->kind == HP_STEP_OFFX && pa && no < pa->noff) st->act = &pa->off[no++];
+            }
         }
         return;
     }
@@ -687,6 +739,8 @@ void hp_actsm_reloaded(hp_actsm_t *e) {
     snprintf(pkey, sizeof pkey, "%s", e->prev_key);
     hp_sched_cancel(e->sched, e->timer); /* the plan is rebuilt below when its target survives */
     e->timer = 0;
+    hp_sched_cancel(e->sched, e->kq_h);
+    e->kq_h = 0;
     e->running = false;
     e->resync = false;
     e->nplan = e->pos = 0;
@@ -727,6 +781,7 @@ void hp_actsm_reloaded(hp_actsm_t *e) {
     int t = resolve_key(e, tkey);
     if (m->format != 2 || (tkey[0] && t < 0)) {
         hp_map_keyq_drop(m);
+        drain(e); /* nothing runs any more: the queued commands go out */
         return;
     }
     hp_log("hub: config reloaded mid-transition: restarting the plan\n");

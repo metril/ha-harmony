@@ -213,7 +213,7 @@ static void test_repress_resyncs_stale_discrete_state(void) {
     settle_all();
     /* tv PWR_ON + input resent, amp (toggle) power skipped but its discrete input resent, then the step; no off to bd */
     EXPECT(NEC(4, 1), NEC(4, 10), NEC(9, 5), NEC(4, 20));
-    CT_CHECK(recs[1].t - recs[0].t < 300); /* D20a: the forced power-on did not re-arm the settle wait */
+    CT_CHECK(recs[1].t - recs[0].t >= 300); /* the forced power-on settles before the forced input (a booting device ignores it) */
     CT_EQ(count_ev(HP_ACTSM_EVT_DEVICE), 0); /* ... nor clear the tracked input */
     CT_CHECK(!strcmp(pw(0), "on") && !strcmp(in(0), "hdmi1"));
     CT_EQ(hp_actsm_reported(&sm), 0);
@@ -1069,6 +1069,82 @@ static void test_state_restore_by_id_other_config(void) {
     unlink(path);
 }
 
+/* ------------------------------------------------- review follow-ups */
+
+/* A same-hash reload mid-Off keeps the remaining off steps (the plan is not rebuilt from the shrunk tracked state). */
+static void test_same_hash_reload_keeps_off_plan(void) {
+    setup();
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    nrec = 0;
+    CT_EQ(hp_actsm_off(&sm), 0);
+    advance(g_now + 20); /* tv off went out; amp toggle and watch's off steps pending */
+    CT_EQ(nrec, 1);
+    CT_EQ(hp_map_load(&map, CFG, strlen(CFG)), 0);
+    hp_actsm_reloaded(&sm);
+    CT_CHECK(hp_actsm_busy(&sm));
+    settle_all();
+    EXPECT(NEC(4, 2), NEC(9, 1), NEC(7, 1));
+    CT_EQ(hp_actsm_reported(&sm), -1);
+}
+
+/* An input queued behind a power-on is dropped when an Off powers the device down before it is sent. */
+static void test_queued_input_dropped_by_off(void) {
+    setup();
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "input_hdmi2"), 0);
+    EXPECT(NEC(4, 1));
+    CT_EQ(hp_actsm_off(&sm), 0);
+    settle_all();
+    for (size_t i = 0; i < nrec; i++) CT_CHECK(recs[i].h != NEC(4, 11));
+    CT_CHECK(!strcmp(pw(0), "off"));
+    CT_EQ(sm.cq_n, 0);
+}
+
+/* A reload that removes the running target still runs the queued commands (and frees them). */
+static void test_reload_removing_target_drains_queue(void) {
+    setup();
+    hp_actsm_set_irsend(&sm, irsend_cb, NULL);
+    irsend_n = 0;
+    hp_actsm_start(&sm, "watch");
+    CT_EQ(hp_actsm_defer_irsend(&sm, strdup("{\"y\":2}")), 0);
+    const char *nw = "{\"format\":2,\"devices\":[{\"id\":\"tv\"}],\"activities\":[{\"id\":\"movie\",\"devices\":[{\"device\":\"tv\"}]}]}";
+    CT_EQ(hp_map_load(&map, nw, strlen(nw)), 0);
+    hp_actsm_reloaded(&sm);
+    CT_CHECK(!hp_actsm_busy(&sm));
+    CT_EQ(irsend_n, 1);
+    CT_EQ(sm.cq_n, 0);
+}
+
+/* Queued keys replay once the devices have settled, not at the last frame. */
+static void test_key_replay_waits_for_settle(void) {
+    setup();
+    CT_EQ(hp_actsm_start(&sm, "movie"), 1);
+    advance(g_now + 20);
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, NULL, NULL), 0);
+    CT_EQ(map.keyq_n, 1);
+    settle_all();
+    size_t in = 0, key = 0;
+    for (size_t i = 0; i < nrec; i++) {
+        if (recs[i].h == NEC(4, 11)) in = i;
+        if (recs[i].h == NEC(5, 5)) key = i;
+    }
+    CT_CHECK(key > in);
+    CT_CHECK(recs[key].t - recs[in].t >= 300);
+    CT_EQ(hp_sched_pending(&sched), 0);
+    /* a new transition cancels the pending replay */
+    setup();
+    hp_actsm_start(&sm, "movie");
+    advance(g_now + 20);
+    hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, NULL, NULL);
+    advance(g_now + 700); /* movie finished, replay waiting on tv's settle */
+    CT_CHECK(!hp_actsm_busy(&sm));
+    size_t n = nrec;
+    CT_EQ(hp_actsm_start(&sm, "music"), 2);
+    settle_all();
+    CT_CHECK(nrec > n);
+    for (size_t i = n; i < nrec; i++) CT_CHECK(recs[i].h != NEC(5, 5));
+}
+
 int main(void) {
     CT_RUN(test_device_command);
     CT_RUN(test_device_command_errors_and_busy);
@@ -1085,6 +1161,10 @@ int main(void) {
     CT_RUN(test_abort_returns_error_and_emits);
     CT_RUN(test_keys_during_transition);
     CT_RUN(test_queued_irsend);
+    CT_RUN(test_same_hash_reload_keeps_off_plan);
+    CT_RUN(test_queued_input_dropped_by_off);
+    CT_RUN(test_reload_removing_target_drains_queue);
+    CT_RUN(test_key_replay_waits_for_settle);
     CT_RUN(test_state_restore_by_id_other_config);
     CT_RUN(test_interrupted_transition);
     CT_RUN(test_interrupt_keeps_settle);
