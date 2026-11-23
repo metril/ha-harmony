@@ -457,9 +457,12 @@ async def test_url_cover_uses_the_url_fetcher_and_text_survives_failure(hass):
     )
     play = npl.Playing(7, npl.PLAYING, 0, 60, "Video", "", url)
     await feed._push(play, (1,))
+    await feed._push_cover(play, [1])
     assert urls == [url] and ents == [] and feed.cover_errors == 1
     assert [c for c, _ in client.sent] == ["now_playing"]
-    await feed._push(npl.Playing(8, npl.PLAYING, 0, 60, "P", "", "/api/x"), (1,))
+    p8 = npl.Playing(8, npl.PLAYING, 0, 60, "P", "", "/api/x")
+    await feed._push(p8, (1,))
+    await feed._push_cover(p8, [1])
     assert ents == [feed.plex] and urls == [url]
 
 
@@ -555,4 +558,60 @@ async def test_pushes_are_serialized_and_the_newest_state_goes_last(hass):
     flags = [a["flags"] for c, a in client.sent if c == "now_playing"]
     assert flags[-1] == npl.PAUSED and flags[-1:] != [npl.PLAYING]
     assert feed._task is None or feed._task.done()
+    feed.stop()
+
+
+async def test_cover_overtaken_by_an_event_during_its_fetch_is_still_sent(hass):
+    client, now, gate = FakeClient(), [dt_util.utcnow()], asyncio.Event()
+
+    async def fetch(url):
+        await gate.wait()
+        return _png()
+
+    feed = _feed(hass, client, now, fetch=fetch)
+    feed.start()
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **PLEX_ATTRS)
+    await asyncio.sleep(0.05)  # the text is out, the cover fetch is waiting
+    # a pure position tick: the text signature is unchanged, so no text push follows
+    _state(
+        hass,
+        PLEX,
+        "playing",
+        media_position_updated_at=now[0],
+        **dict(PLEX_ATTRS, media_position=101),
+    )
+    gate.set()
+    await hass.async_block_till_done()
+    assert [c for c, _ in client.sent].count("cover") == 1
+    feed.stop()
+
+
+async def test_failed_cover_is_retried_by_any_event_after_the_interval(hass):
+    client, now, calls = FakeClient(), [dt_util.utcnow()], []
+
+    async def fetch(url):
+        calls.append(url)
+        return None if len(calls) == 1 else _png()
+
+    feed = _feed(hass, client, now, fetch=fetch)
+    feed.start()
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **PLEX_ATTRS)
+    await hass.async_block_till_done()
+    assert len(calls) == 1 and [c for c, _ in client.sent].count("cover") == 0
+    tick = dict(PLEX_ATTRS, media_position=101)
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **tick)  # inside the window
+    await hass.async_block_till_done()
+    assert len(calls) == 1
+    now[0] += timedelta(seconds=npl._COVER_RETRY_S + 1)
+    _state(
+        hass,
+        PLEX,
+        "playing",
+        media_position_updated_at=now[0],
+        **dict(PLEX_ATTRS, media_position=102),
+    )
+    await hass.async_block_till_done()  # the text did not change: the cover still retries
+    assert len(calls) == 2 and [c for c, _ in client.sent].count("cover") == 1
     feed.stop()

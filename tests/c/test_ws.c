@@ -422,6 +422,36 @@ static void test_no_idle_close_when_authed_but_auth_and_handshake_deadlines(void
     hp_ws_set_timeouts(srv, HP_WS_AUTH_MS, HP_WS_IDLE_MS);
 }
 
+/* Every connection slot in use plus the maximum number of extra wake fds: the poll arrays must hold them all. */
+static int g_efd[HP_WS_MAX_EXTRA_FDS], g_ewr[HP_WS_MAX_EXTRA_FDS];
+static int extra_all(void *arg, int out[HP_WS_MAX_EXTRA_FDS]) {
+    (void)arg;
+    for (int i = 0; i < HP_WS_MAX_EXTRA_FDS; i++) out[i] = g_efd[i];
+    return HP_WS_MAX_EXTRA_FDS;
+}
+static void test_all_slots_and_all_extra_fds(void) {
+    for (int i = 0; i < HP_WS_MAX_EXTRA_FDS; i++) {
+        int p[2];
+        CT_CHECK(pipe(p) == 0);
+        g_efd[i] = p[0];
+        g_ewr[i] = p[1];
+    }
+    hp_ws_set_extra_fds(srv, extra_all, NULL);
+    int c[HP_WS_MAX_CONNS];
+    for (int i = 0; i < HP_WS_MAX_CONNS; i++) c[i] = cl_upgrade();
+    for (int i = 0; i < HP_WS_MAX_EXTRA_FDS; i++) (void)!write(g_ewr[i], "x", 1); /* every extra fd readable too */
+    pump(10);
+    uint8_t ping[8];
+    size_t l = mkframe(ping, 0x9, true, (const uint8_t *)"p", 1, true);
+    send(c[HP_WS_MAX_CONNS - 1], ping, l, MSG_NOSIGNAL);
+    uint8_t b[16];
+    CT_CHECK(cl_read(c[HP_WS_MAX_CONNS - 1], b, sizeof b) >= 2 && (b[0] & 0x0F) == 0xA); /* still served: a pong */
+    hp_ws_set_extra_fds(srv, NULL, NULL);
+    for (int i = 0; i < HP_WS_MAX_CONNS; i++) close(c[i]);
+    for (int i = 0; i < HP_WS_MAX_EXTRA_FDS; i++) { close(g_efd[i]); close(g_ewr[i]); }
+    pump(10);
+}
+
 int main(void) {
     hp_ws_cb_t cb = {on_text, on_close};
     srv = hp_ws_listen(0, "tok", &cb, NULL);
@@ -437,6 +467,7 @@ int main(void) {
     CT_RUN(test_close_echo_and_midframe_disconnect);
     CT_RUN(test_http_garbage_and_slow_handshake);
     CT_RUN(test_send_max_frame);
+    CT_RUN(test_all_slots_and_all_extra_fds);
     CT_RUN(test_sigpipe_safe);
     CT_RUN(test_keepalive_on_accept);
     CT_RUN(test_no_idle_close_when_authed_but_auth_and_handshake_deadlines);
