@@ -198,9 +198,38 @@ static void test_toggle_never_sent_when_in_wanted_state(void) {
     /* amp already on with input opt: nothing to do for it; tv (unused) goes off */
     EXPECT(NEC(4, 2));
     nrec = 0;
-    CT_EQ(hp_actsm_start(&sm, "music"), 2); /* same activity again: no redundant power/input */
+    CT_EQ(hp_actsm_start(&sm, "music"), 2); /* same activity again: resync, but amp's toggle power is never resent */
     settle_all();
-    CT_EQ(nrec, 0);
+    EXPECT(NEC(4, 2), SIRC(1, 22), SIRC(1, 22), SIRC(1, 22), NEC(9, 5)); /* tv/bd off + amp input; no amp toggle */
+}
+
+static void test_repress_resyncs_stale_discrete_state(void) {
+    setup();
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    nrec = 0;
+    /* the real TV was switched off behind the hub's back: tracked state still says on/hdmi1 */
+    CT_EQ(hp_actsm_start(&sm, "watch"), 0);
+    settle_all();
+    /* tv PWR_ON + input resent, amp (toggle) power skipped but its discrete input resent, then the step; bd off */
+    EXPECT(SIRC(1, 22), SIRC(1, 22), SIRC(1, 22), NEC(4, 1), NEC(4, 10), NEC(9, 5), NEC(4, 20));
+    CT_CHECK(!strcmp(pw(0), "on") && !strcmp(in(0), "hdmi1"));
+    CT_EQ(hp_actsm_reported(&sm), 0);
+    /* resync is one-shot: the next switch to another activity skips by tracked state again */
+    nrec = 0;
+    CT_EQ(hp_actsm_start(&sm, "movie"), 1);
+    settle_all();
+    EXPECT(NEC(9, 1), SIRC(1, 21), SIRC(1, 21), SIRC(1, 21), NEC(4, 11));
+}
+
+static void test_switch_still_skips_tracked(void) {
+    setup();
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    nrec = 0;
+    CT_EQ(hp_actsm_start(&sm, "movie"), 1);
+    settle_all();
+    EXPECT(NEC(9, 1), SIRC(1, 21), SIRC(1, 21), SIRC(1, 21), NEC(4, 11)); /* tv power on not resent */
 }
 
 static void test_unknown_input_is_sent(void) {
@@ -804,6 +833,8 @@ int main(void) {
     CT_RUN(test_a_to_b_shared_devices);
     CT_RUN(test_toggle_never_sent_when_in_wanted_state);
     CT_RUN(test_unknown_input_is_sent);
+    CT_RUN(test_repress_resyncs_stale_discrete_state);
+    CT_RUN(test_switch_still_skips_tracked);
     CT_RUN(test_off);
     CT_RUN(test_interrupted_transition);
     CT_RUN(test_interrupt_keeps_settle);
