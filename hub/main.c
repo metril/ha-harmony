@@ -81,7 +81,19 @@ static void peers_keepalive(hp_ws_server_t *srv) {
 
 static int peers_next(void) { return hp_peers_next_ms(&g_peers, mono_ms()); }
 
+static uint32_t g_cb_ms; /* time spent in ws callbacks during the current hp_ws_poll (not the poll's own wait) */
+
+static void on_text_body(hp_ws_conn_t *c, const char *msg, size_t len, void *user);
+
 static void on_text(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
+    uint32_t t0 = hp_mono_ms();
+    on_text_body(c, msg, len, user);
+    uint32_t t1 = hp_mono_ms();
+    g_cb_ms += t1 - t0;
+    hp_stall_check("ws dispatch", t0, t1); /* the handlers' own IR / SPI sends included */
+}
+
+static void on_text_body(hp_ws_conn_t *c, const char *msg, size_t len, void *user) {
     (void)user;
     hp_session_t *sess = hp_ws_conn_user(c);
     if (!sess) {
@@ -140,7 +152,15 @@ static int rf_fds(void *arg, int out[8]) {
     return n;
 }
 
+static void on_close_body(hp_ws_conn_t *c, void *user);
+
 static void on_close(hp_ws_conn_t *c, void *user) {
+    uint32_t t0 = hp_mono_ms();
+    on_close_body(c, user);
+    g_cb_ms += hp_mono_ms() - t0;
+}
+
+static void on_close_body(hp_ws_conn_t *c, void *user) {
     (void)user;
     hp_session_t *sess = hp_ws_conn_user(c);
     if (sess && sess->authed) hp_peers_arm(&g_peers, hp_ws_conn_peer(c), mono_ms());
@@ -256,7 +276,7 @@ int main(int argc, char **argv) {
 #ifdef HH_BT
     if (argc >= 2 && !strcmp(argv[1], "bt-helper")) return bt_helper_main(argc - 2, argv + 2);
 #endif
-    if (hp_hublog_init(&g_log, hub_log_emit, &g_hub) == 0) hp_hublog_install(&g_log); /* else: file only */
+    if (hp_hublog_init(&g_log, hub_log_emit, &g_hub) == 0) { g_log.stamp = true; hp_hublog_install(&g_log); } /* else: file only */
     bool sim = false, rf_spi = false;
     bool rf_debug = false;
     long rf_slot = 0; /* 0 = learn it from the radio's link-up report */
@@ -557,19 +577,38 @@ int main(int argc, char **argv) {
 #ifdef HH_BT
         if (bt_wait >= 0 && (wait < 0 || bt_wait < wait)) wait = bt_wait;
 #endif
+        /* Watchdog: each dispatch is timed; > HP_STALL_MS logs "loop stall <ms> ms in <handler>". Two clock reads per
+         * stage, no timers. The poll sleeps by design: only its overrun past the requested wait counts (a late wake). */
+        uint32_t t0 = hp_mono_ms();
+        g_cb_ms = 0;
         hp_ws_poll(srv, wait);
+        uint32_t t1 = hp_mono_ms();
+        hp_stall_poll(t0, t1, wait, g_cb_ms); /* the ws callbacks report themselves */
         hp_hooklog_service(&g_hook);
+        hp_stall_end("hooklog service", t1);
+        t1 = hp_mono_ms();
         hp_hublog_service(&g_log);
+        hp_stall_end("hublog service", t1);
 #ifdef HH_BT
         if (bt_run) { /* the helper's socket, supervision, then the broadcasts its changes queued */
+            t1 = hp_mono_ms();
             bt_wait = bt_link_service();
             hub_flush_pending(&g_hub);
+            hp_stall_end("bt service", t1);
         }
 #endif
+        t1 = hp_mono_ms();
         hub_pump_rf(&g_hub);
+        hp_stall_end("rf rx", t1);
+        t1 = hp_mono_ms();
         hp_mdns_srv_service(&g_mdns);
+        hp_stall_end("mdns", t1);
+        t1 = hp_mono_ms();
         hub_run_timers(&g_hub);
+        hp_stall_end("timers", t1);
+        t1 = hp_mono_ms();
         peers_keepalive(srv);
+        hp_stall_end("peers", t1);
         if (g_hub.ota.restart && ++restart_polls >= 3) break;
     }
     hp_mdns_srv_stop(&g_mdns); /* goodbye (TTL 0) */

@@ -8,6 +8,7 @@
 #include "ctest_assert.h"
 #include "hub/engine/activity.h"
 #include "hub/hp_errors.h"
+#include "hub/net/hublog.h"
 
 static uint32_t g_now;
 static uint32_t clk(void *c) { (void)c; return g_now; }
@@ -282,6 +283,44 @@ static void test_set_device_during_transition_skips_redundant(void) {
     CT_EQ(hp_actsm_set_device(&sm, "amp", 1, "opt"), 0); /* user says amp is already on/opt */
     settle_all();
     EXPECT(NEC(4, 1), NEC(4, 10), NEC(4, 20));
+}
+
+/* The silent drops now say so: hp_log lines in a captured file. */
+static int cap_begin(hp_hublog_t *l, char *path) {
+    int fd = mkstemp(path);
+    CT_CHECK(fd >= 0);
+    CT_EQ(hp_hublog_init(l, NULL, NULL), 0);
+    l->out_fd = fd;
+    hp_hublog_install(l);
+    return fd;
+}
+
+static void cap_end(int fd, const char *path, char *buf, size_t n) {
+    ssize_t r = pread(fd, buf, n - 1, 0);
+    buf[r > 0 ? r : 0] = 0;
+    hp_hublog_install(NULL);
+    close(fd);
+    unlink(path);
+}
+
+static void test_drops_are_logged(void) {
+    static hp_hublog_t l;
+    char path[] = "/tmp/actlogXXXXXX", buf[2048];
+    setup();
+    int fd = cap_begin(&l, path);
+    hp_actsm_start(&sm, "watch");
+    advance(g_now + 20);
+    CT_EQ(hp_actsm_set_device(&sm, "amp", 1, "opt"), 0); /* tracked as on: the plan skips amp's power-on */
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* busy: dropped */
+    settle_all();
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 3, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* off key */
+    settle_all();
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 3, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* off again: nothing is on */
+    settle_all();
+    cap_end(fd, path, buf, sizeof buf);
+    CT_CHECK(strstr(buf, "hub: step skipped, tracked state says amp is already on\n"));
+    CT_CHECK(strstr(buf, "hub: key 4 dropped: activity change in progress\n"));
+    CT_CHECK(strstr(buf, "hub: key 3 Off ignored: "));
 }
 
 static void test_set_device_errors(void) {
@@ -770,6 +809,7 @@ int main(void) {
     CT_RUN(test_interrupt_keeps_settle);
     CT_RUN(test_off_during_transition);
     CT_RUN(test_set_device_during_transition_skips_redundant);
+    CT_RUN(test_drops_are_logged);
     CT_RUN(test_set_device_errors);
     CT_RUN(test_key_driven_and_busy_keys);
     CT_RUN(test_bt_key_released_on_switch_and_off);

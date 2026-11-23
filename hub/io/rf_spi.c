@@ -156,8 +156,10 @@ static int spi_write_ex(spi_t *s, const uint8_t *buf, size_t n, bool track) {
         rc = -HP_E_BUSY;
     } else {
         ssize_t w;
+        uint32_t t0 = hp_mono_ms();
         do w = s->ops.write(s->ops.ctx, s->fd, buf, n);
         while (w < 0 && errno == EINTR);
+        hp_stall_end("rf_spi write", t0); /* a blocked SPI write() stalls the event loop that called it */
         dbg_frame(s, "TX", (long)w, buf, n);
         if (w < 0 && !track) {
             rc = -HP_E_IO; /* an untracked write (sync pulse) must not put the next real send into backoff */

@@ -98,6 +98,7 @@ TOPIC_ACTIVITY = "activity"  # the running activity or the activity list
 TOPIC_CONFIG = "config"  # a new applied config (devices, key names)
 TOPIC_OTA = "ota"  # firmware update state or progress
 TOPIC_LINK = "link"  # the add-on link state, revision or last error
+UNMAPPED_LOG_S = 5.0  # at most one "key has no Home Assistant mapping" line per this many seconds
 
 
 def topic_device(device: str) -> str:
@@ -339,6 +340,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._resync = False
         self._act_known = False  # the first state_update after HA starts is only a baseline
         self._warned: set[tuple[str, ...]] = set()
+        self._unmapped_log_at = -UNMAPPED_LOG_S  # monotonic time of the last "no mapping" line
         self._unsubs = [
             client.async_subscribe(self._on_push),
             client.async_subscribe_state(self._on_state),
@@ -1868,6 +1870,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 table = tables.get(None)
             call = table.get(key) if table else None
             if call is None:
+                self._log_unmapped_key(key, action)
                 return
             # PRESS fires once; the remote sends HOLD every 400 ms while the key stays down, which
             # is the cadence of a `repeat: true` action. RELEASE does nothing.
@@ -1875,6 +1878,22 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 self._fire(call, hold=action == "hold")
         except Exception:
             _LOGGER.exception("Home Assistant action for key %s failed", key)
+
+    def _log_unmapped_key(self, key: int, action: str) -> None:
+        """A key event with no Home Assistant action (the hub handles most keys itself, so this is
+        routine): INFO, at most one line per 5 s, so a stall can be matched to the keys seen."""
+        if action == "hold":
+            return
+        now = time.monotonic()
+        if now - self._unmapped_log_at < UNMAPPED_LOG_S:
+            return
+        self._unmapped_log_at = now
+        _LOGGER.info(
+            "key %s %s has no Home Assistant mapping (activity %s)",
+            key,
+            action,
+            self.current_activity_id,
+        )
 
     def _warn_once(self, key: tuple[str, ...], msg: str, *args: Any) -> None:
         if key not in self._warned:

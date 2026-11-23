@@ -279,14 +279,24 @@ class HarmonyHubClient:
         delay = self._backoff[0]
         up_since = self._clock()
         while not self._closed:
+            reason = None
             try:
                 await self._serve(ws)
             except HarmonyVersionError as exc:
                 await self._drop(ws)
                 self._notify_state(False, exc)
                 return
-            except Exception:  # a bug must look like a dropped link, never a silent dead task
+            except (
+                Exception
+            ) as exc:  # a bug must look like a dropped link, never a silent dead task
                 _LOGGER.exception("hub connection handler failed; reconnecting")
+                reason = f"handler error {exc!r}"
+            if reason is None:
+                reason = self._close_reason(ws)
+            down_at = self._clock()
+            _LOGGER.warning(
+                "hub websocket disconnected after %.1f s up: %s", down_at - up_since, reason
+            )
             await self._drop(ws)
             self._notify_state(False)
             if self._clock() - up_since >= self._stable_after:
@@ -299,7 +309,9 @@ class HarmonyHubClient:
                     self._notify_state(False, exc)
                     return
                 except HarmonyConnectionError as exc:
-                    _LOGGER.debug("reconnect failed: %s", exc)
+                    _LOGGER.debug(
+                        "reconnect failed after %.1f s down: %s", self._clock() - down_at, exc
+                    )
                     delay = min(delay * 2, self._backoff[1])
                     continue
                 except Exception:
@@ -308,10 +320,19 @@ class HarmonyHubClient:
                     continue
                 self._ws = ws
                 up_since = self._clock()
+                _LOGGER.warning("hub websocket reconnected after %.1f s down", up_since - down_at)
                 # the wait before the next attempt doubles unless this link proves stable
                 delay = min(delay * 2, self._backoff[1])
                 self._notify_state(True)
                 break
+
+    @staticmethod
+    def _close_reason(ws: aiohttp.ClientWebSocketResponse) -> str:
+        """Why the stream ended: the transport error if there was one, else the close code."""
+        exc = ws.exception()
+        if exc is not None:
+            return f"transport error {exc!r}"
+        return f"closed (code {ws.close_code})" if ws.close_code else "connection closed by peer"
 
     async def _drop(self, ws: aiohttp.ClientWebSocketResponse) -> None:
         if self._ws is ws:

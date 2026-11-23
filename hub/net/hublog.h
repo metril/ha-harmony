@@ -17,7 +17,7 @@
 #include <stdint.h>
 
 #define HP_LOG_RING 64
-#define HP_LOG_LINE 192 /* bytes shipped per line (longer lines are cut; the file keeps them whole) */
+#define HP_LOG_LINE 224 /* bytes shipped per line (longer lines are cut; the file keeps them whole) */
 #define HP_LOG_BURST 30 /* lines that may ship at once */
 #define HP_LOG_RATE 10  /* lines per second afterwards */
 
@@ -39,6 +39,7 @@ typedef struct {
     _Atomic uint32_t lost; /* dropped on lock contention (counted without the lock) */
     uint32_t tokens_m, last_ms, suppressed; /* token bucket, milli-tokens */
     bool woken;
+    bool stamp; /* prefix each shipped line with "[HH:MM:SS.mmm +<uptime>ms] " (the file keeps the bare line) */
     int wake[2];
     int out_fd; /* where lines are written first (default 2) */
     uint32_t (*now_ms)(void); /* tests: the bucket's clock */
@@ -62,6 +63,17 @@ int hp_hublog_wake_fd(const hp_hublog_t *);
 void hp_hublog_service(hp_hublog_t *);
 /* Level of a line: "warning" for failure wording, else "info". */
 const char *hp_hublog_level(const char *msg);
+
+/* Monotonic milliseconds (wraps at 2^32). */
+uint32_t hp_mono_ms(void);
+/* Event-loop watchdog: a handler (or a blocking call) that ran longer than HP_STALL_MS is logged as
+ * "hub: loop stall <ms> ms in <what>". hp_stall_end times from t0 (hp_mono_ms) to now; both return true when logged. */
+#define HP_STALL_MS 250
+bool hp_stall_check(const char *what, uint32_t t0, uint32_t now);
+bool hp_stall_end(const char *what, uint32_t t0);
+/* The poll's own overrun: t0..t1 spans hp_ws_poll, which sleeps up to wait_ms (-1 = until woken) and runs the ws callbacks
+ * (cb_ms, reported by their own stall lines). Logs "poll wake" only for time beyond both. */
+bool hp_stall_poll(uint32_t t0, uint32_t t1, int wait_ms, uint32_t cb_ms);
 
 /* printf-style diagnostics line (newline added when missing). Never blocks on the ring; any thread. */
 void hp_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

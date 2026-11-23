@@ -189,6 +189,16 @@ static void rejoin_event(rf_link_t *l, uint64_t now, const char *why) {
   rejoin_attempt(l, now, why);
 }
 
+/* The link's object in flight just began transmitting: its seq is the one the hub logs in `rf key ... seq`. */
+static void note_start(rf_link_t *l) {
+  if (!l->link.started || l->link.tx.type != HP_MSG_KEY_EVENT) return;
+  if (l->logged_start && l->logged_seq == l->link.tx.seq && l->logged_type == l->link.tx.type) return;
+  l->logged_start = true;
+  l->logged_seq = l->link.tx.seq;
+  l->logged_type = l->link.tx.type;
+  ra_logf(&l->sys, "rf_link: key sending seq %u", (unsigned)l->link.tx.seq);
+}
+
 static int rf_send_key(void *ctx, uint8_t code, uint8_t action) {
   rf_link_t *l = ctx;
   if (!l->tp) return -HP_E_NOENT;
@@ -196,7 +206,14 @@ static int rf_send_key(void *ctx, uint8_t code, uint8_t action) {
   uint64_t now = l->sys.ops.now_ms(l->sys.ops.ctx);
   if (action == HP_KEY_ACTION_PRESS) rejoin_event(l, now, "key"); /* re-sync first; the key itself still goes out as before */
   int rc = send_msg(l, HP_MSG_KEY_EVENT, v, 3, now);
-  if (rc < 0) raise_failed(l);
+  if (rc < 0) {
+    ra_logf(&l->sys, "rf_link: key %u action %u send refused (%d)", (unsigned)code, (unsigned)action, rc);
+    raise_failed(l);
+  } else {
+    size_t q = hp_rf_link_status(&l->link).queued;
+    ra_logf(&l->sys, "rf_link: key %u action %u queued (%zu ahead)", (unsigned)code, (unsigned)action, q ? q - 1 : 0);
+    note_start(l); /* an idle link starts it at once */
+  }
   return rc;
 }
 
@@ -249,6 +266,7 @@ static void service(rf_link_t *l, uint64_t now) {
     return;
   }
   int rc = hp_rf_link_pump(&l->link, t32(now));
+  note_start(l); /* a queued object whose turn came */
   if (l->link.rx_frames != l->seen_rx) { /* something came from the hub */
     l->seen_rx = l->link.rx_frames;
     if (l->info_pending && l->next_info_ms == UINT64_MAX) l->next_info_ms = now;
@@ -256,7 +274,12 @@ static void service(rf_link_t *l, uint64_t now) {
     if (e) e->kind = APP_LINK_EV_ALIVE;
   }
   if (rc == -HP_E_IO) ra_logf(&l->sys, "rf_link: link dead");
+  if (l->link.tx.retries != l->seen_retries) { /* a resend of the object in flight */
+    if (l->link.tx.retries) ra_logf(&l->sys, "rf_link: retry %u of %d seq %u", (unsigned)l->link.tx.retries, HP_RF_RETRIES, (unsigned)l->link.tx.seq);
+    l->seen_retries = l->link.tx.retries;
+  }
   bool att = l->tp->attached ? l->tp->attached(l->tp->self) : l->was_attached;
+  if (att != l->was_attached) ra_logf(&l->sys, "rf_link: link state %s seq %u", att ? "up" : "lost", (unsigned)(l->link.tx.next_seq & 0x0F));
   if (!att && l->was_attached) rejoin_attempt(l, now, "loss"); /* lost just now: one attempt, no retry timer */
   if (att && !l->was_attached) {
     if (l->pulse_pending) ra_logf(&l->sys, "rf_link: link up %llu ms after the rejoin pulse", (unsigned long long)(now - l->last_sync_ms));
@@ -286,6 +309,7 @@ static void service(rf_link_t *l, uint64_t now) {
   }
   uint32_t f = hp_rf_link_status(&l->link).failures;
   if (f != l->seen_failures) {
+    ra_logf(&l->sys, "rf_link: send FAILED after %d retries, %u object(s) abandoned (seq %u)", HP_RF_RETRIES, (unsigned)(f - l->seen_failures), (unsigned)l->link.tx.seq);
     l->seen_failures = f;
     l->info_pending = true; /* the hub went quiet: when it is heard again it may have forgotten us */
     l->next_info_ms = UINT64_MAX; /* held until a frame arrives (below): no traffic towards a silent hub */

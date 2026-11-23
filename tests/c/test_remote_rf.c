@@ -753,6 +753,8 @@ static void test_tile_update_changes_render(void) {
   teardown();
 }
 
+static int msg_count(const char *sub);
+
 static void test_dropped_ack_delivers_once(void) {
   setup();
   WAIT_FOR(nhbatt == 1);
@@ -766,6 +768,9 @@ static void test_dropped_ack_delivers_once(void) {
   DRAIN();
   CT_EQ(nhkeys, base + 1);          /* the duplicate was acked, not delivered */
   CT_EQ(fr.nw - w0, 2);             /* sent twice */
+  CT_CHECK(msg_count(" queued (0 ahead)") >= 1);
+  CT_CHECK(msg_count("key sending seq ") >= 1); /* the real seq, logged when the object starts transmitting */
+  CT_CHECK(msg_count("retry 1 of 3 seq ") >= 1);
   CT_CHECK(!app.ui.fallback);
   fk_key(&fk, 0, 115, 0);
   tick(10);

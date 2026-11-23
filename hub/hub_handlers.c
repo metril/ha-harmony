@@ -1505,6 +1505,7 @@ static void emit_key(void *vctx, uint8_t remote, uint8_t key, hp_key_action_t ac
 static void rf_link_up(hub_ctx_t *h) {
     if (h->rf_attached) return;
     h->rf_attached = true;
+    hp_log("hub: rf link up\n");
     h->info_fresh = true;
     for (unsigned i = 0; i < HUB_COVER_MAX; i++) { /* the remote may have rebooted and lost its covers: send again */
         hub_cover_t *c = &h->cover[i];
@@ -1532,6 +1533,7 @@ static void rf_link_up(hub_ctx_t *h) {
  * and what the old remote announced are void; the next link's frames come after this and are untouched. */
 static void rf_link_lost(hub_ctx_t *h) {
     h->rf_attached = false;
+    hp_log("hub: rf link lost\n");
     h->info_fresh = true;
     if (!hp_rf_link_status(&h->link).queued) { /* the link dropped what was in flight without a result */
         h->theme_out = 0;
@@ -1544,6 +1546,10 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
     hp_rf_val_t v[6];
     rf_link_up(h); /* a frame proves the link is up, and its link-up must precede what the frame says */
     if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
+        /* Every press/release is logged (seq = the remote's link seq, to match its log); a held key repeats, so those are rate limited. */
+        if (v[2].u != HP_KEY_ACTION_HOLD || np_log_ok(h, 4))
+            hp_log("hub: rf key remote %u key %u action %u seq %u\n", (unsigned)v[0].u, (unsigned)v[1].u, (unsigned)v[2].u,
+                   (unsigned)m->seq);
         int rc = hp_key_handle(&h->map, &h->sinks, (uint8_t)v[0].u, (uint8_t)v[1].u, (hp_key_action_t)v[2].u,
                                emit_key, h);
         if (rc < 0) hp_log("hub: key %u action failed (%d)\n", (unsigned)v[1].u, rc);

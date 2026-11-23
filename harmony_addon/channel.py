@@ -9,6 +9,8 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,6 +36,18 @@ CHANNEL_KEY = web.AppKey("channel", object)
 # The hub daemon's own log lines (relayed by the integration) go to the add-on's stdout, one logger per hub
 # (`hub.<id>`), pinned to INFO so the add-on's log_level option cannot hide them.
 logging.getLogger("hub").setLevel(logging.INFO)
+# The hub stamps every shipped line "[HH:MM:SS.mmm +<uptime>ms] "; a line without it (older hub, a relayed helper line)
+# gets the time it arrived here, so every line in this log can be placed on the timeline.
+_HUB_STAMP = re.compile(r"\[\d\d:\d\d:\d\d\.\d{3} \+\d+ms\] ")
+
+
+def _stamped(msg: str, now: float) -> str:
+    if _HUB_STAMP.match(msg):
+        return msg
+    ms = int(now * 1000) % 1000
+    return f"[{time.strftime('%H:%M:%S', time.gmtime(now))}.{ms:03d} rx] {msg}"
+
+
 _HUB_LOG = vol.Schema(
     {
         vol.Required("level"): vol.In(("info", "warning")),
@@ -221,7 +235,11 @@ async def _on_frame(app: web.Application, conn: Conn, f: dict[str, Any]) -> None
             lg.warning(
                 "%d hub log line(s) were lost before this one (hub ring full)", ln["dropped"]
             )
-        lg.log(logging.WARNING if ln["level"] == "warning" else logging.INFO, "%s", ln["msg"])
+        lg.log(
+            logging.WARNING if ln["level"] == "warning" else logging.INFO,
+            "%s",
+            _stamped(ln["msg"], app[CLOCK_KEY]()),
+        )
     elif t == "hub":
         try:
             online = _HUB_FRAME(f)["online"]

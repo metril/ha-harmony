@@ -70,6 +70,9 @@ typedef struct {
   app_link_event_t ring[RF_LINK_RING];
   unsigned head, n;
   uint32_t seen_failures, seen_rx;
+  uint8_t seen_retries;
+  bool logged_start; /* note_start: the last object announced as sending */
+  uint8_t logged_seq, logged_type;
   uint64_t next_batt_ms, next_info_ms, info_sent_ms;
   bool info_pending;
   const hp_store_t *store; /* the page store reported in remote_info (gen, pages); NULL = none */
