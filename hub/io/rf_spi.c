@@ -21,7 +21,12 @@
 #define RXQ 16        /* received inner blocks buffered for recv() */
 #define READ_BUF 128  /* the driver ignores `count` and copies a 64-byte entry: never pass less */
 #define RX_MAX 64
-#define LOG_MAX 32    /* diagnostics are rate-limited by total count */
+#define LOG_MAX 32    /* diagnostics per message kind; refilled on every link-up */
+#define FLAP_BURST 4        /* link up/lost lines logged per flap episode */
+#define FLAP_QUIET_MS 10000 /* a flap this long after the previous one starts a new episode */
+#define READ_BACKOFF_MIN_MS 20
+#define READ_BACKOFF_MAX_MS 2000
+enum { LK_CTRL, LK_UNEXP, LK_OVERSIZE, LK_N };
 #define REPORT_HUB_DATA 0x12
 #define REPORT_REMOTE_DATA 0x20
 #define LINK_LOST 0x40
@@ -58,7 +63,10 @@ typedef struct {
     size_t qhead, qn;
     bool attached;
     int wake[2]; /* self-pipe: readable while recv() has something to return */
-    unsigned logged;
+    unsigned logged[LK_N]; /* reader thread only */
+    /* link-flap limiter (reader thread only) */
+    uint64_t flap_last, flap_start;
+    unsigned flap_n, flap_supp;
     bool reader_done;
     pthread_t reader;
     volatile sig_atomic_t stop;
@@ -108,13 +116,32 @@ static void install_usr1(void) {
 
 /* ---- helpers ---- */
 
-static void logf_limited(spi_t *s, const char *what, const uint8_t *b, size_t n) {
-    if (s->logged >= LOG_MAX) return;
-    s->logged++;
+/* Lines produced while `mu` is held are queued here and written after the unlock: logging and the slot file
+ * (fopen/rename on flash) must not stall the main thread, which takes `mu` every loop iteration. */
+static void emit_line(spi_t *s, const char *line);
+#define DEFER_LINES 6
+typedef struct {
+    char line[DEFER_LINES][160];
+    size_t n;
+    bool persist;
+    uint8_t pslot;
+} defer_t;
+
+static void dq(defer_t *d, const char *line) {
+    if (d->n < DEFER_LINES) {
+        snprintf(d->line[d->n], sizeof d->line[0], "%s", line);
+        d->n++;
+    }
+}
+
+static void logf_limited(spi_t *s, defer_t *d, int kind, const char *what, const uint8_t *b, size_t n) {
+    if (s->logged[kind] >= LOG_MAX) return;
+    s->logged[kind]++;
     char line[96];
     int k = snprintf(line, sizeof line, "rf_spi: %s (%zu bytes):", what, n);
     for (size_t i = 0; i < n && i < 8 && k > 0 && (size_t)k + 4 < sizeof line; i++) k += snprintf(line + k, sizeof line - (size_t)k, " %02x", b[i]);
-    hp_log("%s\n", line);
+    if (d) dq(d, line);
+    else emit_line(s, line);
 }
 
 /* Diagnostics sink (default stderr). */
@@ -130,6 +157,34 @@ static void slogf(spi_t *s, const char *fmt, ...) {
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
     emit_line(s, line);
+}
+
+/* A link up/lost line, rate-limited: the first FLAP_BURST of an episode go out; the rest are counted, and the
+ * next flap after FLAP_QUIET_MS of quiet reports "N flaps in last Xs" first. Event-driven: no timer. */
+static void flap_logf(spi_t *s, defer_t *d, const char *fmt, ...) {
+    uint64_t now = s->ops.now_ms(s->ops.ctx);
+    if (s->flap_n && now - s->flap_last >= FLAP_QUIET_MS) {
+        if (s->flap_supp) {
+            char sum[96];
+            snprintf(sum, sizeof sum, "rf_spi: %u more link flaps suppressed in last %llus", s->flap_supp,
+                     (unsigned long long)((s->flap_last - s->flap_start) / 1000u + 1u));
+            dq(d, sum);
+        }
+        s->flap_n = s->flap_supp = 0;
+    }
+    if (!s->flap_n) s->flap_start = now;
+    s->flap_last = now;
+    if (s->flap_n >= FLAP_BURST) {
+        s->flap_supp++;
+        return;
+    }
+    s->flap_n++;
+    char line[160];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    dq(d, line);
 }
 
 /* --rf-debug: one line per syscall. `rc` is write()'s return or read()'s length. */
@@ -223,16 +278,16 @@ static size_t q_push(spi_t *s, bool lost) {
 }
 
 /* Persist the learned slot (tmp + rename; best effort): a restart on an already-up link gets no link-up
- * report, so the last known slot is the provisional start value. Caller holds mu. */
-static void persist_slot(spi_t *s) {
-    if (!s->slot_file[0] || s->persisted == s->slot) return;
+ * report, so the last known slot is the provisional start value. Reader thread, `mu` NOT held (file I/O). */
+static void persist_slot(spi_t *s, uint8_t slot) {
+    if (!s->slot_file[0] || s->persisted == slot) return;
     char tmp[sizeof s->slot_file + 8];
     snprintf(tmp, sizeof tmp, "%s.tmp", s->slot_file);
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    int ok = fprintf(f, "%u\n", (unsigned)s->slot) > 0;
+    int ok = fprintf(f, "%u\n", (unsigned)slot) > 0;
     ok = fclose(f) == 0 && ok;
-    if (ok && rename(tmp, s->slot_file) == 0) s->persisted = s->slot;
+    if (ok && rename(tmp, s->slot_file) == 0) s->persisted = slot;
     else unlink(tmp);
 }
 
@@ -256,22 +311,36 @@ static void load_slot(spi_t *s, const char *path) {
  * bit clear) or the first data frame (hub `0x12 NN ...`, remote `0x20 <pipe> 0x12 ...`, slot = pipe & 0x0F),
  * because a restart on an already-up link gets no link-up report. A slot is only taken while detached, so a
  * second remote cannot hijack a live link, and a re-link on another slot is picked up. The wpid is not
- * checked: the hub pairs one remote. Caller holds mu. */
-static void learn_slot(spi_t *s, unsigned slot, const char *from) {
+ * checked: the hub pairs one remote. Caller holds mu; output goes to `d`. */
+static void learn_slot(spi_t *s, defer_t *d, unsigned slot, const char *from) {
     if (s->slot_fixed || slot < 1 || slot > 15) return;
     if (s->slot_known && (s->slot == slot || s->attached)) return;
     s->slot = (uint8_t)slot;
     s->slot_known = true;
     s->txs_n = 0; /* statuses of the old slot */
-    slogf(s, "rf_spi: slot %u learned from %s", slot, from);
-    persist_slot(s);
+    char line[96];
+    snprintf(line, sizeof line, "rf_spi: slot %u learned from %s", slot, from);
+    dq(d, line);
+    d->persist = true;
+    d->pslot = (uint8_t)slot;
+}
+
+/* After the unlock: the queued lines, then the slot file. */
+static void flush_defer(spi_t *s, defer_t *d) {
+    for (size_t i = 0; i < d->n; i++) {
+        emit_line(s, d->line[i]);
+    }
+    if (d->persist) persist_slot(s, d->pslot);
 }
 
 static void on_report(spi_t *s, const uint8_t *b, size_t n) {
+    defer_t d;
+    d.n = 0;
+    d.persist = false;
     pthread_mutex_lock(&s->mu);
     const uint8_t *inner = NULL;
     bool txs_shape = n == HP_RF_REMOTE_FRAME_LEN && b[0] == REPORT_REMOTE_DATA && b[2] == TX_STATUS_ID;
-    if (txs_shape && !s->slot_known) learn_slot(s, b[1] & 0x0F, "TX status");
+    if (txs_shape && !s->slot_known) learn_slot(s, &d, b[1] & 0x0F, "TX status");
     if (txs_shape && (s->role == HP_RF_SPI_ROLE_REMOTE || (s->slot_known && b[1] == s->slot))) {
         if (s->txs_n == TXSQ) { s->txs_head = (s->txs_head + 1) % TXSQ; s->txs_n--; }
         uint8_t *e = s->txs[(s->txs_head + s->txs_n++) % TXSQ];
@@ -279,27 +348,29 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
         e[1] = b[3];
         push_event(s);
         pthread_mutex_unlock(&s->mu);
+        flush_defer(s, &d);
         return;
     }
     if (s->role == HP_RF_SPI_ROLE_HUB) {
         /* only the configured peer's data: another slot's uplink must not look like our remote's
          * (same filter as the TX status above) */
         if (n == HP_RF_HUB_FRAME_LEN && b[0] == REPORT_HUB_DATA) {
-            learn_slot(s, b[1], "data frame");
+            learn_slot(s, &d, b[1], "data frame");
             if (s->slot_known && b[1] == s->slot) inner = b + 2;
-            else if (!s->slot_known && s->debug) slogf(s, "rf_spi: data dropped, slot not learned yet");
+            else if (!s->slot_known && s->debug) dq(&d, "rf_spi: data dropped, slot not learned yet");
         }
     } else if (n == HP_RF_REMOTE_FRAME_LEN && b[0] == REPORT_REMOTE_DATA && b[2] == 0x12) {
-        learn_slot(s, b[1] & 0x0F, "data frame");
+        learn_slot(s, &d, b[1] & 0x0F, "data frame");
         if (s->slot_known) inner = b + 4;
-        else if (s->debug) slogf(s, "rf_spi: data dropped, slot not learned yet");
+        else if (s->debug) dq(&d, "rf_spi: data dropped, slot not learned yet");
     }
     if (n >= 5 && (b[0] == 0x10 || b[0] == 0x11) && b[2] == 0x41 && b[3] == 0x04 && !(b[4] & LINK_LOST))
-        learn_slot(s, b[1], "link report");
+        learn_slot(s, &d, b[1], "link report");
     if (inner) {
         if (!s->attached && s->link_logged == 0 && s->slot_known) { /* a data frame is the first sign the link is back */
             s->link_logged = 1;
-            slogf(s, "rf_spi: link up (slot %u, data frame)", (unsigned)s->slot);
+            memset(s->logged, 0, sizeof s->logged); /* a new link: diagnostics get a fresh budget */
+            flap_logf(s, &d, "rf_spi: link up (slot %u, data frame)", (unsigned)s->slot);
         }
         s->attached = true;
         size_t qi = q_push(s, false); /* a full queue (reader outran the hub loop) drops the oldest frame */
@@ -310,9 +381,10 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
         int up = !(b[4] & LINK_LOST);
         if (s->link_logged != up) {
             s->link_logged = up;
-            if (up && n >= 7) slogf(s, "rf_spi: link up (slot %u, status 0x%02x, wpid %02x%02x)", (unsigned)b[1], (unsigned)b[4], (unsigned)b[6], (unsigned)b[5]);
-            else if (up) slogf(s, "rf_spi: link up (slot %u, status 0x%02x)", (unsigned)b[1], (unsigned)b[4]);
-            else slogf(s, "rf_spi: link lost (status 0x%02x)", (unsigned)b[4]);
+            if (up) memset(s->logged, 0, sizeof s->logged);
+            if (up && n >= 7) flap_logf(s, &d, "rf_spi: link up (slot %u, status 0x%02x, wpid %02x%02x)", (unsigned)b[1], (unsigned)b[4], (unsigned)b[6], (unsigned)b[5]);
+            else if (up) flap_logf(s, &d, "rf_spi: link up (slot %u, status 0x%02x)", (unsigned)b[1], (unsigned)b[4]);
+            else flap_logf(s, &d, "rf_spi: link lost (status 0x%02x)", (unsigned)b[4]);
         }
         if (b[4] & LINK_LOST) {
             if (s->attached) {
@@ -325,27 +397,40 @@ static void on_report(spi_t *s, const uint8_t *b, size_t n) {
             push_event(s);
         }
     } else {
-        logf_limited(s, (b[0] == 0x10 || b[0] == 0x11) ? "control report dropped" : "unexpected report dropped", b, n);
+        bool ctl = b[0] == 0x10 || b[0] == 0x11;
+        logf_limited(s, &d, ctl ? LK_CTRL : LK_UNEXP, ctl ? "control report dropped" : "unexpected report dropped", b, n);
     }
     pthread_mutex_unlock(&s->mu);
+    flush_defer(s, &d);
 }
 
 static void *reader_main(void *arg) {
     spi_t *s = arg;
     uint8_t buf[READ_BUF];
+    unsigned backoff = 0; /* ms to wait after a read error; doubles to READ_BACKOFF_MAX_MS */
     while (!s->stop) {
         ssize_t n = s->ops.read(s->ops.ctx, s->fd, buf, sizeof buf);
         if (n < 0) {
             if (errno != EINTR && !s->stop) { /* a dead device must not spin */
-                struct timespec ts = {0, 20 * 1000000L};
-                nanosleep(&ts, NULL);
+                if (!backoff) {
+                    slogf(s, "rf_spi: read failed (errno %d); retrying with backoff", errno);
+                    backoff = READ_BACKOFF_MIN_MS;
+                } else if (backoff < READ_BACKOFF_MAX_MS) {
+                    backoff = backoff * 2 > READ_BACKOFF_MAX_MS ? READ_BACKOFF_MAX_MS : backoff * 2;
+                }
+                struct timespec ts = {backoff / 1000, (long)(backoff % 1000) * 1000000L};
+                nanosleep(&ts, NULL); /* a SIGUSR1 from destroy cuts it short */
             }
             continue;
+        }
+        if (backoff) {
+            backoff = 0;
+            slogf(s, "rf_spi: read recovered");
         }
         if (n == 0) continue;
         dbg_frame(s, "RX", (long)n, buf, n > RX_MAX ? RX_MAX : (size_t)n);
         if (n > RX_MAX) { /* the driver's entries are 64 bytes: anything else is not a frame */
-            logf_limited(s, "oversize read dropped", buf, RX_MAX);
+            logf_limited(s, NULL, LK_OVERSIZE, "oversize read dropped", buf, RX_MAX);
             continue;
         }
         on_report(s, buf, (size_t)n);

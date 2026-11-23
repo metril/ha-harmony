@@ -707,7 +707,10 @@ int hp_ws_poll(hp_ws_server_t *s, int timeout_ms) {
         for (int k = 0; k < HP_WS_MAX_EXTRA_FDS; k++) ef[k] = -1;
         int ne = s->extra_fds(s->extra_arg, ef);
         for (int k = 0; k < ne && k < HP_WS_MAX_EXTRA_FDS; k++) {
-            fds[nf].fd = ef[k]; fds[nf].events = POLLIN; fds[nf].revents = 0; map[nf++] = -2;
+            fds[nf].fd = ef[k] & ~HP_WS_FD_OUT;
+            fds[nf].events = (short)(POLLIN | ((ef[k] & HP_WS_FD_OUT) ? POLLOUT : 0));
+            fds[nf].revents = 0;
+            map[nf++] = -2;
         }
     }
     int r = poll(fds, (nfds_t)nf, (int)wait);

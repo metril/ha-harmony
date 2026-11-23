@@ -104,8 +104,13 @@ static int drain_prev(hp_hw_t *h) {
         if (rc < 0) return rc; /* keep flush_ports: DRAIN without a START can sleep forever; retry next time */
         h->flush_ports = 0;
         h->pending = true;
+        h->line_free = UINT64_MAX; /* length of what was queued is unknown: really DRAIN */
     }
     if (!h->pending) return 0;
+    if (h->ops.now_ms(h->ops.ctx) >= h->line_free) { /* played out already: DRAIN would be a no-op syscall */
+        h->pending = false;
+        return 0;
+    }
     uint32_t t0 = hp_mono_ms();
     (void)ioc(h, HP_I2S_DRAIN, 0); /* normally returns at once: irout books the line for the waveform */
     hp_stall_end("i2s drain", t0);
@@ -153,6 +158,7 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
         return rc;
     }
     h->pending = true;
+    h->line_free = h->ops.now_ms(h->ops.ctx) + w.dur_ms;
     return 0; /* DRAIN is deferred to the next send / hp_hw_sinks_close, so the loop never blocks */
 }
 

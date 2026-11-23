@@ -9,6 +9,7 @@
 
 #include "hub/net/hublog.h"
 #include "hci_transport_linux.h"
+#include "hub/bt/bt_pktq.h"
 
 #include "btstack_bool.h"
 #include "btstack_config.h"
@@ -27,8 +28,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <sys/select.h>
-#include <sys/time.h>
 
 #ifndef AF_BLUETOOTH
 #define AF_BLUETOOTH 31
@@ -85,6 +84,8 @@ static btstack_data_source_t hci_transport_linux_data_source;
 static uint8_t hci_packet_with_pre_buffer[HCI_INCOMING_PRE_BUFFER_SIZE + HCI_INCOMING_PACKET_BUFFER_SIZE + 1];
 static uint8_t * hci_packet = &hci_packet_with_pre_buffer[HCI_INCOMING_PRE_BUFFER_SIZE];
 static int hci_socket = -1;
+static bt_pktq_t s_pktq; /* packets that hit EAGAIN, written when the socket is writable */
+static bool s_write_armed;
 
 static const hci_transport_config_linux_t * hci_transport_config_linux;
 
@@ -111,10 +112,28 @@ static void hci_transport_linux_process_read(btstack_data_source_t * ds) {
     }
 }
 
+static void hci_transport_linux_arm_write(bool on) {
+    if (on == s_write_armed) return;
+    s_write_armed = on;
+    if (on) btstack_run_loop_enable_data_source_callbacks(&hci_transport_linux_data_source, DATA_SOURCE_CALLBACK_WRITE);
+    else btstack_run_loop_disable_data_source_callbacks(&hci_transport_linux_data_source, DATA_SOURCE_CALLBACK_WRITE);
+}
+
+/* The socket became writable: send what was queued, in order; stop asking for POLLOUT once it is empty. */
+static void hci_transport_linux_flush(btstack_data_source_t * ds) {
+    UNUSED(ds);
+    while (bt_pktq_drain(&s_pktq, hci_socket) < 0)
+        hp_log("[hci_transport_linux] Queued write failed: %s\n", strerror(errno));
+    hci_transport_linux_arm_write(s_pktq.n != 0);
+}
+
 static void hci_transport_linux_process(btstack_data_source_t *ds, btstack_data_source_callback_type_t callback_type) {
     switch (callback_type) {
         case DATA_SOURCE_CALLBACK_READ:
             hci_transport_linux_process_read(ds);
+            break;
+        case DATA_SOURCE_CALLBACK_WRITE:
+            hci_transport_linux_flush(ds);
             break;
         default:
             break;
@@ -203,6 +222,8 @@ static int hci_transport_linux_open(void) {
 
 static int hci_transport_linux_close(void) {
     btstack_run_loop_remove_data_source(&hci_transport_linux_data_source);
+    s_pktq.n = s_pktq.head = 0;
+    s_write_armed = false;
     if (hci_socket >= 0) {
         close(hci_socket);
         hci_socket = -1;
@@ -219,23 +240,23 @@ static int hci_transport_linux_send_packet(uint8_t packet_type, uint8_t * packet
     uint32_t  buffer_size = (uint32_t)size + 1;
     buffer[0] = packet_type;
 
-
-    int written = write(hci_socket, buffer, buffer_size);
-    if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        fd_set wfds;
-        FD_ZERO(&wfds);
-        FD_SET(hci_socket, &wfds);
-        struct timeval tv = { .tv_sec = 0, .tv_usec = 100000 };
-        if (select(hci_socket + 1, NULL, &wfds, NULL, &tv) > 0) {
-            written = write(hci_socket, buffer, buffer_size);
+    /* never overtake queued packets; on EAGAIN copy the packet (BTstack reuses its buffer) and wait for POLLOUT */
+    int written = -1;
+    if (s_pktq.n == 0) {
+        do written = write(hci_socket, buffer, buffer_size);
+        while (written < 0 && errno == EINTR);
+        if (written >= 0) return 0;
+    }
+    if (s_pktq.n != 0 || errno == EAGAIN || errno == EWOULDBLOCK) {
+        if (bt_pktq_push(&s_pktq, buffer, buffer_size) < 0) {
+            hp_log("[hci_transport_linux] Write queue full, packet dropped (type=%u, len=%d)\n", packet_type, size);
+            return -1;
         }
+        hci_transport_linux_arm_write(true);
+        return 0;
     }
-    if (written < 0) {
-        hp_log("[hci_transport_linux] Write failed (type=%u, len=%d): %s\n",
-                packet_type, size, strerror(errno));
-        return -1;
-    }
-    return 0;
+    hp_log("[hci_transport_linux] Write failed (type=%u, len=%d): %s\n", packet_type, size, strerror(errno));
+    return -1;
 }
 
 static const hci_transport_t hci_transport_linux = {

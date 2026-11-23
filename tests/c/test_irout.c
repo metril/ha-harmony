@@ -275,6 +275,32 @@ static void test_non_key_sends_do_not_repeat(void) {
 
 /* A press while the line is busy (SIRC copies pending) is deferred, never interleaved; deferred
  * sends go out in order, and a full queue drops the newest. */
+static void noop_cb(void *a, uint32_t n) { (void)a; (void)n; }
+static int g_done_rc;
+static void done_cb(void *c, int rc) { (void)c; g_done_rc = rc; }
+
+/* A full timer queue drops the extra copies and queued sends; frames are never sent back to back. */
+static void test_full_timer_queue_drops_instead_of_back_to_back(void) {
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21},"
+              "\"2\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8}"));
+    for (int i = 0; i < HP_SCHED_CAP; i++) CT_CHECK(hp_sched_after(&sched, 100000, noop_cb, NULL));
+    key(1, HP_KEY_ACTION_PRESS);
+    CT_EQ(nrec, 1); /* SIRC wants 3 copies: the two extra are dropped */
+    advance(g_now + 500);
+    CT_EQ(nrec, 1);
+    hp_ir_code_t c;
+    memset(&c, 0, sizeof c);
+    c.kind = HP_IR_CODE_PROTO;
+    c.u.p.proto = HP_IR_NEC;
+    c.u.p.addr = 4;
+    c.u.p.cmd = 8;
+    CT_EQ(hp_irout_send_cb(&out, &ir, &c, 1, 5, 1, done_cb, NULL), 1); /* line free: sent now */
+    g_done_rc = 0;
+    CT_EQ(hp_irout_send_cb(&out, &ir, &c, 1, 6, 1, done_cb, NULL), 1); /* busy: deferred, no timer to wake it */
+    CT_EQ(g_done_rc, -HP_E_BUSY);
+    CT_EQ(nrec, 2);
+}
+
 static void test_press_deferred_while_line_busy(void) {
     setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21},"
               "\"2\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8},"
@@ -444,6 +470,7 @@ int main(void) {
     CT_RUN(test_new_press_ends_hold);
     CT_RUN(test_sirc_three_frames);
     CT_RUN(test_samsung_repeats_full_frame);
+    CT_RUN(test_full_timer_queue_drops_instead_of_back_to_back);
     CT_RUN(test_rc5_toggle);
     CT_RUN(test_raw_default_period_and_pronto_repeat);
     CT_RUN(test_non_key_sends_do_not_repeat);

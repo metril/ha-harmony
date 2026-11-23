@@ -1,9 +1,11 @@
-#define _DEFAULT_SOURCE
+#define _GNU_SOURCE
 #include "hub/ota/hub_ota.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,6 +56,7 @@ static int write_small(const char *path, const char *text) { /* tmp + fsync + re
 void hp_ota_init(hp_ota_t *o, const char *dir, const char *target) {
     memset(o, 0, sizeof *o);
     o->fd = -1;
+    o->done[0] = o->done[1] = -1;
     o->pubkey = ota_pubkey();
     o->key_dev = ota_pubkey_is_dev() != 0;
     o->avail_fn = default_avail;
@@ -116,6 +119,7 @@ static int hex_digest(const char *s, uint8_t out[64]) {
 
 int hp_ota_begin(hp_ota_t *o, const void *owner, unsigned target, uint32_t size, uint32_t build, const char *sha_hex) {
     if (!o->enabled) return HP_OTA_E_DISABLED;
+    if (o->ending) return HP_OTA_E_BUSY;
     if (o->key_dev && !o->allow_dev) return HP_OTA_E_DEVKEY;
     if (o->health_file && access(o->health_file, F_OK) != 0) return HP_OTA_E_NOTREADY;
     if (access(o->pending, F_OK) == 0) return HP_OTA_E_NOTREADY;
@@ -153,6 +157,7 @@ static bool mine(const hp_ota_t *o, const void *owner) { return o->receiving && 
 
 int hp_ota_chunk(hp_ota_t *o, const void *owner, uint32_t offset, const uint8_t *data, size_t n) {
     if (!o->enabled) return HP_OTA_E_DISABLED;
+    if (o->ending) return HP_OTA_E_BUSY;
     if (!mine(o, owner)) return HP_OTA_E_STATE;
     if (n == 0 || n > HP_OTA_CHUNK_MAX) return HP_OTA_E_CHUNK;
     if (offset > o->offset) return HP_OTA_E_OFFSET;
@@ -193,64 +198,114 @@ static int arm_pending(void *v) {
     return 0;
 }
 
-int hp_ota_end(hp_ota_t *o, const void *owner, uint32_t *build_out) {
-    if (!o->enabled) return HP_OTA_E_DISABLED;
-    if (!mine(o, owner)) return HP_OTA_E_STATE;
-    if (o->offset != o->size) return HP_OTA_E_SIZE; /* still resumable */
+/* The slow half of the end: runs on the worker thread. It only touches files and o->job; the loop-visible state
+ * (receiving, owner, min_build, restart) is updated by hp_ota_end_done, back on the loop. */
+static void *end_worker(void *arg) {
+    hp_ota_t *o = arg;
+    int rc = HP_OTA_OK;
+    uint32_t built = 0;
+    int verify_rc = o->verify_rc;
     uint8_t dig[64];
     ota_sha512_final(&o->ctx, dig);
     int fsync_ok = fsync(o->fd) == 0;
     int close_ok = close(o->fd) == 0;
     o->fd = -1;
-    if (memcmp(dig, o->sha, 64) != 0) {
-        drop_upload(o);
-        return HP_OTA_E_SHA;
-    }
-    if (!fsync_ok || !close_ok) {
-        drop_upload(o);
-        return HP_OTA_E_IO;
-    }
     uint32_t declared = o->build;
-    uint8_t hb[12];
-    int hfd = open(o->staged, O_RDONLY);
-    int hok = hfd >= 0 && read(hfd, hb, sizeof hb) == (ssize_t)sizeof hb;
-    if (hfd >= 0) close(hfd);
-    uint32_t signed_build = hok ? (uint32_t)hb[8] | (uint32_t)hb[9] << 8 | (uint32_t)hb[10] << 16 | (uint32_t)hb[11] << 24 : 0;
-    if (!hok || signed_build != declared) { /* refuse before anything is swapped */
-        o->verify_rc = hok ? OTA_E_FORMAT : OTA_E_IO;
-        drop_upload(o);
-        return hok ? HP_OTA_E_VERIFY : HP_OTA_E_IO;
-    }
-    char note[48];
-    arm_t arm = {o, declared};
-    uint32_t built = 0;
-    int rc = ota_apply_staged_cb(o->staged, o->target, o->prev, o->min_build + 1, o->pubkey, &built, arm_pending, &arm);
-    if (rc != OTA_OK) {
-        o->verify_rc = rc;
-        if (access(o->pending, F_OK) == 0) { /* armed, then the rename failed: undo */
-            unlink(o->pending);
-            snprintf(note, sizeof note, "%" PRIu32 "\n", o->min_build);
-            write_small(o->build_file, note);
+    if (memcmp(dig, o->sha, 64) != 0) {
+        rc = HP_OTA_E_SHA;
+    } else if (!fsync_ok || !close_ok) {
+        rc = HP_OTA_E_IO;
+    } else {
+        uint8_t hb[12];
+        int hfd = open(o->staged, O_RDONLY);
+        int hok = hfd >= 0 && read(hfd, hb, sizeof hb) == (ssize_t)sizeof hb;
+        if (hfd >= 0) close(hfd);
+        uint32_t signed_build = hok ? (uint32_t)hb[8] | (uint32_t)hb[9] << 8 | (uint32_t)hb[10] << 16 | (uint32_t)hb[11] << 24 : 0;
+        if (!hok || signed_build != declared) { /* refuse before anything is swapped */
+            verify_rc = hok ? OTA_E_FORMAT : OTA_E_IO;
+            rc = hok ? HP_OTA_E_VERIFY : HP_OTA_E_IO;
+        } else {
+            char note[48];
+            arm_t arm = {o, declared};
+            int ar = ota_apply_staged_cb(o->staged, o->target, o->prev, o->min_build + 1, o->pubkey, &built, arm_pending, &arm);
+            if (ar != OTA_OK) {
+                verify_rc = ar;
+                if (access(o->pending, F_OK) == 0) { /* armed, then the rename failed: undo */
+                    unlink(o->pending);
+                    snprintf(note, sizeof note, "%" PRIu32 "\n", o->min_build);
+                    write_small(o->build_file, note);
+                }
+                rc = ar == OTA_E_DOWNGRADE ? HP_OTA_E_DOWNGRADE : ar == OTA_E_IO ? HP_OTA_E_IO : HP_OTA_E_VERIFY;
+            } else {
+                snprintf(note, sizeof note, "%" PRIu32 "\n", built);
+                unlink(o->rollback);
+                write_small(o->restart_file, note);
+            }
         }
-        drop_upload(o);
-        return rc == OTA_E_DOWNGRADE ? HP_OTA_E_DOWNGRADE : rc == OTA_E_IO ? HP_OTA_E_IO : HP_OTA_E_VERIFY;
     }
-    snprintf(note, sizeof note, "%" PRIu32 "\n", built);
-    o->min_build = built;
-    unlink(o->rollback);
-    unlink(o->staged);
+    unlink(o->staged); /* applied or not, the staging file is spent (a failed upload is never resumable) */
+    o->job.rc = rc;
+    o->job.built = built;
+    o->job.verify_rc = verify_rc;
+    char b = 1;
+    (void)!write(o->done[1], &b, 1); /* last: the loop reads job after this */
+    return NULL;
+}
+
+int hp_ota_end_start(hp_ota_t *o, const void *owner) {
+    if (!o->enabled) return HP_OTA_E_DISABLED;
+    if (o->ending) return HP_OTA_E_BUSY;
+    if (!mine(o, owner)) return HP_OTA_E_STATE;
+    if (o->offset != o->size) return HP_OTA_E_SIZE; /* still resumable */
+    if (o->done[0] < 0 && pipe2(o->done, O_NONBLOCK | O_CLOEXEC) < 0) {
+        o->done[0] = o->done[1] = -1;
+        return HP_OTA_E_IO; /* still resumable */
+    }
+    o->ending = true;
+    if (pthread_create(&o->worker, NULL, end_worker, o) != 0) {
+        o->ending = false;
+        return HP_OTA_E_IO; /* still resumable */
+    }
+    return HP_OTA_ASYNC;
+}
+
+int hp_ota_done_fd(const hp_ota_t *o) { return o->done[0]; }
+bool hp_ota_ending(const hp_ota_t *o) { return o->ending; }
+
+int hp_ota_end_done(hp_ota_t *o, uint32_t *build_out, const void **owner_out, bool *owner_alive_out) {
+    if (!o->ending) return HP_OTA_E_STATE;
+    char junk[8];
+    while (read(o->done[0], junk, sizeof junk) > 0) {}
+    pthread_join(o->worker, NULL); /* the worker has written the completion byte as its last act: this returns at once */
+    o->ending = false;
+    if (owner_out) *owner_out = o->owner;
+    if (owner_alive_out) *owner_alive_out = o->owner_alive;
+    int rc = o->job.rc;
+    o->verify_rc = o->job.verify_rc;
+    o->fd = -1;
     o->receiving = false;
     o->owner = NULL;
     o->owner_alive = false;
     o->offset = 0;
-    o->restart = true;
-    write_small(o->restart_file, note);
-    if (build_out) *build_out = built;
-    return HP_OTA_OK;
+    if (rc == HP_OTA_OK) {
+        o->min_build = o->job.built;
+        o->restart = true;
+        if (build_out) *build_out = o->job.built;
+    }
+    return rc;
+}
+
+int hp_ota_end(hp_ota_t *o, const void *owner, uint32_t *build_out) {
+    int rc = hp_ota_end_start(o, owner);
+    if (rc != HP_OTA_ASYNC) return rc;
+    struct pollfd p = {o->done[0], POLLIN, 0};
+    while (poll(&p, 1, -1) < 0 && errno == EINTR) {}
+    return hp_ota_end_done(o, build_out, NULL, NULL);
 }
 
 int hp_ota_abort(hp_ota_t *o, const void *owner) {
     if (!o->enabled) return HP_OTA_E_DISABLED;
+    if (o->ending) return HP_OTA_E_BUSY;
     if (!o->receiving) return HP_OTA_OK;
     if (o->owner_alive && o->owner != owner) return HP_OTA_E_BUSY;
     drop_upload(o);

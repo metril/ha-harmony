@@ -154,6 +154,9 @@ void bt_link_connect(unsigned slot);
 /* The helper's socket for the poll loop (-1 when no helper runs) and the periodic work: read, parse, ping, reap, respawn,
  * flush output, fire the listener. Returns the ms until it next wants to run (-1 = nothing scheduled). Never blocks. */
 int bt_link_poll_fd(void);
+/* OR-ed into bt_link_poll_fd()'s result while output is queued on the helper socket: poll it for POLLOUT too
+ * (mask it off to get the fd; the ws poll does). Replaces a retry timer. Equals HP_WS_FD_OUT. */
+#define BT_LINK_POLL_OUT 0x40000000
 /* Read end of the helper's stderr pipe (-1 none): poll it too; bt_link_service drains it into hp_log. */
 int bt_link_log_fd(void);
 int bt_link_service(void);

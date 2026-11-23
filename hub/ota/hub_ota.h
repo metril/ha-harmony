@@ -16,6 +16,7 @@
  *   ota-restart     asks the hook to relaunch immediately (the exit status is not visible to it)
  *   ota-rollback    written by the hook after it restored hub.prev: "build=N" "reason=..." lines */
 
+#include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -60,6 +61,11 @@ typedef struct {
     ota_sha512_t ctx;
     int fd;
     int verify_rc;
+    /* hp_ota_end_start worker (fsync, digest check, signature verify, copies run off the event loop) */
+    bool ending;           /* a worker owns the staged file and the fields below: begin/chunk/abort/end say BUSY */
+    pthread_t worker;
+    int done[2];           /* completion pipe (read end polled by the daemon); -1 until first use */
+    struct { int rc; uint32_t built; int verify_rc; } job; /* written by the worker, read after done_fd is readable */
     bool restart; /* applied: the daemon must exit HP_EXIT_OTA_RESTART once replies are flushed */
     /* test seams */
     uint64_t (*avail_fn)(const char *dir); /* free bytes, or UINT64_MAX when unknown */
@@ -75,7 +81,19 @@ extern uint32_t (*hp_build_id_hook)(void); /* tests only */
 void hp_ota_init(hp_ota_t *o, const char *dir, const char *target);
 int hp_ota_begin(hp_ota_t *o, const void *owner, unsigned target, uint32_t size, uint32_t build, const char *sha_hex);
 int hp_ota_chunk(hp_ota_t *o, const void *owner, uint32_t offset, const uint8_t *data, size_t n);
+/* Blocking form (tests, tools): start, wait for the worker, finish. The daemon uses the pair below. */
 int hp_ota_end(hp_ota_t *o, const void *owner, uint32_t *build_out);
+/* Asynchronous end: cheap checks on the caller, then a worker thread does the fsync, digest check, signature
+ * verify and file copies. Returns HP_OTA_ASYNC when the worker runs (poll hp_ota_done_fd; when it is readable call
+ * hp_ota_end_done), or the same error codes hp_ota_end gives for the immediate refusals. */
+#define HP_OTA_ASYNC (-1)
+int hp_ota_end_start(hp_ota_t *o, const void *owner);
+int hp_ota_done_fd(const hp_ota_t *o); /* -1 when no worker was ever started */
+bool hp_ota_ending(const hp_ota_t *o);
+/* Collects the finished worker. Returns what hp_ota_end would have (HP_OTA_OK or HP_OTA_E_*) and fills *build_out
+ * on success. *owner_out / *owner_alive_out: who asked and whether that connection is still open (reply only if so).
+ * Returns HP_OTA_E_STATE when no worker is finished. */
+int hp_ota_end_done(hp_ota_t *o, uint32_t *build_out, const void **owner_out, bool *owner_alive_out);
 int hp_ota_abort(hp_ota_t *o, const void *owner);
 /* The owner's connection closed: the upload stays resumable by any matching begin. */
 void hp_ota_owner_gone(hp_ota_t *o, const void *owner);
