@@ -1194,9 +1194,14 @@ void hp_map_commit(hp_map_t *m, hp_map_t *scratch, char *src) {
     if (m->bt_sinks) bt_release_stored(m); /* a reload never leaves a host key down */
     hp_bt_rdown_t rdown[HH_BT_MAX_REMOTES];
     memcpy(rdown, m->bt_rdown, sizeof rdown);
+    hp_keyq_t keyq[HP_KEYQ_MAX];
+    memcpy(keyq, m->keyq, sizeof keyq);
+    uint8_t keyq_n = m->keyq_n;
     hp_map_free(m);
     *m = *scratch;
     memcpy(m->bt_rdown, rdown, sizeof rdown);
+    memcpy(m->keyq, keyq, sizeof keyq);
+    m->keyq_n = keyq_n;
     m->out = outrt;
     m->actops = ops;
     m->budget = budget;
@@ -1295,7 +1300,8 @@ int hp_map_ir_code(const hp_map_t *m, const hp_action_t *a, uint32_t *raw, hp_ir
 }
 
 /* key >= 0: this is a physical key press, a hold candidate. */
-static int apply_action(const hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s, int key) {
+static int apply_action_cb(const hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s, int key, void (*done)(void *, int),
+                           void *dctx) {
     if (!m || !a || !s) return -HP_E_INVAL;
     switch (a->type) {
     case HP_ACT_IR: {
@@ -1304,7 +1310,7 @@ static int apply_action(const hp_map_t *m, const hp_action_t *a, const hp_sinks_
         if (!s->ir) return -HP_E_INVAL;
         int r = hp_map_ir_code(m, a, raw, &c);
         if (r < 0) return r;
-        if (m->out) return hp_irout_send_n(m->out, s->ir, &c, a->port_mask, key, a->repeats ? a->repeats : 1);
+        if (m->out) return hp_irout_send_cb(m->out, s->ir, &c, a->port_mask, key, a->repeats ? a->repeats : 1, done, dctx);
         hp_ir_signal_t sig;
         if ((r = hp_ir_encode(&c, 0, &sig)) < 0) return r;
         return s->ir->send(s->ir->self, a->port_mask, &sig);
@@ -1323,12 +1329,22 @@ static int apply_action(const hp_map_t *m, const hp_action_t *a, const hp_sinks_
     return -HP_E_INVAL;
 }
 
+static int apply_action(const hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s, int key) {
+    int r = apply_action_cb(m, a, s, key, NULL, NULL);
+    return r < 0 ? r : 0;
+}
+
 int hp_map_apply(const hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s) {
     return apply_action(m, a, s, -1);
 }
 
 int hp_map_apply_deferrable(const hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s) {
     return apply_action(m, a, s, HP_IROUT_KEY_SEND);
+}
+
+int hp_map_apply_deferrable_cb(const hp_map_t *m, const hp_action_t *a, const hp_sinks_t *s, void (*done)(void *, int),
+                               void *ctx) {
+    return apply_action_cb(m, a, s, HP_IROUT_KEY_SEND, done, ctx);
 }
 
 size_t hp_map_activity_count(const hp_map_t *m) { return m->nacts; }
@@ -1470,10 +1486,20 @@ int hp_key_handle(hp_map_t *m, const hp_sinks_t *s, uint8_t remote, uint8_t key,
         bt_release_held(m, s);   /* ... and a bt key still down */
         const char *cur = m->current >= 0 && m->current < m->nacts ? m->acts[m->current].name : NULL;
         hp_action_t a;
+        m->key_dropped.on = false;
         if (hp_map_lookup(m, cur, key, &a) == 1) {
-            if (a.type != HP_ACT_ACTIVITY && m->actops.busy && m->actops.busy(m->actops.ctx))
-            {
-                hp_log("hub: key %u dropped: activity change in progress\n", (unsigned)key); /* the key would overlap the planned frames */
+            if (a.type == HP_ACT_IR && m->actops.busy && m->actops.busy(m->actops.ctx)) {
+                /* an IR frame would overlap the planned ones: queued, replayed when the transition finishes */
+                if (m->keyq_n < HP_KEYQ_MAX) {
+                    m->keyq[m->keyq_n].remote = remote;
+                    m->keyq[m->keyq_n++].key = key;
+                    hp_log("hub: key %u queued: activity change in progress\n", (unsigned)key);
+                } else {
+                    hp_log("hub: key %u dropped: activity change in progress, key queue full\n", (unsigned)key);
+                    m->key_dropped.on = true;
+                    m->key_dropped.remote = remote;
+                    m->key_dropped.key = key;
+                }
                 rc = 0; /* mid-transition */
             }
             else if (a.type == HP_ACT_BT && s->bt) { /* down now, up at the release */
@@ -1492,8 +1518,37 @@ int hp_key_handle(hp_map_t *m, const hp_sinks_t *s, uint8_t remote, uint8_t key,
         hp_irout_release(m->out, key);
         if (m->bt_held.active && m->bt_held.key == key && m->bt_held.remote == remote) rc = bt_release_held(m, s);
     }
+    if (action == HP_KEY_ACTION_RELEASE && m->key_dropped.on && m->key_dropped.remote == remote && m->key_dropped.key == key) {
+        m->key_dropped.on = false; /* a dropped key is not reported to HA, neither its hold nor its release */
+        return rc;
+    }
+    if (m->key_dropped.on && m->key_dropped.remote == remote && m->key_dropped.key == key) return rc;
     if (emit) emit(ctx, remote, key, action);
     return rc;
+}
+
+void hp_map_keyq_replay(hp_map_t *m, const hp_sinks_t *s) {
+    if (!m || !s) return;
+    uint8_t q[HP_KEYQ_MAX][2];
+    uint8_t n = m->keyq_n;
+    for (uint8_t i = 0; i < n; i++) {
+        q[i][0] = m->keyq[i].remote;
+        q[i][1] = m->keyq[i].key;
+    }
+    m->keyq_n = 0;
+    const char *cur = m->current >= 0 && m->current < m->nacts ? m->acts[m->current].name : NULL;
+    for (uint8_t i = 0; i < n; i++) {
+        hp_action_t a;
+        if (hp_map_lookup(m, cur, q[i][1], &a) != 1 || a.type != HP_ACT_IR) continue;
+        int r = apply_action(m, &a, s, q[i][1]);
+        if (r < 0) hp_log("hub: queued key %u failed (%d)\n", (unsigned)q[i][1], r);
+    }
+}
+
+void hp_map_keyq_drop(hp_map_t *m) {
+    if (!m || !m->keyq_n) return;
+    hp_log("hub: %u queued key press(es) dropped: transition cancelled\n", (unsigned)m->keyq_n);
+    m->keyq_n = 0;
 }
 
 int hp_map_bt_remote_key(hp_map_t *m, const hp_sinks_t *s, uint8_t slot, uint8_t page, uint16_t usage, bool down,

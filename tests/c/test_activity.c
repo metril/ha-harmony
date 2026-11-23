@@ -200,19 +200,21 @@ static void test_toggle_never_sent_when_in_wanted_state(void) {
     nrec = 0;
     CT_EQ(hp_actsm_start(&sm, "music"), 2); /* same activity again: resync, but amp's toggle power is never resent */
     settle_all();
-    EXPECT(NEC(4, 2), SIRC(1, 22), SIRC(1, 22), SIRC(1, 22), NEC(9, 5)); /* tv/bd off + amp input; no amp toggle */
+    EXPECT(NEC(9, 5)); /* amp input only: no amp toggle, no off frames to the unused tv/bd */
 }
 
 static void test_repress_resyncs_stale_discrete_state(void) {
     setup();
     hp_actsm_start(&sm, "watch");
     settle_all();
-    nrec = 0;
+    nrec = nev = 0;
     /* the real TV was switched off behind the hub's back: tracked state still says on/hdmi1 */
     CT_EQ(hp_actsm_start(&sm, "watch"), 0);
     settle_all();
-    /* tv PWR_ON + input resent, amp (toggle) power skipped but its discrete input resent, then the step; bd off */
-    EXPECT(SIRC(1, 22), SIRC(1, 22), SIRC(1, 22), NEC(4, 1), NEC(4, 10), NEC(9, 5), NEC(4, 20));
+    /* tv PWR_ON + input resent, amp (toggle) power skipped but its discrete input resent, then the step; no off to bd */
+    EXPECT(NEC(4, 1), NEC(4, 10), NEC(9, 5), NEC(4, 20));
+    CT_CHECK(recs[1].t - recs[0].t < 300); /* D20a: the forced power-on did not re-arm the settle wait */
+    CT_EQ(count_ev(HP_ACTSM_EVT_DEVICE), 0); /* ... nor clear the tracked input */
     CT_CHECK(!strcmp(pw(0), "on") && !strcmp(in(0), "hdmi1"));
     CT_EQ(hp_actsm_reported(&sm), 0);
     /* resync is one-shot: the next switch to another activity skips by tracked state again */
@@ -256,7 +258,27 @@ static void test_off(void) {
     CT_CHECK(!strcmp(pw(0), "off") && !strcmp(in(0), ""));
     CT_CHECK(!strcmp(pw(1), "off"));
     CT_EQ(count_ev(HP_ACTSM_EVT_ACTIVITY), 1);
-    CT_EQ(hp_actsm_off(&sm), -HP_E_INVAL); /* nothing on */
+    /* D21: nothing tracked on: Off still resends the discrete off of the last activity's devices (amp is a toggle: skipped) */
+    nrec = 0;
+    CT_EQ(hp_actsm_off(&sm), 0);
+    settle_all();
+    EXPECT(NEC(4, 2));
+    CT_EQ(hp_actsm_reported(&sm), -1);
+}
+
+static void test_off_with_unknown_state(void) {
+    setup();
+    CT_EQ(hp_actsm_off(&sm), 0); /* no activity known: every discrete-off device (tv, bd), never the toggle amp */
+    settle_all();
+    EXPECT(NEC(4, 2), SIRC(1, 22), SIRC(1, 22), SIRC(1, 22));
+    nrec = 0;
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    nrec = 0;
+    hp_actsm_set_device(&sm, "tv", 0, NULL); /* partly stale: tv tracked off but really on; amp tracked on */
+    CT_EQ(hp_actsm_off(&sm), 0);
+    settle_all();
+    EXPECT(NEC(4, 2), NEC(9, 1), NEC(7, 1)); /* tv forced discrete, amp toggle (tracked on), watch's off steps; no bd */
 }
 
 static void test_interrupted_transition(void) {
@@ -348,8 +370,8 @@ static void test_drops_are_logged(void) {
     settle_all();
     cap_end(fd, path, buf, sizeof buf);
     CT_CHECK(strstr(buf, "hub: step skipped, tracked state says amp is already on\n"));
-    CT_CHECK(strstr(buf, "hub: key 4 dropped: activity change in progress\n"));
-    CT_CHECK(strstr(buf, "hub: key 3 Off ignored: "));
+    CT_CHECK(strstr(buf, "hub: key 4 queued: activity change in progress\n"));
+    CT_CHECK(!strstr(buf, "Off ignored"));
 }
 
 static void test_set_device_errors(void) {
@@ -371,12 +393,12 @@ static void test_key_driven_and_busy_keys(void) {
     CT_CHECK(hp_actsm_busy(&sm));
     advance(g_now + 20);
     size_t n = nrec;
-    CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* plain IR key: dropped */
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* plain IR key: queued */
     CT_EQ(nrec, n);
     settle_all();
-    EXPECT(NEC(4, 1), NEC(9, 1), NEC(4, 10), NEC(9, 5), NEC(4, 20));
+    EXPECT(NEC(4, 1), NEC(9, 1), NEC(4, 10), NEC(9, 5), NEC(4, 20), NEC(5, 5)); /* replayed once the transition finished */
     CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* idle again */
-    CT_EQ(nrec, 6);
+    CT_EQ(nrec, 7);
     CT_EQ(hp_key_handle(&map, &sinks, 1, 3, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* off key */
     settle_all();
     CT_EQ(hp_actsm_reported(&sm), -1);
@@ -464,9 +486,12 @@ static void test_reload_keeps_state_by_id(void) {
     CT_EQ(hp_actsm_reported(&sm), 0);
     hp_actsm_start(&sm, "movie");
     CT_CHECK(hp_actsm_busy(&sm));
-    CT_EQ(hp_map_load(&map, CFG, strlen(CFG)), 0); /* reload mid-transition cancels the plan */
+    CT_EQ(hp_map_load(&map, CFG, strlen(CFG)), 0); /* D24: an unchanged config leaves the transition alone */
     hp_actsm_reloaded(&sm);
+    CT_CHECK(hp_actsm_busy(&sm));
+    settle_all();
     CT_CHECK(!hp_actsm_busy(&sm));
+    CT_EQ(hp_actsm_reported(&sm), 1);
     CT_EQ(hp_sched_pending(&sched), 0);
 }
 
@@ -560,6 +585,12 @@ static void test_state_bad_files(void) {
         setup();
         hp_actsm_set_state_path(&sm, path);
         int r = hp_actsm_load_state(&sm);
+        if (i == 5) { /* D23: another config hash is restored per id */
+            CT_EQ(r, 0);
+            CT_EQ(hp_actsm_reported(&sm), 0);
+            CT_CHECK(!strcmp(pw(0), "on") && !strcmp(in(0), "hdmi1"));
+            continue;
+        }
         if (r != -HP_E_INVAL) fprintf(stderr, "case %s: rc %d\n", cases[i].what, r);
         CT_EQ(r, -HP_E_INVAL);
         CT_EQ(hp_actsm_reported(&sm), -1); /* all off/unknown, no crash */
@@ -614,8 +645,9 @@ static void idle_clock_case(uint32_t idle) {
     uint32_t t0 = g_now;
     CT_EQ(hp_actsm_start(&sm, "movie"), 1);
     CT_EQ(nrec, n0 + 1); /* first step (amp off) goes out at once, not ~24 days from now */
-    CT_EQ(sm.writes, w0 + 1); /* and the state change is written within the debounce window */
+    CT_EQ(sm.writes, w0); /* no synchronous write while the transition runs ... */
     settle_all();
+    CT_EQ(sm.writes, w0 + 1); /* ... one at its end */
     CT_CHECK(!hp_actsm_busy(&sm));
     CT_EQ(hp_actsm_reported(&sm), 1);
     CT_EQ(nrec, n0 + 5); /* amp off, bd on (x3 SIRC), tv input */
@@ -632,50 +664,72 @@ static void test_idle_clock_wrap(void) {
 }
 
 /* A reload while a transition runs must not report (or persist) the unfinished target. */
-static void test_reload_mid_transition_keeps_reported(void) {
+static const char *CFG_B = /* CFG with a trailing blank: another hash, same content */
+    "{\"format\":2,\"devices\":["
+    "{\"id\":\"tv\",\"settle_ms\":300,"
+    " \"power\":{\"on\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":1},\"off\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":2}},"
+    " \"inputs\":{\"hdmi1\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":10},\"hdmi2\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":11}},"
+    " \"commands\":{\"vol_up\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":20}}},"
+    "{\"id\":\"amp\",\"settle_ms\":200,\"power\":{\"toggle\":{\"proto\":\"nec\",\"addr\":9,\"cmd\":1}},"
+    " \"inputs\":{\"opt\":{\"proto\":\"nec\",\"addr\":9,\"cmd\":5}}},"
+    "{\"id\":\"bd\",\"power\":{\"on\":{\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21},\"off\":{\"proto\":\"sirc12\",\"addr\":1,\"cmd\":22}}}],"
+    "\"activities\":["
+    "{\"id\":\"watch\",\"name\":\"watch\",\"devices\":[{\"device\":\"tv\",\"input\":\"hdmi1\"},{\"device\":\"amp\",\"input\":\"opt\"}],"
+    " \"steps\":[{\"type\":\"device\",\"device\":\"tv\",\"command\":\"vol_up\"}],"
+    " \"off\":[{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":7,\"cmd\":1}]},"
+    "{\"id\":\"movie\",\"devices\":[{\"device\":\"tv\",\"input\":\"hdmi2\"},{\"device\":\"bd\"}]},"
+    "{\"id\":\"music\",\"devices\":[{\"device\":\"amp\",\"input\":\"opt\"}]}],"
+    "\"keys\":{\"1\":{\"type\":\"activity\",\"activity\":\"watch\"},\"3\":{\"type\":\"activity\",\"activity\":\"off\"},"
+    "\"4\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":5,\"cmd\":5}}} ";
+
+/* D24: a changed config mid-transition restarts the plan for the surviving target; it is reported only once done. */
+static void test_reload_mid_transition_restarts(void) {
     setup();
     tmp_path();
     hp_actsm_set_state_path(&sm, path);
     CT_EQ(hp_actsm_start(&sm, "watch"), 0);
     settle_all();
     CT_EQ(hp_actsm_reported(&sm), 0);
-    advance(g_now + 3000); /* clear the debounce window */
+    advance(g_now + 3000);
     hp_actsm_start(&sm, "movie");
     advance(g_now + 20);
     CT_CHECK(hp_actsm_busy(&sm));
-    CT_EQ(map.current, 1);
     nev = 0;
-    CT_EQ(hp_map_load(&map, CFG, strlen(CFG)), 0);
+    CT_EQ(hp_map_load(&map, CFG_B, strlen(CFG_B)), 0);
     hp_actsm_reloaded(&sm);
-    CT_CHECK(!hp_actsm_busy(&sm));
+    CT_CHECK(hp_actsm_busy(&sm)); /* restarted, not cancelled */
     CT_EQ(hp_actsm_reported(&sm), 0); /* still the last completed activity */
-    CT_EQ(map.current, 0);
+    CT_EQ(map.current, 1);
     for (size_t i = 0; i < nev; i++) CT_CHECK(!(evs[i].kind == HP_ACTSM_EVT_ACTIVITY && evs[i].idx == 1));
-    CT_EQ(hp_actsm_flush_state(&sm), 0);
-    setup();
-    hp_actsm_set_state_path(&sm, path);
-    CT_EQ(hp_actsm_load_state(&sm), 0);
-    CT_EQ(hp_actsm_reported(&sm), 0); /* the state file never shows the interrupted target */
-    /* from "none": interrupted start must not become current */
-    setup();
-    hp_actsm_start(&sm, "movie");
-    advance(g_now + 20);
-    CT_EQ(hp_map_load(&map, CFG, strlen(CFG)), 0);
-    hp_actsm_reloaded(&sm);
-    CT_EQ(hp_actsm_reported(&sm), -1);
-    CT_EQ(map.current, -1);
-    CT_EQ(count_ev(HP_ACTSM_EVT_ACTIVITY), 0);
-    /* the completed activity vanished in the new config: none */
+    settle_all();
+    CT_CHECK(!hp_actsm_busy(&sm));
+    CT_EQ(hp_actsm_reported(&sm), 1);
+    CT_CHECK(!strcmp(pw(0), "on") && !strcmp(in(0), "hdmi2") && !strcmp(pw(2), "on") && !strcmp(pw(1), "off"));
+    CT_EQ(hp_sched_pending(&sched), 0);
+    /* a target the new config lacks is cancelled; the reported activity that vanished becomes none */
     setup();
     hp_actsm_start(&sm, "watch");
     settle_all();
-    hp_actsm_start(&sm, "movie");
+    hp_actsm_start(&sm, "music");
     advance(g_now + 20);
     const char *nw = "{\"format\":2,\"devices\":[{\"id\":\"tv\"}],\"activities\":[{\"id\":\"movie\",\"devices\":[{\"device\":\"tv\"}]}]}";
     CT_EQ(hp_map_load(&map, nw, strlen(nw)), 0);
     hp_actsm_reloaded(&sm);
+    CT_CHECK(!hp_actsm_busy(&sm));
     CT_EQ(hp_actsm_reported(&sm), -1);
     CT_EQ(map.current, -1);
+    CT_EQ(hp_sched_pending(&sched), 0);
+    /* an Off in flight restarts as an Off */
+    setup();
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    hp_actsm_off(&sm);
+    CT_CHECK(hp_actsm_busy(&sm));
+    CT_EQ(hp_map_load(&map, CFG_B, strlen(CFG_B)), 0);
+    hp_actsm_reloaded(&sm);
+    settle_all();
+    CT_EQ(hp_actsm_reported(&sm), -1);
+    CT_CHECK(!strcmp(pw(0), "off") && !strcmp(pw(1), "off"));
     unlink(path);
 }
 
@@ -813,9 +867,10 @@ static void test_device_command_errors_and_busy(void) {
     hp_actsm_start(&sm, "watch");
     CT_CHECK(hp_actsm_busy(&sm));
     size_t n = nrec;
-    CT_EQ(hp_actsm_device_command(&sm, "tv", "vol_up"), -HP_E_BUSY);
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "vol_up"), 0); /* E28: queued, runs when the transition finishes */
     CT_EQ(nrec, n);
     settle_all();
+    EXPECT(NEC(4, 1), NEC(9, 1), NEC(4, 10), NEC(9, 5), NEC(4, 20), NEC(4, 20));
     /* line owner: behind SIRC copies the send is deferred, not dropped or interleaved */
     nrec = 0;
     CT_EQ(hp_actsm_device_command(&sm, "bd", "power_on"), 0);
@@ -824,6 +879,194 @@ static void test_device_command_errors_and_busy(void) {
     settle_all();
     EXPECT(SIRC(1, 21), SIRC(1, 21), SIRC(1, 21), NEC(4, 20));
     check_no_overlap();
+}
+
+/* ------------------------------------------------- audit batch: engine fixes */
+
+/* D22: an input on a device tracked off powers it on first (settle respected); an input alone never marks power on. */
+static void test_input_on_off_device_powers_on_first(void) {
+    setup();
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "input_hdmi2"), 0);
+    EXPECT(NEC(4, 1)); /* power-on only, now */
+    CT_CHECK(!strcmp(pw(0), "on") && !strcmp(in(0), ""));
+    advance(g_now + 200);
+    CT_EQ(nrec, 1); /* still settling */
+    advance(g_now + 400);
+    EXPECT(NEC(4, 1), NEC(4, 11));
+    CT_CHECK(recs[1].t - recs[0].t >= 300);
+    CT_CHECK(!strcmp(pw(0), "on") && !strcmp(in(0), "hdmi2"));
+    CT_EQ(hp_sched_pending(&sched), 0);
+    /* a device with no power codes: the input is sent, the tracked power is not touched */
+    setup();
+    const char *c = "{\"format\":2,\"devices\":[{\"id\":\"x\",\"inputs\":{\"a\":{\"proto\":\"nec\",\"addr\":1,\"cmd\":2}}}],"
+                    "\"activities\":[{\"id\":\"p\",\"devices\":[{\"device\":\"x\"}]}]}";
+    setup_cfg(c);
+    CT_EQ(hp_actsm_device_command(&sm, "x", "input_a"), 0);
+    EXPECT(NEC(1, 2));
+    CT_CHECK(!strcmp(pw(0), "off"));
+}
+
+/* D25: a deferred send's tracked-state change applies only once the frame is sent, and only on success. */
+static int fail_sends;
+static int flaky_send(void *self, uint8_t port, const hp_ir_signal_t *sig) {
+    if (fail_sends) return -HP_E_IO;
+    return rec_send(self, port, sig);
+}
+static hp_ir_sink flaky = {NULL, flaky_send};
+static hp_sinks_t fsinks = {&flaky, NULL, NULL};
+
+static void test_deferred_send_state_applies_on_success(void) {
+    setup();
+    sm.sinks = &fsinks;
+    CT_EQ(hp_actsm_device_command(&sm, "bd", "power_on"), 0); /* SIRC copies keep the line busy */
+    CT_CHECK(!strcmp(pw(0), "off"));
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "power_on"), 0); /* deferred behind the copies */
+    CT_EQ(nrec, 1);
+    CT_CHECK(!strcmp(pw(0), "off")); /* not on yet: nothing was sent */
+    advance(g_now + 400);
+    CT_CHECK(!strcmp(pw(0), "on"));
+    EXPECT(SIRC(1, 21), SIRC(1, 21), SIRC(1, 21), NEC(4, 1));
+    /* the deferred send fails: tracked state unchanged */
+    setup();
+    sm.sinks = &fsinks;
+    fail_sends = 0;
+    CT_EQ(hp_actsm_device_command(&sm, "bd", "power_on"), 0);
+    CT_EQ(hp_actsm_device_command(&sm, "tv", "power_on"), 0);
+    fail_sends = 1;
+    advance(g_now + 400);
+    fail_sends = 0;
+    CT_CHECK(!strcmp(pw(0), "off"));
+    CT_EQ(hp_sched_pending(&sched), 0);
+}
+
+/* D25: an aborted plan returns the error and tells every client (an ACTIVITY event for the reported activity). */
+static void test_abort_returns_error_and_emits(void) {
+    setup();
+    sm.sinks = &fsinks;
+    fail_sends = 1;
+    nev = 0;
+    CT_EQ(hp_actsm_start(&sm, "watch"), -HP_E_IO);
+    fail_sends = 0;
+    CT_CHECK(!hp_actsm_busy(&sm));
+    CT_EQ(map.current, -1);
+    CT_EQ(count_ev(HP_ACTSM_EVT_ACTIVITY), 1);
+    CT_EQ(evs[nev - 1].idx, -1);
+    /* a failure after the first step (timer-driven) also emits */
+    setup();
+    sm.sinks = &fsinks;
+    hp_actsm_start(&sm, "watch");
+    fail_sends = 1;
+    nev = 0;
+    advance(g_now + 1000);
+    fail_sends = 0;
+    CT_CHECK(!hp_actsm_busy(&sm));
+    CT_EQ(count_ev(HP_ACTSM_EVT_ACTIVITY), 1);
+    CT_EQ(hp_sched_pending(&sched), 0);
+}
+
+/* E26: BT keys always go out; IR keys queue (small FIFO), replay in order at finish, drop on cancel; a dropped key
+ * is not forwarded to HA. */
+static int emitted;
+static void emit_cnt(void *c, uint8_t remote, uint8_t key, hp_key_action_t a) { (void)c; (void)remote; (void)key; (void)a; emitted++; }
+
+static void test_keys_during_transition(void) {
+    sinks.bt = &btsink;
+    setup_cfg("{\"format\":2,\"devices\":[{\"id\":\"tv\",\"settle_ms\":300,\"power\":{\"on\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":1},"
+              "\"off\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":2}},\"inputs\":{\"h\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":10}}}],"
+              "\"activities\":[{\"id\":\"w\",\"devices\":[{\"device\":\"tv\",\"input\":\"h\"}]}],"
+              "\"keys\":{\"6\":{\"type\":\"bt\",\"usage\":233,\"host\":3}}}");
+    bt_n = bt_downs = 0;
+    CT_EQ(hp_actsm_start(&sm, "w"), 0);
+    CT_CHECK(hp_actsm_busy(&sm)); /* the input waits for the tv to settle */
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 6, HP_KEY_ACTION_PRESS, NULL, NULL), 0); /* BT key mid-transition */
+    CT_EQ(bt_downs, 1);
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 6, HP_KEY_ACTION_RELEASE, NULL, NULL), 0);
+    settle_all();
+    sinks.bt = NULL;
+
+    setup();
+    CT_EQ(hp_actsm_start(&sm, "watch"), 0);
+    advance(g_now + 20);
+    size_t n = nrec;
+    for (int i = 0; i < 3; i++) CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, emit_cnt, NULL), 0);
+    CT_EQ(nrec, n);
+    CT_EQ(map.keyq_n, 3);
+    settle_all();
+    CT_EQ(map.keyq_n, 0);
+    CT_EQ(nrec, 5 + 1); /* the plan, then the three presses coalesced into one send */
+    CT_EQ(recs[nrec - 1].h, NEC(5, 5));
+    /* cancelled by a new start: the queue is dropped, not replayed */
+    nrec = 0;
+    CT_EQ(hp_actsm_start(&sm, "movie"), 1);
+    CT_EQ(hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, NULL, NULL), 0);
+    CT_EQ(map.keyq_n, 1);
+    CT_EQ(hp_actsm_start(&sm, "watch"), 0);
+    CT_EQ(map.keyq_n, 0);
+    settle_all();
+    for (size_t i = 0; i < nrec; i++) CT_CHECK(recs[i].h != NEC(5, 5));
+    /* a full queue drops the press without telling HA, and without its hold / release either */
+    setup();
+    hp_actsm_start(&sm, "watch");
+    advance(g_now + 20);
+    emitted = 0;
+    for (int i = 0; i < HP_KEYQ_MAX; i++) hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, emit_cnt, NULL);
+    CT_EQ(emitted, HP_KEYQ_MAX);
+    hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_PRESS, emit_cnt, NULL); /* the ninth: dropped */
+    hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_HOLD, emit_cnt, NULL);
+    hp_key_handle(&map, &sinks, 1, 4, HP_KEY_ACTION_RELEASE, emit_cnt, NULL);
+    CT_EQ(emitted, HP_KEYQ_MAX);
+    settle_all();
+}
+
+/* E28: a queued ir_send runs at finish, in order after the queued device commands. */
+static int irsend_n;
+static char irsend_last[64];
+static void irsend_cb(void *c, const char *json) { (void)c; irsend_n++; snprintf(irsend_last, sizeof irsend_last, "%s", json); }
+
+static void test_queued_irsend(void) {
+    setup();
+    hp_actsm_set_irsend(&sm, irsend_cb, NULL);
+    irsend_n = 0;
+    hp_actsm_start(&sm, "watch");
+    char *j = strdup("{\"x\":1}");
+    CT_EQ(hp_actsm_defer_irsend(&sm, j), 0);
+    CT_EQ(irsend_n, 0);
+    settle_all();
+    CT_EQ(irsend_n, 1);
+    CT_CHECK(!strcmp(irsend_last, "{\"x\":1}"));
+    /* the queue is bounded */
+    hp_actsm_start(&sm, "movie");
+    char *extra[HP_ACT_CMDQ_MAX + 1];
+    int full = 0;
+    for (int i = 0; i <= HP_ACT_CMDQ_MAX; i++) {
+        extra[i] = strdup("{}");
+        if (hp_actsm_defer_irsend(&sm, extra[i]) < 0) {
+            full++;
+            free(extra[i]);
+        }
+    }
+    CT_EQ(full, 1);
+    settle_all();
+    CT_EQ(irsend_n, 1 + HP_ACT_CMDQ_MAX);
+}
+
+/* D23: a state file of another config restores what still exists, by id. */
+static void test_state_restore_by_id_other_config(void) {
+    setup();
+    tmp_path();
+    hp_actsm_set_state_path(&sm, path);
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    CT_EQ(hp_actsm_flush_state(&sm), 0);
+    const char *nw = "{\"format\":2,\"devices\":[{\"id\":\"tv\",\"inputs\":{\"hdmi1\":{\"proto\":\"nec\",\"addr\":4,\"cmd\":10}}},{\"id\":\"zz\"}],"
+                     "\"activities\":[{\"id\":\"other\",\"devices\":[{\"device\":\"zz\"}]}]}";
+    setup_cfg(nw);
+    hp_actsm_set_state_path(&sm, path);
+    CT_EQ(hp_actsm_load_state(&sm), 0);
+    CT_CHECK(!strcmp(pw(0), "on") && !strcmp(in(0), "hdmi1")); /* tv survived */
+    CT_CHECK(!strcmp(pw(1), "off"));
+    CT_EQ(hp_actsm_reported(&sm), -1); /* "watch" is gone */
+    unlink(path);
 }
 
 int main(void) {
@@ -836,6 +1079,13 @@ int main(void) {
     CT_RUN(test_repress_resyncs_stale_discrete_state);
     CT_RUN(test_switch_still_skips_tracked);
     CT_RUN(test_off);
+    CT_RUN(test_off_with_unknown_state);
+    CT_RUN(test_input_on_off_device_powers_on_first);
+    CT_RUN(test_deferred_send_state_applies_on_success);
+    CT_RUN(test_abort_returns_error_and_emits);
+    CT_RUN(test_keys_during_transition);
+    CT_RUN(test_queued_irsend);
+    CT_RUN(test_state_restore_by_id_other_config);
     CT_RUN(test_interrupted_transition);
     CT_RUN(test_interrupt_keeps_settle);
     CT_RUN(test_off_during_transition);
@@ -852,7 +1102,7 @@ int main(void) {
     CT_RUN(test_state_bad_files);
     CT_RUN(test_state_debounce);
     CT_RUN(test_idle_clock_wrap);
-    CT_RUN(test_reload_mid_transition_keeps_reported);
+    CT_RUN(test_reload_mid_transition_restarts);
     CT_RUN(test_reload_rename_keeps_current);
     CT_RUN(test_plan_waits_for_sirc_copies);
     CT_RUN(test_press_after_finish_deferred);

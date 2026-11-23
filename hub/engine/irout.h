@@ -35,7 +35,7 @@
 #define HP_IROUT_GUARD_MS 50 /* quiet time after a frame before the next one may start */
 #define HP_IROUT_KEY_NONE (-1) /* hp_irout_send key: send now (plan/activity steps, which wait on the line) */
 #define HP_IROUT_KEY_SEND (-2) /* ... an ir_send: deferred while the line is busy, no hold candidate */
-#define HP_IROUT_PEND 3 /* deferred sends queued while the line is busy */
+#define HP_IROUT_PEND 16 /* deferred sends queued while the line is busy */
 #define HP_IROUT_BURSTS 4
 #define HP_IROUT_TOGGLES 8
 
@@ -56,6 +56,8 @@ typedef struct {
     bool sirc;
     uint8_t copies; /* frames in total (>= 1) */
     hp_ir_sink *ir;
+    void (*done)(void *ctx, int rc); /* result of the deferred send (NULL = nobody waits) */
+    void *dctx;
     hp_ir_signal_t sig;
 } hp_irout_pend_t;
 
@@ -100,6 +102,12 @@ int hp_irout_send(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_
 /* Same, sending the frame `copies` times in total (1..8, one frame period apart, like the SIRC copies; a SIRC
  * code is always sent at least HP_IROUT_SIRC_COPIES times). The per-command `repeats` of config format 2. */
 int hp_irout_send_n(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key, uint8_t copies);
+/* hp_irout_send_n with a completion callback for a DEFERRED send: returns 0 when the frame went out
+ * now (done is not called), 1 when it was queued (done(ctx, rc) is called exactly once when it is
+ * finally sent, rc = the send result), or a negative error (done not called). Consecutive identical
+ * key presses (key >= 0, no callback) already queued are coalesced into one. */
+int hp_irout_send_cb(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key, uint8_t copies,
+                     void (*done)(void *ctx, int rc), void *ctx);
 /* Starts repeating the last frame sent for `key`; if `key` is already repeating this only extends
  * the safety cap (no-op when `key` has no candidate frame). */
 void hp_irout_hold(hp_irout_t *, int key);
