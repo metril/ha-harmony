@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.6 (2026-11-22)
+
+- Now Playing shows cover art for media-session sources (e.g. SmartTube) from the session's `media_image_url` (HTTPS only, 10 s / 2 MiB bounded). Needs the Shield launcher's updated `Now playing` sensor; in SmartTube, turn off Player → "Disable playback notifications" so its session is visible.
+
 ## 0.4.5 (2026-11-22)
 
 - Now Playing: new optional `media.session_entity` (the Shield launcher's `Now playing` MQTT sensor) gives a title, channel and position for apps the Android TV integration reports untitled, such as SmartTube. Plex keeps priority. Update the integration together with the add-on.
