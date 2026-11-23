@@ -24,3 +24,7 @@ vendor/toolchains/
 # Release packages (built by tools/package_integration.py)
 dist/
 /vendor/toolchains
+
+# Local tooling scratch
+.playwright-mcp/
+/image.png
