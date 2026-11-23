@@ -1482,3 +1482,73 @@ def test_planned_restart_inside_the_updated_builds_window_is_not_a_rollback(root
     assert "runs_old" in (_hub_dir(root) / "hub.prev").read_text()
     assert "runs_new" in (_hub_dir(root) / "hub").read_text()
     assert not (root / "reboot.log").exists()
+
+
+# --- stock bluetoothd suppression (bind-mounted stub, this boot only) -------------
+
+
+def _fake_mount(root: Path, rc: int = 0) -> dict[str, str]:
+    """A mount stand-in that records its argv; the hook never gets the real one."""
+    m = root / "fakemount"
+    m.write_text(f'#!/bin/sh\necho "$@" >>"{root}/mount.log"\nexit {rc}\n')
+    m.chmod(0o755)
+    bt = root / "usr" / "sbin" / "bluetoothd"
+    bt.parent.mkdir(parents=True, exist_ok=True)
+    bt.write_text("#!/bin/sh\nexit 99\n")
+    bt.chmod(0o755)
+    return {"HAH_MOUNT": str(m)}
+
+
+def test_owned_boot_binds_a_noop_stub_over_stock_bluetoothd(root: Path) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root)
+    env = _fake_mount(root)
+    _, demo = source_hook(root, extra_env=env)
+    assert demo == "1"
+    stub = root / "var" / "volatile" / "ha-harmony-bluetoothd-stub"
+    assert (root / "mount.log").read_text().split() == [
+        "-o", "bind", str(stub), str(root / "usr/sbin/bluetoothd"),
+    ]  # fmt: skip
+    assert os.access(stub, os.X_OK)
+    assert subprocess.run([str(stub)], check=False).returncode == 0  # what rcS:79 would run
+    assert (
+        root / "usr/sbin/bluetoothd"
+    ).read_text() == "#!/bin/sh\nexit 99\n"  # no file on disk touched
+    assert "stock bluetoothd suppressed" in (root / "var/volatile/ha-harmony-hook.log").read_text()
+
+
+def test_failed_bluetoothd_bind_is_logged_and_boot_continues(root: Path) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root)
+    _, demo = source_hook(root, extra_env=_fake_mount(root, rc=1))
+    assert demo == "1"
+    assert (
+        "could not bind the bluetoothd stub"
+        in (root / "var/volatile/ha-harmony-hook.log").read_text()
+    )
+
+
+@pytest.mark.parametrize("case", ["strikes", "badconf", "noconf", "stockwd"])
+def test_stock_paths_leave_bluetoothd_alone(root: Path, case: str) -> None:
+    install_daemon(root, "sleep 30")
+    install_conf(root, "token=bad token\n" if case == "badconf" else "token=benchtok\n")
+    env = _fake_mount(root)
+    if case == "strikes":
+        (root / "cache" / "ha-harmony-boot.n").write_text("3")
+    if case == "noconf":
+        (root / "data/ha-harmony/hub.conf").unlink()
+    if case == "stockwd":
+        (root / "etc/nowatchdog").unlink()
+    _, demo = source_hook(root, extra_env=env)
+    assert demo == "unset", "stock boot: hal must start"
+    assert not (root / "mount.log").exists(), "stock boot must not touch bluetoothd"
+    assert not (root / "var/volatile/ha-harmony-bluetoothd-stub").exists()
+
+
+def test_bluetoothd_stub_is_only_written_after_the_strike_is_stored(root: Path) -> None:
+    code = re.sub(r"#.*", "", HOOK.read_text())
+    assert code.index("DEMO_MODE=1") < code.index('"$hah_mount"')  # only once we own the boot
+    assert "-o bind" in code
+    assert not re.search(
+        r"\bmv\b[^\n]*bluetoothd|\brm\b[^\n]*bluetoothd", code
+    )  # nothing persistent

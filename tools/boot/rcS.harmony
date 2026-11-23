@@ -72,6 +72,9 @@ hah_dir="$hah_root/data/ha-harmony"
 hah_daemon="$hah_dir/hub"
 hah_conf="$hah_dir/hub.conf"
 hah_nowd="$hah_root/etc/nowatchdog"
+hah_btbin="$hah_root/usr/sbin/bluetoothd" # stock; rcS:79 runs it by this absolute path
+hah_btstub="$hah_root/var/volatile/ha-harmony-bluetoothd-stub"
+hah_mount="${HAH_MOUNT:-mount}"
 hah_i2s="${HAH_I2S_DEV:-/dev/i2s}"
 # Signed-update files (written by the daemon, hub/ota/hub_ota.h): hub.prev = the build before the last
 # update, ota-pending = "build=N" for a fresh build that has not reached the health mark, ota-restart =
@@ -378,6 +381,22 @@ else
 				[ -n "$hah_rbnote" ] && hah_say "$hah_rbnote" # the per-boot truncation above ate the sync-path line
 				[ -n "$hah_budnote" ] && hah_say "$hah_budnote"
 				hah_say "starting (boot strike $hah_n of $hah_limit, port ${hah_port:-8099}, rf=${hah_rf:-none}, launch in ${hah_delay}s, reboot_on_early_death=$hah_reboot, respawn_max=$hah_rmax, rf_debug=$hah_rdebug)"
+
+				# STOCK bluetoothd. rcS:79 starts /usr/sbin/bluetoothd (after we are sourced, at line 43) and it
+				# holds the HCI controller our bt helper needs. The daemon cannot wait for a non-child to exit
+				# (kernel 2.6.31: no pidfd; polling is forbidden), so it must never start: bind-mount a no-op
+				# stub (tmpfs) over it for THIS boot. Nothing on disk changes, and this branch is only reached
+				# when we own the boot, so every stock path (marker absent, three strikes, bad conf) starts the
+				# real bluetoothd. A reboot drops the mount. A failed mount is logged and harmless: the daemon
+				# kills a bluetoothd it finds.
+				if [ -x "$hah_btbin" ]; then
+					( printf '#!/bin/sh\nexit 0\n' >"$hah_btstub" ) 2>/dev/null && chmod 755 "$hah_btstub" 2>/dev/null
+					if "$hah_mount" -o bind "$hah_btstub" "$hah_btbin" 2>/dev/null; then
+						hah_say "stock bluetoothd suppressed for this boot (stub bound over $hah_btbin)"
+					else
+						hah_say "could not bind the bluetoothd stub; the daemon will stop a running bluetoothd"
+					fi
+				fi
 
 				# Everything below runs in the background: the delay, the optional lua
 				# stop, the daemon and its watcher. Before the health mark a death is a
@@ -710,6 +729,7 @@ fi
 
 unset hah_i2s hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
 unset hah_otadev hah_bfile hah_health hah_rbp hah_rbnote hah_prev hah_pending hah_restart hah_pmark hah_pw hah_rbfile hah_rbl hah_t hah_ok hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
+unset hah_btbin hah_btstub hah_mount
 unset hah_exitf hah_xs hah_xi hah_xw hah_xn hah_xg
 unset hah_rf hah_slot hah_budget hah_budnote hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr
 unset -f hah_endnote hah_say hah_blog hah_stamp hah_num hah_rollback 2>/dev/null
