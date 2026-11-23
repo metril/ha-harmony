@@ -353,14 +353,19 @@ class NowPlayingFeed:
             elif force:
                 targets = tuple(force)
             else:
-                continue
+                targets = ()
             try:
-                ok = await self._push(cur, targets)
+                if targets:
+                    ok = await self._push(cur, targets)
+                    if changed and ok:  # a failed send leaves it unset: the next event tries again
+                        self._sent, self._sent_start = cur, self._start
+                # The cover is its own pending state, whatever the text did: every attached remote that
+                # lacks this cid gets it (a fetch that was overtaken by a newer event, a failed one whose
+                # retry window has passed), checked on every pass.
+                if built is not None and cur.cid and cur.picture:
+                    await self._push_cover(cur, self._live_targets(self._remotes()))
             except Exception:
                 _LOGGER.exception("now playing push failed")
-                continue
-            if changed and ok:  # a failed send leaves it unset: the next event tries again
-                self._sent, self._sent_start = cur, self._start
 
     def _changed(self, cur: Playing) -> bool:
         last = self._sent
@@ -371,7 +376,7 @@ class NowPlayingFeed:
 
     async def _push(self, cur: Playing, remotes: tuple[int, ...]) -> bool:
         """The text first (it must never wait for a cover), then the cover to the remotes lacking it."""
-        targets = [r for r in remotes if self._attached(r) and self.client.connected]
+        targets = self._live_targets(remotes)
         if not targets:
             return False
         ok = False
@@ -399,9 +404,10 @@ class NowPlayingFeed:
                     cur.t1,
                     cur.t2,
                 )
-        if cur.cid and cur.picture:
-            await self._push_cover(cur, targets)
         return ok
+
+    def _live_targets(self, remotes: Iterable[int]) -> list[int]:
+        return [r for r in remotes if self._attached(r) and self.client.connected]
 
     async def _push_cover(self, cur: Playing, targets: list[int]) -> None:
         need = [r for r in targets if self._cover_sent.get(r) != cur.cid]
@@ -420,7 +426,9 @@ class NowPlayingFeed:
                 return
             self._cover_failed.pop(cur.cid, None)
             self._cover = (cur.cid, base64.b64encode(data).decode())
-        if self._dirty:  # the state moved on during the fetch: the next pass sends what is current
+        if (
+            self._dirty
+        ):  # the state moved on during the fetch: the pass that follows sends what is current
             return
         for r in need:
             if await self._send(CMD_COVER, {"remote": r, "cid": cur.cid, "data": self._cover[1]}):

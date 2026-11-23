@@ -134,7 +134,7 @@ static void on_ident_changed(void *ctx, const hp_ident_t *id) {
     hp_log("hub: id is now %s\n", id->id);
 }
 
-/* The ws poll's (max 8) extra wake-only fds: RF pair socket(s) + mDNS. */
+/* The ws poll's extra wake-only fds (at most HP_WS_MAX_EXTRA_FDS): RF pair / SPI, mDNS socket and address watcher, logs, BT. */
 static int rf_fds(void *arg, int out[HP_WS_MAX_EXTRA_FDS]) {
     int n = arg ? hp_rf_pair_fds(arg, out) : 0;
     if (n < 0) n = 0;
