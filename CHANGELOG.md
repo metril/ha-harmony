@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.9 (2026-11-23)
+
+- Pressing the running activity again re-sends its power and input commands, so a TV turned off outside the hub comes back on. Update the hub.
+
 ## 0.4.8 (2026-11-23)
 
 - Fix false loop-stall warnings that flooded the hub log. Update the hub.
