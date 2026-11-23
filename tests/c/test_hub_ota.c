@@ -92,6 +92,15 @@ static int send_all(hp_ota_t *o, const void *own, const fx_t *x, size_t from, si
     return 0;
 }
 
+/* Blocking helper: start the worker and wait for it. */
+static int hp_ota_end(hp_ota_t *o, const void *owner, uint32_t *build_out) {
+    int rc = hp_ota_end_start(o, owner);
+    if (rc != HP_OTA_ASYNC) return rc;
+    struct pollfd p = {hp_ota_done_fd(o), POLLIN, 0};
+    while (poll(&p, 1, -1) < 0 && errno == EINTR) {}
+    return hp_ota_end_done(o, build_out, NULL, NULL);
+}
+
 static void test_good_update(void) {
     fx_t x;
     hp_ota_t o;
@@ -190,6 +199,35 @@ static void test_async_end(void) {
     char sp[320];
     snprintf(sp, sizeof sp, "%s/ota-staged.img", x.dir);
     CT_CHECK(!exists(sp));
+    free(x.img);
+}
+
+static int g_gate[2];
+static void gate_hook(void) { char c; (void)!read(g_gate[0], &c, 1); } /* the worker parks here, mid-apply */
+
+/* While the worker is parked mid-apply the caller is free: end_start returned at once, the done fd is quiet, and
+ * other calls (what a ping/other session would do) are served; the result arrives only after the worker is released. */
+static void test_loop_free_while_worker_runs(void) {
+    fx_t x;
+    hp_ota_t o;
+    fixture(&x, 11, OTA_TARGET_HUB, 2000);
+    setup(&o, &x);
+    CT_EQ(pipe(g_gate), 0);
+    o.swap_hook = gate_hook;
+    int own = 1;
+    CT_EQ(hp_ota_begin(&o, &own, 1, (uint32_t)x.len, 11, x.sha), 0);
+    CT_EQ(send_all(&o, &own, &x, 0, 1000), 0);
+    CT_EQ(hp_ota_end_start(&o, &own), HP_OTA_ASYNC);
+    struct pollfd p = {hp_ota_done_fd(&o), POLLIN, 0};
+    CT_EQ(poll(&p, 1, 150), 0); /* still working: nothing to collect, and we were not blocked */
+    for (int i = 0; i < 100; i++) CT_EQ(hp_ota_chunk(&o, &own, 0, x.img, 10), HP_OTA_E_BUSY); /* the loop keeps answering */
+    CT_EQ(write(g_gate[1], "x", 1), 1);
+    CT_EQ(poll(&p, 1, 5000), 1);
+    uint32_t b = 0;
+    CT_EQ(hp_ota_end_done(&o, &b, NULL, NULL), HP_OTA_OK);
+    CT_EQ(b, 11);
+    close(g_gate[0]);
+    close(g_gate[1]);
     free(x.img);
 }
 
@@ -503,6 +541,7 @@ int main(void) {
     ota_keypair_from_seed(seed, pk, sk);
     test_good_update();
     test_async_end();
+    test_loop_free_while_worker_runs();
     test_busy_resume_offsets();
     test_begin_validation();
     test_space_and_enospc();

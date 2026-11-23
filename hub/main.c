@@ -153,7 +153,7 @@ static void on_ident_changed(void *ctx, const hp_ident_t *id) {
     hp_log("hub: id is now %s\n", id->id);
 }
 
-/* The ws poll's extra wake-only fds (at most HP_WS_MAX_EXTRA_FDS): RF pair / SPI, mDNS socket and address watcher, logs, BT. */
+/* The ws poll's extra wake-only fds (at most HP_WS_MAX_EXTRA_FDS): RF pair (2) / SPI, mDNS socket and address watcher, logs (3), BT (2), OTA worker: 10 of 12. */
 static int rf_fds(void *arg, int out[HP_WS_MAX_EXTRA_FDS]) {
     int n = arg ? hp_rf_pair_fds(arg, out) : 0;
     if (n < 0) n = 0;
@@ -170,6 +170,8 @@ static int rf_fds(void *arg, int out[HP_WS_MAX_EXTRA_FDS]) {
     if (n < HP_WS_MAX_EXTRA_FDS && blf >= 0) out[n++] = blf;
     int bfd = bt_link_poll_fd(); /* the Bluetooth helper's socket (-1 when none runs) */
     if (n < HP_WS_MAX_EXTRA_FDS && bfd >= 0) out[n++] = bfd;
+    int ofd = g_hub.ota.ending ? hp_ota_done_fd(&g_hub.ota) : -1; /* the ota_end worker finished */
+    if (n < HP_WS_MAX_EXTRA_FDS && ofd >= 0) out[n++] = ofd;
     return n;
 }
 
@@ -607,7 +609,8 @@ int main(int argc, char **argv) {
         hp_stall_poll(t0, t1, wait, g_cb_ms); /* the ws callbacks report themselves */
         hp_hooklog_service(&g_hook);
         hp_stall_end("hooklog service", t1);
-        if (hp_hublog_readable(&g_log)) {
+        if (g_hub.ota_end_pend && hp_ws_extra_readable(srv, hp_ota_done_fd(&g_hub.ota))) hub_ota_complete(&g_hub, srv);
+        if (hp_ws_extra_readable(srv, hp_hublog_wake_fd(&g_log))) { /* readiness the ws poll already reported */
             t1 = hp_mono_ms();
             hp_hublog_service(&g_log);
             hp_stall_end("hublog service", t1);

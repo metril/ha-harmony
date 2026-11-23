@@ -55,7 +55,9 @@ def test_one_tag_release_flow():
     assert jobs["addon-image"]["permissions"]["packages"] == "write"
     assert set(jobs["release"]["needs"]) == {"guard", "ci", "addon-image"}
     names = [s.get("name", "") for s in jobs["release"]["steps"]]
-    assert names.index("Add-on image manifests exist for this version") < names.index("Publish release")
+    assert names.index("Add-on image manifests exist for this version") < names.index(
+        "Publish release"
+    )
     guard = "\n".join(s.get("run", "") for s in jobs["guard"]["steps"])
     for f in ("harmony_core/__init__.py", "manifest.json", "addon/config.yaml"):
         assert f in guard
