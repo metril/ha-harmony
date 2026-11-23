@@ -248,6 +248,7 @@ typedef struct {
     size_t est_bytes;      /* hp_map_estimate of the loaded config (0 = none) */
     bool loaded;           /* a config is loaded (src may be NULL: configs loaded from a file are not kept in RAM) */
     int current;      /* running activity index, -1 = none */
+    int key_layer;    /* `current` as hp_key_handle looked the key up; read by the emit callback (-1 = none) */
     char *src;        /* verbatim config text (for the cache); owned */
     size_t src_len;
     uint32_t hash;    /* CRC-32 of src */

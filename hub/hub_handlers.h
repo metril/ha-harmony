@@ -180,6 +180,12 @@ typedef struct {
     uint32_t np_log_at[6]; /* last log line per kind (np held, np sent, cover held, cover sent, held rf key, stale key): rate limit, no storage */
     uint32_t pend_dropped; /* held messages lost to a full queue (a tile that found only pages, or the oldest page) */
     hub_info_t info[HUB_INFO_MAX]; /* remote_info per remote; dropped when the RF link is lost */
+    hub_info_t lost_info[HUB_INFO_MAX]; /* what info held when the link was lost: a re-up soon after is a flap, not a new remote */
+    uint32_t lost_at;       /* scheduler ms of that loss */
+    bool lost_valid;        /* lost_info / lost_at hold a loss no link-up has consumed yet */
+    bool attach_deferred;   /* a flap re-up: remote_attached and the cover/now-playing resend wait for the first remote_info */
+    uint8_t last_remote;    /* the remote id the RF link last named (any frame); remote_attached carries it */
+    bool last_remote_valid;
     void (*bcast_hook)(void *ctx, const char *type, const cJSON *d); /* tests: sees every broadcast, in order */
     void *bcast_ctx;
     bool bt_dirty;          /* the link reported a change: hub_flush_pending sends one bt_state */

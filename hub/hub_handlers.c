@@ -1524,17 +1524,21 @@ static void emit_key(void *vctx, uint8_t remote, uint8_t key, hp_key_action_t ac
     cJSON_AddNumberToObject(d, "remote", remote);
     cJSON_AddNumberToObject(d, "key", key);
     cJSON_AddNumberToObject(d, "action", action);
+    int layer = ((hub_ctx_t *)vctx)->map.key_layer;
+    cJSON_AddNumberToObject(d, "activity", layer >= 0 && layer < 255 ? layer : 255);
     hub_broadcast(vctx, "key_event", d);
 }
 
 /* A remote link is up. Exactly one `remote_attached` per link-up, and anything cached about the remote is
  * (re)announced after it: Home Assistant drops the info it holds on `remote_attached`. Idempotent: called from
  * every place that can learn of the link first (a frame, the transport's flag), whichever comes first. */
-static void rf_link_up(hub_ctx_t *h) {
-    if (h->rf_attached) return;
-    h->rf_attached = true;
-    hp_log("hub: rf link up\n");
-    h->info_fresh = true;
+/* A re-up this soon after a loss, whose first remote_info shows the same generation, is a link flap: the remote
+ * still holds everything it had (same gen and a non-empty page set), so nothing is announced or resent for it. */
+#define HUB_FLAP_MS 10000
+
+/* What a (re)attached remote needs again: its covers and now-playing resent, and the announcement clients redo
+ * their pushes on. `remote` < 0 = not known yet (nothing on this hub ever named a remote). */
+static void rf_attach_work(hub_ctx_t *h, int remote) {
     for (unsigned i = 0; i < HUB_COVER_MAX; i++) { /* the remote may have rebooted and lost its covers: send again */
         hub_cover_t *c = &h->cover[i];
         c->nsent = c->sent_next = c->tries = 0;
@@ -1542,12 +1546,34 @@ static void rf_link_up(hub_ctx_t *h) {
         c->hold = c->used;
     }
     for (unsigned i = 0; i < HUB_NP_MAX; i++) h->np[i].hold = h->np[i].used;
+    cJSON *d = cJSON_CreateObject();
+    if (d && remote >= 0) cJSON_AddNumberToObject(d, "remote", remote);
+    if (d) hub_broadcast(h, "remote_attached", d);
+}
+
+/* `remote`: the remote id the frame that revealed the link names, -1 when none did (the transport's flag). */
+static void rf_link_up(hub_ctx_t *h, int remote) {
+    if (remote >= 0) {
+        h->last_remote = (uint8_t)remote;
+        h->last_remote_valid = true;
+    } else if (h->last_remote_valid) {
+        remote = h->last_remote;
+    }
+    if (h->rf_attached) return;
+    h->rf_attached = true;
+    hp_log("hub: rf link up\n");
+    h->info_fresh = true;
+    bool flap = false;
+    if (h->lost_valid && (int32_t)(hp_sched_now(&h->sched) - h->lost_at) <= HUB_FLAP_MS)
+        for (unsigned i = 0; i < HUB_INFO_MAX; i++) flap = flap || h->lost_info[i].valid;
+    h->lost_valid = false;
+    h->attach_deferred = flap;
+    if (flap) hp_log("hub: rf link re-up after a flap: attach waits for remote_info\n");
+    if (!flap) rf_attach_work(h, remote);
     if (!hp_rf_link_status(&h->link).queued) { /* nothing is in flight: whatever a lost result left counted is void */
         h->theme_out = 0; /* (a strict link keeps its queue across a drop: those objects still report) */
         memset(h->page_out, 0, sizeof h->page_out);
     }
-    cJSON *d = cJSON_CreateObject();
-    if (d) hub_broadcast(h, "remote_attached", d);
     for (unsigned i = 0; i < HUB_INFO_MAX; i++) {
         if (!h->info[i].valid) continue;
         h->info_fresh = false; /* the cached info is out again: the next identical one is a heartbeat */
@@ -1567,6 +1593,14 @@ static void rf_link_lost(hub_ctx_t *h) {
         h->theme_out = 0;
         memset(h->page_out, 0, sizeof h->page_out);
     }
+    if (h->attach_deferred) { /* lost again before it said anything: the older loss still stands */
+        h->attach_deferred = false;
+        h->lost_valid = true;
+    } else {
+        memcpy(h->lost_info, h->info, sizeof h->info);
+        h->lost_at = hp_sched_now(&h->sched);
+        h->lost_valid = true;
+    }
     memset(h->info, 0, sizeof h->info); /* the remote may come back as another firmware: ask again */
 }
 
@@ -1585,9 +1619,18 @@ static bool key_stale(hub_ctx_t *h, unsigned key) {
     return true;
 }
 
+/* The remote id a frame names (key_event, battery, remote_info lead with it), -1 for any other. */
+static int rf_msg_remote(const hp_rf_msg_t *m) {
+    hp_rf_val_t v[6];
+    size_t n = m->type == HP_MSG_REMOTE_INFO ? 6 : 3;
+    if (m->type != HP_MSG_KEY_EVENT && m->type != HP_MSG_BATTERY && m->type != HP_MSG_REMOTE_INFO) return -1;
+    if (hp_rf_unpack(m->type, m->payload, m->len, v, n) != 0 || v[0].u > 255) return -1;
+    return (int)v[0].u;
+}
+
 static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
     hp_rf_val_t v[6];
-    rf_link_up(h); /* a frame proves the link is up, and its link-up must precede what the frame says */
+    rf_link_up(h, rf_msg_remote(m)); /* a frame proves the link is up, and its link-up must precede what the frame says */
     if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
         if (v[2].u != HP_KEY_ACTION_RELEASE && key_stale(h, (unsigned)v[1].u)) return;
         /* Every press/release is logged (seq = the remote's link seq, to match its log); a held key repeats, so those are rate limited. */
@@ -1615,6 +1658,14 @@ static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
         if (!slot) slot = &h->info[0]; /* more remotes than slots: the first is recycled */
         bool changed = !slot->valid || slot->remote != n.remote || slot->page_fmt != n.page_fmt || slot->caps != n.caps ||
                        slot->icons != n.icons || slot->gen != n.gen || slot->pages != n.pages;
+        if (h->attach_deferred) { /* the first word of a flap re-up: the same generation = nothing was lost */
+            h->attach_deferred = false;
+            bool same = false;
+            for (unsigned i = 0; i < HUB_INFO_MAX; i++)
+                same = same || (h->lost_info[i].valid && h->lost_info[i].remote == n.remote && h->lost_info[i].gen == n.gen &&
+                                h->lost_info[i].pages == n.pages && n.pages > 0); /* a remote holding nothing is always served */
+            if (!same) rf_attach_work(h, n.remote);
+        }
         *slot = n;
         /* Broadcast on a change, and for the first remote_info after a link-up even when identical (Home Assistant
          * re-pushes its pages after a reattach). The 5-minute heartbeat repeats are not: one broadcast per link-up. */
@@ -1642,7 +1693,7 @@ void hub_pump_rf(hub_ctx_t *h) {
     }
     /* A link that is up without having sent a frame yet (or that came back right after a loss handled above). The
      * flag going false is not acted on here: its loss marker is still queued behind the frames of that link. */
-    if (h->sinks.rf->attached && h->sinks.rf->attached(h->sinks.rf->self)) rf_link_up(h);
+    if (h->sinks.rf->attached && h->sinks.rf->attached(h->sinks.rf->self)) rf_link_up(h, -1);
     pend_flush(h);
     cover_np_flush(h);
     hub_flush_pending(h); /* a key may have started/stopped an activity */

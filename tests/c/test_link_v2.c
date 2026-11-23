@@ -699,10 +699,28 @@ static void test_cover_is_sent_again_after_a_rejoin(void) {
     hp_rf_link_set_awake(&RL, false, R.now);
     run(900);
     CT_CHECK(!R.up);
+    run(12000); /* gone longer than a flap */
     hp_rf_link_set_awake(&RL, true, R.now);
     run(8000);
     CT_CHECK(chunks_of(31, 3) >= 16);
     CT_CHECK(count_type(HP_MSG_NOW_PLAYING) == 0);
+}
+
+/* a flap (back within 10 s with the same page generation) does not resend the cover */
+static void test_cover_is_not_resent_after_a_flap(void) {
+    world();
+    send_info_stored(3, 7, 2);
+    CT_CHECK(cover_cmd(31, 3));
+    run(4000);
+    CT_EQ(chunks_of(31, 3), 8);
+    hp_rf_link_set_awake(&RL, false, R.now);
+    run(900);
+    CT_CHECK(!R.up);
+    hp_rf_link_set_awake(&RL, true, R.now);
+    run(8000);
+    send_info_stored(3, 7, 2); /* the remote's first word after the re-up: the same page set */
+    run(8000);
+    CT_EQ(chunks_of(31, 3), 8);
 }
 
 int main(void) {
@@ -729,5 +747,6 @@ int main(void) {
     test_cover_is_chunked_and_sent_once_per_cid();
     test_cover_hold_supersedes_never_evicts_pages_and_skips_sleep();
     test_cover_is_sent_again_after_a_rejoin();
+    test_cover_is_not_resent_after_a_flap();
     return CT_DONE();
 }

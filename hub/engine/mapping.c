@@ -1481,6 +1481,7 @@ int hp_key_handle(hp_map_t *m, const hp_sinks_t *s, uint8_t remote, uint8_t key,
                   hp_key_emit_fn emit, void *ctx) {
     if (!m || !s) return -HP_E_INVAL;
     int rc = 0;
+    int layer = m->current >= 0 && m->current < m->nacts ? m->current : -1; /* the layer this key resolves in */
     if (action == HP_KEY_ACTION_PRESS) {
         hp_irout_cancel(m->out); /* a new press ends any hold */
         bt_release_held(m, s);   /* ... and a bt key still down */
@@ -1523,6 +1524,7 @@ int hp_key_handle(hp_map_t *m, const hp_sinks_t *s, uint8_t remote, uint8_t key,
         return rc;
     }
     if (m->key_dropped.on && m->key_dropped.remote == remote && m->key_dropped.key == key) return rc;
+    m->key_layer = layer;
     if (emit) emit(ctx, remote, key, action);
     return rc;
 }

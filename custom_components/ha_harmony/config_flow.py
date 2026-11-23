@@ -46,7 +46,7 @@ HASSIO_UNIQUE_ID = "hassio_ha_harmony_editor"
 
 async def _probe(hass: HomeAssistant, host: str, port: int, token: str) -> str:
     """Connect once and return the hub id. Raises Harmony*Error."""
-    client = HarmonyHubClient(host, port, token, async_get_clientsession(hass))
+    client = HarmonyHubClient(host, port, token, async_get_clientsession(hass), transient=True)
     try:
         await client.async_connect()
         return client.hub_id or ""
@@ -56,7 +56,7 @@ async def _probe(hass: HomeAssistant, host: str, port: int, token: str) -> str:
 
 async def _connect(hass: HomeAssistant, host: str, port: int, token: str) -> HarmonyHubClient:
     """A connected client (the caller closes it). Raises Harmony*Error."""
-    client = HarmonyHubClient(host, port, token, async_get_clientsession(hass))
+    client = HarmonyHubClient(host, port, token, async_get_clientsession(hass), transient=True)
     await client.async_connect()
     return client
 

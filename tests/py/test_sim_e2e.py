@@ -28,7 +28,12 @@ async def test_mapped_key_hits_ir_sink_and_ws(hub_rf, run_remote):
         res = run_remote(hub_rf.rf, "--press", "2", "--remote", "1")
         assert res.returncode == 0, res.stderr
         ke = await recv(ws)
-        assert ke["t"] == "key_event" and ke["d"] == {"remote": 1, "key": 2, "action": 0}
+        assert ke["t"] == "key_event" and ke["d"] == {
+            "remote": 1,
+            "key": 2,
+            "action": 0,
+            "activity": 0,
+        }
         assert read_lines(hub_rf, 1) == ["ir port=3 hz=38029 n=2 us=631,631"]
 
 
@@ -39,7 +44,7 @@ async def test_unmapped_key_emits_only_key_event(hub_rf, run_remote):
         read_lines(hub_rf, 4)
         assert run_remote(hub_rf.rf, "--press", "99").returncode == 0
         ke = await recv(ws)
-        assert ke["d"] == {"remote": 1, "key": 99, "action": 0}
+        assert ke["d"] == {"remote": 1, "key": 99, "action": 0, "activity": 0}
         # no sink call for key 99: the next sink line belongs to the following (mapped) press
         assert run_remote(hub_rf.rf, "--press", "2").returncode == 0
         assert (await recv(ws))["d"]["key"] == 2
@@ -128,7 +133,7 @@ async def test_reconnect_and_garbage_frames(hub_rf, run_remote):
         for fr in rf_codec.split(KEY_EVENT, 9, bytes([4, 55, 1])):
             sock.send(fr)
         ke = await recv(ws)
-        assert ke["d"] == {"remote": 4, "key": 55, "action": 1}
+        assert ke["d"] == {"remote": 4, "key": 55, "action": 1, "activity": 255}
         sock.close()
         assert hub_rf.alive()
         # reconnect through the CLI
@@ -145,7 +150,7 @@ async def test_partial_message_dropped_on_disconnect(hub_rf):
         a.close()
         b = rf_attach(hub_rf.rf)
         b.send(rf_codec.split(KEY_EVENT, 1, bytes([1, 2, 0]))[0])
-        assert (await recv(ws))["d"] == {"remote": 1, "key": 2, "action": 0}
+        assert (await recv(ws))["d"] == {"remote": 1, "key": 2, "action": 0, "activity": 255}
 
 
 async def test_state_update_forwarded_and_battery_relayed(hub_rf):

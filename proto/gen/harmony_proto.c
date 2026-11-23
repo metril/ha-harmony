@@ -15,6 +15,7 @@ static const hp_enum_desc_t hp_enum_key_action = {
 static const hp_field_desc_t hp_fields_hello[] = {
     {"token", HP_T_STR, false, NULL},
     {"client", HP_T_STR, true, NULL},
+    {"transient", HP_T_BOOL, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_hello_ack[] = {
@@ -70,6 +71,7 @@ static const hp_field_desc_t hp_fields_key_event[] = {
     {"remote", HP_T_U8, false, NULL},
     {"key", HP_T_U8, false, NULL},
     {"action", HP_T_ENUM, false, &hp_enum_key_action},
+    {"activity", HP_T_U8, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_state_update[] = {
@@ -105,6 +107,10 @@ static const hp_field_desc_t hp_fields_tile_update[] = {
 static const hp_field_desc_t hp_fields_activity_list[] = {
     {"activities", HP_T_JSON, false, NULL},
     {"config_hash", HP_T_STR, true, NULL},
+};
+
+static const hp_field_desc_t hp_fields_remote_attached[] = {
+    {"remote", HP_T_U8, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_remote_info[] = {
@@ -248,7 +254,7 @@ static const hp_field_desc_t hp_fields_cover_chunk[] = {
 };
 
 static const hp_msg_desc_t hp_msgs[] = {
-    {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 2, hp_fields_hello},
+    {"hello", HP_MSG_HELLO, HP_TRANSPORT_WS, 3, hp_fields_hello},
     {"hello_ack", HP_MSG_HELLO_ACK, HP_TRANSPORT_WS, 13, hp_fields_hello_ack},
     {"error", HP_MSG_ERROR, HP_TRANSPORT_WS, 3, hp_fields_error},
     {"ping", HP_MSG_PING, HP_TRANSPORT_WS, 0, NULL},
@@ -258,14 +264,14 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"config_ack", HP_MSG_CONFIG_ACK, HP_TRANSPORT_WS, 3, hp_fields_config_ack},
     {"command", HP_MSG_COMMAND, HP_TRANSPORT_WS, 3, hp_fields_command},
     {"command_result", HP_MSG_COMMAND_RESULT, HP_TRANSPORT_WS, 2, hp_fields_command_result},
-    {"key_event", HP_MSG_KEY_EVENT, HP_TRANSPORT_BOTH, 3, hp_fields_key_event},
+    {"key_event", HP_MSG_KEY_EVENT, HP_TRANSPORT_BOTH, 4, hp_fields_key_event},
     {"state_update", HP_MSG_STATE_UPDATE, HP_TRANSPORT_BOTH, 2, hp_fields_state_update},
     {"page_push", HP_MSG_PAGE_PUSH, HP_TRANSPORT_BOTH, 3, hp_fields_page_push},
     {"battery", HP_MSG_BATTERY, HP_TRANSPORT_BOTH, 3, hp_fields_battery},
     {"device_state", HP_MSG_DEVICE_STATE, HP_TRANSPORT_WS, 3, hp_fields_device_state},
     {"tile_update", HP_MSG_TILE_UPDATE, HP_TRANSPORT_RF, 4, hp_fields_tile_update},
     {"activity_list", HP_MSG_ACTIVITY_LIST, HP_TRANSPORT_WS, 2, hp_fields_activity_list},
-    {"remote_attached", HP_MSG_REMOTE_ATTACHED, HP_TRANSPORT_WS, 0, NULL},
+    {"remote_attached", HP_MSG_REMOTE_ATTACHED, HP_TRANSPORT_WS, 1, hp_fields_remote_attached},
     {"remote_info", HP_MSG_REMOTE_INFO, HP_TRANSPORT_BOTH, 6, hp_fields_remote_info},
     {"tile_state", HP_MSG_TILE_STATE, HP_TRANSPORT_RF, 5, hp_fields_tile_state},
     {"ota_begin", HP_MSG_OTA_BEGIN, HP_TRANSPORT_WS, 4, hp_fields_ota_begin},

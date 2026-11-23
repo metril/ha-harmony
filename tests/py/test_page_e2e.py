@@ -73,8 +73,8 @@ async def test_tap_button_sends_soft_key_press_release(hub_rf, start_remote):
         await push(ws, PAGE)
         code, out, _ = finish(r)
         assert code == 0 and json.loads(out) == {"hit": True, "id": 2, "key": 130}
-        assert (await recv(ws))["d"] == {"remote": 1, "key": 130, "action": 0}
-        assert (await recv(ws))["d"] == {"remote": 1, "key": 130, "action": 1}
+        assert (await recv(ws))["d"] == {"remote": 1, "key": 130, "action": 0, "activity": 255}
+        assert (await recv(ws))["d"] == {"remote": 1, "key": 130, "action": 1, "activity": 255}
 
 
 async def test_tap_miss_and_label_send_nothing(hub_rf, start_remote, run_remote):

@@ -436,6 +436,7 @@ async def _hub_back(
         data[CONF_PORT],
         data[CONF_TOKEN],
         async_get_clientsession(hass),
+        transient=True,
         **CLIENT_KWARGS,
     )
     try:
