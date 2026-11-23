@@ -31,6 +31,15 @@ from device_backup import DEFAULT_RUN_TIMEOUT, DEFAULT_SSH_TIMEOUT, SshRunner, p
 REMOTE_DIR = "/data/ha-harmony"
 REMOTE_HUB = f"{REMOTE_DIR}/hub"
 REMOTE_SIM = f"{REMOTE_DIR}/remote_sim"
+# Boot-hook supervision: the daemon's pid file, and the tmpfs marker that tells the hook the next
+# daemon exit is a deploy (relaunch at once; no backoff, no respawn spent, no boot strike).
+REMOTE_PIDFILE = "/cache/ha-harmony.pid"
+PLANNED_MARKER = "/tmp/ha-harmony-planned-restart"
+RESTART_SCRIPT = (
+    f'read p <{REMOTE_PIDFILE} && kill -0 "$p" 2>/dev/null || exit 3; '
+    f'read u _ </proc/uptime; echo "${{u%%.*}}" >{PLANNED_MARKER}; '
+    f'kill "$p" || {{ rm -f {PLANNED_MARKER}; exit 4; }}; echo "$p"'
+)
 REMOTE_RF_PROBE = f"{REMOTE_DIR}/rf_probe"
 REMOTE_CONFIG = f"{REMOTE_DIR}/config.json"
 # tmpfs: gone after reboot. The basename MUST be "busybox": this build dispatches on argv[0] and
@@ -398,6 +407,27 @@ class Deployer:
         self.out("=" * 72)
         return 0
 
+    # -- restart [WRITE] ----------------------------------------------------------------
+    def restart(self) -> int:
+        """Planned daemon restart under the boot hook: marker first, then SIGTERM (never kill -9).
+
+        The hook (not us) relaunches, holding /dev/i2s open throughout. Run after `push`.
+        """
+        self.connect()
+        rc, out, err = self.sh(RESTART_SCRIPT)
+        if rc == 3:
+            raise DeployError(
+                f"no live daemon in {REMOTE_PIDFILE}: the boot hook is not supervising one, "
+                "so nothing to restart (is the hook installed and the hub booted into it?)"
+            )
+        if rc != 0:
+            raise DeployError(f"restart failed (rc={rc}): {err.decode('utf-8', 'replace')[-200:]}")
+        self.out(
+            f"planned restart: SIGTERM to daemon pid {out.decode().strip()}; the boot hook "
+            "relaunches it immediately (no respawn budget or boot strike spent)"
+        )
+        return 0
+
     # -- run [WRITE] --------------------------------------------------------------------
     def run_hub(self, args: list[str]) -> int:
         self.connect()
@@ -570,6 +600,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--busybox", type=Path, help="static MIPS BusyBox, staged to /tmp (gives df)")
     p.add_argument("--margin-kb", type=int, default=DEFAULT_MARGIN_KB)
     p.add_argument("--no-space-check", action="store_true")
+    add(
+        "restart",
+        "[WRITE] planned daemon restart under the boot hook (marker + SIGTERM); use after push",
+    )
     p = add("quiesce", "[WRITE] stop lua* then hal; verify devices unheld. BREAKS remote + HA")
     p.add_argument("--timeout", type=float, default=20.0)
     p = add("run", "[WRITE] run the hub in the foreground over ssh (args after --)")
@@ -625,6 +659,8 @@ def main(
             case "push":
                 return d.push(a.hub, a.remote_sim, a.rf_probe, a.config, a.busybox,
                               a.margin_kb, not a.no_space_check)  # fmt: skip
+            case "restart":
+                return d.restart()
             case "quiesce":
                 return d.quiesce(a.timeout)
             case "run":

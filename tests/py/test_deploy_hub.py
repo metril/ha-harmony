@@ -931,3 +931,38 @@ def test_holder_records_the_hubs_own_pid_not_the_holders(tmp_path, shell):
         import signal
 
         os.killpg(p.pid, signal.SIGKILL)
+
+
+# --- restart --------------------------------------------------------------------------------
+
+
+def test_restart_writes_marker_then_sigterms_the_hook_supervised_daemon():
+    d, _hub, lines = make(_RestartHub())
+    assert d.restart() == 0
+    script = next(c[2] for c in d.r.log if c[:2] == ["sh", "-c"] and "planned-restart" in c[2])
+    assert script.index("planned-restart") < script.index('kill "$p"')
+    assert "kill -9" not in script and "killall" not in script
+    assert dh.PLANNED_MARKER == "/tmp/ha-harmony-planned-restart"
+    assert any("pid 321" in line for line in lines)
+
+
+def test_restart_without_a_live_daemon_fails_cleanly():
+    d, _hub, _lines = make(_RestartHub(rc=3))
+    with pytest.raises(dh.DeployError, match="no live daemon"):
+        d.restart()
+
+
+def test_restart_needs_yes():
+    assert dh.main(["restart"]) == 2
+
+
+class _RestartHub(FakeHub):
+    def __init__(self, rc=0):
+        super().__init__()
+        self.rc = rc
+
+    def run(self, argv):
+        if argv[:2] == ["sh", "-c"] and "planned-restart" in argv[2]:
+            self.log.append(argv)
+            return (0, b"321\n", b"") if self.rc == 0 else (self.rc, b"", b"")
+        return super().run(argv)

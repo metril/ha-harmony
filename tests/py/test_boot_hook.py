@@ -1378,3 +1378,84 @@ def test_hook_opens_the_device_write_only_and_only_inside_the_watcher() -> None:
     assert '9>"$hah_i2s"' in code and "9<" not in code
     assert re.search(r'\[ -e "\$hah_i2s" \]', code), "never create a regular file in /dev"
     assert "$hah_i2s" not in _sync_code().replace('hah_i2s="${HAH_I2S_DEV:-/dev/i2s}"', "")
+
+
+# --- planned restart (tools/deploy_hub.py `restart`) -------------------------------------
+
+
+SLOW = {"HAH_BACKOFF1": "30", "HAH_BACKOFF2": "30", "HAH_BACKOFF3": "30"}  # a backoff would show
+
+
+def _marker(root: Path) -> Path:
+    (root / "tmp").mkdir(exist_ok=True)
+    return root / "tmp" / "ha-harmony-planned-restart"
+
+
+def _term_daemon(root: Path) -> None:
+    pid = (root / "cache" / "ha-harmony.pid").read_text().split()[0]
+    os.kill(int(pid), signal.SIGTERM)
+
+
+def _start_healthy(root: Path, clock: Path, **kw: str) -> None:
+    install_daemon(root, IMMORTAL)
+    install_conf(root, "token=t\n")
+    source_hook(root, extra_env={**SLOW, "HAH_UPTIME_FILE": str(clock), **kw})
+    _wait_runs(root, 1)
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy after")
+
+
+def test_planned_restart_relaunches_at_once_and_spends_nothing(root: Path) -> None:
+    clock = _fake_clock(root, 1000)
+    _start_healthy(root, clock, HAH_HB_STALE="99999")
+    _marker(root).write_text("990\n")  # written 10 s ago
+    _term_daemon(root)
+    _wait_runs(root, 2)  # despite 30 s backoffs
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "planned restart")
+    assert not _marker(root).exists()
+    assert "respawn 1 of" not in log and "died after health" not in log
+    assert not (root / "reboot.log").exists()
+    assert not (root / "cache" / "ha-harmony-boot.n").exists()
+    assert (root / "etc" / "ha-harmony-enable").exists()
+    # the budget was untouched: the next unplanned death is respawn 1 of 3
+    _term_daemon(root)
+    _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "respawn 1 of 3")
+
+
+def test_planned_restart_inside_the_health_window_is_no_strike(root: Path) -> None:
+    clock = _fake_clock(root, 1000)
+    install_daemon(root, IMMORTAL)
+    install_conf(root, "token=t\n")
+    source_hook(root, healthy=100, extra_env={**SLOW, "HAH_UPTIME_FILE": str(clock)})
+    _wait_runs(root, 1)
+    _marker(root).write_text("1000\n")
+    _term_daemon(root)
+    _wait_runs(root, 2)
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "inside the health window")
+    assert not _marker(root).exists() and "strike 1 stands" not in log
+    assert not (root / "reboot.log").exists()
+    assert (root / "etc" / "ha-harmony-enable").exists()
+
+
+@pytest.mark.parametrize("content", ["900\n", "2000\n", "junk\n", "", "08\n"])
+def test_stale_or_garbled_planned_marker_is_an_ordinary_death(root: Path, content: str) -> None:
+    clock = _fake_clock(root, 1000)
+    _start_healthy(root, clock, HAH_BACKOFF1="0.05", HAH_HB_STALE="99999")
+    _marker(root).write_text(content)
+    _term_daemon(root)
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "respawn 1 of 3")
+    assert "planned restart" not in log
+    assert not _marker(root).exists(), "a stale marker is consumed, never reused"
+    _wait_runs(root, 2)
+
+
+def test_unplanned_death_without_marker_is_counted_as_before(root: Path) -> None:
+    clock = _fake_clock(root, 1000)
+    _start_healthy(root, clock, HAH_BACKOFF1="0.05", HAH_HB_STALE="99999")
+    _term_daemon(root)
+    log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "respawn 1 of 3")
+    assert "planned restart" not in log
+
+
+def test_planned_restart_keeps_a_single_i2s_holder() -> None:
+    code = re.sub(r"#.*", "", HOOK.read_text())
+    assert code.count('9>"$hah_i2s"') == 1, "one fd holder, opened once, never reopened"
