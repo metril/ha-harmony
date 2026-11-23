@@ -8,12 +8,24 @@ import ir_ref
 import pytest
 
 DIR = Path(__file__).parent.parent / "vectors" / "ir"
-CASES = [(f.stem, i, v) for f in sorted(DIR.glob("*.json")) for i, v in enumerate(json.loads(f.read_text()))]
+CASES = [
+    (f.stem, i, v)
+    for f in sorted(DIR.glob("*.json"))
+    for i, v in enumerate(json.loads(f.read_text()))
+]
 
 
 def test_vectors_present():
     assert {n for n, _, _ in CASES} >= {
-        "nec", "necext", "samsung32", "rc5", "rc6", "sirc12", "sirc15", "sirc20", "pronto_raw",
+        "nec",
+        "necext",
+        "samsung32",
+        "rc5",
+        "rc6",
+        "sirc12",
+        "sirc15",
+        "sirc20",
+        "pronto_raw",
     }
 
 
@@ -33,7 +45,11 @@ def test_hand_checked_nec():
     bits = [1 if once[3 + 2 * i] > 1000 else 0 for i in range(32)]
     val = sum(b << i for i, b in enumerate(bits))
     assert val == 0xF7_08_FB_04
-    assert sum(once) == 108000 - 39970 + 39970 and once[-1] == 39970 and rep == [9000, 2250, 562, 65535]
+    assert (
+        sum(once) == 108000 - 39970 + 39970
+        and once[-1] == 39970
+        and rep == [9000, 2250, 562, 65535]
+    )
 
 
 def test_hand_checked_necext():

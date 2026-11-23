@@ -564,8 +564,10 @@ def violations(remote: str) -> list[str]:
         ok = a0[1] == a0[2] + ".new" and dh.under_write_root(a0[2])
         return [] if ok and a0[2] == dh.REMOTE_HUB else [f"not allowed: {remote!r}"]
     if re.fullmatch(
-        re.escape(f"p=$(sh -c {shlex.quote(dh.HOLDER)} {dh.REMOTE_HUB}") + r"[^;&|`$]* </dev/null >"
-        + re.escape(dh.DETACH_LOG) + r" 2>&1 & echo \$!\); sleep \d+; "
+        re.escape(f"p=$(sh -c {shlex.quote(dh.HOLDER)} {dh.REMOTE_HUB}")
+        + r"[^;&|`$]* </dev/null >"
+        + re.escape(dh.DETACH_LOG)
+        + r" 2>&1 & echo \$!\); sleep \d+; "
         + re.escape(f"read h <{dh.DETACH_PID} && kill -0 $h && echo $h"),
         a0[2] if a0[:2] == ["sh", "-c"] and len(a0) == 3 else "",
     ):
@@ -757,7 +759,14 @@ def test_every_emitted_command_is_allow_listed(artifacts):
     go(h, lambda d: d.prune())
     go(h, lambda d: d.run_detached(["--port", "8099"]))  # refused: hal alive
     h2 = FakeHub()
-    go(h2, lambda d: (d.quiesce(), h2.files.update({dh.REMOTE_HUB: b"x"}), d.run_detached(["--token", "a b"])))
+    go(
+        h2,
+        lambda d: (
+            d.quiesce(),
+            h2.files.update({dh.REMOTE_HUB: b"x"}),
+            d.run_detached(["--token", "a b"]),
+        ),
+    )
     go(FakeHub(corrupt={dh.REMOTE_HUB + ".new"}), lambda d: push_all(d, artifacts))
     go(h, lambda d: d.restore())
     go(h, lambda d: d.clean())
@@ -900,14 +909,19 @@ def test_holder_records_the_hubs_own_pid_not_the_holders(tmp_path, shell):
         pytest.skip("no busybox")
     pidf, out = tmp_path / "pid", tmp_path / "hubpid"
     hub = tmp_path / "hub"
-    hub.write_text(f'#!/bin/sh\necho $$ >{out}\nsleep 30\n')
+    hub.write_text(f"#!/bin/sh\necho $$ >{out}\nsleep 30\n")
     hub.chmod(0o755)
     script = dh.HOLDER.replace(dh.DETACH_PID, str(pidf)).replace("/dev/i2s", str(tmp_path / "i2s"))
     (tmp_path / "i2s").write_text("")
     p = subprocess.Popen([*shell, "-c", script, str(hub)], start_new_session=True)
     try:
         for _ in range(100):
-            if pidf.exists() and pidf.read_text().strip() and out.exists() and out.read_text().strip():
+            if (
+                pidf.exists()
+                and pidf.read_text().strip()
+                and out.exists()
+                and out.read_text().strip()
+            ):
                 break
             time.sleep(0.05)
         assert pidf.read_text().strip() == out.read_text().strip()

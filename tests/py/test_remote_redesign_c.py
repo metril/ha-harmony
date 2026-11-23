@@ -28,7 +28,9 @@ def test_inputs_derived_from_commands_when_the_archive_has_no_list():
     d, cs, path = load("Sony", "KV-32V42.json")
     d = {k: v for k, v in d.items() if k != "inputs"}
     cs = copy.deepcopy(cs)
-    for cmd, new in zip(cs["commands"][:4], ("InputHdmi1", "Input HDMI 2", "InputAv", "InputTv"), strict=True):
+    for cmd, new in zip(
+        cs["commands"][:4], ("InputHdmi1", "Input HDMI 2", "InputAv", "InputTv"), strict=True
+    ):
         cmd["name"] = new
     b = build_device(d, cs, mfr="S", model_file="f.json", codeset_path=path, imported_at="x")
     assert list(b.device["inputs"]) == ["HDMI 1", "HDMI 2", "AV", "TV"]
@@ -53,19 +55,34 @@ def test_living_room_pages_fit_and_every_nav_row_has_a_glyph():
     assert len(c.models) <= MAX_PAGES
     assert all(w.icon for p in c.models for w in p.widgets if w.role == "nav")
     ids = {p["id"] for p in model["pages"]}
-    assert {"dev_tv", "dev_shield", "dev_speakers", "dev_speaker_power", "dev_kvm", "favorites"} <= ids
+    assert {
+        "dev_tv",
+        "dev_shield",
+        "dev_speakers",
+        "dev_speaker_power",
+        "dev_kvm",
+        "favorites",
+    } <= ids
     fav = next(p for p in model["pages"] if p["id"] == "favorites")
     assert all(w.get("compact") and w["w"] == 6 for w in fav["widgets"])
 
 
 def test_too_many_pages_is_a_clear_error():
-    pages = "".join(f"  - {{id: p{i}, cols: 1, rows: 1, title: P{i}, widgets: []}}\n" for i in range(MAX_PAGES + 1))
-    with pytest.raises(CompileError, match=rf"too many pages: {MAX_PAGES + 1} \(the remote holds at most {MAX_PAGES}\)"):
+    pages = "".join(
+        f"  - {{id: p{i}, cols: 1, rows: 1, title: P{i}, widgets: []}}\n"
+        for i in range(MAX_PAGES + 1)
+    )
+    with pytest.raises(
+        CompileError,
+        match=rf"too many pages: {MAX_PAGES + 1} \(the remote holds at most {MAX_PAGES}\)",
+    ):
         compile_config(parse_model("pages:\n" + pages, "t.yaml"))
 
 
 def test_nav_icon_order_device_icon_brand_keyword():
-    assert nav_icon("TV", {"tv": "tv"}, {"tv": "tv"}) == ICON_IDS["tv"]  # the device's configured icon
+    assert (
+        nav_icon("TV", {"tv": "tv"}, {"tv": "tv"}) == ICON_IDS["tv"]
+    )  # the device's configured icon
     assert nav_icon("Shield", {}, {}) == ICON_IDS["nvidia"]  # brand
     assert nav_icon("Speakers", {}, {}) == ICON_IDS["speaker"]  # name keyword
     assert nav_icon("Zzz Qqq", {}, {}) == 0
@@ -73,7 +90,12 @@ def test_nav_icon_order_device_icon_brand_keyword():
 
 
 def test_numbered_inputs_stay_separate():
-    assert [normalize_input(n) for n in ("InputAv", "InputAv1", "InputAv2", "InputUsb2")] == ["AV", "AV 1", "AV 2", "USB 2"]
+    assert [normalize_input(n) for n in ("InputAv", "InputAv1", "InputAv2", "InputUsb2")] == [
+        "AV",
+        "AV 1",
+        "AV 2",
+        "USB 2",
+    ]
     d, cs, path = load("Sony", "KV-32V42.json")
     d = {k: v for k, v in d.items() if k != "inputs"}
     cs = copy.deepcopy(cs)

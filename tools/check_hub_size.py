@@ -15,11 +15,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def ota_slack() -> int:
-    m = re.search(r"#define\s+HP_OTA_SLACK\s+\((\d+)u\s*\*\s*(\d+)u\)", (ROOT / "hub/ota/hub_ota.h").read_text())
+    m = re.search(
+        r"#define\s+HP_OTA_SLACK\s+\((\d+)u\s*\*\s*(\d+)u\)",
+        (ROOT / "hub/ota/hub_ota.h").read_text(),
+    )
     return int(m.group(1)) * int(m.group(2)) if m else 64 * 1024
 
 
-def check(path: Path, max_kib: int = 600, data_kib: int = 2400, slack: int | None = None) -> tuple[bool, list[str]]:
+def check(
+    path: Path, max_kib: int = 600, data_kib: int = 2400, slack: int | None = None
+) -> tuple[bool, list[str]]:
     slack = ota_slack() if slack is None else slack
     data = path.read_bytes()
     size = len(data)
@@ -30,7 +35,9 @@ def check(path: Path, max_kib: int = 600, data_kib: int = 2400, slack: int | Non
     ]
     ok = True
     if b".symtab" in data:
-        lines.append("FAIL: not stripped (has .symtab): push and sign the stripped build output, not hub.debug")
+        lines.append(
+            "FAIL: not stripped (has .symtab): push and sign the stripped build output, not hub.debug"
+        )
         ok = False
     if size > max_kib * 1024:
         lines.append(f"FAIL: {size / 1024:.1f} KiB is over the {max_kib} KiB budget")
@@ -39,7 +46,9 @@ def check(path: Path, max_kib: int = 600, data_kib: int = 2400, slack: int | Non
         lines.append(f"FAIL: OTA need {need / 1024:.0f} KiB exceeds {data_kib} KiB")
         ok = False
     if b"HPBUILDID=" not in data:
-        lines.append("FAIL: build-id tag HPBUILDID= missing (ota_sign could not read the id; was it garbage-collected?)")
+        lines.append(
+            "FAIL: build-id tag HPBUILDID= missing (ota_sign could not read the id; was it garbage-collected?)"
+        )
         ok = False
     return ok, lines
 

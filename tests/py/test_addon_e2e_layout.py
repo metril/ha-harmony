@@ -43,7 +43,10 @@ CLIPPED = """() => {
 
 async def wide(page, size, name):
     await page.set_viewport_size({"width": size[0], "height": size[1]})
-    await page.evaluate("(css) => { const s = new CSSStyleSheet(); s.replaceSync(css); document.adoptedStyleSheets = [...document.adoptedStyleSheets, s]; }", WIDE_CSS)
+    await page.evaluate(
+        "(css) => { const s = new CSSStyleSheet(); s.replaceSync(css); document.adoptedStyleSheets = [...document.adoptedStyleSheets, s]; }",
+        WIDE_CSS,
+    )
     await page.evaluate("() => document.fonts.ready")
     await page.wait_for_timeout(200)
     if SHOTS:
@@ -79,17 +82,23 @@ async def test_palette_tabs_inspector_and_tab_strip_under_a_wide_font(browser, l
         await wide(page, size, f"21-palette-{i}-{tab.split()[0].lower()}")
         await audit(page, tab)
         # the label is whole or absent
-        st = await page.locator("hh-palette .tn").evaluate("e => [getComputedStyle(e).visibility === 'hidden', e.scrollWidth <= e.clientWidth]")
+        st = await page.locator("hh-palette .tn").evaluate(
+            "e => [getComputedStyle(e).visibility === 'hidden', e.scrollWidth <= e.clientWidth]"
+        )
         assert st[0] or st[1], tab
     # the chips of the Devices/Activities/Widgets tabs: equal rows, one line each
     for tab in ("Devices", "Activities", "Widgets"):
         await page.get_by_role("tab", name=tab, exact=True).click()
-        heights = await page.locator("hh-palette .chip2").evaluate_all("els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().height)))]")
+        heights = await page.locator("hh-palette .chip2").evaluate_all(
+            "els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().height)))]"
+        )
         assert len(heights) <= 1, (tab, heights)
         assert await page.evaluate(HOLES) == [], tab
     # every device group of the Devices tab: one-cell chips share rows (>= 2 per row), one grid for all groups (the 1024 px palette is one column)
     await page.get_by_role("tab", name="Devices", exact=True).click()
-    bad = await page.locator("hh-palette .cells[role=group]").evaluate_all("""(g) => { const out = [];
+    bad = await page.locator(
+        "hh-palette .cells[role=group]"
+    ).evaluate_all("""(g) => { const out = [];
       for (const c of g) { const short = [...c.children].filter((k) => k.getBoundingClientRect().width < c.getBoundingClientRect().width - 10); if (short.length < 2) continue;
         const tops = new Map(); for (const k of short) { const t = Math.round(k.getBoundingClientRect().top); tops.set(t, (tops.get(t) || 0) + 1); }
         if (Math.max(...tops.values()) < 2) out.push(c.getAttribute("aria-label")); } return [g.length, out]; }""")
@@ -106,7 +115,10 @@ async def test_palette_tabs_inspector_and_tab_strip_under_a_wide_font(browser, l
 async def test_bluetooth_panel_wizards_and_key_map_under_a_wide_font(browser, bt, site, size):
     bt.add_host(configured=False, result=False)
     bt.add_remote(configured=False)
-    bt.candidates({"addr": "11:22:33:44:55:09", "name": "Homatics Remote", "rssi": -48}, {"addr": "11:22:33:44:55:02", "rssi": -80})
+    bt.candidates(
+        {"addr": "11:22:33:44:55:09", "name": "Homatics Remote", "rssi": -48},
+        {"addr": "11:22:33:44:55:02", "rssi": -80},
+    )
     page, _ = await open_bt(browser, site)
     await page.get_by_text("Living room box").first.wait_for()
     await wide(page, size, "30-bt-panel")
@@ -131,7 +143,9 @@ async def test_bluetooth_panel_wizards_and_key_map_under_a_wide_font(browser, bt
     await wide(page, size, "34-bt-remote-keys-step")
     await audit(page, "remote key step")
     # the key map: every button name is shown whole, one value picker per row
-    cut = await page.locator(".kr b").evaluate_all("els => els.filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.textContent)")
+    cut = await page.locator(".kr b").evaluate_all(
+        "els => els.filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.textContent)"
+    )
     assert cut == [], cut
 
 
@@ -148,13 +162,25 @@ async def test_palette_pairs_share_a_row_left_then_right(browser, large, size):
       walk(document.querySelector('hh-app').shadowRoot); return out; }""")
     keys = list(pos)
     checked = 0
-    for left, right in (("Play", "Pause"), ("Rewind", "Fast Forward"), ("Volume Up", "Volume Down"), ("Channel Up", "Channel Down"), ("Up", "Down")):
+    for left, right in (
+        ("Play", "Pause"),
+        ("Rewind", "Fast Forward"),
+        ("Volume Up", "Volume Down"),
+        ("Channel Up", "Channel Down"),
+        ("Up", "Down"),
+    ):
         for k in keys:
             dev, _, name = k.partition("|")
             if name != left or f"{dev}|{right}" not in pos:
                 continue
             (lt, ll), (rt, rl) = pos[k], pos[f"{dev}|{right}"]
-            assert (lt == rt and ll < rl) or (ll == rl and lt < rt), (dev, left, right, pos[k], pos[f"{dev}|{right}"])
+            assert (lt == rt and ll < rl) or (ll == rl and lt < rt), (
+                dev,
+                left,
+                right,
+                pos[k],
+                pos[f"{dev}|{right}"],
+            )
             checked += 1
     assert checked >= 5, (checked, keys[:20])
     await page.wait_for_timeout(400)

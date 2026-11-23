@@ -4,7 +4,9 @@ import importlib.util
 import sys
 from pathlib import Path
 
-SPEC = importlib.util.spec_from_file_location("check_hub_size", Path(__file__).parents[2] / "tools" / "check_hub_size.py")
+SPEC = importlib.util.spec_from_file_location(
+    "check_hub_size", Path(__file__).parents[2] / "tools" / "check_hub_size.py"
+)
 mod = importlib.util.module_from_spec(SPEC)
 sys.modules["check_hub_size"] = mod
 SPEC.loader.exec_module(mod)

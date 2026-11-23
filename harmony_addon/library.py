@@ -124,7 +124,7 @@ class Library:
         self._meta(cid)
         try:
             raw = (self._cfg_dir(cid) / "revs" / f"{int(rev)}.json").read_bytes()
-        except (FileNotFoundError, ValueError):
+        except FileNotFoundError, ValueError:
             raise NotFound("unknown rev") from None
         try:
             return json.loads(raw)
@@ -168,9 +168,7 @@ class Library:
         self._save(meta)
         return meta
 
-    def duplicate(
-        self, cid: str, rev: int | None, name: str, now: int = 0
-    ) -> dict[str, Any]:
+    def duplicate(self, cid: str, rev: int | None, name: str, now: int = 0) -> dict[str, Any]:
         """New config whose draft is `rev` of `cid` (default: its draft)."""
         if rev is None:
             draft = self._meta(cid)["draft"]
@@ -231,7 +229,9 @@ class Library:
         }
         atomic_write(
             self._cfg_dir(cid) / "revs" / f"{rev}.json",
-            _dump({**{k: row[k] for k in ("rev", "at", "note", "hash")}, "config": draft["config"]}),
+            _dump(
+                {**{k: row[k] for k in ("rev", "at", "note", "hash")}, "config": draft["config"]}
+            ),
         )
         meta["revs"].append(row)  # the rev file first: a crash leaves an unreferenced file only
         meta["next_rev"] = rev + 1
@@ -272,7 +272,7 @@ def migrate_v1(data_dir: Path, lib: Library) -> list[str]:
         hub = path.stem
         try:
             v1 = json.loads(path.read_bytes())
-        except (OSError, ValueError):
+        except OSError, ValueError:
             continue
         if not isinstance(v1, dict) or v1.get("v") != 1 or not HUB_ID.fullmatch(hub):
             continue
@@ -292,13 +292,34 @@ def migrate_v1(data_dir: Path, lib: Library) -> list[str]:
             cfg = r["config"]
             atomic_write(
                 lib._cfg_dir(cid) / "revs" / f"{n}.json",
-                _dump({"rev": n, "at": r["at"], "note": "Migrated", "hash": content_hash(cfg), "config": cfg}),
+                _dump(
+                    {
+                        "rev": n,
+                        "at": r["at"],
+                        "note": "Migrated",
+                        "hash": content_hash(cfg),
+                        "config": cfg,
+                    }
+                ),
             )
             meta["revs"].append(
-                {"rev": n, "at": r["at"], "note": "Migrated", "hash": content_hash(cfg), "parent": n - 1 or None}
+                {
+                    "rev": n,
+                    "at": r["at"],
+                    "note": "Migrated",
+                    "hash": content_hash(cfg),
+                    "parent": n - 1 or None,
+                }
             )
             entries.append(
-                {"config_id": cid, "rev": n, "name": meta["name"], "at": r["at"], "hash": r["hash"], "config": cfg}
+                {
+                    "config_id": cid,
+                    "rev": n,
+                    "name": meta["name"],
+                    "at": r["at"],
+                    "hash": r["hash"],
+                    "config": cfg,
+                }
             )
         meta["next_rev"] = len(rows) + 1
         meta["draft_rev"] = int(v1.get("draft_rev") or 0)

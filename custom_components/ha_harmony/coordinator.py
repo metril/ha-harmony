@@ -158,17 +158,25 @@ class RemoteLink:
 
     info: RemoteInfo | None = None
     epoch: int = 0  # bumped at every link-up: the remote may have lost its page store
-    pushed: tuple[int, int, int, int] | None = None  # (config gen, format, epoch, theme caps) of the last complete set
+    pushed: tuple[int, int, int, int] | None = (
+        None  # (config gen, format, epoch, theme caps) of the last complete set
+    )
     inflight: tuple[int, int, int, int] | None = None
-    theme_sent: int | None = None  # gen of the custom theme the hub accepted for this remote's current set
+    theme_sent: int | None = (
+        None  # gen of the custom theme the hub accepted for this remote's current set
+    )
     waiting: bool = False  # waiting for remote_info
     attached: bool = True  # False after "no remote" until the remote shows signs of life
     pending: bool = False  # a push failed for want of a remote: redo when it is back
     push_ms: float | None = None  # duration of the last complete page push (diagnostics)
     task: asyncio.Task[None] | None = None
     refused: bool = False  # the hub refused a message for a transient reason (not "no remote"): retry with backoff
-    retries: int = 0  # consecutive re-pushes of an unconfirmed set; drives the backoff, reset on confirmation
-    retry_task: asyncio.Task[None] | None = None  # the pending delayed re-push (cancellable, one per remote)
+    retries: int = (
+        0  # consecutive re-pushes of an unconfirmed set; drives the backoff, reset on confirmation
+    )
+    retry_task: asyncio.Task[None] | None = (
+        None  # the pending delayed re-push (cancellable, one per remote)
+    )
     retry_want: tuple[int, int, int, int] | None = None  # the set that re-push is for
     info_event: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -193,9 +201,14 @@ class RemoteLink:
 # domain -> (states that are on, states that are off); any other state of those domains is unknown.
 _ON_OFF_STATES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "cover": (frozenset({"open", "opening"}), frozenset({"closed", "closing"})),
-    "lock": (frozenset({"unlocked", "unlocking", "open", "opening"}), frozenset({"locked", "locking"})),
+    "lock": (
+        frozenset({"unlocked", "unlocking", "open", "opening"}),
+        frozenset({"locked", "locking"}),
+    ),
 }
-_DEFAULT_OFF = frozenset({"off"})  # media_player (idle / standby / paused are on), light, switch, fan, remote, climate (hvac mode off), ...
+_DEFAULT_OFF = frozenset(
+    {"off"}
+)  # media_player (idle / standby / paused are on), light, switch, fan, remote, climate (hvac mode off), ...
 _OFF_STATES: dict[str, frozenset[str]] = {}
 
 
@@ -252,7 +265,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.links: dict[int, RemoteLink] = {r: RemoteLink() for r in self.remotes}
         self._cfg_gen = 0  # bumped whenever the compiled config changes
         self._accepted = False  # the hub is known to run `compiled` (it reported the matching hash)
-        self._rejected = False  # the hub refused `pending`; `compiled` stays the runtime table source
+        self._rejected = (
+            False  # the hub refused `pending`; `compiled` stays the runtime table source
+        )
         self._known_rev: str | None = None  # last add-on rev handled (applied or rejected)
         self._sleep = lambda seconds: _sleep_hook(seconds)
         # tracked by hub index, never by name: a rename keeps the index, a reorder gets a new
@@ -277,14 +292,24 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._link: AddonClient | None = None
         self._apply_lock = asyncio.Lock()
         self.first_sync: asyncio.Task[None] | None = None
-        self._first_apply = asyncio.Event()  # the channel's first answer (bundle, nothing_applied, failure) arrived
+        self._first_apply = (
+            asyncio.Event()
+        )  # the channel's first answer (bundle, nothing_applied, failure) arrived
         self._channel: AddonChannel | None = None  # the open add-on channel, None while it is down
         self._channel_ready = asyncio.Event()  # set while `_channel` is open
-        self._reconnect_now = False  # the channel was closed on purpose (reload_config): reconnect without back-off
-        self._refreshing: list[asyncio.Future[None]] = []  # reload_config calls waiting for the add-on's answer
-        self._sent_identity: str | None = None  # the last identity (hw/name/remotes/limits) the add-on was given
+        self._reconnect_now = (
+            False  # the channel was closed on purpose (reload_config): reconnect without back-off
+        )
+        self._refreshing: list[
+            asyncio.Future[None]
+        ] = []  # reload_config calls waiting for the add-on's answer
+        self._sent_identity: str | None = (
+            None  # the last identity (hw/name/remotes/limits) the add-on was given
+        )
         self.last_error: str | None = None
-        self.timings: dict[str, float] = {}  # last compile / set_config round trip, in ms (diagnostics)
+        self.timings: dict[
+            str, float
+        ] = {}  # last compile / set_config round trip, in ms (diagnostics)
         # firmware update (ota.py): idle | uploading | applying | restarting | installed | failed | rolled_back
         self.ota_state = "idle"
         self.ota_progress = 0  # percent of the image the hub holds
@@ -342,7 +367,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._cur,
             lambda: self.current_activity_id,
         )
-        self._source_cfg: dict[str, Any] | None = None  # the applied source config (recompiled on a source_list change)
+        self._source_cfg: dict[str, Any] | None = (
+            None  # the applied source config (recompiled on a source_list change)
+        )
         self._sl_used: dict[str, tuple[str, ...]] = {}  # entity -> the source_list the compile saw
         self.async_set_updated_data(None)
 
@@ -357,8 +384,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.now_playing.stop()
         self.app_status.stop()
         self.btm.shutdown()
-        for t in [self._ha_task, self._flush_task, *(lk.task for lk in self.links.values()),
-                  *(lk.retry_task for lk in self.links.values())]:
+        for t in [
+            self._ha_task,
+            self._flush_task,
+            *(lk.task for lk in self.links.values()),
+            *(lk.retry_task for lk in self.links.values()),
+        ]:
             if t is not None and not t.done():
                 t.cancel()
         await super().async_shutdown()
@@ -446,7 +477,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         `all_command_buttons` option) all of them; beyond it only those that already have a registry
         entry, so buttons an install already uses keep working and stay as they are."""
         cmds = self.device_commands(device)
-        if len(cmds) <= COMMAND_BUTTON_LIMIT or self.config_entry.options.get(CONF_ALL_COMMAND_BUTTONS):
+        if len(cmds) <= COMMAND_BUTTON_LIMIT or self.config_entry.options.get(
+            CONF_ALL_COMMAND_BUTTONS
+        ):
             return cmds
         reg = er.async_get(self.hass)
         h = self.hub_id
@@ -491,7 +524,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return False
         try:
             compiled = await self.hass.async_add_executor_job(
-                compile_source, data.get("config"), self.hub_id, self.client.limits, self._source_lists(data.get("config"))
+                compile_source,
+                data.get("config"),
+                self.hub_id,
+                self.client.limits,
+                self._source_lists(data.get("config")),
             )
             self._source_cfg = data.get("config")
         except BundleRejected as exc:
@@ -511,7 +548,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             t0 = time.monotonic()
             try:
                 bundle = await self.hass.async_add_executor_job(
-                    parse_bundle, raw, self.hub_id, self.client.limits, self._source_lists(_config_of(raw))
+                    parse_bundle,
+                    raw,
+                    self.hub_id,
+                    self.client.limits,
+                    self._source_lists(_config_of(raw)),
                 )
                 self.timings["compile_ms"] = round((time.monotonic() - t0) * 1000, 1)
             except BundleRejected as exc:
@@ -564,7 +605,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             except AddonError as exc:
                 _LOGGER.debug("Could not send %s to the add-on: %s", t, exc)
 
-        self.config_entry.async_create_background_task(self.hass, _send(), f"{DOMAIN} add-on send {t}")
+        self.config_entry.async_create_background_task(
+            self.hass, _send(), f"{DOMAIN} add-on send {t}"
+        )
 
     def _reject(self, exc: BundleRejected) -> None:
         _LOGGER.error("Rejected the add-on config, keeping the previous one: %s", exc)
@@ -629,12 +672,16 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._known_rev = None  # the add-on sends the bundle even when its rev is the one held
         try:
             async with asyncio.timeout(const.LINK_REFRESH_TIMEOUT):
-                if self._channel is None:  # connecting (or down): a failure to connect settles the waiter too
+                if (
+                    self._channel is None
+                ):  # connecting (or down): a failure to connect settles the waiter too
                     ready = asyncio.ensure_future(self._channel_ready.wait())
                     await asyncio.wait({waiter, ready}, return_when=asyncio.FIRST_COMPLETED)
                     ready.cancel()
                 if not waiter.done() and self._channel is not None:
-                    self._reconnect_now = True  # a fresh hello: a quiet add-on answers nothing to the old one
+                    self._reconnect_now = (
+                        True  # a fresh hello: a quiet add-on answers nothing to the old one
+                    )
                     await self._channel.close()
                 await waiter
         except TimeoutError:
@@ -719,7 +766,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._channel = channel
         self._channel_ready.set()
         self._sent_identity = json.dumps(client.identity_fields(), sort_keys=True)
-        if self.link_state in ("unreachable", "auth_failed", "connecting", "nothing_applied", "addon_outdated"):
+        if self.link_state in (
+            "unreachable",
+            "auth_failed",
+            "connecting",
+            "nothing_applied",
+            "addon_outdated",
+        ):
             self.async_set_link_state("ok" if self.managed else "connecting")
         self._clear_issue(ISSUE_ADDON_OUTDATED)
         if self.managed:
@@ -727,7 +780,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.addon_send("hub", online=self.available)
         self.btm.on_addon_connect()
         if self._acked is not None:
-            self._send_ack(*self._acked)  # the last ack, whatever it was: a dropped channel may have lost it
+            self._send_ack(
+                *self._acked
+            )  # the last ack, whatever it was: a dropped channel may have lost it
         elif self.managed and self.hub_accepted and self.rev:
             self._ack_later(self.rev, "ok")  # the ack a restart may have lost
         try:
@@ -735,7 +790,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 try:
                     await self._on_channel_frame(client, msg)
                 except Exception:
-                    _LOGGER.exception("Could not handle the add-on frame %r", str(msg.get("t"))[:32])
+                    _LOGGER.exception(
+                        "Could not handle the add-on frame %r", str(msg.get("t"))[:32]
+                    )
         finally:
             self._channel = None
             self._channel_ready.clear()
@@ -743,7 +800,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             await channel.close()
         code = channel.close_code
         if code == 4001:
-            _LOGGER.error("The add-on does not support this integration's channel version; update the integration")
+            _LOGGER.error(
+                "The add-on does not support this integration's channel version; update the integration"
+            )
             self.async_set_link_state("integration_outdated")
             self._first_apply.set()
             self._settle_refresh(AddonError("the add-on does not support this integration"))
@@ -761,7 +820,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if t == "bundle":
             body = msg.get("body")
             rev = body.get("rev") if isinstance(body, dict) else None
-            if isinstance(rev, str) and rev == self._known_rev and self.managed and not self._refreshing:
+            if (
+                isinstance(rev, str)
+                and rev == self._known_rev
+                and self.managed
+                and not self._refreshing
+            ):
                 return  # the add-on pushes on every apply, even an unchanged rev: nothing to redo
             try:
                 bundle = await self.async_process_raw(msg.get("body"))
@@ -777,7 +841,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._known_rev = None
             self._first_apply.set()
             self.async_set_link_state("nothing_applied")
-            self._settle_refresh(NothingApplied(f"no config has been applied for hub {self.hub_id} in the add-on"))
+            self._settle_refresh(
+                NothingApplied(f"no config has been applied for hub {self.hub_id} in the add-on")
+            )
         elif t == "adopt":
             res = msg.get("result")
             client.last_adopt = res if isinstance(res, str) else None
@@ -787,7 +853,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         elif t == "listen":
             await self.btm.on_listen(msg.get("on") is True)
         elif t == "error":
-            _LOGGER.debug("The add-on reported %s: %s", str(msg.get("code"))[:32], str(msg.get("msg"))[:200])
+            _LOGGER.debug(
+                "The add-on reported %s: %s", str(msg.get("code"))[:32], str(msg.get("msg"))[:200]
+            )
         else:
             _LOGGER.debug("Ignoring the add-on frame %r", t[:32])
 
@@ -915,9 +983,14 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.config_pushes += 1
         t0 = time.monotonic()
         too_big = None
-        if self.client.limits is not None:  # compiled before the hub reported its limits? check now, not at the hub
+        if (
+            self.client.limits is not None
+        ):  # compiled before the hub reported its limits? check now, not at the hub
             too_big = await self.hass.async_add_executor_job(
-                lambda: fit_error(config_stats(compiled.hub_json, self.client.limits.max_pronto), self.client.limits)
+                lambda: fit_error(
+                    config_stats(compiled.hub_json, self.client.limits.max_pronto),
+                    self.client.limits,
+                )
             )
         too_big = too_big or bt_fit_error(compiled.hub_json, self.client.bt)
         try:
@@ -1002,7 +1075,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 return old if running else None
             if link.retry_task is not None and not link.retry_task.done():
                 if link.retry_want == want:
-                    return old if running else None  # backing off: the retry task pushes when it is due
+                    return (
+                        old if running else None
+                    )  # backing off: the retry task pushes when it is due
                 self._retry_reset(link)  # another set (new config, caps, epoch): no reason to wait
         if running:
             old.cancel()
@@ -1045,11 +1120,17 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             rp = self.compiled.for_caps(link.page_caps) if want[1] >= 2 else None
             themed = rp is not None and rp.theme_wire is not None
             if ok and themed and not await self._await_theme_ack(link, rp):
-                _LOGGER.warning("Remote %s did not report the custom theme set; sending it once more", remote)
-                ok = await self._push_set(remote, link, want[1])  # the hub gave up on it (the remote was away)
+                _LOGGER.warning(
+                    "Remote %s did not report the custom theme set; sending it once more", remote
+                )
+                ok = await self._push_set(
+                    remote, link, want[1]
+                )  # the hub gave up on it (the remote was away)
                 if ok and not await self._await_theme_ack(link, rp):
                     # never mark a set pushed that the remote did not confirm: stay pending, try again later
-                    _LOGGER.warning("Remote %s still does not hold the custom theme set; will retry", remote)
+                    _LOGGER.warning(
+                        "Remote %s still does not hold the custom theme set; will retry", remote
+                    )
                     link.pending = True
                     self._schedule_retry(remote, want)
                     return
@@ -1071,7 +1152,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if rt is not None and not rt.done() and rt is not asyncio.current_task():
             rt.cancel()
 
-    def _schedule_retry(self, remote: int, want: tuple[int, int, int, int], immediate: bool = False) -> None:
+    def _schedule_retry(
+        self, remote: int, want: tuple[int, int, int, int], immediate: bool = False
+    ) -> None:
         """Push the set again later: bounded exponential backoff (PUSH_RETRY_BASE doubling up to
         PUSH_RETRY_MAX), the first one at once when `immediate`. One pending retry per remote, cancelled
         on unload; it does not hold up any other remote."""
@@ -1080,7 +1163,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             return
         n = link.retries
         link.retries += 1
-        delay = 0.0 if immediate and n == 0 else min(const.PUSH_RETRY_BASE * 2 ** min(n, 16), const.PUSH_RETRY_MAX)
+        delay = (
+            0.0
+            if immediate and n == 0
+            else min(const.PUSH_RETRY_BASE * 2 ** min(n, 16), const.PUSH_RETRY_MAX)
+        )
         link.retry_want = want
         link.retry_task = self.config_entry.async_create_background_task(
             self.hass, self._retry_push(remote, want, delay), name=f"{DOMAIN} repush {remote}"
@@ -1112,7 +1199,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             if info is None:
                 continue
             tier = (
-                "custom" if info.caps & const.CAP_THEME_CUSTOM else "palette" if info.caps & const.CAP_THEME_COLOR else "none"
+                "custom"
+                if info.caps & const.CAP_THEME_CUSTOM
+                else "palette"
+                if info.caps & const.CAP_THEME_COLOR
+                else "none"
             )
             out.append(
                 {
@@ -1180,7 +1271,11 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """theme_push of the set's custom theme. True: the hub took it. None: not delivered (no remote,
         link down, refused): the push is redone later."""
         assert rp.theme_wire is not None
-        payload = {"remote": remote, "gen": rp.gen, "data": base64.b64encode(rp.theme_wire).decode()}
+        payload = {
+            "remote": remote,
+            "gen": rp.gen,
+            "data": base64.b64encode(rp.theme_wire).decode(),
+        }
         self.theme_pushes += 1
         try:
             await self.client.async_send(MsgType.THEME_PUSH, payload)
@@ -1382,10 +1477,14 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 # a playing media_player changes attributes every few seconds: only a change of
                 # the derived power/input reaches the entities of that device
                 new = _ha_device_state(event.data["new_state"])
-                if any(self.compiled.ha_devices[i].source_list for i in dev_of.get(event.data["entity_id"], ())):
+                if any(
+                    self.compiled.ha_devices[i].source_list
+                    for i in dev_of.get(event.data["entity_id"], ())
+                ):
                     self._on_source_list(
                         next(
-                            d.entity for d in self.compiled.ha_devices.values()
+                            d.entity
+                            for d in self.compiled.ha_devices.values()
                             if d.entity and self._cur(d.entity) == event.data["entity_id"]
                         ),
                         event.data["new_state"],
@@ -1435,7 +1534,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.app_status.configure(self.compiled.apps)
         media = list(self.compiled.media.values())
         pick = lambda k: next((self._cur(m[k]) for m in media if m.get(k)), None)
-        self.now_playing.configure(pick("apps_entity"), pick("now_playing_entity"), pick("session_entity"))
+        self.now_playing.configure(
+            pick("apps_entity"), pick("now_playing_entity"), pick("session_entity")
+        )
 
     async def _send_tiles(self, entities: set[str], remotes: tuple[int, ...]) -> None:
         """Send each tile whose rendered (state, text) pair changed since the last send. Nothing is
@@ -1473,8 +1574,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             stop = False
 
             async def one(
-                key: tuple[int, int, int], value: tuple[int, str], args: dict[str, Any], entity: str,
-                link: RemoteLink = link, rich: bool = rich, window: asyncio.Semaphore = window,
+                key: tuple[int, int, int],
+                value: tuple[int, str],
+                args: dict[str, Any],
+                entity: str,
+                link: RemoteLink = link,
+                rich: bool = rich,
+                window: asyncio.Semaphore = window,
             ) -> None:
                 nonlocal stop
                 async with window:
@@ -1601,7 +1707,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         """One hub daemon log line: to HA's log under `custom_components.ha_harmony.hub_log`, and on to the add-on."""
         level = "warning" if data["level"] == "warning" else "info"
         HUB_LOGGER.log(
-            logging.WARNING if level == "warning" else logging.INFO, "[%s] %s", self.hub_id, data["msg"]
+            logging.WARNING if level == "warning" else logging.INFO,
+            "[%s] %s",
+            self.hub_id,
+            data["msg"],
         )
         fields: dict[str, Any] = {"level": level, "msg": data["msg"][:400], "ts": data["ts"]}
         if data.get("dropped"):
@@ -1609,7 +1718,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.addon_send("hub_log", **fields)
 
     # ------------------------------------------------------------ firmware update
-    def _set_ota(self, state: str, *, progress: int | None = None, error: str | None = None) -> None:
+    def _set_ota(
+        self, state: str, *, progress: int | None = None, error: str | None = None
+    ) -> None:
         self.ota_state = state
         if progress is not None:
             self.ota_progress = progress
@@ -1781,7 +1892,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         for entity in call.entities:
             if self.hass.states.get(entity) is None:
                 self._warn_once(
-                    (call.service, entity), "%s targets %s, which does not exist", call.service, entity
+                    (call.service, entity),
+                    "%s targets %s, which does not exist",
+                    call.service,
+                    entity,
                 )
 
     @staticmethod
@@ -1795,8 +1909,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         repeat is dropped while the same call is still running, so a slow service never queues."""
         if (problem := self._call_problem(call)) is not None:
             key, _ph = problem
-            text = "Refusing the service %s: not allowed" if key == "service_not_allowed" else (
-                "Service %s does not exist; skipping it"
+            text = (
+                "Refusing the service %s: not allowed"
+                if key == "service_not_allowed"
+                else ("Service %s does not exist; skipping it")
             )
             self._warn_once((call.service,), text, call.service)
             return
@@ -1855,10 +1971,18 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if self._ha_task is not None and not self._ha_task.done():
             self._ha_task.cancel()
         self._ha_task = self.config_entry.async_create_background_task(
-            self.hass, self._run_transition(before, after, everything_off, sweep), name=f"{DOMAIN} activity steps"
+            self.hass,
+            self._run_transition(before, after, everything_off, sweep),
+            name=f"{DOMAIN} activity steps",
         )
 
-    def _transition_steps(self, before: str | None, after: str | None, everything_off: bool | None = None, sweep: bool = True) -> list[HaStep]:
+    def _transition_steps(
+        self,
+        before: str | None,
+        after: str | None,
+        everything_off: bool | None = None,
+        sweep: bool = True,
+    ) -> list[HaStep]:
         """What Home Assistant does once the hub reports `after` running (or everything off):
         power off the HA devices `before` used that `after` does not, then (on Off) before's `off`
         steps, then after's power-on steps, inputs and extra steps (docs/ha-config.md)."""
@@ -1873,7 +1997,9 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             for st in old.off:
                 if st.call.service.endswith(".turn_off"):
                     covered |= {
-                        n for n, d in c.ha_devices.items() if d.off and set(d.off.entities) & set(st.call.entities)
+                        n
+                        for n, d in c.ha_devices.items()
+                        if d.off and set(d.off.entities) & set(st.call.entities)
                     }
         if old is not None:
             for dev in old.devices:
@@ -1895,7 +2021,13 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             steps += new.start
         return steps
 
-    async def _run_transition(self, before: str | None, after: str | None, everything_off: bool | None = None, sweep: bool = True) -> None:
+    async def _run_transition(
+        self,
+        before: str | None,
+        after: str | None,
+        everything_off: bool | None = None,
+        sweep: bool = True,
+    ) -> None:
         """Sequential and cancellable: a newer transition replaces it."""
         ran_power: set[str | None] = set()
         for step in self._transition_steps(before, after, everything_off, sweep):

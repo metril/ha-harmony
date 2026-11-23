@@ -60,12 +60,12 @@ def test_key_table_sane():
 def test_unknown_key_name_rejected_with_valid_names():
     for bad in ("num_0", "back", "vol_up"):
         with pytest.raises(ConfigError) as e:
-            model(f"keys: {{{bad}: {{activity: \"off\"}}}}")
+            model(f'keys: {{{bad}: {{activity: "off"}}}}')
         assert "unknown key" in str(e.value) and "volume_up" in str(e.value)
 
 
 def test_stock_spelling_is_accepted():
-    c = compile_config(model("keys: {VolumeUp: {activity: \"off\"}}"))
+    c = compile_config(model('keys: {VolumeUp: {activity: "off"}}'))
     assert c.key_names == {KEY_CODES["volume_up"]: "volume_up"}
 
 
@@ -117,7 +117,9 @@ def test_docs_example_compiles():
     assert c.activities == ["Watch TV", "Stream"]
     assert len(c.pages) == 1 and len(c.tiles) == 1
     assert {"volume_up", "home", "tap_mute", "tap_off", "tap_temp"} <= set(c.key_names.values())
-    assert len(text.splitlines()) < 450  # 300 + "Colours and themes" + "Naming your hub" + "Bluetooth" + "App rings"
+    assert (
+        len(text.splitlines()) < 450
+    )  # 300 + "Colours and themes" + "Naming your hub" + "Bluetooth" + "App rings"
 
 
 def test_empty_file_is_empty_model():

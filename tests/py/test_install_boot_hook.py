@@ -32,7 +32,9 @@ DAEMON_MD5 = hashlib.md5(DAEMON_BYTES).hexdigest()
 class FakeHub:
     """A filesystem-ish fake: records every argv, serves cat/test/mv/chmod/rm and `sh -n`."""
 
-    def __init__(self, *, files: dict[str, bytes] | None = None, syntax_bad: set[str] | None = None):
+    def __init__(
+        self, *, files: dict[str, bytes] | None = None, syntax_bad: set[str] | None = None
+    ):
         self.files: dict[str, bytes] = {
             ibh.RCS_LOCAL: STOCK_RCS_LOCAL,
             ibh.DAEMON: DAEMON_BYTES,
@@ -140,7 +142,9 @@ def hub() -> FakeHub:
 
 def install(hub: FakeHub, **kw) -> int:
     kw.setdefault("expect_md5", DAEMON_MD5)
-    return ibh.HookInstaller(hub).install(kw.pop("token", "tok"), kw.pop("port", 8099), kw.pop("hub_id", None), **kw)
+    return ibh.HookInstaller(hub).install(
+        kw.pop("token", "tok"), kw.pop("port", 8099), kw.pop("hub_id", None), **kw
+    )
 
 
 # --- blast radius ---------------------------------------------------------------
@@ -176,7 +180,9 @@ def test_never_touches_anything_outside_its_remit(action: str) -> None:
 
 def test_write_paths_keep_logs_off_flash_and_cover_every_rm() -> None:
     assert ibh.LEGACY_LOG in ibh.WRITE_PATHS and ibh.LEGACY_LOG.startswith("/cache/")
-    assert ibh.LOG.startswith("/var/volatile/") and ibh.LOG not in ibh.WRITE_PATHS  # tmpfs, written by the hook only
+    assert (
+        ibh.LOG.startswith("/var/volatile/") and ibh.LOG not in ibh.WRITE_PATHS
+    )  # tmpfs, written by the hook only
     hub = FakeHub(files={**FakeHub().files, ibh.LEGACY_LOG: b"old\n"})
     inst = ibh.HookInstaller(hub)
     inst.install("tok", 8099, None, expect_md5=DAEMON_MD5)
@@ -306,7 +312,10 @@ def test_there_is_no_way_to_install_without_a_daemon(capsys) -> None:
     real rehearsal (run on hardware 2026-11-17) used a daemon that is present but exits 1.
     """
     with pytest.raises(SystemExit):
-        ibh.main(["install", "--yes", "--expect-md5", DAEMON_MD5, "--allow-missing-daemon"], runner=FakeHub())
+        ibh.main(
+            ["install", "--yes", "--expect-md5", DAEMON_MD5, "--allow-missing-daemon"],
+            runner=FakeHub(),
+        )
     assert "unrecognized arguments" in capsys.readouterr().err
 
 
@@ -460,7 +469,16 @@ def test_token_never_in_commands_stdout_or_status(hub: FakeHub, tmp_path, capsys
     secret = "TOP-SECRET-TOKEN-9"
     tf = tmp_path / "tok"
     tf.write_text(secret + "\n")
-    args = ["install", "--yes", "--expect-md5", DAEMON_MD5, "--token-file", str(tf), "--rf-slot", "2"]
+    args = [
+        "install",
+        "--yes",
+        "--expect-md5",
+        DAEMON_MD5,
+        "--token-file",
+        str(tf),
+        "--rf-slot",
+        "2",
+    ]
     assert ibh.main(args, runner=hub) == 0
     assert ibh.main(["status"], runner=hub) == 0
     cap = capsys.readouterr()
@@ -489,7 +507,9 @@ def test_disarm_touches_only_the_marker(hub: FakeHub, capsys) -> None:
     hub.log.clear()
     assert ibh.main(["disarm", "--yes"], runner=hub) == 0
     assert ibh.MARKER not in hub.files
-    assert {k: v for k, v in hub.files.items()} == {k: v for k, v in before.items() if k != ibh.MARKER}
+    assert {k: v for k, v in hub.files.items()} == {
+        k: v for k, v in before.items() if k != ibh.MARKER
+    }
     writes = [c for c in hub.log if c[0] in ("rm", "mv", "chmod", "mkdir") or c[:2] == ["sh", "-c"]]
     assert writes == [["rm", "-f", ibh.MARKER]]
 

@@ -138,7 +138,9 @@ class LinkedHubs:
         if not _valid(wire):
             return
         lim = HubLimits.from_hello(wire)
-        clean = {k: v for k, v in lim.to_wire().items() if k != "flash_free"}  # free flash moves: only the integration checks it, at push time; "none left" (flash_low) is passed on so the editor can say so
+        clean = {
+            k: v for k, v in lim.to_wire().items() if k != "flash_free"
+        }  # free flash moves: only the integration checks it, at push time; "none left" (flash_low) is passed on so the editor can say so
         if self._limits.get(hub) != clean:
             self._limits[hub] = clean
             self._persist(int(self._clock()))

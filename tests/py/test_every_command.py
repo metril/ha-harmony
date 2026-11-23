@@ -49,13 +49,17 @@ def generated() -> dict:
             {
                 "id": f"dev{d}",
                 "name": f"Generated device {d}",
-                "commands": {n: _code(rng, (3, 3, 0, 2, 3, 1)[(i + d) % 6], i) for i, n in enumerate(names)},
+                "commands": {
+                    n: _code(rng, (3, 3, 0, 2, 3, 1)[(i + d) % 6], i) for i, n in enumerate(names)
+                },
             }
         )
     return {"devices": devices}
 
 
-async def test_every_command_of_a_chunked_mixed_config_emits_its_exact_frames(hass, hub_rf, fake_addon):
+async def test_every_command_of_a_chunked_mixed_config_emits_its_exact_frames(
+    hass, hub_rf, fake_addon
+):
     cfg = generated()
     fake_addon.apply(cfg)
     entry = make_entry("127.0.0.1", hub_rf.port, addon=fake_addon)
@@ -66,7 +70,9 @@ async def test_every_command_of_a_chunked_mixed_config_emits_its_exact_frames(ha
     await hass.async_block_till_done()
     coord = entry.runtime_data
     assert coord.config_pushes == 1 and coord.last_error is None
-    assert coord.compiled.usage["json_bytes"] > 64 * 1024, "the config must be big enough to be chunked"
+    assert coord.compiled.usage["json_bytes"] > 64 * 1024, (
+        "the config must be big enough to be chunked"
+    )
     assert coord.client.config_hash == coord.compiled.config_hash
 
     wrong = []
@@ -77,12 +83,24 @@ async def test_every_command_of_a_chunked_mixed_config_emits_its_exact_frames(ha
             want = f"ir port=255 hz={hz} n={len(once)} us={','.join(str(x) for x in once)}"
             if read_lines(hub_rf, 1) != [want]:
                 wrong.append(f"{dev['id']}:{name}")
-    assert not wrong, f"{len(wrong)} of {DEVICES * PER_DEVICE} commands did not emit their frames: {wrong[:10]}"
+    assert not wrong, (
+        f"{len(wrong)} of {DEVICES * PER_DEVICE} commands did not emit their frames: {wrong[:10]}"
+    )
     await hass.config_entries.async_unload(entry.entry_id)
 
 
 def test_the_generated_config_has_the_names_that_break_lookups():
     cmds = generated()["devices"][0]["commands"]
-    assert {n.lower().replace(" ", "").replace("-", "").replace("_", "").replace(".", "") for n in cmds} >= {"volup"}
-    assert sum(1 for n in cmds if n.lower().replace(" ", "").replace("-", "").replace("_", "").replace(".", "") == "volup") >= 6
+    assert {
+        n.lower().replace(" ", "").replace("-", "").replace("_", "").replace(".", "") for n in cmds
+    } >= {"volup"}
+    assert (
+        sum(
+            1
+            for n in cmds
+            if n.lower().replace(" ", "").replace("-", "").replace("_", "").replace(".", "")
+            == "volup"
+        )
+        >= 6
+    )
     assert any(len(n) == 31 for n in cmds)

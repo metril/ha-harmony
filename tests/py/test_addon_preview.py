@@ -95,7 +95,9 @@ async def test_preview_of_a_heavy_config_is_fast_and_memoised(c, monkeypatch):
     assert cold < 150, f"cold preview took {cold:.0f} ms"
     calls = []
     real = app_mod._preview
-    monkeypatch.setattr(app_mod, "_preview", lambda cfg, limits: calls.append(1) or real(cfg, limits))
+    monkeypatch.setattr(
+        app_mod, "_preview", lambda cfg, limits: calls.append(1) or real(cfg, limits)
+    )
     t = time.process_time()
     st, again = await preview(c, cfg)
     warm = (time.process_time() - t) * 1000
@@ -145,7 +147,10 @@ async def test_page_and_total_usage_match_the_compiler(c):
 async def test_over_budget_page_reports_bytes_and_stays_missing(c):
     cfg = json.loads(json.dumps(CONFIG))
     ws = [{"type": "label", "x": i % 8, "y": i // 8, "label": "L" * 22} for i in range(10)]
-    cfg["pages"] = [cfg["pages"][0], {"id": "fat", "layout": "grid", "cols": 8, "rows": 4, "widgets": ws}]
+    cfg["pages"] = [
+        cfg["pages"][0],
+        {"id": "fat", "layout": "grid", "cols": 8, "rows": 4, "widgets": ws},
+    ]
     cfg["pages"][0]["widgets"][1] = {"type": "label", "x": 1, "y": 0, "label": "ok"}
     cfg["pages"][0]["widgets"][0]["action"] = {"activity": "off"}
     _, body = await preview(c, cfg)
@@ -239,7 +244,9 @@ async def test_editor_metadata_is_kept_but_never_leaves_the_add_on(aiohttp_clien
     assert "editor:" in text
     hy = {**H, "Content-Type": "text/yaml"}
     assert (await c.post("/api/v1/configs/main/import_yaml", data=text, headers=hy)).status == 200
-    assert (await (await c.get("/api/v1/configs/main")).json())["draft"]["config"]["editor"] == {"v": 2}
+    assert (await (await c.get("/api/v1/configs/main")).json())["draft"]["config"]["editor"] == {
+        "v": 2
+    }
 
 
 def test_compiler_ignores_editor_and_integration_accepts_it():
@@ -385,12 +392,20 @@ async def test_preview_carries_the_v2_model_and_both_byte_counts(c):
     m = home["page"]
     assert m["version"] == 2 and m["kind"] == "home" and m["title"] == "Home"
     nav = m["widgets"][0]
-    assert nav["role"] == "nav" and nav["bind"] == lst["wire_pages"][0]["page_id"] and nav.get("trailing") and not nav["icon"]
+    assert (
+        nav["role"] == "nav"
+        and nav["bind"] == lst["wire_pages"][0]["page_id"]
+        and nav.get("trailing")
+        and not nav["icon"]
+    )
     assert home["bytes"] > home["bytes_v1"] - 100 and home["limit"] == MAX_BYTES
     assert [w["page_id"] for w in home["wire_pages"]] == [0]
     # a 40-row list on 4-row pages becomes 10 wire pages, numbered 1/10 .. 10/10
     assert len(lst["wire_pages"]) == 10
-    assert [w["seq"] for w in lst["wire_pages"]][:2] == [{"idx": 1, "cnt": 10}, {"idx": 2, "cnt": 10}]
+    assert [w["seq"] for w in lst["wire_pages"]][:2] == [
+        {"idx": 1, "cnt": 10},
+        {"idx": 2, "cnt": 10},
+    ]
     assert lst["page"] == lst["wire_pages"][0]["page"] and lst["ok"]
     assert lst["bytes"] == max(w["bytes"] for w in lst["wire_pages"])
     assert lst["widgets"] == 40
@@ -401,7 +416,12 @@ async def test_preview_carries_the_v2_model_and_both_byte_counts(c):
 async def test_a_page_that_cannot_build_does_not_hide_the_others(c):
     cfg = _list_cfg()
     cfg["pages"].append(
-        {"id": "ok2", "cols": 2, "rows": 1, "widgets": [{"type": "label", "x": 0, "y": 0, "label": "Hi"}]}
+        {
+            "id": "ok2",
+            "cols": 2,
+            "rows": 1,
+            "widgets": [{"type": "label", "x": 0, "y": 0, "label": "Hi"}],
+        }
     )
     cfg["pages"][1]["widgets"] = cfg["pages"][1]["widgets"] * 5  # 200 rows: too many page groups
     _, body = await preview(c, cfg)
@@ -418,7 +438,10 @@ async def test_a_page_that_cannot_build_does_not_hide_the_others(c):
         (lambda p: p["widgets"][0].update(role="loud"), ["pages", 0, "widgets", 0, "role"]),
         (lambda p: p["widgets"][0].update(shape="blob"), ["pages", 0, "widgets", 0, "shape"]),
         (lambda p: p["widgets"][0].update(icon="nope"), ["pages", 0, "widgets", 0, "icon"]),
-        (lambda p: p["widgets"][0].update(icon_only="yes"), ["pages", 0, "widgets", 0, "icon_only"]),
+        (
+            lambda p: p["widgets"][0].update(icon_only="yes"),
+            ["pages", 0, "widgets", 0, "icon_only"],
+        ),
         (lambda p: p["widgets"][0].update(nav="nowhere"), ["pages", 0, "widgets", 0, "nav"]),
         (lambda p: p.update(kind="weird"), ["pages", 0, "kind"]),
         (lambda p: p.update(activity="ghost"), ["pages", 0, "activity"]),
@@ -431,7 +454,15 @@ async def test_a_page_that_cannot_build_does_not_hide_the_others(c):
 async def test_validate_reports_v2_keys_with_precise_paths(c, edit, path):
     cfg = json.loads(json.dumps(CONFIG))
     cfg["pages"] = [
-        {"id": "p", "cols": 2, "rows": 2, "widgets": [{"type": "button", "x": 0, "y": 0, "label": "A", "nav": "next"}, {"type": "label", "x": 1, "y": 0, "label": "L"}]}
+        {
+            "id": "p",
+            "cols": 2,
+            "rows": 2,
+            "widgets": [
+                {"type": "button", "x": 0, "y": 0, "label": "A", "nav": "next"},
+                {"type": "label", "x": 1, "y": 0, "label": "L"},
+            ],
+        }
     ]
     cfg["pages"].append({"id": "q", "cols": 1, "rows": 1, "widgets": []})
     edit(cfg["pages"][0])
@@ -443,18 +474,41 @@ async def test_validate_reports_v2_keys_with_precise_paths(c, edit, path):
 async def test_ref_errors_for_pages_are_all_collected(c):
     cfg = json.loads(json.dumps(CONFIG))
     cfg["pages"] = [
-        {"id": "a", "kind": "home", "cols": 2, "rows": 1, "activity": "ghost", "widgets": [{"type": "button", "x": 0, "y": 0, "nav": "prev"}]},
-        {"id": "b", "kind": "home", "cols": 2, "rows": 1, "widgets": [{"type": "button", "x": 0, "y": 0, "nav": "zzz"}]},
+        {
+            "id": "a",
+            "kind": "home",
+            "cols": 2,
+            "rows": 1,
+            "activity": "ghost",
+            "widgets": [{"type": "button", "x": 0, "y": 0, "nav": "prev"}],
+        },
+        {
+            "id": "b",
+            "kind": "home",
+            "cols": 2,
+            "rows": 1,
+            "widgets": [{"type": "button", "x": 0, "y": 0, "nav": "zzz"}],
+        },
     ]
     r = await c.post("/api/v1/config/validate", json={"config": cfg}, headers=H)
     paths = [e["path"] for e in (await r.json())["errors"]]
-    for want in (["pages", 0, "activity"], ["pages", 0, "widgets", 0, "nav"], ["pages", 1, "kind"], ["pages", 1, "widgets", 0, "nav"]):
+    for want in (
+        ["pages", 0, "activity"],
+        ["pages", 0, "widgets", 0, "nav"],
+        ["pages", 1, "kind"],
+        ["pages", 1, "widgets", 0, "nav"],
+    ):
         assert want in paths, paths
 
 
 async def test_page_cap_is_in_usage_and_over_it_is_an_error(c):
     cfg = json.loads(json.dumps(CONFIG))
-    mk = lambda i: {"id": f"p{i}", "cols": 1, "rows": 1, "widgets": [{"type": "label", "x": 0, "y": 0, "label": "x"}]}
+    mk = lambda i: {
+        "id": f"p{i}",
+        "cols": 1,
+        "rows": 1,
+        "widgets": [{"type": "label", "x": 0, "y": 0, "label": "x"}],
+    }
     cfg["pages"] = [mk(i) for i in range(252)]
     _, body = await preview(c, cfg)
     assert body["ok"] and body["usage"]["pages"] == 252 and body["usage"]["page_limit"] == 252
@@ -468,7 +522,9 @@ async def test_preview_survives_a_button_that_starts_an_unknown_activity(c):
     """The studio previews on every edit, so a dangling activity reference must be a validation
     error, not a 500."""
     cfg = {
-        "devices": [{"id": "tv", "name": "TV", "commands": {"menu": {"proto": "nec", "addr": 1, "cmd": 1}}}],
+        "devices": [
+            {"id": "tv", "name": "TV", "commands": {"menu": {"proto": "nec", "addr": 1, "cmd": 1}}}
+        ],
         "activities": [{"id": "watch", "name": "Watch", "devices": [{"device": "tv"}]}],
         "keys": {"menu": {"device": "nope", "command": "x"}},
         "pages": [
@@ -477,7 +533,14 @@ async def test_preview_survives_a_button_that_starts_an_unknown_activity(c):
                 "cols": 2,
                 "rows": 2,
                 "widgets": [
-                    {"type": "button", "id": "b", "x": 0, "y": 0, "label": "Gone", "action": {"activity": "gone"}}
+                    {
+                        "type": "button",
+                        "id": "b",
+                        "x": 0,
+                        "y": 0,
+                        "label": "Gone",
+                        "action": {"activity": "gone"},
+                    }
                 ],
             }
         ],

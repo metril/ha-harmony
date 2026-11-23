@@ -129,7 +129,9 @@ async def test_state_update_reaches_other_clients_only_when_authed(hub_process):
         )
         assert (await recv(a))["t"] == "command_result"
         assert (await recv(a))["d"] == {"activity": 1, "power": True}
-        assert (await recv(b))["t"] == "activity_list"  # pushed to the other clients after set_config
+        assert (await recv(b))[
+            "t"
+        ] == "activity_list"  # pushed to the other clients after set_config
         assert (await recv(b))["d"] == {"activity": 1, "power": True}
         await asyncio.sleep(0.2)
         await lurker.send_str(env("ping", id=9))  # not authenticated: never received a broadcast
@@ -228,5 +230,7 @@ async def test_authenticated_client_is_never_closed_for_silence(start_hub):
         ack = await hello(ws)
         assert ack["d"]["tcp_keepalive"] is True
         await asyncio.sleep(1.2)  # well past the old idle limit, no traffic
-        assert (await call(ws, "ping", id=10))["t"] == "pong"  # app PINGs from old integrations still answered
+        assert (await call(ws, "ping", id=10))[
+            "t"
+        ] == "pong"  # app PINGs from old integrations still answered
     assert hub.alive()

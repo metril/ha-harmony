@@ -25,7 +25,11 @@ _KIND_NAMES = {v: k for k, v in KINDS.items()}
 PAGE_KINDS = ("normal", "home", "favorites")
 ROLES = ("default", "primary", "secondary", "danger", "nav")
 SHAPES = ("card", "row", "pill", "monogram")
-ALIGNS = ("center", "left", "right")  # kind bits 2-3: 0 centre (default), 1 left, 2 right, 3 rejected
+ALIGNS = (
+    "center",
+    "left",
+    "right",
+)  # kind bits 2-3: 0 centre (default), 1 left, 2 right, 3 rejected
 ICON_STOCK_MAX = 159
 ICON_CUSTOM_MAX = 254
 
@@ -331,7 +335,7 @@ def _widget_bytes(w: Widget, v2: bool) -> bytes:
             | (_ICON_ONLY if w.icon_only else 0)
             | (_TRAILING if w.trailing else 0)
             | (_COMPACT if w.compact else 0)
-            )
+        )
         if style:
             kind |= _HAS_STYLE
             extra += bytes([style])

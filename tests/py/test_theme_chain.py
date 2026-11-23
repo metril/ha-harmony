@@ -72,13 +72,17 @@ async def test_the_remote_sim_gets_theme_then_pages_and_the_set_is_complete(
 ):
     entry = await setup(hass, hub_rf, fake_addon, yaml=USER)
     c = entry.runtime_data
-    r = remote(built_binaries, hub_rf.rf, "--info", str(ALL), "--dump-layout", "--settle-ms", "1500")
+    r = remote(
+        built_binaries, hub_rf.rf, "--info", str(ALL), "--dump-layout", "--settle-ms", "1500"
+    )
     code, out = await asyncio.to_thread(r.result)
     lay = json.loads(out)
     assert code == 0 and lay["version"] == 2 and lay["theme_id"] == 7
     assert lay["theme"] == {"gen": lay["gen"], "hex": c.compiled.theme_wire.hex()}
     assert lay["theme_first"] is True and lay["themes_heard"] == 1
-    assert lay["complete"] is True  # the remote's rule: its pages use theme 7 and the slot has that gen
+    assert (
+        lay["complete"] is True
+    )  # the remote's rule: its pages use theme 7 and the slot has that gen
     await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -100,13 +104,15 @@ async def test_a_restarted_remote_is_sent_the_theme_again(
     hass, hub_rf, fake_addon, built_binaries, info_wait
 ):
     entry = await setup(hass, hub_rf, fake_addon, yaml=USER)
-    for _ in range(2):  # the second remote_sim is a remote that rebooted and lost its slot and store
-        r = remote(built_binaries, hub_rf.rf, "--info", str(ALL), "--dump-layout", "--settle-ms", "1500")
+    for _ in range(
+        2
+    ):  # the second remote_sim is a remote that rebooted and lost its slot and store
+        r = remote(
+            built_binaries, hub_rf.rf, "--info", str(ALL), "--dump-layout", "--settle-ms", "1500"
+        )
         code, out = await asyncio.to_thread(r.result)
         lay = json.loads(out)
         assert code == 0 and lay["complete"] is True and lay["theme_first"] is True
         assert lay["theme"]["hex"] == entry.runtime_data.compiled.theme_wire.hex()
     assert entry.runtime_data.theme_pushes >= 2
     await hass.config_entries.async_unload(entry.entry_id)
-
-

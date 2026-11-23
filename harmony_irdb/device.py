@@ -148,7 +148,9 @@ def build_device(
         if len(raw) > MAX_NAME_CHARS:
             built.skipped.append((raw[:40] + "...", "command name is too long"))
             continue
-        if any(isinstance(cmd.get(k), str) and len(cmd[k]) > MAX_PRONTO_CHARS for k in _TEXT_FIELDS):
+        if any(
+            isinstance(cmd.get(k), str) and len(cmd[k]) > MAX_PRONTO_CHARS for k in _TEXT_FIELDS
+        ):
             built.skipped.append((raw, "IR data is too long"))
             continue
         res = convert_command(cmd)
@@ -156,7 +158,9 @@ def build_device(
             built.skipped.append((raw, res.reason))
             continue
         if len(commands) >= MAX_COMMANDS:
-            built.skipped.append((raw, f"over the import limit of {MAX_COMMANDS} commands per device"))
+            built.skipped.append(
+                (raw, f"over the import limit of {MAX_COMMANDS} commands per device")
+            )
             continue
         n = command_name(raw, used)
         # running size of json.dumps(commands): braces + each `"name":action,`
@@ -195,7 +199,9 @@ def build_device(
         key = cmds[0] if isinstance(cmds, list) and cmds and isinstance(cmds[0], str) else None
         if key in by_raw and isinstance(item.get("name"), str) and len(inputs) < MAX_INPUTS:
             inputs[_label(item["name"], labels)] = by_raw[key].action
-    if not inputs:  # no input list in the archive entry: derive it from commands named like InputHdmi1
+    if (
+        not inputs
+    ):  # no input list in the archive entry: derive it from commands named like InputHdmi1
         for raw, res in by_raw.items():
             label = normalize_input(raw)
             if label and label not in labels and len(inputs) < MAX_INPUTS:

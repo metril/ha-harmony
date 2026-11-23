@@ -190,7 +190,10 @@ def test_ota_message_ids_are_stable_and_remote_ones_reserved():
         "ota_begin": 20, "ota_chunk": 21, "ota_end": 22, "ota_abort": 23, "ota_status": 24,
         "ota_offer": 30, "ota_frag": 31, "ota_frag_ack": 32, "ota_commit": 33, "ota_result": 34,
     }  # fmt: skip
-    assert all(msgs[n].transport == "rf" for n in ("ota_offer", "ota_frag", "ota_frag_ack", "ota_commit", "ota_result"))
+    assert all(
+        msgs[n].transport == "rf"
+        for n in ("ota_offer", "ota_frag", "ota_frag_ack", "ota_commit", "ota_result")
+    )
 
 
 def test_real_schema_message_codes_are_unique():
@@ -390,7 +393,7 @@ def test_receiver_ignores_unknown_fields_sender_stays_strict(tmp_path):
 
 def test_v036_decoder_accepts_main_hello_ack(tmp_path):
     """The 0.3.6 schema knew hello_ack without fw_build / ota_key."""
-    old = (tmp_path / "old.yaml")
+    old = tmp_path / "old.yaml"
     old.write_text(
         "version: 1\nmessages:\n  - name: hello_ack\n    code: 2\n    transport: ws\n    fields:\n"
         "      - {name: hub_id, type: str}\n      - {name: fw_version, type: str, optional: true}\n"
@@ -398,8 +401,12 @@ def test_v036_decoder_accepts_main_hello_ack(tmp_path):
     out = tmp_path / "out"
     generate(old, out)
     ns = load_gen_py(out)
-    env = {"v": 1, "id": 1, "t": "hello_ack",
-           "d": {"hub_id": "h", "fw_version": "0.3.7", "fw_build": 366, "ota_key": "dev"}}
+    env = {
+        "v": 1,
+        "id": 1,
+        "t": "hello_ack",
+        "d": {"hub_id": "h", "fw_version": "0.3.7", "fw_build": 366, "ota_key": "dev"},
+    }
     assert ns["decode_ws"](env)[1] == {"hub_id": "h", "fw_version": "0.3.7"}
     with pytest.raises(ns["ProtoError"]):
         ns["decode_ws"]({**env, "d": {"fw_build": 366}})  # required field still enforced
@@ -411,14 +418,19 @@ def _v038_schema(tmp_path):
 
     text = REAL_SCHEMA.read_text()
     text = _re.sub(r"^ *- \{name: limits,.*\n", "", text, flags=_re.MULTILINE)
-    text = _re.sub(r"^  - name: config_chunk\n(?:    .*\n|      .*\n)+", "", text, flags=_re.MULTILINE)
+    text = _re.sub(
+        r"^  - name: config_chunk\n(?:    .*\n|      .*\n)+", "", text, flags=_re.MULTILINE
+    )
     p = tmp_path / "v038.yaml"
     p.write_text(text)
     return p
 
 
 LIMITS_HELLO = {
-    "hub_id": "h", "fw_version": "0.3.9", "fw_build": 400, "ota_key": "release",
+    "hub_id": "h",
+    "fw_version": "0.3.9",
+    "fw_build": 400,
+    "ota_key": "release",
     "limits": {"budget": 8192, "flash_free": 4096, "chunk": 49152},
 }
 
@@ -438,8 +450,12 @@ def test_this_integration_decodes_v038_hello_ack_and_is_refused():
     from harmony_core.hub_limits import CURRENT, HubLimits
 
     ns = _real_py()
-    env = {"v": 1, "id": 1, "t": "hello_ack",
-           "d": {"hub_id": "h", "fw_version": "0.3.8", "fw_build": 366, "ota_key": "dev"}}
+    env = {
+        "v": 1,
+        "id": 1,
+        "t": "hello_ack",
+        "d": {"hub_id": "h", "fw_version": "0.3.8", "fw_build": 366, "ota_key": "dev"},
+    }
     data = ns["decode_ws"](env)[1]
     assert "limits" not in data
     with pytest.raises(ValueError):

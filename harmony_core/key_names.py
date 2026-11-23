@@ -30,7 +30,43 @@ _NAMES = {
     "directionright": "Right",
 }
 _ACRONYMS = frozenset(
-    ["ok", "dvr", "tv", "hdmi", "usb", "ir", "av", "dvd", "cd", "hd", "uhd", "sd", "epg", "ui", "hdr", "arc", "pip", "bt", "ha", "am", "fm", "cec", "rf", "led", "lcd", "osd", "pc", "vcr", "pvr", "nec", "sirc", "dts", "cc", "vod", "kvm"]
+    [
+        "ok",
+        "dvr",
+        "tv",
+        "hdmi",
+        "usb",
+        "ir",
+        "av",
+        "dvd",
+        "cd",
+        "hd",
+        "uhd",
+        "sd",
+        "epg",
+        "ui",
+        "hdr",
+        "arc",
+        "pip",
+        "bt",
+        "ha",
+        "am",
+        "fm",
+        "cec",
+        "rf",
+        "led",
+        "lcd",
+        "osd",
+        "pc",
+        "vcr",
+        "pvr",
+        "nec",
+        "sirc",
+        "dts",
+        "cc",
+        "vod",
+        "kvm",
+    ]
 )
 _BRAND = {
     "earc": "eARC",
@@ -49,7 +85,26 @@ _BRAND = {
     "hulu": "Hulu",
 }
 _SPLIT_WORDS = frozenset(["ch", "vol", "num", "key", "input", "digit", "page", "mode", "scene"])
-_UNITS = frozenset(["s", "ms", "min", "sec", "h", "hz", "khz", "mhz", "db", "st", "nd", "rd", "th", "m", "cm", "mm"])
+_UNITS = frozenset(
+    [
+        "s",
+        "ms",
+        "min",
+        "sec",
+        "h",
+        "hz",
+        "khz",
+        "mhz",
+        "db",
+        "st",
+        "nd",
+        "rd",
+        "th",
+        "m",
+        "cm",
+        "mm",
+    ]
+)
 _CMD_WORDS = {
     "vol": "volume",
     "ch": "channel",
@@ -206,7 +261,7 @@ _INPUT_PORT = re.compile(r"^input_(av|usb|tv)(?:_?(\d+))?$")
 
 
 def normalize_input(name: str) -> str | None:
-    """"InputHdmi1", "HDMI1", "Input HDMI 2" -> "HDMI 1" / "HDMI 2"; "InputAv" -> "AV", "InputUsb" -> "USB",
+    """ "InputHdmi1", "HDMI1", "Input HDMI 2" -> "HDMI 1" / "HDMI 2"; "InputAv" -> "AV", "InputUsb" -> "USB",
     "InputTv" -> "TV". None when the command is not an input selector (twin of studio-model.ts
     `normalizeInput`; both run tests/vectors/inputs.json)."""
     c = _lookup(name.strip())

@@ -22,7 +22,9 @@ pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client"
 
 @pytest.fixture
 async def addon(aiohttp_client, tmp_path):
-    app = create_app(tmp_path / "addon", auth=NoAuth(), bundle_token=ADDON_TOKEN, bundle_networks=None)
+    app = create_app(
+        tmp_path / "addon", auth=NoAuth(), bundle_token=ADDON_TOKEN, bundle_networks=None
+    )
     return await aiohttp_client(app)
 
 
@@ -38,7 +40,11 @@ class _Link:
         self.addon = addon
 
     def link_data(self):
-        return {"addon_host": "127.0.0.1", "addon_port": self.addon.server.port, "addon_token": ADDON_TOKEN}
+        return {
+            "addon_host": "127.0.0.1",
+            "addon_port": self.addon.server.port,
+            "addon_token": ADDON_TOKEN,
+        }
 
 
 async def apply_yaml(addon, text):
@@ -80,7 +86,11 @@ async def test_hello_bundle_ack_bt_relay_state_keys_and_live_end_to_end(hass, fa
     assert got["state"]["window"] == "host" or got["status"] == "ok"
 
     # editor command: POST -> bt_cmd -> hub bt_pair -> bt_result -> POST answered
-    r = await addon.post("/api/v1/bt/pair", json={"hub": HUB_ID, "mode": "host", "transport": "le", "secs": 60}, headers=H)
+    r = await addon.post(
+        "/api/v1/bt/pair",
+        json={"hub": HUB_ID, "mode": "host", "transport": "le", "secs": 60},
+        headers=H,
+    )
     assert r.status == 200, await r.text()
     assert bt.sent("bt_pair")[-1]["on"] is True and bt.sent("bt_pair")[-1]["transport"] == "le"
     r = await addon.post("/api/v1/bt/pair/stop", json={"hub": HUB_ID}, headers=H)
@@ -116,7 +126,14 @@ async def test_nothing_applied_then_the_first_apply(hass, fake_hub, addon):
 async def test_hub_without_tcp_keepalive_is_refused_at_setup(hass, fake_hub, addon):
     async def handler(ws, env):
         if env["t"] == "hello":
-            await ws.send_json({"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": []}})
+            await ws.send_json(
+                {
+                    "v": 1,
+                    "id": env["id"],
+                    "t": "hello_ack",
+                    "d": {"hub_id": HUB_ID, "activities": []},
+                }
+            )
 
     hub = await fake_hub(handler)
     entry = make_entry("127.0.0.1", hub.port)

@@ -9,7 +9,9 @@ from pathlib import Path
 from harmony_core.config_model import parse_model
 from harmony_core.keymap import resolve_keymaps
 
-FIXTURE = Path(__file__).resolve().parents[2] / "addon" / "frontend" / "test" / "fixtures" / "keymap.json"
+FIXTURE = (
+    Path(__file__).resolve().parents[2] / "addon" / "frontend" / "test" / "fixtures" / "keymap.json"
+)
 CONFIG = """
 devices:
   - id: tv

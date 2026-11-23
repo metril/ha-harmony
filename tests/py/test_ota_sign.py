@@ -15,17 +15,34 @@ CC = shutil.which("cc") or shutil.which("gcc")
 def tool(tmp_path_factory):
     out = tmp_path_factory.mktemp("ota_tool") / "ota_sign"
     subprocess.run(
-        [CC, "-O1", "-std=c11", "-w", "-I", "common/ota", "-I", "vendor/tweetnacl",
-         "-DOTA_PUBKEY_HEADER=\"ota_pubkey_dev.h\"", "-o", str(out), "tools/ota_sign.c",
-         "common/ota/ota_image.c", "vendor/tweetnacl/tweetnacl.c"],
-        cwd=ROOT, check=True, capture_output=True,
+        [
+            CC,
+            "-O1",
+            "-std=c11",
+            "-w",
+            "-I",
+            "common/ota",
+            "-I",
+            "vendor/tweetnacl",
+            '-DOTA_PUBKEY_HEADER="ota_pubkey_dev.h"',
+            "-o",
+            str(out),
+            "tools/ota_sign.c",
+            "common/ota/ota_image.c",
+            "vendor/tweetnacl/tweetnacl.c",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
     )
     return out
 
 
 def run(tool, *args, home=None, ok=True):
     env = dict(os.environ, HOME=str(home)) if home else os.environ
-    r = subprocess.run([str(tool), *map(str, args)], capture_output=True, text=True, env=env, check=False)
+    r = subprocess.run(
+        [str(tool), *map(str, args)], capture_output=True, text=True, env=env, check=False
+    )
     assert (r.returncode == 0) == ok, r.stderr + r.stdout
     return r
 
@@ -73,7 +90,12 @@ def test_sign_verify_roundtrip_and_rejections(tool, tmp_path):
 def test_sign_needs_key_and_args(tool, tmp_path):
     p = tmp_path / "p"
     p.write_bytes(b"x")
-    assert "private key" in run(tool, "sign", "-t", "hub", "-b", 1, p, tmp_path / "o", home=tmp_path, ok=False).stderr
+    assert (
+        "private key"
+        in run(
+            tool, "sign", "-t", "hub", "-b", 1, p, tmp_path / "o", home=tmp_path, ok=False
+        ).stderr
+    )
     run(tool, "sign", "--dev", "-t", "remote", "-b", 1, p, tmp_path / "o", home=tmp_path)
     run(tool, "sign", "-t", "hub", p, tmp_path / "o", home=tmp_path, ok=False)
 
@@ -96,18 +118,50 @@ def test_pubheader_dev_matches_committed_and_generated_is_not_dev(tool, tmp_path
 @pytest.mark.skipif(not shutil.which("cmake"), reason="cmake missing")
 def test_release_build_refuses_dev_key(tmp_path, tool):
     base = ["cmake", "-S", str(ROOT), "-B", str(tmp_path / "b")]
-    r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=Release", "-DHP_BUILD_TESTS=OFF"], capture_output=True, text=True, check=False)
+    r = subprocess.run(
+        [*base, "-DCMAKE_BUILD_TYPE=Release", "-DHP_BUILD_TESTS=OFF"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert r.returncode != 0 and "DEV/TEST public key" in r.stderr
-    allow = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DHP_BUILD_TESTS=OFF", "-DHP_ALLOW_DEV_OTA_KEY=ON"],
-                           capture_output=True, text=True, check=False)
+    allow = subprocess.run(
+        [
+            *base,
+            "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+            "-DHP_BUILD_TESTS=OFF",
+            "-DHP_ALLOW_DEV_OTA_KEY=ON",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert allow.returncode == 0 and "DEV/TEST OTA PUBLIC KEY" in allow.stderr
-    r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DHP_BUILD_TESTS=OFF", "-DHP_ALLOW_DEV_OTA_KEY=OFF"],
-                       capture_output=True, text=True, check=False)
+    r = subprocess.run(
+        [
+            *base,
+            "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+            "-DHP_BUILD_TESTS=OFF",
+            "-DHP_ALLOW_DEV_OTA_KEY=OFF",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert r.returncode != 0
     gen = tmp_path / "gen.h"
     gen.write_text(run(tool, "pubheader", "--dev").stdout.replace("IS_DEV 1", "IS_DEV 0"))
-    r = subprocess.run([*base, "-DCMAKE_BUILD_TYPE=Release", "-DHP_BUILD_TESTS=OFF", f"-DHP_OTA_PUBKEY_HEADER={gen}"],
-                       capture_output=True, text=True, check=False)
+    r = subprocess.run(
+        [
+            *base,
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DHP_BUILD_TESTS=OFF",
+            f"-DHP_OTA_PUBKEY_HEADER={gen}",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert r.returncode == 0, r.stderr
 
 
@@ -118,9 +172,16 @@ def test_sign_reads_the_build_id_from_a_hub_binary_and_needs_it_nowhere_else(too
     out = run(tool, "sign", "--dev", "-t", "hub", fake, img, home=tmp_path).stdout
     assert "build 4242" in out
     assert "build=4242" in run(tool, "verify", "--dev", "-t", "hub", img).stdout
-    run(tool, "sign", "--dev", "-t", "hub", "-b", 9, fake, img, home=tmp_path)  # explicit still wins
+    run(
+        tool, "sign", "--dev", "-t", "hub", "-b", 9, fake, img, home=tmp_path
+    )  # explicit still wins
     assert "build=9" in run(tool, "verify", "--dev", img).stdout
     plain = tmp_path / "p.bin"
     plain.write_bytes(b"no tag here")
-    assert "-b BUILD" in run(tool, "sign", "--dev", "-t", "hub", plain, img, home=tmp_path, ok=False).stderr
-    run(tool, "sign", "--dev", "-t", "remote", plain, img, home=tmp_path, ok=False)  # remote images need -b
+    assert (
+        "-b BUILD"
+        in run(tool, "sign", "--dev", "-t", "hub", plain, img, home=tmp_path, ok=False).stderr
+    )
+    run(
+        tool, "sign", "--dev", "-t", "remote", plain, img, home=tmp_path, ok=False
+    )  # remote images need -b

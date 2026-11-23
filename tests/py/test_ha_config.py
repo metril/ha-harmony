@@ -427,11 +427,14 @@ async def test_page_tap_runs_button_action(hass, hub_rf, write_yaml, built_binar
 async def test_tile_update_follows_bound_entity(hass, hub_rf, write_yaml, built_binaries):
     write_yaml(BASE)
     # settle = quiet time after the last frame; generous so a stalled loop cannot end the dump early
-    r = start_remote(built_binaries, hub_rf.rf, "--dump-layout", "--settle-ms", "2500",
-                     "--timeout-ms", "20000")
+    r = start_remote(
+        built_binaries, hub_rf.rf, "--dump-layout", "--settle-ms", "2500", "--timeout-ms", "20000"
+    )
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
-    sent: list[str] = []  # the tile texts actually sent, in order (the attach push sends "--" first)
+    sent: list[
+        str
+    ] = []  # the tile texts actually sent, in order (the attach push sends "--" first)
     real = coord.client.async_send
 
     async def spy(msg_type, data, *a, **kw):
@@ -535,7 +538,9 @@ async def test_device_commands_buttons_and_send_command(hass, hub_rf, write_yaml
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_toggle_device_power_buttons_keep_direction(hass, hub_rf, write_yaml, enabled_buttons):
+async def test_toggle_device_power_buttons_keep_direction(
+    hass, hub_rf, write_yaml, enabled_buttons
+):
     write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     press = hass.services.async_call
@@ -628,7 +633,9 @@ async def test_reload_service_rejects_bad_yaml_and_keeps_previous(hass, hub_rf, 
 
 
 # ------------------------------------------------------------------ failure modes
-async def test_bad_bundle_at_startup_keeps_the_cached_config(hass, hub_rf, write_yaml, enabled_buttons):
+async def test_bad_bundle_at_startup_keeps_the_cached_config(
+    hass, hub_rf, write_yaml, enabled_buttons
+):
     path = write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     assert uids(hass, entry) == BASE_UIDS
@@ -656,13 +663,24 @@ async def test_nothing_applied_loads_with_hub_config_untouched(hass, hub_rf, wri
     assert hass.states.get(SELECT).attributes["options"] == ["TV", "Music", "Off"]
     assert uids(hass, entry) == {
         f"{HUB_ID}_{k}"
-        for k in ["remote", "activity", "key_1", "battery_1", "voltage_1", "pagefmt_1", "addon_link", "firmware"]
+        for k in [
+            "remote",
+            "activity",
+            "key_1",
+            "battery_1",
+            "voltage_1",
+            "pagefmt_1",
+            "addon_link",
+            "firmware",
+        ]
     }
     await hass.config_entries.async_unload(entry.entry_id)
 
 
 async def test_oversize_config_is_a_clean_error(hass, hub_rf, write_yaml):
-    write_yaml("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(256)))  # the hub's device ceiling is 255
+    write_yaml(
+        "devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(256))
+    )  # the hub's device ceiling is 255
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
     assert entry.state is ConfigEntryState.LOADED
@@ -680,7 +698,16 @@ async def test_hub_rejection_raises_repair_issue(hass, fake_hub, write_yaml, cap
         reply = {"v": 1, "id": env["id"]}
         if t == "hello":
             await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": ["A"], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
+                {
+                    **reply,
+                    "t": "hello_ack",
+                    "d": {
+                        "hub_id": HUB_ID,
+                        "activities": ["A"],
+                        "tcp_keepalive": True,
+                        "limits": CURRENT.to_wire(),
+                    },
+                }
             )
             await ws.send_json(
                 {"v": 1, "id": 0, "t": "state_update", "d": {"activity": 7, "power": True}}
@@ -718,7 +745,9 @@ async def test_hub_restart_recovery(hass, start_hub, write_yaml, tmp_path, keep_
     await until(hass, lambda: hass.states.get(SELECT).state == "Off")
     await until(hass, lambda: coord.config_pushes == (1 if keep_cache else 2))
     # config_pushes counts the request; the activity list is applied when the hub acks it
-    await until(hass, lambda: hass.states.get(SELECT).attributes.get("options") == ["Télé", "Music", "Off"])
+    await until(
+        hass, lambda: hass.states.get(SELECT).attributes.get("options") == ["Télé", "Music", "Off"]
+    )
     await asyncio.sleep(0.1)
     assert coord.config_pushes == (1 if keep_cache else 2)  # pushed again only when the hub lost it
     assert uids(hass, entry) == before

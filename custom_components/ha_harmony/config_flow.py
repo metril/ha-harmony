@@ -161,7 +161,7 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_hub_moved(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """"Hub <id> moved to <host>?" The saved token is only sent after the user says yes."""
+        """ "Hub <id> moved to <host>?" The saved token is only sent after the user says yes."""
         entry = self.hass.config_entries.async_get_entry(self._moved_entry_id or "")
         if entry is None or self._host is None:
             return self.async_abort(reason="unknown")
@@ -171,12 +171,10 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
             "new_host": f"{self._host}:{self._port}",
         }
         if user_input is None:
-            return self.async_show_form(
-                step_id="hub_moved", description_placeholders=placeholders
-            )
+            return self.async_show_form(step_id="hub_moved", description_placeholders=placeholders)
         try:
             hub_id = await _probe(self.hass, self._host, self._port, entry.data[CONF_TOKEN])
-        except (HarmonyAuthError, HarmonyVersionError, HarmonyConnectionError):
+        except HarmonyAuthError, HarmonyVersionError, HarmonyConnectionError:
             return self.async_abort(reason="cannot_connect")
         renamed = (
             hub_id != entry.unique_id
@@ -202,7 +200,9 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         stored_name = entry.data.get(CONF_HUB_NAME, "")
-        can_rename = entry.data.get(CONF_CAN_RENAME) is not False  # unknown (never connected): offer it
+        can_rename = (
+            entry.data.get(CONF_CAN_RENAME) is not False
+        )  # unknown (never connected): offer it
         pinned = entry.data.get(CONF_ID_PINNED) is True
         detail = ""
         if user_input is not None:
@@ -210,7 +210,9 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
             new_id = str(user_input.get(CONF_HUB_ID, entry.unique_id)).strip()
             name = str(user_input.get(CONF_HUB_NAME, stored_name)).strip()
             try:
-                client = await _connect(self.hass, conn[CONF_HOST], conn[CONF_PORT], conn[CONF_TOKEN])
+                client = await _connect(
+                    self.hass, conn[CONF_HOST], conn[CONF_PORT], conn[CONF_TOKEN]
+                )
             except (HarmonyAuthError, HarmonyVersionError, HarmonyConnectionError) as exc:
                 errors["base"] = _error_key(exc)
             else:
@@ -247,10 +249,14 @@ class HarmonyConfigFlow(ConfigFlow, domain=DOMAIN):
             note = "Renaming needs newer hub firmware, so the hub id and name are shown but cannot be changed here."
         else:
             if not pinned:
-                fields[vol.Required(CONF_HUB_ID, default=current.get(CONF_HUB_ID, entry.unique_id))] = str
+                fields[
+                    vol.Required(CONF_HUB_ID, default=current.get(CONF_HUB_ID, entry.unique_id))
+                ] = str
             else:
                 note = "The hub id is pinned by hub_id in hub.conf on the device and cannot be changed here."
-            fields[vol.Optional(CONF_HUB_NAME, default=current.get(CONF_HUB_NAME, stored_name))] = str
+            fields[vol.Optional(CONF_HUB_NAME, default=current.get(CONF_HUB_NAME, stored_name))] = (
+                str
+            )
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=vol.Schema(fields),

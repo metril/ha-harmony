@@ -171,7 +171,17 @@ def sign_image(built_binaries, tmp_path):
         src, out = tmp_path / f"payload{n}.bin", tmp_path / f"signed{n}.img"
         src.write_bytes(payload)
         subprocess.run(
-            [str(built_binaries / "ota_sign"), "sign", "--dev", "-t", target, "-b", str(build), str(src), str(out)],
+            [
+                str(built_binaries / "ota_sign"),
+                "sign",
+                "--dev",
+                "-t",
+                target,
+                "-b",
+                str(build),
+                str(src),
+                str(out),
+            ],
             check=True,
             capture_output=True,
         )

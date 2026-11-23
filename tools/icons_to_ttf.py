@@ -29,7 +29,9 @@ def main(out: str) -> None:
         svg = SVG.fromstring((ROOT / "assets/icons" / f"{ic['name']}.svg").read_text()).topicosvg()
         pen = TTGlyphPen(None)
         # y flip: SVG y grows down; glyph y grows up from the baseline (icon sits on 0..2400)
-        tp = TransformPen(Cu2QuPen(pen, 1.0, reverse_direction=True), (SCALE, 0, 0, -SCALE, 0, 2400))
+        tp = TransformPen(
+            Cu2QuPen(pen, 1.0, reverse_direction=True), (SCALE, 0, 0, -SCALE, 0, 2400)
+        )
         for el in svg.svg_root.iter():
             if el.tag.endswith("path") and el.get("d"):
                 parse_path(el.get("d"), tp)

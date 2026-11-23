@@ -73,14 +73,20 @@ SERVICE_SCHEMAS: dict[str, vol.Schema] = {
     "push_pages": vol.Schema(_TARGET),
     "send_ir": vol.Schema({**_TARGET, vol.Required("ir"): dict}),
     "install_firmware": vol.Schema(
-        {**_TARGET, vol.Required("path"): cv.string, vol.Optional("allow_dev_key", default=False): cv.boolean}
+        {
+            **_TARGET,
+            vol.Required("path"): cv.string,
+            vol.Optional("allow_dev_key", default=False): cv.boolean,
+        }
     ),
     "bt_pair": vol.Schema(
         {
             **_TARGET,
             vol.Optional("mode", default="host"): vol.In(["host", "remote"]),
             vol.Optional("transport", default="any"): vol.In(["any", "classic", "le"]),
-            vol.Optional("seconds", default=120): vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
+            vol.Optional("seconds", default=120): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=300)
+            ),
             vol.Optional("address"): cv.string,
         }
     ),
@@ -212,10 +218,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
         async with entry_lock(hass, entry):  # never alongside a rename started from Reconfigure
             if client.hub_id != entry.unique_id:
                 hw = entry.data.get(CONF_HW_ID)
-                taken = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, client.hub_id or "")
+                taken = hass.config_entries.async_entry_for_domain_unique_id(
+                    DOMAIN, client.hub_id or ""
+                )
                 if not (hw and client.hw_id == hw and client.hub_id and taken is None):
                     await client.async_close()
-                    raise ConfigEntryError("Host now answers as a different hub; re-add the integration")
+                    raise ConfigEntryError(
+                        "Host now answers as a different hub; re-add the integration"
+                    )
                 try:
                     # the hub already has its new id: an add-on store under both ids is a repair issue, not a failure
                     await async_migrate_entry(
@@ -223,8 +233,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: HarmonyConfigEntry) -> b
                     )
                 except RenameError as exc:
                     await client.async_close()
-                    raise ConfigEntryError(f"Could not follow the hub's new id {client.hub_id}: {exc}") from exc
-                _LOGGER.info("The hub is now called %s; moved its entities, devices and cache", client.hub_id)
+                    raise ConfigEntryError(
+                        f"Could not follow the hub's new id {client.hub_id}: {exc}"
+                    ) from exc
+                _LOGGER.info(
+                    "The hub is now called %s; moved its entities, devices and cache", client.hub_id
+                )
     _sync_identity(hass, entry, client)
 
     coordinator = HarmonyCoordinator(hass, entry, client)
@@ -297,7 +311,9 @@ def _device_kwargs(coordinator: HarmonyCoordinator) -> dict[str, Any]:
     }
 
 
-def _sync_identity(hass: HomeAssistant, entry: HarmonyConfigEntry, client: HarmonyHubClient) -> None:
+def _sync_identity(
+    hass: HomeAssistant, entry: HarmonyConfigEntry, client: HarmonyHubClient
+) -> None:
     """Remember what the hub says about itself (hardware id, name, whether it can be renamed)."""
     new = identity_data(entry, client)
     if all(entry.data.get(k) == v for k, v in new.items()):

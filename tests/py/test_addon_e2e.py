@@ -29,7 +29,9 @@ if REQUIRED:
     assert (DIST / "index.html").is_file(), "HH_REQUIRE_E2E set but the frontend is not built"
 else:
     pw = pytest.importorskip("playwright.async_api")
-    pytestmark = pytest.mark.skipif(not (DIST / "index.html").is_file(), reason="frontend not built")
+    pytestmark = pytest.mark.skipif(
+        not (DIST / "index.html").is_file(), reason="frontend not built"
+    )
 
 PREFIX = "/api/hassio_ingress/e2eTok_en-1"
 TOKEN = "ab" * 32
@@ -128,7 +130,9 @@ async def proxy_ws(page, origin):
             await up.close()
             await session.close()
 
-        route.on_message(lambda m: asyncio.ensure_future(up.send_str(m if isinstance(m, str) else m.decode())))
+        route.on_message(
+            lambda m: asyncio.ensure_future(up.send_str(m if isinstance(m, str) else m.decode()))
+        )
         route.on_close(lambda *a: asyncio.ensure_future(stop()))
 
     await page.route_web_socket(f"{ws_origin}{PREFIX}/**", relay)
@@ -174,9 +178,12 @@ class Channel:
     async def open(self, known_rev=None, **hello):
         self.session = aiohttp.ClientSession()
         self.ws = await self.session.ws_connect(
-            f"{self.origin}/api/v1/channel?hub={self.hub}", headers={"Authorization": f"Bearer {TOKEN}"}
+            f"{self.origin}/api/v1/channel?hub={self.hub}",
+            headers={"Authorization": f"Bearer {TOKEN}"},
         )
-        await self.ws.send_json({"t": "hello", "v": 1, "hub": self.hub, "known_rev": known_rev, **hello})
+        await self.ws.send_json(
+            {"t": "hello", "v": 1, "hub": self.hub, "known_rev": known_rev, **hello}
+        )
         return self
 
     async def send(self, t, **fields):
@@ -221,7 +228,9 @@ async def ack(origin, result="ok", detail=None, hub="default"):
     ch = await Channel(origin, hub).open()
     try:
         await ch.ack(result, detail)
-        await ch.ws.send_str("{}")  # frames are handled in order: the answer to this one says the ack is done
+        await ch.ws.send_str(
+            "{}"
+        )  # frames are handled in order: the answer to this one says the ack is done
         await ch.recv("error")
     finally:
         await ch.close()
@@ -229,9 +238,10 @@ async def ack(origin, result="ok", detail=None, hub="default"):
 
 async def hub_status(origin, hub="default"):
     """The `hub:<id>` snapshot the editor gets from /live."""
-    async with aiohttp.ClientSession() as s, s.ws_connect(
-        f"{origin}/api/v1/live", headers={**INGRESS_HEADERS, "Origin": origin}
-    ) as ws:
+    async with (
+        aiohttp.ClientSession() as s,
+        s.ws_connect(f"{origin}/api/v1/live", headers={**INGRESS_HEADERS, "Origin": origin}) as ws,
+    ):
         await ws.send_json({"sub": [f"hub:{hub}"]})
         while True:
             m = (await asyncio.wait_for(ws.receive(), 8)).json()
@@ -252,11 +262,13 @@ async def seed(origin, *configs):
     for text in configs:
         cfg = load_source(text)
         await ensure_cfg(origin)
-        assert (await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": cfg}, headers=H))[
+        assert (
+            await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": cfg}, headers=H)
+        )[0] == 200
+        body = {"config_id": "main"}
+        assert (await api(origin, "POST", "/api/v1/hubs/default/apply", json=body, headers=H))[
             0
         ] == 200
-        body = {"config_id": "main"}
-        assert (await api(origin, "POST", "/api/v1/hubs/default/apply", json=body, headers=H))[0] == 200
 
 
 async def test_import_preview_apply_ack_under_an_ingress_prefix(browser, site):
@@ -538,7 +550,9 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
     )
     await ensure_cfg(site)
     assert (
-        await api(site, "PUT", "/api/v1/configs/main/draft", json={"config": load_source(avr)}, headers=H)
+        await api(
+            site, "PUT", "/api/v1/configs/main/draft", json={"config": load_source(avr)}, headers=H
+        )
     )[0] == 200
     page = await open_editor(browser, site, problems)
     await page.goto(f"{site}{PREFIX}/#/devices/new")
@@ -611,7 +625,9 @@ async def test_edit_then_immediate_reload_keeps_the_edit(browser, site):
 
     await ensure_cfg(site)
 
-    await api(site, "PUT", "/api/v1/configs/main/draft", json={"config": load_source(YAML)}, headers=H)
+    await api(
+        site, "PUT", "/api/v1/configs/main/draft", json={"config": load_source(YAML)}, headers=H
+    )
     page = await open_editor(browser, site)
     await page.goto(f"{site}{PREFIX}/#/devices/tv")
     name = page.get_by_label("Device Name")
@@ -623,7 +639,8 @@ async def test_edit_then_immediate_reload_keeps_the_edit(browser, site):
     if await prompt.count():
         await prompt.click()
     await page.wait_for_function(
-        "() => document.querySelector('hh-app').store.config.devices[0].name === 'Quick TV'", timeout=8000
+        "() => document.querySelector('hh-app').store.config.devices[0].name === 'Quick TV'",
+        timeout=8000,
     )
     await page.wait_for_function(
         "() => document.querySelector('hh-app').store.saveState === 'saved'", timeout=8000
@@ -632,9 +649,7 @@ async def test_edit_then_immediate_reload_keeps_the_edit(browser, site):
     assert got["draft"]["config"]["devices"][0]["name"] == "Quick TV"
 
 
-async def test_wizard_likely_model_goes_candidates_to_model_files(
-    browser, site_ir
-):
+async def test_wizard_likely_model_goes_candidates_to_model_files(browser, site_ir):
     page = await open_editor(browser, site_ir)
     seen: list[str] = []
     page.on("request", lambda r: seen.append(r.url.split("/api/v1/")[-1]))
@@ -724,7 +739,11 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
 
     # drag a light from the palette's Home Assistant tab onto the screen: a tile with the automatic tap
     await page.get_by_role("tab", name="Home Assistant", exact=True).click()
-    await page.locator("hh-palette").get_by_placeholder("Search entities, areas").fill("light.kitchen")
+    await (
+        page.locator("hh-palette")
+        .get_by_placeholder("Search entities, areas")
+        .fill("light.kitchen")
+    )
     ent = page.locator("hh-palette .ent", has_text="light.kitchen").first
     await ent.wait_for()
     eb = await ent.bounding_box()
@@ -756,7 +775,9 @@ async def test_ha_action_key_and_tile_flow_reaches_the_bundle(browser, site_ha):
     bundle = await ch.bundle()
     await ch.close()
     assert "editor" not in bundle["config"]
-    assert bundle["config"]["activities"][1]["keys"]["channel_up"]["ha"]["service"] == "light.toggle"
+    assert (
+        bundle["config"]["activities"][1]["keys"]["channel_up"]["ha"]["service"] == "light.toggle"
+    )
     assert [w for p in bundle["config"]["pages"] for w in p["widgets"] if w["type"] == "tile"]
     if os.environ.get("HH_WRITE_FIXTURE"):
         FLOW_FIXTURE.parent.mkdir(exist_ok=True)
@@ -824,13 +845,16 @@ async def test_history_status_follows_the_remote(browser, site):
         await shots(page, "history-rejected")
     await ch.close()
 
+
 async def test_library_create_save_rev_switch_restore_and_apply_to_hub(browser, site):
     """Config library in the editor: import, Save Revision, New config, switch back, Restore To Draft, Apply To Hub."""
     problems: list[str] = []
     page = await open_editor(browser, site, problems)
     await page.get_by_text("Set up your first hub config").wait_for()
     cfg = page.get_by_role("combobox", name="Config")
-    await pw.expect(cfg.locator("option:checked")).to_have_text("Main")  # an empty library gets "Main"
+    await pw.expect(cfg.locator("option:checked")).to_have_text(
+        "Main"
+    )  # an empty library gets "Main"
 
     await page.get_by_role("button", name="Import YAML", exact=True).click()
     await page.locator("textarea").fill(YAML)
@@ -860,7 +884,9 @@ async def test_library_create_save_rev_switch_restore_and_apply_to_hub(browser, 
     await bar.get_by_text("Rev 1 · No Changes").wait_for()
     assert await page.evaluate("window.__marker") == "alive"  # no reload happened
     await pw.expect(page).to_have_url(re.compile(r"config=main"))
-    await page.evaluate("document.querySelector('hh-app').store.edit(c => { c.devices[0].name = 'Edited'; })")
+    await page.evaluate(
+        "document.querySelector('hh-app').store.edit(c => { c.devices[0].name = 'Edited'; })"
+    )
     await bar.get_by_text("Rev 1 + Unsaved Changes").wait_for()
     # Import As New Config: a third config from the YAML, opened in place
     await page.evaluate("window.__marker = 'alive'")

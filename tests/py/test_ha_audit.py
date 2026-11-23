@@ -245,7 +245,17 @@ async def test_flapping_hub_backs_off_exponentially_with_jitter(fake_hub):
     async def handler(ws, env):
         if env["t"] == "hello":
             await ws.send_json(
-                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
+                {
+                    "v": 1,
+                    "id": env["id"],
+                    "t": "hello_ack",
+                    "d": {
+                        "hub_id": "h",
+                        "activities": [],
+                        "tcp_keepalive": True,
+                        "limits": CURRENT.to_wire(),
+                    },
+                }
             )
             await ws.close()  # accepted, then dropped at once
 
@@ -296,7 +306,17 @@ async def test_stable_connection_resets_the_backoff(fake_hub):
         nonlocal conns, now
         if env["t"] == "hello":
             await ws.send_json(
-                {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
+                {
+                    "v": 1,
+                    "id": env["id"],
+                    "t": "hello_ack",
+                    "d": {
+                        "hub_id": "h",
+                        "activities": [],
+                        "tcp_keepalive": True,
+                        "limits": CURRENT.to_wire(),
+                    },
+                }
             )
             conns += 1
             if conns == 3:
@@ -440,7 +460,9 @@ async def test_flapping_ws_link_pushes_nothing_per_reconnect(hass, rig, clock):
         await settle(hass, lambda: c.available)
     await asyncio.sleep(0.3)
     await settle(hass)
-    assert hub.pages() == [] and c.config_pushes == 1  # bounded work per reconnect: a hello and a resync
+    assert (
+        hub.pages() == [] and c.config_pushes == 1
+    )  # bounded work per reconnect: a hello and a resync
 
 
 # 10: a hold is not an event unless asked for; event_types is built once per compile
@@ -452,7 +474,9 @@ async def test_hold_repeats_write_no_event_by_default(hass, rig, clock, writes):
         await press(hub, 4, action)
     await settle(hass, lambda: len(writes) >= 2)
     await asyncio.sleep(0.1)
-    assert [e for e in writes if e.startswith("event.")] == ["event.harmony_hub_sim_hub_remote_1_keys"] * 2
+    assert [e for e in writes if e.startswith("event.")] == [
+        "event.harmony_hub_sim_hub_remote_1_keys"
+    ] * 2
     st = hass.states.get("event.harmony_hub_sim_hub_remote_1_keys")
     assert st.attributes["action"] == "release" and "remote" not in st.attributes
     hass.config_entries.async_update_entry(c.config_entry, options={"hold_events": True})
@@ -460,7 +484,9 @@ async def test_hold_repeats_write_no_event_by_default(hass, rig, clock, writes):
     for action in (0, 2, 2, 2, 1):
         await press(hub, 4, action)
     await settle(hass, lambda: len(writes) >= 5)
-    assert [e for e in writes if e.startswith("event.")] == ["event.harmony_hub_sim_hub_remote_1_keys"] * 5
+    assert [e for e in writes if e.startswith("event.")] == [
+        "event.harmony_hub_sim_hub_remote_1_keys"
+    ] * 5
 
 
 async def test_event_types_and_config_hash_are_computed_once_per_compile(hass, rig, clock):
@@ -497,7 +523,9 @@ async def test_first_setup_with_a_slow_addon_returns_within_the_bound(
     fake_addon.apply_yaml(YAML)
     entry = make_entry("127.0.0.1", server.port, addon=fake_addon)
     entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)  # returns by FIRST_APPLY_WAIT, add-on still pending
+    assert await hass.config_entries.async_setup(
+        entry.entry_id
+    )  # returns by FIRST_APPLY_WAIT, add-on still pending
     assert not gate.is_set() and fetches
     gate.set()
     c = entry.runtime_data
@@ -663,7 +691,11 @@ async def test_registry_entries_of_a_gone_remote_are_removed(hass, rig, clock, f
         config_entry_id=entry_id, identifiers={("ha_harmony", f"{c.hub_id}_remote_2")}
     )
     ereg.async_get_or_create(
-        "sensor", "ha_harmony", f"{c.hub_id}_battery_2", config_entry=c.config_entry, device_id=dev.id
+        "sensor",
+        "ha_harmony",
+        f"{c.hub_id}_battery_2",
+        config_entry=c.config_entry,
+        device_id=dev.id,
     )
     fake_addon.apply_yaml(YAML.replace("name: Stream", "name: Stream3"))  # any config change
     await c.async_refresh_from_addon()
@@ -688,7 +720,9 @@ def test_translations_icons_and_parallel_updates_are_complete():
             assert key in icons["entity"][domain], (py.name, key)
         if domain in {"sensor", "binary_sensor", "select", "button", "event", "remote"}:
             assert "PARALLEL_UPDATES = 0" in text, py.name
-    for key in re.findall(r'(?:ha_error|invalid)\(\s*"(\w+)"', "".join(p.read_text() for p in pkg.glob("*.py"))):
+    for key in re.findall(
+        r'(?:ha_error|invalid)\(\s*"(\w+)"', "".join(p.read_text() for p in pkg.glob("*.py"))
+    ):
         assert key in strings["exceptions"], key
     for svc in ("reload_config", "push_pages", "send_ir", "set_device_state", "install_firmware"):
         assert svc in icons["services"] and svc in strings["services"]

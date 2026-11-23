@@ -15,7 +15,14 @@ pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client"
 DUSK = "themes:\n  dusk: {extends: midnight, tokens: {ACC: '#FF8A3D'}}\ntheme: dusk\n"
 USER = YAML + DUSK
 USER2 = YAML + DUSK.replace("#FF8A3D", "#3366CC")
-FULL = {"remote": 1, "page_fmt": 2, "caps": 15, "icons": 50, "gen": 0, "pages": 0}  # all caps, empty store
+FULL = {
+    "remote": 1,
+    "page_fmt": 2,
+    "caps": 15,
+    "icons": 50,
+    "gen": 0,
+    "pages": 0,
+}  # all caps, empty store
 MIDNIGHT = 1  # the base preset of the user theme
 
 
@@ -55,7 +62,12 @@ async def test_theme_goes_before_its_pages_and_the_remote_acks(hass, rig, clock)
     assert hub.themes() == [(rp.gen, c.compiled.theme_wire)] and len(c.compiled.theme_wire) == 99
     assert decode_page(c.compiled.pages_v2[0]).theme == 7 == rp.models[0].theme
     st = c.theme_status(1)
-    assert st == {"name": "dusk", "id": 7, "sent": True, "acked": False}  # the hub took it; the remote has not said
+    assert st == {
+        "name": "dusk",
+        "id": 7,
+        "sent": True,
+        "acked": False,
+    }  # the hub took it; the remote has not said
     await hub.push("remote_info", info_of(c))  # complete set held: pages and theme
     await idle(hass, c)
     assert c.links[1].pushed is not None and c.theme_status(1)["acked"] is True
@@ -93,7 +105,9 @@ async def test_a_newer_config_cancels_a_running_theme_push(hass, rig, clock, fak
     order = sent(hub)
     first_new = order.index(("theme", rp.gen))
     assert all(g == rp.gen for _, g in order[first_new:]), order  # the old set never resumes
-    assert order[first_new + 1 :] == [("page", rp.gen)] * len(rp.pages_v2)  # the new theme first, then its pages
+    assert order[first_new + 1 :] == [("page", rp.gen)] * len(
+        rp.pages_v2
+    )  # the new theme first, then its pages
     assert hub.themes()[-1] == (rp.gen, c.compiled.theme_wire)
 
 
@@ -116,7 +130,9 @@ async def test_a_preset_set_needs_no_theme_push(hass, rig, clock):  # noqa: F811
 async def test_a_remote_that_holds_the_set_is_sent_nothing(hass, rig, clock):  # noqa: F811
     hub, c = await rig(USER, pages=False)
     await hub.push("remote_attached", {})
-    await hub.push("remote_info", info_of(c))  # a hub restart: the remote still holds pages and theme
+    await hub.push(
+        "remote_info", info_of(c)
+    )  # a hub restart: the remote still holds pages and theme
     await idle(hass, c)
     await asyncio.sleep(0.05)
     assert sent(hub) == [] and c.theme_status(1)["acked"] is True
@@ -168,7 +184,11 @@ def retrying(link):
     return link.retry_task is not None and not link.retry_task.done()
 
 
-async def test_an_unconfirmed_theme_set_is_not_marked_pushed_and_is_retried_with_backoff(hass, rig, clock):  # noqa: F811
+async def test_an_unconfirmed_theme_set_is_not_marked_pushed_and_is_retried_with_backoff(
+    hass,
+    rig,  # noqa: F811
+    clock,  # noqa: F811
+):
     hub, c = await start(hass, rig)
     link = c.links[1]
     n = len(c.compiled.for_caps(15).pages_v2)
@@ -235,7 +255,9 @@ async def test_a_remote_reboot_the_hub_never_saw_is_pushed_again(hass, rig, cloc
     await hub.push("remote_info", info_of(c))
     await idle(hass, c)
     assert link.pushed is not None
-    await hub.push("remote_info", FULL)  # it rebooted and says its store is empty; no remote_attached
+    await hub.push(
+        "remote_info", FULL
+    )  # it rebooted and says its store is empty; no remote_attached
     await settle(hass, lambda: len(sent(hub)) == 2 * (1 + n))  # at once the first time
     assert [k for k, _ in sent(hub)] == (["theme"] + ["page"] * n) * 2
     await hub.push("remote_info", info_of(c))
@@ -273,7 +295,9 @@ async def test_a_refused_theme_holds_the_pages_back_and_recovers(hass, rig, cloc
     clock.elapse()
     rp = c.compiled.for_caps(15)
     await settle(hass, lambda: len(hub.pages()) == len(rp.pages_v2))
-    assert [k for k, _ in sent(hub)] == ["theme", "theme"] + ["page"] * len(rp.pages_v2)  # the refused one counts
+    assert [k for k, _ in sent(hub)] == ["theme", "theme"] + ["page"] * len(
+        rp.pages_v2
+    )  # the refused one counts
     await hub.push("remote_info", info_of(c))
     await idle(hass, c)
     assert link.pushed is not None and c.theme_status(1)["acked"] is True
@@ -317,7 +341,11 @@ async def test_tiles_are_resent_after_the_pages_of_an_ack_timeout_resend(hass, r
     await hub.push("remote_info", info_of(c))
     await idle(hass, c)
     last_page = max(i for i, (t, _) in enumerate(hub.got) if t == "page_push")
-    after = [d["args"] for t, d in hub.got[last_page + 1 :] if t == "command" and d["command"] == "tile_update"]
+    after = [
+        d["args"]
+        for t, d in hub.got[last_page + 1 :]
+        if t == "command" and d["command"] == "tile_update"
+    ]
     assert any(a["text"] == "22 C" for a in after)  # every tile value again, after the final page
 
 

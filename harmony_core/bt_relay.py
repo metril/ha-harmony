@@ -58,7 +58,9 @@ def _entry(raw: Any, slot_max: int, hosts: bool) -> dict[str, Any] | None:
     if (name := _name(raw.get("name"))) is not None:
         out["name"] = name
     if hosts:
-        out["transport"] = raw["transport"] if raw.get("transport") in ("classic", "le") else "classic"
+        out["transport"] = (
+            raw["transport"] if raw.get("transport") in ("classic", "le") else "classic"
+        )
     elif (bat := _int(raw.get("battery"), 0, 100)) is not None:
         out["battery"] = bat
     if isinstance(raw.get("configured"), bool):
@@ -92,7 +94,10 @@ def clean_state(raw: Any) -> dict[str, Any] | None:
         if pr.get("kind") in ("host", "remote"):
             p["kind"] = pr["kind"]
         out["pairing"] = p
-    for key, cap, smax, hosts in (("hosts", MAX_HOSTS, 254, True), ("remotes", MAX_REMOTES, 31, False)):
+    for key, cap, smax, hosts in (
+        ("hosts", MAX_HOSTS, 254, True),
+        ("remotes", MAX_REMOTES, 31, False),
+    ):
         rows = raw.get(key)
         rows = rows if isinstance(rows, list) else []
         out[key] = [e for r in rows[:cap] if (e := _entry(r, smax, hosts)) is not None]
@@ -116,14 +121,20 @@ def clean_limits(raw: Any) -> dict[str, Any] | None:
         return None
     out: dict[str, Any] = {}
     for k, hi, absent in (
-        ("hosts_max", 255, MAX_HOSTS),  # not reported: the protocol's maximum; reported but invalid: none
+        (
+            "hosts_max",
+            255,
+            MAX_HOSTS,
+        ),  # not reported: the protocol's maximum; reported but invalid: none
         ("conn_max", 255, 0),
         ("remotes_max", 32, MAX_REMOTES),
         ("le_bonds_max", 255, 0),
     ):
         out[k] = absent if k not in raw else (_int(raw[k], 0, hi) or 0)
     pages = raw.get("pages")
-    out["pages"] = sorted({p for p in pages if p in PAGES}) if isinstance(pages, list) else list(PAGES)
+    out["pages"] = (
+        sorted({p for p in pages if p in PAGES}) if isinstance(pages, list) else list(PAGES)
+    )
     out["le"] = raw.get("le") is True
     return out
 

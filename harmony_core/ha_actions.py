@@ -147,7 +147,7 @@ def _check_data(data: Any) -> dict[str, Any]:
             raise vol.Invalid("data must be plain JSON values")
     try:
         size = len(json.dumps(data, allow_nan=False))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise vol.Invalid("data must be plain JSON values") from None
     if size > DATA_MAX_BYTES:
         raise vol.Invalid(f"data is over {DATA_MAX_BYTES} bytes")

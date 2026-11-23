@@ -255,7 +255,8 @@ def test_over_budget_reports_exact_overage():
     assert n > 0
     # dropping exactly that many label bytes makes it fit exactly at 251
     short = ", ".join(
-        btn(f"b{i}", i % 16, i // 16, "abcdefgh"[: 8 - (1 if i < n else 0)], ", icon: none") for i in range(20)
+        btn(f"b{i}", i % 16, i // 16, "abcdefgh"[: 8 - (1 if i < n else 0)], ", icon: none")
+        for i in range(20)
     )
     c = comp(page(short, cols=16, rows=2))
     assert len(c.pages_v2[0]) == 251
@@ -325,7 +326,9 @@ def test_more_than_the_max_pages_is_a_compile_error():
     from harmony_core.page_build import MAX_PAGES
 
     def cfg(n):
-        return "pages:\n" + "".join(f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(n))
+        return "pages:\n" + "".join(
+            f"  - {{id: p{i}, cols: 1, rows: 1, widgets: []}}\n" for i in range(n)
+        )
 
     assert MAX_PAGES == 252
     with pytest.raises(CompileError, match=f"at most {MAX_PAGES}"):
@@ -417,9 +420,7 @@ def fixed_page(widgets: str, rows: int = 16, extra: str = "") -> str:
 
 
 def test_fixed_page_encodes_flag_compact_and_stays_unsplit_when_it_fits():
-    ws = ", ".join(
-        [btn("a", 0, 0, extra=", w: 6, compact: true"), btn("b", 6, 0, extra=", w: 6")]
-    )
+    ws = ", ".join([btn("a", 0, 0, extra=", w: 6, compact: true"), btn("b", 6, 0, extra=", w: 6")])
     c = comp(fixed_page(ws, 2))
     (m,) = c.models
     assert m.fixed and m.cols == 12 and (m.seq_idx, m.seq_cnt) == (0, 0)

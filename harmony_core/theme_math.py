@@ -16,8 +16,35 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
-TOKEN_NAMES = ("bg", "s1", "s2", "s3", "tx", "tx2", "tx3", "acc", "onacc", "warm", "onwarm", "bad", "onbad")
-PALETTE_NAMES = ("red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo", "purple", "pink")
+TOKEN_NAMES = (
+    "bg",
+    "s1",
+    "s2",
+    "s3",
+    "tx",
+    "tx2",
+    "tx3",
+    "acc",
+    "onacc",
+    "warm",
+    "onwarm",
+    "bad",
+    "onbad",
+)
+PALETTE_NAMES = (
+    "red",
+    "orange",
+    "amber",
+    "yellow",
+    "lime",
+    "green",
+    "teal",
+    "cyan",
+    "blue",
+    "indigo",
+    "purple",
+    "pink",
+)
 # (text token, surface token, minimum contrast as num/den) every theme must satisfy
 PAIRS = (
     ("tx", "bg", 9, 2),
@@ -131,7 +158,9 @@ def parse_theme(data: bytes) -> tuple[dict[str, int], list[tuple[int, int, int]]
     v = [from565(int.from_bytes(data[i : i + 2], "big")) for i in range(1, WIRE_LEN, 2)]
     n = len(TOKEN_NAMES)
     pal = v[n:]
-    return dict(zip(TOKEN_NAMES, v[:n], strict=True)), [tuple(pal[i : i + 3]) for i in range(0, len(pal), 3)]  # type: ignore[misc]
+    return dict(zip(TOKEN_NAMES, v[:n], strict=True)), [
+        tuple(pal[i : i + 3]) for i in range(0, len(pal), 3)
+    ]  # type: ignore[misc]
 
 
 # ---- validation and "fix for me" ----
@@ -179,7 +208,14 @@ def nearest_passing(color: int, ok: Callable[[int], bool]) -> int | None:
         for sign in (-1, 1):
             nl = L + sign * k / 200
             if 0 <= nl <= 1:
-                for k_ in (1.0, 0.8, 0.6, 0.4, 0.2, 0.0):  # keep the hue: shrink chroma until in gamut
+                for k_ in (
+                    1.0,
+                    0.8,
+                    0.6,
+                    0.4,
+                    0.2,
+                    0.0,
+                ):  # keep the hue: shrink chroma until in gamut
                     rgb, inside = _oklab_to_srgb(nl, a * k_, b * k_)
                     if inside:
                         break
@@ -201,7 +237,9 @@ def suggest_fill(fill: int, tx: int, bg: int) -> int:
     return fill if c is None else c
 
 
-def validate_theme(tokens: Mapping[str, int], fills: list[int] | None = None) -> list[dict[str, Any]]:
+def validate_theme(
+    tokens: Mapping[str, int], fills: list[int] | None = None
+) -> list[dict[str, Any]]:
     """Contrast problems of a token set (+ optional palette fills, checked against their auto ink).
 
     [{text, surface, ratio_x100, min_x100, fix}] - warnings for a custom theme; fix = nearest RGB565 colour passing."""
@@ -260,7 +298,9 @@ def _hex(v: Any, where: str) -> int:
     return snap565(int(v[1:], 16))
 
 
-def resolve_theme(name: str, themes: Mapping[str, Any], presets: Mapping[str, Any]) -> tuple[dict[str, int], list[int]]:
+def resolve_theme(
+    name: str, themes: Mapping[str, Any], presets: Mapping[str, Any]
+) -> tuple[dict[str, int], list[int]]:
     """Resolve a theme name to (tokens, 12 fills), all snapped to RGB565.
 
     `presets` maps preset key to an object with .tokens (dict of ints) and .palette (items with .fill);
@@ -292,7 +332,7 @@ def resolve_theme(name: str, themes: Mapping[str, Any], presets: Mapping[str, An
         for k, v in (t.get("palette") or {}).items():
             try:
                 idx = int(k)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 idx = 0
             if not 1 <= idx <= len(PALETTE_NAMES):
                 raise ThemeError(f"{n}: palette index {k!r} must be 1..{len(PALETTE_NAMES)}")

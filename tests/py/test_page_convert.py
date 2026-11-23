@@ -55,7 +55,13 @@ def test_ids_actions_and_power_off_on_page_one():
 
 
 def test_labels_fit_their_class():
-    ws = ",".join([btn("a", 0, 0, "Natural Light"), btn("b", 1, 0, "Tropical Twilight"), btn("c", 2, 0, "Long Label X")])
+    ws = ",".join(
+        [
+            btn("a", 0, 0, "Natural Light"),
+            btn("b", 1, 0, "Tropical Twilight"),
+            btn("c", 2, 0, "Long Label X"),
+        ]
+    )
     _, (p,) = build(f"pages:\n  - {{id: p, cols: 3, rows: 1, widgets: [{ws}]}}\n")
     page = SimpleNamespace(cols=p.cols, rows=p.rows, fixed=True)
     assert all(fit_label(page, w) is None for w in p.widgets)

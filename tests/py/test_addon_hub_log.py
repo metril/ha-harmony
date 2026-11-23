@@ -14,7 +14,9 @@ HUB = "LivingRoom"
 
 @pytest.fixture
 async def c(aiohttp_client, tmp_path):
-    app = create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None, hello_timeout=0.3)
+    app = create_app(
+        tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None, hello_timeout=0.3
+    )
     return await aiohttp_client(app)
 
 
@@ -24,7 +26,15 @@ async def test_hub_lines_reach_the_add_on_log_tagged_and_at_info(c, caplog):
     await drain(sock)
     with caplog.at_level(logging.INFO, logger="hub"):
         await sock.send_json({"t": "hub_log", "level": "info", "msg": "hub: build 42", "ts": 5})
-        await sock.send_json({"t": "hub_log", "level": "warning", "msg": "hub: RF send failed", "ts": 6, "dropped": 3})
+        await sock.send_json(
+            {
+                "t": "hub_log",
+                "level": "warning",
+                "msg": "hub: RF send failed",
+                "ts": 6,
+                "dropped": 3,
+            }
+        )
         await drain(sock)  # everything sent before the junk frame has been handled
     recs = [r for r in caplog.records if r.name == f"hub.{HUB}"]
     assert [(r.levelno, r.getMessage()) for r in recs] == [
@@ -32,7 +42,9 @@ async def test_hub_lines_reach_the_add_on_log_tagged_and_at_info(c, caplog):
         (logging.WARNING, "3 hub log line(s) were lost before this one (hub ring full)"),
         (logging.WARNING, "hub: RF send failed"),
     ]
-    assert logging.getLogger("hub").level == logging.INFO  # the add-on's log_level option cannot hide them
+    assert (
+        logging.getLogger("hub").level == logging.INFO
+    )  # the add-on's log_level option cannot hide them
     await sock.close()
 
 

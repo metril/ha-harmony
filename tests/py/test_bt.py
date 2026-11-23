@@ -163,7 +163,9 @@ def test_remote_defaults_use_the_elites_key_names():
 def test_a_null_key_removes_a_default_mapping():
     m = parse_model("bt_remotes:\n  - name: R\n    keys: {Home: null, VolumeUp: channel_up}\n")
     table = {(p, u): k for p, u, k in m["bt_remotes"][0]["keys"]}
-    assert (12, 0x223) not in table and table[(12, 0xE9)] == "channel_up" and table[(7, 0x52)] == "up"
+    assert (
+        (12, 0x223) not in table and table[(12, 0xE9)] == "channel_up" and table[(7, 0x52)] == "up"
+    )
 
 
 def test_remote_keys_override_defaults_and_are_validated():

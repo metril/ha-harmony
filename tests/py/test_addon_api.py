@@ -313,7 +313,9 @@ async def test_ha_actions_in_validate_and_keymap_and_hostile_ones_refused(client
         "entity": "light.a",
         "label": "light.toggle light.a",
     }
-    bad = {"keys": {"up": {"ha": {"service": "shell_command.x", "target": {"entity_id": "light.a"}}}}}
+    bad = {
+        "keys": {"up": {"ha": {"service": "shell_command.x", "target": {"entity_id": "light.a"}}}}
+    }
     r = await client.post("/api/v1/config/validate", json={"config": bad}, headers=H)
     body = await r.json()
     assert any("not allowed" in e["msg"] for e in body["errors"])

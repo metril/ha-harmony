@@ -218,7 +218,9 @@ async def _on_frame(app: web.Application, conn: Conn, f: dict[str, Any]) -> None
             return
         lg = logging.getLogger(f"hub.{hub}")
         if ln.get("dropped"):
-            lg.warning("%d hub log line(s) were lost before this one (hub ring full)", ln["dropped"])
+            lg.warning(
+                "%d hub log line(s) were lost before this one (hub ring full)", ln["dropped"]
+            )
         lg.log(logging.WARNING if ln["level"] == "warning" else logging.INFO, "%s", ln["msg"])
     elif t == "hub":
         try:
@@ -306,7 +308,9 @@ async def channel(request: web.Request) -> web.StreamResponse:
             bt_routes.fail_waiting(h0, "hub_offline")
         for t in tuple(old.tasks):
             t.cancel()
-        t = asyncio.ensure_future(_close_quiet(old.ws, 4002, b"replaced"))  # not awaited: a stuck old peer must not stall
+        t = asyncio.ensure_future(
+            _close_quiet(old.ws, 4002, b"replaced")
+        )  # not awaited: a stuck old peer must not stall
         _BG.add(t)
         t.add_done_callback(_BG.discard)
     try:
@@ -315,7 +319,9 @@ async def channel(request: web.Request) -> web.StreamResponse:
         adopt = _identity(app, hub, f, new=new)
         if adopt is not None:
             await conn.send({"t": "adopt", "result": adopt})
-        conn.ready = True  # pushes now queue behind conn.lock, so a bundle applied from here on is not lost
+        conn.ready = (
+            True  # pushes now queue behind conn.lock, so a bundle applied from here on is not lost
+        )
         try:
             frame = _bundle_frame(app, hub)
         except web.HTTPException:
@@ -358,7 +364,8 @@ def add_routes(app: web.Application, api: str) -> None:
         socks = [c.ws for c in tuple(app[CHANNEL_KEY].conns.values())]
         if socks:
             await asyncio.wait(
-                [asyncio.ensure_future(_close_quiet(w, 1001, b"shutdown")) for w in socks], timeout=SHUTDOWN_CLOSE_S
+                [asyncio.ensure_future(_close_quiet(w, 1001, b"shutdown")) for w in socks],
+                timeout=SHUTDOWN_CLOSE_S,
             )
 
     app.on_shutdown.append(_close)

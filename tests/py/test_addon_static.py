@@ -27,7 +27,9 @@ def static_dir(tmp_path):
 
 @pytest.fixture
 async def ui(aiohttp_client, tmp_path, static_dir):
-    app = create_app(tmp_path / "data", options=Options("info"), auth=NoAuth(), static_dir=static_dir)
+    app = create_app(
+        tmp_path / "data", options=Options("info"), auth=NoAuth(), static_dir=static_dir
+    )
     return await aiohttp_client(app)
 
 
@@ -60,7 +62,12 @@ async def test_index_has_only_relative_urls_so_any_ingress_prefix_works(ui):
 
 
 async def test_missing_and_traversal_never_leak_files(ui):
-    for path in ("/assets/nope.js", "/assets/../secret.txt", "/assets/%2e%2e/secret.txt", "/index.html"):
+    for path in (
+        "/assets/nope.js",
+        "/assets/../secret.txt",
+        "/assets/%2e%2e/secret.txt",
+        "/index.html",
+    ):
         r = await ui.get(path)
         assert r.status in (403, 404), path
         assert "nope" not in await r.text()

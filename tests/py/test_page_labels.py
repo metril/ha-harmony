@@ -150,7 +150,9 @@ def keys_page(extra=""):
         f" action: {{device: shield, command: {cmd}}}{extra}}}"
         for i, (lab, cmd, ic) in enumerate(KEYS)
     ]
-    cmds = ", ".join(f"{c}: {{proto: nec, addr: 4, cmd: {i + 20}}}" for i, (_, c, _i) in enumerate(KEYS))
+    cmds = ", ".join(
+        f"{c}: {{proto: nec, addr: 4, cmd: {i + 20}}}" for i, (_, c, _i) in enumerate(KEYS)
+    )
     cfg = BASE.replace("settings:", f"{cmds}, settings:")
     cfg += f"pages:\n  - {{id: p, layout: fixed, cols: 12, rows: 3, widgets: [{', '.join(ws)}]}}\n"
     return compile_config(parse_model(cfg, "t.yaml"))
@@ -188,10 +190,16 @@ def test_a_key_row_is_all_captions_or_none():
 def test_compacted_card_shortens_its_word_rather_than_breaking_mid_word():
     ws = ", ".join(
         f"{{type: button, id: b{i}, x: {i % 2}, y: {i // 2 + 1}, label: '{lab}', action: {{device: shield, command: zzcmd}}}}"
-        for i, lab in enumerate(["MacBook Pro", "Desktop", "Work Laptop", "Computer 4", "Power On", "Power Off"])
+        for i, lab in enumerate(
+            ["MacBook Pro", "Desktop", "Work Laptop", "Computer 4", "Power On", "Power Off"]
+        )
     )
     tile = "{type: tile, id: t, x: 0, y: 0, w: 2, label: Src, entity: select.x}"
-    c = compile_config(parse_model(BASE + f"pages:\n  - {{id: k, cols: 2, rows: 4, widgets: [{tile}, {ws}]}}\n", "t.yaml"))
+    c = compile_config(
+        parse_model(
+            BASE + f"pages:\n  - {{id: k, cols: 2, rows: 4, widgets: [{tile}, {ws}]}}\n", "t.yaml"
+        )
+    )
     assert not [w for w in c.warnings if "too wide" in w["msg"]]
 
 
@@ -200,7 +208,9 @@ def test_compacted_card_shortens_its_word_rather_than_breaking_mid_word():
 
 def _colour_warnings(widget: str):
     cfg = BASE + f"pages:\n  - {{id: p, cols: 4, rows: 2, widgets: [{widget}]}}\n"
-    return [w for w in compile_config(parse_model(cfg, "t.yaml")).warnings if "best text" in w["msg"]]
+    return [
+        w for w in compile_config(parse_model(cfg, "t.yaml")).warnings if "best text" in w["msg"]
+    ]
 
 
 def test_brand_logo_on_brand_red_is_exempt():
@@ -216,7 +226,9 @@ def test_text_on_brand_red_still_warns():
 # --- icons: label, then command / service target; siblings stay consistent ---------------------------------------------
 
 
-@pytest.mark.parametrize(("text", "icon"), [("Clear", "cctv_off"), ("Clear Camera", "cctv"), ("MacBook Pro", "laptop")])
+@pytest.mark.parametrize(
+    ("text", "icon"), [("Clear", "cctv_off"), ("Clear Camera", "cctv"), ("MacBook Pro", "laptop")]
+)
 def test_icon_keywords(text, icon):
     assert icon_for_text(text) == ICON_IDS[icon] or text == "Clear Camera"
 
@@ -227,7 +239,10 @@ def test_icon_falls_back_to_the_command_name():
 
 
 def test_select_tile_gets_the_input_glyph():
-    cfg = BASE + "pages:\n  - {id: p, cols: 2, rows: 1, widgets: [{type: tile, id: t, x: 0, y: 0, w: 2, label: Source, entity: select.kvm_source}]}\n"
+    cfg = (
+        BASE
+        + "pages:\n  - {id: p, cols: 2, rows: 1, widgets: [{type: tile, id: t, x: 0, y: 0, w: 2, label: Source, entity: select.kvm_source}]}\n"
+    )
     c = compile_config(parse_model(cfg, "t.yaml"))
     assert c.models[0].widgets[0].icon == ICON_IDS["input"]
 
@@ -235,9 +250,15 @@ def test_select_tile_gets_the_input_glyph():
 def test_macbook_caption_keeps_its_glyph_with_its_siblings():
     ws = ", ".join(
         f"{{type: button, id: b{i}, x: {i % 2}, y: {i // 2 + 1}, label: '{lab}', action: {{device: shield, command: zzcmd}}}}"
-        for i, lab in enumerate(["MacBook Pro", "Desktop", "Work Laptop", "Computer 4", "Power On", "Power Off"])
+        for i, lab in enumerate(
+            ["MacBook Pro", "Desktop", "Work Laptop", "Computer 4", "Power On", "Power Off"]
+        )
     )
     tile = "{type: tile, id: t, x: 0, y: 0, w: 2, label: Src, entity: select.x}"
-    c = compile_config(parse_model(BASE + f"pages:\n  - {{id: k, cols: 2, rows: 4, widgets: [{tile}, {ws}]}}\n", "t.yaml"))
+    c = compile_config(
+        parse_model(
+            BASE + f"pages:\n  - {{id: k, cols: 2, rows: 4, widgets: [{tile}, {ws}]}}\n", "t.yaml"
+        )
+    )
     btns = [w for pg in c.models for w in pg.widgets if w.kind == "button"]
     assert all(w.icon for w in btns[:4]) and not any(w.icon_only for w in btns[:4])

@@ -20,7 +20,17 @@ pytestmark = pytest.mark.usefixtures("enable_custom_integrations")
 
 
 def _ack(env):
-    return {"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": "h", "activities": ["A"], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
+    return {
+        "v": 1,
+        "id": env["id"],
+        "t": "hello_ack",
+        "d": {
+            "hub_id": "h",
+            "activities": ["A"],
+            "tcp_keepalive": True,
+            "limits": CURRENT.to_wire(),
+        },
+    }
 
 
 async def _client(hub, **kw):

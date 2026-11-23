@@ -100,7 +100,9 @@ async def test_apply_pushes_one_bundle_and_rev_changes_only_with_content(client)
 async def test_first_apply_after_nothing_applied_is_pushed_and_hubs_are_independent(client):
     ws = await connect(client, "default")
     other = await connect(client, "other")
-    assert await recv(ws) == {"t": "nothing_applied"} and await recv(other) == {"t": "nothing_applied"}
+    assert await recv(ws) == {"t": "nothing_applied"} and await recv(other) == {
+        "t": "nothing_applied"
+    }
     await apply(client)
     assert (await recv(ws))["t"] == "bundle"
     assert await drain(other) == []
@@ -140,11 +142,17 @@ async def test_ack_is_stored_and_a_stale_one_is_refused(client):
 
 async def test_close_codes(aiohttp_client, tmp_path):
     c = await aiohttp_client(
-        create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None, hello_timeout=0.2)
+        create_app(
+            tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None, hello_timeout=0.2
+        )
     )
     ws = await connect(c, "default", hello=False)  # no hello in time
     assert await closed(ws) == 4000
-    for bad in ({"t": "hello", "hub": "default"}, {"t": "nope", "v": 1}, {"t": "hello", "v": 1, "hub": "x y"}):
+    for bad in (
+        {"t": "hello", "hub": "default"},
+        {"t": "nope", "v": 1},
+        {"t": "hello", "v": 1, "hub": "x y"},
+    ):
         ws = await c.ws_connect("/api/v1/channel?hub=default", headers=BEARER)
         await ws.send_json(bad)
         assert (await recv(ws))["code"] == "bad_hello" and await closed(ws) == 4000
@@ -178,20 +186,30 @@ async def test_unknown_frames_and_fields_are_ignored(client):
 
 # ---------------------------------------------------------------- auth separation
 async def test_channel_is_bearer_only_and_ingress_routes_ingress_only(aiohttp_client, tmp_path):
-    app = create_app(tmp_path, auth=IngressAuth(peers={"127.0.0.1"}), bundle_token=TOKEN, bundle_networks=None)
+    app = create_app(
+        tmp_path, auth=IngressAuth(peers={"127.0.0.1"}), bundle_token=TOKEN, bundle_networks=None
+    )
     c = await aiohttp_client(app)
     ing = {"X-Ingress-Path": "/api/hassio_ingress/t"}
     assert await refused(c, "/api/v1/channel", ing) == 401  # ingress without the token...
-    assert await refused(c, "/api/v1/channel", {**ing, **BEARER}) == 401  # ...and the token through ingress
-    strict = await aiohttp_client(create_app(tmp_path / "s", bundle_token=TOKEN, bundle_networks=None))
+    assert (
+        await refused(c, "/api/v1/channel", {**ing, **BEARER}) == 401
+    )  # ...and the token through ingress
+    strict = await aiohttp_client(
+        create_app(tmp_path / "s", bundle_token=TOKEN, bundle_networks=None)
+    )
     for path in ("/api/v1/health", "/api/v1/configs", "/", "/api/v1/live"):
         assert (await strict.get(path, headers={**BEARER, **ing})).status == 403
-    ws = await strict.ws_connect("/api/v1/channel", headers=BEARER)  # authed: the bearer needs no ingress peer
+    ws = await strict.ws_connect(
+        "/api/v1/channel", headers=BEARER
+    )  # authed: the bearer needs no ingress peer
     await ws.close()
 
 
 async def test_channel_peer_must_be_on_the_hassio_network(aiohttp_client, tmp_path):
-    c = await aiohttp_client(create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN))  # 172.30.32.0/23
+    c = await aiohttp_client(
+        create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN)
+    )  # 172.30.32.0/23
     assert await refused(c, "/api/v1/channel", BEARER) == 401  # peer is 127.0.0.1
 
 
@@ -217,7 +235,9 @@ async def test_removed_poll_routes_are_gone(client):
         ("POST", "/api/v1/bundle/ack"),
         ("POST", "/api/v1/bundle/bt"),
     ]:
-        assert (await client.request(method, path, headers={**BEARER, **H}, json={})).status == 404, path
+        assert (
+            await client.request(method, path, headers={**BEARER, **H}, json={})
+        ).status == 404, path
     for method, path in [
         ("GET", "/api/v1/config/status"),
         ("GET", "/api/v1/bt/status"),
@@ -245,7 +265,9 @@ def test_token_file_is_0600_random_and_stable(tmp_path):
 async def test_token_never_in_logs_or_other_responses(aiohttp_client, tmp_path, caplog):
     caplog.set_level(logging.DEBUG)
     token = load_or_create_token(tmp_path)
-    c = await aiohttp_client(create_app(tmp_path, auth=NoAuth(), bundle_token=token, bundle_networks=None))
+    c = await aiohttp_client(
+        create_app(tmp_path, auth=NoAuth(), bundle_token=token, bundle_networks=None)
+    )
     await put_draft(c)
     seen = []
     for method, path in [
@@ -290,7 +312,9 @@ class FakeSupervisor:
 
 async def test_discovery_announces_at_start_and_withdraws_at_stop(aiohttp_client, tmp_path):
     sup = FakeSupervisor()
-    app = create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN, discovery=Discovery(sup, 8099, TOKEN))
+    app = create_app(
+        tmp_path, auth=NoAuth(), bundle_token=TOKEN, discovery=Discovery(sup, 8099, TOKEN)
+    )
     c = await aiohttp_client(app)
     assert sup.calls == [
         "info",
@@ -302,7 +326,9 @@ async def test_discovery_announces_at_start_and_withdraws_at_stop(aiohttp_client
 
 async def test_discovery_failure_is_logged_not_fatal(aiohttp_client, tmp_path, caplog):
     sup = FakeSupervisor(fail=True)
-    app = create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN, discovery=Discovery(sup, 8099, TOKEN))
+    app = create_app(
+        tmp_path, auth=NoAuth(), bundle_token=TOKEN, discovery=Discovery(sup, 8099, TOKEN)
+    )
     c = await aiohttp_client(app)
     assert (await c.get("/api/v1/health")).status == 200
     assert "could not announce" in caplog.text and TOKEN not in caplog.text
@@ -355,7 +381,9 @@ def test_main_passes_a_short_shutdown_timeout(monkeypatch, tmp_path):
 async def test_every_channel_route_needs_the_token_and_never_ingress(aiohttp_client, tmp_path):
     from test_addon import CHANNEL_ROUTES
 
-    c = await aiohttp_client(create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None))
+    c = await aiohttp_client(
+        create_app(tmp_path, auth=NoAuth(), bundle_token=TOKEN, bundle_networks=None)
+    )
     ing = {"X-Ingress-Path": "/api/hassio_ingress/t"}
     assert CHANNEL_ROUTES
     for method, path in CHANNEL_ROUTES:

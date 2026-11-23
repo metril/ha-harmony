@@ -23,35 +23,35 @@ FIX = Path(__file__).parent / "fixtures" / "ir"
 
 # ---- model ----
 def test_protocol_list():
-    assert PROTOCOLS == (
-        "nec", "necext", "samsung32", "rc5", "rc6", "sirc12", "sirc15", "sirc20"
-    )
+    assert PROTOCOLS == ("nec", "necext", "samsung32", "rc5", "rc6", "sirc12", "sirc15", "sirc20")
 
 
 def test_hub_json_shapes():
-    assert IrCode(proto="nec", addr=4, cmd=8).to_hub_json() == {
-        "proto": "nec", "addr": 4, "cmd": 8}
-    assert IrCode(hz=38000, us=(100, 200)).to_hub_json() == {
-        "raw": {"hz": 38000, "us": [100, 200]}}
+    assert IrCode(proto="nec", addr=4, cmd=8).to_hub_json() == {"proto": "nec", "addr": 4, "cmd": 8}
+    assert IrCode(hz=38000, us=(100, 200)).to_hub_json() == {"raw": {"hz": 38000, "us": [100, 200]}}
     assert IrCode(pronto="0000 006D 0000 0001 0010 0020").to_hub_json() == {
-        "pronto": "0000 006D 0000 0001 0010 0020"}
+        "pronto": "0000 006D 0000 0001 0010 0020"
+    }
 
 
-@pytest.mark.parametrize("kw", [
-    {},
-    {"proto": "nec", "addr": 1},
-    {"proto": "nec", "addr": 1, "cmd": 1, "pronto": "0000 006D 0000 0001 0010 0020"},
-    {"proto": "bogus", "addr": 1, "cmd": 1},
-    {"proto": "nec", "addr": 256, "cmd": 1},
-    {"proto": "nec", "addr": 1, "cmd": -1},
-    {"proto": "rc5", "addr": 32, "cmd": 0},
-    {"proto": "sirc12", "addr": 0, "cmd": 128},
-    {"hz": 38000, "us": ()},
-    {"hz": 0, "us": (1, 2)},
-    {"hz": 38000, "us": (1, 0)},
-    {"hz": 38000},
-    {"pronto": "zzzz"},
-])
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {},
+        {"proto": "nec", "addr": 1},
+        {"proto": "nec", "addr": 1, "cmd": 1, "pronto": "0000 006D 0000 0001 0010 0020"},
+        {"proto": "bogus", "addr": 1, "cmd": 1},
+        {"proto": "nec", "addr": 256, "cmd": 1},
+        {"proto": "nec", "addr": 1, "cmd": -1},
+        {"proto": "rc5", "addr": 32, "cmd": 0},
+        {"proto": "sirc12", "addr": 0, "cmd": 128},
+        {"hz": 38000, "us": ()},
+        {"hz": 0, "us": (1, 2)},
+        {"hz": 38000, "us": (1, 0)},
+        {"hz": 38000},
+        {"pronto": "zzzz"},
+    ],
+)
 def test_invalid_codes(kw):
     with pytest.raises(IrImportError):
         IrCode(**kw)
@@ -73,11 +73,19 @@ def test_normalise_pronto():
     assert normalise_pronto("0000 006d 0000 0001\n0010  0020") == "0000 006D 0000 0001 0010 0020"
 
 
-@pytest.mark.parametrize("s", [
-    "", "0000 006D 0000", "0000 006D 0001 0001 0010 0020",  # count mismatch (len 6 vs needs 8)
-    "0000 006D 0000 0000", "0100 006D 0000 0001 0010 0020", "0000 0000 0000 0001 0010 0020",
-    "0000 006D 0000 0001 0010 00G0", "0000 006D 0000 0001 0010 12345",
-])
+@pytest.mark.parametrize(
+    "s",
+    [
+        "",
+        "0000 006D 0000",
+        "0000 006D 0001 0001 0010 0020",  # count mismatch (len 6 vs needs 8)
+        "0000 006D 0000 0000",
+        "0100 006D 0000 0001 0010 0020",
+        "0000 0000 0000 0001 0010 0020",
+        "0000 006D 0000 0001 0010 00G0",
+        "0000 006D 0000 0001 0010 12345",
+    ],
+)
 def test_bad_pronto(s):
     with pytest.raises(IrImportError):
         normalise_pronto(s)
@@ -113,16 +121,26 @@ def test_flipper_library_duplicates_and_protocols():
     assert sigs["Power_3"] == IrCode(proto="rc6", addr=10, cmd=12)
 
 
-@pytest.mark.parametrize("name,proto,addr,cmd", [
-    ("NEC", "nec", 1, 2), ("NECext", "necext", 0x1234, 2), ("Samsung32", "samsung32", 1, 2),
-    ("RC5", "rc5", 1, 2), ("RC6", "rc6", 1, 2),
-    ("SIRC", "sirc12", 1, 2), ("SIRC15", "sirc15", 1, 2), ("SIRC20", "sirc20", 0x123, 2),
-])
+@pytest.mark.parametrize(
+    "name,proto,addr,cmd",
+    [
+        ("NEC", "nec", 1, 2),
+        ("NECext", "necext", 0x1234, 2),
+        ("Samsung32", "samsung32", 1, 2),
+        ("RC5", "rc5", 1, 2),
+        ("RC6", "rc6", 1, 2),
+        ("SIRC", "sirc12", 1, 2),
+        ("SIRC15", "sirc15", 1, 2),
+        ("SIRC20", "sirc20", 0x123, 2),
+    ],
+)
 def test_flipper_protocol_mapping(name, proto, addr, cmd):
     a = addr.to_bytes(4, "little").hex(" ")
     c = cmd.to_bytes(4, "little").hex(" ")
-    text = (f"Filetype: IR signals file\nVersion: 1\n#\nname: K\ntype: parsed\n"
-            f"protocol: {name}\naddress: {a}\ncommand: {c}\n")
+    text = (
+        f"Filetype: IR signals file\nVersion: 1\n#\nname: K\ntype: parsed\n"
+        f"protocol: {name}\naddress: {a}\ncommand: {c}\n"
+    )
     assert parse_flipper(text)["K"] == IrCode(proto=proto, addr=addr, cmd=cmd)
 
 
@@ -142,8 +160,9 @@ def test_flipper_malformed():
         parse_flipper("")
     base = "Filetype: IR signals file\nVersion: 1\n#\nname: K\n"
     with pytest.raises(IrImportError, match="hex"):
-        parse_flipper(base + "type: parsed\nprotocol: NEC\naddress: 0G 00 00 00\n"
-                      "command: 01 00 00 00\n")
+        parse_flipper(
+            base + "type: parsed\nprotocol: NEC\naddress: 0G 00 00 00\ncommand: 01 00 00 00\n"
+        )
     with pytest.raises(IrImportError, match="type"):
         parse_flipper(base + "type: weird\n")
     with pytest.raises(IrImportError):
@@ -207,8 +226,10 @@ def test_broadlink_roundtrip_b64():
 
 # ---- review fixes ----
 def _flip(proto, cmd):
-    return ("Filetype: IR signals file\nVersion: 1\n#\nname: K\ntype: parsed\n"
-            f"protocol: {proto}\naddress: 00 00 00 00\ncommand: {cmd}\n")
+    return (
+        "Filetype: IR signals file\nVersion: 1\n#\nname: K\ntype: parsed\n"
+        f"protocol: {proto}\naddress: 00 00 00 00\ncommand: {cmd}\n"
+    )
 
 
 def test_flipper_necext_16bit_command():
@@ -225,7 +246,11 @@ def test_flipper_rc5x_sets_bit6():
 
 def test_broadlink_clamps_long_gap():
     # trailing 00 0D 05 = 3333 ticks ~ 101 ms -> clamped to 65535
-    assert decode_broadlink(bytes.fromhex("2600 0500 10 20 00 0D05".replace(" ", ""))) == [487, 975, 65535]
+    assert decode_broadlink(bytes.fromhex("2600 0500 10 20 00 0D05".replace(" ", ""))) == [
+        487,
+        975,
+        65535,
+    ]
 
 
 def test_raw_validation():

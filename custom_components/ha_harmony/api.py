@@ -92,7 +92,9 @@ class HarmonyHubClient:
         self._closed = False
         self.hub_id: str | None = None
         self.hub_name: str = ""  # hello_ack.name: the display name set from Home Assistant ("" = none / old firmware)
-        self.hw_id: str | None = None  # hello_ack.hw_id: the hub's stable hardware id (survives renames)
+        self.hw_id: str | None = (
+            None  # hello_ack.hw_id: the hub's stable hardware id (survives renames)
+        )
         self.can_rename = False  # hello_ack.rename: the hub understands set_hub_id
         self.id_pinned = False  # hello_ack.id_pinned: hub.conf pins the id on the device
         self.fw_version: str | None = None
@@ -101,7 +103,9 @@ class HarmonyHubClient:
         self.ota_key: str | None = None  # "dev" | "release" | None
         self.config_hash: str | None = None  # hub's CRC-32 hex of its loaded config text
         self.bt: dict[str, Any] | None = None  # hello_ack.bt; None = a hub without Bluetooth
-        self.bt_state: dict[str, Any] | None = None  # the last bt_state push of this connection (a coordinator made later still sees it)
+        self.bt_state: dict[str, Any] | None = (
+            None  # the last bt_state push of this connection (a coordinator made later still sees it)
+        )
         self.limits: HubLimits | None = None  # hello_ack.limits None before the first hello
 
     @property
@@ -219,8 +223,12 @@ class HarmonyHubClient:
             self.hw_id = d.get("hw_id") or None
             self.can_rename = d.get("rename") is True
             self.id_pinned = d.get("id_pinned") is True
-            if d.get("tcp_keepalive") is not True:  # no app ping runs: liveness is the kernel's TCP keepalive on both ends
-                raise HarmonyVersionError("the hub firmware is too old (no TCP keepalive); update the hub firmware")
+            if (
+                d.get("tcp_keepalive") is not True
+            ):  # no app ping runs: liveness is the kernel's TCP keepalive on both ends
+                raise HarmonyVersionError(
+                    "the hub firmware is too old (no TCP keepalive); update the hub firmware"
+                )
             self.fw_version = d.get("fw_version")
             self.fw_build = d.get("fw_build")
             self.ota_key = d.get("ota_key")
@@ -228,7 +236,9 @@ class HarmonyHubClient:
             try:
                 self.limits = HubLimits.from_hello(d.get("limits"))
             except ValueError as exc:
-                raise HarmonyVersionError(f"the hub firmware is too old ({exc}); update the hub firmware") from exc
+                raise HarmonyVersionError(
+                    f"the hub firmware is too old ({exc}); update the hub firmware"
+                ) from exc
             self.bt = d["bt"] if isinstance(d.get("bt"), dict) else None
             self.bt_state = None
             acts = d.get("activities")
@@ -371,7 +381,9 @@ class HarmonyHubClient:
             await ws.send_json(envelope)
             return await asyncio.wait_for(fut, timeout or self._req_timeout)
         except TimeoutError as exc:  # before OSError, which it subclasses
-            raise HarmonyConnectionError(f"request timed out after {timeout or self._req_timeout:g} s") from exc
+            raise HarmonyConnectionError(
+                f"request timed out after {timeout or self._req_timeout:g} s"
+            ) from exc
         except (aiohttp.ClientError, OSError) as exc:
             raise HarmonyConnectionError(str(exc) or type(exc).__name__) from exc
         finally:

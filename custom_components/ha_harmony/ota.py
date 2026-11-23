@@ -46,7 +46,9 @@ def parse_image(data: bytes) -> Image:
     if target != TARGET_HUB:
         raise invalid("ota_wrong_target")
     if length > HOTA_MAX_PAYLOAD or len(data) != HOTA_HEADER + length:
-        raise invalid("ota_truncated", expected=min(length, HOTA_MAX_PAYLOAD) + HOTA_HEADER, actual=len(data))
+        raise invalid(
+            "ota_truncated", expected=min(length, HOTA_MAX_PAYLOAD) + HOTA_HEADER, actual=len(data)
+        )
     return Image(data, build, hashlib.sha512(data).hexdigest())
 
 
@@ -64,7 +66,9 @@ def read_image(path: str) -> bytes:
     if not p.is_file():
         raise invalid("ota_file_missing", path=path)
     if p.stat().st_size > HOTA_MAX_PAYLOAD + HOTA_HEADER:
-        raise invalid("ota_truncated", expected=HOTA_MAX_PAYLOAD + HOTA_HEADER, actual=p.stat().st_size)
+        raise invalid(
+            "ota_truncated", expected=HOTA_MAX_PAYLOAD + HOTA_HEADER, actual=p.stat().st_size
+        )
     return p.read_bytes()
 
 

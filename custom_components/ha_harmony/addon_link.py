@@ -83,8 +83,12 @@ def compile_source(
     if not isinstance(source, dict):
         raise BundleRejected("config is not an object")
     try:
-        json.dumps(source, allow_nan=False)  # JSON data only (the add-on's own checks use the same dict path)
-        model = parse_data(source)  # not the YAML pass: ~50x faster, which matters for thousands of commands
+        json.dumps(
+            source, allow_nan=False
+        )  # JSON data only (the add-on's own checks use the same dict path)
+        model = parse_data(
+            source
+        )  # not the YAML pass: ~50x faster, which matters for thousands of commands
         return compile_config(model, limits=limits or CURRENT, source_lists=source_lists)
     except (ConfigError, CompileError) as exc:
         raise BundleRejected(str(exc)[:300]) from None
@@ -164,14 +168,16 @@ class AddonChannel:
 
     async def send(self, t: str, **fields: Any) -> None:
         try:
-            await self._ws.send_str(json.dumps({"t": t, **fields}, separators=(",", ":"), allow_nan=False))
+            await self._ws.send_str(
+                json.dumps({"t": t, **fields}, separators=(",", ":"), allow_nan=False)
+            )
         except (aiohttp.ClientError, OSError, TimeoutError, ConnectionError, ValueError) as exc:
             raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None
 
     async def close(self) -> None:
         try:
             await self._ws.close()
-        except (aiohttp.ClientError, OSError, TimeoutError):
+        except aiohttp.ClientError, OSError, TimeoutError:
             pass
 
     def __aiter__(self) -> AsyncIterator[dict[str, Any]]:
@@ -188,7 +194,7 @@ class AddonChannel:
                     continue
                 if isinstance(data, dict) and isinstance(data.get("t"), str):
                     yield data
-        except (aiohttp.ClientError, OSError, TimeoutError):
+        except aiohttp.ClientError, OSError, TimeoutError:
             return
 
 
@@ -208,7 +214,9 @@ class AddonClient:
 
     def identity_fields(self) -> dict[str, Any]:
         """hw / prev / name / remotes / limits, as `hello` and `identity` carry them."""
-        out: dict[str, Any] = {k: v for k in ("hw", "prev", "name") if (v := self.identity.get(k)) is not None}
+        out: dict[str, Any] = {
+            k: v for k in ("hw", "prev", "name") if (v := self.identity.get(k)) is not None
+        }
         lim = self.limits_provider() if self.limits_provider else None
         if lim is not None:
             out["limits"] = lim.to_wire()
@@ -217,7 +225,9 @@ class AddonClient:
             out["remotes"] = clean_remotes(rem)
         return out
 
-    async def connect(self, hub_id: str, known_rev: str | None, *, hello: bool = True) -> AddonChannel:
+    async def connect(
+        self, hub_id: str, known_rev: str | None, *, hello: bool = True
+    ) -> AddonChannel:
         """Open the channel and (by default) send `hello`. Raises AddonAuthError, AddonOutdated (404) or AddonUnreachable."""
         try:
             async with asyncio.timeout(const.LINK_CONNECT_TIMEOUT):
@@ -245,7 +255,11 @@ class AddonClient:
         if hello:
             try:
                 await channel.send(
-                    "hello", v=CHANNEL_VERSION, hub=hub_id, known_rev=known_rev, **self.identity_fields()
+                    "hello",
+                    v=CHANNEL_VERSION,
+                    hub=hub_id,
+                    known_rev=known_rev,
+                    **self.identity_fields(),
                 )
             except BaseException:
                 await channel.close()
@@ -270,7 +284,11 @@ class AddonClient:
                         res = msg.get("result")
                         self.last_adopt = res if isinstance(res, str) else None
                         return
-                    if t in ("error", "bundle", "nothing_applied"):  # `adopt`, when sent, comes before these
+                    if t in (
+                        "error",
+                        "bundle",
+                        "nothing_applied",
+                    ):  # `adopt`, when sent, comes before these
                         return
         except TimeoutError:
             raise AddonUnreachable("the add-on did not answer") from None

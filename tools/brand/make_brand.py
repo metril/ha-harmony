@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate Harmony brand assets (SVG + PNG). Text is converted to outlines.
 
-    uv run --with cairosvg --with fonttools python tools/brand/make_brand.py
+uv run --with cairosvg --with fonttools python tools/brand/make_brand.py
 """
+
 import io
 import math
 import urllib.request
@@ -26,7 +27,9 @@ def font(name: str) -> TTFont:
     CACHE.mkdir(parents=True, exist_ok=True)
     p = CACHE / name
     if not p.exists():
-        data = urllib.request.urlopen(urllib.request.Request(FONT_ZIP, headers={"User-Agent": "x"})).read()
+        data = urllib.request.urlopen(
+            urllib.request.Request(FONT_ZIP, headers={"User-Agent": "x"})
+        ).read()
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             member = next(n for n in z.namelist() if n.endswith("/" + name) and "extras/ttf" in n)
             p.write_bytes(z.read(member))

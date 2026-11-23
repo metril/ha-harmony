@@ -61,9 +61,25 @@ _DOMAIN_ICON = {
 }
 _SERVICE_ICON = {"open_cover": "up", "close_cover": "down"}
 _NAV_ICON_LEAD = {"prev": "chev_left", "home": "home"}
-_KIND_ICONS = ("speaker", "soundbar", "receiver", "streamer", "projector", "kvm", "plug", "laptop", "pc")
+_KIND_ICONS = (
+    "speaker",
+    "soundbar",
+    "receiver",
+    "streamer",
+    "projector",
+    "kvm",
+    "plug",
+    "laptop",
+    "pc",
+)
 _CHEVRONS = frozenset(i for n, i in ICON_IDS.items() if n.startswith("chev"))
-_BRAND_NAMES = {"shield": "nvidia", "nvidia": "nvidia", "plex": "plex", "youtube": "youtube", "kodi": "kodi"}
+_BRAND_NAMES = {
+    "shield": "nvidia",
+    "nvidia": "nvidia",
+    "plex": "plex",
+    "youtube": "youtube",
+    "kodi": "kodi",
+}
 
 
 class CompileError(ValueError):
@@ -191,7 +207,9 @@ class _Unit:
     fixed: bool = False
 
 
-def nav_icon(label: str, dev_icons: dict[str, str] | None, dev_by_name: dict[str, str] | None) -> int:
+def nav_icon(
+    label: str, dev_icons: dict[str, str] | None, dev_by_name: dict[str, str] | None
+) -> int:
     """Icon for a nav row with none set: the device it names (its config icon), a brand logo matched by
     name, then name keywords (the device kind or domain words are among them). Mirrors studio-model.ts."""
     dev = (dev_by_name or {}).get(label.strip().casefold())
@@ -256,8 +274,13 @@ def _spec(
             icon = ICON_IDS.get(_SERVICE_ICON.get(name) or _DOMAIN_ICON.get(dom, ""), None)
         if icon is None:
             icon = icon_for_text(label)
-            if not icon:  # then the command (or the service target) name: "Clear Camera" -> cctv_off
-                hint = action.get("command") or str(action.get("entity_id") or action.get("target", "")).split(".")[-1]
+            if (
+                not icon
+            ):  # then the command (or the service target) name: "Clear Camera" -> cctv_off
+                hint = (
+                    action.get("command")
+                    or str(action.get("entity_id") or action.get("target", "")).split(".")[-1]
+                )
                 icon = icon_for_text(str(hint)) if hint else 0
     elif kind == "tile" and icon is None:
         icon = ICON_IDS.get(_DOMAIN_ICON.get(w["entity"].split(".")[0], ""), 0)
@@ -330,7 +353,9 @@ def _default_icon_only(s: _Spec, cols: int, rows: int, fixed: bool = False) -> N
         return
     if cols == 4 and s.w == 1:
         s.icon_only = True
-    elif (over := lambda x: fit_label(SimpleNamespace(cols=cols, rows=rows, fixed=fixed), _probe(x)))(s):
+    elif (
+        over := lambda x: fit_label(SimpleNamespace(cols=cols, rows=rows, fixed=fixed), _probe(x))
+    )(s):
         if s.shape == "card" and _shrink(s, over):
             return  # a shorter caption keeps the glyph and the caption (MacBook Pro -> MBP)
         s.icon_only = True
@@ -343,7 +368,9 @@ def _maps_exit(model: Model, activity: str | None) -> bool:
     """Would the hub resolve Exit to a binding? With an activity: its keys or the global map. Without
     one (any activity may be running): any activity's keys or the global map."""
     maps = [model.get("keys") or {}]
-    maps += [a.get("keys") or {} for a in model["activities"] if activity is None or a["id"] == activity]
+    maps += [
+        a.get("keys") or {} for a in model["activities"] if activity is None or a["id"] == activity
+    ]
     return any(key_code(n) == _EXIT for m in maps for n in m)
 
 
@@ -365,9 +392,7 @@ def _split_fixed(specs: list[_Spec], p: dict[str, Any], pi: int, base: int) -> l
     size = base
 
     def height(g: list[list[_Spec]]) -> int:
-        ws = tuple(
-            replace(_probe(s), y=y) for y, row in enumerate(g) for s in row
-        )
+        ws = tuple(replace(_probe(s), y=y) for y, row in enumerate(g) for s in row)
         return fixed_height(Page(0, 12, max(1, len(g)), ws, 2, 0, 1, fixed=True))
 
     for y in sorted(rows):
@@ -406,8 +431,14 @@ def _split_fixed(specs: list[_Spec], p: dict[str, Any], pi: int, base: int) -> l
         for i in range(len(groups) - 1, 0, -1):
             if len(groups[i - 1]) - len(groups[i]) >= 2:
                 row = groups[i - 1][-1]
-                nb = sum(widget_size(_probe(x)) for x in row) + sum(widget_size(_probe(x)) for r in groups[i] for x in r)
-                if height([row, *groups[i]]) <= FIXED_MAX and base + nb <= MAX_BYTES and len(groups[i]) < 16:
+                nb = sum(widget_size(_probe(x)) for x in row) + sum(
+                    widget_size(_probe(x)) for r in groups[i] for x in r
+                )
+                if (
+                    height([row, *groups[i]]) <= FIXED_MAX
+                    and base + nb <= MAX_BYTES
+                    and len(groups[i]) < 16
+                ):
                     groups[i].insert(0, row)
                     groups[i - 1].pop()
                     moved_any = True
@@ -454,14 +485,27 @@ def _shrink(s: _Spec, over: Any = None) -> bool:
 
 def _shorten_key(s: _Spec) -> bool:
     """A glyph key whose caption is cut gets a shorter one before it loses the caption."""
-    if s.kind != "button" or s.w > 4 or s.shape != "card" or not s.icon or s.icon_only or s.icon in BRAND_COLORS:
+    if (
+        s.kind != "button"
+        or s.w > 4
+        or s.shape != "card"
+        or not s.icon
+        or s.icon_only
+        or s.icon in BRAND_COLORS
+    ):
         return False
     return _over(s) and _shrink(s)
 
 
 def _refit(s: _Spec) -> None:
     """Last pass on a placed card (the layout may have compacted it): shorten, else drop to the glyph alone."""
-    if s.kind != "button" or s.shape in ("row", "pill", "monogram") or s.icon_only or s.nav is not None or not s.label:
+    if (
+        s.kind != "button"
+        or s.shape in ("row", "pill", "monogram")
+        or s.icon_only
+        or s.nav is not None
+        or not s.label
+    ):
         return
     if s.icon in BRAND_COLORS or not _over(s) or _shrink(s):
         return
@@ -473,7 +517,14 @@ def _caption_rows(specs: list[_Spec]) -> None:
     """In one row of glyph keys either every key has a caption or none does (logo keys excepted)."""
     rows: dict[int, list[_Spec]] = {}
     for s in specs:
-        if s.kind == "button" and s.w <= 6 and s.shape == "card" and s.icon and s.icon not in BRAND_COLORS and s.nav is None:
+        if (
+            s.kind == "button"
+            and s.w <= 6
+            and s.shape == "card"
+            and s.icon
+            and s.icon not in BRAND_COLORS
+            and s.nav is None
+        ):
             rows.setdefault(s.y, []).append(s)
     for row in rows.values():
         if any(s.label != s.cfg["label"] for s in row):
@@ -561,14 +612,22 @@ def _regrid(specs: list[_Spec], cols: int, rows: int) -> list[_Spec]:
 
 def _is_off(s: _Spec) -> bool:
     a = s.cfg.get("action")
-    return s.kind == "button" and bool(a) and a.get("type") == "activity" and a.get("activity") == "off"
+    return (
+        s.kind == "button"
+        and bool(a)
+        and a.get("type") == "activity"
+        and a.get("activity") == "off"
+    )
 
 
 def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     names = {a["id"]: a.get("name", a["id"]) for a in model["activities"]}
     dev_icons = {d["id"]: d["icon"] for d in model["devices"] if d.get("icon")}
     dev_name = {d["id"]: d.get("name") or d["id"] for d in model["devices"]}
-    act_devs = {a["id"]: [dev_name[x["device"]] for x in a["devices"] if x["device"] in dev_name] for a in model["activities"]}
+    act_devs = {
+        a["id"]: [dev_name[x["device"]] for x in a["devices"] if x["device"] in dev_name]
+        for a in model["activities"]
+    }
     dev_by_name = {}
     for d in model["devices"]:
         dev_by_name[d["id"].casefold()] = d["id"]
@@ -576,15 +635,22 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
     units: list[_Unit] = []
     for pi, p in enumerate(model["pages"]):
         in_list = "list" in p
-        specs = [_spec(w, act_ids, names, in_list, dev_icons, dev_by_name, act_devs) for w in p["widgets"]]
+        specs = [
+            _spec(w, act_ids, names, in_list, dev_icons, dev_by_name, act_devs)
+            for w in p["widgets"]
+        ]
         for k, s in enumerate(specs):
             s.order = k
         cols, rows = p["cols"], p["rows"]
         convert = p.get("layout") not in ("fixed", "grid")  # every page is FIXED unless it opts out
         fixed = convert or p.get("layout") == "fixed"
         if fixed and in_list:  # one full-width row each, one grid row per widget
-            half = convert and len(specs) >= 7 and all(
-                s.kind == "button" and s.nav is None and "shape" not in s.cfg for s in specs
+            half = (
+                convert
+                and len(specs) >= 7
+                and all(
+                    s.kind == "button" and s.nav is None and "shape" not in s.cfg for s in specs
+                )
             )
             if half:  # many short items: compact half cards, 8 a page
                 for i, s in enumerate(specs):
@@ -631,7 +697,11 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
             base = HEADER_V2 + len(title.encode())
             groups = _split_fixed(specs, p, pi, base)
             if placed is not None:
-                halves = [s for s in placed if s.kind == "button" and s.shape == "card" and s.w == 6 and not s.compact]
+                halves = [
+                    s
+                    for s in placed
+                    if s.kind == "button" and s.shape == "card" and s.w == 6 and not s.compact
+                ]
                 if len(groups) > 1 and halves:  # compact (56 px) half cards may save the split
                     for s in halves:
                         s.compact = True
@@ -645,7 +715,11 @@ def _units(model: Model, act_ids: list[str]) -> list[_Unit]:
                         _pack(placed)
                         groups = _split_fixed(placed, p, pi, base)
                 off = next((s for s in placed if _is_off(s)), None)
-                while off is not None and not any(x is off for x in groups[0]) and placed.index(off) > 0:
+                while (
+                    off is not None
+                    and not any(x is off for x in groups[0])
+                    and placed.index(off) > 0
+                ):
                     placed.remove(off)  # All Off belongs on page 1: nudge it up the reading order
                     placed.insert(max(0, len(groups[0]) - 1), off)
                     _pack(placed)
@@ -715,7 +789,9 @@ def build_pages(
     """
     units = _units(model, act_ids)
     if len(units) > MAX_PAGES:
-        err = CompileError(f"too many pages: {len(units)} (the remote holds at most {MAX_PAGES}); delete pages or shorten lists that split into several")
+        err = CompileError(
+            f"too many pages: {len(units)} (the remote holds at most {MAX_PAGES}); delete pages or shorten lists that split into several"
+        )
         err.count = len(units)
         raise err
     first: dict[int, int] = {}
@@ -759,7 +835,11 @@ def build_pages(
                 keys[str(code)] = s.cfg["action"]
                 if apps is not None and s.cfg["action"]["type"] != "activity":
                     ids = s.cfg.get("app_id") or infer_app_ids(s.label, s.cfg.get("icon"))
-                    ent, act = _apps_entity(model, cfg[u.cfg_index], s.cfg["action"]) if ids else (None, None)
+                    ent, act = (
+                        _apps_entity(model, cfg[u.cfg_index], s.cfg["action"])
+                        if ids
+                        else (None, None)
+                    )
                     if ent:
                         apps.append(AppBinding(pid, wire, tuple(ids), ent, act))
             else:

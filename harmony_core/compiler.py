@@ -157,7 +157,13 @@ class Compiled:
         pages, notices = degrade_pages(self.models, self.cfg_ids, at, tier)
         if pages is self.models:  # this remote can show everything there is
             return RemotePages(
-                self.models, self.pages_v2, self._pages_b64[1], self.gen, self.theme_id, None, notices
+                self.models,
+                self.pages_v2,
+                self._pages_b64[1],
+                self.gen,
+                self.theme_id,
+                None,
+                notices,
             )
         pages = [replace(p, gen=0) for p in pages]
         models, _v1, v2 = encode_pages(pages, self.cfg_ids, self.seed, [])

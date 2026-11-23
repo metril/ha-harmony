@@ -157,7 +157,9 @@ async def test_restore_route_and_live_configs_topic(client):
     assert d["configs"][0]["dirty"] is True
     r = await client.post("/api/v1/configs/main/restore", json={"rev": 1}, headers=H)
     assert r.status == 200 and (await r.json())["dirty"] is False
-    assert (await client.post("/api/v1/configs/main/restore", json={"rev": 9}, headers=H)).status == 404
+    assert (
+        await client.post("/api/v1/configs/main/restore", json={"rev": 9}, headers=H)
+    ).status == 404
     await lv.close()
 
 
@@ -195,7 +197,12 @@ def test_v1_hub_file_migrates_to_a_library_config(tmp_path):
     state = Store(tmp_path).load("ha-harmony-abc")
     assert state["v"] == 2 and state["ack"]["result"] == "ok"
     a = state["applied"]
-    assert (a["config_id"], a["rev"], a["hash"], a["config"]) == ("ha-harmony-abc", 3, "h3", {"n": 3})
+    assert (a["config_id"], a["rev"], a["hash"], a["config"]) == (
+        "ha-harmony-abc",
+        3,
+        "h3",
+        {"n": 3},
+    )
     assert [h["rev"] for h in state["history"]] == [2, 1]
     # idempotent: a second run changes nothing
     before = f.read_bytes()
@@ -212,7 +219,9 @@ def test_interrupted_migration_reruns_cleanly(tmp_path):
     m["migrated_from"] = "h1"
     lib._save(m)
     migrate_v1(tmp_path, lib)
-    assert lib.ids() == ["h1"] and len(lib.get("h1")["revs"]) == 3 and lib.get("h1")["draft"] is None
+    assert (
+        lib.ids() == ["h1"] and len(lib.get("h1")["revs"]) == 3 and lib.get("h1")["draft"] is None
+    )
 
 
 async def test_app_start_migrates_and_serves_the_hub(aiohttp_client, tmp_path):

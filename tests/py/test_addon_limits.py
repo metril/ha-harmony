@@ -16,7 +16,12 @@ TOKEN = "ab" * 32
 def _many_commands(n):
     return {
         "devices": [
-            {"id": f"d{d}", "commands": {f"c{i}": {"proto": "nec", "addr": d, "cmd": i % 256} for i in range(n // 3)}}
+            {
+                "id": f"d{d}",
+                "commands": {
+                    f"c{i}": {"proto": "nec", "addr": d, "cmd": i % 256} for i in range(n // 3)
+                },
+            }
             for d in range(3)
         ]
     }
@@ -24,13 +29,19 @@ def _many_commands(n):
 
 async def hello(c, hub, limits):
     """The integration's hello with the hub's limits (a JSON text stands for a garbled report)."""
-    ws = await connect(c, hub, limits=json.loads(limits) if isinstance(limits, str) and limits.startswith("{") else limits)
+    ws = await connect(
+        c,
+        hub,
+        limits=json.loads(limits) if isinstance(limits, str) and limits.startswith("{") else limits,
+    )
     await drain(ws)
     await ws.close()
 
 
 def _app(tmp_path):
-    return create_app(tmp_path, auth=NoAuth(), clock=clock, bundle_token=TOKEN, bundle_networks=None)
+    return create_app(
+        tmp_path, auth=NoAuth(), clock=clock, bundle_token=TOKEN, bundle_networks=None
+    )
 
 
 async def test_editor_shows_the_caps_of_the_hub_that_is_linked(aiohttp_client, tmp_path):
@@ -68,7 +79,9 @@ async def test_reported_limits_survive_an_add_on_restart(aiohttp_client, tmp_pat
     c = await aiohttp_client(_app(tmp_path))
     await hello(c, "hub-a", CURRENT.to_wire())
     c2 = await aiohttp_client(_app(tmp_path))
-    r = await c2.post("/api/v1/config/preview?hub=hub-a", json={"config": _many_commands(900)}, headers=H)
+    r = await c2.post(
+        "/api/v1/config/preview?hub=hub-a", json={"config": _many_commands(900)}, headers=H
+    )
     assert (await r.json())["ok"]
 
 
