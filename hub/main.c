@@ -637,6 +637,7 @@ int main(int argc, char **argv) {
         hp_stall_end("peers", t1);
         if (g_hub.ota.restart && ++restart_polls >= 3) break;
     }
+    hp_ota_finish_on_exit(&g_hub.ota); /* an ota_end worker mid-apply must not be cut off */
     hp_mdns_srv_stop(&g_mdns); /* goodbye (TTL 0) */
     hub_shutdown(&g_hub);
     if (!sim) hp_hw_sinks_close(&g_hw);

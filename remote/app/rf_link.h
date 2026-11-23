@@ -76,6 +76,7 @@ typedef struct {
   uint64_t next_batt_ms, next_info_ms, info_sent_ms;
   bool info_pending;
   const hp_store_t *store; /* the page store reported in remote_info (gen, pages); NULL = none */
+  uint16_t boot; /* per-boot nonce sent in remote_info */
   uint8_t told_gen, told_pages; /* what the last remote_info said about it */
   int last_pct;
   bool was_attached, lost, dead_reported;

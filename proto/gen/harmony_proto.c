@@ -120,6 +120,7 @@ static const hp_field_desc_t hp_fields_remote_info[] = {
     {"icons", HP_T_U8, false, NULL},
     {"gen", HP_T_U8, false, NULL},
     {"pages", HP_T_U8, false, NULL},
+    {"boot", HP_T_U16, false, NULL},
 };
 
 static const hp_field_desc_t hp_fields_tile_state[] = {
@@ -272,7 +273,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"tile_update", HP_MSG_TILE_UPDATE, HP_TRANSPORT_RF, 4, hp_fields_tile_update},
     {"activity_list", HP_MSG_ACTIVITY_LIST, HP_TRANSPORT_WS, 2, hp_fields_activity_list},
     {"remote_attached", HP_MSG_REMOTE_ATTACHED, HP_TRANSPORT_WS, 1, hp_fields_remote_attached},
-    {"remote_info", HP_MSG_REMOTE_INFO, HP_TRANSPORT_BOTH, 6, hp_fields_remote_info},
+    {"remote_info", HP_MSG_REMOTE_INFO, HP_TRANSPORT_BOTH, 7, hp_fields_remote_info},
     {"tile_state", HP_MSG_TILE_STATE, HP_TRANSPORT_RF, 5, hp_fields_tile_state},
     {"ota_begin", HP_MSG_OTA_BEGIN, HP_TRANSPORT_WS, 4, hp_fields_ota_begin},
     {"ota_chunk", HP_MSG_OTA_CHUNK, HP_TRANSPORT_WS, 2, hp_fields_ota_chunk},

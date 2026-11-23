@@ -133,6 +133,7 @@ typedef struct {
 typedef struct {
     bool valid;
     uint8_t remote, page_fmt, caps, icons;
+    uint16_t boot;      /* the remote's per-boot nonce */
     uint8_t gen, pages; /* the v2 page set the remote holds: its generation and how many pages (0/0 none) */
 } hub_info_t;
 #define HP_XFER_IDLE_MS 60000 /* a config transfer with no chunk for this long is dropped (frees its flash) */

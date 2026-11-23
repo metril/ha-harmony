@@ -23,10 +23,10 @@ static void world(void) {
 }
 
 static void send_info_stored(uint32_t caps, uint32_t gen, uint32_t pages) {
-    hp_rf_val_t v[6] = {{.u = 1}, {.u = 2}, {.u = caps}, {.u = 50}, {.u = gen}, {.u = pages}};
+    hp_rf_val_t v[7] = {{.u = 1}, {.u = 2}, {.u = caps}, {.u = 50}, {.u = gen}, {.u = pages}, {.u = 0}};
     uint8_t pl[HP_RF_MSG_MAX];
     size_t n;
-    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 6, pl, sizeof pl, &n), 0);
+    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 7, pl, sizeof pl, &n), 0);
     CT_EQ(hp_rf_link_send(&RL, HP_MSG_REMOTE_INFO, pl, n, R.now), 0);
     run(300);
 }

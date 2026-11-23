@@ -202,8 +202,8 @@ static void hub_deliver(void *ctx, const hp_rf_msg_t *m) {
   } else if (m->type == HP_MSG_BATTERY && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
     if (nhbatt < 32) hbatt[nhbatt++] = (hbatt_t){(uint8_t)v[0].u, (uint8_t)v[1].u, (uint16_t)v[2].u, fk.now, hord++};
   } else if (m->type == HP_MSG_REMOTE_INFO) {
-    hp_rf_val_t r[6];
-    CT_EQ(hp_rf_unpack(m->type, m->payload, m->len, r, 6), 0);
+    hp_rf_val_t r[7];
+    CT_EQ(hp_rf_unpack(m->type, m->payload, m->len, r, 7), 0);
     if (nhinfo < 32)
       hinfo[nhinfo++] = (hinfo_t){(uint8_t)r[0].u, (uint8_t)r[1].u, (uint8_t)r[2].u, (uint8_t)r[3].u, (uint8_t)r[4].u,
                                   (uint8_t)r[5].u, fk.now, hord++};
@@ -663,8 +663,8 @@ static void test_tile_state_applies_and_unknown_types_are_dropped(void) {
   CT_EQ(hub_push_page(PAGE2, sizeof PAGE2), 0);
   WAIT_FOR(app.ui.page.page_id == 2);
   uint64_t before = fb_hash();
-  hp_rf_val_t r[6] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}, {.u = 0}, {.u = 0}};
-  CT_EQ(hub_send(HP_MSG_REMOTE_INFO, r, 6), 0); /* a type the remote does not act on: dropped, not an error */
+  hp_rf_val_t r[7] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}, {.u = 0}, {.u = 0}, {.u = 0}};
+  CT_EQ(hub_send(HP_MSG_REMOTE_INFO, r, 7), 0); /* a type the remote does not act on: dropped, not an error */
   hp_rf_val_t t[5] = {{.u = 1}, {.u = 2}, {.u = 5}, {.u = 2}, {.p = (const uint8_t *)"On", .len = 2}};
   CT_EQ(hub_send(HP_MSG_TILE_STATE, t, 5), 0);
   hp_rf_val_t s[2] = {{.u = 3}, {.u = 1}};

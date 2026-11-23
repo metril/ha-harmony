@@ -380,10 +380,10 @@ static void test_key_not_ahead_of_remote_info(void) {
     net_init(&n, false);
     n.ep[0].drop_all = 1;
     CT_EQ(batt_obj(&n, 0), 0); /* in flight */
-    hp_rf_val_t v[6] = {{.u = 1}, {.u = 2}, {.u = 15}, {.u = 9}, {.u = 0}, {.u = 0}};
+    hp_rf_val_t v[7] = {{.u = 1}, {.u = 2}, {.u = 15}, {.u = 9}, {.u = 0}, {.u = 0}, {.u = 0}};
     uint8_t pl[HP_RF_MSG_MAX];
     size_t pn;
-    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 6, pl, sizeof pl, &pn), 0);
+    CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 7, pl, sizeof pl, &pn), 0);
     CT_EQ(hp_rf_link_send(&n.ep[0].link, HP_MSG_REMOTE_INFO, pl, pn, n.now), 0);
     CT_EQ(batt_obj(&n, 0), 0);
     CT_EQ(key_obj(&n, 0, 9, HP_KEY_ACTION_PRESS), 0);

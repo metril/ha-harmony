@@ -73,6 +73,7 @@ async def test_remote_info_is_broadcast_cached_and_resent(hub_rf, start_remote):
             "icons": 50,
             "gen": 0,
             "pages": 0,
+            "boot": 0x5151,
         }
         # a client connecting later gets it right after hello_ack
         async with s.ws_connect(hub_rf.url) as ws2:
@@ -85,6 +86,7 @@ async def test_remote_info_is_broadcast_cached_and_resent(hub_rf, start_remote):
                 "icons": 50,
                 "gen": 0,
                 "pages": 0,
+                "boot": 0x5151,
             }
         await push(ws1, RAW)
         code, _, _ = finish(r)

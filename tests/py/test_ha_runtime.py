@@ -78,8 +78,16 @@ THREE_PAGES = YAML + "".join(
 """
     for i in range(2)
 )
-V2_INFO = {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50, "gen": 0, "pages": 0}  # empty store
-V1_INFO = {"remote": 1, "page_fmt": 1, "caps": 0, "icons": 0, "gen": 0, "pages": 0}
+V2_INFO = {
+    "remote": 1,
+    "page_fmt": 2,
+    "caps": 3,
+    "icons": 50,
+    "gen": 0,
+    "pages": 0,
+    "boot": 1,
+}  # empty store
+V1_INFO = {"remote": 1, "page_fmt": 1, "caps": 0, "icons": 0, "gen": 0, "pages": 0, "boot": 1}
 
 
 class ScriptHub:
