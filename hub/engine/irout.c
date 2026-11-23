@@ -78,7 +78,8 @@ static void burst_cb(void *arg, uint32_t now) {
     if (--b->left > 0) {
         b->h = hp_sched_after(o->sched, b->period_ms, burst_cb, b);
         if (b->h) return;
-        while (b->left-- > 0 && o->ir) (void)o->ir->send(o->ir->self, b->port, &b->sig); /* timers full */
+        /* timers full: the remaining copies are dropped, never sent back to back (each send would DRAIN the last) */
+        hp_log("hub: IR timer queue full, %u repeat copies dropped\n", (unsigned)b->left);
     }
     b->used = 0;
 }
@@ -99,8 +100,8 @@ static void start_burst(hp_irout_t *o, const hp_ir_signal_t *sig, uint8_t port, 
         b->used = 0;
         break;
     }
-    /* no free slot or timer: degrade to back-to-back frames (the sink paces them) */
-    while (extra--) (void)o->ir->send(o->ir->self, port, sig);
+    /* no free slot or timer: the extra copies are dropped, never sent back to back */
+    hp_log("hub: IR timer queue full, %u repeat copies dropped\n", (unsigned)extra);
 }
 
 /* Sends o->cand now (the frame is already encoded there) and books the line. */
@@ -153,20 +154,19 @@ static void pend_cb(void *arg, uint32_t now) {
     }
 }
 
-/* On a full timer queue the queue is flushed back-to-back (the sink paces). */
+/* On a full timer queue the waiting sends are dropped (logged, their callbacks get -HP_E_BUSY): sending them back
+ * to back would make the sink DRAIN between frames on the loop. */
 static void pend_arm(hp_irout_t *o, uint32_t delay) {
     o->pend_h = hp_sched_after(o->sched, delay, pend_cb, o);
     if (o->pend_h) return;
+    hp_log("hub: IR timer queue full, %u queued sends dropped\n", (unsigned)o->pend_n);
     while (o->pend_n) {
         hp_irout_pend_t *p = &o->pend[o->pend_head];
-        memcpy(&o->cand, &p->sig, sizeof o->cand);
-        int er = emit_cand(o, p->ir, p->port, p->key, p->sirc, p->copies);
         void (*done)(void *, int) = p->done;
         void *dctx = p->dctx;
         o->pend_head = (uint8_t)((o->pend_head + 1) % HP_IROUT_PEND);
         o->pend_n--;
-        if (er < 0) hp_log("hub: deferred IR send failed (%d)\n", er);
-        if (done) done(dctx, er);
+        if (done) done(dctx, -HP_E_BUSY);
     }
 }
 

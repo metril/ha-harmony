@@ -33,6 +33,8 @@ typedef struct fake {
     uint8_t w[NW][40];
     size_t wlen[NW];
     int nw;
+    int read_err;   /* fail read() with EIO (after a 1 ms nap) while set */
+    _Atomic int nreads;
     int write_mode; /* 0: return 0, 1: return 30, -1: fail with EIO */
     uint8_t rx[NRX][64];
     size_t rxlen[NRX];
@@ -115,6 +117,12 @@ static ssize_t f_read(void *c, int fd, void *b, size_t cap) {
     (void)fd;
     pthread_mutex_lock(&f->mu);
     if (f->min_cap == 0 || cap < f->min_cap) f->min_cap = cap;
+    atomic_fetch_add(&f->nreads, 1);
+    if (f->read_err && !f->rxn) {
+        pthread_mutex_unlock(&f->mu);
+        errno = EIO;
+        return -1;
+    }
     f->in_read = 1;
     while (!f->rxn && !f->intr) pthread_cond_wait(&f->cv, &f->mu);
     f->in_read = 0;
@@ -967,6 +975,76 @@ static void test_link_transition_logs(void) {
     hp_rf_spi_destroy(t);
 }
 
+/* A persistent read error: one log line, exponential backoff (not a 20 ms spin), a recovery line. */
+static void test_read_error_backs_off(void) {
+    fake_t f;
+    cap_t c;
+    fake_init(&f);
+    cap_init(&c);
+    f.read_err = 1;
+    hp_rf_transport *t = NULL;
+    CT_EQ(open_cfg(&f, HP_RF_SPI_ROLE_HUB, 2, false, &c, &t), 0);
+    ms_sleep(400); /* 20+40+80+160 ms sleeps: ~5 reads; a flat 20 ms retry would make ~20 */
+    CT_CHECK(atomic_load(&f.nreads) <= 8);
+    CT_EQ(cap_count(&c, "read failed"), 1);
+    pthread_mutex_lock(&f.mu);
+    f.read_err = 0;
+    pthread_mutex_unlock(&f.mu);
+    hp_rf_spi_destroy(t); /* SIGUSR1 stand-in cuts the sleep */
+}
+
+static void bad_report(fake_t *f, uint8_t first) {
+    const uint8_t r[5] = {first, 0x09, 0x00, 0x00, 0x00};
+    feed(f, r, 5);
+    wait_idle(f);
+}
+
+/* The drop-diagnostic budget is per message kind and comes back on a link-up. */
+static void test_log_budget_per_kind_and_refilled(void) {
+    fake_t f;
+    cap_t c;
+    fake_init(&f);
+    cap_init(&c);
+    hp_rf_transport *t = NULL;
+    CT_EQ(open_cfg(&f, HP_RF_SPI_ROLE_HUB, 2, false, &c, &t), 0);
+    t->claim(t->self);
+    for (int i = 0; i < 40; i++) bad_report(&f, 0x77); /* unexpected kind */
+    CT_EQ(cap_count(&c, "unexpected report dropped"), 32);
+    bad_report(&f, 0x10); /* a different kind still has its budget */
+    CT_EQ(cap_count(&c, "control report dropped"), 1);
+    const uint8_t up[7] = {0x10, 0x02, 0x41, 0x04, 0x87, 0x21, 0x40};
+    feed(&f, up, 7);
+    wait_idle(&f);
+    for (int i = 0; i < 5; i++) bad_report(&f, 0x77);
+    CT_EQ(cap_count(&c, "unexpected report dropped"), 37);
+    hp_rf_spi_destroy(t);
+}
+
+/* A link that flaps: the first lines of an episode, then a summary on the next flap after a quiet spell. */
+static void test_link_flaps_are_summarised(void) {
+    fake_t f;
+    cap_t c;
+    fake_init(&f);
+    cap_init(&c);
+    hp_rf_transport *t = NULL;
+    CT_EQ(open_cfg(&f, HP_RF_SPI_ROLE_HUB, 2, false, &c, &t), 0);
+    t->claim(t->self);
+    const uint8_t up[7] = {0x10, 0x02, 0x41, 0x04, 0x87, 0x21, 0x40};
+    const uint8_t lost[7] = {0x10, 0x02, 0x41, 0x04, 0x47, 0x21, 0x40};
+    for (int i = 0; i < 10; i++) {
+        feed(&f, i % 2 ? lost : up, 7);
+        wait_idle(&f);
+    }
+    CT_EQ(cap_count(&c, "rf_spi: link "), 4); /* FLAP_BURST lines, 6 suppressed and silent */
+    CT_EQ(cap_count(&c, "flaps suppressed"), 0); /* no timer: nothing yet */
+    f.now += 20000;
+    feed(&f, up, 7); /* the next flap after the quiet interval */
+    wait_idle(&f);
+    CT_EQ(cap_count(&c, "6 more link flaps suppressed"), 1);
+    CT_EQ(cap_count(&c, "rf_spi: link "), 5);
+    hp_rf_spi_destroy(t);
+}
+
 static void test_rf_debug_frames(void) {
     for (int dbg = 0; dbg < 2; dbg++) {
         fake_t f;
@@ -1413,6 +1491,9 @@ int main(void) {
     CT_RUN(test_full_queue_keeps_key_release);
     CT_RUN(test_link_transition_logs);
     CT_RUN(test_link_up_logged_from_data_frame);
+    CT_RUN(test_read_error_backs_off);
+    CT_RUN(test_log_budget_per_kind_and_refilled);
+    CT_RUN(test_link_flaps_are_summarised);
     CT_RUN(test_rf_debug_frames);
     CT_RUN(test_slot_learning_vectors);
     CT_RUN(test_unknown_slot_is_safe_and_then_learned);

@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -45,7 +46,7 @@ int hp_hublog_init(hp_hublog_t *l, hp_log_emit_fn emit, void *ctx) {
     if (pthread_mutex_init(&l->mu, NULL) != 0 || pipe2(l->wake, O_NONBLOCK | O_CLOEXEC) < 0) return -HP_E_INVAL;
     l->emit = emit;
     l->ctx = ctx;
-    l->tokens_m = HP_LOG_BURST * 1000u;
+    l->tokens_m = l->wtokens_m = HP_LOG_BURST * 1000u;
     l->last_ms = l->now_ms();
     return 0;
 }
@@ -70,13 +71,36 @@ static size_t stamp_prefix(char *b, size_t cap, uint32_t ts) {
     return k > 0 && (size_t)k < cap ? (size_t)k : 0;
 }
 
+static bool is_warn(const char *s, size_t n) {
+    char t[HP_LOG_LINE];
+    if (n >= sizeof t) n = sizeof t - 1;
+    memcpy(t, s, n);
+    t[n] = 0;
+    return hp_hublog_level(t)[0] == 'w';
+}
+
+static void ring_remove(hp_hublog_t *l, unsigned i) { /* logical index; mu held */
+    for (; i + 1 < l->count; i++) l->ring[(l->head + i) % HP_LOG_RING] = l->ring[(l->head + i + 1) % HP_LOG_RING];
+    l->count--;
+}
+
 static void push(hp_hublog_t *l, const char *s, size_t n, uint32_t ts) { /* mu held */
     char pre[40];
     size_t pn = l->stamp ? stamp_prefix(pre, sizeof pre, ts) : 0;
     if (pn + n >= HP_LOG_LINE) n = HP_LOG_LINE - 1 - pn;
-    if (l->count == HP_LOG_RING) {
-        l->head = (l->head + 1) % HP_LOG_RING;
-        l->count--;
+    bool warn = is_warn(s, n);
+    if (l->count == HP_LOG_RING) { /* overflow: info lines go before warnings */
+        unsigned i = 0;
+        while (i < l->count && l->ring[(l->head + i) % HP_LOG_RING].level[0] == 'w') i++;
+        if (i < l->count) {
+            ring_remove(l, i);
+        } else if (!warn) { /* ring is all warnings: the incoming info line is the one to lose */
+            l->dropped++;
+            return;
+        } else {
+            l->head = (l->head + 1) % HP_LOG_RING;
+            l->count--;
+        }
         l->dropped++;
     }
     hp_logline_t *e = &l->ring[(l->head + l->count++) % HP_LOG_RING];
@@ -99,24 +123,31 @@ static void ship(hp_hublog_t *l, const char *s, size_t n) {
     uint32_t now = l->now_ms();
     uint64_t add = (uint64_t)(now - l->last_ms) * HP_LOG_RATE; /* milli-tokens: rate/s * ms */
     l->last_ms = now;
-    uint64_t t = l->tokens_m + add;
+    bool warn = is_warn(s, n); /* warnings draw from their own bucket: an info flood cannot starve them */
+    uint32_t *tok = warn ? &l->wtokens_m : &l->tokens_m;
+    uint32_t *sup = warn ? &l->wsuppressed : &l->suppressed;
+    uint64_t t = *tok + add;
+    uint64_t o = (warn ? l->tokens_m : l->wtokens_m) + add; /* the other bucket refills too */
     if (t > HP_LOG_BURST * 1000u) t = HP_LOG_BURST * 1000u;
+    if (o > HP_LOG_BURST * 1000u) o = HP_LOG_BURST * 1000u;
+    if (warn) l->tokens_m = (uint32_t)o;
+    else l->wtokens_m = (uint32_t)o;
     bool kick = false;
     if (t < 1000) {
-        l->suppressed++;
+        (*sup)++;
     } else {
         t -= 1000;
-        if (l->suppressed) {
+        if (*sup) {
             char sum[64];
-            int sn = snprintf(sum, sizeof sum, "hub: %u log lines suppressed", (unsigned)l->suppressed);
+            int sn = snprintf(sum, sizeof sum, "hub: %u %slog lines suppressed", (unsigned)*sup, warn ? "warning " : "");
             push(l, sum, (size_t)sn, now);
-            l->suppressed = 0;
+            *sup = 0;
         }
         push(l, s, n, now);
         kick = !l->woken;
         if (kick) l->woken = true;
     }
-    l->tokens_m = (uint32_t)t;
+    *tok = (uint32_t)t;
     pthread_mutex_unlock(&l->mu);
     if (kick) { char b = 1; (void)!write(l->wake[1], &b, 1); }
 }
@@ -183,6 +214,11 @@ void hp_hublog_feed_ship(hp_hublog_t *l, hp_linebuf_t *lb, const char *prefix, c
 void hp_log_feed(hp_linebuf_t *lb, const char *buf, size_t n) { hp_hublog_feed(g_cur, lb, buf, n); }
 void hp_log_feed_ship(hp_linebuf_t *lb, const char *prefix, const char *buf, size_t n) {
     hp_hublog_feed_ship(g_cur, lb, prefix, buf, n);
+}
+
+bool hp_hublog_readable(const hp_hublog_t *l) {
+    struct pollfd p = {l->wake[0], POLLIN, 0};
+    return l->wake[0] >= 0 && poll(&p, 1, 0) > 0 && (p.revents & POLLIN);
 }
 
 void hp_hublog_service(hp_hublog_t *l) {

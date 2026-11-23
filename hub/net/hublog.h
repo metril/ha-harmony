@@ -8,7 +8,8 @@
  * The poll loop wakes on wake_fd (event-driven, no timers) and hp_hublog_service hands the ring to the emit
  * callback in order. While the callback has no taker the lines stay queued (oldest dropped first, counted).
  * Shipping is rate limited by a token bucket (burst HP_LOG_BURST, HP_LOG_RATE lines/s); suppressed lines still reach
- * the file, and one "N log lines suppressed" line is shipped when the flow resumes. Nothing is persisted by the ring. */
+ * the file, and one "N log lines suppressed" line is shipped when the flow resumes. Warnings have their own bucket,
+ * and on ring overflow info lines are dropped before warnings. Nothing is persisted by the ring. */
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -37,7 +38,8 @@ typedef struct {
     unsigned head, count;
     uint32_t dropped;
     _Atomic uint32_t lost; /* dropped on lock contention (counted without the lock) */
-    uint32_t tokens_m, last_ms, suppressed; /* token bucket, milli-tokens */
+    uint32_t tokens_m, last_ms, suppressed; /* token bucket (info lines), milli-tokens */
+    uint32_t wtokens_m, wsuppressed; /* warnings have a bucket of their own */
     bool woken;
     bool stamp; /* prefix each shipped line with "[HH:MM:SS.mmm +<uptime>ms] " (the file keeps the bare line) */
     int wake[2];
@@ -59,6 +61,8 @@ int hp_hublog_init(hp_hublog_t *, hp_log_emit_fn, void *ctx); /* 0 or -HP_E_* */
 void hp_hublog_install(hp_hublog_t *);
 /* Poll this fd for readability; then call hp_hublog_service. -1 before init. */
 int hp_hublog_wake_fd(const hp_hublog_t *);
+/* True when the wake fd has data (non-blocking check; call hp_hublog_service only then). */
+bool hp_hublog_readable(const hp_hublog_t *);
 /* Event-loop thread: emits queued lines in order until the callback declines. Also call it after a client authenticates. */
 void hp_hublog_service(hp_hublog_t *);
 /* Level of a line: "warning" for failure wording, else "info". */

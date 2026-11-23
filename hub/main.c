@@ -588,9 +588,11 @@ int main(int argc, char **argv) {
         hp_stall_poll(t0, t1, wait, g_cb_ms); /* the ws callbacks report themselves */
         hp_hooklog_service(&g_hook);
         hp_stall_end("hooklog service", t1);
-        t1 = hp_mono_ms();
-        hp_hublog_service(&g_log);
-        hp_stall_end("hublog service", t1);
+        if (hp_hublog_readable(&g_log)) {
+            t1 = hp_mono_ms();
+            hp_hublog_service(&g_log);
+            hp_stall_end("hublog service", t1);
+        }
 #ifdef HH_BT
         if (bt_run) { /* the helper's socket, supervision, then the broadcasts its changes queued */
             t1 = hp_mono_ms();

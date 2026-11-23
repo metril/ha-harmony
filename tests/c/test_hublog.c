@@ -355,6 +355,56 @@ static void test_stall_watchdog_threshold(void) {
     teardown(fd, path);
 }
 
+static void test_warnings_have_their_own_bucket(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    g_ms = 1000;
+    int fd = setup(&l, &s, path);
+    s.up = true;
+    for (int i = 0; i < 100; i++) hp_log("hub: chatter %d", i); /* exhausts the info bucket */
+    hp_log("hub: loop stall 300 ms in x");
+    hp_hublog_service(&l);
+    CT_CHECK(!strcmp(s.msg[s.n - 1], "hub: loop stall 300 ms in x"));
+    CT_CHECK(!strcmp(s.level[s.n - 1], "warning"));
+    teardown(fd, path);
+}
+
+static void test_overflow_drops_info_before_warnings(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    g_ms = 1000;
+    int fd = setup(&l, &s, path); /* nobody up: lines stay queued */
+    hp_log("hub: first failed");
+    for (int i = 0; i < HP_LOG_RING + 10; i++) {
+        hp_log("hub: info %d", i);
+        g_ms += 100; /* keep the bucket full */
+    }
+    hp_log("hub: second failed");
+    s.up = true;
+    hp_hublog_service(&l);
+    CT_EQ(s.n, HP_LOG_RING);
+    CT_CHECK(!strcmp(s.msg[0], "hub: first failed")); /* the oldest line survived: it is a warning */
+    CT_CHECK(!strcmp(s.msg[s.n - 1], "hub: second failed"));
+    teardown(fd, path);
+}
+
+static void test_readable_only_after_a_push(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    g_ms = 1000;
+    int fd = setup(&l, &s, path);
+    s.up = true;
+    CT_CHECK(!hp_hublog_readable(&l));
+    hp_log("hub: x");
+    CT_CHECK(hp_hublog_readable(&l));
+    hp_hublog_service(&l);
+    CT_CHECK(!hp_hublog_readable(&l));
+    teardown(fd, path);
+}
+
 int main(void) {
     CT_RUN(test_hook_offset_survives_a_respawn);
     CT_RUN(test_rf_link_log_goes_through_hp_log);
@@ -365,6 +415,9 @@ int main(void) {
     CT_RUN(test_line_reaches_the_file_synchronously);
     CT_RUN(test_stalled_ring_never_blocks);
     CT_RUN(test_rate_limit_and_summary);
+    CT_RUN(test_warnings_have_their_own_bucket);
+    CT_RUN(test_overflow_drops_info_before_warnings);
+    CT_RUN(test_readable_only_after_a_push);
     CT_RUN(test_long_line_cut_in_the_ring_not_the_file);
     CT_RUN(test_child_pipe_is_nonblocking);
     CT_RUN(test_emit_needs_a_client);

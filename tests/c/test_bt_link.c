@@ -92,7 +92,7 @@ static void setup(const char *mode) {
 }
 
 static void pump_once(void) {
-    int fd = bt_link_poll_fd();
+    int fd = bt_link_poll_fd() & ~BT_LINK_POLL_OUT;
     if (fd >= 0) {
         struct pollfd p = {fd, POLLIN, 0};
         poll(&p, 1, 5);
@@ -427,7 +427,7 @@ static void test_flood(void) {
     long worst = 0, t0 = mono_ms();
     int per_pass_max = 0, wait = 5;
     while (ev_key_n < 15000 && mono_ms() - t0 < 20000) {
-        int fd = bt_link_poll_fd();
+        int fd = bt_link_poll_fd() & ~BT_LINK_POLL_OUT;
         if (fd >= 0 && wait != 0) { struct pollfd p = {fd, POLLIN, 0}; poll(&p, 1, 5); }
         long a = mono_ms();
         int before = ev_rcb_n;
@@ -550,6 +550,20 @@ static void test_bluetoothd(void) {
     CT_EQ(stats().spawns, 0);
     advance(1001);
     CT_EQ(stats().spawns, 1);
+    bt_link_reset();
+
+    setup("normal"); /* the wait for a stubborn bluetoothd backs off (100, 200, 400, 800 ms), it is not a flat 50 ms retry */
+    bz_running = bz_stubborn = 1;
+    usual_cfg();
+    int w = bt_link_service();
+    CT_CHECK(w >= 100 && w <= 3000); /* first wake: no sooner than 100 ms */
+    int wakes = 0;
+    for (int i = 0; i < 100 && stats().spawns == 0 && bz_kill == 0; i++) {
+        advance(w > 0 ? (uint64_t)w : 1);
+        w = bt_link_service();
+        wakes++;
+    }
+    CT_CHECK(wakes <= 8); /* a 3 s wait at a flat 50 ms would be 60 wakes */
     bt_link_reset();
 
     setup("normal"); /* --sim: never */

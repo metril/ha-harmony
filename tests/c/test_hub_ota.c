@@ -3,6 +3,7 @@
  * verify rejections, apply, power loss mid-apply. Host filesystem only; one mkdtemp dir per run. */
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdint.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -137,6 +138,58 @@ static void test_good_update(void) {
     unlink(p); /* the hook's health mark */
     CT_EQ(hp_ota_begin(&o2, &own, 1, (uint32_t)x.len, 6, x.sha), HP_OTA_E_DOWNGRADE);
     CT_EQ(hp_ota_begin(&o2, &own, 1, (uint32_t)x.len, 7, x.sha), HP_OTA_E_DOWNGRADE); /* the same build as the running one */
+    free(x.img);
+}
+
+/* The daemon's form: end_start returns at once, the worker signals a pollable fd, and until then nothing else
+ * may touch the upload. */
+static void test_async_end(void) {
+    fx_t x;
+    hp_ota_t o;
+    fixture(&x, 9, OTA_TARGET_HUB, 3000);
+    setup(&o, &x);
+    int own = 1;
+    CT_EQ(hp_ota_begin(&o, &own, 1, (uint32_t)x.len, 9, x.sha), 0);
+    CT_EQ(send_all(&o, &own, &x, 0, 1000), 0);
+    CT_EQ(hp_ota_done_fd(&o), -1);
+    CT_EQ(hp_ota_end_start(&o, &own), HP_OTA_ASYNC);
+    CT_CHECK(hp_ota_ending(&o));
+    CT_EQ(hp_ota_begin(&o, &own, 1, (uint32_t)x.len, 9, x.sha), HP_OTA_E_BUSY);
+    CT_EQ(hp_ota_abort(&o, &own), HP_OTA_E_BUSY);
+    CT_EQ(hp_ota_end_start(&o, &own), HP_OTA_E_BUSY);
+    struct pollfd p = {hp_ota_done_fd(&o), POLLIN, 0};
+    CT_EQ(poll(&p, 1, 5000), 1);
+    uint32_t b = 0;
+    const void *who = NULL;
+    bool alive = false;
+    CT_EQ(hp_ota_end_done(&o, &b, &who, &alive), HP_OTA_OK);
+    CT_EQ(b, 9);
+    CT_CHECK(who == &own && alive && o.restart && !hp_ota_ending(&o) && !o.receiving);
+    CT_EQ(hp_ota_end_done(&o, &b, NULL, NULL), HP_OTA_E_STATE); /* nothing finished */
+    size_t n = 0;
+    char *got = slurp(x.hub, &n);
+    CT_EQ(n, 3000);
+    free(got);
+    free(x.img);
+
+    /* a corrupted transfer fails in the worker: error code, staging file gone, upload not resumable */
+    fixture(&x, 10, OTA_TARGET_HUB, 2000);
+    hp_ota_t o2;
+    setup(&o2, &x);
+    char bad[129];
+    memcpy(bad, x.sha, sizeof bad);
+    bad[0] = bad[0] == '0' ? '1' : '0';
+    CT_EQ(hp_ota_begin(&o2, &own, 1, (uint32_t)x.len, 10, bad), 0);
+    CT_EQ(send_all(&o2, &own, &x, 0, 1000), 0);
+    CT_EQ(hp_ota_end_start(&o2, &own), HP_OTA_ASYNC);
+    p.fd = hp_ota_done_fd(&o2);
+    CT_EQ(poll(&p, 1, 5000), 1);
+    hp_ota_owner_gone(&o2, &own); /* the asking connection closed meanwhile */
+    CT_EQ(hp_ota_end_done(&o2, &b, &who, &alive), HP_OTA_E_SHA);
+    CT_CHECK(!alive && !o2.restart && !o2.receiving);
+    char sp[320];
+    snprintf(sp, sizeof sp, "%s/ota-staged.img", x.dir);
+    CT_CHECK(!exists(sp));
     free(x.img);
 }
 
@@ -449,6 +502,7 @@ int main(void) {
     for (int i = 0; i < 32; i++) seed[i] = (uint8_t)(i + 1);
     ota_keypair_from_seed(seed, pk, sk);
     test_good_update();
+    test_async_end();
     test_busy_resume_offsets();
     test_begin_validation();
     test_space_and_enospc();

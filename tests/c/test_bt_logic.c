@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 /* Bluetooth helper pure logic: HID report building, remote key diff, IPC framing. */
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@
 #include "hub/bt/bt_bonds.h"
 #include "hub/bt/bt_hid.h"
 #include "hub/bt/bt_hid_queue.h"
+#include "hub/bt/bt_pktq.h"
 #include "hub/bt/bt_txq.h"
 #include "hub/bt/bt_win.h"
 #include "hub/bt/bt_leaddr.h"
@@ -110,6 +112,40 @@ static void test_ipc_frames(void) {
     CT_EQ(bt_ipc_parse(bad, 3, &type, &p, &len), (size_t)-1);
 }
 
+
+/* ---- HCI packet queue: EAGAIN packets are kept whole and in order, never dropped ---- */
+static void test_pktq(void) {
+    int sv[2];
+    CT_EQ(socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+    fcntl(sv[0], F_SETFL, fcntl(sv[0], F_GETFL) | O_NONBLOCK);
+    static bt_pktq_t q;
+    uint8_t p[300];
+    memset(p, 0xAB, sizeof p);
+    int direct = 0; /* fill the socket until it says EAGAIN */
+    for (;; direct++) {
+        p[1] = (uint8_t)direct;
+        if (write(sv[0], p, sizeof p) < 0) { CT_CHECK(errno == EAGAIN); break; }
+        CT_CHECK(direct < 100000);
+    }
+    for (int i = 0; i < BT_PKTQ_SLOTS; i++) {
+        p[1] = (uint8_t)(200 + i);
+        CT_EQ(bt_pktq_push(&q, p, sizeof p), 0);
+    }
+    CT_EQ(bt_pktq_push(&q, p, sizeof p), -1); /* full */
+    CT_EQ(bt_pktq_drain(&q, sv[0]), 0);
+    CT_EQ(q.n, (unsigned)BT_PKTQ_SLOTS); /* still blocked: nothing lost, nothing sent */
+    uint8_t rx[512];
+    for (int i = 0; i < direct; i++) CT_CHECK(read(sv[1], rx, sizeof rx) == (ssize_t)sizeof p);
+    CT_EQ(bt_pktq_drain(&q, sv[0]), 0); /* writable again */
+    CT_EQ(q.n, 0u);
+    for (int i = 0; i < BT_PKTQ_SLOTS; i++) { /* in order, whole */
+        CT_CHECK(read(sv[1], rx, sizeof rx) == (ssize_t)sizeof p);
+        CT_EQ(rx[1], 200 + i);
+    }
+    CT_EQ(bt_pktq_push(&q, p, BT_PKTQ_MAX + 1), -1);
+    close(sv[0]);
+    close(sv[1]);
+}
 
 /* ---- outbound queue: a stuck socket never drops or splits a frame ---- */
 static void test_txq(void) {
@@ -522,6 +558,7 @@ int main(void) {
     CT_RUN(test_pair_fail_line);
     CT_RUN(test_hidq_log_levels);
     CT_RUN(test_leaddr);
+    CT_RUN(test_pktq);
     CT_RUN(test_adv_action);
     CT_RUN(test_trace);
     CT_RUN(test_leaddr_unreadable);

@@ -80,6 +80,7 @@ typedef struct {
     bool rf_claimed;
     hp_rf_transport *rfspi; /* the real radio when cfg.rf was given; sinks.rf then points at it */
     bool pending;          /* START issued, DRAIN owed */
+    uint64_t line_free;    /* ops.now_ms when the last waveform has played out: no DRAIN is owed after it */
     uint8_t flush_ports;   /* nonzero: a failed send left queued bytes; START+DRAIN them before the next use */
     bool configured;       /* DSIZE/MODE/VOLUME done on fd */
     int fd;                /* cfg.dev_fd: held by the boot hook too, so never closed by us */

@@ -204,6 +204,11 @@ static void test_sequence(void) {
         CHECK(F.log[2].op == 'w' && F.log[2].req == w.nbytes);
         CHECK(F.log[3].op == 'i' && F.log[3].req == HP_I2S_START && F.log[3].arg == 0x10000);
     }
+    /* once the waveform has played out the next send owes no DRAIN: the ioctl is skipped */
+    F.now += w.dur_ms;
+    F.nlog = 0;
+    CHECK(send_ir(0, s) == 0);
+    CHECK(F.nlog == 3 && F.log[0].req == HP_I2S_FREQ && F.log[2].req == HP_I2S_START);
     CHECK(F.badfd == 0); /* every call used the adopted fd */
     hp_hw_sinks_close(g_h);
     CHECK(F.log[F.nlog - 1].req == HP_I2S_DRAIN); /* exit drains; there is no close path */
