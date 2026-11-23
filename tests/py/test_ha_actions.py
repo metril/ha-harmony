@@ -73,12 +73,27 @@ def ha_key(body: str) -> str:
         ("{service: light.toggle, target: {area_id: x}}", "target"),
         ("{service: light.toggle, target: {entity_id: nope}}", "entity id"),
         ("{service: light.toggle, target: {entity_id: 'light.a'}, extra: 1}", "unexpected"),
-        ("{service: light.turn_on, target: {entity_id: light.a}, data: {brightness: '{{ 1 }}'}}", "template"),
-        ("{service: light.turn_on, target: {entity_id: light.a}, data: {x: '{% if 1 %}'}}", "template"),
-        ("{service: light.turn_on, target: {entity_id: light.a}, data: {x: '{# c #}'}}", "template"),
+        (
+            "{service: light.turn_on, target: {entity_id: light.a}, data: {brightness: '{{ 1 }}'}}",
+            "template",
+        ),
+        (
+            "{service: light.turn_on, target: {entity_id: light.a}, data: {x: '{% if 1 %}'}}",
+            "template",
+        ),
+        (
+            "{service: light.turn_on, target: {entity_id: light.a}, data: {x: '{# c #}'}}",
+            "template",
+        ),
         ("{service: light.turn_on, target: {entity_id: light.a}, data: {'{{k}}': 1}}", "template"),
-        ("{service: light.turn_on, target: {entity_id: light.a}, data: {entity_id: light.b}}", "target"),
-        ("{service: light.turn_on, target: {entity_id: light.a}, data: {a: {b: {c: {d: {e: 1}}}}}}", "deeper"),
+        (
+            "{service: light.turn_on, target: {entity_id: light.a}, data: {entity_id: light.b}}",
+            "target",
+        ),
+        (
+            "{service: light.turn_on, target: {entity_id: light.a}, data: {a: {b: {c: {d: {e: 1}}}}}}",
+            "deeper",
+        ),
         ("{service: light.turn_on, target: {entity_id: light.a}, repeat: yes}", "repeat"),
     ],
 )
@@ -100,7 +115,9 @@ def test_oversized_data_is_rejected():
 
 
 def test_ha_action_is_allowed_everywhere_an_action_is():
-    text = BASE + """
+    text = (
+        BASE
+        + """
 pages:
   - id: p
     cols: 2
@@ -109,6 +126,7 @@ pages:
       - {type: button, id: b, x: 0, y: 0, label: B, action: {ha: {service: scene.turn_on, target: {entity_id: scene.x}}}}
       - {type: tile, id: t, x: 1, y: 0, label: L, entity: light.a}
 """
+    )
     assert validate_all(text) == []
     for bad in ("shell_command.x",):
         assert validate_all(text.replace("scene.turn_on", bad))
@@ -171,7 +189,9 @@ def test_ha_table_follows_the_keymap_inheritance_rule():
 
 def test_keymap_view_uses_the_same_rule_and_summarizes_ha():
     maps = resolve_keymaps(model())
-    stream = {r["key"]: r for r in next(a for a in maps["activities"] if a["id"] == "stream")["keys"]}
+    stream = {
+        r["key"]: r for r in next(a for a in maps["activities"] if a["id"] == "stream")["keys"]
+    }
     assert stream["select"]["source"] == "activity"
     assert stream["select"]["action"]["kind"] == "device"  # the model action; the table is flat
     assert stream["left"]["action"] == {
@@ -225,7 +245,9 @@ def test_tile_taps_default_to_toggle_and_stay_off_the_hub():
 
 
 def test_tap_toggle_on_a_sensor_is_an_error():
-    assert "does not work" in err(TILES.replace("entity: sensor.t}", "entity: sensor.t, tap: toggle}"))
+    assert "does not work" in err(
+        TILES.replace("entity: sensor.t}", "entity: sensor.t, tap: toggle}")
+    )
     assert "`tap` belongs on a tile" in err(
         "pages:\n  - id: p\n    cols: 1\n    rows: 1\n    widgets:\n"
         "      - {type: button, id: b, label: B, x: 0, y: 0, tap: none, action: {none: true}}\n"
@@ -233,7 +255,9 @@ def test_tap_toggle_on_a_sensor_is_an_error():
 
 
 def test_device_button_on_an_ha_device_becomes_an_ha_action():
-    text = BASE + """
+    text = (
+        BASE
+        + """
 pages:
   - id: p
     cols: 1
@@ -241,6 +265,7 @@ pages:
     widgets:
       - {type: button, id: ok, x: 0, y: 0, label: OK, action: {device: shield, command: ok}}
 """
+    )
     c = compile_config(parse_model(text, "t.yaml"))
     code = 128 + next(i for i in range(8) if c.key_names.get(128 + i) == "tap_ok")
     assert c.ha_keys[None][code].data == {"command": "DPAD_CENTER"}
@@ -251,7 +276,9 @@ def test_remote_info_wait_default_is_one_and_a_half_seconds():
     import re
     from pathlib import Path
 
-    src = (Path(__file__).resolve().parents[2] / "custom_components/ha_harmony/const.py").read_text()
+    src = (
+        Path(__file__).resolve().parents[2] / "custom_components/ha_harmony/const.py"
+    ).read_text()
     assert re.search(r"^INFO_WAIT = 1\.5\b", src, re.MULTILINE)
 
 

@@ -182,7 +182,9 @@ GOLDEN = {
 @pytest.mark.parametrize("name", GOLDEN)
 def test_uncoloured_configs_compile_byte_identical_with_the_same_gen(name):
     if name == "living_room":
-        m = _real_parse((FIX / "living_room.yaml").read_text(), "lr", FIX)  # default layout: converted
+        m = _real_parse(
+            (FIX / "living_room.yaml").read_text(), "lr", FIX
+        )  # default layout: converted
     else:
         m = parse_data(json.loads((FIX / "large_config.json").read_text()))
     c = compile_config(m)

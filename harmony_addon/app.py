@@ -352,7 +352,9 @@ def _config_doc(app: web.Application, meta: dict[str, Any]) -> dict[str, Any]:
     draft = meta["draft"]
     return {
         **Library.summary(meta),
-        "draft": None if draft is None else {k: draft[k] for k in ("config", "updated", "base_rev")},
+        "draft": None
+        if draft is None
+        else {k: draft[k] for k in ("config", "updated", "base_rev")},
         "revs": [{k: r[k] for k in ("rev", "at", "note", "hash", "parent")} for r in meta["revs"]],
         "hubs": _running(app, meta["id"]),
     }
@@ -455,9 +457,18 @@ async def put_draft(request: web.Request) -> web.Response:
 async def save_rev(request: web.Request) -> web.Response:
     body = await read_body(request, schemas.SAVE_REV)
     now = int(request.app[CLOCK_KEY]())
-    meta, row = _store_call(request.app[LIB_KEY].save_rev, request.match_info["id"], body["note"], now)
+    meta, row = _store_call(
+        request.app[LIB_KEY].save_rev, request.match_info["id"], body["note"], now
+    )
     live.publish_configs(request.app)
-    return jresp({"ok": True, "rev": {k: row[k] for k in ("rev", "at", "note", "hash", "parent")}, **_draft_resp(meta)}, 201)
+    return jresp(
+        {
+            "ok": True,
+            "rev": {k: row[k] for k in ("rev", "at", "note", "hash", "parent")},
+            **_draft_resp(meta),
+        },
+        201,
+    )
 
 
 async def get_rev(request: web.Request) -> web.Response:

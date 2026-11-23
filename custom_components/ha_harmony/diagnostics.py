@@ -20,7 +20,10 @@ from .const import (
 )
 
 TO_REDACT = {CONF_TOKEN, CONF_ADDON_TOKEN, CONF_ADDON_UUID, CONF_ADDON_HOST, CONF_HOST}
-TO_REDACT_BT = {"addr", "name"}  # Bluetooth addresses and device names (bonds, the last pairing, scan candidates)
+TO_REDACT_BT = {
+    "addr",
+    "name",
+}  # Bluetooth addresses and device names (bonds, the last pairing, scan candidates)
 
 
 async def async_get_config_entry_diagnostics(
@@ -44,7 +47,9 @@ async def async_get_config_entry_diagnostics(
             },
             "pushed_as": link.pushed,  # (config gen, format, link epoch, theme caps) of the last complete set
             "theme_notices": [n["msg"] for n in c.theme_notices(r)],
-            "theme": c.theme_status(r),  # name, id, sent (the hub took it), acked (the remote holds the set)
+            "theme": c.theme_status(
+                r
+            ),  # name, id, sent (the hub took it), acked (the remote holds the set)
             "pending": link.pending,
             "attached": link.attached,
             "last_push_ms": link.push_ms,
@@ -58,7 +63,9 @@ async def async_get_config_entry_diagnostics(
             "sent_covers": np.sent_covers,
             "failed_sends": np.failed_sends,
             "cover_errors": np.cover_errors,
-            "last": None if np._last is None else {"flags": np._last.flags, "t1": np._last.t1, "t2": np._last.t2},
+            "last": None
+            if np._last is None
+            else {"flags": np._last.flags, "t1": np._last.t1, "t2": np._last.t2},
         },
         "entry": {
             "data": async_redact_data(dict(entry.data), TO_REDACT),

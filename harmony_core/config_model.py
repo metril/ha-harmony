@@ -520,8 +520,13 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         # Players behind the remote's app rings and Now Playing screen (docs/ha-config.md).
         vol.Optional("media"): vol.Schema(
             {
-                vol.Optional("apps_entity"): vol.All(str, vol.Match(_ENTITY, msg="not an entity id")),
+                vol.Optional("apps_entity"): vol.All(
+                    str, vol.Match(_ENTITY, msg="not an entity id")
+                ),
                 vol.Optional("now_playing_entity"): vol.All(
+                    str, vol.Match(_ENTITY, msg="not an entity id")
+                ),
+                vol.Optional("session_entity"): vol.All(
                     str, vol.Match(_ENTITY, msg="not an entity id")
                 ),
             }
@@ -559,7 +564,8 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         vol.Optional("activity"): _slug,
         vol.Optional("back"): bool,
         vol.Optional("layout"): vol.In(
-            ["fixed", "grid"], msg="`fixed` (the default look) or `grid` (keep the hand-placed cells)"
+            ["fixed", "grid"],
+            msg="`fixed` (the default look) or `grid` (keep the hand-placed cells)",
         ),
         vol.Optional("list"): {vol.Required("rows"): _int(1, 16)},
         vol.Required("widgets"): [vol.All(widget, _check_widget)],
@@ -568,7 +574,12 @@ def _build_schema(r: _Resolver) -> vol.Schema:
         {
             vol.Optional("devices", default=list): [any_device],
             # Optional name / icon per device group (default: the first member's own).
-            vol.Optional("groups"): {_slug: {vol.Optional("name"): _name, vol.Optional("icon"): vol.In(list(ICON_IDS), msg="unknown icon")}},
+            vol.Optional("groups"): {
+                _slug: {
+                    vol.Optional("name"): _name,
+                    vol.Optional("icon"): vol.In(list(ICON_IDS), msg="unknown icon"),
+                }
+            },
             vol.Optional("activities", default=list): [activity],
             vol.Optional("keys", default=dict): keys,
             vol.Optional("bt_remotes"): [bt_rem],
@@ -707,14 +718,22 @@ def _check_fixed(p: dict[str, Any]) -> dict[str, Any]:
     p["cols"] = 12
     if "list" not in p:
         for j, w in enumerate(p["widgets"]):
-            if w.get("h", 1) != 1 or w.get("w", 1) not in FIXED_SPANS or w.get("x", 0) % w.get("w", 1):
+            if (
+                w.get("h", 1) != 1
+                or w.get("w", 1) not in FIXED_SPANS
+                or w.get("x", 0) % w.get("w", 1)
+            ):
                 raise vol.Invalid(
                     "a fixed page takes w 12, 6, 4 or 3 (x a multiple of w) and h 1",
                     path=["widgets", j],
                 )
     for j, w in enumerate(p["widgets"]):
-        if w.get("compact") and ("list" in p or w.get("shape", "card") != "card" or w.get("w") != 6):
-            raise vol.Invalid("`compact` is for a 6-wide card button", path=["widgets", j, "compact"])
+        if w.get("compact") and (
+            "list" in p or w.get("shape", "card") != "card" or w.get("w") != 6
+        ):
+            raise vol.Invalid(
+                "`compact` is for a 6-wide card button", path=["widgets", j, "compact"]
+            )
     return p
 
 
@@ -815,7 +834,10 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
             if a is None or (sect == "devices" and it.get("kind") != "bt"):
                 continue
             if a in seen_addr:
-                fail([sect, i, "address"], f"Bluetooth address {a} is already used by {fmt_path(seen_addr[a])}")
+                fail(
+                    [sect, i, "address"],
+                    f"Bluetooth address {a} is already used by {fmt_path(seen_addr[a])}",
+                )
             else:
                 seen_addr[a] = [sect, i]
 

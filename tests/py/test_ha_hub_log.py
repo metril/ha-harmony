@@ -17,7 +17,9 @@ async def test_hub_lines_go_to_the_ha_logger_and_the_add_on(hass, fake_hub, fake
     _, c, _ = await boot(hass, fake_hub, fake_addon, bt, yaml="devices: []\n")
     with caplog.at_level(logging.INFO, logger="custom_components.ha_harmony.hub_log"):
         await bt.push("hub_log", {"level": "info", "msg": "hub: build 7", "ts": 10})
-        await bt.push("hub_log", {"level": "warning", "msg": "hub: RF send failed", "ts": 11, "dropped": 2})
+        await bt.push(
+            "hub_log", {"level": "warning", "msg": "hub: RF send failed", "ts": 11, "dropped": 2}
+        )
         await until(hass, lambda: len(fake_addon.of("hub_log")) == 2)
     recs = [r for r in caplog.records if r.name == "custom_components.ha_harmony.hub_log"]
     assert [(r.levelno, r.getMessage()) for r in recs] == [

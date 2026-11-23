@@ -110,20 +110,27 @@ def _flags(state: State | None) -> int:
 def _int(value: Any) -> int:
     try:
         return max(int(float(value)), 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
 
 
 def _position(attrs: Any, flags: int, now: datetime) -> int:
     pos = _int(attrs.get("media_position"))
     at = attrs.get("media_position_updated_at")
+    if isinstance(at, str):  # an MQTT sensor's attributes carry the timestamp as ISO text
+        at = dt_util.parse_datetime(at)
     if flags == PLAYING and isinstance(at, datetime):
         pos += max(int((now - at).total_seconds()), 0)
     return pos
 
 
 def build(
-    shield: State | None, plex: State | None, now: datetime, plex_apps: Iterable[str], font: str
+    shield: State | None,
+    plex: State | None,
+    now: datetime,
+    plex_apps: Iterable[str],
+    font: str,
+    session: State | None = None,
 ) -> Playing | None:
     """What the remote should show now, or None when neither player is in use. The Plex player gives
     the details while the Shield runs a Plex app; any other app shows its own title (no cover, no
@@ -134,7 +141,19 @@ def build(
         and plex is not None
         and plex.state in ("playing", "paused")
     )
-    src = plex if on_plex else shield
+    sess = (
+        session
+        if not on_plex
+        and session is not None
+        and session.state in ("playing", "paused")
+        and (
+            shield is None
+            or session.attributes.get("app_id") == shield.attributes.get("app_id")
+            or not shield.attributes.get("media_title")
+        )
+        else None
+    )
+    src = sess or (plex if on_plex else shield)
     if src is None or src.state in ("unavailable", "unknown"):
         return None
     flags = _flags(src)
@@ -145,14 +164,19 @@ def build(
         return Playing(0, 0, 0, 0, "", "", None)
     t1 = _line(series or title, (library,), font)
     t2 = ""
+    if sess is not None:
+        artist = _text(a.get("media_artist"))
+        t2 = cut(artist) if artist and has_glyphs(artist, font) else ""
     season, episode = a.get("media_season"), a.get("media_episode")
-    if series and (season not in (None, "") or episode not in (None, "")):
+    if sess is None and series and (season not in (None, "") or episode not in (None, "")):
         tag = f"S{_int(season)} E{_int(episode)}"
         t2 = cut(f"{tag} · {title}") if title and has_glyphs(f"{tag} · {title}", font) else tag
     content = _text(a.get("media_content_id")) or title
     cid = zlib.crc32(content.encode()) & 0xFFFFFFFF if content else 0
     picture = a.get("entity_picture") if on_plex else None
-    return Playing(cid, flags, _position(a, flags, now), _int(a.get("media_duration")), t1, t2, picture)
+    return Playing(
+        cid, flags, _position(a, flags, now), _int(a.get("media_duration")), t1, t2, picture
+    )
 
 
 def _rgb565(r: int, g: int, b: int) -> int:
@@ -193,6 +217,7 @@ class NowPlayingFeed:
         *,
         shield: str = DEFAULT_SHIELD,
         plex: str = DEFAULT_PLEX,
+        session: str | None = None,
         plex_apps: Iterable[str] = DEFAULT_PLEX_APPS,
         font: str = DEFAULT_FONT,
         fetch: Fetch | None = None,
@@ -201,18 +226,25 @@ class NowPlayingFeed:
         self.hass, self.client = hass, client
         self._remotes, self._attached, self._spawn = remotes, attached, spawn
         self.shield, self.plex, self.plex_apps, self.font = shield, plex, tuple(plex_apps), font
+        self.session = self._opt_session = session
         self._opt_shield, self._opt_plex = shield, plex
         self._fetch = fetch or self._fetch_picture
         self._clock = clock
         self._unsub: Callable[[], None] | None = None
         self._task: asyncio.Task[None] | None = None
         self._dirty = False
-        self._last: Playing | None = None  # the latest built state (what an attaching remote is shown)
-        self._sent: Playing | None = None  # the state last handed to the hub for the remotes then attached
+        self._last: Playing | None = (
+            None  # the latest built state (what an attaching remote is shown)
+        )
+        self._sent: Playing | None = (
+            None  # the state last handed to the hub for the remotes then attached
+        )
         self._start = 0.0  # estimated media start (clock epoch seconds) of _last
         self._sent_start = 0.0  # the same for _sent
         self._cover: tuple[int, str] | None = None  # (cid, base64) of the cover for _last
-        self._cover_sent: int | None = None  # cid last handed to the hub (it keeps it; resent on a rejoin only)
+        self._cover_sent: int | None = (
+            None  # cid last handed to the hub (it keeps it; resent on a rejoin only)
+        )
         self._warned: set[int] = set()
         self._cover_for: int | None = None  # cid the cover above (or a fetch in flight) belongs to
         self.sent_now_playing = 0
@@ -224,16 +256,17 @@ class NowPlayingFeed:
     def start(self) -> None:
         self.stop()
         self._unsub = async_track_state_change_event(
-            self.hass, [self.shield, self.plex], self._on_event
+            self.hass, [e for e in (self.shield, self.plex, self.session) if e], self._on_event
         )
         self._on_event(None)  # type: ignore[arg-type]  # prime from the current state
 
-    def configure(self, shield: str | None, plex: str | None) -> None:
+    def configure(self, shield: str | None, plex: str | None, session: str | None = None) -> None:
         """Use the entities of the live config (None keeps the option default)."""
         shield, plex = shield or self._opt_shield, plex or self._opt_plex
-        if (shield, plex) == (self.shield, self.plex):
+        session = session or self._opt_session
+        if (shield, plex, session) == (self.shield, self.plex, self.session):
             return
-        self.shield, self.plex = shield, plex
+        self.shield, self.plex, self.session = shield, plex, session
         self._last = self._sent = None
         if self._unsub:  # started: follow the new entities (start() primes)
             self.start()
@@ -296,6 +329,7 @@ class NowPlayingFeed:
             self._clock(),
             self.plex_apps,
             self.font,
+            self.hass.states.get(self.session) if self.session else None,
         )
 
     # -- work
@@ -317,7 +351,9 @@ class NowPlayingFeed:
     def _changed(self, cur: Playing) -> bool:
         last = self._sent
         same = last is not None and cur.sig == last.sig
-        return not (same and (cur.flags != PLAYING or abs(self._start - self._sent_start) <= _SEEK_SLACK))
+        return not (
+            same and (cur.flags != PLAYING or abs(self._start - self._sent_start) <= _SEEK_SLACK)
+        )
 
     async def _push(self, cur: Playing, remotes: tuple[int, ...], force: bool = False) -> None:
         targets = [r for r in remotes if self._attached(r) and self.client.connected]
@@ -336,7 +372,10 @@ class NowPlayingFeed:
                 except Exception as exc:  # noqa: BLE001  (a bad image is no reason to lose the text)
                     why = f"not usable: {exc}"
                 else:
-                    self._cover_for, self._cover = cur.cid, (cur.cid, base64.b64encode(data).decode())
+                    self._cover_for, self._cover = (
+                        cur.cid,
+                        (cur.cid, base64.b64encode(data).decode()),
+                    )
                     why = ""
             if why:
                 self.cover_errors += 1
@@ -345,7 +384,9 @@ class NowPlayingFeed:
                 _LOGGER.warning("cover for %s: %s", self.plex, why)
         if self._cover and self._cover[0] == cur.cid and (force or self._cover_sent != cur.cid):
             for r in targets:
-                if await self._send(CMD_COVER, {"remote": r, "cid": cur.cid, "data": self._cover[1]}):
+                if await self._send(
+                    CMD_COVER, {"remote": r, "cid": cur.cid, "data": self._cover[1]}
+                ):
                     self._cover_sent = cur.cid
                     self.sent_covers += 1
                     _LOGGER.debug("cover %08x sent to remote %s", cur.cid, r)
@@ -370,7 +411,12 @@ class NowPlayingFeed:
                 self.sent_now_playing += 1
                 _LOGGER.debug(
                     "now_playing sent to remote %s: flags=%s pos=%s dur=%s t1=%r t2=%r",
-                    r, cur.flags, pos, cur.dur, cur.t1, cur.t2,
+                    r,
+                    cur.flags,
+                    pos,
+                    cur.dur,
+                    cur.t1,
+                    cur.t2,
                 )
         if ok and not force:  # a failed send leaves it unset: the next event tries again
             self._sent, self._sent_start = cur, self._start

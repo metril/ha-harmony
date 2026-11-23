@@ -652,7 +652,9 @@ def main(
                 args = a.app_args[1:] if a.app_args[:1] == ["--"] else a.app_args
                 return d.run_app(a.app, args)
             case "install-hook":
-                return d.install_hook(a.app, None if a.learn_slot else a.slot, a.powermode, a.refresh_backup)
+                return d.install_hook(
+                    a.app, None if a.learn_slot else a.slot, a.powermode, a.refresh_backup
+                )
             case "selftest":
                 return d.selftest(None if a.learn_slot else a.slot, a.powermode)
             case "mark-good":

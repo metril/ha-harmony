@@ -10,7 +10,20 @@ from harmony_core.themes import PRESETS, THEMES, swatch, theme_by_id
 
 ROOT = Path(__file__).resolve().parents[2]
 VEC = json.loads((ROOT / "tests" / "vectors" / "themes.json").read_text())
-NAMES = ["red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo", "purple", "pink"]
+NAMES = [
+    "red",
+    "orange",
+    "amber",
+    "yellow",
+    "lime",
+    "green",
+    "teal",
+    "cyan",
+    "blue",
+    "indigo",
+    "purple",
+    "pink",
+]
 
 
 def _gen():
@@ -34,14 +47,20 @@ def _float_contrast(a: int, b: int) -> float:
 
 def test_generated_files_fresh():
     for path, text in _gen().outputs().items():
-        assert path.read_text() == text, f"{path.name} stale: run `uv run python tools/gen_themes.py`"
+        assert path.read_text() == text, (
+            f"{path.name} stale: run `uv run python tools/gen_themes.py`"
+        )
 
 
 def test_ids_unique_and_below_custom():
     ids = [t.id for t in THEMES]
     assert len(set(ids)) == len(ids) and max(ids) < 7
     assert [t.key for t in THEMES] == ["default", "midnight", "daylight", "high_contrast"]
-    assert PRESETS["default"].name == "Cards" and theme_by_id(0) is PRESETS["default"] and theme_by_id(7) is None
+    assert (
+        PRESETS["default"].name == "Cards"
+        and theme_by_id(0) is PRESETS["default"]
+        and theme_by_id(7) is None
+    )
 
 
 def test_palette_order_is_wire_index():
@@ -80,7 +99,12 @@ def test_preset_rules(t):
 def test_ink_tie_goes_to_tx_and_pressed_moves_toward_ink():
     assert tm.ink(0x808080, 0x123456, 0x123456) == 0x123456
     assert tm.pressed(0xF8F8F8, 0) == tm.snap565(0xBABABA)
-    assert tm.snap565(0xFFFFFF) == 0xF8FCF8 and tm.snap565(0x040204) == 0x080408 and tm.snap565(0x030103) == 0 and tm.snap565(0x040004) == 0x080008
+    assert (
+        tm.snap565(0xFFFFFF) == 0xF8FCF8
+        and tm.snap565(0x040204) == 0x080408
+        and tm.snap565(0x030103) == 0
+        and tm.snap565(0x040004) == 0x080008
+    )
 
 
 def test_lin_table_matches_vectors():
@@ -148,12 +172,24 @@ def test_resolve_theme():
     toks, fills = r("default", {}, PRESETS)
     assert toks == dict(d.tokens) and fills == [s.fill for s in d.palette]
     users = {
-        "mine": {"extends": "midnight", "tokens": {"acc": "#ff0000"}, "palette": {"1": {"fill": "#123456"}, 12: {"fill": "#FFFFFF"}}},
+        "mine": {
+            "extends": "midnight",
+            "tokens": {"acc": "#ff0000"},
+            "palette": {"1": {"fill": "#123456"}, 12: {"fill": "#FFFFFF"}},
+        },
         "child": {"extends": "mine", "tokens": {"tx": "#f0f0f0"}},
     }
     toks, fills = r("child", users, PRESETS)
-    assert toks["acc"] == 0xF80000 and toks["tx"] == 0xF0F0F0 and toks["bg"] == PRESETS["midnight"].tokens["bg"]
-    assert fills[0] == tm.snap565(0x123456) and fills[11] == 0xF8FCF8 and fills[1] == PRESETS["midnight"].palette[1].fill
+    assert (
+        toks["acc"] == 0xF80000
+        and toks["tx"] == 0xF0F0F0
+        and toks["bg"] == PRESETS["midnight"].tokens["bg"]
+    )
+    assert (
+        fills[0] == tm.snap565(0x123456)
+        and fills[11] == 0xF8FCF8
+        and fills[1] == PRESETS["midnight"].palette[1].fill
+    )
 
     def bad(name, themes, msg):
         with pytest.raises(tm.ThemeError, match=msg):
@@ -168,7 +204,11 @@ def test_resolve_theme():
     bad("x", {"x": {"extends": "y"}, "y": {"extends": "x"}}, "circular")
     bad("x", {"x": {"extends": "x"}}, "circular")
     bad("x", {"x": {"extends": "default", "palette": {"13": {"fill": "#000000"}}}}, "palette index")
-    bad("x", {"x": {"extends": "default", "palette": {"1": {"fill": "#000000", "ink": "#fff"}}}}, "want")
+    bad(
+        "x",
+        {"x": {"extends": "default", "palette": {"1": {"fill": "#000000", "ink": "#fff"}}}},
+        "want",
+    )
     chain = {f"t{i}": {"extends": f"t{i + 1}"} for i in range(5)} | {"t5": {"extends": "default"}}
     bad("t0", chain, "deeper than 4")
     ok = {f"t{i}": {"extends": f"t{i + 1}"} for i in range(3)} | {"t3": {"extends": "default"}}

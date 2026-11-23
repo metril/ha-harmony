@@ -40,7 +40,9 @@ class HarmonyCommandButton(HarmonyEntity, ButtonEntity):
         )  # ids never contain ":"
         self._device, self._command = device, command
         self._attr_translation_key = "command"
-        self._attr_entity_registry_enabled_default = ENABLED_BY_DEFAULT  # new ones only: an existing registry entry keeps its state
+        self._attr_entity_registry_enabled_default = (
+            ENABLED_BY_DEFAULT  # new ones only: an existing registry entry keeps its state
+        )
         self._attr_name = command.replace("_", " ").capitalize()
 
     async def async_press(self) -> None:

@@ -79,13 +79,17 @@ async def test_draft_validate_preview_apply_revert(client):
     assert got["draft"]["config"] == CONFIG and got["revs"] == [] and got["hubs"] == []
     assert (await apply_draft(client, cid="main", rev=1)).status == 404  # unknown rev
 
-    v = await (await client.post("/api/v1/config/validate", json={"config": CONFIG}, headers=H)).json()
+    v = await (
+        await client.post("/api/v1/config/validate", json={"config": CONFIG}, headers=H)
+    ).json()
     assert v == {"ok": True, "errors": []}
     bad = {**CONFIG, "activities": [{"id": "x"}]}
     v = await (await client.post("/api/v1/config/validate", json={"config": bad}, headers=H)).json()
     assert v["ok"] is False and v["errors"][0]["path"]
 
-    p = await (await client.post("/api/v1/config/preview", json={"config": CONFIG}, headers=H)).json()
+    p = await (
+        await client.post("/api/v1/config/preview", json={"config": CONFIG}, headers=H)
+    ).json()
     assert p["ok"] and p["pages"][0]["page"]["widgets"] and p["usage"]["json_bytes"] > 0
     v2 = p["pages"][0]["page"]
     assert v2["version"] == 2 and v2["total"] == len(p["pages"]) and v2["widgets"]
@@ -96,7 +100,9 @@ async def test_draft_validate_preview_apply_revert(client):
     assert a["applied"]["rev"] == 1 and a["applied"]["config_id"] == "main"
     assert a["applied"]["hash"] == p["hash"] and a["applied"]["name"] == "main"
     got = await (await client.get("/api/v1/configs/main")).json()
-    assert got["revs"][0]["note"] == "Applied to default" and got["hubs"] == [{"hub": "default", "rev": 1}]
+    assert got["revs"][0]["note"] == "Applied to default" and got["hubs"] == [
+        {"hub": "default", "rev": 1}
+    ]
     assert got["draft"]["base_rev"] == 1 and got["dirty"] is False
     hub = await (await client.get("/api/v1/hubs/default")).json()
     assert hub["applied"]["rev"] == 1 and hub["config_exists"] is True and hub["history"] == []
@@ -224,7 +230,9 @@ async def test_s1_ingress_peer_needs_header_for_ui(aiohttp_client, tmp_path):
     assert (await c.get("/api/v1/health", headers={"X-Remote-User-Id": "u1"})).status == 200
 
 
-async def test_s1_every_ingress_route_needs_the_supervisor_user_id(aiohttp_client, tmp_path, caplog):
+async def test_s1_every_ingress_route_needs_the_supervisor_user_id(
+    aiohttp_client, tmp_path, caplog
+):
     import logging
 
     c = await aiohttp_client(create_app(tmp_path, auth=IngressAuth(peers={"127.0.0.1"})))
@@ -240,7 +248,9 @@ async def test_s1_every_ingress_route_needs_the_supervisor_user_id(aiohttp_clien
     hdr = {**H, **ing, "X-Remote-User-Id": "abc123"}
     caplog.set_level(logging.INFO, logger="harmony_addon.app")
     assert (await c.post("/api/v1/configs", json={"name": "main"}, headers=hdr)).status == 201
-    assert (await c.put("/api/v1/configs/main/draft", json={"config": CONFIG}, headers=hdr)).status == 200
+    assert (
+        await c.put("/api/v1/configs/main/draft", json={"config": CONFIG}, headers=hdr)
+    ).status == 200
     body = {"config_id": "main"}
     assert (await c.post("/api/v1/hubs/default/apply", json=body, headers=hdr)).status == 200
     assert (await c.post("/api/v1/hubs/default/apply", json=body, headers=hdr)).status == 200
@@ -295,7 +305,9 @@ async def test_s2_content_type_and_csrf_header_required(client):
 
 async def test_s2_json_type_not_accepted_for_yaml_and_vice_versa(client):
     r = await client.post(
-        "/api/v1/configs/main/import_yaml", data="{}", headers={**H, "Content-Type": "application/json"}
+        "/api/v1/configs/main/import_yaml",
+        data="{}",
+        headers={**H, "Content-Type": "application/json"},
     )
     assert r.status == 403
     r = await client.post(
@@ -334,11 +346,15 @@ async def test_s3_unknown_keys_and_bad_bodies_are_400(client):
     r = await client.put("/api/v1/configs/main/draft", json={"config": {}, "x": 1}, headers=H)
     assert r.status == 400
     r = await client.post(
-        "/api/v1/hubs/default/apply", data="{nope", headers={**H, "Content-Type": "application/json"}
+        "/api/v1/hubs/default/apply",
+        data="{nope",
+        headers={**H, "Content-Type": "application/json"},
     )
     assert r.status == 400
     for q in ("?hub=../x", "?bogus=1", "?hub=a%20b"):
-        assert (await client.post("/api/v1/config/validate" + q, json={"config": {}}, headers=H)).status == 400
+        assert (
+            await client.post("/api/v1/config/validate" + q, json={"config": {}}, headers=H)
+        ).status == 400
 
 
 async def test_s3_caps(client):

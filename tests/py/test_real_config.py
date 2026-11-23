@@ -33,9 +33,7 @@ REPO = Path(__file__).resolve().parents[2]
 def _find_real_config() -> Path | None:
     if env := os.environ.get("HAH_REAL_CONFIG"):
         return Path(env) if Path(env).is_file() else None
-    hits = sorted(
-        glob.glob(str(REPO / "backups/phase1/hub/*/extracted/ha_harmony_config.yaml"))
-    )
+    hits = sorted(glob.glob(str(REPO / "backups/phase1/hub/*/extracted/ha_harmony_config.yaml")))
     return Path(hits[-1]) if hits else None
 
 
@@ -109,14 +107,13 @@ async def test_one_button_per_real_command(hass, loaded, real_cfg, source):
     ]
     assert not missing, f"commands with no button entity: {missing[:10]}"
     total = sum(len(d["commands"]) for d in real_cfg["devices"])
-    assert total == COMMANDS[source], f"expected {COMMANDS[source]} IR commands; a different count means it changed"
+    assert total == COMMANDS[source], (
+        f"expected {COMMANDS[source]} IR commands; a different count means it changed"
+    )
 
 
 async def test_each_real_device_is_an_ha_device(hass, loaded, real_cfg):
-    names = {
-        d.name
-        for d in dr.async_entries_for_config_entry(dr.async_get(hass), loaded.entry_id)
-    }
+    names = {d.name for d in dr.async_entries_for_config_entry(dr.async_get(hass), loaded.entry_id)}
     for dev in real_cfg["devices"]:
         assert dev["name"] in names, f"{dev['name']} missing from the device registry"
 
@@ -236,7 +233,11 @@ async def test_stock_automations_work_after_an_entity_swap(hass, loaded, real_cf
                     blocking=True,
                 )
                 raw = dev["commands"][command]["raw"]
-                assert read_lines(hub_rf, 1) == [_ir_line(raw["hz"], raw["us"])], (dev["id"], alias, command)
+                assert read_lines(hub_rf, 1) == [_ir_line(raw["hz"], raw["us"])], (
+                    dev["id"],
+                    alias,
+                    command,
+                )
 
 
 async def test_restart_does_not_re_push_an_unchanged_config(hass, loaded):

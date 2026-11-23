@@ -43,7 +43,9 @@ pages:
 
 async def put(origin, cfg):
     await ensure_cfg(origin)
-    status, _ = await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": cfg}, headers=H)
+    status, _ = await api(
+        origin, "PUT", "/api/v1/configs/main/draft", json={"config": cfg}, headers=H
+    )
     assert status == 200
 
 

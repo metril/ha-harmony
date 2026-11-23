@@ -52,13 +52,17 @@ def test_python_limits_match_mapping_h():
     src = (ROOT / "hub/engine/mapping.h").read_text()
     defs = {
         m[1]: _num(m[2])
-        for m in re.finditer(r"^#define HP_MAP_(\w+)\s+\(?([\d\s*uU]+?)\)?\s*(?:/\*.*)?$", src, re.MULTILINE)
+        for m in re.finditer(
+            r"^#define HP_MAP_(\w+)\s+\(?([\d\s*uU]+?)\)?\s*(?:/\*.*)?$", src, re.MULTILINE
+        )
     }
     defs.pop("ERR_MAX")
     assert set(defs) == set(HEADER_FIELDS), "a header limit has no Python mirror (or the reverse)"
     for name, field in HEADER_FIELDS.items():
         assert getattr(CURRENT, field) == defs[name], f"python {field} drifted from HP_MAP_{name}"
-    chunk = re.search(r"#define HP_CFG_CHUNK_BYTES (\d+)", (ROOT / "hub/hub_handlers.h").read_text())
+    chunk = re.search(
+        r"#define HP_CFG_CHUNK_BYTES (\d+)", (ROOT / "hub/hub_handlers.h").read_text()
+    )
     assert chunk and CURRENT.chunk == int(chunk[1])
 
 
@@ -110,13 +114,21 @@ def test_estimate_equals_the_c_golden():
         "bt_remotes": 0,
     }
     assert compact_json(cfg) == _c_golden()
-    assert estimate_bytes(CURRENT, **stats) == 1573336  # tests/c/test_budget.c asserts the same number
+    assert (
+        estimate_bytes(CURRENT, **stats) == 1573336
+    )  # tests/c/test_budget.c asserts the same number
 
 
 def test_pool_words_and_keys_are_counted_like_the_hub():
     cfg = {
         "devices": [
-            {"id": "a", "commands": {"x": {"pronto": "0000 006D 0000 0000"}, "y": {"raw": {"hz": 1, "us": [1, 2, 3]}}}}
+            {
+                "id": "a",
+                "commands": {
+                    "x": {"pronto": "0000 006D 0000 0000"},
+                    "y": {"raw": {"hz": 1, "us": [1, 2, 3]}},
+                },
+            }
         ],
         "keys": {"1": {"type": "none"}},
         "activities": [{"id": "z", "keys": {"2": {"type": "none"}, "3": {"type": "none"}}}],
@@ -157,7 +169,9 @@ def test_current_hub_accepts_thousands_of_commands():
 
 def test_the_one_budget_and_its_message():
     lim = CURRENT.with_budget(2 * 1024 * 1024)
-    with pytest.raises(CompileError, match=r"config needs ~\d+ KiB of hub memory, the hub allows 2048 KiB"):
+    with pytest.raises(
+        CompileError, match=r"config needs ~\d+ KiB of hub memory, the hub allows 2048 KiB"
+    ):
         compile_config(_cmds(5000), limits=lim)
     c = compile_config(_cmds(20), limits=lim)
     assert c.usage["config_bytes"] <= 2 * 1024 * 1024
@@ -165,11 +179,20 @@ def test_the_one_budget_and_its_message():
 
 def test_per_item_bounds_remain_with_hub_values():
     with pytest.raises(CompileError, match="too many devices: 256"):
-        compile_config(parse_model("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(256))), limits=CURRENT)
-    compile_config(parse_model("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(255))), limits=CURRENT)
+        compile_config(
+            parse_model("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(256))),
+            limits=CURRENT,
+        )
+    compile_config(
+        parse_model("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(255))),
+        limits=CURRENT,
+    )
     tight = HubLimits.from_hello({**CURRENT.to_wire(), "max_devices": 3})
     with pytest.raises(CompileError, match="too many devices: 4 .the hub allows at most 3"):
-        compile_config(parse_model("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(4))), limits=tight)
+        compile_config(
+            parse_model("devices:\n" + "".join(f"  - {{id: d{i}}}\n" for i in range(4))),
+            limits=tight,
+        )
 
 
 def test_flash_is_checked_with_a_precise_message():
@@ -178,16 +201,24 @@ def test_flash_is_checked_with_a_precise_message():
     tight = HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 20 * 1024})
     assert tight.flash_free == 20 * 1024
     assert "KiB of flash, the hub has 20 KiB free" in fit_error(stats, tight)
-    assert fit_error(stats, HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 4 * 1024 * 1024})) is None
+    assert (
+        fit_error(stats, HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 4 * 1024 * 1024}))
+        is None
+    )
     # none left is not "unknown": flash_free 0 + flash_low says "full", 0 alone still means unknown
     full = HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 0, "flash_low": True})
     assert full.flash_low and "flash is full" in fit_error(stats, full)
     assert full.to_wire()["flash_low"] is True and "flash_low" not in CURRENT.to_wire()
     unknown = HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 0})
     assert not unknown.flash_low and fit_error(stats, unknown) is None
-    assert not HubLimits.from_hello({**CURRENT.to_wire(), "flash_free": 5, "flash_low": True}).flash_low
+    assert not HubLimits.from_hello(
+        {**CURRENT.to_wire(), "flash_free": 5, "flash_low": True}
+    ).flash_low
     # optional on the wire: an add-on stores the limits without it
-    assert HubLimits.from_hello({k: v for k, v in CURRENT.to_wire().items() if k != "flash_free"}) == CURRENT
+    assert (
+        HubLimits.from_hello({k: v for k, v in CURRENT.to_wire().items() if k != "flash_free"})
+        == CURRENT
+    )
 
 
 def test_fit_error_checks_a_compiled_config_against_another_hub():

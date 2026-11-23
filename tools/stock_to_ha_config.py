@@ -131,7 +131,9 @@ def convert_ir(entry: dict[str, Any], mode: str) -> tuple[int, list[int], list[s
         if fin:
             notes.append("finish_not_expressible")
         if not once and mr > 1:
-            notes.append("min_repeats_as_repeats")  # `repeats: N` on the command (hub config format 2)
+            notes.append(
+                "min_repeats_as_repeats"
+            )  # `repeats: N` on the command (hub config format 2)
         elif once and mr:
             notes.append("min_repeats_not_expressed")
     else:
@@ -314,7 +316,9 @@ def load_device_list(path: Path) -> dict[str, StockDevice]:
                 sd.power_on = _single_ir_press(f.get("PowerOnActions"))
                 sd.power_off = _single_ir_press(f.get("PowerOffActions"))
                 sd.power_toggle = _single_ir_press(f.get("PowerToggleActions"))
-                has_any = any(f.get(k) for k in ("PowerOnActions", "PowerOffActions", "PowerToggleActions"))
+                has_any = any(
+                    f.get(k) for k in ("PowerOnActions", "PowerOffActions", "PowerToggleActions")
+                )
                 if has_any and not (sd.power_on and sd.power_off) and not sd.power_toggle:
                     sd.power_other = "power actions are not single IR presses"
                 delay = f.get("PowerOnDelay")
@@ -359,7 +363,11 @@ def _resolve_cmd(name: str | None, cmds: dict[str, Any]) -> str | None:
 
 
 def _label_ok(label: str) -> bool:
-    return bool(label) and not any(ord(c) < 32 for c in label) and len(label.encode()) <= NAME_MAX_BYTES
+    return (
+        bool(label)
+        and not any(ord(c) < 32 for c in label)
+        and len(label.encode()) <= NAME_MAX_BYTES
+    )
 
 
 def _slugify(label: str) -> str:

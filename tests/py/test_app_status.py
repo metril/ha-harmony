@@ -52,7 +52,9 @@ def test_compiler_bindings_media_and_source_list_inputs():
     assert len({(b.page, b.widget) for b in c.apps}) == 2
     assert c.media == {"a": {"apps_entity": SHIELD, "now_playing_entity": "media_player.plex"}}
     step = next(s for s in c.ha_activities["a"].start if s.kind == "input")
-    assert step.call.service == "media_player.select_source" and step.call.data == {"source": "HDMI 2"}
+    assert step.call.service == "media_player.select_source" and step.call.data == {
+        "source": "HDMI 2"
+    }
 
 
 def test_source_list_names_become_inputs():
@@ -90,12 +92,20 @@ async def test_feed_sends_only_changes_and_resends_on_attach(hass, caplog):
     caplog.set_level("INFO")
     client = FakeClient()
     feed = aps.AppStatusFeed(
-        hass, client, lambda: (1,), lambda r: True, lambda coro, name: hass.async_create_task(coro, name)
+        hass,
+        client,
+        lambda: (1,),
+        lambda r: True,
+        lambda coro, name: hass.async_create_task(coro, name),
     )
     feed.configure([AppBinding(0, 5, (PLEX,), SHIELD), AppBinding(0, 6, (YT,), SHIELD)])
     hass.states.async_set(SHIELD, "playing", {"app_id": PLEX})
     await hass.async_block_till_done()
-    assert [(a["tile"], a["state"]) for a in client.sent] == [(5, 0), (6, 0), (5, 2)]  # baseline, then the change
+    assert [(a["tile"], a["state"]) for a in client.sent] == [
+        (5, 0),
+        (6, 0),
+        (5, 2),
+    ]  # baseline, then the change
     assert client.sent[0]["text"] == "" and client.sent[0]["remote"] == 1
     del client.sent[:2]
     hass.states.async_set(SHIELD, "playing", {"app_id": PLEX, "x": 1})  # same status: nothing
@@ -121,5 +131,6 @@ async def test_feed_sends_only_changes_and_resends_on_attach(hass, caplog):
 def test_no_timers_in_app_status():
     src = Path(aps.__file__).read_text()
     assert not re.search(
-        r"call_later|call_at|async_call_later|track_time|async_track_point|asyncio\.sleep|loop\.call_", src
+        r"call_later|call_at|async_call_later|track_time|async_track_point|asyncio\.sleep|loop\.call_",
+        src,
     )

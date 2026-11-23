@@ -79,11 +79,11 @@ Message set for Phase 2 (hub↔HA unless noted):
 
 ```python
 # tests/py/test_codegen.py
-def test_load_schema_parses_messages(tmp_path): ...        # name/code/transport/fields round-trip
-def test_duplicate_code_rejected(tmp_path): ...            # two messages, same code -> SchemaError
-def test_unknown_wire_type_rejected(tmp_path): ...         # type "u64" -> SchemaError
-def test_generate_emits_three_files(tmp_path): ...         # .h, .c, .py exist and are non-empty
-def test_generated_python_round_trips(tmp_path): ...        # exec() the module, encode_ws then decode_ws
+def test_load_schema_parses_messages(tmp_path): ...  # name/code/transport/fields round-trip
+def test_duplicate_code_rejected(tmp_path): ...  # two messages, same code -> SchemaError
+def test_unknown_wire_type_rejected(tmp_path): ...  # type "u64" -> SchemaError
+def test_generate_emits_three_files(tmp_path): ...  # .h, .c, .py exist and are non-empty
+def test_generated_python_round_trips(tmp_path): ...  # exec() the module, encode_ws then decode_ws
 def test_generated_python_rejects_version_mismatch(tmp_path): ...  # envelope v=99 -> ProtoError
 def test_generated_c_header_declares_every_message(tmp_path): ...  # HP_MSG_<NAME> present for each
 ```

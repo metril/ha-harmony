@@ -32,7 +32,9 @@ PROBE = """() => {
 
 
 async def open_remote(browser, site):
-    page = await open_editor(browser, site, viewport={"width": 1440, "height": 1000}, device_scale_factor=1.5)
+    page = await open_editor(
+        browser, site, viewport={"width": 1440, "height": 1000}, device_scale_factor=1.5
+    )
     await page.get_by_text("Set up your first hub config").wait_for()
     await page.get_by_role("button", name="Import YAML", exact=True).click()
     await page.locator("textarea").fill(STUDIO_YAML)
@@ -57,8 +59,12 @@ async def test_labels_fit_and_centre_on_their_keys(browser, site):
     for t in got:
         where = f"{t['key']} '{t['text']}'"
         assert t["over"] <= 0.5, f"{where}: text overflows its key by {t['over']:.1f}px"
-        assert abs(t["cx"]) <= max(1.5, 0.1 * t["cw"]), f"{where}: not centred horizontally ({t['cx']:.1f}px)"
-        assert abs(t["cy"]) <= max(2.5, 0.1 * t["ch"]), f"{where}: not centred vertically ({t['cy']:.1f}px)"
+        assert abs(t["cx"]) <= max(1.5, 0.1 * t["cw"]), (
+            f"{where}: not centred horizontally ({t['cx']:.1f}px)"
+        )
+        assert abs(t["cy"]) <= max(2.5, 0.1 * t["ch"]), (
+            f"{where}: not centred vertically ({t['cy']:.1f}px)"
+        )
     # one font size per key class
     sizes: dict[str, set[float]] = {}
     for t in got:
@@ -78,14 +84,23 @@ async def test_free_key_chips_are_readable_names_that_are_not_cut(browser, site)
     page = await open_remote(browser, site)
     chips = await page.evaluate(CHIPS)
     names = {c["text"] for c in chips}
-    assert {"Previous Channel", "Upper Bulb", "Lower Socket", "Volume Down", "Fast Forward", "DVR"} <= names
+    assert {
+        "Previous Channel",
+        "Upper Bulb",
+        "Lower Socket",
+        "Volume Down",
+        "Fast Forward",
+        "DVR",
+    } <= names
     for c in chips:
         assert "_" not in c["text"], c
         assert c["cut"] <= 0, f"{c['text']} is cut"
         assert c["h"] < 40, f"{c['text']} wraps"
     # short labels share one cell width; a long one spans exactly two cells (rows stay aligned)
     one = min(round(c["w"]) for c in chips)
-    assert all(round(c["w"]) in (one, round(2 * one + 6)) or abs(c["w"] - 2 * one) < 12 for c in chips), "free-key cells are not on one grid"
+    assert all(
+        round(c["w"]) in (one, round(2 * one + 6)) or abs(c["w"] - 2 * one) < 12 for c in chips
+    ), "free-key cells are not on one grid"
     short = [c for c in chips if len(c["text"]) <= 9]
     assert len({c["x"] for c in short}) >= 2, "short free keys sit in one column"
     assert len({round(c["h"]) for c in chips}) == 1, "uneven free-key heights"
@@ -118,10 +133,17 @@ async def test_device_icon_picker_sets_the_icon_in_the_draft(browser, large):
     picker = page.locator("hh-icon-picker")
     await picker.locator("input[type=search]").fill("music")
     await picker.get_by_role("button", name="Music", exact=True).click()
-    icon = await page.evaluate("document.querySelector('hh-app').store.config.devices.find(d => d.id === 'tv').icon")
+    icon = await page.evaluate(
+        "document.querySelector('hh-app').store.config.devices.find(d => d.id === 'tv').icon"
+    )
     assert icon == "music"
     await picker.get_by_role("button", name="Use the Default Icon").click()
-    assert await page.evaluate("document.querySelector('hh-app').store.config.devices.find(d => d.id === 'tv').icon") is None
+    assert (
+        await page.evaluate(
+            "document.querySelector('hh-app').store.config.devices.find(d => d.id === 'tv').icon"
+        )
+        is None
+    )
     await page.context.close()
 
 
@@ -143,10 +165,15 @@ async def test_palette_commands_are_readable_and_sit_on_a_uniform_grid(browser, 
     await page.wait_for_timeout(300)
     groups = await page.evaluate(PALETTE)
     wide = [g for g in groups if len(g) >= 2 and max(len(c["text"]) for c in g) <= 9]
-    assert wide and all(len({c["x"] for c in g}) >= 2 for g in wide), "short palette labels sit in one column at 1600px"
+    assert wide and all(len({c["x"] for c in g}) >= 2 for g in wide), (
+        "short palette labels sit in one column at 1600px"
+    )
     for g in groups:
         one = min(round(c["w"]) for c in g)
-        assert all(round(c["w"]) in (one, 2 * one + 6) for c in g) and len({round(c["h"]) for c in g}) == 1, f"uneven cells: {g}"
+        assert (
+            all(round(c["w"]) in (one, 2 * one + 6) for c in g)
+            and len({round(c["h"]) for c in g}) == 1
+        ), f"uneven cells: {g}"
         for c in g:
             assert "_" not in c["text"], c
             assert c["cut"] <= 0, f"{c['text']} is cut"

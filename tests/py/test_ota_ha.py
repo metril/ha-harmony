@@ -22,7 +22,10 @@ pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client"
 
 
 def make_image(payload: bytes, build: int = 12, target: int = 1, trim: int = 0) -> bytes:
-    hdr = struct.pack("<4sBBHII", b"HOTA", 1, target, 0, build, len(payload)) + hashlib.sha512(payload).digest()
+    hdr = (
+        struct.pack("<4sBBHII", b"HOTA", 1, target, 0, build, len(payload))
+        + hashlib.sha512(payload).digest()
+    )
     img = hdr + b"\0" * 64 + payload
     assert len(img) == HOTA_HEADER + len(payload)
     return img[: len(img) - trim]
@@ -31,12 +34,22 @@ def make_image(payload: bytes, build: int = 12, target: int = 1, trim: int = 0) 
 class ScriptedHub:
     """Holds one upload like the daemon does: begin returns the offset it has, chunks append in order."""
 
-    def __init__(self, *, rollback=None, drop_after=None, fail_end=None, ota_key="release", lose_end_reply=False):
+    def __init__(
+        self,
+        *,
+        rollback=None,
+        drop_after=None,
+        fail_end=None,
+        ota_key="release",
+        lose_end_reply=False,
+    ):
         self.rollback = rollback  # (build, reason) pushed after hello
         self.drop_after = drop_after  # close the first connection after this many chunks
         self.fail_end = fail_end  # error code answered to ota_end
         self.ota_key = ota_key
-        self.lose_end_reply = lose_end_reply  # apply, then vanish without answering ota_end (the daemon exits)
+        self.lose_end_reply = (
+            lose_end_reply  # apply, then vanish without answering ota_end (the daemon exits)
+        )
         self.fw_build = 11
         self.pending_build = 0
         self.held = bytearray()
@@ -50,7 +63,20 @@ class ScriptedHub:
         self.seen.append(t)
         reply = {"v": 1, "id": rid}
         if t == "hello":
-            await ws.send_json({**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire(), "fw_build": self.fw_build, "ota_key": self.ota_key}})
+            await ws.send_json(
+                {
+                    **reply,
+                    "t": "hello_ack",
+                    "d": {
+                        "hub_id": HUB_ID,
+                        "activities": [],
+                        "tcp_keepalive": True,
+                        "limits": CURRENT.to_wire(),
+                        "fw_build": self.fw_build,
+                        "ota_key": self.ota_key,
+                    },
+                }
+            )
             if self.rollback:
                 await ws.send_json({"v": 1, "id": 0, "t": "ota_status", "d": {
                     "state": "rolled_back", "offset": 0, "size": 0, "build": self.rollback[0], "reason": self.rollback[1]}})  # fmt: skip
@@ -119,7 +145,9 @@ def fw_dir(hass):
 
 
 async def install(hass, path):
-    await hass.services.async_call("ha_harmony", "install_firmware", {"path": str(path)}, blocking=True)
+    await hass.services.async_call(
+        "ha_harmony", "install_firmware", {"path": str(path)}, blocking=True
+    )
 
 
 async def test_uploads_a_signed_image_in_bounded_chunks_and_reports_progress(hass, rig, fw_dir):
@@ -132,7 +160,9 @@ async def test_uploads_a_signed_image_in_bounded_chunks_and_reports_progress(has
     c.async_subscribe_topics(("ota",), lambda: seen.append((c.ota_state, c.ota_progress)))
     await install(hass, f)
     assert bytes(hub.held) == img
-    assert hub.begins == [{"target": 1, "size": len(img), "build": 12, "sha": hashlib.sha512(img).hexdigest()}]
+    assert hub.begins == [
+        {"target": 1, "size": len(img), "build": 12, "sha": hashlib.sha512(img).hexdigest()}
+    ]
     assert hub.ends == 1
     states = [s for s, _ in seen]
     assert states[0] == "uploading" and "applying" in states and states[-1] == "installed"
@@ -154,7 +184,9 @@ async def test_uploads_a_signed_image_in_bounded_chunks_and_reports_progress(has
         (make_image(b"x" * 500)[:300], "ota_truncated"),
     ],
 )
-async def test_unsigned_truncated_or_remote_images_are_refused_before_anything_is_sent(hass, rig, fw_dir, data, key):
+async def test_unsigned_truncated_or_remote_images_are_refused_before_anything_is_sent(
+    hass, rig, fw_dir, data, key
+):
     hub = ScriptedHub()
     await rig(hub)
     f = fw_dir / "x.img"
@@ -173,7 +205,9 @@ async def test_paths_outside_the_allowed_directories_are_refused(hass, rig, tmp_
     with pytest.raises(ServiceValidationError) as e:
         await install(hass, outside)
     assert e.value.translation_key == "ota_path_not_allowed"
-    (fw_dir / "link.img").symlink_to(outside)  # a symlink out of the allowed dir does not smuggle it in
+    (fw_dir / "link.img").symlink_to(
+        outside
+    )  # a symlink out of the allowed dir does not smuggle it in
     with pytest.raises(ServiceValidationError) as e:
         await install(hass, fw_dir / "link.img")
     assert e.value.translation_key == "ota_path_not_allowed"
@@ -221,7 +255,9 @@ async def test_dropped_connection_resumes_from_the_hub_offset(hass, rig, fw_dir)
     assert c.ota_state == "installed"
 
 
-async def test_rollback_report_becomes_a_repair_issue_and_a_good_update_clears_it(hass, rig, fw_dir):
+async def test_rollback_report_becomes_a_repair_issue_and_a_good_update_clears_it(
+    hass, rig, fw_dir
+):
     hub = ScriptedHub(rollback=(9, "died_early"))
     c = await rig(hub)
     reg = ir.async_get(hass)
@@ -249,7 +285,11 @@ async def test_a_second_install_while_one_runs_is_refused(hass, rig, fw_dir):
 def test_parse_image_reads_build_and_whole_file_digest():
     img = make_image(b"abc", build=77)
     info = parse_image(img)
-    assert info.build == 77 and info.sha512 == hashlib.sha512(img).hexdigest() and info.size == len(img)
+    assert (
+        info.build == 77
+        and info.sha512 == hashlib.sha512(img).hexdigest()
+        and info.size == len(img)
+    )
 
 
 async def test_a_lost_ota_end_reply_never_uploads_or_applies_twice(hass, rig, fw_dir):
@@ -263,11 +303,15 @@ async def test_a_lost_ota_end_reply_never_uploads_or_applies_twice(hass, rig, fw
     assert c.ota_state == "installed" and c.client.fw_build == 12
 
 
-async def test_never_confirmed_build_fails_the_update_without_resending(hass, rig, fw_dir, monkeypatch):
+async def test_never_confirmed_build_fails_the_update_without_resending(
+    hass, rig, fw_dir, monkeypatch
+):
     hub = ScriptedHub(lose_end_reply=True)
     c = await rig(hub)
     hub.pending_build = 0
-    monkeypatch.setattr(type(c), "_await_build", lambda self, build, tries=480: _never(self, build), raising=True)
+    monkeypatch.setattr(
+        type(c), "_await_build", lambda self, build, tries=480: _never(self, build), raising=True
+    )
     f = fw_dir / "x.img"
     f.write_bytes(make_image(b"k" * 300, build=12))
     with pytest.raises(HomeAssistantError):

@@ -249,9 +249,12 @@ with `source: <name>` on the entity (an explicit input of the same name wins).
 
 ### App rings and Now Playing
 
-An activity may set `media: {apps_entity, now_playing_entity}` (both optional entity ids). `apps_entity` is an
+An activity may set `media: {apps_entity, now_playing_entity, session_entity}` (all optional entity ids). `apps_entity` is an
 androidtv player (state playing / paused / idle / off, attribute `app_id`); `now_playing_entity` is the player
-with the title and cover (Plex). Now Playing uses them instead of the integration options when set.
+with the title and cover (Plex). `session_entity` is the Shield app's MQTT sensor for the active media
+session (state playing / paused / idle; attributes `app_id`, `media_title`, `media_artist`, `media_duration`,
+`media_position`, `media_position_updated_at` as ISO UTC). When Plex is not the open app and the session plays,
+its title and channel show if its `app_id` is the Shield's current app or the Shield reports no title. Now Playing uses them instead of the integration options when set.
 
 An app button carries an optional `app_id` (a package name or a list). Without one it is inferred from the
 label or icon: plex = `com.plexapp.android`; youtube / smarttube = `org.smarttube.stable` and

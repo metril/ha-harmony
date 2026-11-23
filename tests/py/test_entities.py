@@ -54,7 +54,15 @@ async def test_setup_creates_one_of_each(hass, hub_cfg, fast_client):
     assert entry.state is ConfigEntryState.LOADED
     reg = er.async_get(hass)
     ents = er.async_entries_for_config_entry(reg, entry.entry_id)
-    assert sorted(e.domain for e in ents) == ["event", "remote", "select", "sensor", "sensor", "sensor", "sensor"]
+    assert sorted(e.domain for e in ents) == [
+        "event",
+        "remote",
+        "select",
+        "sensor",
+        "sensor",
+        "sensor",
+        "sensor",
+    ]
     assert {e.unique_id for e in ents} == {
         f"{HUB_ID}_remote",
         f"{HUB_ID}_activity",
@@ -242,7 +250,12 @@ async def test_runtime_version_mismatch_reloads_into_setup_error(hass, fake_hub,
                     "v": 1,
                     "id": env["id"],
                     "t": "hello_ack",
-                    "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()},
+                    "d": {
+                        "hub_id": HUB_ID,
+                        "activities": [],
+                        "tcp_keepalive": True,
+                        "limits": CURRENT.to_wire(),
+                    },
                 }
             )
             await ws.send_json({"v": 2, "id": 0, "t": "state_update", "d": {}})

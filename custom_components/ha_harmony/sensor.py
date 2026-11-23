@@ -37,7 +37,11 @@ async def async_setup_entry(
     def build(c: HarmonyCoordinator) -> list[HarmonyEntity]:
         ents: list[HarmonyEntity] = [HarmonyDeviceInput(c, d) for d in c.compiled.devices]
         for r in c.remotes:
-            ents += [HarmonyRemoteBattery(c, r), HarmonyRemoteVoltage(c, r), HarmonyPageFormat(c, r)]
+            ents += [
+                HarmonyRemoteBattery(c, r),
+                HarmonyRemoteVoltage(c, r),
+                HarmonyPageFormat(c, r),
+            ]
         ents.append(HarmonyFirmwareUpdate(c))
         if c.has_addon_link:
             ents.append(HarmonyAddonLink(c))
@@ -174,7 +178,15 @@ class HarmonyFirmwareUpdate(HarmonyEntity, SensorEntity):
 
     def __init__(self, coordinator: HarmonyCoordinator) -> None:
         super().__init__(coordinator, "firmware", topics=(TOPIC_OTA,))
-        self._attr_options = ["idle", "uploading", "applying", "restarting", "installed", "failed", "rolled_back"]
+        self._attr_options = [
+            "idle",
+            "uploading",
+            "applying",
+            "restarting",
+            "installed",
+            "failed",
+            "rolled_back",
+        ]
 
     @property
     def native_value(self) -> str:

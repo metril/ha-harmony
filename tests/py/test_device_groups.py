@@ -85,6 +85,13 @@ pages:
       - {type: button, id: p, x: 0, y: 1, w: 6, shape: card, label: Plex, icon: plex, action: {device: b, command: Plex}}
 """
     )
-    m = parse_model(text.replace("kind: ha, name: B, group: box, entity: media_player.x}", "kind: ha, name: B, group: box, entity: media_player.x, commands: {Plex: {ha: {service: script.turn_on, target: {entity_id: script.p}}}}}"))
+    m = parse_model(
+        text.replace(
+            "kind: ha, name: B, group: box, entity: media_player.x}",
+            "kind: ha, name: B, group: box, entity: media_player.x, commands: {Plex: {ha: {service: script.turn_on, target: {entity_id: script.p}}}}}",
+        )
+    )
     c = compile_config(m)
-    assert [(b.app_ids[0], b.entity_id) for b in c.apps] == [("com.plexapp.android", "media_player.x")]
+    assert [(b.app_ids[0], b.entity_id) for b in c.apps] == [
+        ("com.plexapp.android", "media_player.x")
+    ]

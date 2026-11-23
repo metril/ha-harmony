@@ -29,8 +29,16 @@ def _pad(runs, total):
     return [*runs, (0, min(65535 - tail, total - sum(d for _, d in runs)))]
 
 
-PERIODS = {"nec": 108000, "necext": 108000, "samsung32": 108000, "rc5": 113792, "rc6": 107000,
-           "sirc12": 45000, "sirc15": 45000, "sirc20": 45000}
+PERIODS = {
+    "nec": 108000,
+    "necext": 108000,
+    "samsung32": 108000,
+    "rc5": 113792,
+    "rc6": 107000,
+    "sirc12": 45000,
+    "sirc15": 45000,
+    "sirc20": 45000,
+}
 
 
 def period_us(code):
@@ -96,7 +104,13 @@ def sirc(n, addr, cmd):
 def rc5(addr, cmd, toggle):
     _check(addr, 31)
     _check(cmd, 127)
-    bits = [1, 0 if cmd >= 64 else 1, 1 if toggle else 0, *_bits(addr, 5, False), *_bits(cmd & 63, 6, False)]
+    bits = [
+        1,
+        0 if cmd >= 64 else 1,
+        1 if toggle else 0,
+        *_bits(addr, 5, False),
+        *_bits(cmd & 63, 6, False),
+    ]
     half = 889
     runs = []
     for b in bits:  # 1 = space,mark ; 0 = mark,space

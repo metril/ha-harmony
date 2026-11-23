@@ -320,7 +320,9 @@ async def test_a_codeset_at_the_limit_builds_off_the_loop_and_stays_within_hub_l
 
     from harmony_irdb import device as dev_mod
 
-    monkeypatch.setattr(dev_mod, "MAX_COMMANDS", 256)  # the per-device import bound, lowered to exercise it
+    monkeypatch.setattr(
+        dev_mod, "MAX_COMMANDS", 256
+    )  # the per-device import bound, lowered to exercise it
     monkeypatch.setattr(dev_mod, "MAX_JSON", 131072)
 
     arc = archive(tmp_path, FakeSession(_poisoned(n_small=1900, n_big=50)))

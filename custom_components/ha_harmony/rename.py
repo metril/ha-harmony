@@ -58,12 +58,16 @@ _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}")  # no dot: not valid in t
 Undo = Callable[[], Awaitable[None]]
 
 
-ISSUE_ADDON_STORE = "addon_store_exists"  # + _<hub>: the add-on holds a config under the new id AND the old one
+ISSUE_ADDON_STORE = (
+    "addon_store_exists"  # + _<hub>: the add-on holds a config under the new id AND the old one
+)
 
 
 def entry_lock(hass: HomeAssistant, entry: ConfigEntry) -> asyncio.Lock:
     """One lock per entry: a rename and the setup-follow migration never run at the same time."""
-    return hass.data.setdefault(f"{DOMAIN}_rename_locks", {}).setdefault(entry.entry_id, asyncio.Lock())
+    return hass.data.setdefault(f"{DOMAIN}_rename_locks", {}).setdefault(
+        entry.entry_id, asyncio.Lock()
+    )
 
 
 class RenameError(Exception):
@@ -203,7 +207,12 @@ def _addon_client(hass: HomeAssistant, data: dict[str, Any]) -> AddonClient | No
 
 
 async def _addon_move(
-    hass: HomeAssistant, data: dict[str, Any], src: str, dst: str, hw_id: str | None, following: bool = False
+    hass: HomeAssistant,
+    data: dict[str, Any],
+    src: str,
+    dst: str,
+    hw_id: str | None,
+    following: bool = False,
 ) -> Undo:
     """Ask the add-on to move the hub's store to `dst` now (it would also do it on the next hello, from
     the same fields). An unreachable add-on is not a failure (the hello carries the old id until it has
@@ -221,7 +230,9 @@ async def _addon_move(
         raise RenameError("addon_too_old") from None
     except AddonError:
         return _noop
-    if client.last_adopt is None:  # answered without `adopt`: an add-on that ignores the rename fields
+    if (
+        client.last_adopt is None
+    ):  # answered without `adopt`: an add-on that ignores the rename fields
         if following:
             return _noop
         raise RenameError("addon_too_old")
@@ -294,7 +305,11 @@ async def async_migrate_entry(
         undos.append(await _update_entry(hass, entry, new_id, default_title(new_id, name), data))
         if new_id != old:
             try:
-                undos.append(await _addon_move(hass, data, old, new_id, hw_id or data.get(CONF_HW_ID), following))
+                undos.append(
+                    await _addon_move(
+                        hass, data, old, new_id, hw_id or data.get(CONF_HW_ID), following
+                    )
+                )
             except AddonStoreExists:
                 if not following:
                     raise
@@ -311,7 +326,9 @@ async def async_migrate_entry(
     if new_id != old:
         await _finish(hass, old, new_id)
     if conflict:
-        _LOGGER.warning("The add-on has configs under both %s and %s; left as they are", old, new_id)
+        _LOGGER.warning(
+            "The add-on has configs under both %s and %s; left as they are", old, new_id
+        )
         ir.async_create_issue(
             hass,
             DOMAIN,
@@ -361,9 +378,13 @@ async def _rename_locked(
         return
     if entry.state is ConfigEntryState.SETUP_IN_PROGRESS:
         raise RenameError("rename_failed", "the integration is starting; try again in a moment")
-    if entry.data.get(CONF_HW_ID) != client.hw_id:  # BEFORE the hub renames: always recoverable at next setup
+    if (
+        entry.data.get(CONF_HW_ID) != client.hw_id
+    ):  # BEFORE the hub renames: always recoverable at next setup
         hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_HW_ID: client.hw_id})
-    unloaded = entry.state.recoverable  # LOADED, SETUP_RETRY, SETUP_ERROR: its coordinator or retry must not run
+    unloaded = (
+        entry.state.recoverable
+    )  # LOADED, SETUP_RETRY, SETUP_ERROR: its coordinator or retry must not run
     if unloaded:  # ... while the registries move
         await hass.config_entries.async_unload(entry.entry_id)
     hub_touched = False

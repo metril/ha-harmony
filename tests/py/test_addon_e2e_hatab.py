@@ -24,7 +24,18 @@ from harmony_addon.options import Options
 
 pytestmark = pytest.mark.skipif(not (DIST / "index.html").is_file(), reason="frontend not built")
 SHOTS = os.environ.get("HH_SHOTS")
-DOMS = ["light", "switch", "sensor", "scene", "script", "media_player", "climate", "cover", "fan", "input_boolean"]
+DOMS = [
+    "light",
+    "switch",
+    "sensor",
+    "scene",
+    "script",
+    "media_player",
+    "climate",
+    "cover",
+    "fan",
+    "input_boolean",
+]
 ROOMS = ["Living room", "Kitchen", "Bedroom", "Hallway", "Garage", "Office", "Bathroom", "Garden"]
 
 
@@ -44,24 +55,48 @@ def build():
     for i in range(2999):
         dom = DOMS[i % len(DOMS)]
         eid = f"{dom}.item_{i}"
-        states.append({"entity_id": eid, "state": "on", "attributes": {"friendly_name": f"Item {i} {dom}"}})
+        states.append(
+            {"entity_id": eid, "state": "on", "attributes": {"friendly_name": f"Item {i} {dom}"}}
+        )
         ent = {"entity_id": eid, "device_id": f"d{i % 800}", "platform": f"integ{i % 40}"}
         if i % 7 == 0:
             ent["labels"] = ["cozy"] if i % 14 == 0 else ["night", "cozy"]
         ents.append(ent)
     # the one a person looks for
-    states.append({"entity_id": "light.living_lamp", "state": "off", "attributes": {"friendly_name": "Living room lamp"}})
-    ents.append({"entity_id": "light.living_lamp", "device_id": None, "area_id": "a0", "platform": "hue", "labels": ["cozy"]})
+    states.append(
+        {
+            "entity_id": "light.living_lamp",
+            "state": "off",
+            "attributes": {"friendly_name": "Living room lamp"},
+        }
+    )
+    ents.append(
+        {
+            "entity_id": "light.living_lamp",
+            "device_id": None,
+            "area_id": "a0",
+            "platform": "hue",
+            "labels": ["cozy"],
+        }
+    )
     for n, extra in enumerate(
-        [{"disabled_by": "user"}] * 5 + [{"hidden_by": "user"}] * 5 + [{"entity_category": "diagnostic"}] * 20
+        [{"disabled_by": "user"}] * 5
+        + [{"hidden_by": "user"}] * 5
+        + [{"entity_category": "diagnostic"}] * 20
     ):
         eid = f"sensor.skip_{n}"
         states.append({"entity_id": eid, "state": "1", "attributes": {}})
         ents.append({"entity_id": eid, "platform": "hue", **extra})
     lists = {
         "config/area_registry/list": areas(),
-        "config/floor_registry/list": [{"floor_id": f"f{i}", "name": n} for i, n in enumerate(["Ground", "First", "Second", "Outside"])],
-        "config/label_registry/list": [{"label_id": "cozy", "name": "Cozy"}, {"label_id": "night", "name": "Night"}],
+        "config/floor_registry/list": [
+            {"floor_id": f"f{i}", "name": n}
+            for i, n in enumerate(["Ground", "First", "Second", "Outside"])
+        ],
+        "config/label_registry/list": [
+            {"label_id": "cozy", "name": "Cozy"},
+            {"label_id": "night", "name": "Night"},
+        ],
         "config/device_registry/list": devs,
         "config/entity_registry/list": ents,
     }
@@ -109,7 +144,9 @@ async def site_for(aiohttp_server, tmp_path, ha, reg):
     server = await aiohttp_server(app)
     origin = f"http://127.0.0.1:{server.port}"
     await ensure_cfg(origin)
-    assert (await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": LARGE}, headers=H))[0] == 200
+    assert (
+        await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": LARGE}, headers=H)
+    )[0] == 200
     return origin
 
 
@@ -167,7 +204,9 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     await page.locator(f"{P} [role=status][aria-live]").get_by_text("match").wait_for()
     await shot(page, "02-search-1440")
     await search(page, "")
-    await page.wait_for_function("() => !document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').shadowRoot.querySelector('hh-palette').shadowRoot.querySelector('hh-ha-browser').shadowRoot.querySelector('.ent')")
+    await page.wait_for_function(
+        "() => !document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').shadowRoot.querySelector('hh-palette').shadowRoot.querySelector('hh-ha-browser').shadowRoot.querySelector('.ent')"
+    )
     assert await page.locator(ROWS).count() == 0  # the previous (collapsed) state is back
 
     # type chips with counts, an "n filters" state, clear
@@ -189,7 +228,13 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
 
     # group by Type / Device / Integration / Label (all have data), collapsed, with counts
     sel = page.locator(P).get_by_role("combobox", name="Group By")
-    assert await sel.locator("option").all_text_contents() == ["Area", "Type", "Device", "Integration", "Label"]
+    assert await sel.locator("option").all_text_contents() == [
+        "Area",
+        "Type",
+        "Device",
+        "Integration",
+        "Label",
+    ]
     await sel.select_option("type")
     await page.locator(f"{P} .gh", has_text="Lights").first.wait_for()
     assert await page.locator(ROWS).count() == 0
@@ -221,7 +266,9 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
 
     # "Used in This Config" and the recently used list, at the top
     await page.evaluate(
-        "() => " + STORE + ".edit(c => { c.keys = c.keys || {}; c.keys.play = { ha: { service: 'light.toggle', target: { entity_id: 'light.living_lamp' } } }; })"
+        "() => "
+        + STORE
+        + ".edit(c => { c.keys = c.keys || {}; c.keys.play = { ha: { service: 'light.toggle', target: { entity_id: 'light.living_lamp' } } }; })"
     )
     await page.locator(P).get_by_role("button", name="Used in This Config").wait_for()
     await page.locator(P).get_by_role("button", name="Used in This Config").click()
@@ -231,7 +278,11 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     await shot(page, "06-used-1440")
 
     # favourite the lamp: it appears under Favourites
-    await page.locator(P).get_by_role("button", name="Add Living room lamp to favourites").first.click()
+    await (
+        page.locator(P)
+        .get_by_role("button", name="Add Living room lamp to favourites")
+        .first.click()
+    )
     await page.locator(f"{P} .gh", has_text="Favourites").wait_for()
 
     # drag a search result onto a key of the remote: toggle on that entity
@@ -242,7 +293,9 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
     await ent.wait_for()
     # the list may still be re-rendering (rows are drawn in a budget) when the CPU is loaded: measure
     # until the row holds still, and redo the whole gesture if a re-render swallowed it
-    landed = "() => (" + STORE + ".config.keys.stop || {}).ha?.target?.entity_id === 'light.living_lamp'"
+    landed = (
+        "() => (" + STORE + ".config.keys.stop || {}).ha?.target?.entity_id === 'light.living_lamp'"
+    )
     for attempt in range(4):
         await ent.scroll_into_view_if_needed()
         eb = await ent.bounding_box()
@@ -286,7 +339,11 @@ async def test_the_dom_stays_bounded_and_typing_stays_fast(browser, big):
     t0 = time.perf_counter()
     for ch in "item 12":
         await page.keyboard.type(ch) if await page.locator(f"{P} input.q:focus").count() else None
-    await page.locator(P).get_by_placeholder("Search entities, areas").press_sequentially("item 12", delay=5)
+    await (
+        page.locator(P)
+        .get_by_placeholder("Search entities, areas")
+        .press_sequentially("item 12", delay=5)
+    )
     await page.locator(f"{P} [role=status][aria-live]").get_by_text("match").wait_for()
     assert time.perf_counter() - t0 < 5.0
     assert await page.locator(ROWS).count() <= 300
@@ -328,7 +385,9 @@ async def test_without_registries_it_groups_by_type_and_says_so(aiohttp_server, 
     await page.get_by_role("tab", name="Home Assistant", exact=True).click()
     note = page.locator(P).get_by_role("note")
     await note.get_by_text("grouped by type only").wait_for()
-    assert await page.locator(P).get_by_role("combobox", name="Group By").locator("option").all_text_contents() == ["Type"]
+    assert await page.locator(P).get_by_role("combobox", name="Group By").locator(
+        "option"
+    ).all_text_contents() == ["Type"]
     await page.locator(f"{P} .gh", has_text="Lights").first.wait_for()
     await shot(page, "12-no-registries-1440")
 
@@ -342,7 +401,10 @@ async def test_action_picker_and_add_device_wizard_use_the_same_navigator(browse
     await insp.get_by_role("button", name="Browse Home Assistant entities").click()
     await insp.get_by_placeholder("Search entities, areas").fill("living room lamp")
     await insp.locator("hh-ha-browser .ent", has_text="Living room lamp").first.click()
-    assert await insp.get_by_placeholder("Search entities", exact=True).input_value() == "light.living_lamp"
+    assert (
+        await insp.get_by_placeholder("Search entities", exact=True).input_value()
+        == "light.living_lamp"
+    )
     await shot(page, "13-action-picker-1440")
     # the wizard's Home Assistant step: only its domains, the same search and filters
     await page.goto(f"{big}{PREFIX}/#/devices/new")
@@ -351,10 +413,14 @@ async def test_action_picker_and_add_device_wizard_use_the_same_navigator(browse
     await nav.get_by_placeholder("Search entities, areas").fill("living room lamp")
     row = nav.locator(".ent", has_text="Living room lamp").first
     await row.wait_for()
-    assert await nav.get_by_role("button", name="Sensors").count() == 0  # not a domain a device can be made from
+    assert (
+        await nav.get_by_role("button", name="Sensors").count() == 0
+    )  # not a domain a device can be made from
     await shot(page, "14-wizard-1440")
     await row.click()
-    await page.get_by_role("heading", name="Pick a Home Assistant Entity").wait_for(state="detached")
+    await page.get_by_role("heading", name="Pick a Home Assistant Entity").wait_for(
+        state="detached"
+    )
 
 
 # every browser-side check below is about structure (one line, nothing cut or sideways), never a pixel constant tuned to one font
@@ -367,8 +433,12 @@ async def check_top_of_tab(page):
     search = await box(f"{P} input.q")
     head = await box(f"{P} .gh")
     # the list starts within a few row heights of the search box: filters and group-by are one line each
-    assert head["y"] - search["y"] < 5 * head["height"], "the list starts too far below the search box"
-    tops = lambda sel: page.locator(sel).evaluate_all("els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().top)))]")
+    assert head["y"] - search["y"] < 5 * head["height"], (
+        "the list starts too far below the search box"
+    )
+    tops = lambda sel: page.locator(sel).evaluate_all(
+        "els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().top)))]"
+    )
     ys = await tops(f"{P} .fchips .fchip")
     assert len(ys) == 1, f"the filter row wraps: {ys}"
     centres = await page.locator(f"{P} .tools > *").evaluate_all(
@@ -376,7 +446,9 @@ async def check_top_of_tab(page):
     )
     assert max(centres) - min(centres) <= 3, f"the group-by row wraps: {centres}"
     # nothing in the tab's own controls is wider than its box (a cut label shows as ellipsis, never a sideways scroll)
-    over = await page.locator(P).evaluate("(el) => { const b = el.shadowRoot.querySelector('.body'); return b.scrollWidth - b.clientWidth; }")
+    over = await page.locator(P).evaluate(
+        "(el) => { const b = el.shadowRoot.querySelector('.body'); return b.scrollWidth - b.clientWidth; }"
+    )
     assert over <= 1, over
 
 
@@ -392,14 +464,21 @@ async def test_the_top_of_the_tab_is_compact_and_the_tab_icons_stay_put(browser,
     )
     assert heads >= 8, heads
     # one filter row: Type, Area, Label, Integration and the options menu on one line
-    ys = await page.locator(f"{P} .fchips .fchip").evaluate_all("els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().top)))]")
+    ys = await page.locator(f"{P} .fchips .fchip").evaluate_all(
+        "els => [...new Set(els.map(e => Math.round(e.getBoundingClientRect().top)))]"
+    )
     assert len(ys) == 1, ys
     # switching tabs does not move the other icons under the cursor
     tabs = page.locator("hh-palette [role=tab]")
-    before = await tabs.evaluate_all("els => els.map(e => Math.round(e.getBoundingClientRect().left))")
+    before = await tabs.evaluate_all(
+        "els => els.map(e => Math.round(e.getBoundingClientRect().left))"
+    )
     await tabs.nth(0).click()
     await page.locator("hh-palette [role=tab][aria-selected=true][aria-label=Devices]").wait_for()
-    assert await tabs.evaluate_all("els => els.map(e => Math.round(e.getBoundingClientRect().left))") == before
+    assert (
+        await tabs.evaluate_all("els => els.map(e => Math.round(e.getBoundingClientRect().left))")
+        == before
+    )
     # every icon has a tooltip (its name) on hover and keyboard focus
     await tabs.nth(1).hover()
     tab = await tabs.nth(1).element_handle()
@@ -429,7 +508,9 @@ async def test_the_top_of_the_tab_survives_a_wide_fallback_font(browser, big, si
     await shot(page, f"16-wide-font-{size[0]}-{zoom}")
     await check_top_of_tab(page)
     # chips: all four show icon + word, or all four are icons alone (never a mix, never an abbreviation)
-    modes = await page.locator(f"{P} .fchips .fchip .l").evaluate_all("els => els.map(e => getComputedStyle(e).display !== 'none')")
+    modes = await page.locator(f"{P} .fchips .fchip .l").evaluate_all(
+        "els => els.map(e => getComputedStyle(e).display !== 'none')"
+    )
     assert len(set(modes)) == 1, modes
     for name in TAB_NAMES:
         await page.get_by_role("tab", name=name, exact=True).click()
@@ -444,7 +525,9 @@ async def test_the_top_of_the_tab_survives_a_wide_fallback_font(browser, big, si
 async def classic(browser):
     """a browser with real (classic, layout-taking) scrollbars, like Chrome on macOS with a mouse; headless hides them by default"""
     async with pw.async_playwright() as p:
-        b = await p.chromium.launch(executable_path=os.environ.get("HH_CHROMIUM"), ignore_default_args=["--hide-scrollbars"])
+        b = await p.chromium.launch(
+            executable_path=os.environ.get("HH_CHROMIUM"), ignore_default_args=["--hide-scrollbars"]
+        )
         _stress(b)
         yield b
         await b.close()
@@ -460,13 +543,19 @@ async def test_the_filter_mode_does_not_depend_on_the_list_height(classic, big):
         await page.locator(f"{P} select[aria-label='Group by']").select_option("type")
         await page.locator(f"{P} .gh").first.click()
         await page.locator(ROWS).first.wait_for()
-        scrolls = await page.locator(P).evaluate("e => { const b = e.shadowRoot.querySelector('.body'); return b.scrollHeight > b.clientHeight; }")
+        scrolls = await page.locator(P).evaluate(
+            "e => { const b = e.shadowRoot.querySelector('.body'); return b.scrollHeight > b.clientHeight; }"
+        )
         assert scrolls, "the list should be long enough to scroll"
-        assert await page.locator(P).evaluate(body) > 0, "this browser has overlay scrollbars, so the test proves nothing"
+        assert await page.locator(P).evaluate(body) > 0, (
+            "this browser has overlay scrollbars, so the test proves nothing"
+        )
         await page.wait_for_timeout(100)
         now = await page.locator(f"{P} .fchips").evaluate("e => e.classList.contains('icons')")
         assert now == short, f"the filter mode changed when the list grew (width {width})"
-        assert await page.locator(P).evaluate(body) == gutter, "the scrollbar changes the width the controls get"
+        assert await page.locator(P).evaluate(body) == gutter, (
+            "the scrollbar changes the width the controls get"
+        )
         await shot(page, f"20-long-list-{width}")
         await page.close()
 
@@ -510,5 +599,9 @@ async def test_the_group_by_box_is_one_width_in_every_mode(classic, big):
     for by in ("area", "type", "device", "integration", "label"):
         await page.locator(f"{P} select[aria-label='Group by']").select_option(by)
         await page.wait_for_timeout(100)
-        seen.add(await page.locator(f"{P} select[aria-label='Group by']").evaluate("e => Math.round(e.getBoundingClientRect().width)"))
+        seen.add(
+            await page.locator(f"{P} select[aria-label='Group by']").evaluate(
+                "e => Math.round(e.getBoundingClientRect().width)"
+            )
+        )
     assert len(seen) == 1, f"the group-by box resizes with its choice: {seen}"

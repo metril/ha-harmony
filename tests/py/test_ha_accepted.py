@@ -26,7 +26,9 @@ async def _state(hub, idx):
     await hub.push("state_update", {"activity": idx, "power": True})
 
 
-async def test_a_rejected_config_keeps_dispatching_by_the_accepted_tables(hass, rig, clock, fake_addon):
+async def test_a_rejected_config_keeps_dispatching_by_the_accepted_tables(
+    hass, rig, clock, fake_addon
+):
     toggles = async_mock_service(hass, "light", "toggle")
     turn_ons = async_mock_service(hass, "light", "turn_on")
     hub, c = await rig()
@@ -88,7 +90,9 @@ async def test_restart_with_a_different_hub_hash_waits_for_the_push(hass, rig, c
     await hass.config_entries.async_reload(entry.entry_id)
     await settle(hass, lambda: any(t == "set_config" for t, _ in hub.got))
     c2 = entry.runtime_data
-    await settle(hass, lambda: entry.runtime_data.config_state == "accepted")  # the ack arrives over the socket
+    await settle(
+        hass, lambda: entry.runtime_data.config_state == "accepted"
+    )  # the ack arrives over the socket
     c2 = entry.runtime_data
     assert c2.config_state == "accepted" and c2.compiled.devices  # promoted by the acked push
     assert er.async_get(hass)  # registry intact

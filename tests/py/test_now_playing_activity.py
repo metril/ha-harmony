@@ -25,8 +25,12 @@ class FakeClient:
 
 def _feed(hass, client, now):
     return npl.NowPlayingFeed(
-        hass, client, lambda: (1,), lambda r: True,
-        lambda coro, name: hass.async_create_task(coro, name), clock=lambda: now[0],
+        hass,
+        client,
+        lambda: (1,),
+        lambda r: True,
+        lambda coro, name: hass.async_create_task(coro, name),
+        clock=lambda: now[0],
     )
 
 
@@ -34,14 +38,22 @@ def _np(client, since=0):
     return [m[1]["args"] for m in client.sent[since:] if m[1]["command"] == "now_playing"]
 
 
-async def test_activity_start_while_plex_plays_sends_one_now_playing_with_the_running_position(hass):
+async def test_activity_start_while_plex_plays_sends_one_now_playing_with_the_running_position(
+    hass,
+):
     client, now = FakeClient(), [dt_util.utcnow()]
     feed = _feed(hass, client, now)
     hass.states.async_set(SHIELD, "playing", {"app_id": "com.plexapp.android"})
     hass.states.async_set(
-        PLEX, "playing",
-        {"media_title": "T", "media_content_id": "x", "media_duration": 3000, "media_position": 100,
-         "media_position_updated_at": now[0]},
+        PLEX,
+        "playing",
+        {
+            "media_title": "T",
+            "media_content_id": "x",
+            "media_duration": 3000,
+            "media_position": 100,
+            "media_position_updated_at": now[0],
+        },
     )
     feed.start()
     await hass.async_block_till_done()
@@ -76,7 +88,9 @@ async def test_resend_with_nothing_playing_sends_nothing_playing_only(hass):
 def test_coordinator_resends_when_the_activity_with_the_feed_media_starts():
     calls = []
     fake = SimpleNamespace(
-        compiled=SimpleNamespace(media={"a": {"now_playing_entity": PLEX}, "b": {"apps_entity": SHIELD}}),
+        compiled=SimpleNamespace(
+            media={"a": {"now_playing_entity": PLEX}, "b": {"apps_entity": SHIELD}}
+        ),
         _cur=lambda e: e,
         now_playing=SimpleNamespace(plex=PLEX, resend=lambda: calls.append(1)),
     )

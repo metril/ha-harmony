@@ -50,14 +50,21 @@ async def call(ws, t, d=None, id=2):
 
 
 def begin(img: bytes, build: int) -> dict:
-    return {"target": 1, "size": len(img), "build": BASE + build, "sha": hashlib.sha512(img).hexdigest()}
+    return {
+        "target": 1,
+        "size": len(img),
+        "build": BASE + build,
+        "sha": hashlib.sha512(img).hexdigest(),
+    }
 
 
 async def upload(ws, img: bytes, start: int = 0, stop: int | None = None) -> None:
     end = len(img) if stop is None else stop
     for off in range(start, end, CHUNK):
         part = img[off : min(off + CHUNK, end)]
-        r = await call(ws, "ota_chunk", {"offset": off, "data": base64.b64encode(part).decode()}, id=100 + off)
+        r = await call(
+            ws, "ota_chunk", {"offset": off, "data": base64.b64encode(part).decode()}, id=100 + off
+        )
         assert r["t"] == "ota_status" and r["d"]["state"] == "receiving", r
 
 
@@ -77,7 +84,9 @@ def ota_hub(start_hub, tmp_path):
     return _start
 
 
-async def test_good_update_applies_then_exits_for_the_supervisor(ota_hub, sign_image, built_binaries):
+async def test_good_update_applies_then_exits_for_the_supervisor(
+    ota_hub, sign_image, built_binaries
+):
     payload = os.urandom(20000)
     img = sign_image(payload, 5)
     hub = ota_hub()
@@ -87,12 +96,16 @@ async def test_good_update_applies_then_exits_for_the_supervisor(ota_hub, sign_i
         assert r["d"] == {"state": "receiving", "offset": 0, "size": len(img)}
         await upload(ws, img)
         r = await call(ws, "ota_end", id=3)
-        assert r["t"] == "ota_status" and r["d"]["state"] == "applied" and r["d"]["build"] == BASE + 5
+        assert (
+            r["t"] == "ota_status" and r["d"]["state"] == "applied" and r["d"]["build"] == BASE + 5
+        )
     # the daemon never execs itself: it exits with the dedicated code for the boot hook
     assert hub.proc.wait(timeout=10) == EXIT_OTA_RESTART
     assert (hub.dir / "hub").read_bytes() == payload
     assert (hub.dir / "hub.prev").read_bytes() == OLD
-    assert (hub.dir / "ota-restart").exists() and (hub.dir / "ota-pending").read_text() == f"build={BASE + 5}\nprev={_tag_build(built_binaries / 'hub')}\n"
+    assert (hub.dir / "ota-restart").exists() and (
+        hub.dir / "ota-pending"
+    ).read_text() == f"build={BASE + 5}\nprev={_tag_build(built_binaries / 'hub')}\n"
     assert not (hub.dir / "ota-staged.img").exists()
 
 
@@ -106,7 +119,11 @@ async def test_bad_signature_is_rejected_and_hub_keeps_running(ota_hub, sign_ima
         await call(ws, "ota_begin", begin(img, 5))
         await upload(ws, img)
         r = await call(ws, "ota_end", id=3)
-        assert r["t"] == "error" and r["d"]["code"] == "ota_verify" and "signature" in r["d"]["message"]
+        assert (
+            r["t"] == "error"
+            and r["d"]["code"] == "ota_verify"
+            and "signature" in r["d"]["message"]
+        )
         r = await call(ws, "ping", id=4)  # still serving
         assert r["t"] == "pong"
     assert hub.alive()
@@ -133,7 +150,9 @@ async def test_truncated_image_is_rejected_then_resumed_by_offset(ota_hub, sign_
         r = await call(ws2, "ota_begin", begin(img, 8))
         assert r["d"]["state"] == "receiving" and r["d"]["offset"] == cut
         # a gap is refused; the right offset goes on
-        gap = await call(ws2, "ota_chunk", {"offset": cut + 1, "data": base64.b64encode(b"x").decode()}, id=5)
+        gap = await call(
+            ws2, "ota_chunk", {"offset": cut + 1, "data": base64.b64encode(b"x").decode()}, id=5
+        )
         assert gap["d"]["code"] == "ota_offset"
         await upload(ws2, img, cut)
         r = await call(ws2, "ota_end", id=6)
@@ -175,7 +194,9 @@ async def test_request_validation_errors(ota_hub, sign_image):
         assert (await call(ws, "ota_begin", bad))["d"]["code"] == "ota_bad_request"
         await call(ws, "ota_begin", begin(img, 1))
         big = base64.b64encode(os.urandom(CHUNK + 1)).decode()
-        assert (await call(ws, "ota_chunk", {"offset": 0, "data": big}, id=9))["d"]["code"] == "ota_chunk"
+        assert (await call(ws, "ota_chunk", {"offset": 0, "data": big}, id=9))["d"][
+            "code"
+        ] == "ota_chunk"
         assert (await call(ws, "ota_end", id=10))["d"]["code"] == "ota_size"  # nothing received
         # a chunk of a corrupted transfer: the digest check names it
         good = img[:-1] + bytes([img[-1] ^ 1])
@@ -207,7 +228,9 @@ async def test_downgrade_is_refused_at_begin(ota_hub, sign_image):
     async with aiohttp.ClientSession() as s:
         ws = await connect(s, hub2)
         assert (await call(ws, "ota_begin", begin(img_old, 3)))["d"]["code"] == "ota_downgrade"
-        assert (await call(ws, "ota_begin", begin(img_new, hub_dir_build)))["d"]["code"] == "ota_downgrade"  # same build
+        assert (await call(ws, "ota_begin", begin(img_new, hub_dir_build)))["d"][
+            "code"
+        ] == "ota_downgrade"  # same build
         ack = await _hello_ack(s, hub2)
         assert ack["fw_build"] == BASE + hub_dir_build and ack["ota_key"] == "dev"
 
@@ -231,10 +254,18 @@ async def test_rollback_record_is_pushed_to_each_new_client(start_hub, tmp_path)
         assert (await ws.receive_json(timeout=5))["t"] == "state_update"
         st = await ws.receive_json(timeout=5)
         assert st["t"] == "ota_status"
-        assert st["d"] == {"state": "rolled_back", "offset": 0, "size": 0, "build": 7, "reason": "died_early"}
+        assert st["d"] == {
+            "state": "rolled_back",
+            "offset": 0,
+            "size": 0,
+            "build": 7,
+            "reason": "died_early",
+        }
 
 
-async def test_dev_key_hub_refuses_updates_without_the_explicit_flag(start_hub, tmp_path, sign_image):
+async def test_dev_key_hub_refuses_updates_without_the_explicit_flag(
+    start_hub, tmp_path, sign_image
+):
     d = tmp_path / "devdir"
     d.mkdir()
     hub = start_hub("--ota-dir", str(d))  # this build carries the public dev key
@@ -274,7 +305,9 @@ def _tag_build(binary) -> int:
     return int(m.group(1))
 
 
-def test_build_id_is_derived_floored_and_shared_by_binary_startup_and_signing(built_binaries, start_hub, tmp_path):
+def test_build_id_is_derived_floored_and_shared_by_binary_startup_and_signing(
+    built_binaries, start_hub, tmp_path
+):
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
@@ -285,13 +318,25 @@ def test_build_id_is_derived_floored_and_shared_by_binary_startup_and_signing(bu
     assert f"hub: build {bid}\n" in hub.err_path.read_text()
     # the signing tool takes the id from the binary: image and binary cannot disagree
     out = subprocess.run(
-        [str(built_binaries / "ota_sign"), "sign", "--dev", "-t", "hub", str(built_binaries / "hub"), str(tmp_path / "i.img")],
-        capture_output=True, text=True, check=True,
+        [
+            str(built_binaries / "ota_sign"),
+            "sign",
+            "--dev",
+            "-t",
+            "hub",
+            str(built_binaries / "hub"),
+            str(tmp_path / "i.img"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     assert f"build {bid} " in out
 
 
-async def test_hello_ack_reports_the_compiled_in_build_as_fw_build(start_hub, tmp_path, built_binaries):
+async def test_hello_ack_reports_the_compiled_in_build_as_fw_build(
+    start_hub, tmp_path, built_binaries
+):
     d = tmp_path / "bd"
     d.mkdir()
     hub = start_hub("--ota-dir", str(d), "--ota-allow-dev")

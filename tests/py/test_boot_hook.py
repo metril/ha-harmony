@@ -147,7 +147,9 @@ def source_hook(
     # PATH, and a real `killall`/`reboot` must never reach the host.
     guards = "".join(f'{n}() {{ echo "$@" >>"{root}/{n}.log"; }}; ' for n in ("killall", "reboot"))
     script = f'{guards}{prelude}. "{HOOK}"; echo "__DEMO__=${{DEMO_MODE:-unset}}"'
-    fake_i2s = root / "dev-i2s"  # a regular file stands in for the char device; the hook never creates it
+    fake_i2s = (
+        root / "dev-i2s"
+    )  # a regular file stands in for the char device; the hook never creates it
     if not fake_i2s.exists() and not (extra_env and "HAH_I2S_DEV" in extra_env):
         fake_i2s.write_text("")
     env = {
@@ -722,7 +724,9 @@ def test_daemon_log_is_capped_without_corrupting_the_append_stream(root: Path) -
         if b"AFTER-TRUNCATE" in data and len(data) < 500:
             return
         time.sleep(0.02)
-    raise AssertionError(f"log was not capped ({len(data)} bytes, AFTER-TRUNCATE seen: {b'AFTER-TRUNCATE' in data})")
+    raise AssertionError(
+        f"log was not capped ({len(data)} bytes, AFTER-TRUNCATE seen: {b'AFTER-TRUNCATE' in data})"
+    )
 
 
 # --- review round 2: conf-loop hang guards, watchdog guard ---------------------------
@@ -878,7 +882,9 @@ def test_bad_ota_allow_dev_value_is_stock(root: Path) -> None:
     assert demo == "unset"
 
 
-@pytest.mark.parametrize("junk", ["respawn_max=x", "respawn_max=100", "respawn_max=-1", "rf_debug=2"])
+@pytest.mark.parametrize(
+    "junk", ["respawn_max=x", "respawn_max=100", "respawn_max=-1", "rf_debug=2"]
+)
 def test_bad_respawn_or_debug_value_is_stock(root: Path, junk: str) -> None:
     install_daemon(root, IMMORTAL)
     install_conf(root, f"token=t\n{junk}\n")
@@ -955,7 +961,9 @@ def test_log_lines_carry_uptime_stamps(root: Path) -> None:
     assert re.search(r"^\[up \d+s\] DAEMON-LINE$", vlog.read_text(), re.MULTILINE)
     _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy")
     lines = _clog(root).splitlines()
-    assert lines and all(re.match(r"\[up \d+s( \d{4}-\d\d-\d\d [\d:]+)?\] ha-harmony: ", ln) for ln in lines)
+    assert lines and all(
+        re.match(r"\[up \d+s( \d{4}-\d\d-\d\d [\d:]+)?\] ha-harmony: ", ln) for ln in lines
+    )
     assert any(re.match(r"\[up \d+s \d{4}-", ln) for ln in lines), "background lines carry the date"
 
 
@@ -1030,7 +1038,7 @@ def test_bad_update_is_rolled_back_once_and_reported(root: Path) -> None:
     assert rb[0] == "build=2" and rb[1] == "reason=died_early"
     assert not (_hub_dir(root) / "ota-pending").exists()
     assert not (_hub_dir(root) / "hub.prev").exists()  # consumed: a second rollback is impossible
-    assert 'runs_old' in (_hub_dir(root) / "hub").read_text()
+    assert "runs_old" in (_hub_dir(root) / "hub").read_text()
     assert _count(root, "runs_new") == 1 and _count(root, "runs_old") == 2
     assert not (root / "reboot.log").exists()
 
@@ -1047,13 +1055,17 @@ def _arm_pending_boot(root: Path, new_body: str, old_body: str, counter: str | N
 
 
 def test_boot_after_unhealthy_fresh_build_restores_prev_and_resets_strikes(root: Path) -> None:
-    _arm_pending_boot(root, "exit 1", 'echo "$@" >"$(dirname "$0")/argv.txt"; sleep 30', counter="2")
+    _arm_pending_boot(
+        root, "exit 1", 'echo "$@" >"$(dirname "$0")/argv.txt"; sleep 30', counter="2"
+    )
     install_conf(root, "token=t\nrespawn_max=0\n")
     _, demo = source_hook(root, healthy=1)
     assert demo == "1"  # the previous build was started, not stock
     rb = (_hub_dir(root) / "ota-rollback").read_text().split("\n")
     assert rb[0] == "build=3" and rb[1] == "reason=boot_unclean"
-    assert not (_hub_dir(root) / "ota-pending").exists() and not (_hub_dir(root) / "hub.prev").exists()
+    assert (
+        not (_hub_dir(root) / "ota-pending").exists() and not (_hub_dir(root) / "hub.prev").exists()
+    )
     log = _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "healthy after")
     assert "restored hub.prev" in log and "boot strike 1 of 3" in log  # slate wiped, not strike 3
     _wait_for(_hub_dir(root) / "argv.txt")  # the restored (previous) build is the one running
@@ -1074,13 +1086,17 @@ def test_rollback_happens_once_only_then_normal_strikes_apply(root: Path) -> Non
     _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "parked")
     assert not (_hub_dir(root) / "ota-rollback").exists()
     assert (root / "cache" / "ha-harmony-boot.n").read_text().strip() == "2"
-    _, demo = source_hook(root, healthy=1)  # strike 3: back to stock semantics, hook disables itself
+    _, demo = source_hook(
+        root, healthy=1
+    )  # strike 3: back to stock semantics, hook disables itself
     assert demo == "unset"
     assert not (root / "etc" / "ha-harmony-enable").exists()
     assert not (_hub_dir(root) / "ota-rollback").exists()
 
 
-def test_power_loss_before_the_swap_leaves_the_old_binary_and_only_clears_the_marker(root: Path) -> None:
+def test_power_loss_before_the_swap_leaves_the_old_binary_and_only_clears_the_marker(
+    root: Path,
+) -> None:
     install_daemon(root, IMMORTAL)
     before = (_hub_dir(root) / "hub").read_text()
     (_hub_dir(root) / "ota-pending").write_text("build=4\n")  # armed, then the power went
@@ -1090,8 +1106,12 @@ def test_power_loss_before_the_swap_leaves_the_old_binary_and_only_clears_the_ma
     assert demo == "1"
     assert (_hub_dir(root) / "hub").read_text() == before
     assert not (_hub_dir(root) / "ota-pending").exists()
-    assert not (_hub_dir(root) / "ota-rollback").exists()  # nothing to roll back to, nothing to report
-    assert "no previous build to restore" in _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "no previous build")
+    assert not (
+        _hub_dir(root) / "ota-rollback"
+    ).exists()  # nothing to roll back to, nothing to report
+    assert "no previous build to restore" in _wait_text(
+        root / "var" / "volatile" / "ha-harmony-hook.log", "no previous build"
+    )
 
 
 def test_power_loss_after_the_link_before_the_rename_is_harmless(root: Path) -> None:
@@ -1143,19 +1163,25 @@ def test_update_inside_the_health_window_is_a_planned_relaunch_not_a_death(root:
     assert "inside the health window - launching the new build" in log
     assert "died within" not in log and not (root / "reboot.log").exists()
     assert _count(root, "runs_new") == 1
-    assert not (_hub_dir(root) / "ota-pending").exists()  # cleared at the health mark of the new build
+    assert not (
+        _hub_dir(root) / "ota-pending"
+    ).exists()  # cleared at the health mark of the new build
     assert not (_hub_dir(root) / "ota-rollback").exists()
     assert (root / "var" / "volatile" / "ha-harmony.healthy").exists()
 
 
-def test_update_inside_the_window_that_dies_rolls_back_once_and_restores_ota_build(root: Path) -> None:
+def test_update_inside_the_window_that_dies_rolls_back_once_and_restores_ota_build(
+    root: Path,
+) -> None:
     install_daemon(root, OLD_EARLY)
     _install_new(root, NEW_BAD)
     install_conf(root, "token=t\nrespawn_max=0\nreboot_on_early_death=0\n")
     source_hook(root, healthy=1, extra_env=_EARLY_WINDOW)
     _wait_text(root / "var" / "volatile" / "ha-harmony-hook.log", "restored hub.prev")
     _wait_count(root, "runs_old", 2)
-    assert (_hub_dir(root) / "ota-build").read_text().strip() == "1"  # the previous build id is back
+    assert (
+        _hub_dir(root) / "ota-build"
+    ).read_text().strip() == "1"  # the previous build id is back
     assert "reason=died_early" in (_hub_dir(root) / "ota-rollback").read_text()
     assert _count(root, "runs_new") == 1 and not (root / "reboot.log").exists()
 
@@ -1184,7 +1210,9 @@ def test_cut_before_the_rename_never_installs_an_older_prev(root: Path) -> None:
     assert (_hub_dir(root) / "ota-build").read_text().strip() == "8"  # the old binary is what runs
 
 
-def test_health_file_appears_at_the_health_mark_and_goes_while_an_update_is_unproven(root: Path) -> None:
+def test_health_file_appears_at_the_health_mark_and_goes_while_an_update_is_unproven(
+    root: Path,
+) -> None:
     install_daemon(root, OLD_APPLIER)
     _install_new(root, NEW_OK)
     install_conf(root, "token=t\nrespawn_max=0\n")
@@ -1215,7 +1243,9 @@ def test_respawn_logs_how_the_daemon_died(root: Path, body: str, want: str) -> N
     vlog = root / "var" / "volatile" / "ha-harmony-hook.log"
     _wait_text(vlog, "respawn 1 of 1")
     assert f"daemon ended: {want}" in vlog.read_text()
-    assert not (root / "cache" / "ha-harmony.status").exists(), "the exit status lives in tmpfs, never on flash"
+    assert not (root / "cache" / "ha-harmony.status").exists(), (
+        "the exit status lives in tmpfs, never on flash"
+    )
 
 
 # --- /dev/i2s holder: the watcher holds the device so a daemon exit never closes it --------------
@@ -1325,7 +1355,9 @@ def test_missing_device_reboots_and_counts_the_strike(root: Path) -> None:
 
 
 def test_missing_device_reboots_even_with_the_reboot_switch_off(root: Path) -> None:
-    _assert_no_device_reboots_and_counts(root, root / "no-such-i2s", "token=t\nreboot_on_early_death=0\n")
+    _assert_no_device_reboots_and_counts(
+        root, root / "no-such-i2s", "token=t\nreboot_on_early_death=0\n"
+    )
 
 
 def test_unopenable_device_reboots_and_counts_the_strike(root: Path) -> None:

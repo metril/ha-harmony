@@ -21,7 +21,9 @@ pytestmark = pytest.mark.usefixtures("enable_custom_integrations", "fast_client"
 def write_yaml(hass, fake_addon):
     """write_yaml(text | dict): apply a config in the fake add-on, served to the integration as a bundle."""
     hass.data["fake_addon"] = fake_addon
-    return lambda cfg: fake_addon.apply(cfg) if isinstance(cfg, dict) else fake_addon.apply_yaml(cfg)
+    return lambda cfg: (
+        fake_addon.apply(cfg) if isinstance(cfg, dict) else fake_addon.apply_yaml(cfg)
+    )
 
 
 def many(n: int, per: int = 250, name: str = "D") -> dict:
@@ -32,7 +34,8 @@ def many(n: int, per: int = 250, name: str = "D") -> dict:
                 "id": f"d{d}",
                 "name": f"{name} {d}",
                 "commands": {
-                    f"c{j}": {"proto": "nec", "addr": d, "cmd": j % 256} for j in range(min(per, n - d * per))
+                    f"c{j}": {"proto": "nec", "addr": d, "cmd": j % 256}
+                    for j in range(min(per, n - d * per))
                 },
             }
             for d in range((n + per - 1) // per)
@@ -40,7 +43,9 @@ def many(n: int, per: int = 250, name: str = "D") -> dict:
     }
 
 
-async def test_a_config_far_over_256_commands_reaches_the_real_hub_in_chunks(hass, hub_rf, write_yaml):
+async def test_a_config_far_over_256_commands_reaches_the_real_hub_in_chunks(
+    hass, hub_rf, write_yaml
+):
     write_yaml(BASE)
     entry = await setup(hass, hub_rf)
     coord = entry.runtime_data
@@ -57,7 +62,10 @@ async def test_a_config_far_over_256_commands_reaches_the_real_hub_in_chunks(has
     write_yaml(many(1500))  # ~70 KB of config text: 6 chunks of 12000 bytes
     await hass.async_block_till_done()
     for _ in range(100):
-        if coord.compiled.usage["commands"] == 1500 and coord.client.config_hash == coord.compiled.config_hash:
+        if (
+            coord.compiled.usage["commands"] == 1500
+            and coord.client.config_hash == coord.compiled.config_hash
+        ):
             break
         await hass.async_block_till_done()
 
@@ -65,7 +73,11 @@ async def test_a_config_far_over_256_commands_reaches_the_real_hub_in_chunks(has
     assert coord.compiled.usage["commands"] == 1500
     assert coord.last_error is None and entry.state is ConfigEntryState.LOADED
     chunks = [s for n, s in sent if n == "CONFIG_CHUNK"]
-    assert len(chunks) >= 5 and chunks == list(range(len(chunks))) and not [n for n, _ in sent if n == "SET_CONFIG"]
+    assert (
+        len(chunks) >= 5
+        and chunks == list(range(len(chunks)))
+        and not [n for n, _ in sent if n == "SET_CONFIG"]
+    )
     # the hub runs exactly the compiled text
     assert coord.client.config_hash == coord.compiled.config_hash == await hub_hash(hub_rf.url)
     await hass.config_entries.async_unload(entry.entry_id)
@@ -124,7 +136,9 @@ async def test_a_tighter_hub_budget_is_reported_before_pushing(hass, fake_hub, w
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_chunks_are_in_order_sized_and_reassemble_to_the_compiled_text(hass, fake_hub, write_yaml):
+async def test_chunks_are_in_order_sized_and_reassemble_to_the_compiled_text(
+    hass, fake_hub, write_yaml
+):
     log = []
     hub = await fake_hub(_fake_hub_handler(CURRENT.to_wire(), log))
     write_yaml(many(1200))
@@ -137,7 +151,9 @@ async def test_chunks_are_in_order_sized_and_reassemble_to_the_compiled_text(has
     text = "".join(c["data"] for c in chunks)
     assert len(text.encode()) == chunks[0]["total"]
     assert json.loads(text) == coord.compiled.hub_json
-    assert f"{zlib.crc32(text.encode()):08x}" == coord.compiled.config_hash == coord.client.config_hash
+    assert (
+        f"{zlib.crc32(text.encode()):08x}" == coord.compiled.config_hash == coord.client.config_hash
+    )
     await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -155,7 +171,9 @@ async def test_non_ascii_names_split_on_character_boundaries(hass, fake_hub, wri
 # ------------------------------------------------------------------ command buttons at scale
 def _buttons(hass, entry):
     reg = er.async_get(hass)
-    return [e for e in er.async_entries_for_config_entry(reg, entry.entry_id) if e.domain == "button"]
+    return [
+        e for e in er.async_entries_for_config_entry(reg, entry.entry_id) if e.domain == "button"
+    ]
 
 
 async def _fake(hass, fake_hub, write_yaml, cfg):
@@ -182,7 +200,9 @@ async def test_command_buttons_are_created_disabled(hass, fake_hub, write_yaml):
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_a_device_over_the_limit_gets_no_buttons_but_stays_reachable(hass, fake_hub, write_yaml):
+async def test_a_device_over_the_limit_gets_no_buttons_but_stays_reachable(
+    hass, fake_hub, write_yaml
+):
     log = []
     hub = await fake_hub(_fake_hub_handler(CURRENT.to_wire(), log))
     write_yaml(many(COMMAND_BUTTON_LIMIT + 50, per=COMMAND_BUTTON_LIMIT + 50))
@@ -190,9 +210,13 @@ async def test_a_device_over_the_limit_gets_no_buttons_but_stays_reachable(hass,
     await _compiled(hass, entry)
     coord = entry.runtime_data
     assert not _buttons(hass, entry)
-    assert len(coord.device_commands("d0")) == COMMAND_BUTTON_LIMIT + 50  # all still addressable by name
+    assert (
+        len(coord.device_commands("d0")) == COMMAND_BUTTON_LIMIT + 50
+    )  # all still addressable by name
     await coord.async_device_command("d0", f"c{COMMAND_BUTTON_LIMIT + 49}")  # the send-command path
-    assert any(e["t"] == "command" and f"c{COMMAND_BUTTON_LIMIT + 49}" in json.dumps(e["d"]) for e in log)
+    assert any(
+        e["t"] == "command" and f"c{COMMAND_BUTTON_LIMIT + 49}" in json.dumps(e["d"]) for e in log
+    )
     await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -231,7 +255,9 @@ async def test_bt_devices_get_the_same_command_buttons_as_ir_ones(hass, fake_hub
         ]
     }
     log = []
-    hub = await fake_hub(_fake_hub_handler(CURRENT.to_wire(), log, bt={"hosts_max": 255, "remotes_max": 32}))
+    hub = await fake_hub(
+        _fake_hub_handler(CURRENT.to_wire(), log, bt={"hosts_max": 255, "remotes_max": 32})
+    )
     write_yaml(cfg)
     entry = await setup(hass, hub)
     await _compiled(hass, entry)

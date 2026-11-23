@@ -157,7 +157,13 @@ class Compiled:
         pages, notices = degrade_pages(self.models, self.cfg_ids, at, tier)
         if pages is self.models:  # this remote can show everything there is
             return RemotePages(
-                self.models, self.pages_v2, self._pages_b64[1], self.gen, self.theme_id, None, notices
+                self.models,
+                self.pages_v2,
+                self._pages_b64[1],
+                self.gen,
+                self.theme_id,
+                None,
+                notices,
             )
         pages = [replace(p, gen=0) for p in pages]
         models, _v1, v2 = encode_pages(pages, self.cfg_ids, self.seed, [])
@@ -184,7 +190,7 @@ class Compiled:
     activity_ids: list[str] = field(default_factory=list)  # index = the hub's activity index
     # App rings: per app button (wire page, widget id) its app ids and the apps_entity player.
     apps: list[AppBinding] = field(default_factory=list)
-    # activity id -> {apps_entity, now_playing_entity} (only the keys the activity sets)
+    # activity id -> {apps_entity, now_playing_entity, session_entity} (only the keys the activity sets)
     media: dict[str, dict[str, str]] = field(default_factory=dict)
     # Measured sizes against the hub's and remote's limits (the editor's meters). Not part of
     # equality: two compiles of the same config are the same config.

@@ -30,4 +30,4 @@ asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["proto/gen", "harmony_core/harmony_proto.py"]
+extend-exclude = ["proto/gen", "harmony_core/harmony_proto.py", "harmony_core/icons.py", "harmony_core/themes.py"]

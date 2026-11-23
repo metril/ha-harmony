@@ -431,7 +431,14 @@ async def test_discovery_with_another_hardware_id_is_a_new_hub(hass):
 async def old_hub(fake_hub):
     async def handler(ws, env):
         if env["t"] == "hello":
-            await ws.send_json({"v": 1, "id": env["id"], "t": "hello_ack", "d": {"hub_id": HUB_ID, "tcp_keepalive": True, "limits": CURRENT.to_wire()}})
+            await ws.send_json(
+                {
+                    "v": 1,
+                    "id": env["id"],
+                    "t": "hello_ack",
+                    "d": {"hub_id": HUB_ID, "tcp_keepalive": True, "limits": CURRENT.to_wire()},
+                }
+            )
         elif env["t"] == "set_hub_id":
             await ws.send_json(
                 {
@@ -498,7 +505,9 @@ async def test_rename_then_apply_a_config_end_to_end(hass, hub, fake_addon):
     assert ack["config_hash"] == coord.compiled.config_hash and "Extra" in ack["activities"]
     assert fake_addon.store.hubs() == [NEW]
     state = fake_addon.store.load(NEW)
-    assert state["applied"] is not None and state["applied"]["hub_id"] == NEW  # the store came along
+    assert (
+        state["applied"] is not None and state["applied"]["hub_id"] == NEW
+    )  # the store came along
     # the integration told the add-on it worked, under the new key
     async with asyncio.timeout(10):
         while (fake_addon.acks.get(NEW) or {}).get("result") != "ok":
@@ -547,7 +556,9 @@ async def test_previous_id_is_kept_until_the_addon_answers_adopt(
     async with asyncio.timeout(30):  # under load the first poll can be late
         while entry.runtime_data.link_state not in ("ok", "nothing_applied"):
             await asyncio.sleep(0.05)
-    await fake_addon.frame("hello", lambda f: f.get("prev") == HUB_ID)  # the hello still carries the previous id
+    await fake_addon.frame(
+        "hello", lambda f: f.get("prev") == HUB_ID
+    )  # the hello still carries the previous id
     assert entry.unique_id == "from-hub-conf" and entry.data[const.CONF_PREV_ID] == HUB_ID
     assert entry.runtime_data._link.identity["prev"] == HUB_ID
 
@@ -584,7 +595,9 @@ async def test_hardware_id_is_stored_before_the_hub_is_renamed(hass, hub, fake_a
     assert res["reason"] == "reconfigure_successful" and seen[0] == HW
 
 
-async def test_an_entry_waiting_to_retry_is_unloaded_and_serialised(hass, hub, fake_addon, monkeypatch):
+async def test_an_entry_waiting_to_retry_is_unloaded_and_serialised(
+    hass, hub, fake_addon, monkeypatch
+):
     entry = await set_up(hass, hub, fake_addon)
     unloads = []
     real = hass.config_entries.async_unload
@@ -615,11 +628,18 @@ async def test_setup_follow_keeps_going_when_the_addon_holds_both_ids(hass, hub,
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.LOADED and entry.unique_id == "from-hub-conf"
     issue = ir.async_get(hass).async_get_issue(DOMAIN, "addon_store_exists_from-hub-conf")
-    assert issue is not None and issue.translation_placeholders == {"old": HUB_ID, "new": "from-hub-conf"}
-    assert sorted(fake_addon.store.hubs()) == sorted([HUB_ID, "from-hub-conf"])  # nothing overwritten
+    assert issue is not None and issue.translation_placeholders == {
+        "old": HUB_ID,
+        "new": "from-hub-conf",
+    }
+    assert sorted(fake_addon.store.hubs()) == sorted(
+        [HUB_ID, "from-hub-conf"]
+    )  # nothing overwritten
 
 
-async def test_reconfigure_accepts_the_hubs_current_id_when_the_hardware_id_matches(hass, hub, fake_addon):
+async def test_reconfigure_accepts_the_hubs_current_id_when_the_hardware_id_matches(
+    hass, hub, fake_addon
+):
     entry = await set_up(hass, hub, fake_addon)
     await raw_rename(hub, "from-hub-conf")  # renamed on the device while HA still knows the old id
     res = await reconfigure(hass, entry, HUB_ID, "")

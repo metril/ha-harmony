@@ -49,7 +49,9 @@ class FakeChannelAddon:
         self.refuse: int | None = None  # answer the upgrade with this HTTP status
         self.no_adopt = False  # an add-on that ignores hw/prev: never answers `adopt`
         self.silent = False  # after hello, send nothing (not even bundle/nothing_applied)
-        self.close_after_hello: int | None = None  # close the socket with this code right after hello
+        self.close_after_hello: int | None = (
+            None  # close the socket with this code right after hello
+        )
         self.extra_after_hello: list[dict[str, Any]] = []  # frames sent after the hello answer
         self.store = _Store(self)
         self._now = 1_000
@@ -102,11 +104,16 @@ class FakeChannelAddon:
         if ws is not None:
             await ws.close(code=code)
 
-    async def frame(self, t: str, pred: Any = None, *, timeout: float = 8.0, start: int = 0) -> dict[str, Any]:
+    async def frame(
+        self, t: str, pred: Any = None, *, timeout: float = 8.0, start: int = 0
+    ) -> dict[str, Any]:
         """The first received frame of type `t` (matching `pred`) at or after index `start`. Waits on arrival."""
 
         def find() -> dict[str, Any] | None:
-            return next((f for f in self.frames[start:] if f.get("t") == t and (pred is None or pred(f))), None)
+            return next(
+                (f for f in self.frames[start:] if f.get("t") == t and (pred is None or pred(f))),
+                None,
+            )
 
         async with asyncio.timeout(timeout):
             async with self._cond:
@@ -192,7 +199,14 @@ class FakeChannelAddon:
         if src is not None and hw and self.linked.get(src, {}).get("hw") not in (None, hw):
             src = None  # another hub
         if src is None and hw:
-            src = next((h for h, row in self.linked.items() if row.get("hw") == hw and h in self.applied and h != hub), None)
+            src = next(
+                (
+                    h
+                    for h, row in self.linked.items()
+                    if row.get("hw") == hw and h in self.applied and h != hub
+                ),
+                None,
+            )
         if src is None:
             return "none"
         body = dict(self.applied.pop(src))
@@ -213,7 +227,9 @@ class FakeChannelAddon:
     def app(self) -> web.Application:
         app = web.Application()
         app.router.add_get("/api/v1/channel", self._channel)
-        app.on_shutdown.append(self._close_all)  # like the real add-on: a shutdown closes the sockets (1001)
+        app.on_shutdown.append(
+            self._close_all
+        )  # like the real add-on: a shutdown closes the sockets (1001)
         return app
 
     async def _close_all(self, _app: web.Application) -> None:

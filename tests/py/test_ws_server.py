@@ -160,7 +160,10 @@ def test_real_backend_without_i2s_exits_nonzero(built_binaries):
     # No /dev/i2s on a dev host (or it is held by stock hal): the daemon must refuse to start.
     res = subprocess.run(
         [str(built_binaries / "hub"), "--token", "t", "--no-mdns"],
-        check=False, capture_output=True, text=True, timeout=5,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
     )
     assert res.returncode != 0 and "/dev/i2s" in res.stderr
 
@@ -169,7 +172,10 @@ def test_real_backend_requires_the_i2s_fd_from_the_boot_hook(built_binaries):
     # The daemon never opens /dev/i2s itself (a close of it freezes the hub): no --i2s-fd, no hardware.
     res = subprocess.run(
         [str(built_binaries / "hub"), "--token", "t", "--no-mdns", "--port", "0"],
-        check=False, capture_output=True, text=True, timeout=5,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
     )
     assert res.returncode == 1 and "--i2s-fd" in res.stderr
 
@@ -178,7 +184,10 @@ def test_real_backend_requires_the_i2s_fd_from_the_boot_hook(built_binaries):
 def test_i2s_fd_is_range_checked(built_binaries, fd):
     res = subprocess.run(
         [str(built_binaries / "hub"), "--token", "t", "--no-mdns", "--i2s-fd", fd],
-        check=False, capture_output=True, text=True, timeout=5,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
     )
     assert res.returncode != 0 and "--i2s-fd" in res.stderr
 
@@ -198,7 +207,9 @@ def test_i2s_fd_must_be_a_writable_char_device(built_binaries, tmp_path):
     ro = os.open("/dev/null", os.O_RDONLY)
     try:
         for src in (plain, ro):
-            p = _hub_with_fd9(built_binaries, src, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            p = _hub_with_fd9(
+                built_binaries, src, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+            )
             err = p.communicate(timeout=5)[1]
             assert p.returncode == 1 and "writable character device" in err
     finally:
@@ -218,7 +229,9 @@ def test_hub_starts_with_a_held_i2s_fd_and_never_closes_it(built_binaries, tmp_p
     try:
         time.sleep(1.0)
         assert proc.poll() is None, "the hub must start with the adopted fd"
-        info = Path(f"/proc/{proc.pid}/fdinfo/9").read_text()  # close-on-exec: bt-helper must not inherit it
+        info = Path(
+            f"/proc/{proc.pid}/fdinfo/9"
+        ).read_text()  # close-on-exec: bt-helper must not inherit it
         assert int(re.search(r"flags:\s*(\d+)", info).group(1), 8) & 0o2000000
     finally:
         proc.terminate()
@@ -231,7 +244,9 @@ def test_hub_sources_never_open_or_close_the_i2s_fd():
     bad = re.compile(r"\bopen\s*\([^)]*i2s|\bclose\s*\([^)]*(i2s|dev_fd|\bh->fd)|HP_HW_DEFAULT_DEV")
     for src in [*root.rglob("*.c"), *root.rglob("*.h")]:
         code = re.sub(r"/\*.*?\*/|//[^\n]*", "", src.read_text(), flags=re.DOTALL)
-        if src.name.startswith("hw_sinks") and re.search(r"ops\.(open|close)|\(\*(open|close)\)", code):
+        if src.name.startswith("hw_sinks") and re.search(
+            r"ops\.(open|close)|\(\*(open|close)\)", code
+        ):
             raise AssertionError(f"{src}: the hw ops table must have no open/close")
         for m in bad.finditer(code):
             line = code[: m.start()].count("\n")
@@ -241,8 +256,20 @@ def test_hub_sources_never_open_or_close_the_i2s_fd():
 def test_rf_debug_flag_parses(built_binaries):
     # --rf-debug is a valueless flag: parsing succeeds (exit is the missing /dev/i2s, never usage code 2).
     res = subprocess.run(
-        [str(built_binaries / "hub"), "--token", "t", "--no-mdns", "--rf-spi", "--rf-slot", "2", "--rf-debug"],
-        check=False, capture_output=True, text=True, timeout=5,
+        [
+            str(built_binaries / "hub"),
+            "--token",
+            "t",
+            "--no-mdns",
+            "--rf-spi",
+            "--rf-slot",
+            "2",
+            "--rf-debug",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
     )
     assert res.returncode not in (0, 2) and "usage" not in res.stderr
 
@@ -280,7 +307,7 @@ def test_heartbeat_file_tracks_monotonic_uptime(start_hub, tmp_path):
     def read() -> int | None:
         try:
             return int(hb.read_text())
-        except (ValueError, OSError):
+        except ValueError, OSError:
             return None
 
     deadline = time.monotonic() + 15
@@ -302,6 +329,9 @@ def test_heartbeat_file_tracks_monotonic_uptime(start_hub, tmp_path):
 def test_heartbeat_secs_is_validated(built_binaries):
     res = subprocess.run(
         [str(built_binaries / "hub"), "--sim", "--token", "t", "--heartbeat-secs", "0"],
-        check=False, capture_output=True, text=True, timeout=5,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
     )
     assert res.returncode == 2

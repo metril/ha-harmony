@@ -110,9 +110,7 @@ async def test_two_hubs_each_move_only_their_own_store(c):
     a_before, b_before = await full(c, "hub-a"), await full(c, "hub-b")
     # hub A renames; a claim of B's id as the previous one is refused by the hardware id
     r = await poll(c, "hub-a2", hw=HW_A, prev="hub-b")
-    assert (
-        r["adopt"] == "moved"
-    )  # found hub-a through the hardware id, not hub-b through prev
+    assert r["adopt"] == "moved"  # found hub-a through the hardware id, not hub-b through prev
     assert ids(await hubs(c)) == ["hub-a2", "hub-b"]
     assert await full(c, "hub-a2") == {**a_before, "hub": "hub-a2"}
     assert await full(c, "hub-b") == b_before
@@ -162,7 +160,9 @@ async def test_garbage_identity_fields_are_ignored(c):
     for bad in ({"hw": "not valid!"}, {"hw": "x" * 80}, {"prev": "../etc"}, {"prev": "default"}):
         r = await poll(c, "new-id", **bad)
         assert r["frame"]["t"] in ("bundle", "nothing_applied") and ids(await hubs(c)) == ["old-id"]
-    r = await poll(c, "new-id", name="x" * 49)  # over 48 bytes: the name is dropped, the hello works
+    r = await poll(
+        c, "new-id", name="x" * 49
+    )  # over 48 bytes: the name is dropped, the hello works
     assert [h.get("name") for h in (await hubs(c))["linked"]] == [None]
     assert (await poll(c, "new-id", name="tab\t"))["frame"]
 

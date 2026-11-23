@@ -58,7 +58,11 @@ def b(i, x=0, y=0, w=1, h=1, label="", kind="button"):
         ([b(1, label="é" * 13)], {}, "label"),  # 26 bytes, 13 chars
         ([b(1, label="a\x00")], {}, "NUL"),
         ([Widget("slider", 1, 0, 0, 1, 1)], {}, "kind"),
-        ([b(i, x=i % 4, y=i // 4) for i in range(MAX_WIDGETS + 1)], {"cols": 16, "rows": 16}, "too many"),
+        (
+            [b(i, x=i % 4, y=i // 4) for i in range(MAX_WIDGETS + 1)],
+            {"cols": 16, "rows": 16},
+            "too many",
+        ),
         ([b(1)], {"cols": 0}, "grid"),
         ([b(1)], {"rows": 17}, "grid"),
     ],

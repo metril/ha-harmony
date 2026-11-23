@@ -159,7 +159,9 @@ def test_header_and_json_agree():
     j = json.loads((ROOT / "harmony_addon/frontend-shared/icons.json").read_text())
     for ic in j["icons"]:
         assert f"#define RA_ICON_{ic['name'].upper()} {ic['id']}\n" in h
-        assert ic["keywords"] and (ic["svg"] or ic.get("brand"))  # brand markup is in brand-icons.json
+        assert ic["keywords"] and (
+            ic["svg"] or ic.get("brand")
+        )  # brand markup is in brand-icons.json
     assert re.search(rf"RA_ICON_MAX {len(j['icons'])}", h)
 
 
@@ -169,7 +171,11 @@ def test_no_surface_keeps_its_own_icon_cap():
     from harmony_core.icons import ICON_IDS, MAX_STOCK_ID
 
     cap = len(ICON_IDS)
-    assert cap == MAX_STOCK_ID == len(json.loads((ROOT / "harmony_addon/frontend-shared/icons.json").read_text())["icons"])
+    assert (
+        cap
+        == MAX_STOCK_ID
+        == len(json.loads((ROOT / "harmony_addon/frontend-shared/icons.json").read_text())["icons"])
+    )
     assert f"RA_ICON_MAX {cap}\n" in (ROOT / "remote/app/icons.h").read_text()
     for src in [*(ROOT / "hub").rglob("*.[ch]"), *(ROOT / "common").rglob("*.[ch]")]:
         assert not re.search(r"icon\w*\s*(>|>=|<|<=)\s*\d{2,}", src.read_text()), src
@@ -190,7 +196,9 @@ def test_package_ships_the_generated_icons(tmp_path):
         json.loads((ROOT / "custom_components/ha_harmony/manifest.json").read_text())["version"],
     )
     with zipfile.ZipFile(out) as z:
-        assert z.read("harmony_core/icons.py").decode() == (ROOT / "harmony_core/icons.py").read_text()
+        assert (
+            z.read("harmony_core/icons.py").decode() == (ROOT / "harmony_core/icons.py").read_text()
+        )
 
 
 def test_brand_icons_are_the_filled_logos_with_hex_cards():

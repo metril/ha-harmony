@@ -108,7 +108,9 @@ def theme_warnings(model: dict[str, Any]) -> list[dict[str, Any]]:
     toks = dict(at.tokens)
     for i, pg in enumerate(model.get("pages", [])):
         for j, w in enumerate(pg.get("widgets", [])):
-            if _logo_only(w):  # a brand logo key draws no text on its fill: the brand colour is the point
+            if _logo_only(
+                w
+            ):  # a brand logo key draws no text on its fill: the brand colour is the point
                 continue
             for key in ("color", "on_color"):
                 v = w.get(key)

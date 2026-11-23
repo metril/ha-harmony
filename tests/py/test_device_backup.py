@@ -75,7 +75,9 @@ class FakeSsh:
         self.calls.append(argv)
         cmd = shlex.join(argv)
         if argv[:2] == ["cat", "/proc/mtd"]:
-            return (0, mtd_text(self.parts, self.erase).encode(), b"") if self.mtd else (1, b"", b"no")
+            return (
+                (0, mtd_text(self.parts, self.erase).encode(), b"") if self.mtd else (1, b"", b"no")
+            )
         if argv[:2] == ["cat", "/proc/partitions"]:
             return 0, self.proc_partitions.encode(), b""
         if argv[:2] == ["cat", "/proc/mounts"]:
@@ -494,8 +496,16 @@ def test_commands_are_read_only_by_construction(tmp_path):
         ({"mtd": False}, ()),
         ({"command_v": False}, ()),  # direct-probe fallback
         ({"hash_fail": {"/dev/mtdblock0": "rc"}}, ()),  # device hash pass failure
-        ({"parts": ELITE, "erase": ELITE_ERASE, "mounts": ELITE_MOUNTS, "utils": ("cat", "md5sum"),
-          "char": False}, ()),  # Elite: cat + md5 + block nodes only
+        (
+            {
+                "parts": ELITE,
+                "erase": ELITE_ERASE,
+                "mounts": ELITE_MOUNTS,
+                "utils": ("cat", "md5sum"),
+                "char": False,
+            },
+            (),
+        ),  # Elite: cat + md5 + block nodes only
         ({"parts": ELITE, "erase": ELITE_ERASE, "mounts": ELITE_MOUNTS}, ()),
         ({"parts": ELITE, "erase": ELITE_ERASE, "mounts": ELITE_MOUNTS}, ("--dry-run",)),
         ({"parts": ELITE, "erase": ELITE_ERASE, "mounts": ELITE_MOUNTS}, ("--only", "data")),

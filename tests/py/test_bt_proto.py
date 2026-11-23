@@ -25,7 +25,9 @@ def test_codes_and_transport():
     assert [MsgType[n.upper()] for n in NEW] == [35, 36, 37, 38, 39, 40]
     assert all(MESSAGES[n][1] == "ws" for n in NEW)
     assert len({m[0] for m in MESSAGES.values()}) == len(MESSAGES)  # codes unique
-    assert {30, 31, 32, 33, 34} <= {m[0] for m in MESSAGES.values()}  # remote OTA codes still reserved
+    assert {30, 31, 32, 33, 34} <= {
+        m[0] for m in MESSAGES.values()
+    }  # remote OTA codes still reserved
 
 
 @pytest.mark.parametrize("v", VEC["valid"], ids=lambda v: f"{v['env']['t']}-{v['env']['id']}")
@@ -47,19 +49,41 @@ def test_invalid_refused(v):
 
 def test_old_and_new_peers_ignore_unknown_fields():
     # a newer hub adding fields to bt_state / hello_ack.bt: receivers ignore them
-    env = {"v": 1, "id": 0, "t": "bt_state", "d": {"state": "ready", "discoverable": False, "hosts": [], "future": 1}}
+    env = {
+        "v": 1,
+        "id": 0,
+        "t": "bt_state",
+        "d": {"state": "ready", "discoverable": False, "hosts": [], "future": 1},
+    }
     assert decode_ws(env)[1] == {"state": "ready", "discoverable": False, "hosts": []}
-    ack = {"v": 1, "id": 1, "t": "hello_ack", "d": {"hub_id": "h", "bt": {"hosts_max": 4, "later": [1]}}}
+    ack = {
+        "v": 1,
+        "id": 1,
+        "t": "hello_ack",
+        "d": {"hub_id": "h", "bt": {"hosts_max": 4, "later": [1]}},
+    }
     assert decode_ws(ack)[1]["bt"] == {"hosts_max": 4, "later": [1]}
     # an old hub's hello_ack has no bt; an old hub's bt_state has no remotes / le
     assert "bt" not in decode_ws({"v": 1, "id": 1, "t": "hello_ack", "d": {"hub_id": "h"}})[1]
-    old = {"v": 1, "id": 0, "t": "bt_state", "d": {"state": "off", "discoverable": False, "hosts": []}}
+    old = {
+        "v": 1,
+        "id": 0,
+        "t": "bt_state",
+        "d": {"state": "off", "discoverable": False, "hosts": []},
+    }
     assert decode_ws(old)[1].keys() == {"state", "discoverable", "hosts"}
     # an old client's bt_pair / bt_forget (no mode, kind, transport) is still valid
-    assert decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": {"on": True, "future": 1}})[1] == {"on": True}
+    assert decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": {"on": True, "future": 1}})[1] == {
+        "on": True
+    }
     # candidates / addr: an old hub's bt_state has neither, an old client's bt_pair has no addr; unknown fields inside
     # a candidate pass through (json field)
-    cand = {"state": "ready", "discoverable": False, "hosts": [], "candidates": [{"addr": "AA:BB:CC:DD:EE:01", "rssi": -50, "x": 1}]}
+    cand = {
+        "state": "ready",
+        "discoverable": False,
+        "hosts": [],
+        "candidates": [{"addr": "AA:BB:CC:DD:EE:01", "rssi": -50, "x": 1}],
+    }
     assert decode_ws({"v": 1, "id": 0, "t": "bt_state", "d": cand})[1] == cand
     # window / configured: an old hub sends neither; entries are json, so a client keeps what it does not know
     win = {"state": "ready", "discoverable": False, "window": "remote",
@@ -68,7 +92,10 @@ def test_old_and_new_peers_ignore_unknown_fields():
     assert "window" not in decode_ws(old)[1]
     pick = {"on": True, "mode": "remote", "addr": "AA:BB:CC:DD:EE:01"}
     assert decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": pick})[1] == pick
-    assert "addr" not in decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": {"on": True, "mode": "remote"}})[1]
+    assert (
+        "addr"
+        not in decode_ws({"v": 1, "id": 1, "t": "bt_pair", "d": {"on": True, "mode": "remote"}})[1]
+    )
     # senders stay strict
     with pytest.raises(ProtoError):
         encode_ws(MsgType.BT_FORGET, {"slot": 1, "extra": 1})
@@ -108,7 +135,9 @@ async def test_bt_requests_need_hello(start_hub):
     hub = start_hub()
     extra = [("bt_state", {"state": "off", "discoverable": False, "hosts": []})]
     for i, (t, d) in enumerate([*BT_REQUESTS, *extra], start=1):
-        s, ws, _ = await _session(hub, authed=False)  # the hub closes an unauthenticated socket after its error
+        s, ws, _ = await _session(
+            hub, authed=False
+        )  # the hub closes an unauthenticated socket after its error
         async with s, ws:
             await ws.send_json({"v": 1, "id": i, "t": t, "d": d})
             rep = await ws.receive_json()

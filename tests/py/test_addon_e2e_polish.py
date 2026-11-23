@@ -89,7 +89,9 @@ async def large(aiohttp_server, tmp_path):
     server = await aiohttp_server(app)
     origin = f"http://127.0.0.1:{server.port}"
     await ensure_cfg(origin)
-    status, _ = await api(origin, "PUT", "/api/v1/configs/main/draft", json={"config": LARGE}, headers=H)
+    status, _ = await api(
+        origin, "PUT", "/api/v1/configs/main/draft", json={"config": LARGE}, headers=H
+    )
     assert status == 200
     return origin
 
@@ -198,7 +200,9 @@ async def test_interaction_timings_on_the_large_config(browser, large):
                 key,
             )
             await page.wait_for_timeout(900)
-            chip = page.locator("hh-palette .chip2", has_text=re.compile(rf"^\s*{cmd[-1]}\s*$")).first
+            chip = page.locator(
+                "hh-palette .chip2", has_text=re.compile(rf"^\s*{cmd[-1]}\s*$")
+            ).first
             await chip.scroll_into_view_if_needed()
             cb = await chip.bounding_box()
             kb = await page.locator(f"hh-remote [data-key={key}]").bounding_box()
@@ -349,7 +353,9 @@ async def test_long_press_drag_with_touch_emulation_does_not_scroll_the_page(bro
 
 
 def _studio(js):
-    return f"() => document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').state0.{js}"
+    return (
+        f"() => document.querySelector('hh-app').shadowRoot.querySelector('hh-studio').state0.{js}"
+    )
 
 
 async def test_ha_actions_have_no_test_fire_and_read_as_name_dot_command(browser, large):
@@ -366,7 +372,9 @@ async def test_ha_actions_have_no_test_fire_and_read_as_name_dot_command(browser
     texts = await remote.locator("text.xl").evaluate_all(
         "els => els.map(e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(''))"
     )
-    assert any(t.startswith("Room 0 light") and t.endswith("toggle ↻") for t in texts), [t for t in texts if "toggle" in t or "light" in t]
+    assert any(t.startswith("Room 0 light") and t.endswith("toggle ↻") for t in texts), [
+        t for t in texts if "toggle" in t or "light" in t
+    ]
     long = [t for t in texts if t.startswith("Living room ceiling")]
     assert long and long[0].endswith("…") and len(long[0]) <= 26, texts
     titles = await remote.locator("text.xl title").all_text_contents()
@@ -406,7 +414,9 @@ async def test_permissions_panel_groups_20_entities_and_scrolls_inside_its_card(
     card = await page.locator("hh-overview section[aria-labelledby=hp]").bounding_box()
     assert card["height"] < 700, card
     if SHOTS:
-        await page.locator("hh-overview section[aria-labelledby=hp]").screenshot(path=f"{SHOTS}/permissions.png")
+        await page.locator("hh-overview section[aria-labelledby=hp]").screenshot(
+            path=f"{SHOTS}/permissions.png"
+        )
 
 
 async def test_layer_pills_fit_at_1024_and_overflow_into_a_menu_by_measured_width(browser, large):
@@ -414,7 +424,9 @@ async def test_layer_pills_fit_at_1024_and_overflow_into_a_menu_by_measured_widt
     await page.evaluate("() => document.fonts.ready")
     # measured geometry: [no pill squeezed or ellipsised and no scroll, pills shown, layers in the "More" menu]
     state = (
-        "() => { const r = " + STUDIO + ".querySelector('.layers'); const bs = [...r.querySelectorAll('button')];"
+        "() => { const r = "
+        + STUDIO
+        + ".querySelector('.layers'); const bs = [...r.querySelectorAll('button')];"
         " const m = " + STUDIO + ".querySelector('select[aria-label=\"More layers\"]');"
         " return [r.scrollWidth <= r.clientWidth + 1 && bs.every(b => b.scrollWidth <= b.clientWidth + 1), bs.length, m ? m.options.length - 1 : 0]; }"
     )
@@ -422,7 +434,8 @@ async def test_layer_pills_fit_at_1024_and_overflow_into_a_menu_by_measured_widt
     async def settled(total):
         # the pill count converges after a few renders; wait for it, then assert on the final geometry
         await page.wait_for_function(
-            "([s, n]) => { const [ok, p, m] = eval('(' + s + ')')(); return ok && p + m === n; }", arg=[state, total]
+            "([s, n]) => { const [ok, p, m] = eval('(' + s + ')')(); return ok && p + m === n; }",
+            arg=[state, total],
         )
         ok, pills, menu = await page.evaluate(state)
         assert ok and pills + menu == total and pills >= 1, (ok, pills, menu)
@@ -440,7 +453,9 @@ async def test_layer_pills_fit_at_1024_and_overflow_into_a_menu_by_measured_widt
     assert menu >= 1  # eight layers never fit in one row at 1024
     more = page.locator("hh-studio").locator("select[aria-label='More layers']")
     await more.select_option("a7")
-    await page.locator("hh-studio .layers button[aria-selected=true]", has_text="Extra a7").wait_for()
+    await page.locator(
+        "hh-studio .layers button[aria-selected=true]", has_text="Extra a7"
+    ).wait_for()
     await settled(8)
     # a wide window shows five pills with no menu, and four pills plus the menu past five
     await page.set_viewport_size({"width": 1600, "height": 900})
@@ -512,7 +527,9 @@ async def test_selection_can_be_cleared(browser, large, how):
     page = await open_large(browser, large)
     x, y = await _key_centre(page)
     pressed = f"() => {REMOTE}.querySelector('[data-key=select]').getAttribute('aria-pressed')"
-    selected = f"() => JSON.stringify({STUDIO_EL}.st.sel).includes('\"key\"') && ({pressed})() === 'true'"
+    selected = (
+        f"() => JSON.stringify({STUDIO_EL}.st.sel).includes('\"key\"') && ({pressed})() === 'true'"
+    )
     # the layout can still shift once (late chunks, scrollbar) on a loaded CPU: re-measure and click again
     for attempt in range(3):
         await page.mouse.click(x, y)
@@ -524,7 +541,10 @@ async def test_selection_can_be_cleared(browser, large, how):
             if attempt == 2:
                 raise
             x, y = await _key_centre(page)
-    if how in ("reclick", "body"):  # the popover may sit over the key: dismiss it first, the key stays selected
+    if how in (
+        "reclick",
+        "body",
+    ):  # the popover may sit over the key: dismiss it first, the key stays selected
         await page.keyboard.press("Escape")
         await page.wait_for_function(f"() => !{STUDIO}.querySelector('.pop')", timeout=10000)
         assert '"key"' in await _sel(page)
@@ -546,7 +566,9 @@ async def test_selection_can_be_cleared(browser, large, how):
         await page.keyboard.press("Escape")
     else:
         await page.evaluate(f"() => {STUDIO_EL}.st.setLayer('watch_tv')")
-    await page.wait_for_function(f"() => JSON.stringify({STUDIO_EL}.st.sel) === 'null'", timeout=10000)
+    await page.wait_for_function(
+        f"() => JSON.stringify({STUDIO_EL}.st.sel) === 'null'", timeout=10000
+    )
     await page.wait_for_function(f"() => ({pressed})() === 'false'", timeout=10000)
     assert await page.evaluate(f"() => !{STUDIO}.querySelector('.pop')")
     await page.context.close()
@@ -561,9 +583,13 @@ async def test_widget_selection_clears_on_reclick(browser, large):
         f"() => {{ const r = {REMOTE}.querySelector('[data-widget]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }}"
     )
     await page.mouse.click(*box)
-    await page.wait_for_function(f"() => JSON.stringify({STUDIO_EL}.st.sel).includes('\"widget\"')", timeout=10000)
+    await page.wait_for_function(
+        f"() => JSON.stringify({STUDIO_EL}.st.sel).includes('\"widget\"')", timeout=10000
+    )
     await page.mouse.click(*box)
-    await page.wait_for_function(f"() => JSON.stringify({STUDIO_EL}.st.sel) === 'null'", timeout=10000)
+    await page.wait_for_function(
+        f"() => JSON.stringify({STUDIO_EL}.st.sel) === 'null'", timeout=10000
+    )
     await page.context.close()
 
 
@@ -614,33 +640,48 @@ async def _measure(page, scale=2):
     shot = base64.b64encode(await page.screenshot()).decode()
     await page.evaluate(f"() => {REMOTE}.getElementById('hide').remove()")
     boxes = [
-        {"x": int(i["x"] * scale), "y": int(i["y"] * scale), "w": max(1, int(i["w"] * scale)), "h": max(1, int(i["h"] * scale))}
+        {
+            "x": int(i["x"] * scale),
+            "y": int(i["y"] * scale),
+            "w": max(1, int(i["w"] * scale)),
+            "h": max(1, int(i["h"] * scale)),
+        }
         for i in items
     ]
     px = await page.evaluate(PROBE, {"shot": shot, "boxes": boxes})
     out = []
     for i, p in zip(items, px, strict=True):
         p.sort(key=_lum)
-        bg = p[int(len(p) * 0.75)]  # the light end of the backdrop; a hairline key outline does not count
+        bg = p[
+            int(len(p) * 0.75)
+        ]  # the light end of the backdrop; a hairline key outline does not count
         out.append((i["key"], i["text"], i["col"], bg, _ratio(i["col"], bg)))
     return out
 
 
 async def test_every_key_label_and_glyph_is_readable_when_selected(browser, large):
     page = await open_large(browser, large, 1440, 900, device_scale_factor=2)
-    names = await page.evaluate(f"() => [...{REMOTE}.querySelectorAll('[data-key]')].map((e) => e.dataset.key)")
+    names = await page.evaluate(
+        f"() => [...{REMOTE}.querySelectorAll('[data-key]')].map((e) => e.dataset.key)"
+    )
     assert len(names) >= 35
     bad = []
     for state in ("idle", "hover", "selected", "selected+hover", "drop-target"):
         for name in names:
-            sel = "null" if state in ("idle", "hover", "drop-target") else f"{{kind: 'key', name: '{name}'}}"
+            sel = (
+                "null"
+                if state in ("idle", "hover", "drop-target")
+                else f"{{kind: 'key', name: '{name}'}}"
+            )
             await page.evaluate(f"() => {STUDIO_EL}.st.set({{sel: {sel}}})")
             if state == "drop-target":  # a picked-up source with the keyboard cursor on this key
                 await page.evaluate(
                     f"() => {{ const a = {STUDIO_EL}.assigner; a.cancel(); a.pick({{kind: 'alloff'}}); a.setCursor({{kind: 'key', name: '{name}'}}); }}"
                 )
             hover = state.endswith("hover")
-            await page.mouse.move(*(await _key_centre(page, name))) if hover else await page.mouse.move(0, 0)
+            await page.mouse.move(
+                *(await _key_centre(page, name))
+            ) if hover else await page.mouse.move(0, 0)
             await _settle(page)
             for key, is_text, col, bg, ratio in await _measure(page):
                 if ratio < (4.5 if is_text else 3.0):

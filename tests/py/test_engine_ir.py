@@ -402,7 +402,9 @@ async def test_tile_update_without_remote_and_bad_args(hub_rf):
         r = await call(
             ws, "command", {"device": "hub", "command": "tile_update", "args": args}, id=3
         )
-        assert r["t"] == "command_result" and r["d"]["ok"] is True and r["id"] == 3  # held until link-up
+        assert (
+            r["t"] == "command_result" and r["d"]["ok"] is True and r["id"] == 3
+        )  # held until link-up
         for bad in ({}, {**args, "tile": 256}, {**args, "text": 5}, {"remote": 1}):
             r = await call(
                 ws, "command", {"device": "hub", "command": "tile_update", "args": bad}, id=4

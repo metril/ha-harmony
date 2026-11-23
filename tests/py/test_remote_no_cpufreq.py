@@ -5,7 +5,10 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-FORBIDDEN = re.compile(r"cpufreq|scaling_(governor|setspeed|m(ax|in)_freq)|/sys/devices/system/cpu|cpu0/", re.IGNORECASE)
+FORBIDDEN = re.compile(
+    r"cpufreq|scaling_(governor|setspeed|m(ax|in)_freq)|/sys/devices/system/cpu|cpu0/",
+    re.IGNORECASE,
+)
 
 
 def test_remote_sources_never_touch_cpufreq():

@@ -16,8 +16,12 @@ def _headings(path: Path) -> list[str]:
 
 
 def test_versions_agree():
-    manifest = json.loads((ROOT / "custom_components/ha_harmony/manifest.json").read_text())["version"]
-    addon = re.search(r'^version:\s*"?([\d.]+)"?\s*$', (ROOT / "addon/config.yaml").read_text(), re.MULTILINE)
+    manifest = json.loads((ROOT / "custom_components/ha_harmony/manifest.json").read_text())[
+        "version"
+    ]
+    addon = re.search(
+        r'^version:\s*"?([\d.]+)"?\s*$', (ROOT / "addon/config.yaml").read_text(), re.MULTILINE
+    )
     pkg = json.loads((ROOT / "addon/frontend/package.json").read_text())["version"]
     lock = json.loads((ROOT / "addon/frontend/package-lock.json").read_text())
     assert addon is not None

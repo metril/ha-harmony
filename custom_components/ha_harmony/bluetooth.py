@@ -63,7 +63,9 @@ class BtError(HomeAssistantError):
 
     def __init__(self, key: str, code: str, msg: str) -> None:
         super().__init__(
-            translation_domain=const.DOMAIN, translation_key=key, translation_placeholders={"error": msg}
+            translation_domain=const.DOMAIN,
+            translation_key=key,
+            translation_placeholders={"error": msg},
         )
         self.code, self.msg = _code(code), str(msg)
 
@@ -119,7 +121,9 @@ class BtManager:
                 a = norm_addr(row.get("addr"))
                 if a is not None and a not in seen:
                     seen.add(a)
-                    out.append((kind, a, row.get("name") if isinstance(row.get("name"), str) else None))
+                    out.append(
+                        (kind, a, row.get("name") if isinstance(row.get("name"), str) else None)
+                    )
         return out
 
     def expected_unique_ids(self) -> set[str]:
@@ -179,7 +183,12 @@ class BtManager:
         """A key from a bonded remote. Delivered only while something asked to listen."""
         if not self.listening():
             return
-        slot, page, usage, down = data.get("slot"), data.get("page"), data.get("usage"), data.get("down")
+        slot, page, usage, down = (
+            data.get("slot"),
+            data.get("page"),
+            data.get("usage"),
+            data.get("down"),
+        )
         if (
             type(slot) is not int
             or type(page) is not int
@@ -193,7 +202,9 @@ class BtManager:
         event = {"slot": slot, "page": page, "usage": usage, "down": down}
         if self.addon_listen:
             self.c.addon_send("bt_key", **event)
-        now = time.monotonic()  # token bucket: a stuck or chattering remote must not flood the event bus
+        now = (
+            time.monotonic()
+        )  # token bucket: a stuck or chattering remote must not flood the event bus
         self._tokens = min(EVENT_RATE, self._tokens + (now - self._token_t) * EVENT_RATE)
         self._token_t = now
         if self._tokens < 1:
@@ -243,7 +254,9 @@ class BtManager:
         self._arm_timer()
         await self.sync_listen()
 
-    async def async_listen(self, on: bool, secs: int = const.BT_LISTEN_DEFAULT, source: str = "service") -> None:
+    async def async_listen(
+        self, on: bool, secs: int = const.BT_LISTEN_DEFAULT, source: str = "service"
+    ) -> None:
         """Ask the hub for `bt_remote_key` for `secs` (the service's lease) or stop. The HA event fires only meanwhile."""
         self._need_bt()
         if on:
@@ -269,7 +282,9 @@ class BtManager:
         try:
             res = await self.c.client.async_send(mtype, payload)
         except HarmonyCommandError as exc:
-            raise BtError("bt_failed", exc.code, HUB_ERRORS.get(exc.code, exc.message or exc.code)) from exc
+            raise BtError(
+                "bt_failed", exc.code, HUB_ERRORS.get(exc.code, exc.message or exc.code)
+            ) from exc
         except HarmonyConnectionError as exc:
             raise BtError("bt_failed", "offline", "the hub is not connected") from exc
         if mtype is not MsgType.BT_KEY:
@@ -289,7 +304,12 @@ class BtManager:
         if op == "pair":
             await self._send(
                 MsgType.BT_PAIR,
-                {"on": True, "secs": cmd["secs"], "transport": cmd["transport"], "mode": cmd["mode"]},
+                {
+                    "on": True,
+                    "secs": cmd["secs"],
+                    "transport": cmd["transport"],
+                    "mode": cmd["mode"],
+                },
             )
         elif op == "pair_stop":
             await self._send(MsgType.BT_PAIR, {"on": False})
@@ -298,7 +318,9 @@ class BtManager:
         elif op == "forget":
             await self._send(MsgType.BT_FORGET, {"slot": cmd["slot"], "kind": cmd["kind"]})
         else:  # key
-            await self._send(MsgType.BT_KEY, {k: cmd[k] for k in ("slot", "page", "usage", "action")})
+            await self._send(
+                MsgType.BT_KEY, {k: cmd[k] for k in ("slot", "page", "usage", "action")}
+            )
 
     async def pair(
         self,
@@ -317,14 +339,21 @@ class BtManager:
             await self.execute({"op": "pick", "addr": addr})
         else:
             await self.execute(
-                {"op": "pair", "mode": mode, "transport": transport, **({} if secs is None else {"secs": secs})}
+                {
+                    "op": "pair",
+                    "mode": mode,
+                    "transport": transport,
+                    **({} if secs is None else {"secs": secs}),
+                }
             )
 
     async def forget(self, kind: str, slot: int) -> None:
         await self.execute({"op": "forget", "kind": kind, "slot": slot})
 
     async def key(self, slot: int, page: int, usage: int, action: str) -> None:
-        await self.execute({"op": "key", "slot": slot, "page": page, "usage": usage, "action": action})
+        await self.execute(
+            {"op": "key", "slot": slot, "page": page, "usage": usage, "action": action}
+        )
 
     async def forget_address(self, addr: str) -> None:
         self._need_bt()
@@ -375,7 +404,9 @@ class BtManager:
             return
         raw = {k: v for k, v in raw.items() if k != "t"}  # the frame type is not a command field
         if self._inflight >= const.BT_MAX_INFLIGHT:
-            self.c.addon_send("bt_result", id=cid, ok=False, code="busy", msg="too many commands at once")
+            self.c.addon_send(
+                "bt_result", id=cid, ok=False, code="busy", msg="too many commands at once"
+            )
             return
         self._inflight += 1
         self.c.config_entry.async_create_background_task(
@@ -405,7 +436,13 @@ class BtManager:
         except BtError as exc:
             res |= {"ok": False, "code": _code(exc.code), "msg": exc.msg[:200]}
         except HomeAssistantError as exc:
-            res |= {"ok": False, "code": "invalid", "msg": str(getattr(exc, "translation_placeholders", {}).get("error", "refused"))[:200]}
+            res |= {
+                "ok": False,
+                "code": "invalid",
+                "msg": str(getattr(exc, "translation_placeholders", {}).get("error", "refused"))[
+                    :200
+                ],
+            }
         except Exception:  # a bug must not stop the relay
             _LOGGER.exception("Bluetooth relay command failed")
             res |= {"ok": False, "code": "failed", "msg": "internal error"}

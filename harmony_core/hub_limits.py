@@ -51,7 +51,9 @@ class HubLimits:
     chunk: int = 0  # config_chunk data bytes the hub takes (0 = no chunked transfer)
     slack_b: int = 1536 * 1024  # fixed part of a load (scratch map, the value in hand, sections)
     flash_free: int = 0  # bytes free for the cached config when the hub said hello (0 = unknown, unless flash_low)
-    flash_low: bool = False  # the hub has no flash left for a config (flash_free is then 0): not "unknown"
+    flash_low: bool = (
+        False  # the hub has no flash left for a config (flash_free is then 0): not "unknown"
+    )
     dev_b: int = 224
     cmd_b: int = 120  # one command or input
     key_b: int = 72

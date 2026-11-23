@@ -140,7 +140,16 @@ def hub_handler(sets):
         reply = {"v": 1, "id": env["id"]}
         if env["t"] == "hello":
             await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
+                {
+                    **reply,
+                    "t": "hello_ack",
+                    "d": {
+                        "hub_id": HUB_ID,
+                        "activities": [],
+                        "tcp_keepalive": True,
+                        "limits": CURRENT.to_wire(),
+                    },
+                }
             )
         elif env["t"] == "set_config":
             sets.append(env["d"]["config"])
@@ -188,7 +197,14 @@ def preseed(hass_storage, source=SOURCE, rev="cached"):
 async def raw_addon(aiohttp_server):
     """An add-on channel that says whatever the test scripts: an HTTP `status` for the upgrade, `frames` to send after
     `hello`, then optionally close with `close`. `hits` counts the upgrade attempts, `seen` queues each one."""
-    state = {"status": None, "frames": [], "close": None, "hits": 0, "seen": asyncio.Queue(), "hold": False}
+    state = {
+        "status": None,
+        "frames": [],
+        "close": None,
+        "hits": 0,
+        "seen": asyncio.Queue(),
+        "hold": False,
+    }
 
     async def handler(request):
         state["hits"] += 1
@@ -377,7 +393,13 @@ async def test_client_maps_statuses(aiohttp_server):
     server = await aiohttp_server(app)
     async with aiohttp.ClientSession() as sess:
         client = AddonClient(sess, "127.0.0.1", server.port, "t")
-        for code, exc in ((401, AddonAuthError), (403, AddonAuthError), (404, AddonOutdated), (429, AddonUnreachable), (500, AddonUnreachable)):
+        for code, exc in (
+            (401, AddonAuthError),
+            (403, AddonAuthError),
+            (404, AddonOutdated),
+            (429, AddonUnreachable),
+            (500, AddonUnreachable),
+        ):
             status["v"] = code
             with pytest.raises(exc):
                 await client.connect(HUB_ID, None)
@@ -592,7 +614,9 @@ async def test_ignored_hub_entry_never_gets_the_token(hass, fake_addon):
     assert res["type"] is FlowResultType.ABORT and res["reason"] == "no_hub"
 
 
-async def test_429_is_backoff_not_an_auth_failure(hass, fake_hub, raw_addon, hass_storage, monkeypatch):
+async def test_429_is_backoff_not_an_auth_failure(
+    hass, fake_hub, raw_addon, hass_storage, monkeypatch
+):
     monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.01)
     hub = await fake_hub(hub_handler([]))
     preseed(hass_storage)
@@ -637,7 +661,16 @@ async def test_hub_rejection_is_acked_as_error(hass, fake_hub, fake_addon):
         reply = {"v": 1, "id": env["id"]}
         if env["t"] == "hello":
             await ws.send_json(
-                {**reply, "t": "hello_ack", "d": {"hub_id": HUB_ID, "activities": [], "tcp_keepalive": True, "limits": CURRENT.to_wire()}}
+                {
+                    **reply,
+                    "t": "hello_ack",
+                    "d": {
+                        "hub_id": HUB_ID,
+                        "activities": [],
+                        "tcp_keepalive": True,
+                        "limits": CURRENT.to_wire(),
+                    },
+                }
             )
         elif env["t"] == "set_config":
             await ws.send_json(
@@ -683,13 +716,17 @@ async def test_addon_without_a_channel_is_outdated_with_a_repair_issue_and_keeps
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_close_4001_is_integration_outdated_and_not_retried(hass, fake_hub, raw_addon, monkeypatch):
+async def test_close_4001_is_integration_outdated_and_not_retried(
+    hass, fake_hub, raw_addon, monkeypatch
+):
     monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.01)
     hub = await fake_hub(hub_handler([]))
     raw_addon["frames"] = [{"t": "error", "code": "unsupported_version"}]
     raw_addon["close"] = 4001
     backoffs = []
-    monkeypatch.setattr(coordinator, "random", SimpleNamespace(random=lambda: backoffs.append(1) or 0.5))
+    monkeypatch.setattr(
+        coordinator, "random", SimpleNamespace(random=lambda: backoffs.append(1) or 0.5)
+    )
     entry = await setup(hass, hub, raw_addon["data"])
     await until(lambda: entry.runtime_data.link_state == "integration_outdated")
     # the loop ended in the same step that set the state: it never computed a back-off, so nothing reconnects
@@ -716,7 +753,9 @@ async def test_dropped_channel_reconnects_with_the_known_rev_and_a_quiet_add_on_
     await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_the_last_ack_is_resent_after_a_reconnect_whatever_its_result(hass, fake_hub, fake_addon, monkeypatch):
+async def test_the_last_ack_is_resent_after_a_reconnect_whatever_its_result(
+    hass, fake_hub, fake_addon, monkeypatch
+):
     monkeypatch.setattr(const, "LINK_BACKOFF_MIN", 0.01)
     hub = await fake_hub(hub_handler([]))
     fake_addon.apply(SOURCE)
@@ -769,7 +808,9 @@ async def test_first_link_confirm_shows_what_is_linked(hass, fake_addon):
     }
 
 
-async def test_link_says_nothing_applied_and_a_later_apply_arrives_on_the_same_socket(hass, fake_hub, fake_addon):
+async def test_link_says_nothing_applied_and_a_later_apply_arrives_on_the_same_socket(
+    hass, fake_hub, fake_addon
+):
     """The add-on answers `hello` with `nothing_applied` once. That must not read as `connecting`, and nothing polls:
     a later apply is pushed down the same socket."""
     hub = await fake_hub(hub_handler([]))
@@ -790,10 +831,16 @@ async def test_hello_carries_identity_limits_and_bounded_remotes():
     c.identity = {"hw": "aa:bb", "name": "Den"}
     assert c.identity_fields() == {"hw": "aa:bb", "name": "Den"}
     c.remotes_provider = list
-    assert c.identity_fields()["remotes"] == []  # no remote known: still sent, so the add-on drops what it kept
+    assert (
+        c.identity_fields()["remotes"] == []
+    )  # no remote known: still sent, so the add-on drops what it kept
     c.remotes_provider = lambda: rows * 12
     assert len(c.identity_fields()["remotes"]) == 8  # at most 8 rows
     c.remotes_provider = lambda: rows
     got = c.identity_fields()["remotes"]
-    assert len(json.dumps(got, separators=(",", ":"))) <= 4000 and got[0]["tier"] == "palette" and got[0]["caps"] == 7
+    assert (
+        len(json.dumps(got, separators=(",", ":"))) <= 4000
+        and got[0]["tier"] == "palette"
+        and got[0]["caps"] == 7
+    )
     assert 0 < len(got[0]["notices"]) < 12 and all(len(m) <= 200 for m in got[0]["notices"])

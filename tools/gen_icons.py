@@ -81,7 +81,9 @@ def emit_h(icons: list[dict]) -> str:
 
 def emit_json(icons: list[dict]) -> str:
     slim = [{**i, "svg": ""} if i.get("brand") else i for i in icons]
-    return json.dumps({"glyph_base": GLYPH_BASE, "icons": slim}, indent=1, ensure_ascii=False) + "\n"
+    return (
+        json.dumps({"glyph_base": GLYPH_BASE, "icons": slim}, indent=1, ensure_ascii=False) + "\n"
+    )
 
 
 def emit_brand_json(icons: list[dict]) -> str:
@@ -90,7 +92,12 @@ def emit_brand_json(icons: list[dict]) -> str:
 
 def outputs() -> dict[Path, str]:
     icons = load()
-    return {OUT_PY: emit_py(icons), OUT_H: emit_h(icons), OUT_JSON: emit_json(icons), OUT_BRAND: emit_brand_json(icons)}
+    return {
+        OUT_PY: emit_py(icons),
+        OUT_H: emit_h(icons),
+        OUT_JSON: emit_json(icons),
+        OUT_BRAND: emit_brand_json(icons),
+    }
 
 
 def main() -> int:

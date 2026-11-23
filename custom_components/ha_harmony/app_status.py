@@ -60,7 +60,9 @@ class AppStatusFeed:
         self._remotes, self._ready, self._spawn, self._resolve = remotes, ready, spawn, resolve
         self._running = running
         self._bindings: tuple[AppBinding, ...] = ()
-        self._sent: dict[tuple[int, int, int], int] = {}  # (remote, page, widget) -> status on the remote
+        self._sent: dict[
+            tuple[int, int, int], int
+        ] = {}  # (remote, page, widget) -> status on the remote
         self._unsub: Callable[[], None] | None = None
         self._task: asyncio.Task[None] | None = None
         self._dirty = False
@@ -129,7 +131,13 @@ class AppStatusFeed:
                 key = (remote, b.page, b.widget)
                 if self._sent.get(key) == want:
                     continue
-                args = {"remote": remote, "page": b.page, "tile": b.widget, "text": "", "state": want}
+                args = {
+                    "remote": remote,
+                    "page": b.page,
+                    "tile": b.widget,
+                    "text": "",
+                    "state": want,
+                }
                 try:
                     await self.client.async_send(
                         MsgType.COMMAND,

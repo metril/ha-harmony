@@ -91,7 +91,9 @@ async def test_unauthenticated_or_invalid_ids_are_not_recorded(c):
         await c.ws_connect("/api/v1/channel?hub=../x", headers=BEARER)
     assert e.value.status == 400
     ws = await connect(c, "evil", hello=False)
-    await ws.send_json({"t": "hello", "v": 1, "hub": "another"})  # names a different hub than the URL
+    await ws.send_json(
+        {"t": "hello", "v": 1, "hub": "another"}
+    )  # names a different hub than the URL
     assert (await recv(ws))["code"] == "hub_mismatch"
     assert (await hubs(c))["linked"] == []
 
@@ -203,7 +205,12 @@ async def test_old_linked_file_version_is_ignored(aiohttp_client, tmp_path):
 
 
 REPORT = [
-    {"remote": 1, "caps": 7, "tier": "palette", "notices": ["theme 'dusk' replaced by its base preset 'midnight'"]},
+    {
+        "remote": 1,
+        "caps": 7,
+        "tier": "palette",
+        "notices": ["theme 'dusk' replaced by its base preset 'midnight'"],
+    },
     {"remote": 2, "caps": 15, "tier": "custom", "notices": []},
 ]
 
@@ -225,15 +232,26 @@ async def test_hello_and_identity_report_the_remotes_and_live_exposes_their_noti
         await ws.send_json({"t": "identity", "remotes": bad})
     await drain(ws)
     assert (await hub_status(c, "hub-a"))["remotes"] == REPORT
-    for bad_row in ({"remote": 256, "caps": 7}, {"remote": 1, "caps": -1}, {"remote": -1, "caps": 7}, {"remote": 1, "caps": 300}):
-        await ws.send_json({"t": "identity", "remotes": [{"tier": "palette", "notices": [], **bad_row}]})
+    for bad_row in (
+        {"remote": 256, "caps": 7},
+        {"remote": 1, "caps": -1},
+        {"remote": -1, "caps": 7},
+        {"remote": 1, "caps": 300},
+    ):
+        await ws.send_json(
+            {"t": "identity", "remotes": [{"tier": "palette", "notices": [], **bad_row}]}
+        )
     await drain(ws)
-    assert (await hub_status(c, "hub-a"))["remotes"] == REPORT  # out-of-range ids and caps are refused
+    assert (await hub_status(c, "hub-a"))[
+        "remotes"
+    ] == REPORT  # out-of-range ids and caps are refused
     await ws.send_json({"t": "identity", "remotes": []})
     await drain(ws)
     st = await hub_status(c, "hub-a")
     assert st["remotes"] == [] and st["theme_notices"] == []  # an empty report clears it
-    await ws.send_json({"t": "identity", "remotes": [{"remote": 1, "caps": 15, "tier": "custom", "notices": []}]})
+    await ws.send_json(
+        {"t": "identity", "remotes": [{"remote": 1, "caps": 15, "tier": "custom", "notices": []}]}
+    )
     await drain(ws)
     st = await hub_status(c, "hub-a")
     assert st["theme_notices"] == [] and st["remotes"][0]["tier"] == "custom"

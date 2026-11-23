@@ -53,7 +53,9 @@ class HarmonyBtPeer(HarmonyEntity, BinarySensorEntity):
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
 
-    def __init__(self, coordinator: HarmonyCoordinator, kind: str, addr: str, name: str | None) -> None:
+    def __init__(
+        self, coordinator: HarmonyCoordinator, kind: str, addr: str, name: str | None
+    ) -> None:
         super().__init__(coordinator, f"btconn_{kind}_{addr_key(addr)}", topics=(TOPIC_BT,))
         self._kind, self._addr = kind, addr
         self._attr_name = name or addr
@@ -68,7 +70,11 @@ class HarmonyBtPeer(HarmonyEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, object]:
         e = self.coordinator.btm.entry(self._kind, self._addr)
-        attrs: dict[str, object] = {"address": self._addr, "kind": self._kind, "bonded": e is not None}
+        attrs: dict[str, object] = {
+            "address": self._addr,
+            "kind": self._kind,
+            "bonded": e is not None,
+        }
         if e is not None:
             attrs["slot"] = e["slot"]
             if self._kind == "host":

@@ -111,13 +111,21 @@ class FakeClient:
 async def test_full_resend_includes_zero_and_activity_changes_clear(hass):
     client, running = FakeClient(), ["a"]
     feed = aps.AppStatusFeed(
-        hass, client, lambda: (1,), lambda r: True,
-        lambda coro, name: hass.async_create_task(coro, name), lambda e: e, lambda: running[0],
+        hass,
+        client,
+        lambda: (1,),
+        lambda r: True,
+        lambda coro, name: hass.async_create_task(coro, name),
+        lambda e: e,
+        lambda: running[0],
     )
     hass.states.async_set(SHIELD, "playing", {"app_id": PLEX})
     feed.configure([AppBinding(0, 5, (PLEX,), SHIELD, "a"), AppBinding(0, 6, (YT,), SHIELD, "a")])
     await hass.async_block_till_done()
-    assert sorted((a["tile"], a["state"]) for a in client.sent) == [(5, 2), (6, 0)]  # the 0 is sent too
+    assert sorted((a["tile"], a["state"]) for a in client.sent) == [
+        (5, 2),
+        (6, 0),
+    ]  # the 0 is sent too
     running[0] = None  # the activity turned off
     feed.refresh()
     await hass.async_block_till_done()

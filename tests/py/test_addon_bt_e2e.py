@@ -21,14 +21,28 @@ from harmony_core.bt_codes import DEFAULT_COMMANDS
 pytestmark = pytest.mark.skipif(not (DIST / "index.html").is_file(), reason="frontend not built")
 SHOTS = os.environ.get("HH_BT_SHOTS")
 BEARER = {"Authorization": f"Bearer {TOKEN}"}
-LIMITS = {"hosts_max": 8, "conn_max": 2, "remotes_max": 4, "le_bonds_max": 8, "pages": [7, 12], "le": True}
+LIMITS = {
+    "hosts_max": 8,
+    "conn_max": 2,
+    "remotes_max": 4,
+    "le_bonds_max": 8,
+    "pages": [7, 12],
+    "le": True,
+}
 BOX = "AA:BB:CC:DD:EE:01"
 REMOTE = "11:22:33:44:55:01"
 
 
 @pytest.fixture
 async def site(aiohttp_server, tmp_path):
-    app = create_app(tmp_path, options=Options("info"), auth=NoAuth(), static_dir=DIST, bundle_token=TOKEN, bundle_networks=None)
+    app = create_app(
+        tmp_path,
+        options=Options("info"),
+        auth=NoAuth(),
+        static_dir=DIST,
+        bundle_token=TOKEN,
+        bundle_networks=None,
+    )
     server = await aiohttp_server(app)
     return f"http://127.0.0.1:{server.port}"
 
@@ -72,7 +86,9 @@ class FakeIntegration:
             msg = await self.ch.recv(timeout=3600)
             if msg["t"] == "bt_cmd":
                 res = self._run({k: v for k, v in msg.items() if k != "t"})
-                await self.ch.send("bt_result", **res, **({"state": self.state} if self.supported else {}))
+                await self.ch.send(
+                    "bt_result", **res, **({"state": self.state} if self.supported else {})
+                )
             elif msg["t"] == "listen":
                 self.listen = msg["on"] is True
                 for ev in self.out_events if self.listen else ():
@@ -88,7 +104,11 @@ class FakeIntegration:
         st = self.state
         if op == "pair":
             st.pop("pairing", None)  # the hub clears the last outcome when a window opens
-            st.update(discoverable=cmd.get("mode", "host") == "host", window=cmd.get("mode", "host"), discoverable_secs=cmd.get("secs", 120))
+            st.update(
+                discoverable=cmd.get("mode", "host") == "host",
+                window=cmd.get("mode", "host"),
+                discoverable_secs=cmd.get("secs", 120),
+            )
             if cmd.get("mode") == "remote":
                 st["candidates"] = list(self._candidates)
         elif op == "pair_stop":
@@ -108,18 +128,36 @@ class FakeIntegration:
         self.state["discoverable"] = False
 
     def add_host(self, addr=BOX, name="Living room box", configured=None, result=True):
-        entry = {"slot": len(self.state["hosts"]), "addr": addr, "name": name, "transport": "le", "connected": True}
+        entry = {
+            "slot": len(self.state["hosts"]),
+            "addr": addr,
+            "name": name,
+            "transport": "le",
+            "connected": True,
+        }
         if configured is not None:
             entry["configured"] = configured
         self.state["hosts"].append(entry)
         if result:
-            self.state["pairing"] = {"result": "ok", "addr": addr, "name": name, "transport": "le", "kind": "host"}
+            self.state["pairing"] = {
+                "result": "ok",
+                "addr": addr,
+                "name": name,
+                "transport": "le",
+                "kind": "host",
+            }
         self.close_window()
         self.state["gen"] += 1
         self.push()
 
     def add_remote(self, addr=REMOTE, name="Homatics Remote", configured=None):
-        entry = {"slot": len(self.state["remotes"]), "addr": addr, "name": name, "connected": True, "battery": 82}
+        entry = {
+            "slot": len(self.state["remotes"]),
+            "addr": addr,
+            "name": name,
+            "connected": True,
+            "battery": 82,
+        }
         if configured is not None:
             entry["configured"] = configured
         self.state["remotes"].append(entry)
@@ -137,7 +175,9 @@ class FakeIntegration:
 
     def press(self, page, usage, slot=0):
         for down in (True, False):
-            asyncio.ensure_future(self.ch.send("bt_key", slot=slot, page=page, usage=usage, down=down))
+            asyncio.ensure_future(
+                self.ch.send("bt_key", slot=slot, page=page, usage=usage, down=down)
+            )
 
 
 @pytest.fixture
@@ -204,12 +244,21 @@ async def test_pair_a_host_name_it_pick_commands_and_save(browser, bt, site):
 
     bt.add_host()  # the TV box pairs
     await page.get_by_role("heading", name="Name It and Choose Its Commands").wait_for()
-    focused = await page.evaluate("document.querySelector('hh-app').shadowRoot.querySelector('hh-bluetooth').shadowRoot.querySelector('hh-bt-pair').shadowRoot.activeElement?.id")
+    focused = await page.evaluate(
+        "document.querySelector('hh-app').shadowRoot.querySelector('hh-bluetooth').shadowRoot.querySelector('hh-bt-pair').shadowRoot.activeElement?.id"
+    )
     assert focused == "step-title"  # focus moved into the new step
     # the paired device is in the draft already (address and the transport it paired on), before the form is finished
-    saved = await draft_has(site, lambda c: any(d.get("kind") == "bt" and d.get("address") == BOX for d in c.get("devices", [])))
+    saved = await draft_has(
+        site,
+        lambda c: any(
+            d.get("kind") == "bt" and d.get("address") == BOX for d in c.get("devices", [])
+        ),
+    )
     assert saved["devices"][0]["transport"] == "le"
-    await page.get_by_text(f"{len(DEFAULT_COMMANDS)} commands chosen").wait_for()  # the default set is preselected
+    await page.get_by_text(
+        f"{len(DEFAULT_COMMANDS)} commands chosen"
+    ).wait_for()  # the default set is preselected
     await page.get_by_label("Name", exact=True).fill("Living room box")
     await page.get_by_label("Search commands").fill("F1")
     await page.get_by_role("checkbox", name=re.compile(r"^F1 ")).check()
@@ -223,11 +272,21 @@ async def test_pair_a_host_name_it_pick_commands_and_save(browser, bt, site):
     await shot(page, "04-host-setup")
     await page.get_by_role("button", name="Add Device").click()
     await page.wait_for_function("location.hash.startsWith('#/devices/living_room_box')")
-    cfg = await draft_has(site, lambda c: any(d.get("kind") == "bt" and "Netflix" in d.get("commands", {}) for d in c.get("devices", [])))
+    cfg = await draft_has(
+        site,
+        lambda c: any(
+            d.get("kind") == "bt" and "Netflix" in d.get("commands", {})
+            for d in c.get("devices", [])
+        ),
+    )
     dev = cfg["devices"][0]
     assert dev["address"] == BOX and dev["name"] == "Living room box" and dev["transport"] == "le"
     assert len(cfg["devices"]) == 1  # the form edited the entry made at pairing
-    assert dev["commands"]["F1"] == "F1" and dev["commands"]["Netflix"] == "HID:0C:0223" and "Home" in dev["commands"]
+    assert (
+        dev["commands"]["F1"] == "F1"
+        and dev["commands"]["Netflix"] == "HID:0C:0223"
+        and "Home" in dev["commands"]
+    )
     # the device page has no IR parts
     await page.get_by_role("heading", name="Connection").wait_for()
     assert await page.get_by_text("Power control").count() == 0
@@ -253,7 +312,10 @@ async def test_a_host_already_paired_but_not_in_the_config_is_added(browser, bt,
 
 
 async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
-    bt.candidates({"addr": REMOTE, "name": "Homatics Remote", "rssi": -48}, {"addr": "11:22:33:44:55:02", "rssi": -80})
+    bt.candidates(
+        {"addr": REMOTE, "name": "Homatics Remote", "rssi": -48},
+        {"addr": "11:22:33:44:55:02", "rssi": -80},
+    )
     page, problems = await open_bt(browser, site)
     await page.get_by_role("link", name="Add Bluetooth remote").click()
     await shot(page, "07-remote-start")
@@ -265,7 +327,9 @@ async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
     await shot(page, "08-remote-candidates")
     await page.get_by_role("button", name="Pair with Homatics Remote").click()
     await page.get_by_role("heading", name="Choose What Its Buttons Do").wait_for()
-    paired = await draft_has(site, lambda c: bool(c.get("bt_remotes")))  # saved to the draft on pairing, before any key
+    paired = await draft_has(
+        site, lambda c: bool(c.get("bt_remotes"))
+    )  # saved to the draft on pairing, before any key
     assert paired["bt_remotes"] == [{"name": "Homatics Remote", "address": REMOTE}]
     await page.get_by_label("Key for Home", exact=True).wait_for()
     # learn mode: press a button on the "real" remote
@@ -286,10 +350,14 @@ async def test_pair_a_remote_from_candidates_and_learn_a_key(browser, bt, site):
     await shot(page, "09-remote-learn")
     await page.get_by_role("button", name="Stop Listening").click()
     await page.get_by_role("button", name="Add Remote").click()
-    cfg = await draft_has(site, lambda c: bool(c.get("bt_remotes") and c["bt_remotes"][0].get("keys")))
+    cfg = await draft_has(
+        site, lambda c: bool(c.get("bt_remotes") and c["bt_remotes"][0].get("keys"))
+    )
     assert len(cfg["bt_remotes"]) == 1
     r = cfg["bt_remotes"][0]
-    assert r["address"] == REMOTE and r["name"] == "Homatics Remote" and r["keys"] == {"Home": "menu"}
+    assert (
+        r["address"] == REMOTE and r["name"] == "Homatics Remote" and r["keys"] == {"Home": "menu"}
+    )
     assert any(c["op"] == "pick" and c["addr"] == REMOTE for c in bt.ran)
     # the panel offers the key editor of a configured remote
     await page.get_by_role("link", name="Edit Buttons").first.click()
@@ -378,7 +446,7 @@ async def test_errors_are_sentences_and_pairing_results_say_what_next(browser, b
     bt.state["gen"] += 1
     bt.push()
     await page.get_by_role("alert").get_by_text("The device refused to pair.").wait_for()
-    await page.get_by_text("remove any old \"Harmony\" entry").wait_for()
+    await page.get_by_text('remove any old "Harmony" entry').wait_for()
     await shot(page, "17-result-refused")
     await page.get_by_role("button", name="Try Again").click()
     await page.get_by_role("button", name="Start Pairing").click()
@@ -414,7 +482,9 @@ activities:
     page, problems = await open_bt(browser, site, "remote")
     await page.get_by_text("Shield").first.wait_for()
     await page.get_by_text("Volume Up").first.wait_for()  # chips of the explicit set
-    await page.get_by_text("Up", exact=True).first.wait_for()  # the default set of "TV box" (it lists no commands)
+    await page.get_by_text(
+        "Up", exact=True
+    ).first.wait_for()  # the default set of "TV box" (it lists no commands)
     await shot(page, "19-palette-bt-commands")
     await page.evaluate("location.hash = '#/devices'")
     await page.get_by_text("Bluetooth", exact=True).first.wait_for()
@@ -449,7 +519,9 @@ async def test_the_host_wizard_works_from_the_keyboard_alone(browser, bt, site):
     await page.get_by_role("timer").wait_for()
     bt.add_host()
     await page.get_by_role("heading", name="Name It and Choose Its Commands").wait_for()
-    assert await page.evaluate(ACTIVE) == "Name It and Choose Its Commands"  # focus moved to the new step
+    assert (
+        await page.evaluate(ACTIVE) == "Name It and Choose Its Commands"
+    )  # focus moved to the new step
     await tab_to(page, "Add Device")
     await page.keyboard.press("Enter")
     cfg = await draft_has(site, lambda c: bool(c.get("devices")))
@@ -473,11 +545,17 @@ async def test_the_remote_wizard_works_from_the_keyboard_alone(browser, bt, site
     await page.keyboard.press("ArrowDown")  # a select: change it from the keyboard
     await tab_to(page, "Add Remote")
     await page.keyboard.press("Enter")
-    cfg = await draft_has(site, lambda c: bool(c.get("bt_remotes") and c["bt_remotes"][0].get("keys")))
-    assert cfg["bt_remotes"][0]["address"] == REMOTE and "Back" in cfg["bt_remotes"][0].get("keys", {})
+    cfg = await draft_has(
+        site, lambda c: bool(c.get("bt_remotes") and c["bt_remotes"][0].get("keys"))
+    )
+    assert cfg["bt_remotes"][0]["address"] == REMOTE and "Back" in cfg["bt_remotes"][0].get(
+        "keys", {}
+    )
 
 
-async def test_a_default_can_be_set_to_does_nothing_and_the_picker_has_human_names(browser, bt, site):
+async def test_a_default_can_be_set_to_does_nothing_and_the_picker_has_human_names(
+    browser, bt, site
+):
     await seed(site, "bt_remotes: [{name: R}]\n")
     bt.add_remote(configured=True)
     page, _ = await open_bt(browser, site, "bluetooth/keys/0")
@@ -485,18 +563,35 @@ async def test_a_default_can_be_set_to_does_nothing_and_the_picker_has_human_nam
     await sel.wait_for()
     opts = await sel.locator("option").all_inner_texts()
     assert "Does Nothing" in opts and "Digit 0" in opts and "Volume Up" in opts and "up" not in opts
-    assert await sel.locator("optgroup").evaluate_all("g => g.map(x => x.label)") == ["Navigation", "Transport", "Volume and channel", "Colour", "Digits", "Other"]
+    assert await sel.locator("optgroup").evaluate_all("g => g.map(x => x.label)") == [
+        "Navigation",
+        "Transport",
+        "Volume and channel",
+        "Colour",
+        "Digits",
+        "Other",
+    ]
     await sel.select_option(label="Does Nothing")
-    cfg = await draft_has(site, lambda c: (c.get("bt_remotes") or [{}])[0].get("keys", {}).get("Back", 1) is None)
+    cfg = await draft_has(
+        site, lambda c: (c.get("bt_remotes") or [{}])[0].get("keys", {}).get("Back", 1) is None
+    )
     assert cfg["bt_remotes"][0]["keys"] == {"Back": None}
     await page.get_by_role("button", name="Reset Back to Exit").click()
-    await draft_has(site, lambda c: "keys" not in c["bt_remotes"][0] or not c["bt_remotes"][0]["keys"])
+    await draft_has(
+        site, lambda c: "keys" not in c["bt_remotes"][0] or not c["bt_remotes"][0]["keys"]
+    )
 
 
 async def test_nothing_overflows_at_390(browser, bt, site):
     bt.add_host(configured=False, result=False)
     bt.add_remote(configured=False)
-    for route in ("bluetooth", "bluetooth/host", "bluetooth/remote", f"bluetooth/remote/{REMOTE}", f"bluetooth/host/{BOX}"):
+    for route in (
+        "bluetooth",
+        "bluetooth/host",
+        "bluetooth/remote",
+        f"bluetooth/remote/{REMOTE}",
+        f"bluetooth/host/{BOX}",
+    ):
         page = await open_editor(browser, site, [], viewport={"width": 390, "height": 844})
         await page.evaluate(f"location.hash = '#/{route}'")
         await page.wait_for_timeout(1200)

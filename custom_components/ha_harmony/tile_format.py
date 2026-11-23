@@ -72,9 +72,15 @@ def tile_state(state: State | None) -> tuple[int, str]:
     if domain in _ONOFF_DOMAINS and state.state in _ON_WORDS:
         code = _ON_WORDS[state.state]
         text = state.state.capitalize()
-        if domain == "light" and code == TILE_ON and isinstance(attrs.get("brightness"), int | float):
+        if (
+            domain == "light"
+            and code == TILE_ON
+            and isinstance(attrs.get("brightness"), int | float)
+        ):
             text = f"{round(attrs['brightness'] * 100 / 255)}%"
-        elif domain == "cover" and code == TILE_ON and isinstance(attrs.get("current_position"), int):
+        elif (
+            domain == "cover" and code == TILE_ON and isinstance(attrs.get("current_position"), int)
+        ):
             text = f"{attrs['current_position']}%"
         return code, cut(text)
     dc = attrs.get("device_class")

@@ -59,7 +59,11 @@ VALIDATE_QUERY = vol.Schema(
     extra=vol.PREVENT_EXTRA,
 )
 EXPORT_QUERY = vol.Schema(
-    {vol.Optional("source", default="draft"): vol.All(str, vol.Match(r"^(draft|rev:[0-9]{1,12})$"))},
+    {
+        vol.Optional("source", default="draft"): vol.All(
+            str, vol.Match(r"^(draft|rev:[0-9]{1,12})$")
+        )
+    },
     extra=vol.PREVENT_EXTRA,
 )
 

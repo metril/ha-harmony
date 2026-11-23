@@ -92,10 +92,14 @@ class ScriptHub:
         self.gate: asyncio.Event | None = None  # while cleared, page_push replies wait
         self.no_remote = False
         self.reject_config = False  # answer set_config with ok=false
-        self.refuse: dict[str, int] = {}  # message type -> how many to answer with rf_error (the link queue was full)
+        self.refuse: dict[
+            str, int
+        ] = {}  # message type -> how many to answer with rf_error (the link queue was full)
         self.tile_delay = 0.0  # seconds a tile_update reply is held
         self.tiles_inflight = self.tiles_peak = 0
-        self.config_hash: str | None = None  # of the last accepted set_config, as hello_ack reports it
+        self.config_hash: str | None = (
+            None  # of the last accepted set_config, as hello_ack reports it
+        )
         self.info: dict | None = None  # the remote's cached remote_info, resent after hello_ack
         self._late: list[asyncio.Task] = []
 
@@ -104,7 +108,12 @@ class ScriptHub:
         reply = {"v": 1, "id": env["id"]}
         t, d = env["t"], env["d"]
         if t == "hello":
-            ack = {"hub_id": HUB_ID, "activities": self.activities, "tcp_keepalive": True, "limits": CURRENT.to_wire()}
+            ack = {
+                "hub_id": HUB_ID,
+                "activities": self.activities,
+                "tcp_keepalive": True,
+                "limits": CURRENT.to_wire(),
+            }
             if self.config_hash:
                 ack["config_hash"] = self.config_hash
             await ws.send_json({**reply, "t": "hello_ack", "d": ack})
@@ -128,7 +137,9 @@ class ScriptHub:
             self._late.append(asyncio.create_task(self._tile_reply_later(ws, reply)))
         elif self.refuse.get(t):
             self.refuse[t] -= 1
-            await ws.send_json({**reply, "t": "error", "d": {"code": "rf_error", "message": "RF send failed"}})
+            await ws.send_json(
+                {**reply, "t": "error", "d": {"code": "rf_error", "message": "RF send failed"}}
+            )
         elif t in ("page_push", "command", "theme_push"):
             if t != "command" and self.gate is not None and not self.gate.is_set():
                 self._late.append(asyncio.create_task(self._reply_when_open(ws, reply)))
@@ -230,7 +241,9 @@ async def rig(hass, fake_hub, fake_addon, clock):
             await settle(hass, lambda: len(hub.pages()) >= len(entry.runtime_data.compiled.pages))
             # the push is over once its task is: its tile texts follow the last page's reply
             links = entry.runtime_data.links
-            await settle(hass, lambda: all(lk.task is None or lk.task.done() for lk in links.values()))
+            await settle(
+                hass, lambda: all(lk.task is None or lk.task.done() for lk in links.values())
+            )
         else:
             await settle(hass)
         made.append(entry)
@@ -364,9 +377,15 @@ def S(entity, state, **attrs):
         (S("sensor.t", "21.53333", unit_of_measurement="°C"), (0, "21.5°C")),
         (S("sensor.t", "21", unit_of_measurement="°C"), (0, "21°C")),
         (S("sensor.p", "1013.25", unit_of_measurement="hPa"), (0, "1013 hPa")),
-        (S("sensor.t", "3.14159", unit_of_measurement="V", suggested_display_precision=2), (0, "3.14 V")),
+        (
+            S("sensor.t", "3.14159", unit_of_measurement="V", suggested_display_precision=2),
+            (0, "3.14 V"),
+        ),
         (S("media_player.m", "playing"), (0, "Playing")),
-        (S("sensor.d", "2026-11-18T10:30:00+00:00", device_class="timestamp"), (0, "2026-11-18 10:30")),
+        (
+            S("sensor.d", "2026-11-18T10:30:00+00:00", device_class="timestamp"),
+            (0, "2026-11-18 10:30"),
+        ),
         (S("scene.x", "2026-11-18T10:30:00+00:00"), (0, "")),
         (S("lock.l", "closed"), (1, "Closed")),
         (S("cover.c", "open", current_position=40), (2, "40%")),
@@ -413,7 +432,14 @@ async def test_burst_of_changes_is_one_message_with_the_latest_value(hass, rig, 
     # holds a v2 set and its task is done. "Any tile seen" is not enough: the v1 push's tiles satisfy it
     # before the remote_info above has even been read.
     link = _c.links[1]
-    await settle(hass, lambda: link.pushed is not None and link.pushed[1] == 2 and (link.task is None or link.task.done()))
+    await settle(
+        hass,
+        lambda: (
+            link.pushed is not None
+            and link.pushed[1] == 2
+            and (link.task is None or link.task.done())
+        ),
+    )
     await settle(hass, lambda: hub.tiles_inflight == 0)
     hub.got.clear()
     for i in range(2, 12):
@@ -421,10 +447,12 @@ async def test_burst_of_changes_is_one_message_with_the_latest_value(hass, rig, 
     # the debounce timer fired, its flush ran, and nothing is marked or pending any more
     await settle(
         hass,
-        lambda: hub.tiles()
-        and _c._tile_timer is None
-        and not _c._tile_dirty
-        and (_c._flush_task is None or _c._flush_task.done()),
+        lambda: (
+            hub.tiles()
+            and _c._tile_timer is None
+            and not _c._tile_dirty
+            and (_c._flush_task is None or _c._flush_task.done())
+        ),
     )
     sent = [t for t in hub.tiles() if t["text"].endswith("C")]
     assert len(sent) == 1 and sent[0]["text"] == "11 C"
@@ -554,7 +582,9 @@ async def test_key_event_to_service_call_is_scheduled_in_the_same_loop_iteration
 
     monkeypatch.setattr(type(hass.services), "async_call", spy)
     c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 1, "action": 0})
-    assert started == [("light", "toggle", True)]  # blocking runs inside the task; started before any await
+    assert started == [
+        ("light", "toggle", True)
+    ]  # blocking runs inside the task; started before any await
     await settle(hass)
 
 
@@ -566,13 +596,19 @@ async def test_unknown_entity_and_service_warn_once_per_rev_and_never_raise(
     caplog.set_level(logging.WARNING)
     for _ in range(3):
         c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 1, "action": 0})
-    warns = [r for r in caplog.records if "light.toggle" in r.getMessage() and r.name.endswith("coordinator")]
+    warns = [
+        r
+        for r in caplog.records
+        if "light.toggle" in r.getMessage() and r.name.endswith("coordinator")
+    ]
     assert len(warns) == 1 and "does not exist" in warns[0].getMessage()
     async_mock_service(hass, "light", "toggle")
     c._warned.clear()  # a new config revision starts over
     for _ in range(2):
         c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 1, "action": 0})
-    gone = [r for r in caplog.records if "light.up" in r.getMessage() and r.name.endswith("coordinator")]
+    gone = [
+        r for r in caplog.records if "light.up" in r.getMessage() and r.name.endswith("coordinator")
+    ]
     assert len(gone) == 1
 
 
@@ -599,7 +635,9 @@ async def test_integration_enforces_the_allow_list_again(hass, rig, clock, caplo
 HOSTILE = {
     "shell": "{service: shell_command.x, target: {entity_id: light.a}}",
     "template": "{service: light.turn_on, target: {entity_id: light.a}, data: {b: '{{ states(1) }}'}}",
-    "big": "{service: light.turn_on, target: {entity_id: light.a}, data: {v: [" + ",".join(["1"] * 80) + "]}}",
+    "big": "{service: light.turn_on, target: {entity_id: light.a}, data: {v: ["
+    + ",".join(["1"] * 80)
+    + "]}}",
 }
 
 
@@ -609,7 +647,9 @@ async def test_hostile_bundles_with_ha_actions_are_rejected_by_the_integration(
 ):
     _hub, c = await rig()
     before = c.compiled
-    fake_addon.apply_yaml(YAML.replace("keys:\n  select:", f"keys:\n  right: {{ha: {HOSTILE[name]}}}\n  select:", 1))
+    fake_addon.apply_yaml(
+        YAML.replace("keys:\n  select:", f"keys:\n  right: {{ha: {HOSTILE[name]}}}\n  select:", 1)
+    )
     with pytest.raises(BundleRejected):
         await c.async_refresh_from_addon()
     assert c.compiled == before  # nothing changed
@@ -667,7 +707,9 @@ async def test_leaving_runs_power_off_and_off_steps_only_on_off(hass, rig, clock
 
 
 @pytest.mark.parametrize("shield", ["idle", "standby", "playing", "paused"])
-async def test_off_powers_down_ha_devices_the_leaving_activity_did_not_list(hass, rig, clock, shield):
+async def test_off_powers_down_ha_devices_the_leaving_activity_did_not_list(
+    hass, rig, clock, shield
+):
     async_mock_service(hass, "light", "turn_off")
     async_mock_service(hass, "remote", "turn_on")
     async_mock_service(hass, "remote", "send_command")
@@ -752,7 +794,9 @@ async def _shield_started_by_hand(hass, rig):
 
 async def test_power_on_with_unknown_index_is_not_off(hass, rig, clock):
     hub, c, off = await _shield_started_by_hand(hass, rig)
-    await hub.push("state_update", {"activity": 99, "power": True})  # reload race: list not known yet
+    await hub.push(
+        "state_update", {"activity": 99, "power": True}
+    )  # reload race: list not known yet
     await settle(hass)
     assert c.current_activity_id is None and off == []
 

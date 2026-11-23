@@ -14,7 +14,10 @@ FIX = json.loads((Path(__file__).resolve().parents[1] / "vectors" / "text_fit.js
 
 @pytest.mark.parametrize("c", FIX["cases"], ids=lambda c: c["name"])
 def test_budget(c):
-    page, w = SimpleNamespace(cols=c["cols"], rows=c["rows"], fixed=c.get("fixed", False)), SimpleNamespace(**c["widget"])
+    page, w = (
+        SimpleNamespace(cols=c["cols"], rows=c["rows"], fixed=c.get("fixed", False)),
+        SimpleNamespace(**c["widget"]),
+    )
     b = label_budget(page, w)
     e = c["expect"]
     if e is None:

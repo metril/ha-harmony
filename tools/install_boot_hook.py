@@ -48,16 +48,29 @@ RCS = "/etc/init.d/rcS"  # never written; read only, and only to report its hook
 RCS_LOCAL = "/etc/init.d/rcS.local"
 RCS_HARMONY = "/etc/init.d/rcS.harmony"
 MARKER = "/etc/ha-harmony-enable"
-NOWATCHDOG = "/etc/nowatchdog"  # read only (test -e); stock rcS:59 skips the watchdog while it exists
+NOWATCHDOG = (
+    "/etc/nowatchdog"  # read only (test -e); stock rcS:59 skips the watchdog while it exists
+)
 COUNTER = "/cache/ha-harmony-boot.n"
 PIDFILE = "/cache/ha-harmony.pid"
 LOG = "/var/volatile/ha-harmony-hook.log"  # tmpfs: the hook's own log never touches flash; the daemon ships it to HA
 LEGACY_LOG = "/cache/ha-harmony.log"  # where older hooks logged (jffs2 flash): removed on install
-OTA_LEGACY_LOG = "/cache/ota-update.log"  # the stock updater's log on flash: removed once on install
+OTA_LEGACY_LOG = (
+    "/cache/ota-update.log"  # the stock updater's log on flash: removed once on install
+)
 DAEMON_LOG = "/var/volatile/ha-harmony.log"  # tmpfs; read-only here, the hook writes it
 
 # The only paths this tool may write. Asserted by tests over the recorded command log.
-WRITE_PATHS = (RCS_LOCAL, RCS_HARMONY, MARKER, REMOTE_DIR, COUNTER, PIDFILE, LEGACY_LOG, OTA_LEGACY_LOG)
+WRITE_PATHS = (
+    RCS_LOCAL,
+    RCS_HARMONY,
+    MARKER,
+    REMOTE_DIR,
+    COUNTER,
+    PIDFILE,
+    LEGACY_LOG,
+    OTA_LEGACY_LOG,
+)
 
 BEGIN = "# >>> ha-harmony boot hook >>>"
 END = "# <<< ha-harmony boot hook <<<"
@@ -81,7 +94,9 @@ class InstallError(RuntimeError):
 
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9._~+/=-]{1,256}")  # keep in step with rcS.harmony
-HUB_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,63}")  # new pins: no dot (not an mDNS label), not "default"
+HUB_ID_RE = re.compile(
+    r"[A-Za-z0-9_-]{1,63}"
+)  # new pins: no dot (not an mDNS label), not "default"
 
 
 def md5_bytes(b: bytes) -> str:
@@ -207,8 +222,12 @@ class HookInstaller:
             for name, data in (("rcS.harmony", hook), ("selftest.sh", script)):
                 rc, _, err = self.r.run_input(["sh", "-c", f"cat > {SELFTEST_DIR}/{name}"], data)
                 if rc != 0:
-                    raise InstallError(f"upload {name} failed: {err.decode(errors='replace').strip()}")
-            rc, out, err = self.r.run(["sh", f"{SELFTEST_DIR}/selftest.sh", f"{SELFTEST_DIR}/rcS.harmony"])
+                    raise InstallError(
+                        f"upload {name} failed: {err.decode(errors='replace').strip()}"
+                    )
+            rc, out, err = self.r.run(
+                ["sh", f"{SELFTEST_DIR}/selftest.sh", f"{SELFTEST_DIR}/rcS.harmony"]
+            )
             print(out.decode(errors="replace").rstrip())
             if rc != 0:
                 print(err.decode(errors="replace").rstrip(), file=sys.stderr)
@@ -238,9 +257,11 @@ class HookInstaller:
         reboot_on_early_death: bool = True,
     ) -> int:
         if not TOKEN_RE.fullmatch(token or ""):
-            raise InstallError("token must match [A-Za-z0-9._~+/=-]{1,256} (no whitespace or CR/LF)")
+            raise InstallError(
+                "token must match [A-Za-z0-9._~+/=-]{1,256} (no whitespace or CR/LF)"
+            )
         if hub_id is not None and (not HUB_ID_RE.fullmatch(hub_id) or hub_id == "default"):
-            raise InstallError("hub id must match [A-Za-z0-9_-]{1,63} and not be \"default\"")
+            raise InstallError('hub id must match [A-Za-z0-9_-]{1,63} and not be "default"')
         if not 1 <= port <= 65535:
             raise InstallError("port must be 1..65535")
         if expect_md5 is None or not re.fullmatch(r"[0-9a-f]{32}", expect_md5):
@@ -391,7 +412,9 @@ class HookInstaller:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
     )
     ap.add_argument("--host", default="harmony-hub")
     ap.add_argument("--port", type=int, default=None, help="ssh port")
@@ -404,17 +427,34 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("install", help="[WRITE] install and arm the boot hook", allow_abbrev=False)
     p.add_argument("--yes", action="store_true")
     p.add_argument("--token-file", type=Path, help="file holding the WS token (or set HAH_TOKEN)")
-    p.add_argument("--rf-slot", type=int, default=None, help="enable the real radio, remote at HID++ slot N")
-    p.add_argument("--learn-slot", action="store_true", help="enable the real radio with no slot: learned from the radio (opt-in, needs the bench gate)")
-    p.add_argument("--expect-md5", required=True, help="md5 of the local hub build; arm only if the device matches")
-    p.add_argument("--no-reboot-on-early-death", action="store_true",
-                   help="do not reboot when the daemon dies inside the 120 s health window")
+    p.add_argument(
+        "--rf-slot", type=int, default=None, help="enable the real radio, remote at HID++ slot N"
+    )
+    p.add_argument(
+        "--learn-slot",
+        action="store_true",
+        help="enable the real radio with no slot: learned from the radio (opt-in, needs the bench gate)",
+    )
+    p.add_argument(
+        "--expect-md5",
+        required=True,
+        help="md5 of the local hub build; arm only if the device matches",
+    )
+    p.add_argument(
+        "--no-reboot-on-early-death",
+        action="store_true",
+        help="do not reboot when the daemon dies inside the 120 s health window",
+    )
     p.add_argument("--keep-lua", action="store_true", help="do not stop luaworks/luadraws at boot")
-    p.add_argument("--hub-port", type=int, default=8099, help="daemon WS port (default %(default)s)")
+    p.add_argument(
+        "--hub-port", type=int, default=8099, help="daemon WS port (default %(default)s)"
+    )
     p.add_argument("--hub-id", default=None)
     p = sub.add_parser("disarm", help="[WRITE] remove only the marker; next boot is pure stock")
     p.add_argument("--yes", action="store_true")
-    p = sub.add_parser("selftest", help="[WRITE /tmp only] dry-run the hook under the hub's BusyBox sh")
+    p = sub.add_parser(
+        "selftest", help="[WRITE /tmp only] dry-run the hook under the hub's BusyBox sh"
+    )
     p.add_argument("--yes", action="store_true")
     p = sub.add_parser("uninstall", help="[WRITE] disarm and remove the hook")
     p.add_argument("--yes", action="store_true")
