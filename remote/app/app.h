@@ -57,6 +57,8 @@ typedef struct {
   void (*resumed)(void *ctx, uint64_t now, uint64_t gap_ms);
   /* Optional. A touch went down (any place): a link that is lost re-initiates itself. */
   void (*touched)(void *ctx);
+  /* Optional. Objects are still queued or in flight: the remote does not suspend yet (a key press would be lost). */
+  bool (*busy)(void *ctx);
 } app_link_t;
 
 extern const app_link_t app_link_null;

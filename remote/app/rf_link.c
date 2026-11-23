@@ -143,10 +143,10 @@ static int send_msg(rf_link_t *l, hp_msg_type_t t, const hp_rf_val_t *v, size_t 
   return hp_rf_link_send(&l->link, t, payload, plen, t32(now));
 }
 
-/* The link layer refuses to send while attached() is false, but a remote whose chip has not yet
- * reported link status (an unvalidated report) would then never speak first, and the hub treats a
- * remote as absent until it does. So the link gets a view of rf_spi without attached(): sends always
- * go out, and a silent hub shows up as a failed send after the retries, as designed. */
+/* The link layer sees the chip's attached state: it holds the retry clock while the link is down (no retries burn
+ * against a lost link) and drops objects that went stale meanwhile. A remote whose chip has not yet reported link
+ * status would never speak first, and the hub treats a remote as absent until it does, so speak_first lets the first
+ * send go out regardless. */
 static int lt_send(void *self, const uint8_t *f, size_t n) {
   rf_link_t *l = self;
   return l->tp->send(l->tp->self, f, n);
@@ -158,6 +158,10 @@ static int lt_recv(void *self, uint8_t *f, size_t cap, int ms) {
 static int lt_tx_status(void *self, uint8_t *slot, uint8_t *status) {
   rf_link_t *l = self;
   return l->tp->tx_status ? l->tp->tx_status(l->tp->self, slot, status) : 0;
+}
+static bool lt_attached(void *self) {
+  rf_link_t *l = self;
+  return l->tp->attached ? l->tp->attached(l->tp->self) : true;
 }
 static int lt_claim(void *self) {
   rf_link_t *l = self;
@@ -207,11 +211,13 @@ static int rf_send_key(void *ctx, uint8_t code, uint8_t action) {
   if (action == HP_KEY_ACTION_PRESS) rejoin_event(l, now, "key"); /* re-sync first; the key itself still goes out as before */
   int rc = send_msg(l, HP_MSG_KEY_EVENT, v, 3, now);
   if (rc < 0) {
+    /* a refusal (queue full, no peer) is not an abandoned object: logged, no fallback page */
     ra_logf(&l->sys, "rf_link: key %u action %u send refused (%d)", (unsigned)code, (unsigned)action, rc);
-    raise_failed(l);
   } else {
-    size_t q = hp_rf_link_status(&l->link).queued;
-    ra_logf(&l->sys, "rf_link: key %u action %u queued (%zu ahead)", (unsigned)code, (unsigned)action, q ? q - 1 : 0);
+    if (action != HP_KEY_ACTION_HOLD) { /* hold repeats log failures only */
+      size_t q = hp_rf_link_status(&l->link).queued;
+      ra_logf(&l->sys, "rf_link: key %u action %u queued (%zu ahead)", (unsigned)code, (unsigned)action, q ? q - 1 : 0);
+    }
     note_start(l); /* an idle link starts it at once */
   }
   return rc;
@@ -307,6 +313,12 @@ static void service(rf_link_t *l, uint64_t now) {
     heartbeat(l, now);
     hp_rf_link_pump(&l->link, t32(now));
   }
+  uint32_t ex = hp_rf_link_status(&l->link).expired;
+  if (ex != l->seen_expired) { /* dropped while the link was down: lost, but no retries were burnt */
+    ra_logf(&l->sys, "rf_link: %u object(s) dropped, stale while the link was down", (unsigned)(ex - l->seen_expired));
+    l->seen_expired = ex;
+    raise_failed(l);
+  }
   uint32_t f = hp_rf_link_status(&l->link).failures;
   if (f != l->seen_failures) {
     ra_logf(&l->sys, "rf_link: send FAILED after %d retries, %u object(s) abandoned (seq %u)", HP_RF_RETRIES, (unsigned)(f - l->seen_failures), (unsigned)l->link.tx.seq);
@@ -356,6 +368,11 @@ static void rf_touched(void *ctx) {
   if (l->tp) rejoin_event(l, l->sys.ops.now_ms(l->sys.ops.ctx), "touch");
 }
 
+static bool rf_busy(void *ctx) {
+  rf_link_t *l = ctx;
+  return l->tp && hp_rf_link_status(&l->link).queued > 0;
+}
+
 static uint32_t rf_next_ms(void *ctx, uint64_t now) {
   rf_link_t *l = ctx;
   if (l->n || (!l->tp && !l->dead_reported)) return 0;
@@ -388,8 +405,9 @@ int rf_link_open(rf_link_t *l, const hp_rf_spi_cfg_t *cfg) {
     return -HP_E_BUSY;
   }
   l->tp = tp;
-  l->lt = (hp_rf_transport){l, lt_send, lt_recv, lt_claim, NULL, lt_tx_status, NULL};
+  l->lt = (hp_rf_transport){l, lt_send, lt_recv, lt_claim, lt_attached, lt_tx_status, NULL};
   hp_rf_link_init(&l->link, &l->lt, false, 0, deliver, l);
+  l->link.speak_first = true;
   hp_rf_link_set_poll(&l->link, RF_LINK_POLL_MS, RF_LINK_IDLE_POLL_MS); /* active once the app reports awake */
   if (cfg->debug) hp_rf_link_set_log(&l->link, cfg->log ? cfg->log : hp_rf_log_stderr, cfg->log_ctx);
   l->next_batt_ms = 0; /* first heartbeat on the first poll */
@@ -409,5 +427,5 @@ void rf_link_close(rf_link_t *l) {
 
 app_link_t rf_link_app(rf_link_t *l) {
   return (app_link_t){.ctx = l, .send_key = rf_send_key, .poll = rf_poll, .get_fd = rf_get_fd, .next_ms = rf_next_ms,
-                      .set_awake = rf_set_awake, .resumed = rf_resumed, .touched = rf_touched};
+                      .set_awake = rf_set_awake, .resumed = rf_resumed, .touched = rf_touched, .busy = rf_busy};
 }

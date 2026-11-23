@@ -36,6 +36,7 @@
 
 #define HP_RF_RETRIES 3
 #define HP_RF_RETRY_MS 150
+#define HP_RF_BUSY_MS 50 /* a send refused with -HP_E_BUSY (transport backoff) is not a retry: tried again after this */
 
 typedef struct {
     uint8_t b[HP_RF_INNER_LEN];
@@ -86,7 +87,8 @@ int hp_rf_unwrap_remote(const uint8_t *f, size_t len, uint8_t *slot, uint8_t *by
 typedef struct {
     int active;
     int have_last;
-    uint8_t last_seq; /* last delivered seq (one assembler per peer direction) */
+    uint8_t last_seq; /* last delivered seq and type (one assembler per peer direction) */
+    uint8_t last_type;
     uint8_t type, seq, next_idx;
     uint8_t len; /* body length */
     size_t have; /* object bytes (length byte included) received so far */
@@ -114,6 +116,7 @@ typedef struct {
     hp_rf_tx_state_t state;
     uint8_t next_seq, seq, type;
     uint8_t retries; /* retransmissions done so far */
+    uint8_t busy;    /* the last send attempt was refused with -HP_E_BUSY (not counted as a retry) */
     uint32_t deadline;
     size_t n;
     /* Pacing. pace_ms == 0 (default): every frame goes out at once. pace_ms > 0: frame 0 goes out at

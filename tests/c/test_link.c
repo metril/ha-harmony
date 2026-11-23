@@ -6,6 +6,7 @@
 #include "ctest_assert.h"
 #include "hub/hp_errors.h"
 #include "hub/rf/link.h"
+#include "hub/rf/rf_payload.h"
 
 #define QCAP 128
 
@@ -26,6 +27,8 @@ typedef struct {
     int gone;                                     /* recv reports -HP_E_NOENT once */
     int refuse;                                   /* send fails with -HP_E_IO this many times */
     int noent;                                    /* send fails with -HP_E_NOENT while set */
+    int busy;                                     /* send fails with -HP_E_BUSY this many times (transport backoff) */
+    int down;                                     /* attached() reports false while set */
     uint32_t at[64];                              /* net->now of each non-ack frame sent */
     int nat;
     uint8_t txs[16][2];                           /* queued TX statuses (slot, status) */
@@ -48,6 +51,10 @@ static int t_send(void *self, const uint8_t *frame, size_t len) {
     ep_t *peer = &e->net->ep[1 - e->idx];
     bool ack = is_ack(e->net, frame);
     if (e->noent) return -HP_E_NOENT;
+    if (e->busy > 0) {
+        e->busy--;
+        return -HP_E_BUSY;
+    }
     if (e->refuse > 0) {
         e->refuse--;
         return -HP_E_IO;
@@ -101,6 +108,7 @@ static int t_recv(void *self, uint8_t *frame, size_t cap, int timeout_ms) {
 }
 
 static int t_claim(void *self) { (void)self; return 0; }
+static bool t_att(void *self) { return !((ep_t *)self)->down; }
 
 static void deliver(void *ctx, const hp_rf_msg_t *m) {
     ep_t *e = ctx;
@@ -114,7 +122,7 @@ static void net_init(net_t *n, bool wrapped) {
         ep_t *e = &n->ep[i];
         e->net = n;
         e->idx = i;
-        e->t = (hp_rf_transport){e, t_send, t_recv, t_claim, NULL, NULL, NULL};
+        e->t = (hp_rf_transport){e, t_send, t_recv, t_claim, t_att, NULL, NULL};
         hp_rf_link_init(&e->link, &e->t, wrapped, 1, deliver, e);
     }
     n->now = 1000;
@@ -282,14 +290,168 @@ static void test_peer_lost_resets(void) {
     n.ep[1].drop_all = 1;
     n.ep[1].gone = 1;
     CT_EQ(hp_rf_link_pump(&n.ep[1].link, n.now), -HP_E_NOENT);
-    CT_EQ(hp_rf_link_status(&n.ep[1].link).failures, 1);
-    CT_EQ(hp_rf_link_status(&n.ep[1].link).queued, 0);
+    CT_EQ(hp_rf_link_status(&n.ep[1].link).failures, 0); /* a loss is not a send failure: the queue is kept */
+    CT_EQ(hp_rf_link_status(&n.ep[1].link).queued, 1);
     CT_EQ(hp_rf_link_pump(&n.ep[1].link, n.now), 0); /* once */
     /* after a reset the same seq is accepted again (the duplicate filter was cleared) */
     n.ep[0].drop_all = n.ep[1].drop_all = 0;
     CT_EQ(send_obj(&n, 0, 5, big, sizeof big), 0);
     run(&n, 200);
     CT_EQ(n.ep[1].ngot, 2);
+}
+
+static int key_obj(net_t *n, int from, int code, int action) {
+    hp_rf_val_t v[3] = {{.u = 1}, {.u = (uint32_t)code}, {.u = (uint32_t)action}};
+    uint8_t pl[HP_RF_MSG_MAX];
+    size_t pn;
+    CT_EQ(hp_rf_pack(HP_MSG_KEY_EVENT, v, 3, pl, sizeof pl, &pn), 0);
+    return hp_rf_link_send(&n->ep[from].link, HP_MSG_KEY_EVENT, pl, pn, n->now);
+}
+static int batt_obj(net_t *n, int from) {
+    hp_rf_val_t v[3] = {{.u = 1}, {.u = 50}, {.u = 0}};
+    uint8_t pl[HP_RF_MSG_MAX];
+    size_t pn;
+    CT_EQ(hp_rf_pack(HP_MSG_BATTERY, v, 3, pl, sizeof pl, &pn), 0);
+    return hp_rf_link_send(&n->ep[from].link, HP_MSG_BATTERY, pl, pn, n->now);
+}
+
+/* A loss keeps the queue and holds the retry clock; the object is delivered after the link-up. */
+static void test_loss_keeps_queue_and_holds_retries(void) {
+    net_t n;
+    net_init(&n, false);
+    uint8_t body[2] = {1, 2};
+    n.ep[0].drop_all = 1;
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    run(&n, 100);
+    n.ep[0].down = 1;
+    n.ep[0].gone = 1;
+    run(&n, 1000); /* well past 3 retries' worth of time */
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).failures, 0);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 1);
+    CT_EQ(n.ep[0].link.tx.retries, 0);
+    n.ep[0].down = 0;
+    n.ep[0].drop_all = 0;
+    run(&n, 600);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 0);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).failures, 0);
+    CT_EQ(n.ep[1].ngot, 1);
+}
+
+/* While down: objects older than HP_LINK_STALE_MS go (not a failure), the newest RELEASE of a key stays. */
+static void test_stale_dropped_release_kept(void) {
+    net_t n;
+    net_init(&n, false);
+    n.ep[0].link.speak_first = true;
+    n.ep[0].down = 1;
+    n.ep[0].drop_all = 1;
+    uint8_t body[2] = {1, 2};
+    CT_EQ(key_obj(&n, 0, 7, HP_KEY_ACTION_PRESS), 0); /* the first send still goes out */
+    CT_EQ(n.ep[0].sent_objs, 0);                      /* (dropped by the fake: drop_all) */
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    CT_EQ(key_obj(&n, 0, 7, HP_KEY_ACTION_RELEASE), 0);
+    CT_EQ(key_obj(&n, 0, 7, HP_KEY_ACTION_RELEASE), 0);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 4);
+    run(&n, 1000);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 4); /* young: all kept, no retries */
+    CT_EQ(n.ep[0].link.tx.retries, 0);
+    run(&n, 700);
+    hp_rf_link_status_t st = hp_rf_link_status(&n.ep[0].link);
+    CT_EQ(st.queued, 1); /* only the newest RELEASE */
+    CT_EQ(st.expired, 3);
+    CT_EQ(st.failures, 0);
+    n.ep[0].down = 0;
+    n.ep[0].drop_all = 0;
+    run(&n, 300);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 0);
+    CT_EQ(n.ep[1].ngot, 1);
+}
+
+/* A key goes ahead of objects that have not started; HOLD repeats coalesce; RELEASE drops pending HOLDs. */
+static void test_key_priority_and_hold_coalescing(void) {
+    net_t n;
+    net_init(&n, false);
+    n.ep[0].drop_all = 1; /* nothing is acked: the first object stays in flight */
+    CT_EQ(batt_obj(&n, 0), 0);    /* in flight */
+    CT_EQ(batt_obj(&n, 0), 0);    /* waiting */
+    CT_EQ(key_obj(&n, 0, 9, HP_KEY_ACTION_PRESS), 0);
+    CT_EQ(key_obj(&n, 0, 9, HP_KEY_ACTION_HOLD), 0);
+    CT_EQ(key_obj(&n, 0, 9, HP_KEY_ACTION_HOLD), 0); /* coalesced */
+    CT_EQ(key_obj(&n, 0, 8, HP_KEY_ACTION_HOLD), 0); /* another key: own hold */
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 5);
+    CT_EQ(key_obj(&n, 0, 9, HP_KEY_ACTION_RELEASE), 0); /* the key-9 hold goes */
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 5);
+    n.ep[0].drop_all = 0;
+    run(&n, 1000);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 0);
+    CT_EQ(n.ep[1].ngot, 5);
+    CT_EQ(n.ep[1].got[0].type, HP_MSG_BATTERY);
+    CT_EQ(n.ep[1].got[1].type, HP_MSG_KEY_EVENT); /* press 9 ahead of the waiting battery */
+    CT_EQ(n.ep[1].got[1].payload[2], HP_KEY_ACTION_PRESS);
+    CT_EQ(n.ep[1].got[2].type, HP_MSG_KEY_EVENT);
+    CT_EQ(n.ep[1].got[3].type, HP_MSG_KEY_EVENT);
+    CT_EQ(n.ep[1].got[4].type, HP_MSG_BATTERY);
+}
+
+/* A RELEASE is not refused on a full queue. */
+static void test_release_never_refused(void) {
+    net_t n;
+    net_init(&n, false);
+    n.ep[0].drop_all = 1;
+    uint8_t body[2] = {1, 2};
+    for (int i = 0; i < HP_LINK_QUEUE; i++) CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), -HP_E_BUSY);
+    CT_EQ(key_obj(&n, 0, 9, HP_KEY_ACTION_PRESS), -HP_E_BUSY);
+    CT_EQ(key_obj(&n, 0, 9, HP_KEY_ACTION_RELEASE), 0); /* makes room: the newest unstarted non-key object goes */
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, HP_LINK_QUEUE);
+    n.ep[0].drop_all = 0;
+    run(&n, 1500);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 0);
+    CT_EQ(n.ep[1].ngot, HP_LINK_QUEUE);
+    CT_EQ(n.ep[1].got[1].type, HP_MSG_KEY_EVENT); /* ahead of the waiting ones */
+}
+
+/* A write refused for the transport's backoff (BUSY) is not a retry or a failure. */
+static void test_busy_is_not_a_retry(void) {
+    net_t n;
+    net_init(&n, false);
+    uint8_t body[2] = {1, 2};
+    n.ep[0].busy = 100; /* first frame refused for long */
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    run(&n, 2000);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).failures, 0);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 1);
+    n.ep[0].busy = 0;
+    run(&n, 300);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).queued, 0);
+    CT_EQ(n.ep[1].ngot, 1);
+    /* a retry refused by the backoff does not burn retries either */
+    n.ep[0].drop_objs = 1; /* first transmission lost */
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    n.ep[0].busy = 6;
+    run(&n, 3000);
+    CT_EQ(hp_rf_link_status(&n.ep[0].link).failures, 0);
+    CT_EQ(n.ep[1].ngot, 2);
+}
+
+/* Strict downlink: a refused ack write with nothing queued still wakes the loop when the backoff ends. */
+static void test_strict_refused_ack_wakes_at_backoff_end(void) {
+    net_t n;
+    net_init(&n, false);
+    n.ep[1].t.tx_status = t_txs;
+    n.ep[1].link.strict = true;
+    uint8_t body[2] = {1, 2};
+    CT_EQ(send_obj(&n, 0, 5, body, sizeof body), 0);
+    n.ep[1].refuse = 1000; /* the radio write of the ack is refused */
+    n.now += 5;
+    (void)hp_rf_link_pump(&n.ep[1].link, n.now);
+    CT_EQ(n.ep[1].ngot, 1);
+    CT_EQ(hp_rf_link_status(&n.ep[1].link).queued, 0);
+    int d = hp_rf_link_next_timeout_ms(&n.ep[1].link, n.now);
+    CT_CHECK(d >= 0 && d <= HP_LINK_WRITE_RETRY_MS);
+    n.ep[1].refuse = 0;
+    n.now += (uint32_t)d;
+    (void)hp_rf_link_pump(&n.ep[1].link, n.now);
+    CT_EQ(n.ep[1].sent_acks, 1);
 }
 
 static int noent_send(void *self, const uint8_t *f, size_t l) { (void)self; (void)f; (void)l; return -HP_E_NOENT; }
@@ -506,6 +668,12 @@ int main(void) {
     test_limits_and_queue();
     test_first_frame_refused_is_retried();
     test_peer_lost_resets();
+    test_loss_keeps_queue_and_holds_retries();
+    test_stale_dropped_release_kept();
+    test_key_priority_and_hold_coalescing();
+    test_release_never_refused();
+    test_busy_is_not_a_retry();
+    test_strict_refused_ack_wakes_at_backoff_end();
     test_noent_synchronous();
     test_queued_objects_without_a_peer_are_reported();
     test_pacing_gap();

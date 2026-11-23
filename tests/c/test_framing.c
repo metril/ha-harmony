@@ -627,6 +627,57 @@ static void test_seq_wrap_both_directions(void)
     CT_EQ(dir[1].tx.next_seq, 46 & 0xf);
 }
 
+/* The duplicate filter compares seq AND type, and a remote_info (a rebooted remote) is always delivered and restarts it. */
+static void test_dup_filter_type_and_reboot(void)
+{
+    hp_rf_asm_t a;
+    hp_rf_asm_init(&a);
+    hp_rf_inner_t fr[HP_RF_MAX_FRAGS], ack;
+    hp_rf_msg_t m;
+    size_t n;
+    uint8_t body[3] = {1, 2, 3};
+    CT_EQ(hp_rf_split(HP_MSG_KEY_EVENT, 4, body, 3, fr, HP_RF_MAX_FRAGS, &n), 0);
+    CT_EQ(hp_rf_asm_push(&a, &fr[0], &m, &ack), HP_ASM_COMPLETE);
+    CT_EQ(hp_rf_asm_push(&a, &fr[0], &m, &ack), HP_ASM_DUPLICATE);
+    CT_EQ(hp_rf_split(HP_MSG_BATTERY, 4, body, 3, fr, HP_RF_MAX_FRAGS, &n), 0); /* same seq, other type */
+    CT_EQ(hp_rf_asm_push(&a, &fr[0], &m, &ack), HP_ASM_COMPLETE);
+    CT_EQ(hp_rf_split(HP_MSG_REMOTE_INFO, 4, body, 3, fr, HP_RF_MAX_FRAGS, &n), 0);
+    CT_EQ(hp_rf_asm_push(&a, &fr[0], &m, &ack), HP_ASM_COMPLETE);
+    CT_EQ(hp_rf_asm_push(&a, &fr[0], &m, &ack), HP_ASM_COMPLETE); /* remote_info: idempotent, never a duplicate */
+    CT_EQ(hp_rf_split(HP_MSG_KEY_EVENT, 4, body, 3, fr, HP_RF_MAX_FRAGS, &n), 0);
+    CT_EQ(hp_rf_asm_push(&a, &fr[0], &m, &ack), HP_ASM_COMPLETE); /* a rebooted remote's first key with an old seq */
+}
+
+/* A send refused with -HP_E_BUSY (transport backoff) is not a retry. */
+static int busy_send(void *ctx, const hp_rf_inner_t *f)
+{
+    (void)f;
+    int *left = ctx;
+    if (*left > 0) {
+        (*left)--;
+        return -HP_E_BUSY;
+    }
+    return 0;
+}
+static void test_tx_busy_is_not_a_retry(void)
+{
+    hp_rf_tx_t tx;
+    int busy = 0;
+    uint8_t body[2] = {1, 2};
+    hp_rf_tx_init(&tx, busy_send, &busy);
+    CT_EQ(hp_rf_tx_start(&tx, T_KEY, body, 2, 0), 0);
+    busy = 10;
+    uint32_t t = 0;
+    for (int i = 0; i < 10; i++) { /* the retry deadline passes with the transport refusing: no retries counted */
+        t = tx.deadline;
+        CT_EQ(hp_rf_tx_poll(&tx, t), HP_RF_TX_WAIT);
+    }
+    CT_EQ(tx.retries, 0);
+    t = tx.deadline;
+    CT_EQ(hp_rf_tx_poll(&tx, t), HP_RF_TX_WAIT);
+    CT_EQ(tx.retries, 1);
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) { fprintf(stderr, "usage: test_framing <frames.json>\n"); return 2; }
@@ -649,5 +700,7 @@ int main(int argc, char **argv)
     CT_RUN(test_tx_lost_ack_delivers_once);
     CT_RUN(test_tx_wrong_ack_ignored);
     CT_RUN(test_seq_wrap_both_directions);
+    CT_RUN(test_dup_filter_type_and_reboot);
+    CT_RUN(test_tx_busy_is_not_a_retry);
     return CT_DONE();
 }
