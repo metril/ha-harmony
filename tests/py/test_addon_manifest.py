@@ -34,11 +34,35 @@ def test_base_images_pinned_by_digest():
     assert build["amd64"] in (ROOT / "addon/Dockerfile").read_text()
 
 
-def test_publish_workflow_is_tag_or_manual_only():
-    wf = yaml.safe_load((ROOT / ".github/workflows/addon-publish.yml").read_text())
-    on = wf.get("on", wf.get(True))
-    assert set(on) == {"push", "workflow_dispatch"} and on["push"] == {"tags": ["addon-v*"]}
+def _wf(name):
+    wf = yaml.safe_load((ROOT / f".github/workflows/{name}.yml").read_text())
+    return wf, wf.get("on", wf.get(True))
+
+
+def test_publish_workflow_is_called_or_manual_only():
+    wf, on = _wf("addon-publish")
+    assert set(on) == {"workflow_call", "workflow_dispatch"}  # no tag trigger, no addon-v* tag
     assert wf["jobs"]["publish"]["permissions"]["packages"] == "write"
+
+
+def test_one_tag_release_flow():
+    wf, on = _wf("release")
+    assert on == {"push": {"tags": ["v*"]}}
+    jobs = wf["jobs"]
+    assert jobs["ci"]["uses"] == "./.github/workflows/ci.yml" and jobs["ci"]["needs"] == "guard"
+    assert jobs["addon-image"]["uses"] == "./.github/workflows/addon-publish.yml"
+    assert jobs["addon-image"]["needs"] == "ci"
+    assert jobs["addon-image"]["permissions"]["packages"] == "write"
+    assert set(jobs["release"]["needs"]) == {"guard", "ci", "addon-image"}
+    names = [s.get("name", "") for s in jobs["release"]["steps"]]
+    assert names.index("Add-on image manifests exist for this version") < names.index("Publish release")
+    guard = "\n".join(s.get("run", "") for s in jobs["guard"]["steps"])
+    for f in ("harmony_core/__init__.py", "manifest.json", "addon/config.yaml"):
+        assert f in guard
+    assert "workflow_call" in _wf("ci")[1] and "pull_request" in _wf("ci")[1]
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
+    assert "py-tests" in ci["ci"]["needs"]
+    assert ci["py-tests"]["strategy"]["matrix"]["shard"] == [0, 1, 2]
 
 
 def test_repository_and_build_files():

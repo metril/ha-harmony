@@ -1,7 +1,10 @@
 name: release
 
-# Push a tag `vX.Y.Z` (matching manifest.json's version) to publish the HACS package:
-# a GitHub release with ha_harmony.zip attached. The tests run first; nothing is released red.
+# One tag does everything: push `vX.Y.Z` (matching harmony_core.__version__, manifest.json and
+# addon/config.yaml). The workflow checks the versions, runs the full ci suite, builds and pushes the
+# add-on image (addon-publish, via workflow_call: tags pushed with GITHUB_TOKEN trigger nothing), verifies
+# the image manifests exist on ghcr, and only then creates the GitHub release with ha_harmony.zip.
+# There is no separate addon-v* tag. addon-publish stays runnable by hand (workflow_dispatch).
 on:
   push:
     tags: ["v*"]
@@ -10,22 +13,62 @@ permissions:
   contents: write
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must equal every version file
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          core=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' harmony_core/__init__.py)
+          manifest=$(python3 -c 'import json;print(json.load(open("custom_components/ha_harmony/manifest.json"))["version"])')
+          addon=$(sed -n 's/^version: "\(.*\)"$/\1/p' addon/config.yaml)
+          echo "tag=$want core=$core manifest=$manifest addon=$addon"
+          for v in "$core" "$manifest" "$addon"; do
+            [ "$v" = "$want" ] || { echo "version mismatch: tag $want vs $v"; exit 1; }
+          done
+
+  ci:
+    needs: guard
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  addon-image:
+    needs: ci
+    uses: ./.github/workflows/addon-publish.yml
+    permissions:
+      contents: read
+      packages: write
+
   release:
+    needs: [guard, ci, addon-image]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: read
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add-on image manifests exist for this version
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          for arch in amd64 aarch64; do
+            docker buildx imagetools inspect "ghcr.io/metril/ha-harmony-editor-${arch}:${v}" > /dev/null \
+              || { echo "missing ghcr image ${arch}:${v}"; exit 1; }
+          done
       - name: Install Python deps
         run: uv sync --locked
-      - name: Build C binaries
-        run: |
-          cmake -S . -B build
-          cmake --build build -j --target hub remote_sim
-      - name: Test
-        run: uv run pytest tests/py -n auto -q
       - name: Build package
         run: uv run tools/package_integration.py --version "${GITHUB_REF_NAME#v}" --out dist/ha_harmony.zip
       - name: Publish release

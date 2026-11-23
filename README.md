@@ -69,8 +69,8 @@ the IR database and the config store; it feeds the integration, which stays the 
 - Install: add this repository's URL in *Settings -> Add-ons -> Add-on store -> Repositories*, install
   *Harmony Editor*, start it and open it from the sidebar. It needs the integration >= 0.3.0 and Supervisor
   2026.10.3 or newer.
-- **The add-on image is published only from an `addon-v*` tag, and may not exist yet.** Until the first such
-  tag is pushed the store cannot install it.
+- **The add-on image is published by the release workflow (one `vX.Y.Z` tag).** If a release failed before
+  that step, the store cannot install the add-on until the workflow is re-run.
 - Read next: [`addon/DOCS.md`](addon/DOCS.md) (install, link, backups, troubleshooting),
   [`docs/ha-config.md`](docs/ha-config.md) (the config format) and
   [`docs/addon-api.md`](docs/addon-api.md) (the add-on's HTTP API).
