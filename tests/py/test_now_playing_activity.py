@@ -89,13 +89,16 @@ def test_coordinator_resends_when_the_activity_with_the_feed_media_starts():
     calls = []
     fake = SimpleNamespace(
         compiled=SimpleNamespace(
-            media={"a": {"now_playing_entity": PLEX}, "b": {"apps_entity": SHIELD}}
+            media={"a": {"now_playing_entity": PLEX}, "b": {"apps_entity": SHIELD}, "c": {}}
         ),
         _cur=lambda e: e,
         now_playing=SimpleNamespace(plex=PLEX, resend=lambda: calls.append(1)),
     )
-    for after in (None, "b", "zz"):
+    for after in (None, "c", "zz"):
         HarmonyCoordinator._np_activity(fake, after)
     assert calls == []
     HarmonyCoordinator._np_activity(fake, "a")
-    assert calls == [1]
+    HarmonyCoordinator._np_activity(
+        fake, "b"
+    )  # any activity with a media entity, not only the feed's Plex
+    assert calls == [1, 1]

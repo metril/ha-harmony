@@ -50,6 +50,7 @@ void hp_mdns_rl_sweep(hp_mdns_rl_t *, uint32_t now_ms);
 
 typedef struct {
     int fd; /* -1 when not running */
+    int nl_fd; /* rtnetlink address-change socket (-1 = none: the address is rechecked on a timer instead) */
     hp_mdns_svc_t svc;
     hp_sched_t *sched;
     struct sockaddr_in dest;
@@ -78,6 +79,9 @@ int hp_mdns_on_link(uint32_t src, uint32_t if_addr, uint32_t mask);
  * options. Never blocks. */
 int hp_mdns_srv_start(hp_mdns_srv_t *, hp_sched_t *, const hp_mdns_opts_t *, const char *hub_id,
                       uint16_t service_port, unsigned proto_v);
+/* Wake-only fd: readable when an IPv4 address changed. The owner adds it to its poll set next to hp_mdns_srv_fd(); the
+ * next hp_mdns_srv_service() handles it. -1 when there is none (no timer-free address watching then). */
+int hp_mdns_srv_wake_fd(const hp_mdns_srv_t *);
 int hp_mdns_srv_fd(const hp_mdns_srv_t *); /* may change over time; -1 when down */
 uint16_t hp_mdns_srv_port(const hp_mdns_srv_t *);
 /* Drains readable datagrams (bounded per call) and answers matching queries. */

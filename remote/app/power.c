@@ -44,14 +44,12 @@ void ra_power_init(ra_power_t *p, ra_sys_t *sys, uint64_t now) {
   write_node(p, RA_PATH_LED, p->led);
 }
 
-bool ra_power_input(ra_power_t *p, uint64_t now) {
-  if (p->state == RA_PW_ACTIVE) {
-    p->last_input_ms = now;
-    return true;
-  }
+bool ra_power_input(ra_power_t *p, uint64_t now, bool touch) {
+  ra_pw_state_t was = p->state;
   p->last_input_ms = now;
-  set_state(p, RA_PW_ACTIVE, now);
-  return false;
+  if (was != RA_PW_ACTIVE) set_state(p, RA_PW_ACTIVE, now);
+  /* A dimmed screen is readable: everything acts. Off: hard keys act too, only a touch is swallowed. */
+  return was != RA_PW_OFF || !touch;
 }
 
 void ra_power_activity(ra_power_t *p, uint64_t now) {

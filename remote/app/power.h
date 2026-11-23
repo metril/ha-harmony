@@ -50,9 +50,9 @@ typedef struct {
 
 /* Backlight to normal and LEDs on immediately; first battery poll on the first tick. */
 void ra_power_init(ra_power_t *p, ra_sys_t *sys, uint64_t now);
-/* A press / touch-down arrived. True: the screen was active and the event goes on. False: it woke
- * the screen (from dim or off) and must be consumed. */
-bool ra_power_input(ra_power_t *p, uint64_t now);
+/* A press / touch-down arrived; it always wakes the screen. True: the event goes on (any press while active or
+ * dimmed, a hard key while off). False: a touch that woke an off screen, to be consumed. */
+bool ra_power_input(ra_power_t *p, uint64_t now, bool touch);
 /* Other accepted input: restart the idle timer (never wakes). */
 void ra_power_activity(ra_power_t *p, uint64_t now);
 void ra_power_tick(ra_power_t *p, uint64_t now);

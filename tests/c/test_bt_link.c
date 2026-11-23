@@ -304,6 +304,24 @@ static void test_no_adapter(void) {
     bt_link_reset();
 }
 
+/* No timers: the wake is the real time to the next ping (not capped at 200 ms), and a killed helper is reaped from the
+ * SIGCHLD pipe the poll set carries while no socket is open. */
+static void test_wake_is_real_time_and_reap_is_signal_driven(void) {
+    setup("normal");
+    usual_cfg();
+    CT_CHECK(PUMP(ready(), 3000));
+    pump_for(30);
+    int w = bt_link_service();
+    CT_CHECK(w > 1000 && w <= BT_SUP_PING_MS);
+    pid_t pid = stats().pid;
+    CT_CHECK(pid > 0);
+    kill(pid, SIGKILL);
+    CT_CHECK(PUMP(stats().deaths == 1, 3000));
+    CT_CHECK(bt_link_poll_fd() >= 0); /* the SIGCHLD pipe while there is no socket */
+    CT_CHECK(PUMP(waitpid(pid, NULL, WNOHANG) < 0 && errno == ECHILD, 3000)); /* reaped, with no 100 ms timer */
+    bt_link_reset();
+}
+
 static void test_silence_kills(void) {
     setup("hang");
     usual_cfg();
@@ -696,6 +714,7 @@ int main(int argc, char **argv) {
     CT_RUN(test_remote_disconnect);
     CT_RUN(test_backoff_and_cap);
     CT_RUN(test_no_adapter);
+    CT_RUN(test_wake_is_real_time_and_reap_is_signal_driven);
     CT_RUN(test_silence_kills);
     CT_RUN(test_loop_stall_is_not_silence);
     CT_RUN(test_deaths_reset_after_healthy_ready);

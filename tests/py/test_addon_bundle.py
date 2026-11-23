@@ -397,12 +397,12 @@ async def test_a_bundle_applied_while_the_hello_is_answered_is_not_lost(client, 
     from harmony_addon import channel
 
     await apply(client)
-    real, calls = channel._bundle_frame, []
+    real, calls, loop = channel._bundle_frame, [], asyncio.get_running_loop()
 
-    def building(app, hub):
+    def building(app, hub):  # runs in the executor
         frame = real(app, hub)
         if not calls:  # an apply lands while the first frame is being built
-            channel.on_apply(app, hub)
+            loop.call_soon_threadsafe(channel.on_apply, app, hub)
         calls.append(1)
         return frame
 

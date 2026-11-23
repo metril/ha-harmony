@@ -40,7 +40,7 @@ static void key_event(ra_input_t *in, const struct input_event *ev, uint64_t now
     for (int i = 0; i < RA_MAX_HELD && !h; i++)
       if (!in->held[i].code) h = &in->held[i];
     if (!h) return;
-    bool pass = in->sink.gate(in->sink.ctx, now);
+    bool pass = in->sink.gate(in->sink.ctx, now, false);
     *h = (ra_held_t){.evdev = ev->code, .code = code, .down_ms = now, .next_hold_ms = now + RA_HOLD_DELAY_MS,
                      .suppressed = !pass};
     if (pass) in->sink.emit(in->sink.ctx, code, HP_KEY_ACTION_PRESS);
@@ -83,7 +83,7 @@ void ra_input_feed(ra_input_t *in, const struct input_event *ev, uint64_t now) {
     if (ev->code == BTN_TOUCH) {
       if (ev->value == 1 && !in->touching) {
         in->touching = true;
-        in->touch_suppressed = !in->sink.gate(in->sink.ctx, now);
+        in->touch_suppressed = !in->sink.gate(in->sink.ctx, now, true);
         if (in->sink.touch && !in->touch_suppressed) in->sink.touch(in->sink.ctx, in->tx, in->ty, true);
       } else if (ev->value == 0 && in->touching) {
         touch_release(in, now);

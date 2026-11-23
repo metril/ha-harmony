@@ -33,6 +33,7 @@ static uint32_t tick_cb(void) { return (uint32_t)g_tick_sys->ops.now_ms(g_tick_s
 static void show_cur(app_t *a) {
   unsigned have = hp_store_count(&a->store), need = hp_store_need(&a->store);
   ra_display_note(&a->display, RA_WHY_PAGE, 0);
+  a->touch_dirty = true; /* a page change shows at once */
   hp_page_t p;
   if ((hp_store_complete(&a->store) || a->partial) && a->cur >= 0 && hp_store_ready(&a->store, (uint8_t)a->cur) &&
       hp_store_get(&a->store, (uint8_t)a->cur, &p) == 0) { /* never with a stale or missing custom theme */
@@ -153,11 +154,12 @@ static void sink_emit(void *ctx, uint8_t code, uint8_t action);
 static bool sink_widget(void *ctx, const hp_widget_t *w) {
   app_t *a = ctx;
   if (a->v2 && on_stored_page(a) && ra_ui_is_np(&a->ui, w)) { /* the Now Playing card: play / pause, as the hard keys */
-    uint8_t code = (a->ui.np.flags & 1) ? a->key_pause : a->key_play;
-    if (code != HP_KEY_NONE) {
-      sink_emit(a, code, HP_KEY_ACTION_PRESS);
-      sink_emit(a, code, HP_KEY_ACTION_RELEASE);
+    /* one toggle key, whatever the (possibly stale) card says; the glyph flips now and the hub's push corrects it */
+    if (a->key_play_pause != HP_KEY_NONE) {
+      sink_emit(a, a->key_play_pause, HP_KEY_ACTION_PRESS);
+      sink_emit(a, a->key_play_pause, HP_KEY_ACTION_RELEASE);
     }
+    ra_ui_np_toggle(&a->ui, a->input_ms);
     return true;
   }
   if (!a->v2 || !on_stored_page(a) || !w->has_bind) return false;
@@ -201,15 +203,16 @@ static void sink_emit(void *ctx, uint8_t code, uint8_t action) {
   send_pending(a); /* full: the ones waiting go first, so keys never reorder */
   if (a->link.send_key(a->link.ctx, code, action) < 0) ra_logf(&a->sys, "send_key %u/%u failed", code, action);
 }
-static bool sink_gate(void *ctx, uint64_t now) {
+static bool sink_gate(void *ctx, uint64_t now, bool touch) {
   app_t *a = ctx;
-  bool pass = ra_power_input(&a->power, now);
+  bool pass = ra_power_input(&a->power, now, touch);
   if (pass) ra_ui_toast_dismiss(&a->ui); /* any touch or key clears the toast */
   return pass;
 }
 static void sink_touch(void *ctx, int x, int y, bool down) {
   app_t *a = ctx;
   ra_display_note(&a->display, down ? RA_WHY_PRESS : RA_WHY_RELEASE, a->input_ms);
+  a->touch_dirty = true; /* a press / release changes pixels: draw them now */
   if (down && a->link.touched) a->link.touched(a->link.ctx);
   if (down) ra_ui_press_at(&a->ui, x, y);
   else ra_ui_release(&a->ui);
@@ -246,8 +249,7 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
   a->key_exit = (k = hp_hwkey_by_name("Exit")) ? k->id : HP_KEY_NONE;
   a->key_home = (k = hp_hwkey_by_name("Home")) ? k->id : HP_KEY_NONE;
   a->key_fav = (k = hp_hwkey_by_name("Favorites")) ? k->id : HP_KEY_NONE;
-  a->key_play = (k = hp_hwkey_by_name("Play")) ? k->id : HP_KEY_NONE;
-  a->key_pause = (k = hp_hwkey_by_name("Pause")) ? k->id : HP_KEY_NONE;
+  a->key_play_pause = (k = hp_hwkey_by_name("PlayPause")) ? k->id : HP_KEY_NONE;
   ra_cover_reset();
   ra_input_sink_t sink = {.ctx = a, .emit = sink_emit, .gate = sink_gate, .activity = sink_activity, .page = sink_page,
                        .touch = sink_touch, .widget = sink_widget, .bar = sink_bar};
@@ -511,8 +513,11 @@ void app_step(app_t *a, unsigned max_wait_ms) {
       if (ready[i]) ra_input_read(&a->input, i, now);
   ra_input_tick(&a->input, now);
   if (w > 0 || a->ntx) {
-    lv_refr_now(a->display.disp); /* touch / key feedback: pixels now, not at the next refresh timer */
-    send_pending(a);              /* then the radio */
+    /* A touch press / release or a page change draws now (pixels, then the radio); a plain hard key sends first and
+     * draws nothing here (the refresh timer picks up any other change). */
+    if (a->touch_dirty) lv_refr_now(a->display.disp);
+    a->touch_dirty = false;
+    send_pending(a);
   }
   ra_power_tick(&a->power, now);
   if (a->power.batt_polls != a->last_batt_polls) {

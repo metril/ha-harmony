@@ -113,7 +113,7 @@ class FakeClient:
         return {}
 
 
-async def test_feed_is_event_driven_and_sends_cover_then_text(hass):
+async def test_feed_is_event_driven_and_sends_text_then_cover(hass):
     client, fetched = FakeClient(), []
 
     async def fetch(url):
@@ -133,7 +133,7 @@ async def test_feed_is_event_driven_and_sends_cover_then_text(hass):
     _state(hass, PLEX, "playing", media_position_updated_at=dt_util.utcnow(), **PLEX_ATTRS)
     await hass.async_block_till_done()
     cmds = [c for c, _ in client.sent]
-    assert cmds.count("cover") == 1 and cmds[-2:] == ["cover", "now_playing"]
+    assert cmds.count("cover") == 1 and cmds[-2:] == ["now_playing", "cover"]
     cover = next(a for c, a in client.sent if c == "cover")
     assert len(base64.b64decode(cover["data"])) == 1760 and cover["cid"] == zlib.crc32(
         b"/library/metadata/42"
@@ -152,7 +152,7 @@ async def test_feed_is_event_driven_and_sends_cover_then_text(hass):
     # a remote that joins later is shown the current state again, cover included
     feed.on_remote_attached(1)
     await hass.async_block_till_done()
-    assert [c for c, _ in client.sent[-2:]] == ["cover", "now_playing"] and len(fetched) == 1
+    assert [c for c, _ in client.sent[-2:]] == ["now_playing", "cover"] and len(fetched) == 1
     feed.stop()
     await asyncio.sleep(0)
 
@@ -189,11 +189,18 @@ async def test_attach_resend_runs_pos_on_and_a_failed_cover_fetch_is_retried(has
     assert (
         sum("cover for" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records) == 1
     )
-    _state(hass, PLEX, "paused", **PLEX_ATTRS)  # the next push tries again, and does not warn twice
+    _state(hass, PLEX, "paused", **PLEX_ATTRS)  # a failed cover is not retried on every push
     await hass.async_block_till_done()
-    assert len(calls) == 2 and [c for c, _ in client.sent].count("cover") == 1
+    assert len(calls) == 1 and [c for c, _ in client.sent].count("cover") == 0
+    now[0] += timedelta(
+        seconds=npl._COVER_RETRY_S + 1
+    )  # an event after the long interval retries once
     _state(hass, PLEX, "playing", media_position_updated_at=now[0], **PLEX_ATTRS)
     await hass.async_block_till_done()
+    assert len(calls) == 2 and [c for c, _ in client.sent].count("cover") == 1
+    assert (
+        sum("cover for" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records) == 1
+    )
     now[0] += timedelta(seconds=30)
     feed.on_remote_attached(1)
     await hass.async_block_till_done()
@@ -358,7 +365,7 @@ async def test_attach_push_errors_are_logged(hass, caplog):
     _playing(hass, now)
     feed.on_remote_attached(1)
     await hass.async_block_till_done()
-    assert "attach push failed" in caplog.text
+    assert "now playing push failed" in caplog.text
 
 
 ST = "org.smarttube.stable"
@@ -454,3 +461,98 @@ async def test_url_cover_uses_the_url_fetcher_and_text_survives_failure(hass):
     assert [c for c, _ in client.sent] == ["now_playing"]
     await feed._push(npl.Playing(8, npl.PLAYING, 0, 60, "P", "", "/api/x"), (1,))
     assert ents == [feed.plex] and urls == [url]
+
+
+def _feed2(hass, client, now, fetch=None, remotes=(1,)):
+    return npl.NowPlayingFeed(
+        hass,
+        client,
+        lambda: remotes,
+        lambda r: True,
+        lambda coro, name: hass.async_create_task(coro, name),
+        fetch=fetch,
+        clock=lambda: now[0],
+    )
+
+
+async def test_cover_is_sent_per_remote_and_only_to_a_remote_lacking_it(hass):
+    client, now, calls = FakeClient(), [dt_util.utcnow()], []
+
+    async def fetch(url):
+        calls.append(url)
+        return _png()
+
+    feed = _feed2(hass, client, now, fetch, remotes=(1, 2))
+    feed.start()
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **PLEX_ATTRS)
+    await hass.async_block_till_done()
+    covers = [a["remote"] for c, a in client.sent if c == "cover"]
+    assert sorted(covers) == [1, 2]
+    feed.resend()  # an activity change: the remotes keep their covers
+    await hass.async_block_till_done()
+    assert [a["remote"] for c, a in client.sent if c == "cover"] == covers
+    feed.on_remote_attached(2)  # remote 2 rebooted: only it gets the cover again (from the cache)
+    await hass.async_block_till_done()
+    assert [a["remote"] for c, a in client.sent if c == "cover"] == covers + [2]
+    assert len(calls) == 1
+    feed.stop()
+
+
+async def test_reconnect_resends_text_and_cover(hass):
+    client, now = FakeClient(), [dt_util.utcnow()]
+
+    async def fetch(url):
+        return _png()
+
+    feed = _feed2(hass, client, now, fetch)
+    feed.start()
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **PLEX_ATTRS)
+    await hass.async_block_till_done()
+    n = len(client.sent)
+    feed.on_reconnect()
+    await hass.async_block_till_done()
+    assert [c for c, _ in client.sent[n:]] == ["now_playing", "cover"]
+    feed.stop()
+
+
+async def test_source_going_unavailable_sends_one_clear(hass):
+    client, now = FakeClient(), [dt_util.utcnow()]
+    feed = _feed2(hass, client, now)
+    feed.start()
+    _state(hass, SHIELD, "playing", app_id="com.example", media_title="Song")
+    await hass.async_block_till_done()
+    n = len(client.sent)
+    assert client.sent[-1][1]["flags"] == npl.PLAYING
+    _state(hass, SHIELD, "unavailable")
+    await hass.async_block_till_done()
+    _state(hass, SHIELD, "unknown")
+    await hass.async_block_till_done()
+    got = [a for c, a in client.sent[n:] if c == "now_playing"]
+    assert len(got) == 1 and got[0]["flags"] == 0 and got[0]["t1"] == ""
+    feed.stop()
+
+
+async def test_pushes_are_serialized_and_the_newest_state_goes_last(hass):
+    """A slow cover fetch holds the worker; events meanwhile fold into one pass with the newest state."""
+    client, now, gate = FakeClient(), [dt_util.utcnow()], asyncio.Event()
+
+    async def fetch(url):
+        await gate.wait()
+        return _png()
+
+    feed = _feed2(hass, client, now, fetch)
+    feed.start()
+    _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    _state(hass, PLEX, "playing", media_position_updated_at=now[0], **PLEX_ATTRS)
+    await asyncio.sleep(0.05)
+    _state(hass, PLEX, "paused", **PLEX_ATTRS)
+    feed.on_remote_attached(1)
+    feed.resend()
+    gate.set()
+    await hass.async_block_till_done()
+    flags = [a["flags"] for c, a in client.sent if c == "now_playing"]
+    assert flags[-1] == npl.PAUSED and flags[-1:] != [npl.PLAYING]
+    assert feed._task is None or feed._task.done()
+    feed.stop()

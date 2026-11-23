@@ -451,6 +451,22 @@ static void test_retry_state_machine(void) {
     CT_EQ(hp_sched_pending(&sc), 0);
 }
 
+/* Real interface detection watches address changes on a netlink socket for the poll set, with no recheck timer; an
+ * injected detect (above) keeps the timer. */
+static void test_address_watch_is_event_driven(void) {
+    hp_sched_t sc; g_now = 1000;
+    hp_sched_init(&sc, fake_clock, NULL);
+    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", NULL, NULL};
+    hp_mdns_srv_t m;
+    CT_EQ(hp_mdns_srv_start(&m, &sc, &o, "sim-hub", 8099, 1), 0);
+    if (hp_mdns_srv_wake_fd(&m) < 0) { fprintf(stderr, "note: no netlink here, skipped\n"); hp_mdns_srv_stop(&m); return; }
+    for (int i = 0; i < 6 && hp_sched_pending(&sc) > 0; i++) tick(&sc); /* the startup announcements */
+    CT_EQ(hp_sched_pending(&sc), 0); /* and nothing after them: no recheck or retry timer */
+    hp_mdns_srv_service(&m); /* nothing to read: harmless */
+    hp_mdns_srv_stop(&m);
+    CT_EQ(hp_mdns_srv_wake_fd(&m), -1);
+}
+
 int main(void) {
     CT_EQ(hp_mdns_svc_init(&S, "sim-hub", 8099, IP, 1), 0);
     CT_RUN(test_questions);
@@ -462,6 +478,7 @@ int main(void) {
     CT_RUN(test_max_name_build);
     CT_RUN(test_legacy_echo);
     CT_RUN(test_on_link);
+    CT_RUN(test_address_watch_is_event_driven);
     CT_RUN(test_holdoff);
     CT_RUN(test_backoff_fn);
     CT_RUN(test_retry_state_machine);

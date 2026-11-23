@@ -89,7 +89,8 @@ typedef struct {
   int cur;
   uint8_t stack[APP_STACK]; /* page ids, oldest first; the top is `cur` */
   uint8_t depth;
-  uint8_t key_play, key_pause;                          /* the Now Playing card's tap */
+  bool touch_dirty;                                     /* a touch press / release or page change since the last render */
+  uint8_t key_play_pause;                               /* the Now Playing card's tap (virtual key) */
   uint8_t key_up, key_down, key_exit, key_home, key_fav; /* logical ids of the hard keys the app handles itself */
   uint8_t swallowed;                                     /* bit 0..2: Up, Down, Exit were consumed at press: their holds / release too */
   unsigned last_batt_polls; /* power.batt_polls already shown in the status bar */

@@ -109,9 +109,15 @@ def _bundle_frame(app: web.Application, hub: str) -> dict[str, Any] | None:
     return None if b is None else {"t": "bundle", "rev": b["rev"], "body": b}
 
 
+async def _frame_off_loop(app: web.Application, hub: str) -> dict[str, Any] | None:
+    """The bundle frame, read from disk in an executor so a slow volume never stalls the loop (reads see whole files:
+    every write is an atomic replace)."""
+    return await asyncio.get_running_loop().run_in_executor(None, _bundle_frame, app, hub)
+
+
 async def _push(app: web.Application, conn: Conn) -> None:
     try:
-        frame = _bundle_frame(app, conn.hub)
+        frame = await _frame_off_loop(app, conn.hub)
     except web.HTTPException:
         await conn.send({"t": "error", "code": "store_error"})
         return
@@ -161,7 +167,7 @@ async def _on_ack(app: web.Application, conn: Conn, f: dict[str, Any]) -> None:
         return
     try:
         store = app[STORE_KEY]
-        state = _store_call(store.load, hub)
+        state = await asyncio.get_running_loop().run_in_executor(None, _store_call, store.load, hub)
         bundle = _bundle(hub, state)
         if (
             bundle is None or body["rev"] != bundle["rev"]
@@ -341,7 +347,7 @@ async def channel(request: web.Request) -> web.StreamResponse:
             True  # pushes now queue behind conn.lock, so a bundle applied from here on is not lost
         )
         try:
-            frame = _bundle_frame(app, hub)
+            frame = await _frame_off_loop(app, hub)
         except web.HTTPException:
             await conn.send({"t": "error", "code": "store_error"})
         else:

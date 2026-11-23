@@ -1226,6 +1226,15 @@ int ra_ui_set_np(ra_ui_t *ui, const ra_np_t *np) {
   return 0;
 }
 
+void ra_ui_np_toggle(ra_ui_t *ui, uint64_t now) {
+  if (ui->np_idx < 0 || (ui->np.flags != 1 && ui->np.flags != 2)) return;
+  ra_np_t n = ui->np;
+  n.pos = (uint16_t)np_pos(ui, now);
+  n.at = now;
+  n.flags = n.flags == 1 ? 2 : 1;
+  ra_ui_set_np(ui, &n);
+}
+
 void ra_ui_np_cover(ra_ui_t *ui, uint32_t cid) {
   if (ui->np_idx < 0 || !ui->np_art || ui->np.cid != cid) return;
   if (np_draw_art(ui) < 0) fail(ui);

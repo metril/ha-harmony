@@ -254,18 +254,18 @@ static void test_full_session_is_safe(void) {
   t += 20000;
   step_at(t);
   CT_EQ(app.power.state, RA_PW_OFF);
-  /* wake: the press that wakes is consumed, then normal again */
+  /* wake: a hard key acts and wakes (only a touch is swallowed while off) */
   fk_key(&fk, 0, 115, 1);
   fk_key(&fk, 0, 115, 0);
   t += 100;
   step_at(t);
   CT_EQ(app.power.state, RA_PW_ACTIVE);
-  CT_EQ(lk.nsent, sent_before_idle);
+  CT_EQ(lk.nsent, sent_before_idle + 2);
   fk_key(&fk, 0, 115, 1);
   fk_key(&fk, 0, 115, 0);
   t += 100;
   step_at(t);
-  CT_EQ(lk.nsent, sent_before_idle + 2);
+  CT_EQ(lk.nsent, sent_before_idle + 4);
 
   /* battery poll on a healthy cradle: no poweroff */
   t += 61000;
