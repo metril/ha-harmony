@@ -22,7 +22,7 @@ checks it again, and sends it to the hub; the editor never talks to the hub itse
 1. *Settings -> Add-ons -> Add-on store -> menu -> Repositories*: add `https://github.com/metril/ha-harmony`.
 2. Install **Harmony Editor**, start it, and open **Harmony** from the sidebar.
 
-The add-on image is built by the repository's `addon-publish` workflow from an `addon-v*` tag; if the
+The add-on image is built by the repository's `addon-publish` workflow from the release `v*` tag (or by hand); if the
 store shows no installable version, that image has not been published yet.
 
 ## Link it to the integration
@@ -172,7 +172,7 @@ returns to the previous version, and a revert can itself be reverted.
 
 The add-on is installed from the prebuilt image named by `image:` in `config.yaml`
 (`ghcr.io/metril/ha-harmony-editor-{arch}`, published by the `addon-publish` workflow on
-`addon-v*` tags). Supervisor local builds are not supported: the image needs the repository's
+release `v*` tags). Supervisor local builds are not supported: the image needs the repository's
 shared Python packages (`harmony_core`, `harmony_irdb`), which lie outside the `addon/` folder
 that is the only build context a local build receives.
 

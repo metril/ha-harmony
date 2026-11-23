@@ -1,10 +1,10 @@
 name: addon-publish
 
 # Publishes ghcr.io/metril/ha-harmony-editor-{amd64,aarch64}:<version> (what addon/config.yaml's
-# `image:` points the Supervisor at). Only on addon-v* tags or by hand, never on push.
+# `image:` points the Supervisor at). Called by release.yml on a `vX.Y.Z` tag (the addon-v* tag is
+# gone: one tag drives everything), or run by hand, never on push.
 on:
-  push:
-    tags: ["addon-v*"]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
         run: |
           version=$(sed -n 's/^version: "\(.*\)"$/\1/p' addon/config.yaml)
           [ -n "$version" ] || { echo "no version in addon/config.yaml"; exit 1; }
-          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "addon-v${version}" ]; then
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match addon/config.yaml version ${version}"
             exit 1
           fi
