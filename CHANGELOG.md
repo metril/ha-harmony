@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.7 (2026-11-23)
+
+- Diagnostics for stalled remote commands: timestamped hub log lines, a loop-stall watchdog, and logs for dropped keys, the RF link and Home Assistant connection drops. Update the hub and the remote.
+
 ## 0.4.6 (2026-11-22)
 
 - Now Playing shows cover art for media-session sources (e.g. SmartTube) from the session's `media_image_url` (HTTPS only, 10 s / 2 MiB bounded). Needs the Shield launcher's updated `Now playing` sensor; in SmartTube, turn off Player → "Disable playback notifications" so its session is visible.
