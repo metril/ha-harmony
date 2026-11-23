@@ -335,6 +335,13 @@ def test_session_fills_an_untitled_shield(hass):
     assert (p.t1, p.t2, p.flags, p.pos, p.dur) == ("Video", "Channel", npl.PLAYING, 15, 600)
 
 
+def test_session_iso_timestamp_still_advances(hass):
+    now = dt_util.utcnow()
+    shield = _state(hass, SHIELD, "playing", app_id=ST)
+    sess = _sess(hass, now=(now - timedelta(seconds=10)).isoformat())
+    assert npl.build(shield, None, now, APPS, "m16", sess).pos == 15
+
+
 def test_session_of_another_app_loses_to_a_titled_shield(hass):
     now = dt_util.utcnow()
     shield = _state(hass, SHIELD, "playing", app_id="org.xbmc.kodi", media_title="Movie")

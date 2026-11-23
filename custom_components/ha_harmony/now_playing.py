@@ -117,6 +117,8 @@ def _int(value: Any) -> int:
 def _position(attrs: Any, flags: int, now: datetime) -> int:
     pos = _int(attrs.get("media_position"))
     at = attrs.get("media_position_updated_at")
+    if isinstance(at, str):  # an MQTT sensor's attributes carry the timestamp as ISO text
+        at = dt_util.parse_datetime(at)
     if flags == PLAYING and isinstance(at, datetime):
         pos += max(int((now - at).total_seconds()), 0)
     return pos
