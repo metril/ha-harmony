@@ -173,7 +173,11 @@ def build(
         t2 = cut(f"{tag} · {title}") if title and has_glyphs(f"{tag} · {title}", font) else tag
     content = _text(a.get("media_content_id")) or title
     cid = zlib.crc32(content.encode()) & 0xFFFFFFFF if content else 0
-    picture = a.get("entity_picture") if on_plex else None
+    if sess is not None:
+        img = a.get("media_image_url")
+        picture = img if isinstance(img, str) and img.startswith("https://") else None
+    else:
+        picture = a.get("entity_picture") if on_plex else None
     return Playing(
         cid, flags, _position(a, flags, now), _int(a.get("media_duration")), t1, t2, picture
     )
@@ -202,6 +206,8 @@ def quantize_cover(raw: bytes) -> bytes:
 
 
 Fetch = Callable[[str], Awaitable[bytes | None]]
+_COVER_MAX = 2 * 1024 * 1024  # largest cover download accepted
+_COVER_TIMEOUT = 10  # seconds
 
 
 class NowPlayingFeed:
@@ -221,6 +227,7 @@ class NowPlayingFeed:
         plex_apps: Iterable[str] = DEFAULT_PLEX_APPS,
         font: str = DEFAULT_FONT,
         fetch: Fetch | None = None,
+        fetch_url: Fetch | None = None,
         clock: Callable[[], datetime] = dt_util.utcnow,
     ) -> None:
         self.hass, self.client = hass, client
@@ -229,6 +236,7 @@ class NowPlayingFeed:
         self.session = self._opt_session = session
         self._opt_shield, self._opt_plex = shield, plex
         self._fetch = fetch or self._fetch_picture
+        self._fetch_url = fetch_url or self._fetch_https
         self._clock = clock
         self._unsub: Callable[[], None] | None = None
         self._task: asyncio.Task[None] | None = None
@@ -361,7 +369,8 @@ class NowPlayingFeed:
             return
         if cur.cid and cur.picture and self._cover_for != cur.cid:
             try:
-                raw = await self._fetch(self.plex)
+                url = cur.picture.startswith("https://")
+                raw = await (self._fetch_url(cur.picture) if url else self._fetch(self.plex))
             except Exception as exc:  # noqa: BLE001  (the cover is optional: the text must still go out)
                 raw, why = None, f"fetch error: {exc!r}"
             else:
@@ -381,7 +390,7 @@ class NowPlayingFeed:
                 self.cover_errors += 1
             if why and cur.cid not in self._warned:  # retried on the next push; logged once per cid
                 self._warned.add(cur.cid)
-                _LOGGER.warning("cover for %s: %s", self.plex, why)
+                _LOGGER.warning("cover for %s: %s", "URL" if url else self.plex, why)
         if self._cover and self._cover[0] == cur.cid and (force or self._cover_sent != cur.cid):
             for r in targets:
                 if await self._send(
@@ -431,6 +440,22 @@ class NowPlayingFeed:
             _LOGGER.debug("%s not delivered: %s", command, exc)
             return False
         return True
+
+    async def _fetch_https(self, url: str) -> bytes | None:
+        """A session cover over HTTPS: bounded in time and size, images only."""
+        from aiohttp import ClientTimeout
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        sess = async_get_clientsession(self.hass)
+        async with sess.get(url, timeout=ClientTimeout(total=_COVER_TIMEOUT)) as resp:
+            if resp.status != 200 or not resp.headers.get("Content-Type", "").startswith("image/"):
+                return None
+            body = bytearray()
+            async for chunk in resp.content.iter_chunked(65536):
+                body += chunk
+                if len(body) > _COVER_MAX:
+                    return None
+        return bytes(body)
 
     async def _fetch_picture(self, entity_id: str) -> bytes | None:
         """The player's cover bytes, in process (no URL, token or TLS): the entity's own image getter."""

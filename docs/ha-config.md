@@ -254,7 +254,7 @@ androidtv player (state playing / paused / idle / off, attribute `app_id`); `now
 with the title and cover (Plex). `session_entity` is the Shield app's MQTT sensor for the active media
 session (state playing / paused / idle; attributes `app_id`, `media_title`, `media_artist`, `media_duration`,
 `media_position`, `media_position_updated_at` as ISO UTC). When Plex is not the open app and the session plays,
-its title and channel show if its `app_id` is the Shield's current app or the Shield reports no title. Now Playing uses them instead of the integration options when set.
+its title and channel show if its `app_id` is the Shield's current app or the Shield reports no title. The session's cover comes from its `media_image_url` attribute (an `https://` URL). Now Playing uses them instead of the integration options when set.
 
 An app button carries an optional `app_id` (a package name or a list). Without one it is inferred from the
 label or icon: plex = `com.plexapp.android`; youtube / smarttube = `org.smarttube.stable` and

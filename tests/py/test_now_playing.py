@@ -365,7 +365,7 @@ ST = "org.smarttube.stable"
 SESS = "sensor.shield_now_playing"
 
 
-def _sess(hass, state="playing", app=ST, now=None):
+def _sess(hass, state="playing", app=ST, now=None, **extra):
     return _state(
         hass,
         SESS,
@@ -376,6 +376,7 @@ def _sess(hass, state="playing", app=ST, now=None):
         media_duration=600,
         media_position=5,
         media_position_updated_at=now or dt_util.utcnow(),
+        **extra,
     )
 
 
@@ -411,3 +412,45 @@ def test_idle_session_is_ignored(hass):
     now = dt_util.utcnow()
     shield = _state(hass, SHIELD, "playing", app_id=ST)
     assert npl.build(shield, None, now, APPS, "m16", _sess(hass, "idle")).t1 == ""
+
+
+def test_session_cover_is_its_https_image_url(hass):
+    now = dt_util.utcnow()
+    shield = _state(hass, SHIELD, "playing", app_id=ST)
+    url = "https://i.ytimg.com/vi/x/hq.jpg"
+    assert (
+        npl.build(shield, None, now, APPS, "m16", _sess(hass, media_image_url=url)).picture == url
+    )
+    for bad in ("http://i.ytimg.com/x.jpg", None, 5):
+        sess = _sess(hass, media_image_url=bad)
+        assert npl.build(shield, None, now, APPS, "m16", sess).picture is None
+
+
+async def test_url_cover_uses_the_url_fetcher_and_text_survives_failure(hass):
+    url = "https://i.ytimg.com/vi/x/hq.jpg"
+    urls, ents = [], []
+
+    async def fetch_url(u):
+        urls.append(u)
+        raise OSError("down")
+
+    async def fetch(e):
+        ents.append(e)
+        return _png()
+
+    client = FakeClient()
+    feed = npl.NowPlayingFeed(
+        hass,
+        client,
+        lambda: (1,),
+        lambda r: True,
+        lambda coro, name: hass.async_create_task(coro, name),
+        fetch=fetch,
+        fetch_url=fetch_url,
+    )
+    play = npl.Playing(7, npl.PLAYING, 0, 60, "Video", "", url)
+    await feed._push(play, (1,))
+    assert urls == [url] and ents == [] and feed.cover_errors == 1
+    assert [c for c, _ in client.sent] == ["now_playing"]
+    await feed._push(npl.Playing(8, npl.PLAYING, 0, 60, "P", "", "/api/x"), (1,))
+    assert ents == [feed.plex] and urls == [url]
