@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.5 (2026-11-22)
+
+- Now Playing: new optional `media.session_entity` (the Shield launcher's `Now playing` MQTT sensor) gives a title, channel and position for apps the Android TV integration reports untitled, such as SmartTube. Plex keeps priority. Update the integration together with the add-on.
+- Repo-wide `ruff format` (generated icon/theme tables excluded).
+
 ## 0.4.4 (2026-11-22)
 
 - Hub: the boot hook now holds /dev/i2s for the daemon's whole life and hands it over (`--i2s-fd`), so a daemon crash, kill or OTA restart can no longer close the device and hard-freeze the hub. A missing or unopenable device counts as a failed boot. Update the hub (and re-run `tools/install_boot_hook.py`).

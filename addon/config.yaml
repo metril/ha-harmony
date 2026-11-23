@@ -1,5 +1,5 @@
 name: Harmony Editor
-version: "0.4.4"
+version: "0.4.5"
 slug: ha_harmony_editor
 description: Visual editor, IR database and preview for the Harmony hub (feeds the Harmony integration)
 url: https://github.com/metril/ha-harmony
