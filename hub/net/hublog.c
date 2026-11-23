@@ -223,10 +223,12 @@ bool hp_hublog_readable(const hp_hublog_t *l) {
 
 void hp_hublog_service(hp_hublog_t *l) {
     char junk[16];
+    /* Drain first, then re-arm under mu: a ship() racing with us either sees woken still set (its line is in the ring
+     * before our drain loop below finishes) or sees it cleared and writes a fresh byte. Clearing first lost that byte. */
+    while (read(l->wake[0], junk, sizeof junk) > 0) {}
     pthread_mutex_lock(&l->mu);
     l->woken = false;
     pthread_mutex_unlock(&l->mu);
-    while (read(l->wake[0], junk, sizeof junk) > 0) {}
     for (;;) {
         hp_logline_t e;
         pthread_mutex_lock(&l->mu);

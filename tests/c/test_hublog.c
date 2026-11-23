@@ -2,6 +2,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
+#include <sched.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -405,6 +407,45 @@ static void test_readable_only_after_a_push(void) {
     teardown(fd, path);
 }
 
+typedef struct { hp_hublog_t *l; int n; } shipper_t;
+static void *shipper(void *a) {
+    shipper_t *s = a;
+    for (int i = 0; i < s->n; i++) {
+        hp_log("hub: threaded %d", i);
+        if (i % 16 == 0) sched_yield();
+    }
+    return NULL;
+}
+
+/* A ship() from another thread interleaved with service passes never leaves lines queued with no wake byte. */
+static void test_threaded_ship_never_loses_the_wake(void) {
+    static sink_t s;
+    static hp_hublog_t l;
+    char path[] = "/tmp/hublogXXXXXX";
+    for (int round = 0; round < 50; round++) {
+        g_ms = 1000 + (uint32_t)round * 100000;
+        int fd = setup(&l, &s, path);
+        s.up = true;
+        s.n = 0;
+        l.tokens_m = l.wtokens_m = HP_LOG_BURST * 1000u;
+        pthread_t th;
+        shipper_t sh = {&l, 20};
+        CT_EQ(pthread_create(&th, NULL, shipper, &sh), 0);
+        for (int i = 0; i < 200; i++) {
+            if (hp_hublog_readable(&l)) hp_hublog_service(&l);
+            sched_yield();
+        }
+        pthread_join(th, NULL);
+        if (hp_hublog_readable(&l)) hp_hublog_service(&l);
+        pthread_mutex_lock(&l.mu);
+        unsigned left = l.count;
+        pthread_mutex_unlock(&l.mu);
+        CT_CHECK(left == 0 || hp_hublog_readable(&l)); /* queued lines always have a wake pending */
+        teardown(fd, path);
+        strcpy(path, "/tmp/hublogXXXXXX");
+    }
+}
+
 int main(void) {
     CT_RUN(test_hook_offset_survives_a_respawn);
     CT_RUN(test_rf_link_log_goes_through_hp_log);
@@ -418,6 +459,7 @@ int main(void) {
     CT_RUN(test_warnings_have_their_own_bucket);
     CT_RUN(test_overflow_drops_info_before_warnings);
     CT_RUN(test_readable_only_after_a_push);
+    CT_RUN(test_threaded_ship_never_loses_the_wake);
     CT_RUN(test_long_line_cut_in_the_ring_not_the_file);
     CT_RUN(test_child_pipe_is_nonblocking);
     CT_RUN(test_emit_needs_a_client);

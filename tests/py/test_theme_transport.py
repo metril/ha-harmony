@@ -22,6 +22,7 @@ FULL = {
     "icons": 50,
     "gen": 0,
     "pages": 0,
+    "boot": 1,
 }  # all caps, empty store
 MIDNIGHT = 1  # the base preset of the user theme
 

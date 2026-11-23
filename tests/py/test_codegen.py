@@ -365,14 +365,14 @@ def test_remote_info_and_tile_state_round_trip():
     assert ns["MESSAGES"]["remote_info"][1:] == (
         "both",
         (("remote", "u8", False), ("page_fmt", "u8", False), ("caps", "u8", False),
-         ("icons", "u8", False), ("gen", "u8", False), ("pages", "u8", False)),
+         ("icons", "u8", False), ("gen", "u8", False), ("pages", "u8", False), ("boot", "u16", False)),
     )  # fmt: skip
     assert ns["MESSAGES"]["tile_state"][1:] == (
         "rf",
         (("remote", "u8", False), ("page", "u8", False), ("tile", "u8", False),
          ("state", "u8", False), ("text", "str", False)),
     )  # fmt: skip
-    d = {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50, "gen": 167, "pages": 12}
+    d = {"remote": 1, "page_fmt": 2, "caps": 3, "icons": 50, "gen": 167, "pages": 12, "boot": 4660}
     assert ns["decode_ws"](ns["encode_ws"](T.REMOTE_INFO, d)) == (T.REMOTE_INFO, d)
     assert T.REMOTE_INFO == 18 and T.TILE_STATE == 19
     with pytest.raises(ns["ProtoError"]):

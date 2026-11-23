@@ -140,11 +140,11 @@ static int send_key(long remote, long key, long action) {
 static long g_stored_gen, g_stored_pages; /* --stored */
 
 static int send_info(long remote, long caps) {
-    hp_rf_val_t v[6] = {{.u = (uint32_t)remote}, {.u = 2}, {.u = (uint32_t)caps}, {.u = 50},
-                        {.u = (uint32_t)g_stored_gen}, {.u = (uint32_t)g_stored_pages}};
+    hp_rf_val_t v[7] = {{.u = (uint32_t)remote}, {.u = 2}, {.u = (uint32_t)caps}, {.u = 50},
+                        {.u = (uint32_t)g_stored_gen}, {.u = (uint32_t)g_stored_pages}, {.u = 0x5151}}; /* fixed nonce: the sim reboots every run */
     uint8_t payload[HP_RF_MSG_MAX];
     size_t plen = 0;
-    if (hp_rf_pack(HP_MSG_REMOTE_INFO, v, 6, payload, sizeof payload, &plen) < 0) return 1;
+    if (hp_rf_pack(HP_MSG_REMOTE_INFO, v, 7, payload, sizeof payload, &plen) < 0) return 1;
     uint32_t fails = hp_rf_link_status(&g_link).failures;
     if (hp_rf_link_send(&g_link, HP_MSG_REMOTE_INFO, payload, plen, (uint32_t)now_ms()) < 0) return 1;
     while (hp_rf_link_status(&g_link).queued) {

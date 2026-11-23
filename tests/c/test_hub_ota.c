@@ -231,6 +231,30 @@ static void test_loop_free_while_worker_runs(void) {
     free(x.img);
 }
 
+/* Shutdown during an async end: finish_on_exit waits for the worker, so the process never exits between arming and
+ * the rename, and the result is applied (restart set). */
+static void test_finish_on_exit_joins_the_worker(void) {
+    fx_t x;
+    hp_ota_t o;
+    fixture(&x, 12, OTA_TARGET_HUB, 2000);
+    setup(&o, &x);
+    int own = 1;
+    CT_EQ(hp_ota_begin(&o, &own, 1, (uint32_t)x.len, 12, x.sha), 0);
+    CT_EQ(send_all(&o, &own, &x, 0, 1000), 0);
+    CT_EQ(hp_ota_end_start(&o, &own), HP_OTA_ASYNC);
+    hp_ota_finish_on_exit(&o); /* SIGTERM path: no polling, just join */
+    CT_CHECK(!hp_ota_ending(&o) && o.restart);
+    size_t n = 0;
+    char *got = slurp(x.hub, &n);
+    CT_EQ(n, 2000); /* fully swapped, never half */
+    free(got);
+    char p[320];
+    snprintf(p, sizeof p, "%s/ota-build", x.dir);
+    CT_CHECK(exists(p));
+    hp_ota_finish_on_exit(&o); /* idempotent */
+    free(x.img);
+}
+
 static void test_busy_resume_offsets(void) {
     fx_t x;
     hp_ota_t o;
@@ -469,6 +493,9 @@ static void test_power_loss_between_link_and_rename(void) {
     char *got = slurp(x.hub, &n);
     CT_CHECK(n == 10 && !memcmp(got, "OLD-BINARY", 10));
     free(got);
+    char bp[320];
+    snprintf(bp, sizeof bp, "%s/ota-build", x.dir);
+    CT_CHECK(!exists(bp)); /* the old binary stays the build floor: ota-build is written only after the rename */
     free(x.img);
 }
 
@@ -541,6 +568,7 @@ int main(void) {
     ota_keypair_from_seed(seed, pk, sk);
     test_good_update();
     test_async_end();
+    test_finish_on_exit_joins_the_worker();
     test_loop_free_while_worker_runs();
     test_busy_resume_offsets();
     test_begin_validation();

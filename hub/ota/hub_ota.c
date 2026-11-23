@@ -191,8 +191,6 @@ static int arm_pending(void *v) {
     char note[64];
     snprintf(note, sizeof note, "build=%" PRIu32 "\nprev=%" PRIu32 "\n", a->build, a->o->min_build);
     if (write_small(a->o->pending, note) != 0) return -1;
-    snprintf(note, sizeof note, "%" PRIu32 "\n", a->build);
-    if (write_small(a->o->build_file, note) != 0) return -1; /* the hook puts "prev=" back if this build fails */
     if (a->o->swap_hook) a->o->swap_hook();
     return 0;
 }
@@ -229,14 +227,13 @@ static void *end_worker(void *arg) {
             int ar = ota_apply_staged_cb(o->staged, o->target, o->prev, o->min_build + 1, o->pubkey, &built, arm_pending, &arm);
             if (ar != OTA_OK) {
                 verify_rc = ar;
-                if (access(o->pending, F_OK) == 0) { /* armed, then the rename failed: undo */
-                    unlink(o->pending);
-                    snprintf(note, sizeof note, "%" PRIu32 "\n", o->min_build);
-                    write_small(o->build_file, note);
-                }
+                if (access(o->pending, F_OK) == 0) unlink(o->pending); /* armed, then the rename failed: disarm */
                 rc = ar == OTA_E_DOWNGRADE ? HP_OTA_E_DOWNGRADE : ar == OTA_E_IO ? HP_OTA_E_IO : HP_OTA_E_VERIFY;
             } else {
                 snprintf(note, sizeof note, "%" PRIu32 "\n", built);
+                /* After the rename, never before: a cut between arming and renaming leaves the old binary, so the build
+                 * floor must still be the old one. A cut right after the rename is covered by the compiled-in build id. */
+                write_small(o->build_file, note);
                 unlink(o->rollback);
                 write_small(o->restart_file, note);
             }
@@ -266,6 +263,12 @@ int hp_ota_end_start(hp_ota_t *o, const void *owner) {
         return HP_OTA_E_IO; /* still resumable */
     }
     return HP_OTA_ASYNC;
+}
+
+/* Shutdown: let a running worker finish (it is bounded by its own file work) so the process never exits between arming
+ * the pending marker and the rename. Applies its result like a normal completion (sets restart on success). */
+void hp_ota_finish_on_exit(hp_ota_t *o) {
+    if (o->ending) (void)hp_ota_end_done(o, NULL, NULL, NULL);
 }
 
 int hp_ota_done_fd(const hp_ota_t *o) { return o->done[0]; }

@@ -97,7 +97,7 @@ static void test_remote_info(void) {
     uint8_t buf[HP_RF_MSG_MAX];
     size_t n = 0;
     CT_EQ(hp_rf_pack(HP_MSG_REMOTE_INFO, v, 7, buf, sizeof buf, &n), 0);
-    const uint8_t want[] = {1, 2, 3, 50, 0xA7, 12, 0xEF, 0xBE}; /* ..., gen of the stored v2 set, its page count, boot nonce */
+    const uint8_t want[] = {1, 2, 3, 50, 0xA7, 12, 0xBE, 0xEF}; /* ..., gen of the stored v2 set, its page count, boot nonce */
     CT_EQ(n, sizeof want);
     CT_MEM_EQ(buf, want, sizeof want);
     CT_EQ(hp_rf_unpack(HP_MSG_REMOTE_INFO, buf, n, o, 7), 0);

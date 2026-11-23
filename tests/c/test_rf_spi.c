@@ -971,7 +971,8 @@ static void test_link_transition_logs(void) {
     ms_sleep(30);
     CT_EQ(cap_count(&c, "link up (slot 2, status 0x87, wpid 4021)"), 2);
     CT_EQ(cap_count(&c, "link lost (status 0x47)"), 1);
-    CT_EQ(cap_total(&c), 3); /* exactly one line per transition, no debug lines */
+    CT_EQ(cap_count(&c, "control report dropped"), 1); /* the other slot's report */
+    CT_EQ(cap_total(&c), 4); /* one line per transition plus that drop, no debug lines */
     hp_rf_spi_destroy(t);
 }
 
@@ -992,6 +993,8 @@ static void test_read_error_backs_off(void) {
     pthread_mutex_unlock(&f.mu);
     hp_rf_spi_destroy(t); /* SIGUSR1 stand-in cuts the sleep */
 }
+static void wait_idle(fake_t *f);
+
 
 static void bad_report(fake_t *f, uint8_t first) {
     const uint8_t r[5] = {first, 0x09, 0x00, 0x00, 0x00};

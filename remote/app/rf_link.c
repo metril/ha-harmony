@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "remote/app/rf_link.h"
 
 #include <stdio.h>

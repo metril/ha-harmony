@@ -1652,15 +1652,15 @@ static bool key_stale(hub_ctx_t *h, unsigned key) {
 
 /* The remote id a frame names (key_event, battery, remote_info lead with it), -1 for any other. */
 static int rf_msg_remote(const hp_rf_msg_t *m) {
-    hp_rf_val_t v[6];
-    size_t n = m->type == HP_MSG_REMOTE_INFO ? 6 : 3;
+    hp_rf_val_t v[7];
+    size_t n = m->type == HP_MSG_REMOTE_INFO ? 7 : 3;
     if (m->type != HP_MSG_KEY_EVENT && m->type != HP_MSG_BATTERY && m->type != HP_MSG_REMOTE_INFO) return -1;
     if (hp_rf_unpack(m->type, m->payload, m->len, v, n) != 0 || v[0].u > 255) return -1;
     return (int)v[0].u;
 }
 
 static void handle_rf_msg(hub_ctx_t *h, const hp_rf_msg_t *m) {
-    hp_rf_val_t v[6];
+    hp_rf_val_t v[7];
     rf_link_up(h, rf_msg_remote(m)); /* a frame proves the link is up, and its link-up must precede what the frame says */
     if (m->type == HP_MSG_KEY_EVENT && hp_rf_unpack(m->type, m->payload, m->len, v, 3) == 0) {
         if (v[2].u != HP_KEY_ACTION_RELEASE && key_stale(h, (unsigned)v[1].u)) return;

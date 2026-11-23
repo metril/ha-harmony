@@ -294,7 +294,7 @@ static void test_full_timer_queue_drops_instead_of_back_to_back(void) {
     c.u.p.proto = HP_IR_NEC;
     c.u.p.addr = 4;
     c.u.p.cmd = 8;
-    CT_EQ(hp_irout_send_cb(&out, &ir, &c, 1, 5, 1, done_cb, NULL), 1); /* line free: sent now */
+    CT_EQ(hp_irout_send_cb(&out, &ir, &c, 1, 5, 1, done_cb, NULL), 0); /* line free: sent now (0), done not called */
     g_done_rc = 0;
     CT_EQ(hp_irout_send_cb(&out, &ir, &c, 1, 6, 1, done_cb, NULL), 1); /* busy: deferred, no timer to wake it */
     CT_EQ(g_done_rc, -HP_E_BUSY);

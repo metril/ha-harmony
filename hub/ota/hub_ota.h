@@ -12,7 +12,7 @@
  *                   hub.prev is in place, immediately before the rename; removed by the hook at the health mark,
  *                   or by us if the apply fails. A cut before the rename leaves hub.prev == hub (same inode), so
  *                   the hook's rollback is a no-op.
- *   ota-build       the installed build (the hook restores M from "prev=M" on rollback)
+ *   ota-build       the installed build; written after the rename (the hook restores M from "prev=M" on rollback)
  *   ota-restart     asks the hook to relaunch immediately (the exit status is not visible to it)
  *   ota-rollback    written by the hook after it restored hub.prev: "build=N" "reason=..." lines */
 
@@ -87,6 +87,7 @@ int hp_ota_chunk(hp_ota_t *o, const void *owner, uint32_t offset, const uint8_t 
 #define HP_OTA_ASYNC (-1)
 int hp_ota_end_start(hp_ota_t *o, const void *owner);
 int hp_ota_done_fd(const hp_ota_t *o); /* -1 when no worker was ever started */
+void hp_ota_finish_on_exit(hp_ota_t *o); /* join a running worker before teardown */
 bool hp_ota_ending(const hp_ota_t *o);
 /* Collects the finished worker. Returns what hp_ota_end would have (HP_OTA_OK or HP_OTA_E_*) and fills *build_out
  * on success. *owner_out / *owner_alive_out: who asked and whether that connection is still open (reply only if so).
