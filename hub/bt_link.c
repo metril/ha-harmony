@@ -1,7 +1,7 @@
 /* bt_link for builds with Bluetooth: runs and supervises `hub bt-helper` (hub/bt/bt_ipc.h) and serves the hub/bt_link.h contract from
  * a cached snapshot. Everything runs on the event-loop thread from bt_link_service(); nothing blocks.
  *
- *   helper:  absent -> (wanted) -> bluetoothd stop (once per boot, only if running) -> spawned -> STARTING -> READY
+ *   helper:  absent -> (wanted) -> defensive bluetoothd kill (once per boot, only if present) -> spawned -> STARTING -> READY
  *   failure: malformed frame / 15 s of silence / exit  -> SIGKILL, cache cleared, engine told, backoff 5/30/120 s, at most
  *            BT_SUP_MAX_RESPAWNS respawns per boot, then status DISABLED. A death never touches the hub's boot-health state.
  *   stop:    no config entries and no window -> SIGTERM, SIGKILL after 2 s; not a failure.
@@ -77,10 +77,7 @@ static struct {
     uint8_t token;
     unsigned deaths, spawns, key_drops, bad_frames;
     bool disabled, io_err;
-    int bz;               /* 0 not looked at, 1 TERM sent, 2 KILL sent, 3 done */
-    uint64_t bz_deadline;
-    uint64_t bz_next;     /* next backoff check of the bluetoothd stop */
-    unsigned bz_step;     /* its current backoff, ms */
+    bool bz;              /* the stock bluetoothd was looked at this boot */
     /* io */
     uint8_t rx[RX_CAP];
     size_t rx_n;
@@ -510,42 +507,18 @@ static int default_bluetoothd_signal(int sig) {
     return sent;
 }
 
-/* Non-blocking stop of the stock daemon before the first spawn of a boot. Returns true when the spawn may go ahead. */
-static bool bluetoothd_clear(uint64_t now) {
-    if (L.hk.skip_bluetoothd || L.bz == 3) return true;
+/* The boot hook (tools/boot/rcS.harmony) keeps stock bluetoothd from ever starting while our firmware is enabled, so
+ * normally there is nothing here. Defensive only: if one is present anyway (hook mount failed, a manual start) it is
+ * SIGKILLed once and the helper spawns at once, with no wait. This kernel (MIPS 2.6.31) has no pidfd and no exit
+ * notification for a non-child, and the hub forbids polling; if the dying daemon still holds the controller the helper
+ * reports no_adapter and the ordinary spawn backoff retries. */
+static void bluetoothd_clear(void) {
+    if (L.hk.skip_bluetoothd || L.bz) return;
+    L.bz = true;
     int (*sig)(int) = L.hk.bluetoothd_signal ? L.hk.bluetoothd_signal : default_bluetoothd_signal;
-    if (L.bz == 0) {
-        if (sig(0) == 0) {
-            hp_log("hub: bluetooth: stock bluetoothd not found, nothing to stop\n");
-            L.bz = 3;
-            return true;
-        }
-        hp_log("hub: bluetooth: stopping stock bluetoothd (SIGTERM); hciattach is left running (it attaches the controller)\n");
-        sig(SIGTERM);
-        L.bz = 1;
-        L.bz_deadline = now + 3000;
-        L.bz_step = 0;
-        L.bz_next = 0;
-        return false;
-    }
-    if (sig(0) == 0) {
-        hp_log("hub: bluetooth: stock bluetoothd stopped\n");
-        L.bz = 3;
-        return true;
-    }
-    if (now < L.bz_deadline) return false;
-    if (L.bz == 1) {
-        hp_log("hub: bluetooth: bluetoothd ignored SIGTERM, sending SIGKILL\n");
-        sig(SIGKILL);
-        L.bz = 2;
-        L.bz_deadline = now + 1000;
-        L.bz_step = 0;
-        L.bz_next = 0;
-        return false;
-    }
-    hp_log("hub: bluetooth: bluetoothd still running after SIGKILL, starting the helper anyway\n");
-    L.bz = 3; /* gave up waiting: spawn anyway, the helper reports no_adapter if the controller is still taken */
-    return true;
+    if (sig(0) == 0) return;
+    hp_log("hub: bluetooth: stock bluetoothd is running (the boot hook should have prevented it); SIGKILL, spawning without waiting\n");
+    sig(SIGKILL);
 }
 
 static void spawn(uint64_t now) {
@@ -1070,7 +1043,10 @@ int bt_link_service(void) {
     }
     L.last_svc = now ? now : 1;
     if (L.deaths && L.ready_at && running() && L.st.status == BT_READY && now - L.ready_at >= BT_SUP_HEALTHY_MS) L.deaths = 0; /* a healthy stretch forgives earlier crashes */
-    if (!running() && !L.disabled && wanted(now) && L.reap == 0 && now >= L.next_spawn && bluetoothd_clear(now)) spawn(now);
+    if (!running() && !L.disabled && wanted(now) && L.reap == 0 && now >= L.next_spawn) {
+        bluetoothd_clear();
+        spawn(now);
+    }
     if (L.rebuild) {
         rebuild();
         remotes_lost_check();
@@ -1089,17 +1065,7 @@ int bt_link_service(void) {
         if (L.ping_at) WAKE(L.ping_at + BT_SUP_SILENCE_MS);
         if (L.win_closed_at && !(L.n_ch + L.n_cr > 0 || L.window != BT_WIN_NONE || L.pend_pair)) WAKE(L.win_closed_at + BT_SUP_LINGER_MS); /* the linger ends: stop the helper then */
     } else if (!L.disabled && wanted(now)) {
-        if (L.bz && L.bz != 3) {
-            /* The stock bluetoothd is not our child and this kernel (MIPS 2.6.31) has no pidfd (5.3) nor a process-exit
-             * inotify/proc-connector, so its exit cannot be waited on as an event. One bounded geometric backoff
-             * (100, 200, 400, 800 ms) up to the SIGTERM/SIGKILL deadline, instead of a flat 50 ms retry. */
-            if (now >= L.bz_next) {
-                L.bz_step = L.bz_step ? (L.bz_step * 2 > 800 ? 800 : L.bz_step * 2) : 100;
-                L.bz_next = now + L.bz_step;
-            }
-            WAKE(L.bz_next < L.bz_deadline ? L.bz_next : L.bz_deadline);
-        }
-        else if (L.reap == 0) WAKE(L.next_spawn);
+        if (L.reap == 0) WAKE(L.next_spawn);
     }
     if (L.reap > 0) WAKE(L.kill_at); /* SIGCHLD wakes the poll (bt_link_poll_fd); this is the SIGKILL deadline */
 #undef WAKE
