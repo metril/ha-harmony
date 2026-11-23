@@ -38,6 +38,7 @@ typedef struct fake {
   uint8_t rx[64][64];
   size_t rxlen[64];
   int rxh, rxn, intr;
+  int blocked; /* the reader is parked in read() with nothing queued: it has finished the last frame */
   _Atomic uint64_t now;
   struct fake *peer;
   int drop_acks; /* swallow this many outgoing ack frames */
@@ -115,7 +116,11 @@ static ssize_t f_read(void *c, int fd, void *b, size_t cap) {
   fake_t *f = c;
   (void)fd; (void)cap;
   pthread_mutex_lock(&f->mu);
-  while (!f->rxn && !f->intr) pthread_cond_wait(&f->cv, &f->mu);
+  while (!f->rxn && !f->intr) {
+    f->blocked = 1;
+    pthread_cond_wait(&f->cv, &f->mu);
+  }
+  f->blocked = 0;
   ssize_t r;
   if (f->rxn) {
     r = (ssize_t)f->rxlen[f->rxh];
@@ -244,9 +249,25 @@ static void settle(int rounds) {
 /* every object either side has queued is acked */
 #define DRAIN() WAIT_FOR(hp_rf_link_status(&rf.link).queued == 0 && hp_rf_link_status(&hub_link).queued == 0)
 
+/* Both fake radios idle: nothing queued for a reader and each reader parked in read(). A frame in flight (fed, or
+ * read but not yet handed to the link) would otherwise let a fake-clock jump outrun it and fire a spurious retry. */
+static int chip_idle(fake_t *f) {
+  pthread_mutex_lock(&f->mu);
+  int r = !f->rxn && f->blocked;
+  pthread_mutex_unlock(&f->mu);
+  return r;
+}
+static void quiesce(void) {
+  for (int i = 0; i < 20000 && !(chip_idle(&fh) && chip_idle(&fr)); i++) ms_sleep(1);
+}
+
 static void tick(uint64_t ms) {
   fk.now += ms;
-  settle(3);
+  for (int i = 0; i < 3; i++) {
+    quiesce();
+    settle(1);
+  }
+  quiesce();
 }
 
 /* The radios' link-up reports (bench, docs/hardware/hub-rf-cc2544.md): neither side is given a slot,
@@ -580,6 +601,7 @@ static void test_now_playing_card_and_cover_over_rf(void) {
   CT_EQ(app.ui.np_idx, -1); /* nothing playing: the cards stay */
   CT_EQ(send_np(0xC0FFEE, 1, 247, 2706, "VisionQuest", "S1 E2"), 0);
   TWAIT(app.ui.np_idx >= 0);
+  DRAIN(); /* the 8-slot send queue must be free of the np_update before the 8 slices go in */
   CT_EQ(app.ui.np.cid, 0xC0FFEEu);
   CT_EQ(app.ui.np.pos, 247);
   CT_EQ(app.ui.np.dur, 2706);
