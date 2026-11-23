@@ -1,6 +1,9 @@
 #include "remote/app/rf_link.h"
 
+#include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "hub/hp_errors.h"
 #include "hub/rf/rf_payload.h"
@@ -231,12 +234,28 @@ static void store_view(const rf_link_t *l, uint8_t *gen, uint8_t *pages) {
   *pages = have ? (uint8_t)hp_store_count(l->store) : 0;
 }
 
+/* A fresh nonce per process start (the remote app restarts with the device): /dev/urandom, else the clock. */
+static uint16_t boot_nonce(void) {
+  uint16_t n = 0;
+  FILE *f = fopen("/dev/urandom", "rb");
+  if (f) {
+    if (fread(&n, sizeof n, 1, f) != 1) n = 0;
+    fclose(f);
+  }
+  if (!n) {
+    struct timespec t;
+    clock_gettime(CLOCK_REALTIME, &t);
+    n = (uint16_t)(t.tv_nsec ^ (t.tv_sec << 7) ^ getpid());
+  }
+  return n;
+}
+
 static void send_info(rf_link_t *l, uint64_t now) {
   uint8_t gen, pages;
   store_view(l, &gen, &pages);
-  hp_rf_val_t v[6] = {{.u = l->remote}, {.u = RF_LINK_PAGE_FMT}, {.u = RF_LINK_CAPS}, {.u = RA_ICON_MAX},
-                      {.u = gen}, {.u = pages}};
-  if (send_msg(l, HP_MSG_REMOTE_INFO, v, 6, now) < 0) {
+  hp_rf_val_t v[7] = {{.u = l->remote}, {.u = RF_LINK_PAGE_FMT}, {.u = RF_LINK_CAPS}, {.u = RA_ICON_MAX},
+                      {.u = gen}, {.u = pages}, {.u = l->boot}};
+  if (send_msg(l, HP_MSG_REMOTE_INFO, v, 7, now) < 0) {
     l->next_info_ms = now + RF_LINK_RETRY_MS;
     return;
   }
@@ -414,6 +433,7 @@ int rf_link_open(rf_link_t *l, const hp_rf_spi_cfg_t *cfg) {
   if (cfg->debug) hp_rf_link_set_log(&l->link, cfg->log ? cfg->log : hp_rf_log_stderr, cfg->log_ctx);
   l->next_batt_ms = 0; /* first heartbeat on the first poll */
   l->info_pending = true;
+  l->boot = boot_nonce();
   l->next_info_ms = 0; /* remote_info goes out first */
   l->dead_reported = false;
   return 0;

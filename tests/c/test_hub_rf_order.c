@@ -121,9 +121,10 @@ static int make_obj(hp_msg_type_t type, const hp_rf_val_t *v, size_t nv) {
     CT_CHECK(ncap > first);
     return first;
 }
+static uint32_t g_boot; /* the nonce the fake remote reports; a change is a reboot */
 static int make_info_gen(uint32_t caps, uint32_t gen) {
-    hp_rf_val_t v[6] = {{.u = 1}, {.u = 2}, {.u = caps}, {.u = 50}, {.u = gen}, {.u = 2}};
-    return make_obj(HP_MSG_REMOTE_INFO, v, 6);
+    hp_rf_val_t v[7] = {{.u = 1}, {.u = 2}, {.u = caps}, {.u = 50}, {.u = gen}, {.u = 2}, {.u = g_boot}};
+    return make_obj(HP_MSG_REMOTE_INFO, v, 7);
 }
 static int make_info(uint32_t caps) { return make_info_gen(caps, 0); }
 static int make_battery(void) {
@@ -293,15 +294,33 @@ static void test_flap_is_not_announced(void) {
     pump();
     pump();
     CT_EQ(count("remote_attached"), 3);
+    /* a remote that REBOOTED inside the window (new nonce, same gen and pages) lost its covers: served */
+    r_lost();
+    pump();
+    r_up();
+    g_boot = 0x1234;
+    int ib = make_info_gen(3, 9);
+    r_frames(ib, nframes_since(ib));
+    pump();
+    pump();
+    CT_EQ(count("remote_attached"), 4);
+    r_lost();
+    pump();
+    r_up(); /* and a flap of that same boot is again not announced */
+    int ic = make_info_gen(3, 9);
+    r_frames(ic, nframes_since(ic));
+    pump();
+    pump();
+    CT_EQ(count("remote_attached"), 4);
     /* a remote that comes back holding no pages (it lost its store) is always served, whatever the gen */
     r_lost();
-    hp_rf_val_t e[6] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}, {.u = 9}, {.u = 0}};
-    int i5 = make_obj(HP_MSG_REMOTE_INFO, e, 6);
+    hp_rf_val_t e[7] = {{.u = 1}, {.u = 2}, {.u = 3}, {.u = 50}, {.u = 9}, {.u = 0}, {.u = g_boot}};
+    int i5 = make_obj(HP_MSG_REMOTE_INFO, e, 7);
     r_up();
     r_frames(i5, nframes_since(i5));
     pump();
     pump();
-    CT_EQ(count("remote_attached"), 4);
+    CT_EQ(count("remote_attached"), 5);
 }
 
 /* 2c. a link-up the transport's flag revealed (no frame) names the last remote seen, none before any */
