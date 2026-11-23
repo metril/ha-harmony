@@ -198,6 +198,7 @@ static void cancel_plan(hp_actsm_t *e) {
     hp_sched_cancel(e->sched, e->timer);
     e->timer = 0;
     e->running = false;
+    e->resync = false;
     e->nplan = e->pos = 0;
 }
 
@@ -218,6 +219,11 @@ static uint32_t settle_wait(const hp_actsm_t *e, int dev, uint32_t now) {
 }
 
 static bool redundant(const hp_actsm_t *e, const hp_actstep_t *s) {
+    /* resync: discrete power / input codes are idempotent, so resend them whatever the tracked state says
+     * (it may be stale); toggle power would flip the device and stays skipped by tracked state */
+    bool force = e->resync && s->kind != HP_STEP_EXTRA && s->kind != HP_STEP_OFFX &&
+                 (s->kind == HP_STEP_INPUT || e->map->devs[s->dev].pwr == HP_PWR_ONOFF);
+    if (force) return false;
     switch (s->kind) {
     case HP_STEP_PWR_OFF: return !e->dev[s->dev].power;
     case HP_STEP_PWR_ON: return e->dev[s->dev].power;
@@ -245,6 +251,7 @@ static void arm(hp_actsm_t *e, uint32_t delay);
 
 static void finish(hp_actsm_t *e) {
     e->running = false;
+    e->resync = false;
     e->nplan = e->pos = 0;
     set_reported(e, e->target);
     e->map->current = e->target;
@@ -364,6 +371,8 @@ int hp_actsm_start_idx(hp_actsm_t *e, int idx) {
     hp_irout_cancel(m->out); /* a key hold must not repeat into the plan's frames */
     hp_map_bt_release(m, e->sinks);
     const hp_activity_t *a = &m->acts[idx];
+    bool resync = e->reported == idx && m->current == idx;
+    if (resync) hp_log("hub: activity %s re-pressed: resync (resending discrete steps)\n", a->name);
     bool used[HP_MAP_MAX_DEVICES] = {false};
     for (uint8_t i = 0; i < a->ndevs; i++) used[a->devs[i].dev] = true;
     for (int d = 0; d < e->ndev; d++)
@@ -372,6 +381,7 @@ int hp_actsm_start_idx(hp_actsm_t *e, int idx) {
     for (uint8_t i = 0; i < a->ndevs; i++)
         if (a->devs[i].input >= 0) add(e, HP_STEP_INPUT, a->devs[i].dev, a->devs[i].input, NULL);
     for (uint8_t i = 0; i < a->nsteps; i++) add(e, HP_STEP_EXTRA, 0, -1, &a->steps[i]);
+    e->resync = resync;
     int rc = begin(e, idx);
     return rc < 0 ? rc : idx;
 }

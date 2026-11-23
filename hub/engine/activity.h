@@ -78,6 +78,7 @@ typedef struct {
     hp_actstep_t plan[HP_ACT_PLAN_MAX];
     uint16_t nplan, pos;
     bool running;
+    bool resync; /* plan of a re-pressed current activity: discrete steps ignore the tracked state */
     int target;   /* activity being started, -1 = off */
     hp_sched_handle timer;
     bool bus_busy;
