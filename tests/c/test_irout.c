@@ -406,6 +406,37 @@ static void test_repeats_validation(void) {
     hp_map_free(&m);
 }
 
+/* E27: a deeper deferred queue; every press is its own send (no merging); callbacks see the result. */
+static int cb_n, cb_rc;
+static void cb(void *c, int rc) { (void)c; cb_n++; cb_rc = rc; }
+
+static void test_pending_queue_keeps_presses_and_reports(void) {
+    CT_EQ(HP_IROUT_PEND, 16);
+    setup(CFG("\"1\":{\"type\":\"ir\",\"proto\":\"sirc12\",\"addr\":1,\"cmd\":21},"
+              "\"2\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":8},"
+              "\"3\":{\"type\":\"ir\",\"proto\":\"nec\",\"addr\":4,\"cmd\":9}"));
+    key(1, HP_KEY_ACTION_PRESS);
+    advance(g_now + 10);
+    for (int i = 0; i < 5; i++) key(2, HP_KEY_ACTION_PRESS); /* five quick taps: five sends */
+    key(3, HP_KEY_ACTION_PRESS);
+    key(2, HP_KEY_ACTION_PRESS);
+    advance(g_now + 3000);
+    CT_EQ(nrec, 3 + 7);
+    CT_EQ(hp_sched_pending(&sched), 0);
+    /* deferred send with a callback: 1 = queued, done(rc) once sent */
+    nrec = 0;
+    hp_ir_code_t c = {.kind = HP_IR_CODE_PROTO, .u.p = {HP_IR_NEC, 4, 8}};
+    key(1, HP_KEY_ACTION_PRESS);
+    cb_n = 0;
+    CT_EQ(hp_irout_send_cb(&out, &ir, &c, 0xFF, HP_IROUT_KEY_SEND, 1, cb, NULL), 1);
+    CT_EQ(cb_n, 0);
+    advance(g_now + 2000);
+    CT_EQ(cb_n, 1);
+    CT_EQ(cb_rc, 0);
+    CT_EQ(hp_irout_send_cb(&out, &ir, &c, 0xFF, HP_IROUT_KEY_SEND, 1, cb, NULL), 0); /* idle line: sent now, no callback */
+    CT_EQ(cb_n, 1);
+}
+
 int main(void) {
     CT_RUN(test_nec_hold_repeat_and_cap);
     CT_RUN(test_periodic_hold_extends_cap);
@@ -419,6 +450,7 @@ int main(void) {
     CT_RUN(test_press_deferred_while_line_busy);
     CT_RUN(test_line_stale_after_idle);
     CT_RUN(test_send_modes);
+    CT_RUN(test_pending_queue_keeps_presses_and_reports);
     CT_RUN(test_repeats_per_command);
     CT_RUN(test_repeats_validation);
     hp_map_free(&map);

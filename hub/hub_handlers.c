@@ -44,6 +44,8 @@ static void hub_notify(void *vctx, hp_actsm_evt_t evt, int idx) {
     }
 }
 
+static void run_queued_ir_send(void *vh, const char *json);
+
 void hub_ctx_init(hub_ctx_t *c) {
     memset(c, 0, sizeof *c);
     hp_ota_init(&c->ota, NULL, NULL); /* disabled until main() gives it a directory */
@@ -52,6 +54,7 @@ void hub_ctx_init(hub_ctx_t *c) {
     hp_irout_init(&c->irout, &c->sched);
     hp_map_set_out(&c->map, &c->irout);
     hp_actsm_init(&c->act, &c->map, &c->sched, &c->sinks, hub_notify, c);
+    hp_actsm_set_irsend(&c->act, run_queued_ir_send, c);
 }
 
 void hub_set_clock(hub_ctx_t *c, hp_clock_fn fn, void *ctx) {
@@ -691,7 +694,7 @@ static int ack_loaded(hub_ctx_t *h, hp_session_t *sess, uint32_t id, char *reply
     h->pending_list = true;
     h->list_skip = sess;
     hub_bt_config_sync(h);
-    hp_actsm_reloaded(&h->act); /* cancels a transition, re-keys device state, queues device_state/state_update */
+    hp_actsm_reloaded(&h->act); /* no-op for an unchanged config; else re-keys device state, restarts a running plan, queues device_state/state_update */
     /* A running activity is re-reported (to the sender too): a rename keeps its index, so clients
      * that map index -> name would otherwise never learn the new name. */
     int cur = hp_actsm_reported(&h->act);
@@ -848,29 +851,48 @@ static cJSON *on_limits(void *vctx) {
 
 static int reply_err(uint32_t id, const char *code, const char *msg, char *reply, size_t cap, size_t *len);
 
-static int cmd_ir_send(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply, size_t cap, size_t *len) {
-    if (!cJSON_IsObject(args)) return reply_ok(id, "command_result", false, "args must be an IR action", reply, cap, len);
-    if (hp_actsm_busy(&h->act)) return reply_ok(id, "command_result", false, "transition in progress", reply, cap, len);
+/* Parses and sends an ir_send action (deferred while the IR line is busy). NULL ok, else the reply text. */
+static const char *do_ir_send(hub_ctx_t *h, const cJSON *args, char *err, size_t errn) {
     hp_map_t *sc = calloc(1, sizeof *sc); /* scratch pool for the action's IR data */
-    if (!sc) return reply_ok(id, "command_result", false, "out of memory", reply, cap, len);
+    if (!sc) return "out of memory";
     hp_map_set_out(sc, &h->irout);
     hp_action_t a;
+    const char *why = NULL;
     int rc = hp_map_parse_ir(sc, args, &a);
-    int r;
     if (rc < 0) {
-        r = reply_ok(id, "command_result", false, sc->err[0] ? sc->err : "invalid IR action", reply, cap, len);
+        snprintf(err, errn, "%s", sc->err[0] ? sc->err : "invalid IR action"); /* sc is freed below */
+        why = err;
     } else if ((rc = hp_map_apply_deferrable(sc, &a, &h->sinks)) < 0) {
-        r = reply_ok(id, "command_result", false,
-                     rc == -HP_E_BUSY ? "IR line busy, queue full"
-                     : h->sinks.ir    ? "IR send failed"
-                                      : "no IR output",
-                     reply, cap, len);
-    } else {
-        r = reply_ok(id, "command_result", true, NULL, reply, cap, len);
+        why = rc == -HP_E_BUSY ? "IR line busy, queue full" : h->sinks.ir ? "IR send failed" : "no IR output";
     }
+    if (why) hp_log("hub: ir_send failed: %s\n", why);
     hp_map_free(sc);
     free(sc);
-    return r;
+    return why;
+}
+
+/* A queued ir_send (from a transition) is run when the transition finishes. */
+static void run_queued_ir_send(void *vh, const char *json) {
+    cJSON *args = cJSON_Parse(json);
+    char err[HP_MAP_ERR_MAX];
+    if (args) (void)do_ir_send(vh, args, err, sizeof err);
+    cJSON_Delete(args);
+}
+
+static int cmd_ir_send(hub_ctx_t *h, uint32_t id, const cJSON *args, char *reply, size_t cap, size_t *len) {
+    if (!cJSON_IsObject(args)) return reply_ok(id, "command_result", false, "args must be an IR action", reply, cap, len);
+    if (hp_actsm_busy(&h->act)) { /* queued: it runs when the transition finishes */
+        char *txt = cJSON_PrintUnformatted(args);
+        if (!txt) return reply_ok(id, "command_result", false, "out of memory", reply, cap, len);
+        if (hp_actsm_defer_irsend(&h->act, txt) < 0) {
+            free(txt);
+            return reply_ok(id, "command_result", false, "transition in progress, queue full", reply, cap, len);
+        }
+        return reply_ok(id, "command_result", true, NULL, reply, cap, len);
+    }
+    char err[HP_MAP_ERR_MAX];
+    const char *why = do_ir_send(h, args, err, sizeof err);
+    return reply_ok(id, "command_result", why == NULL, why, reply, cap, len);
 }
 
 static bool u8_arg(const cJSON *o, const char *k, uint32_t *out) {
@@ -1000,7 +1022,7 @@ static int cmd_device_command(hub_ctx_t *h, uint32_t id, const cJSON *args, char
     if (rc == 0) return reply_ok(id, "command_result", true, NULL, reply, cap, len);
     const char *why = rc == -HP_E_NOENT ? "unknown device"
                       : rc == -HP_E_INVAL ? "unknown command for this device"
-                      : rc == -HP_E_BUSY ? (hp_actsm_busy(&h->act) ? "transition in progress"
+                      : rc == -HP_E_BUSY ? (hp_actsm_busy(&h->act) ? "transition in progress, queue full"
                                                                    : "IR line busy, queue full")
                       : h->sinks.ir ? "IR send failed" : "no IR output";
     return reply_ok(id, "command_result", false, why, reply, cap, len);

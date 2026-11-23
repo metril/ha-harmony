@@ -23,7 +23,8 @@
  * Interruption rule: a new start/off while a transition runs cancels the remaining plan steps
  * (frames already sent stay applied in the tracked state), then plans from the tracked state.
  * Pending settle times survive, so a half-powered device is not sent an input too early.
- * Key presses (other than activity keys) and the ir_send verb are refused while busy.
+ * IR key presses and the ir_send / device_command verbs that arrive while busy are queued (small FIFOs) and
+ * run when the transition finishes; they are dropped (logged) when it is cancelled or aborted. BT keys always go out.
  *
  * Reporting: the current activity (map->current) switches to the target when the request is
  * accepted (key lookup uses it); the REPORTED activity (state_update, hello state) changes only
@@ -53,9 +54,29 @@ typedef enum { HP_STEP_PWR_OFF = 1, HP_STEP_PWR_ON, HP_STEP_INPUT, HP_STEP_EXTRA
 
 typedef struct {
     uint8_t kind, dev;
+    uint8_t force;          /* resend a discrete power / input code whatever the tracked state says */
     int32_t input;          /* HP_STEP_INPUT: index into map.inputs */
     const hp_action_t *act; /* EXTRA/OFFX action */
 } hp_actstep_t;
+
+#define HP_ACT_CMDQ_MAX 8
+/* A client request that arrived mid-transition (or must wait for a device to settle): run when the line is free. */
+typedef struct {
+    uint8_t kind;  /* 1 device_command, 2 ir_send (text = the args JSON, owned) */
+    bool nopre;    /* an input command already preceded by its power-on */
+    char dev[HP_MAP_NAME_MAX];
+    char cmd[HP_MAP_NAME_MAX + 8];
+    char *text;
+} hp_actcmd_t;
+
+/* A device command whose frame waits in the IR queue: its tracked-state change applies when it is sent. */
+typedef struct {
+    struct hp_actsm *e;
+    bool used, has_input, settle;
+    int8_t power; /* -1 keep */
+    char dev[HP_MAP_NAME_MAX];
+    char input[HP_MAP_NAME_MAX];
+} hp_actpc_t;
 
 typedef struct {
     char id[HP_MAP_NAME_MAX];
@@ -65,7 +86,7 @@ typedef struct {
     uint32_t settle_until;
 } hp_devstate_t;
 
-typedef struct {
+typedef struct hp_actsm {
     hp_map_t *map;
     hp_sched_t *sched;
     const hp_sinks_t *sinks;
@@ -80,6 +101,19 @@ typedef struct {
     bool running;
     bool resync; /* plan of a re-pressed current activity: discrete steps ignore the tracked state */
     int target;   /* activity being started, -1 = off */
+    char tgt_key[HP_MAP_NAME_MAX];      /* its identity ("" = off) and, for off, the activity whose off steps run: to restart the plan after a reload */
+    char prev_key[HP_MAP_NAME_MAX];
+    char last_key[HP_MAP_NAME_MAX];     /* last activity that was reported (survives Off): whose devices a stale Off still powers down */
+    uint32_t loaded_hash;               /* config hash the device tracking was last keyed to */
+    bool have_hash;
+    hp_actcmd_t cq[HP_ACT_CMDQ_MAX];
+    uint8_t cq_n;
+    hp_sched_handle cq_h;
+    bool draining;
+    void (*irsend_fn)(void *ctx, const char *json);
+    void *irsend_ctx;
+    hp_actpc_t pc[HP_IROUT_PEND];
+    uint8_t npc;
     hp_sched_handle timer;
     bool bus_busy;
     uint32_t bus_free, bus_len; /* deadline + the span it was set with (see remaining()) */
@@ -92,16 +126,19 @@ typedef struct {
 } hp_actsm_t;
 
 void hp_actsm_init(hp_actsm_t *, hp_map_t *, hp_sched_t *, const hp_sinks_t *, hp_actsm_notify_fn, void *);
-/* Call after every successful hp_map_load: cancels a running transition, re-keys the tracked
- * device state by device id (new devices start off/unknown), re-resolves the last COMPLETED
+/* Call after every successful hp_map_load: does nothing when the config hash is unchanged (a running
+ * transition keeps going; its plan only re-points at the reloaded tables). Otherwise re-keys the tracked
+ * device state by device id, restarts a running transition's plan for its target when that survives (else
+ * cancels it) (new devices start off/unknown), re-resolves the last COMPLETED
  * activity in the new map by id (name in format 1; none if gone; a transition cut short by the
  * reload is never reported, even though map->current carried its target over) and notifies every
  * device (and the activity if it changed). */
 void hp_actsm_reloaded(hp_actsm_t *);
 
 /* Start the named activity / a power-down. Return the activity index (off: the activity that was
- * current, 0 when only stray devices were on), -HP_E_INVAL (unknown activity / nothing to turn
- * off), or the error of a synchronous first send. */
+ * current, 0 when none), -HP_E_INVAL (unknown activity), or the error of a synchronous first send.
+ * Off is never a no-op: nothing tracked on still resends the discrete power-off codes of the
+ * current / last activity's devices (all devices when none is known). */
 int hp_actsm_start(hp_actsm_t *, const char *name);
 int hp_actsm_start_idx(hp_actsm_t *, int idx);
 int hp_actsm_off(hp_actsm_t *);
@@ -119,14 +156,19 @@ int hp_actsm_set_device(hp_actsm_t *, const char *device, int power, const char 
  * command/input or power without power codes, -HP_E_BUSY while a transition runs, else the
  * send error (state untouched). */
 int hp_actsm_device_command(hp_actsm_t *, const char *device, const char *command);
+/* Queues an ir_send (its args as JSON, malloc'd; owned on success) to run when the current transition
+ * finishes, through the callback set below. 0, or -HP_E_BUSY when the queue is full (not owned then). */
+int hp_actsm_defer_irsend(hp_actsm_t *, char *json);
+void hp_actsm_set_irsend(hp_actsm_t *, void (*fn)(void *ctx, const char *json), void *ctx);
 const hp_devstate_t *hp_actsm_device(const hp_actsm_t *, size_t idx); /* NULL if out of range */
 
 /* State file: "HPST" | ver u8 | config hash u32 BE | activity id (u8 len + bytes, len 0 = none)
  * | ndev u8 | per device: id (u8 len + bytes), power u8, input (u8 len + bytes) | CRC-32 u32 BE
  * over everything before. Written with hp_atomic_write. */
 void hp_actsm_set_state_path(hp_actsm_t *, const char *path);
-/* Restores from the file; a missing/corrupt/other-version/other-config file leaves the state as is
- * (all off/unknown) and returns a negative error (-HP_E_NOENT missing, -HP_E_INVAL otherwise). */
+/* Restores from the file per device / activity id (ids the config no longer has are dropped, whatever
+ * the config hash); a missing/corrupt/other-version file leaves the state as is (all off/unknown) and
+ * returns a negative error (-HP_E_NOENT missing, -HP_E_INVAL otherwise). */
 int hp_actsm_load_state(hp_actsm_t *);
 /* Writes the state file now (no-op without a path). 0 or -HP_E_IO. */
 int hp_actsm_flush_state(hp_actsm_t *);

@@ -170,6 +170,9 @@ typedef struct {
     bool (*busy)(void *ctx);
 } hp_map_actops_t;
 
+#define HP_KEYQ_MAX 8
+typedef struct { uint8_t remote, key; } hp_keyq_t;
+
 typedef enum { HP_BT_AUTO = 0, HP_BT_CLASSIC, HP_BT_LE } hp_bt_transport_t;
 
 /* One entry of the top-level "bt_hosts": [{"slot":n,"addr":"AA:BB:CC:DD:EE:FF"|null,"name":"..","transport":
@@ -251,6 +254,11 @@ typedef struct {
     char err[HP_MAP_ERR_MAX]; /* first problem of the last failed load */
     hp_irout_t *out;  /* IR output runtime (hold/repeat/toggle); optional, survives reloads */
     hp_map_actops_t actops; /* optional, survives reloads */
+    /* IR key presses that arrived mid-transition: replayed when it finishes (hp_map_keyq_replay), dropped
+     * when it is cancelled / aborted (hp_map_keyq_drop). Survives reloads. */
+    hp_keyq_t keyq[HP_KEYQ_MAX];
+    uint8_t keyq_n;
+    struct { bool on; uint8_t remote, key; } key_dropped; /* the press just dropped: its HOLD/RELEASE are not forwarded either */
 } hp_map_t;
 
 void hp_map_init(hp_map_t *);
@@ -330,6 +338,14 @@ int hp_map_apply(const hp_map_t *, const hp_action_t *, const hp_sinks_t *);
 /* Same for an externally requested one-off send (the ir_send verb): if the IR line is busy the
  * frame is deferred until it is free (see irout.h) instead of interleaving. */
 int hp_map_apply_deferrable(const hp_map_t *, const hp_action_t *, const hp_sinks_t *);
+/* hp_map_apply_deferrable with a completion callback: 0 = sent now (done not called), 1 = queued (done(ctx, rc)
+ * is called once when it is finally sent), negative = error (done not called). */
+int hp_map_apply_deferrable_cb(const hp_map_t *, const hp_action_t *, const hp_sinks_t *, void (*done)(void *, int),
+                               void *ctx);
+/* Replays the IR key presses queued during a transition (in order, as fresh presses of the current
+ * activity); drops them (logged) instead. Called by the activity state machine. */
+void hp_map_keyq_replay(hp_map_t *, const hp_sinks_t *);
+void hp_map_keyq_drop(hp_map_t *);
 
 size_t hp_map_activity_count(const hp_map_t *);
 const char *hp_map_activity_name(const hp_map_t *, size_t index); /* NULL if out of range */

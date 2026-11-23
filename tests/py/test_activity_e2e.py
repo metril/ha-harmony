@@ -220,10 +220,13 @@ async def test_bad_state_file_starts_fresh(start_hub, tmp_path, damage):
         await ws.send_str(json.dumps({"v": 1, "id": 1, "t": "hello", "d": {"token": "test-token"}}))
         assert (await recv(ws))["t"] == "hello_ack"
         su = await recv(ws)
-        assert su["d"] == {"activity": 0, "power": False}
+        # a state file of another config hash is restored per id (nothing it names was removed)
+        assert su["d"] == {"activity": 0, "power": damage == "hash"}
     hub2.stop()
     log = hub2.err_path.read_text()
-    assert "starting all off/unknown" in log
+    assert (
+        ("restored state from" in log) if damage == "hash" else ("starting all off/unknown" in log)
+    )
 
 
 async def test_key_starts_activity_through_state_machine(hub_rf, run_remote):
@@ -310,10 +313,12 @@ async def test_device_command_tracks_state_and_skips_redundant_toggle(hub_proces
         assert (await dc("amp", "power_on"))["d"] == {"ok": True}  # tracked on: no IR
         await asyncio.sleep(0.2)
         assert read_lines(hub_process, 0) == []
-        # discrete tv: input implies on; unknown device/command are refused
+        # discrete tv tracked off: an input powers it on first, then selects the input once it has settled
         assert (await dc("tv", "input_hdmi2"))["d"] == {"ok": True}
+        assert (await recv(ws))["d"] == dev("tv", True)
         assert (await recv(ws))["d"] == dev("tv", True, "hdmi2")
-        assert read_lines(hub_process, 1) == [ir_line(TV_H2)]
+        assert read_lines(hub_process, 2) == [ir_line(TV_ON), ir_line(TV_H2)]
+        # unknown device/command are refused
         for bad in (("ghost", "power_on"), ("tv", "nope"), ("tv", "input_vga")):
             r = (await dc(*bad))["d"]
             assert r["ok"] is False and r["message"], bad
@@ -321,7 +326,7 @@ async def test_device_command_tracks_state_and_skips_redundant_toggle(hub_proces
         assert (await call(ws, "command", msg, id=6))["d"]["ok"] is False
 
 
-async def test_device_command_refused_during_transition(hub_process):
+async def test_device_command_queued_during_transition(hub_process):
     slow_tv = {**CONFIG["devices"][0], "settle_ms": 5000}  # the input step waits out the settle
     slow = {**CONFIG, "devices": [slow_tv, CONFIG["devices"][1]]}
     async with aiohttp.ClientSession() as s, s.ws_connect(hub_process.url) as ws:
@@ -333,7 +338,7 @@ async def test_device_command_refused_during_transition(hub_process):
         await ws.send_str(json.dumps({"v": 1, "id": 7, "t": "command", "d": msg}))
         while (r := await recv(ws))["id"] != 7:  # device_state pushes may come first
             pass
-        assert r["d"] == {"ok": False, "message": "transition in progress"}
+        assert r["d"] == {"ok": True}  # queued: it runs when the transition finishes
         # no waiting for the transition: closing the socket and stopping the hub cancels it
 
 

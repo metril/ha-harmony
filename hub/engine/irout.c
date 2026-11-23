@@ -140,10 +140,14 @@ static void pend_cb(void *arg, uint32_t now) {
     hp_irout_pend_t *p = &o->pend[o->pend_head];
     o->cand_key = -1;
     memcpy(&o->cand, &p->sig, sizeof o->cand);
-    (void)emit_cand(o, p->ir, p->port, p->key, p->sirc, p->copies);
+    int er = emit_cand(o, p->ir, p->port, p->key, p->sirc, p->copies);
+    void (*done)(void *, int) = p->done;
+    void *dctx = p->dctx;
     o->pend_head = (uint8_t)((o->pend_head + 1) % HP_IROUT_PEND);
     o->pend_n--;
-    if (o->pend_n) {
+    if (er < 0) hp_log("hub: deferred IR send failed (%d)\n", er);
+    if (done) done(dctx, er);
+    if (o->pend_n && !o->pend_h) {
         uint32_t nw = line_wait(o, hp_sched_now(o->sched), HP_IROUT_GUARD_MS);
         pend_arm(o, nw ? nw : 1);
     }
@@ -156,9 +160,13 @@ static void pend_arm(hp_irout_t *o, uint32_t delay) {
     while (o->pend_n) {
         hp_irout_pend_t *p = &o->pend[o->pend_head];
         memcpy(&o->cand, &p->sig, sizeof o->cand);
-        (void)emit_cand(o, p->ir, p->port, p->key, p->sirc, p->copies);
+        int er = emit_cand(o, p->ir, p->port, p->key, p->sirc, p->copies);
+        void (*done)(void *, int) = p->done;
+        void *dctx = p->dctx;
         o->pend_head = (uint8_t)((o->pend_head + 1) % HP_IROUT_PEND);
         o->pend_n--;
+        if (er < 0) hp_log("hub: deferred IR send failed (%d)\n", er);
+        if (done) done(dctx, er);
     }
 }
 
@@ -167,6 +175,12 @@ int hp_irout_send(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8
 }
 
 int hp_irout_send_n(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key, uint8_t copies) {
+    int r = hp_irout_send_cb(o, ir, code, port_mask, key, copies, NULL, NULL);
+    return r < 0 ? r : 0;
+}
+
+int hp_irout_send_cb(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key, uint8_t copies,
+                     void (*done)(void *ctx, int rc), void *dctx) {
     if (!o || !ir || !code) return -HP_E_INVAL;
     if (copies < 1) copies = 1;
     if (copies > HP_IROUT_MAX_COPIES) copies = HP_IROUT_MAX_COPIES;
@@ -186,6 +200,8 @@ int hp_irout_send_n(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uin
     if (rc < 0) return rc;
     int k = key < 0 ? -1 : key;
     if (!defer) return emit_cand(o, ir, port_mask, k, is_sirc(code), copies);
+    o->pend[slot].done = done;
+    o->pend[slot].dctx = dctx;
     o->pend[slot].ir = ir;
     o->pend[slot].port = port_mask;
     o->pend[slot].key = k;
@@ -193,7 +209,7 @@ int hp_irout_send_n(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uin
     o->pend[slot].copies = copies;
     o->pend_n++;
     if (!o->pend_h) pend_arm(o, w ? w : 1);
-    return 0;
+    return 1;
 }
 
 static void tick_cb(void *arg, uint32_t now) {
