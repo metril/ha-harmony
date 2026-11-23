@@ -85,6 +85,10 @@ hah_bfile="$hah_dir/ota-build"
 # Written at the health mark (tmpfs): the daemon refuses ota_begin until it exists, so an update never
 # lands inside the health window of the build that is still proving itself.
 hah_health="$hah_root/var/volatile/ha-harmony.healthy"
+# Planned-restart marker (tmpfs, so a reboot clears it). tools/deploy_hub.py `restart` writes the hub's
+# uptime seconds into it, then SIGTERMs the daemon. An exit with a fresh marker (<= 60 s old) is a deploy,
+# not a crash: relaunch at once, no backoff, no respawn spent, no boot strike.
+hah_pmark="$hah_root/tmp/ha-harmony-planned-restart"
 
 # Numeric knobs (test overrides) are matched, never trusted: digits only, else the default.
 hah_num() {
@@ -406,6 +410,21 @@ else
 					# ($! of a pipeline is the timestamper, not the daemon), then read it back.
 					# The launcher shell stays as the daemon's parent only to record how it ended ($? = 128+N for a
 					# signal N) in the tmpfs exit file; the pid we supervise (and kill -9) is the daemon's own.
+					# Arithmetic lives here, in the backgrounded subshell, never on the synchronous path.
+					# True (and the marker consumed) when a fresh planned-restart marker exists. Any other state is false;
+					# a stale, empty or garbled marker is still removed so it cannot excuse a later crash.
+					hah_planned() {
+						[ -e "$hah_pmark" ] || return 1
+						hah_pw=''
+						read -r hah_pw 2>/dev/null <"$hah_pmark"
+						rm -f "$hah_pmark" 2>/dev/null
+						hah_stamp
+						case "$hah_pw" in '' | *[!0-9]* | 0[0-9]* | ??????????*) return 1 ;; esac
+						[ -n "$hah_now" ] || return 1
+						hah_pw=$((hah_now - hah_pw))
+						[ "$hah_pw" -ge 0 ] && [ "$hah_pw" -le 60 ]
+					}
+
 					hah_launch() {
 						# A D-state daemon still holds fd 9 and the ring: never run two writers.
 						while [ -n "$hah_pid" ] && kill -0 "$hah_pid" 2>/dev/null; do sleep "$hah_nap"; done
@@ -490,6 +509,16 @@ else
 							sleep "$hah_nap"
 							hah_t=$((hah_t + 1))
 							if ! kill -0 "$hah_pid" 2>/dev/null; then
+								if hah_planned; then
+									hah_blog "planned restart inside the health window - relaunching, no strike"
+									hah_launch "$@"
+									[ -n "$hah_pid" ] || {
+										hah_up=0
+										break
+									}
+									hah_t=0
+									continue
+								fi
 								if [ -e "$hah_restart" ]; then
 									# a planned relaunch into an applied update, not a death: no strike, and the
 									# new build gets a fresh health window
@@ -573,6 +602,16 @@ else
 										break
 									fi
 								done
+								if hah_planned; then
+									# deploy restart: immediate, no backoff, budget and strikes untouched
+									hah_blog "planned restart - relaunching now (respawn budget $hah_used of $hah_rmax unchanged)"
+									hah_launch "$@"
+									if [ -z "$hah_pid" ]; then
+										hah_blog "planned restart: no pid recorded - not supervising any further (no respawn, no reboot)"
+										break
+									fi
+									continue
+								fi
 								[ -e "$hah_restart" ] || hah_endnote
 								if [ -e "$hah_restart" ]; then
 									# The daemon applied a signed update and exited (status 42) to be relaunched:
@@ -592,6 +631,16 @@ else
 										sleep "$hah_nap"
 										hah_t=$((hah_t + 1))
 										if ! kill -0 "$hah_pid" 2>/dev/null; then
+											if hah_planned; then
+												hah_blog "planned restart inside the updated build's health window - relaunching, no rollback"
+												hah_launch "$@"
+												if [ -z "$hah_pid" ]; then
+													hah_blog "planned restart: no pid recorded - not supervising any further (no respawn, no reboot)"
+													break 2
+												fi
+												hah_t=0
+												continue
+											fi
 											hah_ok=0
 											break
 										fi
@@ -660,7 +709,7 @@ else
 fi
 
 unset hah_i2s hah_root hah_marker hah_counter hah_log hah_dlog hah_pidfile hah_dir hah_daemon hah_conf
-unset hah_otadev hah_bfile hah_health hah_rbp hah_rbnote hah_prev hah_pending hah_restart hah_rbfile hah_rbl hah_t hah_ok hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
+unset hah_otadev hah_bfile hah_health hah_rbp hah_rbnote hah_prev hah_pending hah_restart hah_pmark hah_pw hah_rbfile hah_rbl hah_t hah_ok hah_nowd hah_nap hah_polls hah_cap hah_limit hah_healthy hah_delay hah_step hah_logmax hah_n hah_chk hah_token hah_port hah_id
 unset hah_exitf hah_xs hah_xi hah_xw hah_xn hah_xg
 unset hah_rf hah_slot hah_budget hah_budnote hah_stoplua hah_rmax hah_rdebug hah_hb hah_uptf hah_stale hah_refill hah_b1 hah_b2 hah_b3 hah_wall hah_now hah_ts hah_reboot hah_bad hah_k hah_v hah_line hah_cr
 unset -f hah_endnote hah_say hah_blog hah_stamp hah_num hah_rollback 2>/dev/null

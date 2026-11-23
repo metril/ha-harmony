@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Hub: deploys no longer burn the boot hook's respawn budget or backoff. `tools/deploy_hub.py restart --yes` (after `push`) marks the stop as planned (tmpfs marker, SIGTERM) and the hook relaunches the daemon at once, still holding /dev/i2s, with no respawn or boot strike counted. Any other exit is counted as before. Re-run `tools/install_boot_hook.py` to get the new hook.
+
 ## 0.4.9 (2026-11-23)
 
 - Pressing the running activity again re-sends its power and input commands, so a TV turned off outside the hub comes back on. Update the hub.
