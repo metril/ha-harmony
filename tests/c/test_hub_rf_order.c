@@ -76,6 +76,13 @@ static bool t_att(void *self) {
     if (on_att) on_att(att_calls);
     return a;
 }
+static uint32_t g_rx_at; /* the stamp frame_times reports for the frame recv() returned last */
+static int t_times(void *self, uint32_t *rx_at, uint32_t *tx_at) {
+    (void)self;
+    *rx_at = g_rx_at;
+    *tx_at = 0;
+    return 1;
+}
 static hp_rf_transport HT;
 
 /* the remote end captures what it transmits */
@@ -330,7 +337,32 @@ static void test_silent_attach_after_pump_wakes_the_loop(void) {
     CT_CHECK(hub_next_timeout_ms(&H) != 0);
 }
 
+/* A key frame stamped `age` ms before the pump: how many key_event broadcasts the pump produced. */
+static int key_with_age(unsigned action, uint32_t age) {
+    hp_rf_val_t v[3] = {{.u = 1}, {.u = 5}, {.u = action}};
+    int first = make_obj(HP_MSG_KEY_EVENT, v, 3);
+    int before = count("key_event");
+    r_frames(first, nframes_since(first));
+    g_rx_at = now_ms + 5 - age; /* pump() advances the clock by 5 */
+    pump();
+    return count("key_event") - before;
+}
+
+/* Stale presses and holds are dropped (not executed, not emitted); a release is always processed. */
+static void test_stale_keys_dropped_release_kept(void) {
+    world();
+    HT.frame_times = t_times;
+    CT_EQ(key_with_age(HP_KEY_ACTION_PRESS, 100), 1);
+    CT_EQ(key_with_age(HP_KEY_ACTION_PRESS, 1500), 1);  /* at the limit: kept */
+    CT_EQ(key_with_age(HP_KEY_ACTION_PRESS, 1600), 0);  /* stale press */
+    CT_EQ(key_with_age(HP_KEY_ACTION_HOLD, 5000), 0);   /* stale hold */
+    CT_EQ(key_with_age(HP_KEY_ACTION_RELEASE, 9000), 1); /* a release is never dropped */
+    HT.frame_times = NULL;
+    CT_EQ(key_with_age(HP_KEY_ACTION_PRESS, 9000), 1);  /* no stamps: nothing can be judged */
+}
+
 int main(void) {
+    test_stale_keys_dropped_release_kept();
     test_attach_during_pump_recv();
     test_attach_between_recv_and_flag();
     test_attach_inside_recv();

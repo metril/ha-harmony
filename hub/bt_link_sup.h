@@ -34,6 +34,7 @@ void bt_link_reset(void);
 
 #define BT_SUP_PING_MS 5000
 #define BT_SUP_SILENCE_MS 15000
+#define BT_SUP_HEALTHY_MS 180000 /* READY this long resets the death count (the respawn budget is for crash loops) */
 #define BT_SUP_MAX_RESPAWNS 5
 #define BT_SUP_LINGER_MS 60000 /* the helper keeps running this long after a pairing window closed with no config entries */
 

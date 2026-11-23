@@ -16,8 +16,9 @@
 #define HP_WS_HANDSHAKE_MS 5000     /* time allowed to finish the HTTP upgrade */
 #define HP_WS_AUTH_MS 10000         /* upgraded conn must be marked authed within this (default) */
 #define HP_WS_IDLE_MS 90000         /* max silence of a not-yet-authenticated conn (authed ones have none: TCP keepalive) */
-#define HP_WS_KEEPIDLE_S 60         /* TCP keepalive on every accepted socket: idle, probe interval, probe count */
-#define HP_WS_KEEPINTVL_S 10
+#define HP_WS_KEEPIDLE_S 15         /* TCP keepalive on every accepted socket: idle, probe interval, probe count */
+#define HP_WS_KEEPINTVL_S 5
+#define HP_WS_USER_TIMEOUT_MS 20000 /* TCP_USER_TIMEOUT: unacked data older than this kills the socket */
 #define HP_WS_KEEPCNT 3
 #define HP_WS_CLOSE_MS 2000         /* time allowed to flush a close frame */
 
