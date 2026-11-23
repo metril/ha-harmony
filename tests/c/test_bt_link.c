@@ -516,54 +516,39 @@ static void test_bluetoothd_find(void) {
 }
 
 static void test_bluetoothd(void) {
-    setup("normal"); /* running: stopped once, before the first spawn only */
+    setup("normal"); /* present (the hook should have prevented it): SIGKILLed once, spawn at once, no wait */
     bz_running = 1;
     usual_cfg();
-    CT_CHECK(PUMP(stats().spawns == 1, 2000));
-    CT_EQ(bz_term, 1);
-    CT_EQ(bz_kill, 0);
+    bt_link_service();
+    CT_EQ(stats().spawns, 1);
+    CT_EQ(bz_kill, 1);
+    CT_EQ(bz_term, 0);
     CT_CHECK(PUMP(ready(), 3000));
     int calls = bz_calls;
     kill(stats().pid, SIGKILL);
     CT_CHECK(PUMP(stats().deaths == 1, 3000));
     advance(5001);
     CT_CHECK(PUMP(stats().spawns == 2, 2000));
-    CT_EQ(bz_term, 1);
+    CT_EQ(bz_kill, 1);
     CT_EQ(bz_calls, calls); /* not touched again this boot */
     bt_link_reset();
 
-    setup("normal"); /* not running: never signalled */
+    setup("normal"); /* absent (the normal case with the hook): one probe, never signalled, spawns at once */
     usual_cfg();
-    CT_CHECK(PUMP(stats().spawns == 1, 2000));
+    bt_link_service();
+    CT_EQ(stats().spawns, 1);
     CT_EQ(bz_term, 0);
     CT_EQ(bz_kill, 0);
-    CT_EQ(bz_calls, 1); /* one probe */
+    CT_EQ(bz_calls, 1);
     bt_link_reset();
 
-    setup("normal"); /* a daemon that ignores SIGTERM: SIGKILL after 3 s, then the spawn goes ahead anyway */
+    setup("normal"); /* no timer for the stop: with the helper running, the next wake is only the ping / silence deadlines */
     bz_running = bz_stubborn = 1;
     usual_cfg();
     bt_link_service();
-    CT_EQ(stats().spawns, 0);
-    advance(3001);
-    CT_EQ(bz_kill, 1);
-    CT_EQ(stats().spawns, 0);
-    advance(1001);
     CT_EQ(stats().spawns, 1);
-    bt_link_reset();
-
-    setup("normal"); /* the wait for a stubborn bluetoothd backs off (100, 200, 400, 800 ms), it is not a flat 50 ms retry */
-    bz_running = bz_stubborn = 1;
-    usual_cfg();
     int w = bt_link_service();
-    CT_CHECK(w >= 100 && w <= 3000); /* first wake: no sooner than 100 ms */
-    int wakes = 0;
-    for (int i = 0; i < 100 && stats().spawns == 0 && bz_kill == 0; i++) {
-        advance(w > 0 ? (uint64_t)w : 1);
-        w = bt_link_service();
-        wakes++;
-    }
-    CT_CHECK(wakes <= 8); /* a 3 s wait at a flat 50 ms would be 60 wakes */
+    CT_CHECK(w < 0 || w >= 1000); /* nothing short (the old 100 ms backoff) is armed */
     bt_link_reset();
 
     setup("normal"); /* --sim: never */
