@@ -1,8 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-11-23)
 
-- Hub: deploys no longer burn the boot hook's respawn budget or backoff. `tools/deploy_hub.py restart --yes` (after `push`) marks the stop as planned (tmpfs marker, SIGTERM) and the hook relaunches the daemon at once, still holding /dev/i2s, with no respawn or boot strike counted. Any other exit is counted as before. Re-run `tools/install_boot_hook.py` to get the new hook.
+- Stale presses expire instead of replaying in a burst after a stall.
+- Faster dead-connection detection between the add-on and the hub.
+- Presses are kept across short radio link blips.
+- TV and Off resync from stale state; keys and commands pressed during an activity change are queued, not dropped.
+- Now Playing: play/pause toggle and fixes.
+- No polling anywhere: everything is push-driven.
+- Deploys no longer use up the hub's restart budget (`tools/deploy_hub.py restart --yes` is a planned restart).
+- The stock Bluetooth service is no longer started on owned boots.
+- Update the add-on in Home Assistant, the hub and the remote, then re-run `tools/install_boot_hook.py` once.
 
 ## 0.4.9 (2026-11-23)
 
