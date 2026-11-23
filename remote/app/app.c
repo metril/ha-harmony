@@ -184,6 +184,12 @@ static void sink_bar(void *ctx, int x, int y) {
   else go_back(a); /* the back chevron ignores the BACK bit */
 }
 
+static void send_pending(app_t *a) {
+  for (unsigned i = 0; i < a->ntx; i++)
+    if (a->link.send_key(a->link.ctx, a->tx[i].code, a->tx[i].action) < 0)
+      ra_logf(&a->sys, "send_key %u/%u failed", a->tx[i].code, a->tx[i].action);
+  a->ntx = 0;
+}
 static void sink_emit(void *ctx, uint8_t code, uint8_t action) {
   app_t *a = ctx;
   if (local_key(a, code, action)) return;
@@ -192,13 +198,8 @@ static void sink_emit(void *ctx, uint8_t code, uint8_t action) {
     a->tx[a->ntx++].action = action;
     return;
   }
+  send_pending(a); /* full: the ones waiting go first, so keys never reorder */
   if (a->link.send_key(a->link.ctx, code, action) < 0) ra_logf(&a->sys, "send_key %u/%u failed", code, action);
-}
-static void send_pending(app_t *a) {
-  for (unsigned i = 0; i < a->ntx; i++)
-    if (a->link.send_key(a->link.ctx, a->tx[i].code, a->tx[i].action) < 0)
-      ra_logf(&a->sys, "send_key %u/%u failed", a->tx[i].code, a->tx[i].action);
-  a->ntx = 0;
 }
 static bool sink_gate(void *ctx, uint64_t now) {
   app_t *a = ctx;
@@ -528,7 +529,8 @@ void app_step(app_t *a, unsigned max_wait_ms) {
       a->lowbatt_pending = true;
     }
   }
-  if (!a->ntx && partial_wait_ms(a, now) == UINT32_MAX && ra_power_suspend_due(&a->power, now)) {
+  if (!a->ntx && !(a->link.busy && a->link.busy(a->link.ctx)) && partial_wait_ms(a, now) == UINT32_MAX &&
+      ra_power_suspend_due(&a->power, now)) {
     suspend_now(a);
     now = a->sys.ops.now_ms(a->sys.ops.ctx);
   }

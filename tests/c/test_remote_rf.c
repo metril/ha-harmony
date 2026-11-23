@@ -1253,6 +1253,32 @@ static void test_rejoin_lost_mid_transfer_pulses_and_does_not_spin(void) {
   teardown();
 }
 
+/* A link-lost report keeps the queued key (no false "send FAILED"), burns no retries, and delivers it after the link-up. */
+static void test_loss_keeps_key_no_false_failure(void) {
+  setup();
+  WAIT_FOR(nhbatt == 1);
+  DRAIN();
+  int base = nhkeys;
+  fr.drop_all = 1; /* nothing the remote says reaches the hub */
+  fk_key(&fk, 0, 115, 1);
+  tick(10);
+  fk_key(&fk, 0, 115, 0);
+  tick(10);
+  remote_chip_link(0); /* status 0x47 */
+  app_link_t lk = rf_link_app(&rf);
+  idle_awake(1000);
+  CT_EQ(msg_count("send FAILED"), 0);
+  CT_EQ(msg_count("retry 1 of 3"), 0);
+  CT_CHECK(lk.busy && lk.busy(lk.ctx)); /* queued: the remote must not suspend */
+  CT_CHECK(!app.ui.fallback);
+  fr.drop_all = 0;
+  remote_chip_link(1);
+  idle_awake(1000);
+  WAIT_FOR(nhkeys == base + 2); /* press and release, in order */
+  WAIT_FOR(!lk.busy(lk.ctx));
+  teardown();
+}
+
 static void test_rejoin_on_touch_while_lost(void) {
   setup();
   DRAIN();
@@ -1296,6 +1322,7 @@ int main(void) {
   CT_RUN(test_rejoin_followed_by_quick_uplink_in_5ms);
   CT_RUN(test_rejoin_lost_mid_transfer_pulses_and_does_not_spin);
   CT_RUN(test_rejoin_on_touch_while_lost);
+  CT_RUN(test_loss_keeps_key_no_false_failure);
   CT_RUN(test_heartbeat_unreadable_soc);
   CT_RUN(test_wait_includes_link_fd_and_deadline);
   CT_RUN(test_open_refused_when_hal_alive);

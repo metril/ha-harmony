@@ -69,7 +69,7 @@ typedef struct {
   uint8_t remote;
   app_link_event_t ring[RF_LINK_RING];
   unsigned head, n;
-  uint32_t seen_failures, seen_rx;
+  uint32_t seen_failures, seen_rx, seen_expired;
   uint8_t seen_retries;
   bool logged_start; /* note_start: the last object announced as sending */
   uint8_t logged_seq, logged_type;

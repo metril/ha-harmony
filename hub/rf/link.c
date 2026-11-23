@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "hub/hp_errors.h"
+#include "hub/rf/rf_payload.h"
 
 void hp_rf_link_init(hp_rf_link_t *l, hp_rf_transport *tp, bool wrapped, uint8_t slot,
                      hp_rf_link_deliver_fn deliver, void *ctx) {
@@ -111,7 +112,10 @@ static void flush_out(hp_rf_link_t *l, uint32_t now) {
     bool ack = l->pa_v;
     if (!ack && !l->pd_v) return;
     const hp_rf_inner_t *fr = ack ? &l->pa : &l->pd;
-    if (write_raw(l, fr) < 0) return; /* kept; tried again next pump (the transport backs off) */
+    if (write_raw(l, fr) < 0) { /* kept; tried again when the transport's backoff ends */
+        l->wr_retry_at = now + HP_LINK_WRITE_RETRY_MS;
+        return;
+    }
     l->out_busy = true;
     l->out_ack = ack;
     l->out_fr = *fr;
@@ -132,38 +136,120 @@ static void reset(hp_rf_link_t *l) {
         out_done(l, false, REL_LOSS);
         return;
     }
+    /* The queue is kept too (a loss is not a send failure). The retry clock is held while the link is down and stale
+     * objects are dropped by expire_stale(); the object in flight gets a fresh set of retries after the link-up. */
     hp_rf_asm_init(&l->as);
-    l->failures += (uint32_t)l->qn;
-    l->qhead = l->qn = 0;
-    l->started = false;
-    l->start_tries = 0;
-    uint8_t seq = l->tx.next_seq; /* keep counting: the peer may not have reset its duplicate filter */
-    hp_rf_tx_init(&l->tx, emit, l);
-    l->tx.next_seq = seq;
+    if (l->tx.state == HP_RF_TX_WAIT) l->tx.retries = 0;
 }
 
 static void pop(hp_rf_link_t *l) {
     l->qhead = (l->qhead + 1) % HP_LINK_QUEUE;
     l->qn--;
     l->started = false;
+    l->start_wait = false;
     l->pd_v = false; /* a stale frame of the finished object */
 }
 
 static void drive_tx(hp_rf_link_t *l, uint32_t now);
+static void report(hp_rf_link_t *l, const hp_rf_link_obj_t *o, bool ok);
+
+static hp_rf_link_obj_t *qat(hp_rf_link_t *l, size_t i) { return &l->q[(l->qhead + i) % HP_LINK_QUEUE]; }
+
+/* A key_event object: its logical key and action. */
+static bool key_info(const hp_rf_link_obj_t *o, uint32_t *code, uint32_t *action) {
+    hp_rf_val_t v[3];
+    if (o->type != HP_MSG_KEY_EVENT || hp_rf_unpack(o->type, o->body, o->len, v, 3) < 0) return false;
+    *code = v[1].u;
+    *action = v[2].u;
+    return true;
+}
+
+/* Removes queued object i (never counted as a send failure). */
+static void remove_at(hp_rf_link_t *l, size_t i, bool notify) {
+    if (notify) report(l, qat(l, i), false);
+    if (i == 0) {
+        if (l->started) l->tx.state = HP_RF_TX_IDLE;
+        l->started = false;
+        l->start_wait = false;
+        l->start_tries = 0;
+        l->pd_v = false;
+    }
+    for (size_t k = i; k + 1 < l->qn; k++) *qat(l, k) = *qat(l, k + 1);
+    l->qn--;
+}
+
+/* The newest RELEASE of a key is never dropped: the hub would see the key as held forever. */
+static bool keep_release(hp_rf_link_t *l, size_t i) {
+    uint32_t code, act, c2, a2;
+    if (!key_info(qat(l, i), &code, &act) || act != HP_KEY_ACTION_RELEASE) return false;
+    for (size_t j = i + 1; j < l->qn; j++)
+        if (key_info(qat(l, j), &c2, &a2) && c2 == code && a2 == HP_KEY_ACTION_RELEASE) return false;
+    return true;
+}
+
+/* Non-strict, link down: drops the objects older than HP_LINK_STALE_MS. */
+static void expire_stale(hp_rf_link_t *l, uint32_t now) {
+    for (size_t i = 0; i < l->qn;) {
+        if ((int32_t)(now - qat(l, i)->queued_at) < HP_LINK_STALE_MS || keep_release(l, i)) {
+            i++;
+            continue;
+        }
+        lg(l, now, "dropped type %d: stale while the link is down", (int)qat(l, i)->type);
+        l->expired++;
+        remove_at(l, i, true);
+    }
+}
 
 int hp_rf_link_send(hp_rf_link_t *l, hp_msg_type_t type, const uint8_t *body, size_t len, uint32_t now_ms) {
     if (!l || !l->tp || (len && !body) || (unsigned)type > 0xFF) return -HP_E_INVAL;
     if (len > HP_RF_BODY_MAX) return -HP_E_TOOBIG;
     l->now_dbg = now_ms;
-    if (l->tp->attached && !l->tp->attached(l->tp->self)) return -HP_E_NOENT;
+    if (!l->speak_first && l->tp->attached && !l->tp->attached(l->tp->self)) return -HP_E_NOENT;
+    hp_rf_link_obj_t nw;
+    nw.type = type;
+    nw.len = len;
+    nw.queued_at = now_ms;
+    if (len) memcpy(nw.body, body, len);
+    uint32_t kcode = 0, kact = 0;
+    bool is_key = key_info(&nw, &kcode, &kact);
+    size_t first = l->started ? 1 : 0; /* the object in flight stays */
+    if (is_key && kact == HP_KEY_ACTION_HOLD) { /* at most one unstarted HOLD per key: a repeat adds nothing */
+        for (size_t i = first; i < l->qn; i++) {
+            uint32_t c, a;
+            if (key_info(qat(l, i), &c, &a) && c == kcode && a == HP_KEY_ACTION_HOLD) return 0;
+        }
+    } else if (is_key && kact == HP_KEY_ACTION_RELEASE) { /* pending HOLDs of the key are moot */
+        for (size_t i = first; i < l->qn;) {
+            uint32_t c, a;
+            if (key_info(qat(l, i), &c, &a) && c == kcode && a == HP_KEY_ACTION_HOLD) remove_at(l, i, false);
+            else i++;
+        }
+        if (l->qn == HP_LINK_QUEUE) { /* never refused: an unstarted HOLD of any key goes, else the newest unstarted non-key object */
+            size_t victim = HP_LINK_QUEUE;
+            for (size_t i = first; i < l->qn && victim == HP_LINK_QUEUE; i++) {
+                uint32_t c, a;
+                if (key_info(qat(l, i), &c, &a) && a == HP_KEY_ACTION_HOLD) victim = i;
+            }
+            for (size_t i = l->qn; i > first && victim == HP_LINK_QUEUE; i--)
+                if (qat(l, i - 1)->type != HP_MSG_KEY_EVENT) victim = i - 1;
+            if (victim != HP_LINK_QUEUE) remove_at(l, victim, true);
+        }
+    }
     if (l->qn == HP_LINK_QUEUE) return -HP_E_BUSY;
     if (!l->tx.send) hp_rf_tx_init(&l->tx, emit, l);
-    hp_rf_link_obj_t *o = &l->q[(l->qhead + l->qn) % HP_LINK_QUEUE];
-    o->type = type;
-    o->len = len;
-    if (len) memcpy(o->body, body, len);
+    /* A key goes ahead of the objects that have not started transmitting (remote_info, battery after a resume),
+     * behind the one in flight and the keys already waiting. */
+    size_t pos = l->qn;
+    if (is_key) {
+        pos = first;
+        while (pos < l->qn && qat(l, pos)->type == HP_MSG_KEY_EVENT) pos++;
+    }
+    for (size_t k = l->qn; k > pos; k--) *qat(l, k) = *qat(l, k - 1);
+    *qat(l, pos) = nw;
     l->qn++;
-    if (l->qn == 1) { /* nothing ahead of it: transmit now, so "no peer" is reported synchronously */
+    if (pos == 0) { /* nothing ahead of it: transmit now, so "no peer" is reported synchronously */
+        l->start_wait = false;
+        l->start_tries = 0;
         l->noent = false;
         l->sending = true; /* the caller learns of a refusal from the return value: no result callback for it */
         drive_tx(l, now_ms);
@@ -222,10 +308,12 @@ static void report(hp_rf_link_t *l, const hp_rf_link_obj_t *o, bool ok) {
 }
 
 static void drive_tx(hp_rf_link_t *l, uint32_t now) {
+    if (l->qn && !strict_on(l) && !link_up(l)) expire_stale(l, now);
     for (int guard = 0; guard < HP_LINK_QUEUE + 1 && l->qn; guard++) {
         hp_rf_link_obj_t *o = &l->q[l->qhead];
         if (!l->started) {
-            if (l->start_tries && (int32_t)(now - l->start_at) < 0) return;
+            if (l->start_wait && (int32_t)(now - l->start_at) < 0) return;
+            l->start_wait = false;
             l->tx.pace_ms = l->gap_ms;
             lg(l, now, "send start type %d len %zu seq %u", (int)o->type, o->len, (unsigned)(l->tx.next_seq & 0x0F));
             int rc = hp_rf_tx_start(&l->tx, o->type, o->body, o->len, now);
@@ -236,7 +324,13 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
                 pop(l);
                 continue;
             }
-            if (rc == -HP_E_IO) { /* transport refused the first frame (backoff, chip busy): retry later */
+            if (rc == -HP_E_IO && (l->last_rc == -HP_E_BUSY || (!strict_on(l) && !link_up(l)))) {
+                /* transport backoff, or the link is down: not a try; again when the backoff ends (down: until stale) */
+                l->start_at = now + (l->last_rc == -HP_E_BUSY ? HP_LINK_WRITE_RETRY_MS : HP_RF_RETRY_MS);
+                l->start_wait = true;
+                return;
+            }
+            if (rc == -HP_E_IO) { /* transport refused the first frame (chip error): retry later */
                 if (++l->start_tries > HP_RF_RETRIES) {
                     l->failures++;
                     report(l, o, false);
@@ -245,6 +339,7 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
                     continue;
                 }
                 l->start_at = now + HP_RF_RETRY_MS;
+                l->start_wait = true;
                 return;
             }
             l->start_tries = 0;
@@ -257,10 +352,10 @@ static void drive_tx(hp_rf_link_t *l, uint32_t now) {
             l->started = true;
             return;
         }
-        bool hold = strict_on(l) && (l->out_busy || l->pd_v || !link_up(l));
+        bool hold = strict_on(l) ? (l->out_busy || l->pd_v || !link_up(l)) : !link_up(l);
         if (strict_on(l)) {
             if (!hold) (void)hp_rf_tx_service(&l->tx, now, 1); /* radio free: the next frame of the object */
-        } else {
+        } else if (!hold) {
             (void)hp_rf_tx_service(&l->tx, now, l->released);
         }
         uint8_t was = l->tx.retries;
@@ -347,8 +442,13 @@ int hp_rf_link_next_timeout_ms(const hp_rf_link_t *l, uint32_t now_ms) {
         if (d < 0) d = 0;
         if (best < 0 || d < best) best = d;
     }
+    if (strict_on(l) && !l->out_busy && (l->pa_v || l->pd_v) && link_up(l)) { /* a refused write: wake when the backoff ends */
+        int32_t d = (int32_t)(l->wr_retry_at - now_ms);
+        if (d < 0) d = 0;
+        if (best < 0 || d < best) best = d;
+    }
     if (!l->qn) return best;
-    uint32_t at = l->started ? l->tx.deadline : l->start_tries ? l->start_at : now_ms;
+    uint32_t at = l->started ? l->tx.deadline : l->start_wait ? l->start_at : now_ms;
     if (l->started && l->tx.state == HP_RF_TX_WAIT && l->tx.sent < l->tx.n) at = l->tx.next_at; /* pacing */
     int32_t d = (int32_t)(at - now_ms);
     if (d < 0) d = 0;
@@ -356,5 +456,5 @@ int hp_rf_link_next_timeout_ms(const hp_rf_link_t *l, uint32_t now_ms) {
 }
 
 hp_rf_link_status_t hp_rf_link_status(const hp_rf_link_t *l) {
-    return (hp_rf_link_status_t){l->qn, l->failures, l->delivered};
+    return (hp_rf_link_status_t){l->qn, l->failures, l->delivered, l->expired};
 }

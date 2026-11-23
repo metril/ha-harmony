@@ -24,6 +24,8 @@
 #define HP_LINK_SLOT_ANY 0xFF /* tx_slot: accept a TX status for any slot */
 #define HP_LINK_OUT_TIMEOUT_MS 300 /* strict downlink: a written frame with no TX status is taken as done after this */
 #define HP_LINK_UPLINK_RELEASE_MS 5 /* strict downlink: an uplink frame arriving this long after a write finished releases the radio slot */
+#define HP_LINK_STALE_MS 1500      /* non-strict: while the link is down, objects queued longer than this are dropped (the newest key RELEASE per key stays) */
+#define HP_LINK_WRITE_RETRY_MS 50  /* a write refused (transport backoff): tried again after this */
 #define HP_LINK_POLL_MS 30         /* remote polling: gap while an object awaits its ack */
 #define HP_LINK_IDLE_POLL_MS 250   /* ...and otherwise, while awake */
 
@@ -32,6 +34,7 @@ typedef void (*hp_rf_link_deliver_fn)(void *ctx, const hp_rf_msg_t *msg);
 typedef struct {
     hp_msg_type_t type;
     size_t len;
+    uint32_t queued_at; /* caller clock when queued (stale-object expiry while the link is down) */
     uint8_t body[HP_RF_BODY_MAX];
 } hp_rf_link_obj_t;
 
@@ -56,6 +59,10 @@ typedef struct {
     bool started;          /* q[qhead] is handed to tx (in flight, or awaiting a first transmission) */
     uint8_t start_tries;   /* first-transmission attempts for the head object */
     uint32_t start_at;     /* next attempt time while the transport refuses the first frame */
+    bool start_wait;       /* the head object waits for start_at (a refusal that is not counted as a try) */
+    bool speak_first;      /* remote: send() works while attached() is false (the remote speaks first); the retry clock still holds */
+    uint32_t expired;      /* objects dropped as stale while the link was down (monotonic; not a send failure) */
+    uint32_t wr_retry_at;  /* strict: earliest time a refused frame write is tried again */
     int last_rc;           /* last transport send() result */
     bool sending;          /* inside hp_rf_link_send: a refusal is returned, not reported */
     bool noent;            /* the head object hit -HP_E_NOENT on its first frame and was dropped */
@@ -99,6 +106,7 @@ typedef struct {
     size_t queued;     /* objects waiting or in flight */
     uint32_t failures; /* monotonic count of objects abandoned after retries */
     uint32_t delivered;
+    uint32_t expired;  /* monotonic count of objects dropped as stale while the link was down */
 } hp_rf_link_status_t;
 
 /* `tp` must already be claimed by the caller. deliver may be NULL (objects dropped). */

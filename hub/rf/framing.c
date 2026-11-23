@@ -131,9 +131,13 @@ int hp_rf_asm_push(hp_rf_asm_t *a, const hp_rf_inner_t *in, hp_rf_msg_t *out, hp
 
     a->active = 0;
     hp_rf_make_ack(a->type, a->seq, ack);
-    if (a->have_last && a->last_seq == a->seq) return HP_ASM_DUPLICATE;
-    a->have_last = 1;
+    /* remote_info opens a (re)started remote: always delivered (idempotent), and the filter starts over, so a
+     * rebooted remote's restarted seq is never mistaken for a repeat */
+    bool info = a->type == HP_MSG_REMOTE_INFO;
+    if (!info && a->have_last && a->last_seq == a->seq && a->last_type == a->type) return HP_ASM_DUPLICATE;
+    a->have_last = !info;
     a->last_seq = a->seq;
+    a->last_type = a->type;
     out->type = (hp_msg_type_t)a->type;
     out->seq = a->seq;
     out->len = a->len;
@@ -155,9 +159,14 @@ static int tx_send_all(hp_rf_tx_t *tx, uint32_t now_ms)
 {
     tx->sent = 0;
     size_t lim = tx->pace_ms ? 1 : tx->n;
+    tx->busy = 0;
     for (size_t i = 0; i < lim; i++) {
         tx->sent = i + 1;
-        if (tx->send(tx->ctx, &tx->fr[i]) < 0) return -HP_E_IO;
+        int rc = tx->send(tx->ctx, &tx->fr[i]);
+        if (rc < 0) {
+            tx->busy = rc == -HP_E_BUSY;
+            return -HP_E_IO;
+        }
     }
     tx->next_at = now_ms + tx->pace_ms;
     return 0;
@@ -213,8 +222,11 @@ hp_rf_tx_state_t hp_rf_tx_poll(hp_rf_tx_t *tx, uint32_t now_ms)
         tx->state = HP_RF_TX_FAILED;
         return tx->state;
     }
-    tx->retries++;
-    (void)tx_send_all(tx, now_ms); /* a failed attempt still counts; the next timeout retries */
+    if (tx_send_all(tx, now_ms) < 0 && tx->busy) { /* refused by the transport's backoff: not a retry, try again soon */
+        tx->deadline = now_ms + HP_RF_BUSY_MS;
+        return tx->state;
+    }
+    tx->retries++; /* a failed attempt still counts; the next timeout retries */
     tx->deadline = now_ms + HP_RF_RETRY_MS;
     return tx->state;
 }
