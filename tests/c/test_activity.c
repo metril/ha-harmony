@@ -993,7 +993,7 @@ static void test_keys_during_transition(void) {
     CT_EQ(map.keyq_n, 3);
     settle_all();
     CT_EQ(map.keyq_n, 0);
-    CT_EQ(nrec, 5 + 1); /* the plan, then the three presses coalesced into one send */
+    CT_EQ(nrec, 5 + 3); /* the plan, then all three presses */
     CT_EQ(recs[nrec - 1].h, NEC(5, 5));
     /* cancelled by a new start: the queue is dropped, not replayed */
     nrec = 0;

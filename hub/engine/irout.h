@@ -104,8 +104,8 @@ int hp_irout_send(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_
 int hp_irout_send_n(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key, uint8_t copies);
 /* hp_irout_send_n with a completion callback for a DEFERRED send: returns 0 when the frame went out
  * now (done is not called), 1 when it was queued (done(ctx, rc) is called exactly once when it is
- * finally sent, rc = the send result), or a negative error (done not called). Consecutive identical
- * key presses (key >= 0, no callback) already queued are coalesced into one. */
+ * finally sent, rc = the send result), or a negative error (done not called). Distinct presses are never
+ * merged; hold repeats are already skipped while a send is queued. */
 int hp_irout_send_cb(hp_irout_t *, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key, uint8_t copies,
                      void (*done)(void *ctx, int rc), void *ctx);
 /* Starts repeating the last frame sent for `key`; if `key` is already repeating this only extends

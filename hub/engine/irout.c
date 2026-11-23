@@ -179,11 +179,6 @@ int hp_irout_send_n(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uin
     return r < 0 ? r : 0;
 }
 
-static bool same_signal(const hp_ir_signal_t *a, const hp_ir_signal_t *b) {
-    return a->carrier_hz == b->carrier_hz && a->once_n == b->once_n && a->rep_n == b->rep_n &&
-           a->period_us == b->period_us && !memcmp(a->us, b->us, ((size_t)a->once_n + a->rep_n) * sizeof a->us[0]);
-}
-
 int hp_irout_send_cb(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, uint8_t port_mask, int key, uint8_t copies,
                      void (*done)(void *ctx, int rc), void *dctx) {
     if (!o || !ir || !code) return -HP_E_INVAL;
@@ -205,14 +200,6 @@ int hp_irout_send_cb(hp_irout_t *o, hp_ir_sink *ir, const hp_ir_code_t *code, ui
     if (rc < 0) return rc;
     int k = key < 0 ? -1 : key;
     if (!defer) return emit_cand(o, ir, port_mask, k, is_sirc(code), copies);
-    if (k >= 0 && !done && o->pend_n) { /* the same key pressed again while the last one still waits: one send */
-        const hp_irout_pend_t *last = &o->pend[(o->pend_head + o->pend_n - 1) % HP_IROUT_PEND];
-        if (last->key == k && !last->done && last->port == port_mask && last->copies == copies &&
-            same_signal(&last->sig, sig)) {
-            hp_log("hub: repeated key %d coalesced into the queued send\n", k);
-            return 1;
-        }
-    }
     o->pend[slot].done = done;
     o->pend[slot].dctx = dctx;
     o->pend[slot].ir = ir;
