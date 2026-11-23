@@ -201,6 +201,28 @@ async def test_failed_user_calls_raise_translated_errors_key_calls_only_log(
     assert "tv on fire" in caplog.text
 
 
+async def test_hung_service_call_times_out_clears_flight_and_names_the_service(
+    hass, rig, clock, caplog, monkeypatch
+):
+    from custom_components.ha_harmony import coordinator as coord_mod
+    from custom_components.ha_harmony.errors import HomeAssistantError
+
+    hass.states.async_set("remote.shield", "on")
+    _hub, c = await rig()
+    monkeypatch.setattr(coord_mod, "CALL_TIMEOUT", 0.1)
+
+    async def hang(call):
+        await asyncio.Event().wait()
+
+    hass.services.async_register("remote", "send_command", hang)
+    caplog.set_level("WARNING")
+    with pytest.raises(HomeAssistantError):
+        await c.async_device_command("shield", "ok")
+    c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 2, "action": 0})
+    await settle(hass, lambda: "remote.send_command did not finish" in caplog.text)
+    await settle(hass, lambda: not c._calls)
+
+
 # 6: an activity change while HA and the hub were disconnected still runs the HA-side steps
 async def test_transition_during_a_disconnect_runs_the_ha_steps(hass, rig, clock):
     from pytest_homeassistant_custom_component.common import async_mock_service

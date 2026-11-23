@@ -21,7 +21,7 @@ from .harmony_core.harmony_proto import (
     encode_ws,
 )
 from .harmony_core.hub_limits import HubLimits
-from .sockopts import keepalive_ws
+from .sockopts import abort_ws, keepalive_ws
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -189,9 +189,10 @@ class HarmonyHubClient:
     # ------------------------------------------------------------ internals
     async def _open(self) -> aiohttp.ClientWebSocketResponse:
         try:
-            ws = await self._session.ws_connect(
-                self._url, timeout=aiohttp.ClientWSTimeout(ws_close=5), autoping=True
-            )
+            async with asyncio.timeout(5):
+                ws = await self._session.ws_connect(
+                    self._url, timeout=aiohttp.ClientWSTimeout(ws_close=5), autoping=True
+                )
         except (aiohttp.ClientError, OSError, TimeoutError) as exc:
             raise HarmonyConnectionError(f"cannot connect to {self._url}: {exc}") from exc
         keepalive_ws(ws)
@@ -399,9 +400,13 @@ class HarmonyHubClient:
         fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[msg_id] = fut
         try:
-            await ws.send_json(envelope)
-            return await asyncio.wait_for(fut, timeout or self._req_timeout)
+            async with asyncio.timeout(timeout or self._req_timeout):
+                await ws.send_json(envelope)
+                return await fut
         except TimeoutError as exc:  # before OSError, which it subclasses
+            # a late path heal must not run a command the caller already gave up on: drop the
+            # queued frames and let the read loop see the dead link and reconnect
+            abort_ws(ws)
             raise HarmonyConnectionError(
                 f"request timed out after {timeout or self._req_timeout:g} s"
             ) from exc

@@ -259,8 +259,8 @@ async def test_hub_with_tcp_keepalive_gets_no_ping_timer_and_the_socket_has_keep
         sock = c._ws._response.connection.transport.get_extra_info("socket")
         assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
         if hasattr(socket, "TCP_KEEPIDLE"):
-            assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 60
-            assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 10
+            assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 15
+            assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 5
             assert sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 3
         with pytest.raises(TimeoutError):  # no ping is ever sent
             await asyncio.wait_for(pinged.wait(), 0.3)
@@ -281,6 +281,23 @@ async def test_unanswered_request_error_says_timed_out(fake_hub):
     try:
         with pytest.raises(HarmonyConnectionError, match="timed out"):
             await c.async_send(MsgType.COMMAND, {"device": "d", "command": "c"})
+    finally:
+        await c.async_close()
+        await session.close()
+
+
+async def test_request_timeout_aborts_the_link_and_reconnects(fake_hub):
+    async def handler(ws, env):
+        if env["t"] == "hello":
+            await ws.send_json(_ack(env))
+
+    hub = await fake_hub(handler)
+    c, session = await _client(hub, request_timeout=0.2)
+    await c.async_connect()
+    try:
+        with pytest.raises(HarmonyConnectionError, match="timed out"):
+            await c.async_send(MsgType.COMMAND, {"device": "d", "command": "c"})
+        await _wait(lambda: hub.connections >= 2 and c.connected)  # the timed-out link was dropped
     finally:
         await c.async_close()
         await session.close()
