@@ -270,8 +270,8 @@ def test_the_real_keepalive_options_are_set():
 
         assert set_keepalive(s) is True
         assert s.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
-        assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 60
-        assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 10
+        assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == 15
+        assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL) == 5
         assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 3
         s.close()
     finally:

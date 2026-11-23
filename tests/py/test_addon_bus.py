@@ -48,9 +48,17 @@ def test_set_keepalive():
         if hasattr(socket, "TCP_KEEPCNT"):
             assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 3
         if hasattr(socket, "TCP_USER_TIMEOUT"):
-            assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 90000
+            assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 20000
     finally:
         a.close()
+
+
+def test_integration_keepalive_detects_a_dead_link_within_about_20_s():
+    from custom_components.ha_harmony import sockopts
+
+    assert (sockopts.KEEPIDLE, sockopts.KEEPINTVL, sockopts.KEEPCNT) == (15, 5, 3)
+    assert sockopts.USER_TIMEOUT_MS == 20000
+    assert sockopts.abort_ws(object()) is False
 
 
 def test_integration_set_keepalive_has_a_user_timeout():
@@ -60,6 +68,6 @@ def test_integration_set_keepalive_has_a_user_timeout():
     try:
         assert ha_keepalive(a) is True
         if hasattr(socket, "TCP_USER_TIMEOUT"):
-            assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 90000
+            assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 20000
     finally:
         a.close()

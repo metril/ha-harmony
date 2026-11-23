@@ -1,15 +1,14 @@
-"""TCP keepalive for liveness without application ping timers (60 s idle, 10 s interval, 3 probes)."""
+"""TCP keepalive for liveness without application ping timers (15 s idle, 5 s interval, 3 probes)."""
 
 from __future__ import annotations
 
 import socket
 from typing import Any
 
-KEEPIDLE = 60
-KEEPINTVL = 10
+KEEPIDLE = 15
+KEEPINTVL = 5
 KEEPCNT = 3
-USER_TIMEOUT_MS = 90000  # unacked data aborts the connection after this long
-USER_TIMEOUT_MS = 90000  # unacked data aborts the connection after this long
+USER_TIMEOUT_MS = 20000  # unacked data aborts the connection after this long
 
 
 def set_keepalive(sock: socket.socket | None) -> bool:
@@ -51,3 +50,13 @@ def keepalive_ws(ws: Any) -> bool:
     except AttributeError:
         return False
     return set_keepalive(sock)
+
+
+def abort_ws(ws: Any) -> bool:
+    """Abort the transport under an aiohttp client WebSocket, discarding anything still queued to send.
+    Never raises; False when the transport is unreachable."""
+    try:
+        ws._response.connection.transport.abort()
+    except AttributeError:
+        return False
+    return True

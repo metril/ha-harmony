@@ -135,6 +135,8 @@ LINK_STATES = (
     "integration_outdated",
 )
 
+CALL_TIMEOUT = 15.0  # a service call that has not finished by then is abandoned
+
 
 @dataclass
 class DeviceState:
@@ -1940,12 +1942,22 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         if hold and flight in self._calls:
             return
         self._calls[flight] = self._calls.get(flight, 0) + 1
-        self.hass.async_create_task(self._run_call(call, flight), eager_start=True)
+        self.config_entry.async_create_background_task(
+            self.hass,
+            self._run_call(call, flight),
+            name="ha_harmony service call",
+            eager_start=True,
+        )
 
     async def _run_call(self, call: HaCall, flight: tuple[str, tuple[str, ...]]) -> None:
         try:
-            await self.hass.services.async_call(
-                call.domain, call.name, self._call_data(call), blocking=True, context=Context()
+            async with asyncio.timeout(CALL_TIMEOUT):
+                await self.hass.services.async_call(
+                    call.domain, call.name, self._call_data(call), blocking=True, context=Context()
+                )
+        except TimeoutError:
+            _LOGGER.warning(
+                "%s did not finish within %g s; giving up on it", call.service, CALL_TIMEOUT
             )
         except Exception as exc:  # noqa: BLE001  (a key event or step never raises)
             self._warn_once((call.service, "error"), "%s failed: %s", call.service, exc)
@@ -1963,9 +1975,15 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             raise invalid(key, **ph)
         self._warn_missing_entities(call)
         try:
-            await self.hass.services.async_call(
-                call.domain, call.name, self._call_data(call), blocking=True, context=Context()
+            async with asyncio.timeout(CALL_TIMEOUT):
+                await self.hass.services.async_call(
+                    call.domain, call.name, self._call_data(call), blocking=True, context=Context()
+                )
+        except TimeoutError:
+            _LOGGER.warning(
+                "%s did not finish within %g s; giving up on it", call.service, CALL_TIMEOUT
             )
+            raise ha_error("service_failed", service=call.service, error="timed out") from None
         except HomeAssistantError:
             raise
         except Exception as exc:

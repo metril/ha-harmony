@@ -2,14 +2,14 @@
 
 import socket
 
-KEEPIDLE = 60
-KEEPINTVL = 10
+KEEPIDLE = 15
+KEEPINTVL = 5
 KEEPCNT = 3
-USER_TIMEOUT_MS = 90000  # unacked data aborts the connection after this long
+USER_TIMEOUT_MS = 20000  # unacked data aborts the connection after this long
 
 
 def set_keepalive(sock: socket.socket | None) -> bool:
-    """Enable SO_KEEPALIVE (60 s idle, 10 s interval, 3 probes). False when sock is None/unusable."""
+    """Enable SO_KEEPALIVE (15 s idle, 5 s interval, 3 probes). False when sock is None/unusable."""
     if sock is None:
         return False
     try:

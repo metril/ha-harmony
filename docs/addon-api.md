@@ -270,7 +270,7 @@ closed `4002 replaced`). Frames are text JSON `{"t": <type>, ...}`; unknown `t` 
 Replaces the removed `GET bundle`, `GET bundle/wait`, `POST bundle/ack`, `POST bundle/bt`.
 
 **Liveness.** No application ping, no aiohttp `heartbeat`. Both ends set kernel TCP keepalive on the socket (`SO_KEEPALIVE`,
-`TCP_KEEPIDLE=60`, `TCP_KEEPINTVL=10`, `TCP_KEEPCNT=3`; helper `harmony_addon.sockopts.set_keepalive`), so a dead peer is
+`TCP_KEEPIDLE=15`, `TCP_KEEPINTVL=5`, `TCP_KEEPCNT=3`; helper `harmony_addon.sockopts.set_keepalive`), so a dead peer is
 detected within about 90 s and the socket errors/closes. On close the add-on marks the hub not connected (`connected:false`
 pushed to `/live`) and fails pending Bluetooth commands with `hub_offline`.
 
@@ -402,7 +402,7 @@ limits. No cadence, no fast mode.
 ### Cadence
 
 None. Nothing polls and nothing renews: the integration and editor hold WebSockets, state changes are pushed, and a dead peer is
-found by TCP keepalive (60 s idle, 10 s interval, 3 probes), then reconnected with back-off and resynced from `hello` /
+found by TCP keepalive (15 s idle, 5 s interval, 3 probes), then reconnected with back-off and resynced from `hello` /
 `snapshot`.
 
 ### Implementer notes (routes)
