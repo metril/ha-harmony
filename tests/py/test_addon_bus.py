@@ -48,7 +48,7 @@ def test_set_keepalive():
         if hasattr(socket, "TCP_KEEPCNT"):
             assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT) == 3
         if hasattr(socket, "TCP_USER_TIMEOUT"):
-            assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 90000
+            assert a.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == 20000
     finally:
         a.close()
 
