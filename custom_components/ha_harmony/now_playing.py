@@ -123,7 +123,12 @@ def _position(attrs: Any, flags: int, now: datetime) -> int:
 
 
 def build(
-    shield: State | None, plex: State | None, now: datetime, plex_apps: Iterable[str], font: str
+    shield: State | None,
+    plex: State | None,
+    now: datetime,
+    plex_apps: Iterable[str],
+    font: str,
+    session: State | None = None,
 ) -> Playing | None:
     """What the remote should show now, or None when neither player is in use. The Plex player gives
     the details while the Shield runs a Plex app; any other app shows its own title (no cover, no
@@ -134,7 +139,19 @@ def build(
         and plex is not None
         and plex.state in ("playing", "paused")
     )
-    src = plex if on_plex else shield
+    sess = (
+        session
+        if not on_plex
+        and session is not None
+        and session.state in ("playing", "paused")
+        and (
+            shield is None
+            or session.attributes.get("app_id") == shield.attributes.get("app_id")
+            or not shield.attributes.get("media_title")
+        )
+        else None
+    )
+    src = sess or (plex if on_plex else shield)
     if src is None or src.state in ("unavailable", "unknown"):
         return None
     flags = _flags(src)
@@ -145,8 +162,11 @@ def build(
         return Playing(0, 0, 0, 0, "", "", None)
     t1 = _line(series or title, (library,), font)
     t2 = ""
+    if sess is not None:
+        artist = _text(a.get("media_artist"))
+        t2 = cut(artist) if artist and has_glyphs(artist, font) else ""
     season, episode = a.get("media_season"), a.get("media_episode")
-    if series and (season not in (None, "") or episode not in (None, "")):
+    if sess is None and series and (season not in (None, "") or episode not in (None, "")):
         tag = f"S{_int(season)} E{_int(episode)}"
         t2 = cut(f"{tag} · {title}") if title and has_glyphs(f"{tag} · {title}", font) else tag
     content = _text(a.get("media_content_id")) or title
@@ -193,6 +213,7 @@ class NowPlayingFeed:
         *,
         shield: str = DEFAULT_SHIELD,
         plex: str = DEFAULT_PLEX,
+        session: str | None = None,
         plex_apps: Iterable[str] = DEFAULT_PLEX_APPS,
         font: str = DEFAULT_FONT,
         fetch: Fetch | None = None,
@@ -201,6 +222,7 @@ class NowPlayingFeed:
         self.hass, self.client = hass, client
         self._remotes, self._attached, self._spawn = remotes, attached, spawn
         self.shield, self.plex, self.plex_apps, self.font = shield, plex, tuple(plex_apps), font
+        self.session = self._opt_session = session
         self._opt_shield, self._opt_plex = shield, plex
         self._fetch = fetch or self._fetch_picture
         self._clock = clock
@@ -224,16 +246,17 @@ class NowPlayingFeed:
     def start(self) -> None:
         self.stop()
         self._unsub = async_track_state_change_event(
-            self.hass, [self.shield, self.plex], self._on_event
+            self.hass, [e for e in (self.shield, self.plex, self.session) if e], self._on_event
         )
         self._on_event(None)  # type: ignore[arg-type]  # prime from the current state
 
-    def configure(self, shield: str | None, plex: str | None) -> None:
+    def configure(self, shield: str | None, plex: str | None, session: str | None = None) -> None:
         """Use the entities of the live config (None keeps the option default)."""
         shield, plex = shield or self._opt_shield, plex or self._opt_plex
-        if (shield, plex) == (self.shield, self.plex):
+        session = session or self._opt_session
+        if (shield, plex, session) == (self.shield, self.plex, self.session):
             return
-        self.shield, self.plex = shield, plex
+        self.shield, self.plex, self.session = shield, plex, session
         self._last = self._sent = None
         if self._unsub:  # started: follow the new entities (start() primes)
             self.start()
@@ -296,6 +319,7 @@ class NowPlayingFeed:
             self._clock(),
             self.plex_apps,
             self.font,
+            self.hass.states.get(self.session) if self.session else None,
         )
 
     # -- work

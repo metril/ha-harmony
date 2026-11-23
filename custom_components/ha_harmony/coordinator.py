@@ -1435,7 +1435,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.app_status.configure(self.compiled.apps)
         media = list(self.compiled.media.values())
         pick = lambda k: next((self._cur(m[k]) for m in media if m.get(k)), None)
-        self.now_playing.configure(pick("apps_entity"), pick("now_playing_entity"))
+        self.now_playing.configure(pick("apps_entity"), pick("now_playing_entity"), pick("session_entity"))
 
     async def _send_tiles(self, entities: set[str], remotes: tuple[int, ...]) -> None:
         """Send each tile whose rendered (state, text) pair changed since the last send. Nothing is

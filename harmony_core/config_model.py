@@ -524,6 +524,9 @@ def _build_schema(r: _Resolver) -> vol.Schema:
                 vol.Optional("now_playing_entity"): vol.All(
                     str, vol.Match(_ENTITY, msg="not an entity id")
                 ),
+                vol.Optional("session_entity"): vol.All(
+                    str, vol.Match(_ENTITY, msg="not an entity id")
+                ),
             }
         ),
     }

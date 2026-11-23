@@ -308,3 +308,48 @@ async def test_attach_push_errors_are_logged(hass, caplog):
     feed.on_remote_attached(1)
     await hass.async_block_till_done()
     assert "attach push failed" in caplog.text
+
+
+ST = "org.smarttube.stable"
+SESS = "sensor.shield_now_playing"
+
+
+def _sess(hass, state="playing", app=ST, now=None):
+    return _state(
+        hass,
+        SESS,
+        state,
+        app_id=app,
+        media_title="Video",
+        media_artist="Channel",
+        media_duration=600,
+        media_position=5,
+        media_position_updated_at=now or dt_util.utcnow(),
+    )
+
+
+def test_session_fills_an_untitled_shield(hass):
+    now = dt_util.utcnow()
+    shield = _state(hass, SHIELD, "playing", app_id=ST)
+    p = npl.build(shield, None, now, APPS, "m16", _sess(hass, now=now - timedelta(seconds=10)))
+    assert (p.t1, p.t2, p.flags, p.pos, p.dur) == ("Video", "Channel", npl.PLAYING, 15, 600)
+
+
+def test_session_of_another_app_loses_to_a_titled_shield(hass):
+    now = dt_util.utcnow()
+    shield = _state(hass, SHIELD, "playing", app_id="org.xbmc.kodi", media_title="Movie")
+    assert npl.build(shield, None, now, APPS, "m16", _sess(hass)).t1 == "Movie"
+
+
+def test_plex_beats_the_session(hass):
+    now = dt_util.utcnow()
+    shield = _state(hass, SHIELD, "playing", app_id="com.plexapp.android")
+    plex = _state(hass, PLEX, "playing", **PLEX_ATTRS)
+    p = npl.build(shield, plex, now, APPS, "m16", _sess(hass, app="com.plexapp.android"))
+    assert p.t1 == "Severance"
+
+
+def test_idle_session_is_ignored(hass):
+    now = dt_util.utcnow()
+    shield = _state(hass, SHIELD, "playing", app_id=ST)
+    assert npl.build(shield, None, now, APPS, "m16", _sess(hass, "idle")).t1 == ""

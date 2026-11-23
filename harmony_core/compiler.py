@@ -184,7 +184,7 @@ class Compiled:
     activity_ids: list[str] = field(default_factory=list)  # index = the hub's activity index
     # App rings: per app button (wire page, widget id) its app ids and the apps_entity player.
     apps: list[AppBinding] = field(default_factory=list)
-    # activity id -> {apps_entity, now_playing_entity} (only the keys the activity sets)
+    # activity id -> {apps_entity, now_playing_entity, session_entity} (only the keys the activity sets)
     media: dict[str, dict[str, str]] = field(default_factory=dict)
     # Measured sizes against the hub's and remote's limits (the editor's meters). Not part of
     # equality: two compiles of the same config are the same config.

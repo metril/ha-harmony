@@ -107,7 +107,7 @@ devices:
 activities:
   - id: shield_tv
     name: Shield TV
-    media: {apps_entity: media_player.nvidia_shield_tv, now_playing_entity: media_player.plex_plex_for_android_tv_shield_android_tv}
+    media: {apps_entity: media_player.nvidia_shield_tv, now_playing_entity: media_player.plex_plex_for_android_tv_shield_android_tv, session_entity: sensor.shield_now_playing}
     devices:
       - {device: tv, input: HDMI 1}
       - {device: shield_ha}
