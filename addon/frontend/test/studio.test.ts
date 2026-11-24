@@ -10,6 +10,8 @@ import keymap from './fixtures/keymap.json';
 import vectors from '../../../tests/vectors/pages.json';
 import { Store, setStore } from '../src/lib/store';
 import { widgetRect } from '../src/lib/page-renderer';
+import { assign } from '../src/lib/studio-model';
+import { SCREEN } from '../src/lib/remote-layout';
 import { libRoutes, fakeApi, previewOk, tvConfig } from './helpers';
 
 const page = (vectors.valid_v2 as { name: string; dict: unknown }[]).find((v) => v.name === 'v2_all_options')!.dict;
@@ -420,6 +422,52 @@ describe('remote studio', () => {
       const r = widgetRect(s2 as never, s2.widgets[1] as never);
       expect([Number(g.getAttribute('x')), Number(g.getAttribute('y'))]).toEqual([r.x1 + CW, r.y1 + CH]);
       expect(Number(g.getAttribute('width'))).toBe(r.x2 - r.x1 + 1);
+    });
+    describe('drops on empty cells', () => {
+      type R = { st: { set(p: object): void }; screenPoint: unknown; renderRoot: { elementsFromPoint: unknown }; targetAt(x: number, y: number): unknown; spots(): { id: string; x: number; y: number }[] };
+      const cellSpots = (remote: El) => (remote as unknown as R).spots().filter((x) => x.id.startsWith('c:')).map((x) => x.id);
+      const dropAt = (remote: El, x: number, y: number) => {
+        const r = remote as unknown as R;
+        r.screenPoint = () => ({ x, y });
+        r.renderRoot.elementsFromPoint = () => [];
+        return r.targetAt(0, 0);
+      };
+      it('screen 1 accepts a drop on a free cell of a drawn row and places the widget at that config cell', async () => {
+        const { remote, store } = await boot();
+        const { s1 } = fixture(store);
+        await tick(remote);
+        // free cells of the drawn rows only (config rows 0 and 2); the rows between them are not drawn
+        expect(cellSpots(remote).filter((c) => c.startsWith('c:0:3:'))).toEqual(['c:0:3:0', 'c:0:3:2']);
+        expect(cellSpots(remote).some((c) => /^c:0:\d+:(1|3|4|6)$/.test(c))).toBe(false);
+        const row = widgetRect(s1 as never, s1.widgets[0] as never); // compiled row of config row 0
+        const t = dropAt(remote, 3.5 * 20, (row.y1 + row.y2) / 2);
+        expect(t).toEqual({ kind: 'cell', page: 0, x: 3, y: 0 });
+        const r = assign(store.config, 'default' as never, { kind: 'command', device: 'tv', name: 'up' } as never, t as never);
+        expect('refused' in r).toBe(false);
+        expect((r as { config: { pages: { widgets: { x: number; y: number }[] }[] } }).config.pages[0]!.widgets[12]).toMatchObject({ x: 3, y: 0 });
+      });
+      it('screen 2 accepts the same, in its own rows, at their compiled position', async () => {
+        const { remote, store } = await boot();
+        const { s2 } = fixture(store);
+        (remote as unknown as R).st.set({ wire: 1 });
+        await tick(remote);
+        expect(cellSpots(remote).filter((c) => c.startsWith('c:0:3:'))).toEqual(['c:0:3:4', 'c:0:3:6']);
+        const row = widgetRect(s2 as never, s2.widgets[3] as never); // compiled row 1 = config row 6
+        const spot = (remote as unknown as R).spots().find((x) => x.id === 'c:0:3:6')!;
+        expect(spot.y).toBeCloseTo(SCREEN.y + (row.y1 + row.y2) / 2, 0);
+        expect(dropAt(remote, 3.5 * 20, (row.y1 + row.y2) / 2)).toEqual({ kind: 'cell', page: 0, x: 3, y: 6 });
+        expect(dropAt(remote, 4.5 * 20, (row.y1 + row.y2) / 2)).toMatchObject({ kind: 'widget', index: 10 });
+      });
+      it('a converted page (config cells are not compiled cells) offers no cell spots and no cell drops', async () => {
+        const { remote, store } = await boot();
+        const { s2 } = fixture(store);
+        delete (store.config.pages![0] as { layout?: string }).layout;
+        (remote as unknown as R).st.set({ wire: 1 });
+        await tick(remote);
+        expect(cellSpots(remote)).toEqual([]);
+        const row = widgetRect(s2 as never, s2.widgets[3] as never);
+        expect(dropAt(remote, 3.5 * 20, (row.y1 + row.y2) / 2)).toBeNull();
+      });
     });
     it('dragging past the bottom is refused on screen 2 exactly as on screen 1: nothing changes and it says so', async () => {
       const { remote, store, studio } = await boot();

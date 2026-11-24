@@ -207,7 +207,36 @@ export class HhRemote extends LitElement {
     const g = gridOf(page);
     return widgetRect({ cols: g.cols, rows: g.rows, version: 2 } as V2Page, { ...b, y: b.y - g.shift });
   }
+  /** Explicit `layout: fixed` pages split by config rows, so a config cell of a drawn row is a compiled cell; converted pages are regridded and have no such cells. */
+  private fixedCells(page: Page): boolean {
+    return this.multiScreen() && page.layout === 'fixed' && !isList(page);
+  }
+  /** Compiled pixel rows (y1..y2) of the config rows the shown screen draws. */
+  private shownRows(page: Page): Map<number, { y1: number; y2: number }> {
+    const v2 = this.v2();
+    const map = wireMap(page, this.st.previewOf(this.st.page), this.st.wire);
+    const rows = new Map<number, { y1: number; y2: number }>();
+    page.widgets.forEach((w, i) => {
+      if ((map[i] ?? -1) < 0) return;
+      const r = this.rectOf(page, i, v2, map);
+      const y = boxOf(w).y;
+      const cur = rows.get(y);
+      rows.set(y, { y1: Math.min(cur?.y1 ?? r.y1, r.y1), y2: Math.max(cur?.y2 ?? r.y2, r.y2) });
+    });
+    return rows;
+  }
+  private isFreeCell(page: Page, x: number, y: number): boolean {
+    return !page.widgets.some((w) => {
+      const b = boxOf(w);
+      return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
+    });
+  }
   private cellRect(page: Page, x: number, y: number) {
+    const row = this.fixedCells(page) ? this.shownRows(page).get(y) : undefined;
+    if (row) {
+      const cols = pageDims(page).cols;
+      return { x1: Math.ceil((x * 240) / cols), x2: Math.ceil(((x + 1) * 240) / cols) - 1, y1: row.y1, y2: row.y2 };
+    }
     const g = gridOf(page);
     return widgetRect({ cols: g.cols, rows: g.rows, version: 2 } as V2Page, { x, y: y - g.shift, w: 1, h: 1 });
   }
@@ -230,6 +259,13 @@ export class HhRemote extends LitElement {
   private cfgCellAt(px: number, py: number): { x: number; y: number } | null {
     const page = this.cfgPage();
     if (!page || isList(page)) return null;
+    if (this.multiScreen()) {
+      if (!this.fixedCells(page)) return null;
+      const cols = pageDims(page).cols;
+      const x = Math.min(cols - 1, Math.floor((px * cols) / 240));
+      for (const [y, r] of this.shownRows(page)) if (py >= r.y1 && py <= r.y2 && this.isFreeCell(page, x, y)) return { x, y };
+      return null;
+    }
     const g = gridOf(page);
     const c = cellAt({ cols: g.cols, rows: g.rows, version: 2, widgets: [] } as unknown as V2Page, px, py);
     return c ? { x: c.x, y: c.y + g.shift } : null;
@@ -246,7 +282,7 @@ export class HhRemote extends LitElement {
     if (!p || !page) return null;
     if (isList(page)) return { kind: 'cell', page: this.st.page, x: 0, y: 0 };
     if (this.multiScreen()) {
-      // the config grid is not what is drawn: hit-test the compiled screen, and offer no empty cells (there is no grid to place one on)
+      // the config grid is not what is drawn: hit-test the compiled screen first
       const v2 = this.v2();
       const map = wireMap(page, this.st.previewOf(this.st.page), this.st.wire);
       const index = !v2 ? -1 : map.findIndex((m) => {
@@ -255,7 +291,9 @@ export class HhRemote extends LitElement {
         const r = widgetRect(v2, w);
         return p.x >= r.x1 && p.x <= r.x2 && p.y >= r.y1 && p.y <= r.y2;
       });
-      return index >= 0 ? { kind: 'widget', page: this.st.page, index } : null;
+      if (index >= 0) return { kind: 'widget', page: this.st.page, index };
+      const cell = this.cfgCellAt(p.x, p.y); // only on explicit fixed pages
+      return cell ? { kind: 'cell', page: this.st.page, x: cell.x, y: cell.y } : null;
     }
     const c = this.cfgCellAt(p.x, p.y);
     if (!c) return null;
@@ -282,8 +320,17 @@ export class HhRemote extends LitElement {
       const r = this.rectOf(page, i, v2, map);
       out.push({ id: `w:${this.st.page}:${i}`, target: { kind: 'widget', page: this.st.page, index: i }, x: SCREEN.x + (r.x1 + r.x2) / 2, y: SCREEN.y + (r.y1 + r.y2) / 2 });
     });
-    // a multi-screen page has no single grid to place into: no empty-cell spots
-    if (this.multiScreen()) return out;
+    if (this.multiScreen()) {
+      // explicit fixed pages: the free cells of the rows this screen draws; converted pages have no compiled cells
+      if (!this.fixedCells(page)) return out;
+      for (const [y] of this.shownRows(page))
+        for (let x = 0; x < cols; x++)
+          if (this.isFreeCell(page, x, y)) {
+            const r = this.cellRect(page, x, y);
+            out.push({ id: `c:${this.st.page}:${x}:${y}`, target: { kind: 'cell', page: this.st.page, x, y }, x: SCREEN.x + (r.x1 + r.x2) / 2, y: SCREEN.y + (r.y1 + r.y2) / 2 });
+          }
+      return out;
+    }
     for (let y = 0; y < rows; y++)
       for (let x = 0; x < cols; x++)
         if (!covered.has(`${x},${y}`)) {
