@@ -57,6 +57,7 @@ BASE_UIDS = {
         "remote",
         "addon_link",
         "firmware",
+        "firmware_image",
         "activity",
         "key_1",
         "battery_1",
@@ -672,6 +673,7 @@ async def test_nothing_applied_loads_with_hub_config_untouched(hass, hub_rf, wri
             "pagefmt_1",
             "addon_link",
             "firmware",
+            "firmware_image",
         ]
     }
     await hass.config_entries.async_unload(entry.entry_id)
