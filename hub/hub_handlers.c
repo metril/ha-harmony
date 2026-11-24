@@ -41,6 +41,7 @@ static void hub_notify(void *vctx, hp_actsm_evt_t evt, int idx) {
         h->pending_state = true;
         h->pending_activity = idx < 0 ? 0 : idx;
         h->pending_power = idx >= 0;
+        h->pending_off = h->pending_off || hp_actsm_off_press(&h->act);
     }
 }
 
@@ -666,6 +667,8 @@ void hub_flush_pending(hub_ctx_t *h) {
     if (!d) return;
     cJSON_AddNumberToObject(d, "activity", h->pending_activity);
     cJSON_AddBoolToObject(d, "power", h->pending_power);
+    if (h->pending_off) cJSON_AddBoolToObject(d, "off_press", true); /* ws only: the RF payload is unchanged */
+    h->pending_off = false;
     hub_broadcast(h, "state_update", d);
     hp_rf_val_t v[2] = {{.u = (uint32_t)h->pending_activity & 0xFF}, {.u = h->pending_power ? 1u : 0u}};
     (void)rf_send_msg(h, HP_MSG_STATE_UPDATE, v, 2); /* best effort: remote may be absent */

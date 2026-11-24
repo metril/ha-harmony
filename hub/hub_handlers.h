@@ -154,6 +154,7 @@ typedef struct {
     bool pending_state;     /* a state_update to broadcast after the reply */
     int pending_activity;
     bool pending_power;
+    bool pending_off;       /* ... caused by an Off command */
     hp_rf_link_t link;      /* RF object link (acks, retries, reassembly), bound lazily to sinks.rf */
     bool link_bound;
     bool rf_debug; /* --rf-debug: per-object link events on stderr */

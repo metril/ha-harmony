@@ -60,12 +60,18 @@ static hp_actsm_t sm;
 
 typedef struct {
     int kind, idx;
+    bool off;
 } ev_t;
 static ev_t evs[256];
 static size_t nev;
 static void notify(void *c, hp_actsm_evt_t e, int idx) {
     (void)c;
-    if (nev < 256) evs[nev++] = (ev_t){e, idx};
+    if (nev < 256) evs[nev++] = (ev_t){e, idx, hp_actsm_off_press(&sm)};
+}
+static size_t count_off_ev(void) {
+    size_t n = 0;
+    for (size_t i = 0; i < nev; i++) n += evs[i].kind == HP_ACTSM_EVT_ACTIVITY && evs[i].off;
+    return n;
 }
 static size_t count_ev(int kind) {
     size_t n = 0;
@@ -1088,6 +1094,35 @@ static void test_state_restore_by_id_other_config(void) {
     unlink(path);
 }
 
+/* The off_press marker rides only on the report that finishes an actual Off, also while already Off. */
+static void test_off_press_marker(void) {
+    setup();
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    CT_EQ(count_off_ev(), 0); /* a start is not an Off */
+    hp_actsm_start(&sm, "watch"); /* re-pressed: resync */
+    settle_all();
+    CT_EQ(count_off_ev(), 0);
+    CT_EQ(hp_map_load(&map, CFG, strlen(CFG)), 0);
+    hp_actsm_reloaded(&sm); /* reload */
+    settle_all();
+    CT_EQ(count_off_ev(), 0);
+    CT_EQ(hp_actsm_off(&sm), 0);
+    settle_all();
+    CT_EQ(count_off_ev(), 1);
+    nev = 0;
+    CT_EQ(hp_actsm_off(&sm), 0); /* already Off: the press still reports */
+    settle_all();
+    CT_EQ(count_ev(HP_ACTSM_EVT_ACTIVITY), 1);
+    CT_EQ(count_off_ev(), 1);
+    nev = 0;
+    CT_EQ(hp_map_load(&map, CFG, strlen(CFG)), 0);
+    hp_actsm_reloaded(&sm); /* reload while Off: no marker */
+    settle_all();
+    CT_EQ(count_off_ev(), 0);
+    CT_CHECK(!hp_actsm_off_press(&sm)); /* only visible inside the notify */
+}
+
 /* ------------------------------------------------- review follow-ups */
 
 /* A same-hash reload mid-Off keeps the remaining off steps (the plan is not rebuilt from the shrunk tracked state). */
@@ -1202,6 +1237,7 @@ int main(void) {
     CT_RUN(test_state_bad_files);
     CT_RUN(test_state_debounce);
     CT_RUN(test_idle_clock_wrap);
+    CT_RUN(test_off_press_marker);
     CT_RUN(test_reload_mid_transition_restarts);
     CT_RUN(test_reload_rename_keeps_current);
     CT_RUN(test_plan_waits_for_sirc_copies);

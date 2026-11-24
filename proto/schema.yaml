@@ -117,6 +117,9 @@ messages:
     fields:
       - {name: activity, type: u8}
       - {name: power, type: bool}
+      # ws only (the RF wire carries the first two fields): true when this report is the finish of an
+      # actual Off command (key, HA or WS), even if already Off; never on a resync, hello or reload.
+      - {name: off_press, type: bool, optional: true}
 
   - name: page_push
     code: 12

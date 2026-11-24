@@ -1674,7 +1674,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 # Stored even when beyond the activity list we know: after a reload that inserts an
                 # activity the hub's re-report can precede the new list (_activity_name range-checks).
                 self._last_idx = self._current_idx = idx
-            self._note_activity(before, self.current_activity_id, bool(data["power"]))
+            self._note_activity(
+                before,
+                self.current_activity_id,
+                bool(data["power"]),
+                bool(data.get("off_press")),
+            )
             if idx_before != (self._current_idx, self._last_idx):
                 self._notify(TOPIC_ACTIVITY)
             if before != self.current_activity_id:
@@ -2028,22 +2033,32 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         st = self.device_states.get(device)
         return st.power if st else None
 
-    def _note_activity(self, before: str | None, after: str | None, power: bool = True) -> None:
+    def _note_activity(
+        self,
+        before: str | None,
+        after: str | None,
+        power: bool = True,
+        off_press: bool = False,
+    ) -> None:
         if not self._act_known:
             self._act_known, self._resync = True, False
             return
         sweep, self._resync = not self._resync, False
-        if before == after:
+        # An Off pressed while already Off (the Shield was woken by its own remote) still sweeps
+        repeat = off_press and not power and before == after
+        if before == after and not repeat:
             return
         c = self.compiled
-        everything_off = not power and before is not None  # Off powers every HA device down
+        everything_off = not power and (
+            before is not None or off_press
+        )  # Off powers every HA device down
         if not everything_off and before not in c.ha_activities and after not in c.ha_activities:
             return
         if self._ha_task is not None and not self._ha_task.done():
             self._ha_task.cancel()
         self._ha_task = self.config_entry.async_create_background_task(
             self.hass,
-            self._run_transition(before, after, everything_off, sweep),
+            self._run_transition(before, after, everything_off, sweep, repeat),
             name=f"{DOMAIN} activity steps",
         )
 
@@ -2098,14 +2113,19 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         after: str | None,
         everything_off: bool | None = None,
         sweep: bool = True,
+        skip_known_off: bool = False,
     ) -> None:
-        """Sequential and cancellable: a newer transition replaces it."""
+        """Sequential and cancellable: a newer transition replaces it. `skip_known_off`: a repeated Off
+        does not fire power_off at a device Home Assistant confidently reads as off."""
         ran_power: set[str | None] = set()
         for step in self._transition_steps(before, after, everything_off, sweep):
             state = self._ha_power(step.device) if step.device else None
             if step.kind == "power_on" and state is True:
                 continue  # already on: the entity is the truth
-            # power_off is never skipped on a read state: entity states lag the real device
+            # power_off is never skipped on a read state (entity states lag the real device), except
+            # on a repeated Off, where the device would otherwise be hit by every press
+            if skip_known_off and step.kind == "power_off" and state is False:
+                continue
             if step.kind == "power_on":
                 ran_power.add(step.device)
             if step.wait_ms and (step.kind != "input" or step.device in ran_power):

@@ -958,3 +958,60 @@ async def test_remote_attached_redoes_only_the_remote_it_names(hass, rig, clock)
         MsgType.REMOTE_ATTACHED, {}
     )  # no id (a hub that has seen no remote yet): all of them
     assert pushed == [2, 1, 2]
+
+
+_OFF_PRESS = {"activity": 0, "power": False, "off_press": True}
+
+
+async def test_off_pressed_while_already_off_sweeps_a_shield_woken_by_hand(hass, rig, clock):
+    hub, c, off = await _shield_started_by_hand(hass, rig)
+    await hub.push("state_update", _OFF_PRESS)
+    await settle(hass, lambda: off)
+    off.clear()
+    hass.states.async_set("media_player.shield", "playing")  # woken with its own remote
+    await settle(hass)
+    assert c.current_activity_id is None
+    await hub.push("state_update", _OFF_PRESS)  # Off -> Off
+    await settle(hass, lambda: off)
+    assert len(off) == 1
+
+
+async def test_repeated_off_skips_a_device_confidently_off(hass, rig, clock):
+    hub, c, off = await _shield_started_by_hand(hass, rig)
+    await hub.push("state_update", _OFF_PRESS)
+    await settle(hass, lambda: off)
+    off.clear()
+    hass.states.async_set("media_player.shield", "off")
+    await settle(hass, lambda: c._ha_power("shield") is False)
+    await hub.push("state_update", _OFF_PRESS)
+    await settle(hass)
+    assert off == []
+    hass.states.async_set("media_player.shield", "unavailable")  # unknown still sends
+    await settle(hass, lambda: c._ha_power("shield") is None)
+    await hub.push("state_update", _OFF_PRESS)
+    await settle(hass, lambda: off)
+    assert len(off) == 1
+
+
+async def test_off_to_off_without_the_marker_or_after_reconnect_never_sweeps(hass, rig, clock):
+    hub, c, off = await _shield_started_by_hand(hass, rig)
+    await hub.push("state_update", {"activity": 0, "power": False})
+    await settle(hass, lambda: off)
+    off.clear()
+    await hub.push("state_update", {"activity": 0, "power": False})  # a plain re-report
+    await settle(hass)
+    assert off == []
+    c._on_state(True, None)  # reconnect: the first report is a baseline
+    await hub.push("state_update", _OFF_PRESS)
+    await settle(hass)
+    assert off == []
+    await hub.push("state_update", _OFF_PRESS)
+    await settle(hass, lambda: off)  # the next real press acts again
+    assert len(off) == 1
+
+
+async def test_normal_off_transition_with_marker_is_unchanged(hass, rig, clock):
+    hub, _c, off = await _shield_started_by_hand(hass, rig)
+    await hub.push("state_update", _OFF_PRESS)
+    await settle(hass, lambda: off)
+    assert len(off) == 1
