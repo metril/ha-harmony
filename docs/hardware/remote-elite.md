@@ -150,6 +150,14 @@ has run for hours unfed). `/etc/nowatchdog` also stops `rcS` starting the stock 
 `/data` (ubifs, 405 LEBs ≈ 49 MB) has roughly 45 MB free **[INFERRED]** from mapped LEBs; there is
 no `df` on the device.
 
+## Motion sensor / wake on lift, 2026-11-23 **[MEASURED, read-only]**
+- `event1` "LIS3DH accelerometer" (i2c `1-0019`, `irq/108-LIS3DH` thread, `/proc/interrupts` GPIO 108 "LIS3DH accelerometer int1", 22 hits since boot and
+  unchanged at rest: interrupt driven). Caps `EV=9`, `ABS` X/Y/Z (+ a high code). sysfs: `xyz` (ro), `data_rate`, `int1_threshold` (10), `int1_duration` (3),
+  `int2_*`, `selftest`. Reading `xyz` would be polling; the app never does.
+- App: opens `event1` read-only, counts reports (EV_SYN), and a lift is `RA_LIFT_REPORTS` (3) inside `RA_LIFT_WINDOW_MS` (1 s); only a dim or dark screen reacts
+  (full brightness, idle timers restart, no key), and not within `RA_LIFT_SETTLE_MS` (3 s) of the screen going off. A touch on a dark screen stays wake-only.
+- Suspend: `1-0019/power/wakeup` exists like msp430's (kernel survey, same state), but motion waking the SoC from `mem` is NOT measured here.
+
 ## Suspend survey, 2026-11-18 **[MEASURED, read-only]** (upstream behaviour **[CODE]**)
 - `/sys/power/state` = `standby mem`; `/sys/power` has only `state`, `wakeup_count` (0), `pm_async`. No debugfs, so no `wakeup_sources`
   table; per-device `power/wakeup` files exist (msp430 `1-0034` and `cc2544.1` expose `wakeup_count` etc.). Kernel 2.6.37 PREEMPT.

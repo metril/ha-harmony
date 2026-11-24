@@ -14,6 +14,10 @@
 #define RA_HOLD_DELAY_MS 500  /* first hold after the key has been down this long */
 #define RA_HOLD_REPEAT_MS 200 /* then one hold per interval while still down */
 #define RA_MAX_HELD 8
+/* Wake on lift: the LIS3DH raises its INT1 line (hardware threshold + duration) and the driver reports once per
+ * interrupt. A lift is RA_LIFT_REPORTS reports inside RA_LIFT_WINDOW_MS; a single bump or a passing vibration is not. */
+#define RA_LIFT_REPORTS 3
+#define RA_LIFT_WINDOW_MS 1000
 
 typedef struct {
   void *ctx;
@@ -31,6 +35,8 @@ typedef struct {
   bool (*widget)(void *ctx, const hp_widget_t *w);
   /* Optional. A tap (release) in the status bar (y < HP_PAGE_BAR_H). */
   void (*bar)(void *ctx, int x, int y);
+  /* Optional. The remote was lifted / moved (see RA_LIFT_*): wake the screen. Never emits a key. */
+  void (*lift)(void *ctx, uint64_t now);
 } ra_input_sink_t;
 
 typedef struct {
@@ -43,7 +49,9 @@ typedef struct {
 typedef struct {
   ra_sys_t *sys;
   ra_input_sink_t sink;
-  int fd[2]; /* event0, event2 */
+  int fd[3]; /* event0, event2, event1 (motion; -1 when it would not open: the app runs without wake-on-lift) */
+  unsigned lift_n;
+  uint64_t lift_t0;
   ra_held_t held[RA_MAX_HELD];
   int tx, ty;
   bool touching, touch_suppressed;
@@ -54,6 +62,8 @@ int ra_input_open(ra_input_t *in, ra_sys_t *sys, const ra_input_sink_t *sink);
 void ra_input_close(ra_input_t *in);
 /* Read what fd[idx] has (one read of up to 16 events) and process it. */
 void ra_input_read(ra_input_t *in, int idx, uint64_t now);
+/* One motion report (an EV_SYN of the accelerometer node) at `now`; calls sink.lift on the RA_LIFT_REPORTS-th inside the window. */
+void ra_input_motion(ra_input_t *in, uint64_t now);
 void ra_input_feed(ra_input_t *in, const struct input_event *ev, uint64_t now);
 void ra_input_tick(ra_input_t *in, uint64_t now);
 /* Milliseconds until the next hold is due, or UINT32_MAX when no key is down. */

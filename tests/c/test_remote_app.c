@@ -170,7 +170,7 @@ static void test_seam_refuses(void) {
   ra_sys_t s;
   ra_sys_init(&s, &ops, "/tmp/bootcount");
   const char *bad_in[] = {"/dev/rfspi", "/dev/rffw", "/dev/mspfw", "/dev/watchdog", "/dev/mtd0", "/dev/mtdblock7",
-                          "/dev/input/event1", "/dev/input/event3", "/dev/fb0", "/etc/passwd"};
+                          "/dev/input/event3", "/dev/input/event4", "/dev/fb0", "/etc/passwd"};
   for (unsigned i = 0; i < sizeof bad_in / sizeof bad_in[0]; i++) {
     errno = 0;
     CT_EQ(ra_open_input(&s, bad_in[i]), -1);
@@ -282,7 +282,7 @@ static void test_full_session_is_safe(void) {
   CT_EQ(fk.nexec, 1);
 
   CT_CHECK(fk_log_is_safe(&fk, "/tmp/bootcount"));
-  const char *never[] = {"rfspi", "rffw", "mspfw", "watchdog", "mtd", "power/state", "kill", "charger", "event1", "event3"};
+  const char *never[] = {"rfspi", "rffw", "mspfw", "watchdog", "mtd", "power/state", "kill", "charger", "event4", "event3"};
   for (int i = 0; i < fk.nlog; i++)
     for (unsigned j = 0; j < sizeof never / sizeof never[0]; j++)
       if (strstr(fk.log[i], never[j])) { fprintf(stderr, "forbidden: %s\n", fk.log[i]); CT_CHECK(0); }

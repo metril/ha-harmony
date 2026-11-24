@@ -185,11 +185,11 @@ static hinfo_t hinfo[32];
 static int nhbatt, nhinfo, nhother, hord; /* hord: arrival order of battery / remote_info objects */
 
 /* wait() recorder: what the loop select()s on and for how long */
-static int rec_n, rec_fd[3];
+static int rec_n, rec_fd[4];
 static unsigned rec_ms;
 static int rec_wait(void *c, const int *fds, int n, unsigned ms, int *ready) {
   rec_n = n;
-  for (int i = 0; i < n && i < 3; i++) rec_fd[i] = fds[i];
+  for (int i = 0; i < n && i < 4; i++) rec_fd[i] = fds[i];
   rec_ms = ms;
   return fk_wait(c, fds, n, ms, ready);
 }
@@ -921,9 +921,9 @@ static void test_wait_includes_link_fd_and_deadline(void) {
   WAIT_FOR(nhbatt == 1);
   DRAIN();
   for (int i = 0; i < 3; i++) tick(100); /* let LVGL's refresh timer go idle */
-  CT_EQ(rec_n, 3);
-  CT_EQ(rec_fd[2], hp_rf_spi_wake_fd(rf.tp));
-  CT_CHECK(rec_fd[2] >= 0);
+  CT_EQ(rec_n, 4);
+  CT_EQ(rec_fd[3], hp_rf_spi_wake_fd(rf.tp));
+  CT_CHECK(rec_fd[3] >= 0);
   CT_CHECK(rec_ms <= RF_LINK_IDLE_POLL_MS); /* idle: woken for the next poll, never later */
   fr.drop_all = 1;
   fk_key(&fk, 0, 115, 1);
@@ -938,7 +938,7 @@ static void test_open_refused_when_hal_alive(void) {
   CT_EQ(fr.nopens, 0);
   settle(2);
   CT_CHECK(app.ui.fallback); /* no radio: say so, keep running */
-  CT_EQ(rec_n, 2);           /* and nothing to select() on */
+  CT_EQ(rec_n, 3);           /* the three input nodes (keys, touch, motion), and nothing to select() on */
   fk_key(&fk, 0, 115, 1);
   settle(2); /* a key with no link must not crash */
   teardown();
@@ -1083,7 +1083,7 @@ static void test_full_session_is_safe_with_rf(void) {
 
   /* the app seam: the allow-list as ever, and the radio is not its business */
   CT_CHECK(fk_log_is_safe(&fk, NULL));
-  const char *never[] = {"rfspi", "rffw", "mspfw", "watchdog", "mtd", "power/state", "kill", "charger", "event1", "event3"};
+  const char *never[] = {"rfspi", "rffw", "mspfw", "watchdog", "mtd", "power/state", "kill", "charger", "event4", "event3"};
   for (int i = 0; i < fk.nlog; i++)
     for (unsigned j = 0; j < sizeof never / sizeof never[0]; j++)
       if (strstr(fk.log[i], never[j])) { fprintf(stderr, "forbidden: %s\n", fk.log[i]); CT_CHECK(0); }

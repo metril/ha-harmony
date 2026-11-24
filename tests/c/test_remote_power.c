@@ -107,6 +107,61 @@ static void test_wake_consumes(void) {
   CT_EQ(fk.bl_w[fk.nbl - 1], 26);
 }
 
+static int count_msg(const char *m) {
+  int n = 0;
+  for (int i = 0; i < fk.nmsgs; i++) n += !strcmp(fk.msgs[i], m);
+  return n;
+}
+
+static void test_dark_touch_logged_rate_limited(void) {
+  begin();
+  const char *m = "power: touch on dark screen woke it (not sent)";
+  CT_CHECK(ra_power_input(&pw, fk.now, true)); /* lit: nothing to log */
+  CT_EQ(count_msg(m), 0);
+  run_to(fk.now + 31000);
+  CT_EQ(pw.state, RA_PW_OFF);
+  CT_CHECK(!ra_power_input(&pw, fk.now, true));
+  CT_EQ(count_msg(m), 1);
+  run_to(fk.now + 31000);
+  CT_CHECK(!ra_power_input(&pw, fk.now, true)); /* 31 s later: logged again (past the limit) */
+  CT_EQ(count_msg(m), 2);
+  /* inside the limit: swallowed but not logged again */
+  run_to(fk.now + 31000);
+  ra_power_input(&pw, fk.now, false); /* a key wakes: no line */
+  CT_EQ(count_msg(m), 2);
+  fk.now -= 0;
+  pw.state = RA_PW_OFF;
+  pw.swallow_log_ms = fk.now - 1000;
+  CT_CHECK(!ra_power_input(&pw, fk.now, true));
+  CT_EQ(count_msg(m), 2);
+}
+
+static void test_lift(void) {
+  begin();
+  CT_CHECK(!ra_power_lift(&pw, fk.now + 100)); /* active: nothing to do, timers untouched */
+  uint64_t t0 = fk.now;
+  run_to(t0 + 10000);
+  CT_EQ(pw.state, RA_PW_DIM);
+  CT_CHECK(ra_power_lift(&pw, fk.now)); /* dim: full brightness, timers restart */
+  CT_EQ(pw.state, RA_PW_ACTIVE);
+  CT_EQ(pw.last_input_ms, fk.now);
+  CT_EQ(fk.led_w[fk.nled - 1], 42);
+  run_to(fk.now + 50 * 26);
+  CT_EQ(pw.bl, 26);
+  run_to(fk.now + 31000);
+  CT_EQ(pw.state, RA_PW_OFF);
+  uint64_t off = pw.off_since_ms;
+  CT_CHECK(!ra_power_lift(&pw, off + RA_LIFT_SETTLE_MS - 1)); /* putting it down is motion too */
+  CT_EQ(pw.state, RA_PW_OFF);
+  CT_CHECK(ra_power_lift(&pw, off + RA_LIFT_SETTLE_MS));
+  CT_EQ(pw.state, RA_PW_ACTIVE);
+  CT_EQ(pw.lifts, 2);
+  CT_EQ(fk.nexec, 0);
+  pw.poweroff_requested = true;
+  pw.state = RA_PW_OFF;
+  CT_CHECK(!ra_power_lift(&pw, fk.now + 100000));
+}
+
 static void batt_case(const char *soc, const char *src, const char *chg, int want_exec, const char *why) {
   begin();
   fk_set_file(&fk, SOC, soc);
@@ -191,6 +246,8 @@ int main(void) {
   CT_RUN(test_constants);
   CT_RUN(test_idle_machine);
   CT_RUN(test_wake_consumes);
+  CT_RUN(test_dark_touch_logged_rate_limited);
+  CT_RUN(test_lift);
   CT_RUN(test_battery_guard);
   CT_RUN(test_battery_fresh_each_poll);
   return CT_DONE();

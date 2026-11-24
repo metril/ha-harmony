@@ -223,6 +223,10 @@ static void sink_activity(void *ctx, uint64_t now) {
   app_t *a = ctx;
   ra_power_activity(&a->power, now);
 }
+static void sink_lift(void *ctx, uint64_t now) {
+  app_t *a = ctx;
+  if (ra_power_lift(&a->power, now)) ra_display_note(&a->display, RA_WHY_WAKE, a->input_ms);
+}
 static const hp_page_t *sink_page(void *ctx) {
   app_t *a = ctx;
   return &a->ui.page;
@@ -252,7 +256,7 @@ int app_init(app_t *a, const ra_ops_t *ops, const app_link_t *link, const char *
   a->key_play_pause = (k = hp_hwkey_by_name("PlayPause")) ? k->id : HP_KEY_NONE;
   ra_cover_reset();
   ra_input_sink_t sink = {.ctx = a, .emit = sink_emit, .gate = sink_gate, .activity = sink_activity, .page = sink_page,
-                       .touch = sink_touch, .widget = sink_widget, .bar = sink_bar};
+                       .touch = sink_touch, .widget = sink_widget, .bar = sink_bar, .lift = sink_lift};
   if (ra_input_open(&a->input, &a->sys, &sink) < 0) {
     ra_logf(&a->sys, "cannot open input devices");
     ra_display_destroy(&a->display);
@@ -492,8 +496,10 @@ static void suspend_now(app_t *a) {
 void app_step(app_t *a, unsigned max_wait_ms) {
   uint64_t now = a->sys.ops.now_ms(a->sys.ops.ctx);
   uint32_t lv_ms = lv_timer_handler();
-  int fds[3] = {a->input.fd[0], a->input.fd[1], -1};
+  int fds[4] = {a->input.fd[0], a->input.fd[1], -1, -1};
   int nfd = 2;
+  if (a->input.fd[2] >= 0) fds[nfd++] = a->input.fd[2]; /* slot 2 = motion when it opened */
+  int nin = nfd;
   int lfd = a->link.get_fd ? a->link.get_fd(a->link.ctx) : -1;
   if (lfd >= 0) fds[nfd++] = lfd;
   uint32_t cap = lfd >= 0 ? APP_LINK_IDLE_WAIT_MS : LINK_POLL_MS;
@@ -504,12 +510,12 @@ void app_step(app_t *a, unsigned max_wait_ms) {
                    a->power.state != RA_PW_OFF ? ra_ui_np_next_ms(&a->ui, now) : UINT32_MAX};
   for (int i = 0; i < 6; i++)
     if (d[i] < t) t = d[i];
-  int ready[3] = {0, 0, 0};
+  int ready[4] = {0, 0, 0, 0};
   int w = a->sys.ops.wait(a->sys.ops.ctx, fds, nfd, t, ready);
   now = a->sys.ops.now_ms(a->sys.ops.ctx);
   a->input_ms = now;
   if (w > 0)
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < nin; i++)
       if (ready[i]) ra_input_read(&a->input, i, now);
   ra_input_tick(&a->input, now);
   if (w > 0 || a->ntx) {
