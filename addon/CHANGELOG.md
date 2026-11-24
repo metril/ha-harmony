@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2 (2026-11-23)
+
+- Lifting the remote wakes its screen (motion sensor), so the first tap works.
+- The remote logs taps swallowed on a dark screen.
+- The hub logs each IR send: one line per run, with a summary.
+- Update the remote and hub. The add-on update is optional (no HA changes) but keeps versions aligned.
+
 ## 0.5.1 (2026-11-23)
 
 - First published release of the 0.5.0 changes below (0.5.0 was tagged but never published). No device-facing differences.
