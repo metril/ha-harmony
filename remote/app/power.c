@@ -27,6 +27,7 @@ static int target_for(ra_pw_state_t s) { return s == RA_PW_ACTIVE ? RA_BL_NORMAL
 
 static void set_state(ra_power_t *p, ra_pw_state_t s, uint64_t now) {
   if (s == RA_PW_OFF && p->state != RA_PW_OFF) p->off_since_ms = now;
+  if (s != p->state) p->state_since_ms = now;
   p->state = s;
   p->bl_target = target_for(s);
   set_led(p, s == RA_PW_ACTIVE ? RA_LED_ON : RA_LED_OFF);
@@ -60,7 +61,7 @@ bool ra_power_input(ra_power_t *p, uint64_t now, bool touch) {
 
 bool ra_power_lift(ra_power_t *p, uint64_t now) {
   if (p->state == RA_PW_ACTIVE || p->poweroff_requested) return false;
-  if (p->state == RA_PW_OFF && now - p->off_since_ms < RA_LIFT_SETTLE_MS) return false;
+  if (now - p->state_since_ms < RA_LIFT_SETTLE_MS) return false; /* just dimmed or blanked: setting it down is motion too */
   p->last_input_ms = now;
   p->lifts++;
   set_state(p, RA_PW_ACTIVE, now);

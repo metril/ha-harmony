@@ -98,7 +98,8 @@ static int ioc(hp_hw_t *h, unsigned long req, unsigned long arg) {
 
 /* DRAIN the previous waveform. The fd is never closed: closing a speaker fd frees the DMA ring while IRQ 23 can
  * still fire (hard lockup), and the boot hook holds the file open anyway. */
-static int drain_prev(hp_hw_t *h, const char **how, int64_t *gap_ms) {
+static int drain_prev(hp_hw_t *h, const char **how, int64_t *gap_ms, uint32_t *took_ms) {
+    *took_ms = 0;
     *how = "none"; /* nothing was pending */
     *gap_ms = 0;
     if (h->flush_ports) { /* a failed send left bytes queued: no reset/flush ioctl exists, so play them out */
@@ -119,6 +120,7 @@ static int drain_prev(hp_hw_t *h, const char **how, int64_t *gap_ms) {
     *how = "called";
     uint32_t t0 = hp_mono_ms();
     (void)ioc(h, HP_I2S_DRAIN, 0); /* normally returns at once: irout books the line for the waveform */
+    *took_ms = hp_mono_ms() - t0;
     hp_stall_end("i2s drain", t0);
     h->pending = false;
     return 0;
@@ -136,7 +138,6 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     if (!sig || sig->once_n == 0 || sig->once_n > HP_IR_MAX_DUR) return -HP_E_INVAL;
     int ports = map_ports(h, port_mask);
     if (ports < 0) return ports;
-    hp_crumb("ir ports=%d n=%u hz=%u", ports, (unsigned)sig->once_n, (unsigned)sig->carrier_hz);
     hp_hw_wave_t w;
     int rc = hp_hw_ir_build(sig->us, sig->once_n, sig->carrier_hz, 1, h->buf, sizeof h->buf, &w);
     if (rc < 0) return rc; /* too big for the ring: reject, nothing touches the device */
@@ -144,7 +145,25 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     if (h->fd < 0) return -HP_E_IO; /* after hp_hw_sinks_close */
     const char *drain;
     int64_t gap;
-    if ((rc = drain_prev(h, &drain, &gap)) < 0) return rc;
+    uint32_t took;
+    uint64_t t_now = h->ops.now_ms(h->ops.ctx);
+    bool in_run = h->run_n > 0 && t_now <= h->line_free + HP_HW_RUN_GAP_MS; /* a repeat or burst copy of the last frame */
+    if ((rc = drain_prev(h, &drain, &gap, &took)) < 0) return rc;
+    /* Logging (hp_log also drops a crash crumb, so a frame gets exactly one of the two, before the hardware is touched):
+     * the first frame of a run in full; later copies only when abnormal (a DRAIN over 5 ms); one summary line on the next
+     * frame after a gap. Event-driven: no timer. */
+    if (!in_run) {
+        if (h->run_n > 1) hp_log("hub: ir: %u frames, drains skipped %u", h->run_n, h->run_skipped);
+        h->run_n = 1;
+        h->run_skipped = 0;
+        hp_log("hub: ir sent ports=%d hz=%u dur_ms=%u drain=%s now-line_free=%lldms", ports, (unsigned)sig->carrier_hz,
+               (unsigned)w.dur_ms, drain, (long long)gap);
+    } else {
+        h->run_n++;
+        h->run_skipped += drain[0] == 's';
+        if (took > 5) hp_log("hub: ir copy %u slow: ports=%d drain took %ums", h->run_n, ports, (unsigned)took);
+        else hp_crumb("ir ports=%d n=%u hz=%u", ports, (unsigned)sig->once_n, (unsigned)sig->carrier_hz);
+    }
     if (!h->configured) {
         if ((rc = ioc(h, HP_I2S_DSIZE, 16)) < 0 || (rc = ioc(h, HP_I2S_MODE, 2)) < 0 ||
             (rc = ioc(h, HP_I2S_VOLUME, 15)) < 0)
@@ -167,9 +186,6 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     }
     h->pending = true;
     h->line_free = h->ops.now_ms(h->ops.ctx) + w.dur_ms;
-    /* One line per frame; hp_log's token bucket keeps a hold repeat from flooding what ships. */
-    hp_log("hub: ir sent ports=%d hz=%u dur_ms=%u drain=%s now-line_free=%lldms", ports, (unsigned)sig->carrier_hz,
-           (unsigned)w.dur_ms, drain, (long long)gap);
     return 0; /* DRAIN is deferred to the next send / hp_hw_sinks_close, so the loop never blocks */
 }
 
@@ -216,7 +232,10 @@ void hp_hw_sinks_close(hp_hw_t *h) {
     if (h->fd >= 0) {
         const char *how;
         int64_t gap;
-        drain_prev(h, &how, &gap);
+        uint32_t took;
+        drain_prev(h, &how, &gap, &took);
+        if (h->run_n > 1) hp_log("hub: ir: %u frames, drains skipped %u", h->run_n, h->run_skipped);
+        h->run_n = 0;
     }
     h->fd = -1; /* deliberately not closed: the boot hook holds the file */
     hp_rf_spi_destroy(h->rfspi);

@@ -142,6 +142,9 @@ static void test_lift(void) {
   uint64_t t0 = fk.now;
   run_to(t0 + 10000);
   CT_EQ(pw.state, RA_PW_DIM);
+  CT_CHECK(!ra_power_lift(&pw, fk.now)); /* just dimmed: put down, not picked up */
+  CT_EQ(pw.state, RA_PW_DIM);
+  run_to(pw.state_since_ms + RA_LIFT_SETTLE_MS);
   CT_CHECK(ra_power_lift(&pw, fk.now)); /* dim: full brightness, timers restart */
   CT_EQ(pw.state, RA_PW_ACTIVE);
   CT_EQ(pw.last_input_ms, fk.now);
@@ -153,7 +156,8 @@ static void test_lift(void) {
   uint64_t off = pw.off_since_ms;
   CT_CHECK(!ra_power_lift(&pw, off + RA_LIFT_SETTLE_MS - 1)); /* putting it down is motion too */
   CT_EQ(pw.state, RA_PW_OFF);
-  CT_CHECK(ra_power_lift(&pw, off + RA_LIFT_SETTLE_MS));
+  fk.now = off + RA_LIFT_SETTLE_MS;
+  CT_CHECK(ra_power_lift(&pw, fk.now));
   CT_EQ(pw.state, RA_PW_ACTIVE);
   CT_EQ(pw.lifts, 2);
   CT_EQ(fk.nexec, 0);

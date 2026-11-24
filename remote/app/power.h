@@ -17,7 +17,7 @@
 #define RA_DIM_AFTER_MS 10000 /* idle time to dim */
 #define RA_OFF_AFTER_MS 30000 /* idle time to switch the backlight off */
 #define RA_BATT_POLL_MS 60000
-#define RA_LIFT_SETTLE_MS 3000 /* after the screen goes off, lift is ignored this long: setting the remote down is motion too */
+#define RA_LIFT_SETTLE_MS 3000 /* after the screen dims or goes off, lift is ignored this long: setting the remote down is motion too */
 #define RA_SWALLOW_LOG_MS 5000 /* rate limit of the dark-touch log line */
 #define RA_BATT_SOC_MAX 3.0 /* percent: at or below this, on battery and not charging, power off */
 
@@ -40,6 +40,7 @@ typedef struct {
   int bl, bl_target, led;
   bool write_failed, poweroff_requested;
   ra_suspend_mode_t suspend_mode;
+  uint64_t state_since_ms; /* last change of state (to DIM or OFF too): lift is ignored for RA_LIFT_SETTLE_MS after it */
   uint64_t off_since_ms, suspend_hold_ms; /* when the screen went off; no suspend before this time */
   uint64_t suspended_ms; /* total time asleep, from the wall clock (CLOCK_MONOTONIC stops in suspend) */
   unsigned suspends;

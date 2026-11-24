@@ -339,7 +339,13 @@ static void test_stubs(void) {
     CHECK(g_h->sinks.rf->claim(g_h->sinks.rf->self) == -HP_E_BUSY);
 }
 
-/* One log line per frame: ports, hz, dur_ms, whether DRAIN ran, and now - line_free. */
+static int count_str(const char *h, const char *n) {
+    int c = 0;
+    for (; (h = strstr(h, n)); h++) c++;
+    return c;
+}
+
+/* The first frame of a run logs ports, hz, dur_ms, whether DRAIN ran, and now - line_free. */
 static void test_send_log(void) {
     char path[] = "/tmp/hwsinks_logXXXXXX";
     int fd = mkstemp(path);
@@ -366,11 +372,40 @@ static void test_send_log(void) {
     char *a = strstr(buf, "hub: ir sent ports=");
     CHECK(a != NULL);
     CHECK(a && strstr(a, "hz=38000 dur_ms=") && strstr(a, "drain=none now-line_free=0ms"));
-    char *b = a ? strchr(a, '\n') : NULL;
-    CHECK(b && strstr(b, "drain=called now-line_free=-"));
-    char *c = b ? strstr(b + 1, "hub: ir sent") : NULL;
-    c = c ? strstr(c + 1, "hub: ir sent") : NULL;
+    CHECK(count_str(buf, "hub: ir sent") == 2); /* the repeat copy in the middle logs nothing */
+    char *c = a ? strstr(a + 1, "hub: ir sent") : NULL;
     CHECK(c && strstr(c, "drain=skipped now-line_free=") && !strstr(c, "now-line_free=-"));
+    CHECK(strstr(buf, "hub: ir: 2 frames, drains skipped 0") != NULL);
+}
+
+/* A repeat run logs its first frame fully, no line per copy, and one summary on the next frame after a gap. */
+static void test_run_summary(void) {
+    char path[] = "/tmp/hwsinks_runXXXXXX";
+    int fd = mkstemp(path);
+    CHECK(fd >= 0);
+    static hp_hublog_t l;
+    CHECK(hp_hublog_init(&l, NULL, NULL) == 0);
+    l.out_fd = fd;
+    hp_hublog_install(&l);
+    setup();
+    CHECK(open_hw(0) == 0);
+    F.now = 1000;
+    for (int i = 0; i < 6; i++) { /* a hold: copies back to back while the line is busy, then a skipped drain */
+        CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 38000)) == 0);
+        F.now += (i == 3) ? 100 : 5;
+    }
+    F.now += 10000; /* the gap */
+    CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 38000)) == 0);
+    hp_hublog_install(NULL);
+    char buf[4096] = {0};
+    CHECK(lseek(fd, 0, SEEK_SET) == 0);
+    CHECK(read(fd, buf, sizeof buf - 1) > 0);
+    close(fd);
+    unlink(path);
+    CHECK(count_str(buf, "hub: ir sent") == 2); /* first of the run, first after the gap */
+    CHECK(count_str(buf, "hub: ir: 6 frames, drains skipped ") == 1);
+    CHECK(count_str(buf, "slow") == 0);
+    CHECK(strstr(buf, "hub: ir: 6 frames") < strrchr(buf, 'i') && strstr(buf, "hub: ir: 6 frames") > strstr(buf, "hub: ir sent"));
 }
 
 int main(int argc, char **argv) {
@@ -386,6 +421,7 @@ int main(int argc, char **argv) {
     test_adopt();
     test_stubs();
     test_send_log();
+    test_run_summary();
     free(F.wbuf);
     free(g_h);
     if (fails) { printf("%d failure(s)\n", fails); return 1; }
