@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .theme_math import PALETTE_NAMES, from565, to565
@@ -70,6 +70,7 @@ class Widget:
     trailing: bool = False  # v2: draw a trailing chevron (nav role only)
     align: str = "center"  # v2: kind bits 2-3 (centre is the default and costs nothing)
     compact: bool = False  # v2: style bit 7, FIXED pages only
+    src: int = field(default=-1, compare=False)  # editor only: index in the config page (-1 unknown); never encoded
 
 
 @dataclass(frozen=True)

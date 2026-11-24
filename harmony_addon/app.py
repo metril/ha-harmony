@@ -564,6 +564,14 @@ def _compile_tolerant(
     return compiled, blanked
 
 
+def _with_src(m: Any) -> dict[str, Any]:
+    """page_to_dict plus each widget's config index (`src`): editor-only, never part of the hub wire."""
+    d = page_to_dict(m)
+    for w, src in zip(d["widgets"], m.widgets, strict=True):
+        w["src"] = src.src
+    return d
+
+
 def _wire_entry(m: Any, u: dict[str, Any]) -> dict[str, Any]:
     return {
         "page_id": m.page_id,
@@ -571,7 +579,7 @@ def _wire_entry(m: Any, u: dict[str, Any]) -> dict[str, Any]:
         "bytes": u["bytes"],
         "bytes_v1": u["bytes_v1"],
         "widgets": u["widgets"],
-        "page": page_to_dict(m),
+        "page": _with_src(m),
     }
 
 

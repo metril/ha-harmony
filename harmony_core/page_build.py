@@ -876,6 +876,7 @@ def build_pages(
                     s.trailing,
                     s.align,
                     s.compact,
+                    s.order,
                 )
             )
         pages.append(
