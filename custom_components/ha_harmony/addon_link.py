@@ -313,12 +313,16 @@ class AddonClient:
                     raise AddonUnreachable(f"the add-on answered HTTP {resp.status}")
                 if (resp.content_length or 0) > FW_MAX_BYTES:
                     raise AddonRejected("the firmware image is too large")
-                data = await resp.content.read(FW_MAX_BYTES + 1)
+                data = bytearray()
+                async for chunk in resp.content.iter_chunked(64 * 1024):  # read() returns only what has arrived
+                    data += chunk
+                    if len(data) > FW_MAX_BYTES:
+                        break
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None
         if len(data) > FW_MAX_BYTES:
             raise AddonRejected("the firmware image is too large")
-        return data
+        return bytes(data)
 
     async def probe(self, hub_id: str) -> None:
         """Does the add-on answer at this address and token? (config flow). No hello: it is closed at once."""
