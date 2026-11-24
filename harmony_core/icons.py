@@ -67,7 +67,7 @@ ICONS: tuple[Icon, ...] = (
     Icon(51, 'search', ('search', 'find')),
     Icon(52, 'grid_apps', ('apps', 'app', 'grid', 'launcher')),
     Icon(53, 'numpad', ('numpad', 'keypad', 'digits', 'numbers')),
-    Icon(54, 'replay10', ('replay', 'back10', 'rewind10', 'rewind', '10')),
+    Icon(54, 'replay10', ('replay', 'back10', 'rewind10', 'rewind', '10', 'skip', 'back')),
     Icon(55, 'skip10', ('skip10', 'forward10', 'skip', 'forward', '10')),
     Icon(56, 'shuffle', ('shuffle', 'random')),
     Icon(57, 'repeat', ('repeat', 'loop')),

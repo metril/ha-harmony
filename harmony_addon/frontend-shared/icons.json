@@ -561,7 +561,9 @@
     "back10",
     "rewind10",
     "rewind",
-    "10"
+    "10",
+    "skip",
+    "back"
    ],
    "svg": "<path d=\"M4.5 13A7.5 7.5 0 1 0 7 6.3\"/><path d=\"M4 3v4h4\"/><path d=\"M10 10.5v5M13 10.5h2.5v5H13z\"/>"
   },

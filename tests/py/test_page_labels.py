@@ -267,3 +267,9 @@ def test_macbook_caption_keeps_its_glyph_with_its_siblings():
     )
     btns = [w for pg in c.models for w in pg.widgets if w.kind == "button"]
     assert all(w.icon for w in btns[:4]) and not any(w.icon_only for w in btns[:4])
+
+
+def test_skip_by_ten_icons():
+    assert icon_for_text("SkipBack10") == ICON_IDS["replay10"]
+    assert icon_for_text("SkipForward10") == ICON_IDS["skip10"]
+    assert icon_for_text("Skip Back") == ICON_IDS["skip_prev"]

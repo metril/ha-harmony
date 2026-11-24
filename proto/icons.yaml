@@ -53,7 +53,7 @@ icons:
   - {id: 51, name: search, keywords: [search, find]}
   - {id: 52, name: grid_apps, keywords: [apps, app, grid, launcher]}
   - {id: 53, name: numpad, keywords: [numpad, keypad, digits, numbers]}
-  - {id: 54, name: replay10, keywords: [replay, back10, rewind10, rewind, '10']}
+  - {id: 54, name: replay10, keywords: [replay, back10, rewind10, rewind, '10', skip, back]}
   - {id: 55, name: skip10, keywords: [skip10, forward10, skip, forward, '10']}
   - {id: 56, name: shuffle, keywords: [shuffle, random]}
   - {id: 57, name: repeat, keywords: [repeat, loop]}

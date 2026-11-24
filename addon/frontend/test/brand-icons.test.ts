@@ -47,3 +47,10 @@ describe('lazy brand markup', () => {
     expect(shapesFor(65).length).toBeGreaterThan(0);
   });
 });
+
+describe('skip-by-ten icons', () => {
+  it('SkipBack10 draws replay10 and SkipForward10 skip10 (the skip_prev keywords do not steal them)', () => {
+    for (const n of ['SkipBack10', 'Skip Back 10']) expect(suggestIcons(n)[0]?.icon.name).toBe('replay10');
+    for (const n of ['SkipForward10', 'Skip Forward 10']) expect(suggestIcons(n)[0]?.icon.name).toBe('skip10');
+  });
+});
