@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.7 (2026-11-24)
+
+- Editor: pages that span several screens line up with what the remote draws. No false "too wide" warnings, the markers sit on the right widgets, Show jumps to the widget's screen, and clicking, dragging and dropping on screen 2+ use the drawn layout.
+- Editor: palette icons use the compiler's icon inference. Context Menu, the arrows and the paging keys get real icons, and the colour keys show their colour.
+- Editor: Skip Back and Skip Forward use the skip glyphs; Skip Back 10 keeps replay.
+- Editor: dropped commands get readable labels ("Context Menu").
+- Editor: the warnings list closes once nothing is left, has screen-reader labels, and moves focus to the widget after Show.
+- Editor: no more Lit update warnings.
+
 ## 0.5.6 (2026-11-24)
 
 - Remote: tapping the running activity on Home (e.g. Shield TV) sends that activity's key again, so the TV powers back on. Before, it sent the key of the tile at that spot on the activity page.
