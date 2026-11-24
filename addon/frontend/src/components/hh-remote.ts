@@ -6,7 +6,7 @@ import { cellAt, pageGroup, widgetRect } from '../lib/page-renderer';
 import { activeTheme } from '../lib/theme-model';
 import { BODY, DPAD, GLASS, GRIP_Y, JOINED, PLATED, PLATES, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, bodyPath, gripPath, keyPath, keyTitle, tintPath, type KeyGeom } from '../lib/remote-layout';
 import type { StudioHost } from '../lib/studio-state';
-import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
+import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, promotedIndex, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
 import type { Page } from '../lib/model';
 import { collectIssues, widgetIssues } from '../lib/issues';
@@ -191,6 +191,10 @@ export class HhRemote extends LitElement {
     const pp = this.st.previewOf(this.st.page);
     return pp ? (pp.wire_pages[this.st.wire]?.page ?? pp.page) : null;
   }
+  /** Is config widget i drawn on the screen shown? (a promoted header label has no wire widget but is always drawn) */
+  private onScreen(page: Page, i: number, map: number[]): boolean {
+    return !this.multiScreen() || (map[i] ?? -1) >= 0 || i === promotedIndex(page);
+  }
   private multiScreen(): boolean {
     return (this.st.previewOf(this.st.page)?.wire_pages.length ?? 0) > 1;
   }
@@ -264,6 +268,7 @@ export class HhRemote extends LitElement {
     const { cols, rows } = pageDims(page);
     const covered = new Set<string>();
     page.widgets.forEach((w, i) => {
+      if (!this.onScreen(page, i, map)) return;
       const b = boxOf(w);
       for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) covered.add(`${x},${y}`);
       const r = this.rectOf(page, i, v2, map);
@@ -468,6 +473,7 @@ export class HhRemote extends LitElement {
     }
     const sel = st.sel?.kind === 'widget' && st.sel.page === st.page ? st.sel.index : -1;
     const widgets = page.widgets.map((w, i) => {
+      if (!this.onScreen(page, i, map)) return nothing;
       const r = this.rectOf(page, i, v2, map);
       const cls = ['wh'];
       if (i === sel) cls.push('sel');
@@ -480,12 +486,12 @@ export class HhRemote extends LitElement {
         @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, i)}
         @focus=${() => { if (!(st.sel?.kind === 'widget' && st.sel.index === i && st.sel.page === st.page)) this.host.activateWidget(st.page, i); }}></rect>`;
     });
-    const markers = [...marks].filter(([i]) => !v2 || (map[i] ?? -1) >= 0 || !this.multiScreen()).map(([i, is]) => {
+    const markers = [...marks].filter(([i]) => !v2 || this.onScreen(page, i, map)).map(([i, is]) => {
       const r = this.rectOf(page, i, v2, map);
       return svg`<circle class="mark warn" cx=${r.x2 - 3} cy=${r.y1 + 4} r="5" @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, i)}><title>${is.text}</title></circle>`;
     });
     let handle: TemplateResult | typeof nothing = nothing;
-    if (sel >= 0 && !list && !this.assigner.active) {
+    if (sel >= 0 && !list && !this.assigner.active && this.onScreen(page, sel, map)) {
       const r = this.rectOf(page, sel, v2, map);
       handle = svg`<rect class="handle" x=${r.x2 - 7} y=${r.y2 - 7} width="12" height="12" rx="3" @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, sel, true)}></rect>`;
     }
