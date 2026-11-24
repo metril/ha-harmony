@@ -69,22 +69,22 @@ template:
             target: {entity_id: media_player.shield}
         media_next_track:
           - action: remote.send_command
-            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            target: {entity_id: remote.harmony_hub_livingroom}
             data: {device: bluetooth_device, command: SkipForward}
         media_previous_track:
           - action: remote.send_command
-            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            target: {entity_id: remote.harmony_hub_livingroom}
             data: {device: bluetooth_device, command: SkipBack}
         # Volume is the TV's (IR through the Harmony hub); the Shield's HDMI output is fixed-volume.
         volume_up:
           - action: remote.send_command
-            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            target: {entity_id: remote.harmony_hub_livingroom}
             data: {device: tv, command: Volume Up}
         volume_down:
           - action: remote.send_command
-            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            target: {entity_id: remote.harmony_hub_livingroom}
             data: {device: tv, command: Volume Down}
         volume_mute:
           - action: remote.send_command
-            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            target: {entity_id: remote.harmony_hub_livingroom}
             data: {device: tv, command: Mute}
