@@ -3,7 +3,7 @@ import { Assigner, moveCursor, type Spot } from '../src/lib/assigner';
 import type { Config, Device, Page } from '../src/lib/model';
 import {
   assign, deviceChips, duplicatePage, errorTarget, firstFree, fits, groupCommand, isRefusal, labelRoom, movePage, moveBox, pageBytes, pageIndexForLayer,
-  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, studioChecks, labelMeter, templatePage, trimToBytes, defaultService, type Source, type Target,
+  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, studioChecks, labelMeter, sourceLabel, templatePage, trimToBytes, defaultService, type Source, type Target,
 } from '../src/lib/studio-model';
 
 const cfg = (): Config => ({
@@ -78,7 +78,7 @@ describe('assign (drop rules)', () => {
   it('a command on the screen makes a button at that cell, or the first free one', () => {
     const r = ok(assign(cfg(), 'default', vol, { kind: 'cell', page: 0, x: 2, y: 3 }));
     const w = r.config.pages![0]!.widgets[1]!;
-    expect(w).toMatchObject({ type: 'button', x: 2, y: 3, label: 'Vol up', action: { device: 'avr', command: 'vol_up' } });
+    expect(w).toMatchObject({ type: 'button', x: 2, y: 3, label: 'Volume Up', action: { device: 'avr', command: 'vol_up' } });
     expect(r.widget).toEqual({ page: 0, index: 1 });
     const occupied = ok(assign(cfg(), 'default', vol, { kind: 'cell', page: 0, x: 0, y: 0 }));
     expect(occupied.config.pages![0]!.widgets[1]).toMatchObject({ x: 2, y: 0 }); // first free after the occupied cell
@@ -284,5 +284,14 @@ describe('multi-screen fixed pages', () => {
     const out = studioChecks(c, () => pp, true).filter((k) => k.kind === 'label' && (k.index === 15 || k.index === 16));
     expect(out).toEqual([]);
     expect(labelMeter(page, pp, 15)?.over).toBe(0);
+  });
+});
+
+describe('drop labels', () => {
+  it('a dropped command reads as a person would say it', () => {
+    const c = { devices: [], activities: [], pages: [] } as unknown as Config;
+    expect(sourceLabel(c, { kind: 'command', device: 'sh', name: 'ContextMenu' } as Source)).toBe('Context Menu');
+    expect(sourceLabel(c, { kind: 'command', device: 'sh', name: 'DirectionUp' } as Source)).toBe('Up');
+    expect(sourceLabel(c, { kind: 'input', device: 'tv', name: 'InputHdmi1' } as Source)).toBe('HDMI 1');
   });
 });

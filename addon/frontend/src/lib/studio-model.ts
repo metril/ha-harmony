@@ -6,7 +6,7 @@ import type { Config, Device, IrAction, Page, Widget } from './model';
 import { tileDefaultTap } from './permissions';
 import { colourBytes } from './theme-model';
 import { bestIcon } from './icon-suggest';
-import { abbreviate, dn, fitName } from './key-names';
+import { abbreviate, displayName, dn, fitName } from './key-names';
 import { stockIconByName, stockIconId } from './stock-icons';
 import type { PreviewPage } from './api';
 import { labelBudget, textPx, type FitWidget, type Font } from './text-fit';
@@ -207,7 +207,7 @@ export function sourceLabel(cfg: Config, s: Source): string {
   switch (s.kind) {
     case 'command':
     case 'input':
-      return pretty(s.name);
+      return displayName(s.name);
     case 'activity':
       return (cfg.activities ?? []).find((a) => a.id === s.id)?.name ?? pretty(s.id);
     case 'alloff':
