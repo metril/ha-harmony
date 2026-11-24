@@ -1525,6 +1525,7 @@ static void on_hello_extra(void *vctx, cJSON *ack) {
 
 void hub_install(hp_handler_tbl_t *tbl, hub_ctx_t *ctx) {
     tbl->ctx = ctx;
+    tbl->fw_version = HP_FW_VERSION; /* hello_ack.fw_version (main.c may override it with --fw-version) */
     tbl->hello_extra = on_hello_extra;
     tbl->activities = on_activities;
     tbl->config_hash = on_config_hash;

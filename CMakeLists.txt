@@ -216,6 +216,15 @@ endif()
 message(STATUS "firmware build id ${HP_BUILD_ID}")
 set_source_files_properties(hub/ota/hub_ota.c PROPERTIES COMPILE_DEFINITIONS HP_BUILD_ID=${HP_BUILD_ID})
 
+# Firmware version string reported as hello_ack.fw_version: the package version, "-dev" when the dev OTA key is allowed.
+file(STRINGS "${CMAKE_SOURCE_DIR}/harmony_core/__init__.py" _hp_ver_line REGEX "^__version__ = \"")
+string(REGEX REPLACE "^__version__ = \"([^\"]*)\".*$" "\\1" HP_FW_VERSION "${_hp_ver_line}")
+if(HP_ALLOW_DEV_OTA_KEY)
+  set(HP_FW_VERSION "${HP_FW_VERSION}-dev")
+endif()
+message(STATUS "firmware version ${HP_FW_VERSION}")
+target_compile_definitions(hp_hub PUBLIC HP_FW_VERSION="${HP_FW_VERSION}")
+
 add_executable(hub hub/main.c)
 target_link_libraries(hub PRIVATE hp_hub)
 if(HH_BT AND HH_BT_LE)

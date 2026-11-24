@@ -137,6 +137,9 @@ typedef struct {
     uint8_t gen, pages; /* the v2 page set the remote holds: its generation and how many pages (0/0 none) */
 } hub_info_t;
 #define HP_XFER_IDLE_MS 60000 /* a config transfer with no chunk for this long is dropped (frees its flash) */
+#ifndef HP_FW_VERSION
+#define HP_FW_VERSION "0.0.0-unknown" /* set by CMake from harmony_core/__init__.py ("-dev" with the dev OTA key) */
+#endif
 #define HP_CFG_CHUNK_BYTES 16384 /* config_chunk data bytes the hub accepts per chunk (hello_ack.limits.chunk) */
 #define HUB_CAP_TILE_STATE 1 /* caps bit 0 */
 #define HUB_CAP_PAGE_STORE 2 /* caps bit 1 */

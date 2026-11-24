@@ -305,6 +305,8 @@ static void test_chunked_config(void) {
     const char *hello = "{\"v\":1,\"id\":1,\"t\":\"hello\",\"d\":{\"token\":\"t\"}}";
     CT_EQ(hp_dispatch(hello, strlen(hello), &tbl, &anon, rep, sizeof rep, &rl), HP_DISPATCH_OK);
     CT_CHECK(strstr(rep, "\"limits\"") && strstr(rep, "\"budget\":8388608") && strstr(rep, "\"max_devices\":255"));
+    CT_CHECK(strstr(rep, "\"fw_version\":\"" HP_FW_VERSION "\""));
+    CT_CHECK(!strstr(HP_FW_VERSION, "unknown")); /* CMake supplied the real version */
     hub_shutdown(&H);
     hp_map_free(&H.map);
     free(cfg);

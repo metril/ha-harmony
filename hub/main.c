@@ -534,7 +534,7 @@ int main(int argc, char **argv) {
     if (g_hub.ident.warn[0]) hp_log("hub: %s\n", g_hub.ident.warn);
     g_hub.ident_changed = on_ident_changed;
     g_tbl.hub_id = g_hub.ident.id;
-    g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : "ha-harmony-hub";
+    g_tbl.fw_version = fw_version ? fw_version : sim ? "sim" : HP_FW_VERSION;
     hp_log("hub: build %u\n", (unsigned)hp_build_id());
     if (ota_pubkey_is_dev()) hp_log("hub: dev OTA key built in (never ship this build)\n");
     { /* peer list next to the state file */
