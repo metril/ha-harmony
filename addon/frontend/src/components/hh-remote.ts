@@ -219,9 +219,15 @@ export class HhRemote extends LitElement {
     page.widgets.forEach((w, i) => {
       if ((map[i] ?? -1) < 0) return;
       const r = this.rectOf(page, i, v2, map);
-      const y = boxOf(w).y;
-      const cur = rows.get(y);
-      rows.set(y, { y1: Math.min(cur?.y1 ?? r.y1, r.y1), y2: Math.max(cur?.y2 ?? r.y2, r.y2) });
+      const { y, h } = boxOf(w);
+      const H = r.y2 - r.y1 + 1;
+      for (let k = 0; k < h; k++) {
+        // a widget h rows tall: its compiled height is shared evenly between the config rows it spans
+        const y1 = r.y1 + Math.round((k * H) / h);
+        const y2 = r.y1 + Math.round(((k + 1) * H) / h) - 1;
+        const cur = rows.get(y + k);
+        rows.set(y + k, { y1: Math.min(cur?.y1 ?? y1, y1), y2: Math.max(cur?.y2 ?? y2, y2) });
+      }
     });
     return rows;
   }
@@ -231,12 +237,24 @@ export class HhRemote extends LitElement {
       return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
     });
   }
+  /** Pixel columns (x1..x2) of config column x on the shown screen: from a drawn widget covering it, else the renderer's own geometry for a 1-column widget. */
+  private columnOf(page: Page, x: number): { x1: number; x2: number } {
+    const v2 = this.v2();
+    const map = wireMap(page, this.st.previewOf(this.st.page), this.st.wire);
+    for (let i = 0; i < page.widgets.length; i++) {
+      const b = boxOf(page.widgets[i] as never);
+      if ((map[i] ?? -1) < 0 || x < b.x || x >= b.x + b.w) continue;
+      const r = this.rectOf(page, i, v2, map);
+      const u = (r.x2 - r.x1 + 1) / b.w;
+      return { x1: Math.round(r.x1 + (x - b.x) * u), x2: Math.round(r.x1 + (x - b.x + 1) * u) - 1 };
+    }
+    const g = gridOf(page);
+    const r = widgetRect({ cols: g.cols, rows: g.rows, version: 2 } as V2Page, { x, y: 0, w: 1, h: 1 });
+    return { x1: r.x1, x2: r.x2 };
+  }
   private cellRect(page: Page, x: number, y: number) {
     const row = this.fixedCells(page) ? this.shownRows(page).get(y) : undefined;
-    if (row) {
-      const cols = pageDims(page).cols;
-      return { x1: Math.ceil((x * 240) / cols), x2: Math.ceil(((x + 1) * 240) / cols) - 1, y1: row.y1, y2: row.y2 };
-    }
+    if (row) return { ...this.columnOf(page, x), y1: row.y1, y2: row.y2 };
     const g = gridOf(page);
     return widgetRect({ cols: g.cols, rows: g.rows, version: 2 } as V2Page, { x, y: y - g.shift, w: 1, h: 1 });
   }
@@ -262,8 +280,11 @@ export class HhRemote extends LitElement {
     if (this.multiScreen()) {
       if (!this.fixedCells(page)) return null;
       const cols = pageDims(page).cols;
-      const x = Math.min(cols - 1, Math.floor((px * cols) / 240));
-      for (const [y, r] of this.shownRows(page)) if (py >= r.y1 && py <= r.y2 && this.isFreeCell(page, x, y)) return { x, y };
+      for (let x = 0; x < cols; x++) {
+        const c = this.columnOf(page, x);
+        if (px < c.x1 || px > c.x2) continue;
+        for (const [y, r] of this.shownRows(page)) if (py >= r.y1 && py <= r.y2 && this.isFreeCell(page, x, y)) return { x, y };
+      }
       return null;
     }
     const g = gridOf(page);

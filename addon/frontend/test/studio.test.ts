@@ -458,6 +458,40 @@ describe('remote studio', () => {
         expect(dropAt(remote, 3.5 * 20, (row.y1 + row.y2) / 2)).toEqual({ kind: 'cell', page: 0, x: 3, y: 6 });
         expect(dropAt(remote, 4.5 * 20, (row.y1 + row.y2) / 2)).toMatchObject({ kind: 'widget', index: 10 });
       });
+      it('a widget two rows tall gives its second row free-cell spots too', async () => {
+        const { remote, store } = await boot();
+        const { s2 } = fixture(store);
+        const ws = store.config.pages![0]!.widgets as { h?: number }[];
+        ws[6]!.h = 2; // D6 at (0,4) now covers config rows 4 and 5
+        const at = [[0, 0, 2], [4, 0, 1], [8, 0, 1], [0, 2, 1], [4, 2, 1], [8, 2, 1]] as const;
+        s2.widgets.forEach((w, k) => Object.assign(w, { x: at[k]![0], y: at[k]![1], h: at[k]![2] }));
+        store.dispatchEvent(new Event('change'));
+        (remote as unknown as R).st.set({ wire: 1 });
+        await tick(remote);
+        const ids = cellSpots(remote);
+        expect(ids.filter((c) => /^c:0:\d+:5$/.test(c))).toEqual(['c:0:3:5', 'c:0:4:5', 'c:0:5:5', 'c:0:6:5', 'c:0:7:5', 'c:0:8:5', 'c:0:9:5', 'c:0:10:5', 'c:0:11:5']);
+        expect(ids).not.toContain('c:0:0:5'); // under the tall widget
+        const spots = (remote as unknown as R).spots();
+        const top = spots.find((x) => x.id === 'c:0:3:4')!;
+        const low = spots.find((x) => x.id === 'c:0:3:5')!;
+        expect(low.y).toBeGreaterThan(top.y); // the band below, not on top of the first
+      });
+      it('a free cell sits in the same compiled column as a widget on another row', async () => {
+        const { remote, store } = await boot();
+        const { s2 } = fixture(store);
+        (store.config.pages![0]!.widgets as unknown[]).splice(10, 1); // D10 at (4,6) is gone: a free cell below D7 at (4,4)
+        s2.widgets.splice(4, 1);
+        store.dispatchEvent(new Event('change'));
+        (remote as unknown as R).st.set({ wire: 1 });
+        await tick(remote);
+        const d7 = widgetRect(s2 as never, s2.widgets[1] as never);
+        const spot = (remote as unknown as R).spots().find((x) => x.id === 'c:0:4:6')!;
+        expect(spot).toBeTruthy();
+        const t = dropAt(remote, d7.x1 + 1, widgetRect(s2 as never, s2.widgets[3] as never).y1 + 1);
+        expect(t).toEqual({ kind: 'cell', page: 0, x: 4, y: 6 });
+        expect(dropAt(remote, d7.x1 - 2, widgetRect(s2 as never, s2.widgets[3] as never).y1 + 1)).not.toEqual({ kind: 'cell', page: 0, x: 4, y: 6 });
+        expect(spot.x).toBeCloseTo(SCREEN.x + d7.x1 + (d7.x2 - d7.x1 + 1) / 6, -1); // the first third of D7's three columns
+      });
       it('a converted page (config cells are not compiled cells) offers no cell spots and no cell drops', async () => {
         const { remote, store } = await boot();
         const { s2 } = fixture(store);
