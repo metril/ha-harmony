@@ -64,7 +64,7 @@ export class HhActionPicker extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.host.state.addEventListener('change', this.onState);
-    queueMicrotask(() => void this.host.state.loadHa()); // its "loading" emit would re-render the inspector that is mid-render
+    queueMicrotask(() => { if (this.isConnected) void this.host.state.loadHa(); }); // its "loading" emit would re-render the inspector that is mid-render
   }
   override disconnectedCallback(): void {
     this.host.state.removeEventListener('change', this.onState);

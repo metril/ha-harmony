@@ -393,7 +393,9 @@ describe('focus after Show', () => {
     const again = document.createElement('hh-studio') as El;
     document.body.append(again);
     await tick(again);
-    expect(deepActive()?.getAttribute('data-widget')).toBe('1');
+    const a = deepActive();
+    expect(a?.getAttribute('data-widget')).toBe('1');
+    expect(a?.tagName.toLowerCase()).toBe('rect');
   });
   it('an error on a key focuses no widget and falls back to the main region', async () => {
     const { app, studio, store } = await boot();
