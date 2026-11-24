@@ -191,6 +191,9 @@ export class HhRemote extends LitElement {
     const pp = this.st.previewOf(this.st.page);
     return pp ? (pp.wire_pages[this.st.wire]?.page ?? pp.page) : null;
   }
+  private multiScreen(): boolean {
+    return (this.st.previewOf(this.st.page)?.wire_pages.length ?? 0) > 1;
+  }
   private wireOffset(): number {
     const pp = this.st.previewOf(this.st.page);
     return (pp?.wire_pages ?? []).slice(0, this.st.wire).reduce((n, w) => n + w.widgets, 0);
@@ -477,7 +480,7 @@ export class HhRemote extends LitElement {
         @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, i)}
         @focus=${() => { if (!(st.sel?.kind === 'widget' && st.sel.index === i && st.sel.page === st.page)) this.host.activateWidget(st.page, i); }}></rect>`;
     });
-    const markers = [...marks].map(([i, is]) => {
+    const markers = [...marks].filter(([i]) => !v2 || (map[i] ?? -1) >= 0 || !this.multiScreen()).map(([i, is]) => {
       const r = this.rectOf(page, i, v2, map);
       return svg`<circle class="mark warn" cx=${r.x2 - 3} cy=${r.y1 + 4} r="5" @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, i)}><title>${is.text}</title></circle>`;
     });

@@ -9,6 +9,7 @@ import '../src/components/hh-app';
 import keymap from './fixtures/keymap.json';
 import vectors from '../../../tests/vectors/pages.json';
 import { Store, setStore } from '../src/lib/store';
+import { widgetRect } from '../src/lib/page-renderer';
 import { libRoutes, fakeApi, previewOk, tvConfig } from './helpers';
 
 const page = (vectors.valid_v2 as { name: string; dict: unknown }[]).find((v) => v.name === 'v2_all_options')!.dict;
@@ -300,6 +301,27 @@ describe('remote studio', () => {
       const r = remote.shadowRoot.querySelector('[data-widget="0"]')!;
       expect(Number(m[0]!.getAttribute('cx'))).toBeGreaterThan(Number(r.getAttribute('x')) + Number(r.getAttribute('width')) - 10);
       expect(Number(m[0]!.getAttribute('cy'))).toBeLessThan(Number(r.getAttribute('y')) + 10);
+    });
+    it('on a multi-screen fixed page the marker and rect sit at the compiled position on the shown screen only', async () => {
+      const { remote, store } = await boot();
+      const lab = (i: number) => (i === 15 ? 'Power Toggle' : `B${i}`);
+      const cfgPage = { id: 'main', title: 'Main', layout: 'fixed', cols: 12, rows: 7, widgets: Array.from({ length: 20 }, (_, i) => ({ type: 'button', id: `b${i}`, x: (i % 3) * 4, y: Math.floor(i / 3), w: 4, h: 1, label: lab(i), action: { none: true } })) };
+      const wpage = (n: number, rows: number, off: number) => ({ ...(page as object), version: 2, cols: 12, rows, fixed: true, widgets: Array.from({ length: n }, (_, k) => ({ kind: 'button', x: (k % 3) * 4, y: Math.floor(k / 3), w: 4, h: 1, label: off + k === 15 ? 'Power' : `B${off + k}`, shape: 'card', icon: 0, icon_only: false })) });
+      const s1 = wpage(15, 5, 0);
+      const s2 = wpage(5, 2, 15);
+      store.config.pages = [cfgPage] as never;
+      store.pages = [{ index: 0, id: 'main', ok: true, error: null, page: s1, wire_pages: [{ page_id: 0, seq: null, bytes: 1, bytes_v1: 1, widgets: 15, page: s1 }, { page_id: 1, seq: null, bytes: 1, bytes_v1: 1, widgets: 5, page: s2 }], bytes: 1, bytes_v1: 1, limit: 251, widgets: 20, widget_limit: 32 }] as never;
+      inject(store, [{ kind: 'label', page: 0, index: 15, msg: 'x' }, { kind: 'label', page: 0, index: 2, msg: 'y' }]);
+      (remote as unknown as { st: { wire: number } }).st.wire = 1;
+      await tick(remote);
+      const m = remote.shadowRoot.querySelectorAll('circle.mark');
+      expect(m).toHaveLength(1); // widget 2 is on screen 1
+      const r = widgetRect(s2 as never, s2.widgets[0] as never);
+      const rect = remote.shadowRoot.querySelector('[data-widget="15"]')!;
+      expect(Number(rect.getAttribute('x'))).toBe(r.x1);
+      expect(Number(rect.getAttribute('y'))).toBe(r.y1);
+      expect(Number(m[0]!.getAttribute('cx'))).toBe(r.x2 - 3);
+      expect(Number(m[0]!.getAttribute('cy'))).toBe(r.y1 + 4);
     });
     it('a widget with a marker says it has a warning in its label', async () => {
       const { remote, store } = await boot();

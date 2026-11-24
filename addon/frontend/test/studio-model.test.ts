@@ -3,7 +3,7 @@ import { Assigner, moveCursor, type Spot } from '../src/lib/assigner';
 import type { Config, Device, Page } from '../src/lib/model';
 import {
   assign, deviceChips, duplicatePage, errorTarget, firstFree, fits, groupCommand, isRefusal, labelRoom, movePage, moveBox, pageBytes, pageIndexForLayer,
-  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, templatePage, trimToBytes, defaultService, type Source, type Target,
+  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, studioChecks, labelMeter, templatePage, trimToBytes, defaultService, type Source, type Target,
 } from '../src/lib/studio-model';
 
 const cfg = (): Config => ({
@@ -270,5 +270,19 @@ describe('icon-only state', () => {
   it('an explicit false survives setWidget', () => {
     const c = { pages: [pg] } as Config;
     expect(setWidget(c, 0, 0, { icon_only: false }).pages![0]!.widgets[0]!.icon_only).toBe(false);
+  });
+});
+
+describe('multi-screen fixed pages', () => {
+  const labels = (i: number) => (i === 15 ? 'Power Toggle' : i === 16 ? 'Context Menu' : `B${i}`);
+  const page = { id: 'p', title: 'Pg', layout: 'fixed', cols: 12, rows: 7, widgets: Array.from({ length: 20 }, (_, i) => ({ type: 'button', id: `b${i}`, x: (i % 3) * 4, y: Math.floor(i / 3), w: 4, h: 1, label: labels(i), icon: 'none', action: { none: true } })) } as unknown as Page;
+  const ww = (i: number, label: string) => ({ kind: 'button', x: (i % 3) * 4, y: Math.floor(i / 3), w: 4, h: 1, label, shape: 'card', icon: 0, icon_only: false });
+  const screen = (from: number, to: number, rows: number, lab: (i: number) => string) => ({ page: { cols: 12, rows, fixed: true, widgets: Array.from({ length: to - from }, (_, k) => ww(k, lab(from + k))) }, widgets: to - from });
+  const pp = { wire_pages: [screen(0, 15, 5, labels), screen(15, 20, 2, (i) => (i === 15 ? 'Power' : i === 16 ? 'Menu' : `B${i}`))] } as never;
+  it('judges screen-2 widgets on their own compiled labels', () => {
+    const c = { devices: [], activities: [], pages: [page] } as unknown as Config;
+    const out = studioChecks(c, () => pp, true).filter((k) => k.kind === 'label' && (k.index === 15 || k.index === 16));
+    expect(out).toEqual([]);
+    expect(labelMeter(page, pp, 15)?.over).toBe(0);
   });
 });

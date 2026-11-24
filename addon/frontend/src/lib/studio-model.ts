@@ -358,9 +358,17 @@ export function labelRoom(p: Page, index: number, budget = PAGE_BUDGET): number 
 export interface Meter { font: Font; px: number; used: number; over: number }
 export interface Overflow extends Meter { index: number; label: string; advice: string; short?: string }
 function wireWidget(page: Page, pp: PreviewPage | null, wi: number) {
-  const wp = pp?.wire_pages[0]?.page;
-  const map = wp && !page.list ? wireMap(page, wp.widgets.length) : null;
-  return { wp, wire: map && (map[wi] ?? -1) >= 0 ? wp?.widgets[map[wi] as number] : undefined };
+  const first = pp?.wire_pages[0]?.page;
+  if (page.list) return { wp: first, wire: undefined };
+  // a fixed page may compile to several screens: the widget is on the screen whose slice of the config order holds it
+  let off = 0;
+  for (const s of pp?.wire_pages ?? []) {
+    const n = s.page.widgets.length;
+    const m = wireMap(page, n, off)[wi] ?? -1;
+    if (m >= 0) return { wp: s.page, wire: s.page.widgets[m] };
+    off += n;
+  }
+  return { wp: first, wire: undefined };
 }
 /** Is the widget drawn icon-only? The compiled widget's value (the compiler defaults it on), else the config's. */
 export function wireIconOnly(page: Page, pp: PreviewPage | null, wi: number): boolean {
@@ -1087,14 +1095,15 @@ export function errorTarget(path: (string | number)[]): ErrorTarget {
 }
 
 // ---------------------------------------------------------------- config widgets <-> wire widgets
-/** For each config widget of a page, the index of the same widget in the wire page (or -1: promoted header label, other wire page). */
+/** For each config widget of a page, the index of the same widget in the wire page (or -1: promoted header label, other wire page). `offset` is how many widgets the earlier wire pages hold. */
 export function wireMap(p: Page, wireCount: number, offset = 0): number[] {
   const promoted = promotedIndex(p);
   let j = 0;
   return p.widgets.map((_, i) => {
     if (p.list) return i - offset >= 0 && i - offset < wireCount ? i - offset : -1;
     if (i === promoted) return -1;
-    return j < wireCount ? j++ : -1;
+    const k = j++ - offset;
+    return k >= 0 && k < wireCount ? k : -1;
   });
 }
 /** Grid of the drawn page: v2 shifts rows up by one when a header label was promoted to the title. */
