@@ -212,7 +212,7 @@ static void net_cb(void *arg, uint32_t now);
  * nothing rechecks on a timer. Only the real interface detection uses it; an injected detect (tests) keeps the timer. */
 static void nl_open(hp_mdns_srv_t *s) {
     s->nl_fd = -1;
-    if (!s->multicast || s->detect != detect_default) return;
+    if (!s->multicast || !s->watch) return;
     int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
     if (fd < 0) return;
     struct sockaddr_nl sa;
@@ -285,6 +285,7 @@ int hp_mdns_srv_start(hp_mdns_srv_t *s, hp_sched_t *sched, const hp_mdns_opts_t 
     s->detect = o->detect ? o->detect : detect_default;
     s->backoff = HP_MDNS_RETRY_MIN_MS;
     s->nl_fd = -1;
+    s->watch = !o->detect || o->watch;
     inet_pton(AF_INET, HP_MDNS_GROUP, &s->group);
     s->multicast = 1;
     s->bind_ip.s_addr = htonl(INADDR_ANY);

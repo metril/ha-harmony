@@ -33,6 +33,7 @@ typedef struct {
                         * (default: the group on 5353; none for unicast-only mode). */
     hp_mdns_detect_fn detect; /* NULL = real interface detection (multicast mode only) */
     const char *hw;    /* optional stable hardware id for TXT hw= (NULL = none) */
+    int watch;         /* nonzero: watch address changes on netlink even with an injected detect (tests) */
 } hp_mdns_opts_t;
 
 /* Per-record-set multicast holdoff (RFC 6762 s6: one multicast of a record
@@ -50,6 +51,7 @@ void hp_mdns_rl_sweep(hp_mdns_rl_t *, uint32_t now_ms);
 
 typedef struct {
     int fd; /* -1 when not running */
+    int watch; /* open the netlink watch (real detection, or forced by tests) */
     int nl_fd; /* rtnetlink address-change socket (-1 = none: the address is rechecked on a timer instead) */
     hp_mdns_svc_t svc;
     hp_sched_t *sched;
