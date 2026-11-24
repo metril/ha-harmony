@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.6 (2026-11-24)
+
+- Remote: tapping the running activity on Home (e.g. Shield TV) sends that activity's key again, so the TV powers back on. Before, it sent the key of the tile at that spot on the activity page.
+- Editor: one warnings chip in the top bar opens the full list, each with Show. Widgets with a problem get an amber dot, and the inspector shows one wrapping line with a one-click fix. The floating warning boxes are gone. Studio checks show in the chip while the Remote editor is open.
+- Editor: the icon picker's Suggested row lays out like the grid, with the reason in a tooltip.
+
 ## 0.5.5 (2026-11-24)
 
 - The Now Playing card on the remote no longer shows "Paused" before the time, so the time stays in place; the pause glyph shows the state.
