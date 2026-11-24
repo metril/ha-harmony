@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3 (2026-11-23)
+
+- Pressing Off on the Harmony remote now puts the Shield (and any HA-controlled device that is on) to sleep, even when the activity already shows Off. For example, after the Shield was woken by its own remote.
+- A second Off press never interrupts one already running.
+- Update both the hub and the add-on in HA.
+
 ## 0.5.2 (2026-11-23)
 
 - Lifting the remote wakes its screen (motion sensor), so the first tap works.
