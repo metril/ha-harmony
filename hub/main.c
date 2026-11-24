@@ -319,7 +319,7 @@ int main(int argc, char **argv) {
     long auth_ms = HP_WS_AUTH_MS, idle_ms = HP_WS_IDLE_MS;
     const char *bt_helper = NULL, *bt_dir = NULL; /* --bt-helper (tests: the fake helper), --bt-dir (default: next to the state file) */
     int mdns = -1; /* -1 = default: on for the real daemon, off under --sim */
-    hp_mdns_opts_t mo = {HP_MDNS_PORT, NULL, NULL, NULL, NULL};
+    hp_mdns_opts_t mo = {HP_MDNS_PORT, NULL, NULL, NULL, NULL, 0};
     g_mdns.fd = -1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--sim")) sim = true;

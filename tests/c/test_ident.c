@@ -327,7 +327,7 @@ static void test_mdns(void) {
     hp_sched_t sc;
     g_now = 0;
     hp_sched_init(&sc, fake_clock, NULL);
-    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", fake_detect, "aabbccddeeff"};
+    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", fake_detect, "aabbccddeeff", 0};
     hp_mdns_srv_t m;
     CT_EQ(hp_mdns_srv_start(&m, &sc, &o, "old-id", 8099, 1), 0);
     CT_CHECK(!strcmp(m.svc.hw, "aabbccddeeff"));

@@ -408,7 +408,7 @@ static void test_backoff_fn(void) {
 static void test_retry_state_machine(void) {
     hp_sched_t sc; g_now = 0xFFFFF000u; /* start near wraparound */
     hp_sched_init(&sc, fake_clock, NULL);
-    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", fake_detect, NULL};
+    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", fake_detect, NULL, 0};
     hp_mdns_srv_t m;
     g_detect_ok = 0; g_mask = 0xFF000000u; g_ip = 0x7F000001u;
     /* no address yet: start succeeds soft, no socket, retries with backoff */
@@ -451,12 +451,14 @@ static void test_retry_state_machine(void) {
     CT_EQ(hp_sched_pending(&sc), 0);
 }
 
-/* Real interface detection watches address changes on a netlink socket for the poll set, with no recheck timer; an
+/* Interface detection watches address changes on a netlink socket for the poll set, with no recheck timer; an
  * injected detect (above) keeps the timer. */
 static void test_address_watch_is_event_driven(void) {
     hp_sched_t sc; g_now = 1000;
     hp_sched_init(&sc, fake_clock, NULL);
-    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", NULL, NULL};
+    /* Injected detect (the real one, musl getifaddrs, faults under qemu-user) with the netlink watch forced on. */
+    g_detect_ok = 1; g_mask = 0xFF000000u; g_ip = 0x7F000001u;
+    hp_mdns_opts_t o = {0, NULL, "127.0.0.1:9", fake_detect, NULL, 1};
     hp_mdns_srv_t m;
     CT_EQ(hp_mdns_srv_start(&m, &sc, &o, "sim-hub", 8099, 1), 0);
     if (hp_mdns_srv_wake_fd(&m) < 0) { fprintf(stderr, "note: no netlink here, skipped\n"); hp_mdns_srv_stop(&m); return; }
