@@ -261,7 +261,9 @@ async def test_pair_a_host_name_it_pick_commands_and_save(browser, bt, site):
     ).wait_for()  # the default set is preselected
     await page.get_by_label("Name", exact=True).fill("Living room box")
     await page.get_by_label("Search commands").fill("F1")
-    await page.get_by_role("checkbox", name=re.compile(r"^F1 ")).check()
+    f1 = page.get_by_role("button", name=re.compile(r"^F1 "))
+    await f1.click()
+    assert await f1.get_attribute("aria-pressed") == "true"
     await page.get_by_label("Command Name").fill("Netflix")
     await page.get_by_label("HID Code").fill("HID:0C:0223")
     await page.get_by_role("button", name="Add Code").click()

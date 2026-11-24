@@ -211,7 +211,9 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
 
     # type chips with counts, an "n filters" state, clear
     await page.locator(P).get_by_role("button", name="Type", exact=True).click()
-    await page.locator(f"{P} .opt", has_text="Lights").get_by_role("checkbox").check()
+    lights = page.locator(f"{P} .opt", has_text="Lights")
+    await lights.click()
+    assert await lights.get_attribute("aria-pressed") == "true"
     await page.locator(P).get_by_text("1 filter", exact=True).wait_for()
     await shot(page, "03-filter-chip-1440")
     await page.locator(P).get_by_role("button", name="Clear", exact=True).click()
@@ -219,9 +221,9 @@ async def test_collapsed_by_default_search_filter_group_and_drag(browser, big):
 
     # area dropdown filter (searchable) + removable pill
     await page.locator(P).get_by_role("button", name="Area", exact=True).click()
-    await page.locator(P).get_by_role("checkbox").first.wait_for()
+    await page.locator(f"{P} .opt").first.wait_for()
     await page.locator(P).get_by_placeholder("Search areas").fill("kitchen")
-    await page.locator(P).get_by_role("checkbox").first.check()
+    await page.locator(f"{P} .opt").first.click()
     await page.locator(P).get_by_text("Area: Kitchen").wait_for()
     await shot(page, "04-area-filter-1440")
     await page.locator(P).get_by_role("button", name="Remove filter Area: Kitchen").click()

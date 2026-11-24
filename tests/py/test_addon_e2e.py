@@ -577,8 +577,10 @@ async def test_wizard_to_activity_to_xray_and_apply(browser, site_ir):
     await page.goto(f"{site}{PREFIX}/#/activities")
     await page.get_by_role("button", name="New Activity").click()
     await page.get_by_label("Activity name").fill("Watch TV")
-    await page.get_by_label("Sony KDL-46V2501").check()
-    await page.get_by_label("AV receiver").check()
+    for dev in ("Sony KDL-46V2501", "AV receiver"):
+        pick = page.get_by_role("group", name="Devices").get_by_role("button", name=dev)
+        await pick.click()
+        assert await pick.get_attribute("aria-pressed") == "true"
     await page.get_by_role("button", name="Create").click()
     await page.get_by_text("Who Handles It").wait_for()
     await page.get_by_role("button", name="Who handles volume").click()
