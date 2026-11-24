@@ -380,7 +380,8 @@ describe('remote studio', () => {
       pt = { x: 100 + dx, y: 100 + dy };
       el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1 }));
       el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
-      await tick(remote);
+      await remote.updateComplete; // short on purpose: the store's 150 ms preview debounce must not fire and swap the fixture's pages
+      await new Promise((r) => setTimeout(r, 10));
     }
     const wireOf = (remote: El) => (remote as unknown as { st: { wire: number } }).st.wire;
     it('dragging one cell right and one row down on screen 2 changes x and y by exactly 1 and the widget stays on screen 2', async () => {
