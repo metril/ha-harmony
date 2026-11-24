@@ -18,8 +18,9 @@ import type { Config } from '../lib/model';
 
 const TABS: [PaletteTab, string, string][] = [['devices', 'Devices', 'tv'], ['activities', 'Activities', 'play'], ['ha', 'Home Assistant', 'scene'], ['widgets', 'Widgets', 'list']];
 
-/** Left pane: sources to drag onto keys and the screen, or to click and then click a target. */
 const COLOUR_KEYS = new Set(['red', 'green', 'yellow', 'blue']);
+
+/** Left pane: sources to drag onto keys and the screen, or to click and then click a target. */
 @customElement('hh-palette')
 export class HhPalette extends LitElement {
   static override styles = [

@@ -65,5 +65,10 @@ export function commandIconId(name: string, group: Group = groupCommand(name)): 
   return stockIconByName(hit ?? GROUP_ICON[group])?.id ?? 0;
 }
 /** Palette chip icon: what the compiler would draw for the command (icon-suggest), else the name table / group icon. */
-export const chipIconId = (name: string, group: Group = groupCommand(name)): number => stockIconByName(bestIcon(name))?.id ?? commandIconId(name, group);
+const inferred = new Map<string, number>();
+export const chipIconId = (name: string, group: Group = groupCommand(name)): number => {
+  let id = inferred.get(name);
+  if (id === undefined) inferred.set(name, (id = stockIconByName(bestIcon(name))?.id ?? 0));
+  return id || commandIconId(name, group);
+};
 export const groupIconId = (g: Group): number => stockIconByName(GROUP_ICON[g])?.id ?? 0;
