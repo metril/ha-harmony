@@ -1107,3 +1107,96 @@ async def test_second_off_never_interrupts_an_in_flight_off(hass, rig, clock):
     await settle(hass)
     assert fired == ["remote.turn_off"]  # not cancelled and not repeated by the second Off
     assert c._ha_task.done() and not c._ha_task.cancelled()
+
+
+# ------------------------------------------------------------------ E: off_ends_activity
+ENDS = YAML.replace(
+    "    entity: media_player.shield\n",
+    "    entity: media_player.shield\n    off_ends_activity: true\n",
+    1,
+)
+
+
+async def _stream_running(hass, rig, yaml=ENDS, age=const.OFF_ENDS_ACTIVITY_AGE + 1):
+    async_mock_service(hass, "light", "turn_off")
+    async_mock_service(hass, "remote", "turn_on")
+    async_mock_service(hass, "remote", "send_command")
+    hass.states.async_set("media_player.shield", "playing")
+    hub, c = await rig(yaml)
+    await hub.push("state_update", {"activity": 1, "power": True})
+    await settle(hass, lambda: c.current_activity_id == "stream" and not c._transition_running())
+    c._act_since = time.monotonic() - age
+    hub.got.clear()
+    return hub, c
+
+
+def _ended(hub):
+    return [d for t, d in hub.got if t == "command" and d["command"] == "power_off"]
+
+
+async def test_self_off_ends_the_activity(hass, rig, clock):
+    hub, c = await _stream_running(hass, rig)
+    hass.states.async_set("media_player.shield", "off")
+    await settle(hass, lambda: _ended(hub))
+    assert len(_ended(hub)) == 1
+
+
+async def test_self_off_within_the_first_minute_does_nothing(hass, rig, clock):
+    hub, c = await _stream_running(hass, rig, age=const.OFF_ENDS_ACTIVITY_AGE - 5)
+    hass.states.async_set("media_player.shield", "off")
+    await settle(hass)
+    assert _ended(hub) == []
+
+
+async def test_self_off_during_a_transition_does_nothing(hass, rig, clock):
+    hub, c = await _stream_running(hass, rig)
+    c._ha_task = asyncio.ensure_future(asyncio.sleep(30))  # a start/stop/switch is running
+    try:
+        hass.states.async_set("media_player.shield", "off")
+        await settle(hass)
+        assert _ended(hub) == []
+    finally:
+        c._ha_task.cancel()
+
+
+async def test_off_caused_by_our_own_power_off_does_nothing(hass, rig, clock):
+    hub, c = await _stream_running(hass, rig)
+    off = async_mock_service(hass, "remote", "turn_off")
+    await c.async_device_command("shield", "power_off")
+    assert len(off) == 1
+    hass.states.async_set("media_player.shield", "off")
+    await settle(hass)
+    assert _ended(hub) == []
+
+
+async def test_self_off_without_the_option_does_nothing(hass, rig, clock):
+    hub, c = await _stream_running(hass, rig, yaml=YAML)
+    hass.states.async_set("media_player.shield", "off")
+    await settle(hass)
+    assert _ended(hub) == []
+
+
+async def test_self_off_of_a_device_outside_the_current_activity_does_nothing(hass, rig, clock):
+    hub, c = await _stream_running(hass, rig)
+    await hub.push("state_update", {"activity": 0, "power": True})  # tv_on: no shield
+    await settle(hass, lambda: c.current_activity_id == "tv_on" and not c._transition_running())
+    c._act_since = time.monotonic() - const.OFF_ENDS_ACTIVITY_AGE - 1
+    hub.got.clear()
+    hass.states.async_set("media_player.shield", "off")
+    await settle(hass)
+    assert _ended(hub) == []
+
+
+@pytest.mark.parametrize(
+    ("dev", "ok"),
+    [
+        ("entity: media_player.x, off_ends_activity: true", True),
+        ("off_ends_activity: true", False),
+        ("entity: media_player.x, off_ends_activity: yes please", False),
+    ],
+)
+def test_off_ends_activity_validation(dev, ok):
+    from harmony_core.config_model import validate_all
+
+    text = f"devices:\n  - {{id: x, kind: ha, {dev}}}\nactivities: []\npages: []\n"
+    assert (not validate_all(text)) == ok

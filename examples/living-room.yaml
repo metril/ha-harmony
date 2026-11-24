@@ -62,6 +62,7 @@ devices:
     icon: grid_apps
     group: shield
     entity: media_player.nvidia_shield_tv
+    off_ends_activity: true   # the Shield sleeping on its own (CEC standby leaves the TV half off) ends the activity
     power:
       'on': {ha: {service: media_player.turn_on, target: {entity_id: media_player.nvidia_shield_tv}}}
       'off': {ha: {service: media_player.turn_off, target: {entity_id: media_player.nvidia_shield_tv}}}

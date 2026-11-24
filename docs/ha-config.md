@@ -247,6 +247,12 @@ against the hub's device limits and never reaches the hub. Turn HDMI-CEC off on 
 `{device, input: <name>}` or activity `input` that is not in `inputs` becomes `media_player.select_source`
 with `source: <name>` on the entity (an explicit input of the same name wins).
 
+`off_ends_activity: true` (needs `entity`) ends the running activity when the device turns itself off: its entity goes
+from on to off, pushed by Home Assistant, and the activity uses the device, has been current for at least 60 s, no start,
+stop or switch is running and the off was not caused by Home Assistant's own power-off of that device within the last
+30 s. The activity then ends exactly as the Off key does, so the hub sends the TV its IR power-off. Use it on a Shield
+that sleeps on its own and sends CEC standby, which leaves the TV half off and deaf to IR power-on.
+
 ### App rings and Now Playing
 
 An activity may set `media: {apps_entity, now_playing_entity, session_entity}` (all optional entity ids). `apps_entity` is an

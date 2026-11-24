@@ -65,6 +65,7 @@ class HaDevice:
     inputs: dict[str, HaCall] = field(default_factory=dict)
     commands: dict[str, HaCall] = field(default_factory=dict)
     source_list: bool = False  # inputs come from the entity's source_list attribute
+    off_ends_activity: bool = False  # the device turning itself off ends the activity
 
     def lookup(self, command: str) -> HaCall | None:
         """`power_on`, `power_off`, `input_<name>` or a configured command -> its call."""
@@ -545,6 +546,7 @@ def compile_config(
             {n: _input_call(d, n) for n in input_names(d)},
             {n: call_of(x) for n, x in d["commands"].items()},
             bool(d.get("source_list")),
+            bool(d.get("off_ends_activity")),
         )
         for i, d in ha_devs.items()
     }

@@ -71,6 +71,8 @@ TILE_TEXT_MAX = 31  # bytes, docs/proto/page-format.md
 
 HOLD_REPEAT = 0.4  # seconds between the resends of `remote.send_command hold_secs` (the remote's hold cadence)
 
+OFF_ENDS_ACTIVITY_AGE = 60.0  # seconds an activity must have been current before a device's own off ends it
+OWN_OFF_GRACE = 30.0  # seconds after our own power-off of a device in which its off is ours, not its own
 OFF_OPTION = "Off"
 HUB_DEVICE = "hub"
 CMD_START_ACTIVITY = "start_activity"
