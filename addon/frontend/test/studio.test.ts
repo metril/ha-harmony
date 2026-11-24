@@ -316,6 +316,15 @@ describe('remote studio', () => {
       await press(insp, 'Use "Power"');
       expect(store.config.pages?.[0]?.widgets[0]?.label).toBe('Power');
     });
+    it('a row with no action shows its issue line in the inspector (not tied to the label meter)', async () => {
+      const { insp, store } = await inspectorFor({ kind: 'widget', page: 0, index: 0 });
+      store.edit((c) => void (c.pages![0]!.widgets[0] = { type: 'button', shape: 'row', id: 'r', x: 0, y: 0, w: 4, h: 1, label: 'Dead' }));
+      await tick(insp);
+      const lines = insp.shadowRoot.querySelectorAll('.issue');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]!.textContent).toContain('does nothing');
+      expect(lines[0]!.querySelector('button')).toBeNull();
+    });
     it('the page view lists no issues', async () => {
       const { insp, store } = await inspectorFor({ kind: 'page', page: 0 });
       inject(store, [check()]);

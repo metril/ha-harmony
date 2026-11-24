@@ -49,9 +49,9 @@ export class HhInspector extends LitElement {
       .cnt { display: flex; justify-content: space-between; font-weight: 500; color: var(--tx3); }
       .cnt.warn { color: var(--ir); } .cnt.full { color: var(--bad); }
       .pxm { margin: -4px 0 8px; font-size: 12px; }
-      .issue { margin: 2px 0; font-size: 12px; overflow-wrap: anywhere; white-space: normal; padding: 6px 8px; border-radius: var(--r2); background: var(--sf2); border: 1px solid var(--line); }
+      .issue { margin: 2px 0; font-size: 12px; overflow-wrap: anywhere; padding: 6px 8px; border-radius: var(--r2); background: var(--sf2); border: 1px solid var(--line); }
       .issue.warning { border-left: 3px solid var(--ir); } .issue.error { border-left: 3px solid var(--bad); }
-      .issue .chip { margin-top: 4px; }
+      .issue .chip { margin-top: 4px; border: 1px solid var(--line); background: var(--sf); color: var(--tx); border-radius: 12px; padding: 2px 10px; cursor: pointer; }
       .pxm .chips { display: flex; flex-wrap: wrap; gap: 4px; }
       .pxm .chip { border: 1px solid var(--line); background: var(--sf2); color: var(--tx); border-radius: 12px; padding: 2px 10px; cursor: pointer; }
       .seg { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -199,6 +199,7 @@ export class HhInspector extends LitElement {
         <input type="text" .value=${w.label ?? ''} aria-label="Label" @input=${(e: Event) => this.widgetPatch(pi, wi, { label: trimToBytes((e.target as HTMLInputElement).value, room) }, 'label')} />
       </label>
       ${this.pxMeter(pi, wi, w, meterPx)}
+      ${this.issueLine(pi, wi)}
       <div class="sec"><h3>Type</h3>
         <div class="seg" role="group" aria-label="Widget type">${(['button', 'tile', 'label'] as const).map((t) => html`<button aria-pressed=${w.type === t} @click=${() => this.setType(pi, wi, t)}>${t}</button>`)}</div>
       </div>
@@ -346,18 +347,25 @@ export class HhInspector extends LitElement {
     else this.widgetPatch(pi, wi, { type, entity: undefined, on_color: undefined, action: { none: true }, id: w.id ?? `btn_${wi + 1}` });
   }
 
+  private issueOf(pi: number, wi: number) {
+    return widgetIssues(collectIssues(this.st.store.errors, this.st.store.warnings, this.st.store.checks, this.cfg), pi).get(wi);
+  }
+  /** The one issue on this widget (text from issueText) and, for a label that can be shortened, its fix. */
+  private issueLine(pi: number, wi: number) {
+    const issue = this.issueOf(pi, wi);
+    if (!issue) return nothing;
+    const fix = issue.fix;
+    return html`<div class="issue ${issue.level}"><div>${issue.text}</div>${fix ? html`<button type="button" class="chip" @click=${() => this.widgetPatch(pi, wi, { label: fix.value }, 'label')}>${fix.label}</button>` : nothing}</div>`;
+  }
   /** The label's pixel meter (what the remote can show, not bytes) and one-tap shorter forms when it is over. */
   private pxMeter(pi: number, wi: number, w: Widget, m: ReturnType<typeof labelMeter>) {
     if (!m) return nothing;
     const cmd = String((w['action'] as { command?: string } | undefined)?.command ?? '');
     const label = w.label ?? '';
-    const issue = widgetIssues(collectIssues(this.st.store.errors, this.st.store.warnings, this.st.store.checks, this.cfg), pi).get(wi);
-    const fix = issue?.fix;
-    const options = fix ? [] : [...new Set([abbreviate(label), cmd ? abbreviate(displayName(cmd)) : ''])].filter((o) => o && o !== label && textPx(o, m.font) <= m.px);
+    const options = this.issueOf(pi, wi)?.fix ? [] : [...new Set([abbreviate(label), cmd ? abbreviate(displayName(cmd)) : ''])].filter((o) => o && o !== label && textPx(o, m.font) <= m.px);
     const state = m.over > 0 ? 'full' : m.px - m.used <= 6 ? 'warn' : '';
     return html`<div class="pxm">
       <div class="cnt ${state}"><span>Fits the Remote</span><span aria-live="polite">${m.used} / ${m.px} px · ${m.font}</span></div>
-      ${issue ? html`<div class="issue ${issue.level}"><div>${issue.text}</div>${fix ? html`<button type="button" class="chip" @click=${() => this.widgetPatch(pi, wi, { label: fix.value }, 'label')}>${fix.label}</button>` : nothing}</div>` : nothing}
       ${m.over > 0 && options.length ? html`<div class="chips" role="group" aria-label="Shorter labels">${options.map((o) => html`<button type="button" class="chip" @click=${() => this.widgetPatch(pi, wi, { label: o }, 'label')}>${o}</button>`)}</div>` : nothing}
     </div>`;
   }

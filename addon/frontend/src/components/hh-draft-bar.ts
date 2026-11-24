@@ -36,8 +36,8 @@ export class HhDraftBar extends StoreElement {
       .issues .row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; padding: 4px; }
       .issues .row .msg { overflow-wrap: anywhere; white-space: normal; min-width: 0; }
       .issues .row .lvl.error { color: var(--bad); }
-      .issues .row .lvl.warning { color: var(--warn); }
-      .chip.warn { background: var(--irs); color: var(--warn); }
+      .issues .row .lvl.warning { color: var(--ir); }
+      .chip.warn { background: var(--irs); color: var(--ir); }
       .meters .meter { min-width: 92px; }
       .chipbtn { border: 0; cursor: pointer; }
       .short { display: none; }

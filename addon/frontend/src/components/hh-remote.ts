@@ -9,7 +9,7 @@ import type { StudioHost } from '../lib/studio-state';
 import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
 import type { Page } from '../lib/model';
-import { collectIssues, issueText, widgetIssues } from '../lib/issues';
+import { collectIssues, widgetIssues } from '../lib/issues';
 
 interface Session {
   kind: 'move' | 'resize';
@@ -131,7 +131,7 @@ export class HhRemote extends LitElement {
     .wh:focus-visible { stroke: #5fe3cf; stroke-width: 2.2; }
     .wh.bad { stroke: #f85848; stroke-width: 1.8; stroke-dasharray: 4 2; }
     .mark { stroke: var(--sf); stroke-width: 1.2; cursor: pointer; }
-    .mark.warn { fill: var(--ir); } .mark.bad { fill: var(--bad); }
+    .mark.warn { fill: var(--ir); }
     .wh.tgt { stroke: rgba(32, 200, 176, 0.7); stroke-dasharray: 4 3; stroke-width: 1.4; }
     .wh.over { stroke: #5fe3cf; stroke-width: 2; fill: rgba(32, 200, 176, 0.18); stroke-dasharray: none; }
     .cell { fill: transparent; }
@@ -479,7 +479,7 @@ export class HhRemote extends LitElement {
     });
     const markers = [...marks].map(([i, is]) => {
       const r = this.rectOf(page, i, v2, map);
-      return svg`<circle class="mark ${is.level === 'error' ? 'bad' : 'warn'}" cx=${r.x2 - 3} cy=${r.y1 + 4} r="5" @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, i)}><title>${issueText({ kind: 'label', msg: is.text })}</title></circle>`;
+      return svg`<circle class="mark warn" cx=${r.x2 - 3} cy=${r.y1 + 4} r="5" @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, i)}><title>${is.text}</title></circle>`;
     });
     let handle: TemplateResult | typeof nothing = nothing;
     if (sel >= 0 && !list && !this.assigner.active) {
@@ -546,7 +546,7 @@ export class HhRemote extends LitElement {
       <path class="seam" d=${`M${BODY.x + 1} ${GRIP_Y}h${BODY.w - 2}`}></path>
       <rect class="glass" x=${GLASS.x} y=${GLASS.y} width=${GLASS.w} height=${GLASS.h} rx=${GLASS.r}></rect>
       <svg class="scr" x=${SCREEN.x} y=${SCREEN.y} width=${SCREEN.w} height=${SCREEN.h} viewBox="0 0 240 320" @pointerdown=${(e: PointerEvent) => this.onScreenDown(e)}>
-        ${v2 ? pageGroup(v2, { activeAct: activityIndex(this.store.config, st.layer), theme: activeTheme(this.store.config).theme, flagOverflow: true }) : svg`<rect width="240" height="320" fill="#101820"></rect><text x="120" y="164" font-size="13" fill="#687888" text-anchor="middle">${this.store.pages.length || !this.store.loaded ? 'No preview for this page' : 'Add a page to see the screen'}</text>`}
+        ${v2 ? pageGroup(v2, { activeAct: activityIndex(this.store.config, st.layer), theme: activeTheme(this.store.config).theme }) : svg`<rect width="240" height="320" fill="#101820"></rect><text x="120" y="164" font-size="13" fill="#687888" text-anchor="middle">${this.store.pages.length || !this.store.loaded ? 'No preview for this page' : 'Add a page to see the screen'}</text>`}
         ${this.screenOverlay()}
       </svg>
       <rect class=${frame ? 'screen-frame tgt' : 'screen-frame'} x=${SCREEN.x - 2} y=${SCREEN.y - 2} width=${SCREEN.w + 4} height=${SCREEN.h + 4} rx="4"></rect>
