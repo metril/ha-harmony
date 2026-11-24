@@ -1,5 +1,6 @@
 #define _DEFAULT_SOURCE
-/* OTA image signing tool (host side; releases are signed by hand, CI never signs).
+/* OTA image signing tool (host side). Release images are signed by CI (hub-firmware.yml) with the release key held as the
+ * OTA_SIGNING_KEY secret of the `release` environment (v* tags only); bench images are signed by hand with --dev or a local key.
  *
  *   ota_sign keygen [-k KEY]                         new key; refuses to overwrite
  *   ota_sign pubkey [-k KEY]                         public key, 64 hex characters

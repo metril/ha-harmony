@@ -3,6 +3,47 @@
 Protocol, file protocol and rationale: `docs/proto/ota-image.md`. Hub only; the remote's RF transport is a later package.
 All commands run from the repo root. Device steps are `[WRITE]` (they replace `/data/ha-harmony/hub`): get a go-ahead first.
 
+## Release flow: updates arrive in Home Assistant
+
+On a `vX.Y.Z` tag CI builds the hub once (MIPS, `MinSizeRel`, `-DHP_OTA_PUBKEY_HEADER=common/ota/ota_pubkey_release.h`, no dev key),
+signs it with the release key (`hub-firmware.yml`), and bundles `hub.img` + `hub.json` `{version, build, size, sha512}` into both
+add-on images; the same `hub-X.Y.Z.img` is attached to the GitHub release. Nothing polls:
+
+- The add-on sends an `fw` frame after every channel `hello` (only when an image is bundled); `GET /api/v1/firmware/hub.img` serves it
+  (bearer token, like the channel).
+- The hub reports `fw_version` (compiled in from `harmony_core/__init__.py`, `-dev` suffix for a dev-key build) and `fw_build` in `hello_ack`.
+- The integration's `update.<hub>_firmware` entity shows installed `"<version> (<build>)"` and latest from the add-on; newer is decided by
+  build id, not by the version string. **Install** fetches the image, checks header, build, size and sha512 against `hub.json`,
+  refuses a hub that trusts the dev key (`ota_key == "dev"`), then runs the normal signed upload (the hub verifies the signature, applies,
+  restarts, rolls back by itself if the new build is not healthy). `ha_harmony.install_firmware` (a file) stays and shares the same path.
+- A dev or self-signed build cannot take these updates (different key: `ota_verify: bad signature`). A hub installed from a release image
+  can; see `install-hub.md`.
+
+### Owner one-time setup (not automated; do it once before the first tagged release)
+
+1. GitHub > Settings > Environments > New environment `release`; restrict deployment to tags matching `v*`.
+2. `gh secret set OTA_SIGNING_KEY --env release < ~/.config/ha-harmony/ota_ed25519`
+3. The committed `common/ota/ota_pubkey_release.h` must be the public half of that key. CI derives the public key from the secret with
+   `ota_sign pubkey` and fails the build if it differs from the header, so a wrong secret can never ship an image the fleet rejects.
+
+The key file is written under `umask 077` to `$RUNNER_TEMP` and removed in an `if: always()` step. The dev key is never used in a release path.
+
+### Build id floor (the one way to brick updates)
+
+The build id is the commit count, floored by `cmake/build_id_floor.txt` (the highest id ever released). The workflow fails on a shallow
+checkout or when the count is below the floor. Never rewrite history of a released line; if it must happen, raise the floor first. A hub
+refuses any image whose build is not above its installed one (`ota_downgrade`), so a lower id after a rewrite means every hub silently
+ignores updates. Raise `cmake/build_id_floor.txt` to the last released id whenever history is squashed or rebased.
+
+### Failures
+
+- `ota_no_space`: an update needs about twice the image size free on `/data` (staged copy plus the new binary). Free space
+  (`tools/deploy_hub.py prune`) and install again; the hub removes partial files.
+- `ota_failed` with `ota_downgrade`: the add-on's image is not newer than what the hub runs (the entity then shows no update).
+- The entity shows no latest version when the add-on bundles no image (a manual add-on build, or an old add-on): update the add-on.
+
+## Manual flow (a file you built or signed yourself)
+
 ## Prerequisites
 
 - The hub runs the boot-hook build with this feature (`tools/install_boot_hook.py install`, runbook `phase4-persistence.md`),
