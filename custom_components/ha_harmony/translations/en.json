@@ -42,13 +42,13 @@
       }
     },
     "error": {
-      "invalid_auth": "The token was rejected by the hub.",
-      "cannot_connect": "Could not connect to the hub.",
+      "invalid_auth": "The token was rejected by the hub",
+      "cannot_connect": "Could not connect to the hub",
       "unsupported_version": "The hub speaks an incompatible protocol version. Update the hub firmware or this integration so both use the same version.",
-      "unknown": "Unexpected error.",
-      "invalid_hub_id": "The hub id may only contain letters, digits, underscore and dash (1-63 characters) and cannot be \"default\".",
-      "invalid_hub_name": "The name is too long (48 bytes at most) or contains control characters.",
-      "id_in_use": "Another hub in Home Assistant already uses that id.",
+      "unknown": "Unexpected error",
+      "invalid_hub_id": "The hub id may only contain letters, digits, underscore and dash (1-63 characters) and cannot be \"default\"",
+      "invalid_hub_name": "The name is too long (48 bytes at most) or contains control characters",
+      "id_in_use": "Another hub in Home Assistant already uses that id",
       "id_pinned": "The hub id is pinned by hub_id in hub.conf on the device. Remove it there to rename the hub from Home Assistant. {detail}",
       "rename_unsupported": "This hub's firmware cannot be renamed from Home Assistant. Update the hub firmware first.",
       "rename_failed": "The hub did not accept the new id or name; nothing was changed. {detail}",
@@ -59,19 +59,19 @@
     },
     "abort": {
       "hub_renamed_not_applied": "The hub's id was changed on the device; the connection is saved and Home Assistant follows the new id. The id or name you entered was not applied: open Reconfigure again to rename.",
-      "already_configured": "This hub is already configured.",
-      "reauth_successful": "Re-authentication was successful.",
-      "wrong_hub": "The token belongs to a different hub.",
-      "addon_linked": "The Harmony Editor add-on is linked.",
-      "addon_updated": "The Harmony Editor add-on address was updated.",
-      "no_hub": "Set up a Harmony hub first, then restart the Harmony Editor add-on so it announces itself again.",
+      "already_configured": "This hub is already configured",
+      "reauth_successful": "Re-authentication was successful",
+      "wrong_hub": "The token belongs to a different hub",
+      "addon_linked": "The Harmony Editor add-on is linked",
+      "addon_updated": "The Harmony Editor add-on address was updated",
+      "no_hub": "Set up a Harmony hub first, then restart the Harmony Editor add-on so it announces itself again",
       "invalid_auth": "The add-on refused the discovery token. Restart the add-on and try again.",
-      "cannot_connect": "Could not reach the Harmony Editor add-on.",
-      "invalid_discovery": "The add-on sent an unusable discovery message.",
-      "not_our_addon": "Only the Harmony Editor add-on can link to this integration.",
-      "reconfigure_successful": "The hub connection was updated.",
-      "unknown": "Unexpected error.",
-      "hub_moved_updated": "The hub's new address was saved."
+      "cannot_connect": "Could not reach the Harmony Editor add-on",
+      "invalid_discovery": "The add-on sent an unusable discovery message",
+      "not_our_addon": "Only the Harmony Editor add-on can link to this integration",
+      "reconfigure_successful": "The hub connection was updated",
+      "unknown": "Unexpected error",
+      "hub_moved_updated": "The hub's new address was saved"
     }
   },
   "issues": {
@@ -325,10 +325,10 @@
   },
   "exceptions": {
     "service_not_allowed": {
-      "message": "The service {service} is not allowed."
+      "message": "The service {service} is not allowed"
     },
     "service_missing": {
-      "message": "The service {service} does not exist."
+      "message": "The service {service} does not exist"
     },
     "service_failed": {
       "message": "The service {service} failed: {error}"
@@ -343,55 +343,55 @@
       "message": "The hub command failed: {error}"
     },
     "ha_device_state": {
-      "message": "{device} is a Home Assistant device: its state is its entity's."
+      "message": "{device} is a Home Assistant device: its state is its entity's"
     },
     "unknown_command": {
-      "message": "{device} has no command {command}."
+      "message": "{device} has no command {command}"
     },
     "not_linked": {
-      "message": "This hub is not linked to the Harmony Editor add-on."
+      "message": "This hub is not linked to the Harmony Editor add-on"
     },
     "bt_unsupported": {
-      "message": "This hub has no Bluetooth (its firmware or build does not support it)."
+      "message": "This hub has no Bluetooth (its firmware or build does not support it)"
     },
     "bt_failed": {
-      "message": "Bluetooth: {error}."
+      "message": "Bluetooth: {error}"
     },
     "bt_invalid": {
-      "message": "Bluetooth: {error}."
+      "message": "Bluetooth: {error}"
     },
     "bt_unknown_address": {
-      "message": "The hub holds no Bluetooth bond with {address}."
+      "message": "The hub holds no Bluetooth bond with {address}"
     },
     "bt_ambiguous_address": {
-      "message": "{address} is bonded both as a device and as a remote; use the editor to forget the right one."
+      "message": "{address} is bonded both as a device and as a remote; use the editor to forget the right one"
     },
     "config_rejected": {
       "message": "The hub rejected the config: {error}"
     },
     "no_activities": {
-      "message": "The hub has no activities configured."
+      "message": "The hub has no activities configured"
     },
     "no_loaded_hub": {
-      "message": "No loaded ha_harmony hub."
+      "message": "No loaded ha_harmony hub"
     },
     "no_matching_hub": {
-      "message": "No loaded ha_harmony entry matches {hub}."
+      "message": "No loaded ha_harmony entry matches {hub}"
     },
     "several_hubs": {
-      "message": "Several hubs are configured: pass config_entry."
+      "message": "Several hubs are configured: pass config_entry"
     },
     "invalid_ir": {
       "message": "Invalid IR action: {error}"
     },
     "need_power_or_input": {
-      "message": "Give power and/or input."
+      "message": "Give power and/or input"
     },
     "ota_not_signed": {
       "message": "That file is not a signed Harmony firmware image (no HOTA header). Unsigned files are never sent to the hub."
     },
     "ota_wrong_target": {
-      "message": "That image is not for the hub."
+      "message": "That image is not for the hub"
     },
     "ota_truncated": {
       "message": "The image is incomplete: its header says {expected} bytes but the file has {actual}. Download it again."
@@ -400,10 +400,10 @@
       "message": "No such file: {path}"
     },
     "ota_path_not_allowed": {
-      "message": "{path} is not under config/ha_harmony/firmware or an allowlist_external_dirs directory."
+      "message": "{path} is not under config/ha_harmony/firmware or an allowlist_external_dirs directory"
     },
     "ota_in_progress": {
-      "message": "A firmware update is already being uploaded to this hub."
+      "message": "A firmware update is already being uploaded to this hub"
     },
     "ota_failed": {
       "message": "The firmware update failed: {error}"
