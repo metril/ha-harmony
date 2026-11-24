@@ -136,6 +136,10 @@ LINK_STATES = (
 )
 
 KEY_PLAY_PAUSE = KEY_BY_NAME["PlayPause"][0]  # the virtual key the Now Playing card sends
+KEY_PLAYERS = (
+    KEY_BY_NAME["Play"][0],
+    KEY_BY_NAME["Pause"][0],
+)  # their mapped targets name the player
 CALL_TIMEOUT = 15.0  # a service call that has not finished by then is abandoned
 
 
@@ -1895,10 +1899,14 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 self._released.discard(key)
             elif key in self._released:
                 return  # a stray hold after the release: repeats stop with the release
-            tables = self.compiled.ha_keys
-            ids = self.compiled.activity_ids
+            # right after a reload the running config is empty until the hub reports its hash: the newest
+            # compiled one (the cached config) serves the keys meanwhile
+            comp = self.compiled if self.compiled.activity_ids else self.pending
+            tables = comp.ha_keys
+            ids = comp.activity_ids
             if layer is None:
-                act = self.current_activity_id
+                idx = self._current_idx
+                act = ids[idx] if idx is not None and 0 <= idx < len(ids) else None
             else:
                 act = ids[layer] if 0 <= layer < len(ids) else None
             table = tables.get(act)
@@ -1907,10 +1915,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             call = table.get(key) if table else None
             if call is None and key == KEY_PLAY_PAUSE:
                 # the Now Playing card's tap: one toggle on the Shield player (the androidtv entity sends
-                # KEYCODE_MEDIA_PLAY_PAUSE to whatever app is playing); a mapped play_pause key wins
-                call = HaCall(
-                    "media_player.media_play_pause", (self.now_playing.shield,), {}, False
-                )
+                # KEYCODE_MEDIA_PLAY_PAUSE to whatever app is playing)
+                player = self._card_player(table, tables.get(None))
+                if player:
+                    call = HaCall("media_player.media_play_pause", (player,), {}, False)
             if call is None:
                 self._log_unmapped_key(key, action)
                 return
@@ -1920,6 +1928,18 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 self._fire(call, hold=action == "hold")
         except Exception:
             _LOGGER.exception("Home Assistant action for key %s failed", key)
+
+    def _card_player(self, *tables: dict[int, HaCall] | None) -> str | None:
+        """The media_player the card's tap toggles: the one the activity's own Play / Pause keys call, else
+        the feed's Shield entity when it is a media_player (it is the apps sensor when `apps_entity` is
+        one, which no media_player service can act on)."""
+        for table in tables:
+            for code in KEY_PLAYERS:
+                call = table.get(code) if table else None
+                if call and call.domain == "media_player" and call.entities:
+                    return self._cur(call.entities[0])
+        shield = self.now_playing.shield
+        return shield if shield.startswith("media_player.") else None
 
     def _log_unmapped_key(self, key: int, action: str) -> None:
         """A key event with no Home Assistant action (the hub handles most keys itself, so this is
