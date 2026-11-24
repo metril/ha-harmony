@@ -289,7 +289,7 @@ describe('screens render with a realistic config', () => {
     expect(nav.querySelector('.err')?.textContent?.trim()).toBe('1');
     const bar = app.shadowRoot!.querySelector('hh-draft-bar')!;
     await settle(bar as HTMLElement);
-    expect(text(bar)).toContain('1 error · Show');
+    expect(text(bar)).toContain('1 error');
     const apply = bar.shadowRoot!.querySelector('.btn.pri')!;
     expect(apply.getAttribute('aria-disabled')).toBe('true');
     expect(apply.getAttribute('title')).toBe('Fix 1 error to apply');
@@ -478,3 +478,70 @@ describe('no polling', () => {
     }
   });
 });
+
+describe('draft bar issues chip', () => {
+  const chk = (msg: string, page?: number, index?: number) => ({ kind: 'action' as const, msg, ...(page !== undefined ? { page } : {}), ...(index !== undefined ? { index } : {}) });
+  const bar = async (app: HTMLElement) => {
+    const b = app.shadowRoot!.querySelector('hh-draft-bar') as HTMLElement;
+    await settle(b);
+    return b;
+  };
+  it('reads Valid with no issues', async () => {
+    const { app } = await boot();
+    const b = await bar(app);
+    expect(b.shadowRoot!.querySelector('.chip.ok')?.textContent?.trim()).toBe('Valid');
+    expect(b.shadowRoot!.querySelector('#issues-pop')).toBeNull();
+  });
+  it('one chip for 1 error and 2 checks, opening a list with Show only where there is a target', async () => {
+    const { app, store } = await boot({ draft: true, errors: true });
+    await settle(app);
+    const long = 'x'.repeat(200);
+    store.setChecks([chk(long, 0, 1), chk('device glyph')]);
+    const b = await bar(app);
+    const chip = b.shadowRoot!.querySelector('#issues-chip') as HTMLButtonElement;
+    expect(chip.textContent?.replace(/\s+/g, ' ').trim()).toBe('✗ 1 error · 2 warnings');
+    expect(chip.classList.contains('bad')).toBe(true);
+    chip.click();
+    await settle(b);
+    const pop = b.shadowRoot!.querySelector('[role=dialog]#issues-pop')!;
+    const rows = [...pop.querySelectorAll('.row')];
+    expect(rows).toHaveLength(3);
+    expect(rows[1]!.textContent).toContain(long);
+    expect(rows[0]!.querySelector('button')).toBeTruthy();
+    expect(rows[1]!.querySelector('button')).toBeTruthy();
+    expect(rows[2]!.querySelector('button')).toBeNull();
+    const cs = getComputedStyle(rows[1]!.querySelector('.msg')!);
+    expect(cs.whiteSpace).not.toBe('nowrap');
+    expect(cs.textOverflow).not.toBe('ellipsis');
+  });
+  it('warnings only is a warn chip; Escape and an outside click close and refocus', async () => {
+    const { app, store } = await boot();
+    store.setChecks([chk('a', 0, 0), chk('b', 0, 1)]);
+    const b = await bar(app);
+    const chip = b.shadowRoot!.querySelector('#issues-chip') as HTMLButtonElement;
+    expect(chip.textContent?.replace(/\s+/g, ' ').trim()).toBe('⚠ 2 warnings');
+    expect(chip.classList.contains('warn')).toBe(true);
+    chip.click();
+    await settle(b);
+    b.shadowRoot!.querySelector('#issues-pop')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true }));
+    await settle(b);
+    expect(b.shadowRoot!.querySelector('#issues-pop')).toBeNull();
+    expect(b.shadowRoot!.activeElement).toBe(chip);
+    chip.click();
+    await settle(b);
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    await settle(b);
+    expect(b.shadowRoot!.querySelector('#issues-pop')).toBeNull();
+    expect(b.shadowRoot!.activeElement).toBe(chip);
+  });
+  it('Show on a check for a deleted page does not throw', async () => {
+    const { app, store } = await boot();
+    store.setChecks([chk('gone', 99, 0)]);
+    const b = await bar(app);
+    (b.shadowRoot!.querySelector('#issues-chip') as HTMLElement).click();
+    await settle(b);
+    const show = b.shadowRoot!.querySelector('#issues-pop .row button') as HTMLButtonElement;
+    expect(() => show.click()).not.toThrow();
+  });
+});
+

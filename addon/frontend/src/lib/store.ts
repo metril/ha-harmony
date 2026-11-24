@@ -52,6 +52,8 @@ export class Store extends EventTarget {
   warnings: ValidationError[] = [];
   /** the Studio's own checks (label too wide, no glyph, row with no action); published by the open Studio */
   checks: StudioCheck[] = [];
+  /** a Studio target waiting for the Studio to mount (Show clicked on another route); the Studio takes it on connect */
+  pendingIssue: Issue | null = null;
   usage: Usage | null = null;
   hash: string | null = null;
   /** per-page preview results from the last check (error tolerant: good pages decode even when others fail) */
@@ -163,6 +165,7 @@ export class Store extends EventTarget {
       requestAnimationFrame(() => document.querySelector('hh-app')?.shadowRoot?.querySelector('main')?.focus());
       return;
     }
+    this.pendingIssue = i;
     location.hash = '#/remote';
     this.dispatchEvent(new CustomEvent('hh-show-issue', { detail: i }));
   }

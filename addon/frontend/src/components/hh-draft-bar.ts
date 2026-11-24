@@ -4,6 +4,7 @@ import { classMap } from 'lit/directives/class-map.js';
 import { icon } from '../lib/icons';
 import { shared } from '../lib/styles';
 import { ApiError } from '../lib/api';
+import { collectIssues, type Issue } from '../lib/issues';
 import { StoreElement, confirmAction } from './base';
 import { ago, agoChangeIn, meters, statusChip } from './parts';
 
@@ -30,6 +31,13 @@ export class HhDraftBar extends StoreElement {
         .usage { display: block; }
         .state .muted { display: none; }
       }
+      .issues { position: relative; }
+      .issues .pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 9; background: var(--sf); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--lift); padding: 8px; width: min(440px, calc(100vw - 32px)); max-height: 60vh; overflow: auto; display: grid; gap: 4px; }
+      .issues .row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; padding: 4px; }
+      .issues .row .msg { overflow-wrap: anywhere; white-space: normal; min-width: 0; }
+      .issues .row .lvl.error { color: var(--bad); }
+      .issues .row .lvl.warning { color: var(--warn); }
+      .chip.warn { background: var(--irs); color: var(--warn); }
       .meters .meter { min-width: 92px; }
       .chipbtn { border: 0; cursor: pointer; }
       .short { display: none; }
@@ -48,12 +56,25 @@ export class HhDraftBar extends StoreElement {
     `,
   ];
   @state() private usageOpen = false;
+  @state() private issuesOpen = false;
+  private onDocClick = (e: Event) => {
+    if (this.issuesOpen && !e.composedPath().includes(this.renderRoot.querySelector('.issues') as EventTarget)) this.closeIssues(false);
+  };
+  private closeIssues(refocus: boolean) {
+    this.issuesOpen = false;
+    if (refocus) void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('#issues-chip')?.focus());
+  }
+  override connectedCallback(): void {
+    super.connectedCallback();
+    document.addEventListener('click', this.onDocClick);
+  }
   @state() private noteOpen = false;
   @state() private note = '';
   @state() private saving = false;
   private timer?: ReturnType<typeof setTimeout>;
   override disconnectedCallback(): void {
     clearTimeout(this.timer);
+    document.removeEventListener('click', this.onDocClick);
     super.disconnectedCallback();
   }
   /** "saved 3 min ago" is redrawn by one timeout to the moment its text changes, not on a clock. */
@@ -132,10 +153,7 @@ export class HhDraftBar extends StoreElement {
         <span class="long">${text}</span><span class="short">${short}</span>
         <span class="muted" role="status" aria-live="polite">${saveText}</span>
       </div>
-      ${errs
-        ? html`<button class="chip bad chipbtn" @click=${() => this.showFirst()} aria-label="${errs} errors. Show the first one">${icon('alert')} ${errs} error${errs === 1 ? '' : 's'} · Show</button>`
-        : statusChip('ok', 'Valid', { check: true })}
-      ${s.warnings.length ? statusChip('ir', `${s.warnings.length} warning${s.warnings.length === 1 ? '' : 's'}`, { id: 'warn-chip', title: s.warnings.map((w) => w.msg).join('\n') }) : nothing}
+      ${this.issuesChip()}
       <div class="meters long">${meters(s)}</div>
       <div class="usage">
         <button class="btn sm" aria-expanded=${this.usageOpen} aria-controls="usage-pop" @click=${() => (this.usageOpen = !this.usageOpen)}>Usage</button>
@@ -161,10 +179,26 @@ export class HhDraftBar extends StoreElement {
     </div>`;
   }
 
-  private showFirst() {
-    const f = this.store.errorSummary.first;
-    if (!f) return;
-    location.hash = '#/' + f.route;
-    requestAnimationFrame(() => document.querySelector('hh-app')?.shadowRoot?.querySelector('main')?.focus());
+  private issuesChip() {
+    const s = this.store;
+    const issues = collectIssues(s.errors, s.warnings, s.checks, s.config);
+    const errs = issues.filter((i) => i.level === 'error').length;
+    const warns = issues.length - errs;
+    if (!issues.length) return statusChip('ok', 'Valid', { check: true });
+    const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    const label = errs ? `✗ ${plural(errs, 'error')}${warns ? ` · ${plural(warns, 'warning')}` : ''}` : `⚠ ${plural(warns, 'warning')}`;
+    return html`<div class="issues">
+      <button class=${classMap({ chip: true, chipbtn: true, bad: errs > 0, warn: errs === 0 })} id="issues-chip" aria-expanded=${this.issuesOpen} aria-controls="issues-pop" aria-haspopup="dialog" @click=${() => (this.issuesOpen = !this.issuesOpen)}>${label}</button>
+      ${this.issuesOpen
+        ? html`<div class="pop" id="issues-pop" role="dialog" aria-label="Issues" @keydown=${(e: KeyboardEvent) => e.key === 'Escape' && this.closeIssues(true)}>
+            ${issues.map((i) => this.issueRow(i))}
+          </div>`
+        : nothing}
+    </div>`;
+  }
+  private issueRow(i: Issue) {
+    return html`<div class="row"><span class="lvl ${i.level}" aria-label=${i.level}>${i.level === 'error' ? '✗' : '⚠'}</span><span class="msg">${i.text}</span>${i.target
+      ? html`<button class="btn sm" @click=${() => { this.closeIssues(false); this.store.showIssue(i); }}>Show</button>`
+      : nothing}</div>`;
   }
 }

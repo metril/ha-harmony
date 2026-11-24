@@ -304,3 +304,19 @@ describe('studio checks in the store', () => {
     expect(st.sel).toEqual({ kind: 'key', name: 'menu' });
   });
 });
+
+describe('Show while the Studio is not mounted', () => {
+  it('keeps the issue pending and selects the widget once the Studio mounts', async () => {
+    const { studio, store } = await boot();
+    store.edit((c) => void c.pages![0]!.widgets.push({ type: 'button', shape: 'row', id: 'r', x: 0, y: 1, w: 4, h: 1, label: 'Dead' }));
+    await tick(studio);
+    studio.remove();
+    store.showIssue({ level: 'warning', text: 'x', target: { kind: 'widget', page: 0, index: 1 } });
+    const again = document.createElement('hh-studio') as El;
+    document.body.append(again);
+    await tick(again);
+    expect((again as unknown as { st: { sel: unknown } }).st.sel).toEqual({ kind: 'widget', page: 0, index: 1 });
+    expect(store.pendingIssue).toBeNull();
+  });
+});
+

@@ -172,11 +172,15 @@ export class HhStudio extends StoreElement implements StudioHost {
     super.disconnectedCallback();
   }
   private onShowIssue = (e: CustomEvent<Issue>) => {
-    const t = e.detail.target;
+    this.store.pendingIssue = null;
+    this.applyIssue(e.detail);
+  };
+  private applyIssue(i: Issue): void {
+    const t = i.target;
     if (t?.kind === 'error') return this.showError(t.path);
     if (t?.kind !== 'widget' || t.page < 0 || t.page >= (this.store.config.pages?.length ?? 0)) return;
     this.showCheck(t.page, t.index);
-  };
+  }
   private onStore = () => {
     const s = this.store;
     if (!s.loaded) return;
@@ -194,6 +198,11 @@ export class HhStudio extends StoreElement implements StudioHost {
           this.state0.sel = { kind: 'widget', page: Number(w[1]), index: Number(w[2]) };
         }
       }
+    }
+    const pend = s.pendingIssue;
+    if (pend) {
+      s.pendingIssue = null;
+      this.applyIssue(pend);
     }
     if (s.config !== this.lastCfg) {
       this.lastCfg = s.config;
