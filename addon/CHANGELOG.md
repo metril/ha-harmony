@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.5.0 (2026-11-23)
+## 0.5.1 (2026-11-23)
+
+- First published release of the 0.5.0 changes below (0.5.0 was tagged but never published). No device-facing differences.
+- Fix a CI-only mdns test failure under qemu.
+
+## 0.5.0 (2026-11-23, not published)
 
 - Stale presses expire instead of replaying in a burst after a stall.
 - Faster dead-connection detection between the add-on and the hub.
