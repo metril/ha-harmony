@@ -861,6 +861,7 @@ async def test_card_toggle_key_runs_play_pause_on_the_shield_unless_mapped(hass,
     fired = []
     c._fire = lambda call, **kw: fired.append(call)
     key = coord_mod.KEY_PLAY_PAUSE
+    hass.states.async_set(c.now_playing.shield, "on")  # the player exists
     c._dispatch_ha(key, "press")
     c._dispatch_ha(key, "release")
     c._dispatch_ha(key, "hold")  # only the press fires
@@ -945,6 +946,72 @@ async def test_key_resolves_in_the_layer_the_hub_names_not_the_last_state_update
     c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 7, "action": 0, "activity": 0})
     c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 7, "action": 0, "activity": 255})
     assert fired == [a, b]
+
+
+async def test_play_pause_resolve_in_the_hub_layer_and_the_card_toggles_that_player(
+    hass, rig, clock
+):
+    import dataclasses
+
+    _hub, c = await rig()
+    ids = c.compiled.activity_ids
+    assert len(ids) >= 2  # the hub layer 1 is not HA's first activity
+    fired = []
+    c._fire = lambda call, **kw: fired.append(call)
+    play = HaCall("media_player.media_play", ("media_player.shield",))
+    pause = HaCall("media_player.media_pause", ("media_player.shield",))
+    other = HaCall("media_player.media_pause", ("media_player.other",))
+    c.compiled = dataclasses.replace(
+        c.compiled,
+        ha_keys={ids[0]: {15: other}, ids[1]: {14: play, 15: pause}, None: {}},
+    )
+    c._current_idx = 0  # state_update lags: the hub already runs the second activity
+    c.now_playing.shield = "sensor.shield_3fd3_app"  # the apps sensor, never a player
+    for key, layer in ((14, 1), (15, 1)):
+        c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": key, "action": 0, "activity": layer})
+    c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 36, "action": 0, "activity": 1})
+    assert [(f.service, f.entities) for f in fired] == [
+        ("media_player.media_play", ("media_player.shield",)),
+        ("media_player.media_pause", ("media_player.shield",)),
+        ("media_player.media_play_pause", ("media_player.shield",)),
+    ]
+
+
+async def test_card_toggles_the_configured_player_when_play_pause_are_scripts(hass, rig, clock):
+    import dataclasses
+
+    _hub, c = await rig()
+    ids = c.compiled.activity_ids
+    fired = []
+    c._fire = lambda call, **kw: fired.append(call)
+    scr = HaCall("script.turn_on", ("script.shield_play",))
+    c.compiled = dataclasses.replace(c.compiled, ha_keys={ids[1]: {14: scr, 15: scr}, None: {}})
+    c.now_playing.shield = "sensor.shield_3fd3_app"
+    c.now_playing.plex = "media_player.gone"  # removed entity: never a target
+    c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 36, "action": 0, "activity": 1})
+    assert fired == []
+    hass.states.async_set("media_player.shield_tv", "playing")
+    c.now_playing.plex = "media_player.shield_tv"
+    c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 36, "action": 0, "activity": 1})
+    assert [(f.service, f.entities) for f in fired] == [
+        ("media_player.media_play_pause", ("media_player.shield_tv",))
+    ]
+
+
+async def test_keys_dispatch_from_the_cached_config_before_the_hub_reports_its_hash(
+    hass, rig, clock
+):
+    import dataclasses
+
+    _hub, c = await rig()
+    ids = c.compiled.activity_ids
+    fired = []
+    c._fire = lambda call, **kw: fired.append(call)
+    play = HaCall("media_player.media_play", ("media_player.shield",))
+    c.pending = dataclasses.replace(c.compiled, ha_keys={ids[1]: {14: play}, None: {}})
+    c.compiled = dataclasses.replace(c.compiled, activity_ids=[], ha_keys={})  # just reloaded
+    c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 14, "action": 0, "activity": 1})
+    assert fired == [play]
 
 
 async def test_remote_attached_redoes_only_the_remote_it_names(hass, rig, clock):
