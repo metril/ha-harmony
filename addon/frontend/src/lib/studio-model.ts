@@ -358,17 +358,9 @@ export function labelRoom(p: Page, index: number, budget = PAGE_BUDGET): number 
 export interface Meter { font: Font; px: number; used: number; over: number }
 export interface Overflow extends Meter { index: number; label: string; advice: string; short?: string }
 function wireWidget(page: Page, pp: PreviewPage | null, wi: number) {
-  const first = pp?.wire_pages[0]?.page;
-  if (page.list) return { wp: first, wire: undefined };
-  // a fixed page may compile to several screens: the widget is on the screen whose slice of the config order holds it
-  let off = 0;
-  for (const s of pp?.wire_pages ?? []) {
-    const n = s.page.widgets.length;
-    const m = wireMap(page, n, off)[wi] ?? -1;
-    if (m >= 0) return { wp: s.page, wire: s.page.widgets[m] };
-    off += n;
-  }
-  return { wp: first, wire: undefined };
+  const loc = page.list ? null : wireLocate(page, pp, wi);
+  const wp = pp?.wire_pages[loc?.screen ?? 0]?.page;
+  return { wp, wire: loc ? wp?.widgets[loc.idx] : undefined };
 }
 /** Is the widget drawn icon-only? The compiled widget's value (the compiler defaults it on), else the config's. */
 export function wireIconOnly(page: Page, pp: PreviewPage | null, wi: number): boolean {
@@ -1095,16 +1087,33 @@ export function errorTarget(path: (string | number)[]): ErrorTarget {
 }
 
 // ---------------------------------------------------------------- config widgets <-> wire widgets
-/** For each config widget of a page, the index of the same widget in the wire page (or -1: promoted header label, other wire page). `offset` is how many widgets the earlier wire pages hold. */
-export function wireMap(p: Page, wireCount: number, offset = 0): number[] {
+/** For each compiled screen, the config widget index behind each compiled widget (the compiler reorders and splits; `src` says where each came from). */
+export function wireSources(p: Page, pp: PreviewPage | null): number[][] {
   const promoted = promotedIndex(p);
-  let j = 0;
-  return p.widgets.map((_, i) => {
-    if (p.list) return i - offset >= 0 && i - offset < wireCount ? i - offset : -1;
-    if (i === promoted) return -1;
-    const k = j++ - offset;
-    return k >= 0 && k < wireCount ? k : -1;
+  const real = p.widgets.map((_, i) => i).filter((i) => p.list || i !== promoted);
+  let off = 0;
+  return (pp?.wire_pages ?? []).map((s) => {
+    const out = s.page.widgets.map((w, k) => (typeof w.src === 'number' && w.src >= 0 ? w.src : (real[off + k] ?? -1)));
+    off += s.page.widgets.length;
+    return out;
   });
+}
+/** For each config widget, its index on compiled screen `screen` (or -1: promoted header label, drawn on another screen). */
+export function wireMap(p: Page, pp: PreviewPage | null, screen = 0): number[] {
+  const map = p.widgets.map(() => -1);
+  (wireSources(p, pp)[screen] ?? []).forEach((ci, k) => {
+    if (ci >= 0 && ci < map.length) map[ci] = k;
+  });
+  return map;
+}
+/** Which compiled screen draws config widget `wi`, and its index there; null when none does. */
+export function wireLocate(p: Page, pp: PreviewPage | null, wi: number): { screen: number; idx: number } | null {
+  const all = wireSources(p, pp);
+  for (let screen = 0; screen < all.length; screen++) {
+    const idx = (all[screen] ?? []).indexOf(wi);
+    if (idx >= 0) return { screen, idx };
+  }
+  return null;
 }
 /** Grid of the drawn page: v2 shifts rows up by one when a header label was promoted to the title. */
 export function gridOf(p: Page): { cols: number; rows: number; shift: number } {

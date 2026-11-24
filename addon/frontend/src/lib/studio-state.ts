@@ -3,7 +3,7 @@
 import { ApiError, haCatalogOrReason, haServicesOrNull, type HaEntity, type HaService, type Keymap, type KeymapRow, type PreviewPage } from './api';
 import { enrich, noLookups, type Lookups } from './ha-nav';
 import type { Store } from './store';
-import { DEFAULT_LAYER, keyActionLabel, pageIndexForLayer, type Layer } from './studio-model';
+import { DEFAULT_LAYER, keyActionLabel, pageIndexForLayer, wireLocate, type Layer } from './studio-model';
 
 export type Sel = { kind: 'key'; name: string } | { kind: 'widget'; page: number; index: number } | { kind: 'page' } | null;
 export type PaletteTab = 'devices' | 'activities' | 'ha' | 'widgets';
@@ -28,7 +28,18 @@ export class StudioState extends EventTarget {
   page = 0;
   /** wire page of a list page (the compiler splits long lists) */
   wire = 0;
-  sel: Sel = null;
+  private selected: Sel = null;
+  get sel(): Sel {
+    return this.selected;
+  }
+  /** Selecting a widget shows the screen that draws it (a page may compile to several). */
+  set sel(v: Sel) {
+    this.selected = v;
+    if (v?.kind !== 'widget' || v.page !== this.page) return;
+    const pg = this.store.config.pages?.[v.page];
+    const loc = pg ? wireLocate(pg, this.previewOf(v.page), v.index) : null;
+    if (loc) this.wire = loc.screen;
+  }
   xray = false;
   mode: 'remote' | 'screen' = 'remote';
   /** integer scale of the screen in Screen mode */

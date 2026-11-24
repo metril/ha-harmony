@@ -198,10 +198,6 @@ export class HhRemote extends LitElement {
   private multiScreen(): boolean {
     return (this.st.previewOf(this.st.page)?.wire_pages.length ?? 0) > 1;
   }
-  private wireOffset(): number {
-    const pp = this.st.previewOf(this.st.page);
-    return (pp?.wire_pages ?? []).slice(0, this.st.wire).reduce((n, w) => n + w.widgets, 0);
-  }
   /** Overlay rectangle in screen pixels for config widget i. */
   private rectOf(page: Page, i: number, v2: V2Page | null, map: number[]) {
     const m = map[i] ?? -1;
@@ -249,6 +245,18 @@ export class HhRemote extends LitElement {
     const page = this.cfgPage();
     if (!p || !page) return null;
     if (isList(page)) return { kind: 'cell', page: this.st.page, x: 0, y: 0 };
+    if (this.multiScreen()) {
+      // the config grid is not what is drawn: hit-test the compiled screen, and offer no empty cells (there is no grid to place one on)
+      const v2 = this.v2();
+      const map = wireMap(page, this.st.previewOf(this.st.page), this.st.wire);
+      const index = !v2 ? -1 : map.findIndex((m) => {
+        const w = m >= 0 ? v2.widgets[m] : undefined;
+        if (!w) return false;
+        const r = widgetRect(v2, w);
+        return p.x >= r.x1 && p.x <= r.x2 && p.y >= r.y1 && p.y <= r.y2;
+      });
+      return index >= 0 ? { kind: 'widget', page: this.st.page, index } : null;
+    }
     const c = this.cfgCellAt(p.x, p.y);
     if (!c) return null;
     const index = page.widgets.findIndex((w) => {
@@ -264,7 +272,7 @@ export class HhRemote extends LitElement {
     if (!page) return out;
     if (isList(page)) return [...out, { id: `c:${this.st.page}:0:0`, target: { kind: 'cell', page: this.st.page, x: 0, y: 0 }, x: SCREEN.x + 120, y: SCREEN.y + 160 }];
     const v2 = this.v2();
-    const map = wireMap(page, v2?.widgets.length ?? 0, this.wireOffset());
+    const map = wireMap(page, this.st.previewOf(this.st.page), this.st.wire);
     const { cols, rows } = pageDims(page);
     const covered = new Set<string>();
     page.widgets.forEach((w, i) => {
@@ -274,6 +282,8 @@ export class HhRemote extends LitElement {
       const r = this.rectOf(page, i, v2, map);
       out.push({ id: `w:${this.st.page}:${i}`, target: { kind: 'widget', page: this.st.page, index: i }, x: SCREEN.x + (r.x1 + r.x2) / 2, y: SCREEN.y + (r.y1 + r.y2) / 2 });
     });
+    // a multi-screen page has no single grid to place into: no empty-cell spots
+    if (this.multiScreen()) return out;
     for (let y = 0; y < rows; y++)
       for (let x = 0; x < cols; x++)
         if (!covered.has(`${x},${y}`)) {
@@ -451,7 +461,7 @@ export class HhRemote extends LitElement {
     const v2 = this.v2();
     if (!page) return svg``;
     const st = this.st;
-    const map = wireMap(page, v2?.widgets.length ?? 0, this.wireOffset());
+    const map = wireMap(page, this.st.previewOf(this.st.page), this.st.wire);
     const g = gridOf(page);
     const list = isList(page);
     const showGrid = !list && (st.mode === 'screen' || this.assigner.active || st.sel?.kind === 'widget' || !!this.session);

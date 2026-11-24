@@ -3,7 +3,7 @@ import { Assigner, moveCursor, type Spot } from '../src/lib/assigner';
 import type { Config, Device, Page } from '../src/lib/model';
 import {
   assign, deviceChips, duplicatePage, errorTarget, firstFree, fits, groupCommand, isRefusal, labelRoom, movePage, moveBox, pageBytes, pageIndexForLayer,
-  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, studioChecks, labelMeter, sourceLabel, templatePage, trimToBytes, defaultService, type Source, type Target,
+  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, studioChecks, labelMeter, sourceLabel, wireMap, wireLocate, templatePage, trimToBytes, defaultService, type Source, type Target,
 } from '../src/lib/studio-model';
 
 const cfg = (): Config => ({
@@ -293,5 +293,35 @@ describe('drop labels', () => {
     expect(sourceLabel(c, { kind: 'command', device: 'sh', name: 'ContextMenu' } as Source)).toBe('Context Menu');
     expect(sourceLabel(c, { kind: 'command', device: 'sh', name: 'DirectionUp' } as Source)).toBe('Up');
     expect(sourceLabel(c, { kind: 'input', device: 'tv', name: 'InputHdmi1' } as Source)).toBe('HDMI 1');
+  });
+});
+
+describe('config index -> compiled widget (src)', () => {
+  const lab = (i: number) => (i === 15 ? 'Power Toggle' : i === 16 ? 'Context Menu' : `B${i}`);
+  const page = { id: 'p', title: 'Pg', layout: 'fixed', cols: 12, rows: 9, widgets: Array.from({ length: 24 }, (_, i) => ({ type: 'button', id: `b${i}`, x: ((i + 1) % 3) * 4, y: Math.floor((i + 1) / 3), w: 4, h: 1, label: lab(i), icon: 'none', action: { none: true } })) } as unknown as Page;
+  const short = (i: number) => (i === 15 ? 'Power' : i === 16 ? 'Menu' : `B${i}`);
+  const screen = (srcs: number[], rows: number) => ({ page: { cols: 12, rows, fixed: true, widgets: srcs.map((src, k) => ({ kind: 'button', x: (k % 3) * 4, y: Math.floor(k / 3), w: 4, h: 1, label: short(src), shape: 'card', icon: 0, icon_only: false, src })) }, widgets: srcs.length });
+  // the last config widget sits top-left, so it is compiled onto screen 1 and screen 2 starts at B11
+  const pp = { wire_pages: [screen([23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4), screen([11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22], 4)] } as never;
+  it('maps every config widget to the screen and widget that really draw it', () => {
+    expect(wireMap(page, pp, 0)[23]).toBe(0);
+    expect(wireMap(page, pp, 0)[10]).toBe(11);
+    expect(wireMap(page, pp, 0)[11]).toBe(-1);
+    for (let i = 11; i < 23; i++) expect(wireMap(page, pp, 1)[i]).toBe(i - 11);
+    expect(wireLocate(page, pp, 16)).toEqual({ screen: 1, idx: 5 });
+    expect(wireLocate(page, pp, 23)).toEqual({ screen: 0, idx: 0 });
+  });
+  it('judges labels on the right compiled widget after the reorder', () => {
+    const c = { devices: [], activities: [], pages: [page] } as unknown as Config;
+    expect(studioChecks(c, () => pp, true).filter((k) => k.kind === 'label')).toEqual([]);
+    expect(labelMeter(page, pp, 16)?.over).toBe(0);
+    expect(labelMeter(page, pp, 15)?.used).toBe(labelMeter(page, pp, 15, 'Power')?.used); // measured on the compiled "Power"
+  });
+  it('a single-screen fixed page whose compiled order differs from the config order', () => {
+    const pg = { id: 'q', cols: 12, rows: 3, layout: 'fixed', widgets: [lab(15), lab(16), 'B2'].map((label, i) => ({ type: 'button', id: `q${i}`, x: 0, y: 2 - i, w: 4, h: 1, label, icon: 'none', action: { none: true } })) } as unknown as Page;
+    const one = { wire_pages: [{ page: { cols: 12, rows: 3, fixed: true, widgets: [2, 1, 0].map((src, k) => ({ kind: 'button', x: 0, y: k, w: 4, h: 1, label: ['B2', 'Menu', 'Power'][k], shape: 'card', icon: 0, icon_only: false, src })) }, widgets: 3 }] } as never;
+    expect(wireMap(pg, one, 0)).toEqual([2, 1, 0]);
+    expect(labelMeter(pg, one, 0)?.over).toBe(0);
+    expect(labelMeter(pg, one, 1)?.over).toBe(0);
   });
 });

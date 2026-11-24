@@ -45,7 +45,7 @@ export class HhPageDiff extends StoreElement {
   private marks(page: Page | undefined, pp: PreviewPage | undefined | null, idx: number[]): Rect[] {
     const v2 = pp?.page;
     if (!page || !v2 || !idx.length) return [];
-    const map = wireMap(page, pp?.wire_pages[0]?.page.widgets.length ?? v2.widgets.length);
+    const map = wireMap(page, pp, 0);
     return idx.flatMap((i) => {
       const w = v2.widgets[map[i] ?? -1];
       return w ? [widgetRect(v2, w)] : [];

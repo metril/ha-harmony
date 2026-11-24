@@ -53,6 +53,18 @@ beforeEach(() => {
   document.body.replaceChildren();
 });
 
+// a 24-button fixed page whose last widget sits top-left: screen 1 draws B23 + B0..B10, screen 2 draws B11..B22
+function twoScreens(store: Store) {
+  const widgets = Array.from({ length: 24 }, (_, i) => ({ type: 'button', id: `b${i}`, x: ((i + 1) % 3) * 4, y: Math.floor((i + 1) / 3), w: 4, h: 1, label: `B${i}`, action: { none: true } }));
+  const wpage = (srcs: number[]) => ({ ...(page as object), version: 2, cols: 12, rows: 4, fixed: true, widgets: srcs.map((src, k) => ({ kind: 'button', x: (k % 3) * 4, y: Math.floor(k / 3), w: 4, h: 1, label: `B${src}`, shape: 'card', icon: 0, icon_only: false, src })) });
+  const s1 = wpage([23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  const s2 = wpage([11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
+  store.config.pages = [{ id: 'main', title: 'Main', layout: 'fixed', cols: 12, rows: 9, widgets }] as never;
+  store.pages = [{ index: 0, id: 'main', ok: true, error: null, page: s1, wire_pages: [{ page_id: 0, seq: null, bytes: 1, bytes_v1: 1, widgets: 12, page: s1 }, { page_id: 1, seq: null, bytes: 1, bytes_v1: 1, widgets: 12, page: s2 }], bytes: 1, bytes_v1: 1, limit: 251, widgets: 24, widget_limit: 32 }] as never;
+  store.dispatchEvent(new Event('change'));
+  return { s1, s2 };
+}
+
 describe('remote studio', () => {
   it('is the default route and draws the remote with all 35 keys as labelled buttons', async () => {
     const { remote, studio } = await boot();
@@ -290,6 +302,52 @@ describe('remote studio', () => {
     expect(chip.querySelector('svg')).toBeNull();
     const sw = chip.querySelector<HTMLElement>('i.sw')!;
     expect(sw.style.background).toBe('#e0584c');
+  });
+
+  describe('multi-screen pages with a reordered compile', () => {
+    type Stu = El & { activateWidget(p: number, i: number): void; showCheck(p: number, i: number | undefined): void };
+    const wireOf = (remote: El) => (remote as unknown as { st: { wire: number } }).st.wire;
+    it('selecting a widget (Show or a click) switches to the screen that draws it', async () => {
+      const { remote, studio, store } = await boot();
+      twoScreens(store);
+      await tick(remote);
+      expect(wireOf(remote)).toBe(0);
+      (studio as Stu).activateWidget(0, 16);
+      await tick(remote);
+      expect(wireOf(remote)).toBe(1);
+      (studio as Stu).activateWidget(0, 23);
+      await tick(remote);
+      expect(wireOf(remote)).toBe(0);
+      (studio as unknown as { showCheck(p: number, i: number): void }).showCheck(0, 20);
+      await tick(remote);
+      expect(wireOf(remote)).toBe(1);
+      expect(remote.shadowRoot.querySelector('[data-widget="20"]')).toBeTruthy();
+    });
+    it('offers no empty-cell spots on any screen, and rects exist only for the widgets drawn', async () => {
+      const { remote, store } = await boot();
+      twoScreens(store);
+      (remote as unknown as { st: { wire: number } }).st.wire = 1;
+      await tick(remote);
+      const spots = (remote as unknown as { spots(): { id: string }[] }).spots();
+      expect(spots.filter((x) => x.id.startsWith('c:'))).toEqual([]);
+      expect(spots.filter((x) => x.id.startsWith('w:')).length).toBe(12);
+      expect(remote.shadowRoot.querySelector('[data-widget="23"]')).toBeNull();
+      expect(remote.shadowRoot.querySelector('[data-widget="11"]')).toBeTruthy();
+    });
+    it('a drop on screen 2 hits the compiled widget under the point, and nothing in an empty area', async () => {
+      const { remote, store } = await boot();
+      const { s2 } = twoScreens(store);
+      (remote as unknown as { st: { wire: number } }).st.wire = 1;
+      await tick(remote);
+      const r = widgetRect(s2 as never, s2.widgets[5] as never); // compiled index 5 is config widget 16
+      const t = remote as unknown as { screenPoint: unknown; renderRoot: { elementsFromPoint: unknown }; targetAt(x: number, y: number): unknown };
+      let pt: { x: number; y: number } | null = { x: (r.x1 + r.x2) / 2, y: (r.y1 + r.y2) / 2 };
+      t.screenPoint = () => pt;
+      t.renderRoot.elementsFromPoint = () => [];
+      expect(t.targetAt(0, 0)).toEqual({ kind: 'widget', page: 0, index: 16 });
+      pt = { x: 2, y: 310 };
+      expect(t.targetAt(0, 0)).toBeNull();
+    });
   });
 
   describe('issue markers and the inspector line', () => {

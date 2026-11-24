@@ -101,6 +101,8 @@ export interface V2Widget {
   color?: string | null;
   /** tiles: the colour while on */
   on_color?: string | null;
+  /** editor only: index of this widget in the config page (the compiler reorders and splits screens) */
+  src?: number;
 }
 export interface V2Page {
   version: 1 | 2;
