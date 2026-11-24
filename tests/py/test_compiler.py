@@ -118,8 +118,8 @@ def test_docs_example_compiles():
     assert len(c.pages) == 1 and len(c.tiles) == 1
     assert {"volume_up", "home", "tap_mute", "tap_off", "tap_temp"} <= set(c.key_names.values())
     assert (
-        len(text.splitlines()) < 450
-    )  # 300 + "Colours and themes" + "Naming your hub" + "Bluetooth" + "App rings"
+        len(text.splitlines()) < 460
+    )  # 300 + "Colours and themes" + "Naming your hub" + "Bluetooth" + "App rings" + off_ends_activity
 
 
 def test_empty_file_is_empty_model():

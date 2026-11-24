@@ -344,6 +344,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._ha_dev_unsub: Callable[[], None] | None = None
         self._ha_task: asyncio.Task[None] | None = None
         self._ha_task_off = False  # the running task is an Off transition
+        self._act_since = time.monotonic()  # when the current activity became current
+        self._own_off: dict[str, float] = {}  # device -> monotonic time of our own power-off of it
         self._calls: dict[tuple[str, tuple[str, ...]], int] = {}  # key-started calls in flight
         self._released: set[int] = set()  # keys whose last event was a release: no more repeats
         self._resync = False
@@ -1504,7 +1506,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     )
                 for dev_id in dev_of.get(event.data["entity_id"], ()):
                     if self.device_states.get(dev_id) != new:
+                        was_on = (self.device_states.get(dev_id) or DeviceState()).power is True
                         self.device_states[dev_id] = new
+                        if was_on and new.power is False:
+                            self._self_off(dev_id)
                         self._notify(topic_device(dev_id))
 
             self._ha_dev_unsub = async_track_state_change_event(self.hass, list(dev_of), on_dev)
@@ -1688,6 +1693,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             if idx_before != (self._current_idx, self._last_idx):
                 self._notify(TOPIC_ACTIVITY)
             if before != self.current_activity_id:
+                self._act_since = time.monotonic()
                 self.app_status.refresh()
                 self._np_activity(self.current_activity_id)
         elif mtype is MsgType.KEY_EVENT:
@@ -2056,6 +2062,36 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         st = self.device_states.get(device)
         return st.power if st else None
 
+    def _transition_running(self) -> bool:
+        return self._ha_task is not None and not self._ha_task.done()
+
+    @callback
+    def _self_off(self, dev_id: str) -> None:
+        """An `off_ends_activity` device went on -> off: when it is part of the activity that has been
+        current for OFF_ENDS_ACTIVITY_AGE, nothing is starting or stopping and the off is not ours,
+        end the activity (the hub then sends the TV its real IR power-off)."""
+        dev = self.compiled.ha_devices.get(dev_id)
+        act = self.compiled.ha_activities.get(self.current_activity_id)
+        if dev is None or not dev.off_ends_activity or act is None or dev_id not in act.devices:
+            return
+        now = time.monotonic()
+        if (
+            now - self._act_since < const.OFF_ENDS_ACTIVITY_AGE
+            or self._transition_running()
+            or now - self._own_off.get(dev_id, -const.OWN_OFF_GRACE) < const.OWN_OFF_GRACE
+        ):
+            return
+        _LOGGER.info("%s turned itself off: ending the activity", dev_id)
+        self.config_entry.async_create_background_task(
+            self.hass, self._end_activity(), name=f"{DOMAIN} end activity"
+        )
+
+    async def _end_activity(self) -> None:
+        try:
+            await self.async_power_off()
+        except HomeAssistantError as exc:
+            _LOGGER.warning("Could not end the activity: %s", exc)
+
     def _note_activity(
         self,
         before: str | None,
@@ -2161,6 +2197,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             # on a repeated Off, where the device would otherwise be hit by every press
             if skip_known_off and step.kind == "power_off" and state is False:
                 continue
+            if step.kind == "power_off" and step.device:
+                self._own_off[step.device] = time.monotonic()
             if step.kind == "power_on":
                 ran_power.add(step.device)
             if step.wait_ms and (step.kind != "input" or step.device in ran_power):
@@ -2257,6 +2295,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             call = ha.lookup(command)
             if call is None:
                 raise invalid("unknown_command", device=device, command=command)
+            if command == "power_off":
+                self._own_off[device] = time.monotonic()
             await self.async_run_call(call)
             return
         await self.async_command(

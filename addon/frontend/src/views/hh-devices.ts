@@ -93,6 +93,7 @@ export class HhDevices extends StoreElement {
       .row .l b { font-weight: 600; font-size: 13px; }
       .row .l small { color: var(--tx3); font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .f { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--tx2); }
+      .f.chk input { margin: 0 6px 0 0; }
       input[type="number"], input[type="text"], input[type="search"], select { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; width: 100%; }
       .ports { display: flex; gap: 6px; }
       .ports button { width: 44px; height: 34px; border-radius: var(--r1); border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 700; cursor: pointer; }
@@ -405,9 +406,11 @@ export class HhDevices extends StoreElement {
     return html`
       ${ok ? nothing : html`<div class="banner ir" role="note">Home Assistant devices cannot be edited here: this add-on version does not store Home Assistant actions yet (the add-on reports ha_actions: off).</div>`}
       <section class="card" aria-label="Entity"><h2>Entity</h2>
-        <label class="f">Where Its State Comes From<input type="text" list="hh-dev-ents" aria-label="Entity" .value=${d.entity ?? ''} placeholder="media_player.shield" ?disabled=${!ok} @change=${(e: Event) => set(patchDevice(this.store.config, d.id, { entity: (e.target as HTMLInputElement).value.trim() || undefined }))} />
+        <label class="f">Where Its State Comes From<input type="text" list="hh-dev-ents" aria-label="Entity" .value=${d.entity ?? ''} placeholder="media_player.shield" ?disabled=${!ok} @change=${(e: Event) => { const entity = (e.target as HTMLInputElement).value.trim() || undefined; set(patchDevice(this.store.config, d.id, entity ? { entity } : { entity, off_ends_activity: undefined })); }} />
           <datalist id="hh-dev-ents">${(st.entities ?? []).slice(0, 300).map((e) => html`<option value=${e.entity_id}>${e.name ?? ''}</option>`)}</datalist>
-          <span class="hint">Power shows as on unless this entity is off, standby, unavailable or unknown.</span></label></section>
+          <span class="hint">Power shows as on unless this entity is off, standby, unavailable or unknown.</span></label>
+        <label class="f chk"><span><input type="checkbox" aria-label="Ends the activity when it turns off by itself" .checked=${!!d.entity && d.off_ends_activity === true} ?disabled=${!ok || !d.entity} @change=${(e: Event) => set(patchDevice(this.store.config, d.id, { off_ends_activity: (e.target as HTMLInputElement).checked || undefined }))} /> Ends the Activity When It Turns Off by Itself</span>
+          <span class="hint">Use for a device that sleeps by itself (e.g. the Shield): its own off ends the running activity so the TV is really switched off.</span></label></section>
       <section class="card" aria-label="Power control"><h2>Power</h2>
         ${(['on', 'off'] as const).map((k) => this.haAction(`Power ${k === 'on' ? 'On' : 'Off'}`, d.power?.[k], (a) => set(setPowerCode(this.store.config, d.id, k, a))))}</section>
       ${(['inputs', 'commands'] as const).map((where) => html`<section class="card" aria-label=${pretty(where)}><h2>${pretty(where)}</h2>

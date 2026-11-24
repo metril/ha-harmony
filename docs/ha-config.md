@@ -241,11 +241,18 @@ off; `lock` unlocked / unlocking / open = on, locked / locking = off; `media_pla
 unknown power. Everything else works as for IR devices:
 `{device: shield, command: ok}` on a key or button becomes that service call, the device gets its buttons,
 `remote.send_command` and a power sensor, and activities may list it with an `input`. It does not count
-against the hub's device limits and never reaches the hub. Turn HDMI-CEC off on these devices and on the TV they connect to (Samsung calls it Anynet+): CEC fights Harmony's own power handling, and a device put to sleep while the TV powers off can wake straight back up.
+against the hub's device limits and never reaches the hub. Turn HDMI-CEC off on the TV (Samsung calls it Anynet+) unless you use `off_ends_activity` below: CEC fights Harmony's own power handling, and a device put to sleep while the TV powers off can wake straight back up.
 
 `source_list: true` (needs `entity`) takes the inputs from the entity's `source_list` attribute: any
 `{device, input: <name>}` or activity `input` that is not in `inputs` becomes `media_player.select_source`
 with `source: <name>` on the entity (an explicit input of the same name wins).
+
+`off_ends_activity: true` (needs `entity`) ends the running activity when the device turns itself off: its entity goes
+from on to off, pushed by Home Assistant, the activity uses the device, has been current for at least 60 s, no HA step run
+is in progress and Home Assistant did not power it off itself within the last 30 s (a hub-side start or stop is not seen,
+the 60 s covers it; a second Off while the hub's Off runs is ignored by the hub). The activity then ends as the Off key does, so
+the hub sends the TV its IR power-off. For a Shield that sleeps on its own and sends CEC standby, which leaves the TV half off
+and deaf to IR power-on (this needs CEC on, so the Shield's standby reaches the TV). Use an entity whose `off` means asleep.
 
 ### App rings and Now Playing
 

@@ -443,6 +443,8 @@ def _build_schema(r: _Resolver) -> vol.Schema:
             # Inputs come from the entity's `source_list` attribute (media_player.select_source);
             # explicit `inputs` of the same name win.
             vol.Optional("source_list", default=False): bool,
+            # The device turning itself off (its entity goes on -> off) ends the activity using it.
+            vol.Optional("off_ends_activity", default=False): bool,
             vol.Optional("settle_ms"): _int(0, 60000),
             vol.Optional("source"): {str: vol.Any(str, int, float, bool, None)},
             vol.Optional("commands", default=dict): {_cmd_name: ha},
@@ -812,6 +814,11 @@ def _check_refs(model: Model, sink: list[_RefError] | None = None) -> None:
     for i, d in enumerate(model["devices"]):
         if d.get("source_list") and "entity" not in d:
             fail(["devices", i, "source_list"], "`source_list` needs the device's `entity`")
+        if d.get("off_ends_activity") and "entity" not in d:
+            fail(
+                ["devices", i, "off_ends_activity"],
+                "`off_ends_activity` needs the device's `entity`",
+            )
     uniq(model["activities"], "activities", "activity")
     uniq(model["pages"], "pages", "page")
 

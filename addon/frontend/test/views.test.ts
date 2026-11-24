@@ -107,6 +107,54 @@ describe('screens render with a realistic config', () => {
     expect(dv.shadowRoot!.querySelectorAll('tbody tr').length).toBe(61);
   });
 
+  describe('devices: off_ends_activity toggle', () => {
+    const haCfg = (extra: object = {}) => {
+      const c = tvConfig();
+      c.devices!.push({ id: 'shield', name: 'Shield', kind: 'ha', entity: 'media_player.shield', ...extra } as never);
+      return c;
+    };
+    const open = async (hash: string, config: ReturnType<typeof tvConfig>) => {
+      const { app, store } = await boot({ hash, config, draft: true, routes: { 'GET api/v1/health': () => ({ body: { ok: true, addon_version: '1', capabilities: { ha_actions: true } } }) } });
+      const dv = await lazyEl(app, 'hh-devices');
+      await settle(dv as HTMLElement);
+      await vi.waitFor(() => expect((dv as unknown as { ha: { haWritable: boolean } }).ha.haWritable).toBe(true));
+      await settle(dv as HTMLElement);
+      return { dv, store };
+    };
+    const box = (dv: HTMLElement) => dv.shadowRoot!.querySelector('input[aria-label="Ends the activity when it turns off by itself"]') as HTMLInputElement | null;
+    const dev = (store: { config: { devices?: { id: string }[] } }) => store.config.devices!.find((d) => d.id === 'shield') as Record<string, unknown>;
+
+    it('renders for HA devices only', async () => {
+      expect(box((await open('#/devices/shield', haCfg())).dv)).not.toBeNull();
+      document.body.replaceChildren();
+      expect(box((await open('#/devices/tv', haCfg())).dv)).toBeNull();
+    });
+    it('sets and removes the key', async () => {
+      const { dv, store } = await open('#/devices/shield', haCfg());
+      const b = box(dv)!;
+      expect(b.disabled).toBe(false);
+      b.checked = true;
+      b.dispatchEvent(new Event('change'));
+      await vi.waitFor(() => expect(dev(store as never).off_ends_activity).toBe(true));
+      await settle(dv);
+      const b2 = box(dv)!;
+      b2.checked = false;
+      b2.dispatchEvent(new Event('change'));
+      await vi.waitFor(() => expect('off_ends_activity' in dev(store as never)).toBe(false));
+    });
+    it('is disabled without an entity; clearing the entity drops the key', async () => {
+      const { dv, store } = await open('#/devices/shield', haCfg({ off_ends_activity: true }));
+      expect(box(dv)!.checked).toBe(true);
+      const ent = dv.shadowRoot!.querySelector('input[aria-label="Entity"]') as HTMLInputElement;
+      ent.value = '';
+      ent.dispatchEvent(new Event('change'));
+      await vi.waitFor(() => expect('entity' in dev(store as never) || 'off_ends_activity' in dev(store as never)).toBe(false));
+      await settle(dv);
+      expect(box(dv)!.disabled).toBe(true);
+      expect(box(dv)!.checked).toBe(false);
+    });
+  });
+
   it('devices gallery: a card per device with power status, counts and source, plus Add Device', async () => {
     const { app } = await boot({ hash: '#/devices' });
     const dv = await lazyEl(app, 'hh-devices');
