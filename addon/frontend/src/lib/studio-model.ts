@@ -356,7 +356,7 @@ export function labelRoom(p: Page, index: number, budget = PAGE_BUDGET): number 
 }
 // ---------------------------------------------------------------- pixel budget (the remote cuts labels by pixels, not bytes)
 export interface Meter { font: Font; px: number; used: number; over: number }
-export interface Overflow extends Meter { index: number; label: string; advice: string }
+export interface Overflow extends Meter { index: number; label: string; advice: string; short?: string }
 function wireWidget(page: Page, pp: PreviewPage | null, wi: number) {
   const wp = pp?.wire_pages[0]?.page;
   const map = wp && !page.list ? wireMap(page, wp.widgets.length) : null;
@@ -392,23 +392,23 @@ export function labelMeter(page: Page, pp: PreviewPage | null, wi: number, label
   return { font: b.font, px: b.px, used, over: Math.max(0, used - b.px) };
 }
 /** One line of advice for a label that will be cut: a hard key, an icon, the device prefix or an abbreviation. */
-function adviceFor(page: Page, w: Widget, m: Meter): string {
+function adviceFor(page: Page, w: Widget, m: Meter): { advice: string; short?: string } {
   const cmd = String((w['action'] as { command?: string } | undefined)?.command ?? '');
   const label = w.label ?? '';
-  if (cmd && isHardKey(cmd)) return 'this is a hard key, so remove it';
+  if (cmd && isHardKey(cmd)) return { advice: 'this is a hard key, so remove it' };
   const prefix = (page.title ?? '').trim();
-  if (prefix && label.toLowerCase().startsWith(`${prefix.toLowerCase()} `)) return `the page title already says "${prefix}": drop the prefix`;
+  if (prefix && label.toLowerCase().startsWith(`${prefix.toLowerCase()} `)) return { advice: `the page title already says "${prefix}": drop the prefix` };
   const short = abbreviate(label);
-  if (short !== label && textPx(short, m.font) <= m.px) return `use "${short}"`;
-  if (bestIcon(cmd, label)) return 'use an icon';
-  return 'shorten it';
+  if (short !== label && textPx(short, m.font) <= m.px) return { advice: `use "${short}"`, short };
+  if (bestIcon(cmd, label)) return { advice: 'use an icon' };
+  return { advice: 'shorten it' };
 }
 /** Every label on this page the remote would cut, with the pixels over and what to do about it. */
 export function pageOverflow(page: Page, pp: PreviewPage | null): Overflow[] {
   const out: Overflow[] = [];
   page.widgets.forEach((w, index) => {
     const m = labelMeter(page, pp, index);
-    if (m && m.over > 0) out.push({ ...m, index, label: w.label ?? '', advice: adviceFor(page, w, m) });
+    if (m && m.over > 0) out.push({ ...m, index, label: w.label ?? '', ...adviceFor(page, w, m) });
   });
   return out;
 }
@@ -1046,6 +1046,8 @@ export function setPage(cfg: Config, index: number, patch: Record<string, unknow
 export interface StudioCheck {
   kind: 'label' | 'glyph' | 'action';
   msg: string;
+  /** label checks: the abbreviation that fits, when that is the advice */
+  short?: string;
   /** the page to show and the widget to select; absent for a device */
   page?: number;
   index?: number;
@@ -1061,7 +1063,7 @@ export function studioChecks(cfg: Config, preview: (page: number) => PreviewPage
   (cfg.pages ?? []).forEach((pg, pi) => {
     const pp = preview(pi);
     // with needPreview a label is judged only on the compiled page: the config estimate flags captions the compiler will shorten
-    for (const o of needPreview && !pp ? [] : pageOverflow(pg, pp)) out.push({ kind: 'label', page: pi, index: o.index, msg: `${pg.title || pg.id}: "${o.label}" is ${o.over} px too wide for its ${o.font} slot; ${o.advice}` });
+    for (const o of needPreview && !pp ? [] : pageOverflow(pg, pp)) out.push({ kind: 'label', page: pi, index: o.index, msg: `${pg.title || pg.id}: "${o.label}" is ${o.over} px too wide for its ${o.font} slot; ${o.advice}`, ...(o.short ? { short: o.short } : {}) });
     pg.widgets.forEach((w, wi) => {
       if (w.type === 'button' && w.shape === 'row' && !w['action'] && !w.nav) out.push({ kind: 'action', page: pi, index: wi, msg: `${pg.title || pg.id}: the row "${w.label ?? ''}" does nothing; give it an action or a page` });
     });
