@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { render } from 'lit';
 import '../src/components/hh-icon-picker';
-import { deviceArt } from '../src/lib/device-art';
+import { chipIconId, deviceArt } from '../src/lib/device-art';
+import { stockIconByName } from '../src/lib/stock-icons';
 import { patchDevice } from '../src/lib/device-edit';
 import { tvConfig } from './helpers';
 
@@ -56,5 +57,13 @@ describe('device icon', () => {
       expect(b.querySelector('.why')).toBeNull();
     }
     el.remove();
+  });
+});
+
+describe('palette chip icons', () => {
+  it('use the compiler inference first: ContextMenu is the menu icon, Up an arrow, groups are the fallback', () => {
+    expect(chipIconId('ContextMenu')).toBe(stockIconByName('menu')?.id);
+    expect(chipIconId('Up')).toBe(stockIconByName('up')?.id);
+    expect(chipIconId('Zzyzx', 'other')).toBe(stockIconByName('settings')?.id);
   });
 });

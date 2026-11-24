@@ -6,7 +6,7 @@ import { fitCells, watchCells } from '../lib/fit-cells';
 import { displayCommand, titleHuman, dn } from '../lib/key-names';
 import { orderedCells } from './parts';
 import { stockIconSvg } from '../lib/icon-shapes';
-import { commandIconId } from '../lib/device-art';
+import { chipIconId } from '../lib/device-art';
 import { chipStyles, shared } from '../lib/styles';
 import { permissions } from '../lib/permissions';
 import { HA_DOMAINS, type PaletteTab, type StudioHost } from '../lib/studio-state';
@@ -166,7 +166,7 @@ export class HhPalette extends LitElement {
         const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
           ? html`<h2>${pretty(grp)}</h2><div class="cells" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
-              ${orderedCells(chips, (c) => c.name, (c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(commandIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
+              ${orderedCells(chips, (c) => c.name, (c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(chipIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
             </div>`
           : nothing;
       });

@@ -4,6 +4,7 @@ import { svg, type TemplateResult } from 'lit';
 import type { Device } from './model';
 import { groupCommand, type Group } from './studio-model';
 import { stockIconByName } from './stock-icons';
+import { bestIcon } from './icon-suggest';
 
 export type Kind = 'tv' | 'receiver' | 'soundbar' | 'streamer' | 'console' | 'projector' | 'disc' | 'other';
 export const KIND_LABEL: Record<Kind, string> = { tv: 'TV', receiver: 'AV receiver', soundbar: 'Soundbar', streamer: 'Streaming Box', console: 'Game Console', projector: 'Projector', disc: 'Blu-ray / DVD', other: 'Something Else' };
@@ -63,4 +64,6 @@ export function commandIconId(name: string, group: Group = groupCommand(name)): 
   const hit = NAME_ICON.find(([re]) => re.test(n))?.[1];
   return stockIconByName(hit ?? GROUP_ICON[group])?.id ?? 0;
 }
+/** Palette chip icon: what the compiler would draw for the command (icon-suggest), else the name table / group icon. */
+export const chipIconId = (name: string, group: Group = groupCommand(name)): number => stockIconByName(bestIcon(name))?.id ?? commandIconId(name, group);
 export const groupIconId = (g: Group): number => stockIconByName(GROUP_ICON[g])?.id ?? 0;
