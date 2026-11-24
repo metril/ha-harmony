@@ -1015,3 +1015,28 @@ async def test_normal_off_transition_with_marker_is_unchanged(hass, rig, clock):
     await hub.push("state_update", _OFF_PRESS)
     await settle(hass, lambda: off)
     assert len(off) == 1
+
+
+async def test_second_off_never_interrupts_an_in_flight_off(hass, rig, clock):
+    hub, c, _off = await _shield_started_by_hand(hass, rig)
+    gate = asyncio.Event()
+    fired = []
+
+    def fire(call, **kw):
+        async def run():
+            fired.append(call.service)
+            await gate.wait()  # a slow service
+
+        return asyncio.ensure_future(run())
+
+    c._fire = fire
+    await hub.push("state_update", _OFF_PRESS)  # tv_on -> Off
+    await settle(hass, lambda: fired)
+    assert len(fired) == 1  # blocked on its first step
+    await hub.push("state_update", _OFF_PRESS)  # second Off while the first runs
+    await settle(hass)
+    gate.set()
+    await settle(hass, lambda: c._ha_task is None or c._ha_task.done())
+    await settle(hass)
+    assert fired == ["remote.turn_off"]  # not cancelled and not repeated by the second Off
+    assert c._ha_task.done() and not c._ha_task.cancelled()
