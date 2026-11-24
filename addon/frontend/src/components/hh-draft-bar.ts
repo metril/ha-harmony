@@ -58,6 +58,10 @@ export class HhDraftBar extends StoreElement {
   ];
   @state() private usageOpen = false;
   @state() private issuesOpen = false;
+  protected override willUpdate(): void {
+    const s = this.store;
+    if (this.issuesOpen && !collectIssues(s.errors, s.warnings, s.checks, s.config).length) this.issuesOpen = false;
+  }
   private onDocClick = (e: Event) => {
     if (this.issuesOpen && !e.composedPath().includes(this.renderRoot.querySelector('.issues') as EventTarget)) this.closeIssues(false);
   };
@@ -186,7 +190,6 @@ export class HhDraftBar extends StoreElement {
     const errs = issues.filter((i) => i.level === 'error').length;
     const warns = issues.length - errs;
     if (!issues.length) {
-      this.issuesOpen = false;
       return statusChip('ok', 'Valid', { check: true });
     }
     const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;

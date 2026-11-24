@@ -128,8 +128,10 @@ export class HhStudio extends StoreElement implements StudioHost {
   private pillSig = '';
   private pillRo?: ResizeObserver;
   private resetPills = () => { this.pillCap = LAYER_PILLS; this.requestUpdate(); };
-  protected override updated(): void {
+  protected override willUpdate(): void {
     this.store.setChecks(studioChecks(this.store.config, (i) => this.st.previewOf(i), true));
+  }
+  protected override updated(): void {
     if (this.sheet) this.setAttribute('sheet', this.sheet);
     else this.removeAttribute('sheet');
     const sig = (this.store.config.activities ?? []).map((a) => a.name ?? a.id).join('\u0001');

@@ -364,6 +364,47 @@ describe('studio checks in the store', () => {
   });
 });
 
+/** The focused element, looking through every shadow root. */
+const deepActive = (): Element | null => {
+  let a: Element | null = document.activeElement;
+  while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+  return a;
+};
+const addDeadRow = async (store: Store, studio: El) => {
+  store.edit((c) => void c.pages![0]!.widgets.push({ type: 'button', shape: 'row', id: 'r', x: 0, y: 1, w: 4, h: 1, label: 'Dead' }));
+  await tick(studio);
+};
+
+describe('focus after Show', () => {
+  it('lands on the widget rect when the Studio is mounted', async () => {
+    const { studio, store } = await boot();
+    await addDeadRow(store, studio);
+    store.showIssue({ level: 'warning', text: 'x', target: { kind: 'widget', page: 0, index: 1 } });
+    await tick(studio);
+    const a = deepActive();
+    expect(a?.getAttribute('data-widget')).toBe('1');
+    expect(a?.tagName.toLowerCase()).toBe('rect');
+  });
+  it('lands on the widget rect when the Studio mounts after Show', async () => {
+    const { studio, store } = await boot();
+    await addDeadRow(store, studio);
+    studio.remove();
+    store.showIssue({ level: 'warning', text: 'x', target: { kind: 'widget', page: 0, index: 1 } });
+    const again = document.createElement('hh-studio') as El;
+    document.body.append(again);
+    await tick(again);
+    expect(deepActive()?.getAttribute('data-widget')).toBe('1');
+  });
+  it('an error on a key focuses no widget and falls back to the main region', async () => {
+    const { app, studio, store } = await boot();
+    store.showIssue({ level: 'error', text: 'x', target: { kind: 'error', path: ['keys', 'menu'] } });
+    await tick(studio);
+    const a = deepActive();
+    expect(a?.hasAttribute('data-widget')).toBe(false);
+    expect(a).toBe(app.shadowRoot.querySelector('main'));
+  });
+});
+
 describe('Show while the Studio is not mounted', () => {
   it('keeps the issue pending and selects the widget once the Studio mounts', async () => {
     const { studio, store } = await boot();
