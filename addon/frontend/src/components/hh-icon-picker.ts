@@ -15,7 +15,7 @@ const SECTIONS: { title: string; names: string[] }[] = [
 
 /**
  * A searchable picker of the remote's stock icons. `value` is the icon name ('' = the default); fires `hh-icon` with the new name or undefined.
- * With `command` / `label` it opens on a Suggested row (best matches first, each with the reason it matched).
+ * With `command` / `label` it opens on a Suggested row (best matches first, the reason it matched is each button's tooltip).
  */
 @customElement('hh-icon-picker')
 export class HhIconPicker extends LitElement {
@@ -28,14 +28,12 @@ export class HhIconPicker extends LitElement {
       h4 { margin: 10px 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--tx2); }
       h4:first-child { margin-top: 0; }
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; }
-      .sug { display: grid; gap: 4px; }
-      button.ic { position: relative; height: 44px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf2); color: var(--tx); cursor: pointer; font-size: 11.5px; }
-      button.ic:hover { background: var(--sf3); }
-      button.ic[aria-pressed="true"] { background: var(--acc); color: var(--onacc); border-color: var(--acc); }
-      button.ic .sic { width: 24px; height: 24px; }
-      button.row { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px; justify-content: flex-start; }
-      button.row .why { font-size: 11.5px; color: var(--tx2); }
-      button.ic[aria-pressed="true"] .why { color: inherit; }
+      button.pick { position: relative; height: 44px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r1); background: var(--sf2); color: var(--tx); cursor: pointer; font-size: 11.5px; }
+      button.pick:hover { background: var(--sf3); }
+      button.pick[aria-pressed="true"] { background: var(--acc); color: var(--onacc); border-color: var(--acc); }
+      button.pick .sic { width: 24px; height: 24px; }
+      .sug button.pick { height: 56px; grid-template-rows: 24px auto; gap: 2px; padding: 4px 2px 2px; }
+      .sug button.pick .nm { font-size: 9.5px; line-height: 1.1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .new::after { content: 'new'; position: absolute; top: -5px; right: -4px; font-size: 9px; line-height: 1; padding: 2px 4px; border-radius: 6px; background: var(--acc); color: var(--onacc); }
       .none { margin: 8px 0 0; }
     `,
@@ -51,7 +49,8 @@ export class HhIconPicker extends LitElement {
   }
   private btn(i: StockIcon, why = '') {
     const name = displayKey(i.name);
-    return html`<button class="ic ${isNewIcon(i) ? 'new' : ''} ${why ? 'row' : ''}" aria-pressed=${this.value === i.name} aria-label=${why ? `${name}: ${why}` : name} title=${why ? `${name}: ${why}` : name} @click=${() => this.pick(i.name)}>${stockIconSvg(i.id)}${why ? html`<span>${name}</span><span class="why">${why}</span>` : nothing}</button>`;
+    const tip = why ? `${name}: ${why}` : name;
+    return html`<button class="pick ${isNewIcon(i) ? 'new' : ''}" aria-pressed=${this.value === i.name} aria-label=${tip} title=${tip} @click=${() => this.pick(i.name)}>${stockIconSvg(i.id)}${why ? html`<span class="nm">${name}</span>` : nothing}</button>`;
   }
   protected override render() {
     const q = this.q.trim().toLowerCase();
@@ -66,7 +65,7 @@ export class HhIconPicker extends LitElement {
     if (rest.length) groups.push({ title: 'More', icons: rest });
     return html`<input type="search" placeholder="Search icons" aria-label="Search icons" .value=${this.q} @input=${(e: Event) => (this.q = (e.target as HTMLInputElement).value)} />
       <div class="scroll" role="group" aria-label="Icon">
-        ${sug.length ? html`<h4>Suggested</h4><div class="sug">${sug.map((s) => this.btn(s.icon, s.reason))}</div>` : nothing}
+        ${sug.length ? html`<h4>Suggested</h4><div class="grid sug">${sug.map((s) => this.btn(s.icon, s.reason))}</div>` : nothing}
         ${groups.filter((g) => g.icons.length).map((g) => html`<h4>${g.title}</h4><div class="grid">${g.icons.map((i) => this.btn(i))}</div>`)}
       </div>
       ${found.length ? '' : html`<p class="muted">No icon matches.</p>`}

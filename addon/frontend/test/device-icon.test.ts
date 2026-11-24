@@ -40,4 +40,21 @@ describe('device icon', () => {
     expect(got).toBe('tv');
     el.remove();
   });
+
+  it('Suggested buttons are picker cells (not the shared .ic icon class) and keep the reason as a tooltip', async () => {
+    const el = document.createElement('hh-icon-picker') as HTMLElement & { command: string; label: string; updateComplete: Promise<boolean> };
+    el.command = 'Volume Up';
+    el.label = 'Volume Up';
+    document.body.append(el);
+    await el.updateComplete;
+    const sug = el.shadowRoot!.querySelectorAll<HTMLButtonElement>('.sug button');
+    expect(sug.length).toBeGreaterThan(0);
+    for (const b of sug) {
+      expect(b.classList.contains('ic')).toBe(false);
+      expect(b.classList.contains('pick')).toBe(true);
+      expect(b.title).toContain(': ');
+      expect(b.querySelector('.why')).toBeNull();
+    }
+    el.remove();
+  });
 });
