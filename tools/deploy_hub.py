@@ -19,6 +19,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+import hub_image
 from device_backup import DEFAULT_RUN_TIMEOUT, DEFAULT_SSH_TIMEOUT, SshRunner, parse_hash
 
 REMOTE_DIR = "/data/ha-harmony"
@@ -602,6 +604,25 @@ class Deployer:
         return 0
 
 
+def push_signed(d: Deployer, a: argparse.Namespace) -> int:
+    """First install from a signed release image: verify it offline against the committed release key (never the dev
+    key), strip the header and push the daemon like `--hub`, then record the image's build id."""
+    try:
+        data = a.image.read_bytes() if a.image else hub_image.download(a.release)
+        img = hub_image.verify_image(data, hub_image.release_pubkey())
+    except (OSError, hub_image.ImageError) as e:
+        raise DeployError(f"image refused: {e}") from None
+    d.out(f"image ok: signed with the release key, build {img.build}, {len(img.payload)} B")
+    with tempfile.TemporaryDirectory() as tmp:
+        hub = Path(tmp) / "hub"
+        hub.write_bytes(img.payload)
+        d.out(
+            f"hub md5 {hashlib.md5(img.payload, usedforsecurity=False).hexdigest()}  (for install_boot_hook --expect-md5)"
+        )
+        return d.push(hub, a.remote_sim, a.rf_probe, a.config, a.busybox,
+                      a.margin_kb, not a.no_space_check)  # fmt: skip
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--host", default="harmony-hub", help="ssh host/alias (default %(default)s)")
@@ -622,7 +643,18 @@ def build_parser() -> argparse.ArgumentParser:
         "push",
         "[WRITE] copy hub (+remote_sim, rf_probe, config, BusyBox) to /data/ha-harmony, md5-verified",
     )
-    p.add_argument("--hub", type=Path, required=True)
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--hub", type=Path, help="a cross-built, stripped hub binary")
+    src.add_argument(
+        "--image",
+        type=Path,
+        help="a signed hub-X.Y.Z.img (verified offline against the release key)",
+    )
+    src.add_argument(
+        "--release",
+        metavar="X.Y.Z",
+        help="download hub-X.Y.Z.img from the GitHub release, then as --image",
+    )
     p.add_argument("--remote-sim", type=Path)
     p.add_argument("--rf-probe", type=Path, help="read-only CC2544 probe tool")
     p.add_argument("--config", type=Path)
@@ -686,8 +718,10 @@ def main(
             case "status":
                 return d.status()
             case "push":
-                return d.push(a.hub, a.remote_sim, a.rf_probe, a.config, a.busybox,
-                              a.margin_kb, not a.no_space_check)  # fmt: skip
+                if a.hub is not None:
+                    return d.push(a.hub, a.remote_sim, a.rf_probe, a.config, a.busybox,
+                                  a.margin_kb, not a.no_space_check)  # fmt: skip
+                return push_signed(d, a)
             case "restart":
                 return d.restart()
             case "quiesce":
