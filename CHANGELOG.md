@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.5 (2026-11-24)
+
+- The Now Playing card on the remote no longer shows "Paused" before the time, so the time stays in place; the pause glyph shows the state.
+- Remote firmware change: update the remote. No hub update is needed.
+
 ## 0.5.4 (2026-11-23)
 
 - The Now Playing card's play/pause works again: it toggles the activity's media player.
