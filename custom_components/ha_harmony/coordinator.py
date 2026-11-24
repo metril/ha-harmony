@@ -339,6 +339,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self._tile_last: dict[tuple[int, int, int], tuple[bool, tuple[int, str]]] = {}
         self._ha_dev_unsub: Callable[[], None] | None = None
         self._ha_task: asyncio.Task[None] | None = None
+        self._ha_task_off = False  # the running task is an Off transition
         self._calls: dict[tuple[str, tuple[str, ...]], int] = {}  # key-started calls in flight
         self._released: set[int] = set()  # keys whose last event was a release: no more repeats
         self._resync = False
@@ -2054,11 +2055,20 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         )  # Off powers every HA device down
         if not everything_off and before not in c.ha_activities and after not in c.ha_activities:
             return
-        if self._ha_task is not None and not self._ha_task.done():
-            self._ha_task.cancel()
+        running = self._ha_task is not None and not self._ha_task.done()
+        if repeat and running:
+            # never interrupt an in-flight Off: its own sweep already covers every HA device
+            if self._ha_task_off:
+                return
+            prior = self._ha_task
+        else:
+            prior = None
+            if running:
+                self._ha_task.cancel()
+        self._ha_task_off = everything_off
         self._ha_task = self.config_entry.async_create_background_task(
             self.hass,
-            self._run_transition(before, after, everything_off, sweep, repeat),
+            self._run_transition(before, after, everything_off, sweep, repeat, prior),
             name=f"{DOMAIN} activity steps",
         )
 
@@ -2114,9 +2124,12 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         everything_off: bool | None = None,
         sweep: bool = True,
         skip_known_off: bool = False,
+        after_task: asyncio.Task[None] | None = None,
     ) -> None:
         """Sequential and cancellable: a newer transition replaces it. `skip_known_off`: a repeated Off
         does not fire power_off at a device Home Assistant confidently reads as off."""
+        if after_task is not None:
+            await asyncio.wait({after_task})  # let the running transition finish first
         ran_power: set[str | None] = set()
         for step in self._transition_steps(before, after, everything_off, sweep):
             state = self._ha_power(step.device) if step.device else None
