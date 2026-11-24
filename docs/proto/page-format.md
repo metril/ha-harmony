@@ -135,7 +135,7 @@ its tile overlay (survives the page leaving the screen; a re-push of the page dr
 
 **Now Playing card** (`now_playing` 29 + `cover_chunk` 42). On a FIXED v2 page whose `act` is the running activity (+ 1, power
 on) and while `flags` != 0, the card (224x80, 4 px pad: 48x72 art, m16 title, r12 subtitle, an r12 accent line with the play or
-pause glyph and `m:ss / m:ss` (`Paused · ` before it when paused), a 3 px bar) replaces the page's first grid row (lowest y)
+pause glyph and `m:ss / m:ss`, a 3 px bar) replaces the page's first grid row (lowest y)
 whose widgets are all non-compact button cards of span 12 or 6 (80 px class); the row's widgets are not drawn nor tappable.
 A page with no such row shows none. A tap on the card sends the hard keys Pause (while playing) or Play (while paused) as a
 key_event, so the activity's own Play / Pause mapping applies. The position advances locally (once a second, only while awake

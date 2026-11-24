@@ -1112,9 +1112,8 @@ static unsigned np_pos(const ra_ui_t *ui, uint64_t now) {
 }
 
 static void np_time_text(const ra_ui_t *ui, unsigned sec, char *b, size_t n) {
-  const char *pre = ui->np.flags == 2 ? "Paused \xC2\xB7 " : "";
-  if (ui->np.dur) snprintf(b, n, "%s%u:%02u / %u:%02u", pre, sec / 60, sec % 60, ui->np.dur / 60u, ui->np.dur % 60u);
-  else snprintf(b, n, "%s%u:%02u", pre, sec / 60, sec % 60);
+  if (ui->np.dur) snprintf(b, n, "%u:%02u / %u:%02u", sec / 60, sec % 60, ui->np.dur / 60u, ui->np.dur % 60u);
+  else snprintf(b, n, "%u:%02u", sec / 60, sec % 60);
 }
 
 #define NP_TW (HP_PAGE_SCREEN_W - 2 * RA_MARGIN - NP_TX - 10) /* text column width */
