@@ -257,6 +257,29 @@ static void test_tap_running_activity_returns_to_its_page(void) {
   app_destroy(&app);
 }
 
+/* Regression: tapping the running activity's row on Home swaps the page under the touch; the key must still be 128 + the
+ * tapped (Home) widget's id, not the id of whatever widget of the new page sits at that slot. */
+static void test_retap_running_activity_sends_the_tapped_widgets_key(void) {
+  start();
+  ws_t act[] = {one(5, HP_ROLE_DEFAULT, RA_ICON_TV, -1, "Plex"), one(2, HP_ROLE_NAV, RA_ICON_BACK, 1, "Back")};
+  act[1].y = 1;
+  ws_t home[] = {one(1, HP_ROLE_DEFAULT, RA_ICON_TV, 0, "TV")};
+  push(0, 2, 3, HP_PAGE_KIND_NORMAL, 1, 0, 0, 1, "Watch TV", act, 2);
+  push(1, 2, 3, HP_PAGE_KIND_HOME, 0, 0, 0, 0, "Home", home, 1);
+  settle();
+  state(0, 1);
+  settle();
+  press_key(0, KEY_HOME_);
+  settle();
+  CT_EQ(shown(), 1);
+  lk.nsent = 0;
+  tap_widget(1);
+  CT_EQ(shown(), 0); /* went to the activity page, as designed */
+  CT_CHECK(lk.nsent >= 1);
+  CT_EQ(lk.sent[0].code, HP_SOFT_KEY_BASE + 1);
+  app_destroy(&app);
+}
+
 static void test_highlight_is_a_partial_redraw(void) {
   start();
   push_set(3, 0);
@@ -702,6 +725,7 @@ int main(void) {
   CT_RUN(test_rerender_only_when_visible_page_replaced);
   CT_RUN(test_activity_page_and_power_off_home);
   CT_RUN(test_tap_running_activity_returns_to_its_page);
+  CT_RUN(test_retap_running_activity_sends_the_tapped_widgets_key);
   CT_RUN(test_highlight_is_a_partial_redraw);
   CT_RUN(test_nav_widget_switches_locally);
   CT_RUN(test_paged_up_down_are_local);

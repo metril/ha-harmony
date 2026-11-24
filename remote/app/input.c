@@ -69,8 +69,9 @@ static void touch_release(ra_input_t *in, uint64_t now) {
   const hp_widget_t *w = p ? hp_page_hit(p, in->tx, in->ty) : NULL;
   if (in->ty < HP_PAGE_BAR_H && in->sink.bar) in->sink.bar(in->sink.ctx, in->tx, in->ty);
   if (!w || w->kind == HP_WIDGET_LABEL) return;
-  if (in->sink.widget && in->sink.widget(in->sink.ctx, w)) return; /* handled locally: no key_event */
+  /* before the sink: re-tapping the running activity shows its page, which overwrites *w in place */
   uint8_t code = (uint8_t)(HP_SOFT_KEY_BASE + w->id);
+  if (in->sink.widget && in->sink.widget(in->sink.ctx, w)) return; /* handled locally: no key_event */
   in->sink.emit(in->sink.ctx, code, HP_KEY_ACTION_PRESS);
   in->sink.emit(in->sink.ctx, code, HP_KEY_ACTION_RELEASE);
 }
