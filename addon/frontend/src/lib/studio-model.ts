@@ -1041,7 +1041,7 @@ export function setPage(cfg: Config, index: number, patch: Record<string, unknow
   const p = next.pages?.[index] as (Page & Record<string, unknown>) | undefined;
   if (!p) return next;
   for (const [k, v] of Object.entries(patch)) {
-    if (v === undefined || v === null || v === '' || v === false) delete p[k];
+    if (v === undefined || v === null || v === '' || (v === false && k !== 'back')) delete p[k];
     else p[k] = v;
   }
   return next;

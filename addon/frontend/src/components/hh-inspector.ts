@@ -8,7 +8,7 @@ import { stockIconByName } from '../lib/stock-icons';
 import { fitCells, watchCells } from '../lib/fit-cells';
 import { abbreviate, displayCommand, displayKey, displayName, gridStyle, FREE_CAP, dn } from '../lib/key-names';
 import { KEYS, keyTitle } from '../lib/remote-layout';
-import { shared } from '../lib/styles';
+import { shared, switchStyles } from '../lib/styles';
 import { collectIssues, widgetIssues } from '../lib/issues';
 import type { StudioHost } from '../lib/studio-state';
 import { meter, orderedCells } from './parts';
@@ -38,6 +38,7 @@ const ALIGNS = [
 export class HhInspector extends LitElement {
   static override styles = [
     shared,
+    switchStyles,
     css`
       :host { display: block; background: var(--sf); height: 100%; overflow: auto; }
       .pad { padding: 14px 14px 24px; display: grid; gap: 14px; align-content: start; }
@@ -77,7 +78,6 @@ export class HhInspector extends LitElement {
       .slot { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px; border: 1.5px dashed var(--line); border-radius: var(--r2); background: var(--sf2); color: var(--tx); cursor: pointer; text-align: left; width: 100%; }
       .slot.drop { border-color: var(--acc); background: var(--accs); }
       .slot b { font-weight: 600; flex: 1; min-width: 0; overflow-wrap: anywhere; }
-      .chk { display: flex; gap: 8px; align-items: center; font-weight: 500; color: var(--tx); font-size: 13px; }
       .errs { display: grid; gap: 4px; }
       .err { font-size: 12px; color: var(--bad); background: var(--bads); padding: 6px 8px; border-radius: var(--r1); }
       .free.grid > .pair { height: 28px; }
@@ -165,7 +165,7 @@ export class HhInspector extends LitElement {
     const shape = w.shape ?? (navVal || list ? 'row' : 'card');
     const ok = !!page && alignApplies({ cols: page.list ? 1 : page.cols ?? 4, rows: page.list ? page.list.rows : page.rows ?? 6, fixed: page.layout === 'fixed' }, { type: w.type, shape, icon_only: w.icon_only, x: list ? 0 : w.x ?? 0, y: list ? wi : w.y ?? 0, w: list ? 1 : w.w ?? 1, h: list ? 1 : w.h ?? 1 });
     const why = page?.layout === 'fixed' ? 'Fixed pages always read left to right' : 'Small buttons, tiles and icon-only buttons are always centred';
-    return html`<div class="ali"><span id="ali-l">Align</span><div class="grp" role="group" aria-labelledby="ali-l" title=${ok ? '' : why}>${ALIGNS.map((o) => html`<button type="button" ?disabled=${!ok} aria-pressed=${(ok ? w.align ?? 'center' : 'center') === o.v} aria-label=${o.name} title=${ok ? o.name : why} @click=${() => this.widgetPatch(pi, wi, { align: o.v === 'center' ? undefined : o.v })}>${svg`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d=${o.d}></path></svg>`}</button>`)}</div></div>${ok ? nothing : html`<p class="why" role="note">${why}.</p>`}`;
+    return html`<div class="ali"><span id="ali-l">Align</span><div class="grp" role="group" aria-labelledby="ali-l" title=${ok ? '' : why} aria-describedby="ali-why">${ALIGNS.map((o) => html`<button type="button" ?disabled=${!ok} aria-pressed=${(ok ? w.align ?? 'center' : 'center') === o.v} aria-label=${o.name} title=${ok ? o.name : why} @click=${() => this.widgetPatch(pi, wi, { align: o.v === 'center' ? undefined : o.v })}>${svg`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d=${o.d}></path></svg>`}</button>`)}</div><span class="vh" id="ali-why">${ok ? '' : why}</span></div>`;
   }
 
   private keyView(name: string) {
@@ -190,15 +190,20 @@ export class HhInspector extends LitElement {
     const bytes = labelBytes(w.label ?? '');
     const meterPx = labelMeter(page, pp, wi);
     const isBtn = w.type === 'button';
+    const iconOnly = wireIconOnly(page, pp, wi);
+    const noIcon = !w.icon || w.icon === 'none';
     const navVal = typeof w['nav'] === 'string' ? (w['nav'] as string) : '';
     const picked = this.assigner.phase.name === 'picked';
     return html`<div class="pad">
       <h2>${w.type === 'label' ? 'Label' : w.type === 'tile' ? 'Tile' : 'Button'} <span class="chip">${page.title || page.id}</span></h2>
       ${this.errorsFor((t) => t.kind === 'widget' && t.page === pi && t.index === wi)}
-      <label>Label <span class="cnt ${bytes >= room ? 'full' : bytes >= room - 4 ? 'warn' : ''}"><span>Shown on the Remote</span><span aria-live="polite">${bytes}/${room} B</span></span>
+      <label>Label <span class="cnt ${bytes >= room ? 'full' : bytes >= room - 4 ? 'warn' : ''}"><span>${iconOnly ? 'Kept for voice and the hub' : 'Shown on the Remote'}</span><span aria-live="polite">${bytes}/${room} B</span></span>
         <input type="text" .value=${w.label ?? ''} aria-label="Label" @input=${(e: Event) => this.widgetPatch(pi, wi, { label: trimToBytes((e.target as HTMLInputElement).value, room) }, 'label')} />
       </label>
-      ${this.pxMeter(pi, wi, w, meterPx)}
+      ${w.type !== 'label'
+        ? html`<label class="tgl" title=${noIcon && !iconOnly ? 'Pick an icon first' : nothing}><span>Hide Label</span><input type="checkbox" role="switch" .checked=${iconOnly} ?disabled=${noIcon && !iconOnly} @change=${(e: Event) => this.widgetPatch(pi, wi, { icon_only: (e.target as HTMLInputElement).checked })} /></label>`
+        : nothing}
+      ${iconOnly ? html`<div class="pxm"><div class="cnt"><span>Label hidden</span></div></div>` : this.pxMeter(pi, wi, w, meterPx)}
       ${this.issueLine(pi, wi)}
       <div class="sec"><h3>Type</h3>
         <div class="seg" role="group" aria-label="Widget type">${(['button', 'tile', 'label'] as const).map((t) => html`<button aria-pressed=${w.type === t} @click=${() => this.setType(pi, wi, t)}>${t}</button>`)}</div>
@@ -226,7 +231,6 @@ export class HhInspector extends LitElement {
             <span id="ico-l">Icon</span>
             <hh-icon-picker aria-labelledby="ico-l" .value=${w.icon && w.icon !== 'none' ? w.icon : ''} .command=${String((w['action'] as { command?: string } | undefined)?.command ?? '')} .label=${w.label ?? ''}
               @hh-icon=${(e: CustomEvent<string | undefined>) => this.widgetPatch(pi, wi, { icon: e.detail, ...(e.detail && !w.color && stockIconByName(e.detail)?.brand ? { color: stockIconByName(e.detail)?.brand } : {}) })}></hh-icon-picker>
-            <label class="chk"><input type="checkbox" .checked=${wireIconOnly(page, pp, wi)} @change=${(e: Event) => this.widgetPatch(pi, wi, { icon_only: (e.target as HTMLInputElement).checked })} /> Icon only (the label is kept but not drawn)</label>
           </div>`
         : nothing}
       ${w.type === 'label' ? html`<div class="sec"><h3>Look</h3>${this.colourRows(pi, wi, w)}</div>` : nothing}
@@ -395,7 +399,12 @@ export class HhInspector extends LitElement {
           <option value="">Never (Manual)</option>
           ${(this.cfg.activities ?? []).map((a) => html`<option value=${a.id} ?selected=${page.activity === a.id}>${dn(a.name, a.id)}</option>`)}
         </select></label>
-      <label class="chk"><input type="checkbox" .checked=${!!page.back} @change=${(e: Event) => this.pagePatch(pi, { back: (e.target as HTMLInputElement).checked || undefined })} /> Back Chevron (Exit Goes Home)</label>
+      <div class="sec"><h3>Exit Button</h3>
+        <div class="seg" role="group" aria-label="Exit button">
+          ${([['Auto', undefined], ['Back', true], ['Device', false]] as const).map(([n, v]) => html`<button aria-pressed=${page.back === v} @click=${() => this.pagePatch(pi, { back: v })}>${n}</button>`)}
+        </div>
+        <p class="why">${page.back === true ? 'Goes back a page and shows a back arrow' : page.back === false ? 'Sends Exit to the device' : 'Goes back unless Exit is mapped to a device'}</p>
+      </div>
       ${page.list ? html`<label>List Rows Per Screen<input type="number" min="1" max="16" .value=${String(page.list.rows)} @change=${(e: Event) => this.pagePatch(pi, { list: { rows: Math.max(1, Math.min(16, Number((e.target as HTMLInputElement).value) || 6)) } })} /></label>` : nothing}
       ${!page.list ? html`<div class="grid4"><label>Cols<input type="number" min="1" max="16" .value=${String(page.cols ?? 4)} @change=${(e: Event) => this.pagePatch(pi, { cols: Math.max(1, Math.min(16, Number((e.target as HTMLInputElement).value) || 4)) })} /></label><label>Rows<input type="number" min="1" max="16" .value=${String(page.rows ?? 6)} @change=${(e: Event) => this.pagePatch(pi, { rows: Math.max(1, Math.min(16, Number((e.target as HTMLInputElement).value) || 6)) })} /></label></div>` : html`<p class="why">A list page splits into screens of ${page.list.rows} rows; Up/Down pages through them on the remote.</p>`}
     </div>`;

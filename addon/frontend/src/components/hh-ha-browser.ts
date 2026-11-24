@@ -4,7 +4,7 @@ import { repeat } from 'lit/directives/repeat.js';
 import type { HaEntity } from '../lib/api';
 import { stockIconSvg } from '../lib/icon-shapes';
 import { stockIconByName } from '../lib/stock-icons';
-import { chipStyles, shared } from '../lib/styles';
+import { chipStyles, shared, switchStyles } from '../lib/styles';
 import {
   GROUP_BY, NONE, NO_AREA, NO_INTEGRATION, NO_LABEL, TYPE_CHIPS, availableGroupBys, domainOf, emptyFilters, facet, filterCount, filterEntities, groupEntities, groupIds, highlight,
   pushRecent, queryWords, readList, readText, reasonText, toggled, typeLabel, typeOf, writeList, noLookups, type Lookups, writeText, type Dim, type Filters, type Group, type GroupBy,
@@ -42,6 +42,7 @@ const PINS = [
 @customElement('hh-ha-browser')
 export class HhHaBrowser extends LitElement {
   static override styles = [
+    switchStyles,
     shared,
     chipStyles,
     css`
@@ -78,6 +79,8 @@ export class HhHaBrowser extends LitElement {
       .opts { display: grid; max-height: 200px; overflow: auto; }
       .opt { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 4px; font-size: 12.5px; cursor: pointer; border-radius: var(--r1); }
       .opt:hover { background: var(--sf2); }
+      button.opt { width: 100%; border: 0; background: transparent; color: var(--tx); text-align: left; }
+      .opt[aria-pressed="true"] { background: var(--accs); }
       .opt span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .opt small, .more, .sum, .note { color: var(--tx3); font-size: 11.5px; }
       .pills { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -123,7 +126,6 @@ export class HhHaBrowser extends LitElement {
       @media (prefers-reduced-motion: reduce) { .skel i { animation: none; } .chev { transition: none; } }
       .empty { color: var(--tx2); font-size: 12.5px; padding: 8px 2px; display: grid; gap: 8px; justify-items: start; }
       .note { padding: 6px 8px; border-radius: var(--r1); background: var(--sf2); }
-      .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tx2); }
       @media (max-width: 720px) { .fchip { height: 32px; } .gh { min-height: 44px; } .ent.chip2 { height: 52px; } .star { width: 44px; } select, .opt { min-height: 36px; } }
     `,
   ];
@@ -443,7 +445,7 @@ export class HhHaBrowser extends LitElement {
     if (!dim) return nothing;
     if (dim === 'menu')
       return html`<div class="pop" role="group" aria-label="Options">
-        ${this.registries && this.mode === 'drag' ? html`<label class="chk"><input type="checkbox" .checked=${this.diag} @change=${(e: Event) => this.dispatchEvent(new CustomEvent('hh-ha-diag', { detail: (e.target as HTMLInputElement).checked, bubbles: true, composed: true }))} /> Show Diagnostic and Config Entities</label>` : nothing}
+        ${this.registries && this.mode === 'drag' ? html`<label class="tgl"><span>Show Diagnostic Entities</span><input type="checkbox" role="switch" .checked=${this.diag} @change=${(e: Event) => this.dispatchEvent(new CustomEvent('hh-ha-diag', { detail: (e.target as HTMLInputElement).checked, bubbles: true, composed: true }))} /></label>` : nothing}
         <button class="btn sm" @click=${() => this.dispatchEvent(new CustomEvent('hh-ha-refresh', { bubbles: true, composed: true }))}>Refresh the List</button>
       </div>`;
     const none = dim === 'types' ? '' : NONE;
@@ -460,7 +462,7 @@ export class HhHaBrowser extends LitElement {
     return html`<div class="pop" role="group" aria-label=${`${label} filter`}>
       ${names.length > 8 ? html`<input type="search" aria-label=${`Search ${label.toLowerCase()}s`} placeholder=${`Search ${label.toLowerCase()}s`} .value=${this.popQ} @input=${(e: Event) => (this.popQ = (e.target as HTMLInputElement).value)} />` : nothing}
       <div class="opts">
-        ${shown.slice(0, POP_MAX).map((n) => html`<label class="opt"><input type="checkbox" .checked=${sel.has(n)} @change=${() => this.flip(dim, n)} />${dim === 'types' ? icon(ICON[n] ?? 'home') : nothing}<span>${name(n)}</span><small>${(counts.get(n) ?? 0).toLocaleString('en')}</small></label>`)}
+        ${shown.slice(0, POP_MAX).map((n) => html`<button type="button" class="opt" aria-pressed=${sel.has(n)} @click=${() => this.flip(dim, n)}>${dim === 'types' ? icon(ICON[n] ?? 'home') : nothing}<span>${name(n)}</span><small>${(counts.get(n) ?? 0).toLocaleString('en')}</small></button>`)}
         ${shown.length > POP_MAX ? html`<span class="more">${shown.length - POP_MAX} more: type to narrow</span>` : nothing}
         ${shown.length ? nothing : html`<span class="more">Nothing matches</span>`}
       </div>

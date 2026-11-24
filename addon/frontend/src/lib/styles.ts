@@ -76,3 +76,21 @@ export const chipStyles = css`
   .chip2 .sw { width: 15px; height: 9px; border-radius: 5px; flex: none; }
   @media (max-width: 720px) { .chip2 { height: 36px; } }
 `;
+
+/** A setting as a switch (a native checkbox with role="switch") and a choice from a set as a selectable chip (an aria-pressed button). */
+export const switchStyles = css`
+  .tgl { display: inline-flex; width: fit-content; align-items: center; justify-content: flex-start; gap: 8px; min-height: 32px; font-weight: 500; color: var(--tx); font-size: 13px; cursor: pointer; }
+  .tgl > input { order: -1; }
+  .tgl > span small { display: block; color: var(--tx3); font-weight: 400; font-size: 12px; }
+  input[role="switch"] { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 36px; height: 20px; margin: 0; border-radius: 10px; border: 1px solid var(--line); background: var(--sf3); cursor: pointer; transition: background 150ms ease-out, border-color 150ms ease-out; }
+  input[role="switch"]::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--tx2); transition: transform 150ms ease-out, background 150ms ease-out; }
+  input[role="switch"]:checked { background: var(--acc); border-color: var(--acc); }
+  input[role="switch"]:checked::after { transform: translateX(16px); background: var(--onacc); }
+  input[role="switch"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  input[role="switch"]:disabled { opacity: 0.5; cursor: not-allowed; }
+  @media (prefers-reduced-motion: reduce) { input[role="switch"], input[role="switch"]::after { transition: none; } }
+  .pk { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid var(--line); background: var(--sf2); color: var(--tx); font-size: 12.5px; cursor: pointer; }
+  .pk:hover { background: var(--sf3); }
+  .pk[aria-pressed="true"] { background: var(--accs); border-color: var(--acc); }
+  .pks { display: flex; flex-wrap: wrap; gap: 6px; }
+`;

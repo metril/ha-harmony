@@ -13,7 +13,7 @@ import { stockIconSvg } from '../lib/icon-shapes';
 import type { Device, IrAction } from '../lib/model';
 import { hashFor } from '../lib/router';
 import { summarize, trimBytes } from '../lib/codes';
-import { shared } from '../lib/styles';
+import { shared, switchStyles } from '../lib/styles';
 import { StudioState } from '../lib/studio-state';
 import { GROUPS, groupCommand, pretty, type Group } from '../lib/studio-model';
 import { candidateLabel, currentCandidate, initial, isOffline, likelyModels, progressIndex, reduce, stepsFor, type WAction, type WState } from '../lib/wizard';
@@ -33,6 +33,7 @@ const PAGE = 40;
 @customElement('hh-add-device')
 export class HhAddDevice extends StoreElement {
   static override styles = [
+    switchStyles,
     shared,
     css`
       :host { display: flex; flex-direction: column; gap: 18px; min-width: 0; max-width: 1040px; width: 100%; margin: 0 auto; }
@@ -409,7 +410,7 @@ export class HhAddDevice extends StoreElement {
           ${(['on', 'off', 'toggle'] as const).some((k) => pw?.[k]) ? html`<section class="grp"><h3>${stockIconSvg(commandIconId('power'))} Power</h3><div class="cmds">${(['on', 'off', 'toggle'] as const).filter((k) => pw?.[k]).map((k) => html`<div class="cmd"><span class="m"><b>Power ${k}</b><small>${summarize(pw?.[k] as IrAction)}</small></span>${ha ? nothing : html`<hh-send-ir variant="round" .code=${pw?.[k]} name="power ${k}"></hh-send-ir>`}</div>`)}</div></section>` : nothing}
           ${GROUPS.filter((g) => (by.get(g)?.length ?? 0) > 0).map((g) => html`<section class="grp"><h3>${stockIconSvg(commandIconId(g, g))} ${pretty(g)}</h3><div class="cmds">${(by.get(g) ?? []).map(([n, code]) => {
             const on = w.selected.includes(n);
-            return html`<div class="cmd ${on ? '' : 'off'}"><input type="checkbox" aria-label="Add ${n}" .checked=${on} @change=${() => this.dispatch({ t: 'toggle', name: n })} />
+            return html`<div class="cmd ${on ? '' : 'off'}"><input type="checkbox" role="switch" aria-label="Add ${n}" .checked=${on} @change=${() => this.dispatch({ t: 'toggle', name: n })} />
               <span class="m"><input type="text" aria-label="Name of ${n}" .value=${this.names[n] ?? n} @input=${(e: Event) => (this.names = { ...this.names, [n]: (e.target as HTMLInputElement).value })} />${probs[n] ? html`<span class="err" role="alert">${probs[n]}</span>` : html`<small>${code.ha ? `${code.ha.service}` : summarize(code)}</small>`}</span>
               ${code.ha ? nothing : html`<hh-send-ir variant="round" .code=${code} name=${n}></hh-send-ir>`}</div>`;
           })}</div></section>`)}

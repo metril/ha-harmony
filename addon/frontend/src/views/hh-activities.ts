@@ -23,7 +23,7 @@ import { setStyle } from '../lib/set-style';
 import { stockIconByName } from '../lib/stock-icons';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import { sourceAction, describeAction, type Source } from '../lib/studio-model';
-import { shared } from '../lib/styles';
+import { shared, switchStyles } from '../lib/styles';
 import { displayCommand, dn } from '../lib/key-names';
 import { keyTitle } from '../lib/remote-layout';
 
@@ -34,6 +34,7 @@ const ZONE_NAME: Record<Zone, string> = { volume: 'Volume', navigation: 'Navigat
 @customElement('hh-activities')
 export class HhActivities extends StoreElement {
   static override styles = [
+    switchStyles,
     shared,
     css`
       :host { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -118,8 +119,6 @@ export class HhActivities extends StoreElement {
       .offer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       .total { color: var(--tx2); font-size: 12.5px; margin-left: auto; }
       input.txt { height: 36px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; width: 100%; }
-      .checks { display: grid; gap: 4px; max-height: 220px; overflow: auto; }
-      .checks label { display: flex; gap: 8px; align-items: center; font-weight: 500; min-height: 32px; }
       @media (max-width: 860px) {
         .who { grid-template-columns: minmax(0, 1fr); }
         .remote { order: -1; margin: 0 auto; width: 120px; }
@@ -306,7 +305,7 @@ export class HhActivities extends StoreElement {
     return html`<hh-dialog .open=${this.newOpen} heading="New Activity" @close=${() => (this.newOpen = false)}>
       <label>Name<input class="txt" type="text" aria-label="Activity name" placeholder="Watch TV" .value=${this.newName} @input=${(e: Event) => (this.newName = (e.target as HTMLInputElement).value)} @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && this.create()} /></label>
       <div><b>Devices It Uses</b><p class="muted">You can change this later.</p>
-        <div class="checks">${devs.length ? devs.map((d) => html`<label><input type="checkbox" .checked=${this.newDevs.includes(d.id)} @change=${(e: Event) => (this.newDevs = (e.target as HTMLInputElement).checked ? [...this.newDevs, d.id] : this.newDevs.filter((x) => x !== d.id))} /> ${dn(d.name, d.id)}</label>`) : html`<span class="muted">No devices yet. Add one first.</span>`}</div></div>
+        <div class="pks" role="group" aria-label="Devices">${devs.length ? devs.map((d) => html`<button type="button" class="pk" aria-pressed=${this.newDevs.includes(d.id)} @click=${() => (this.newDevs = this.newDevs.includes(d.id) ? this.newDevs.filter((x) => x !== d.id) : [...this.newDevs, d.id])}>${dn(d.name, d.id)}</button>`) : html`<span class="muted">No devices yet. Add one first.</span>`}</div></div>
       <button slot="footer" class="btn" @click=${() => (this.newOpen = false)}>Cancel</button>
       <button slot="footer" class="btn pri" ?disabled=${!this.newName.trim()} @click=${() => this.create()}>Create</button>
     </hh-dialog>`;

@@ -19,8 +19,8 @@ export class HhBtCommands extends LitElement {
       input[type="search"], input[type="text"] { height: 36px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 10px; min-width: 0; }
       .tools input[type="search"] { flex: 1; min-width: 160px; }
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; max-height: 340px; overflow: auto; padding: 2px; }
-      .chk { display: flex; gap: 8px; align-items: center; min-height: 40px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf); cursor: pointer; min-width: 0; }
-      .chk:has(input:checked) { border-color: var(--acc); background: var(--accs); }
+      .chk { color: var(--tx); text-align: left; font: inherit; display: flex; gap: 8px; align-items: center; min-height: 40px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--sf); cursor: pointer; min-width: 0; }
+      .chk[aria-pressed="true"] { border-color: var(--acc); background: var(--accs); }
       .chk span { display: grid; min-width: 0; }
       .chk b { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chk small { color: var(--tx3); font-family: var(--mono); font-size: 11px; }
@@ -84,7 +84,7 @@ export class HhBtCommands extends LitElement {
         <span class="muted" role="status">${count} command${count === 1 ? '' : 's'} chosen</span>
       </div>
       <div class="grid" role="group" aria-label="Built-in commands">
-        ${list.map((b) => html`<label class="chk"><input type="checkbox" .checked=${this.value[b.name] === b.name} @change=${(e: Event) => this.toggle(b.name, (e.target as HTMLInputElement).checked)} /><span title=${b.name}><b>${displayKey(b.name)}</b><small>${pageName(b.page)} ${hidCode(b.page, b.usage).slice(4)}</small></span></label>`)}
+        ${list.map((b) => html`<button type="button" class="chk" aria-pressed=${this.value[b.name] === b.name} @click=${() => this.toggle(b.name, this.value[b.name] !== b.name)}><span title=${b.name}><b>${displayKey(b.name)}</b><small>${pageName(b.page)} ${hidCode(b.page, b.usage).slice(4)}</small></span></button>`)}
         ${list.length ? nothing : html`<p class="hint">No built-in command matches "${this.q}".</p>`}
       </div>
       <h3>Your Own Codes</h3>

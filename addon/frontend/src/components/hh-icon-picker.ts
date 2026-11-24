@@ -32,8 +32,8 @@ export class HhIconPicker extends LitElement {
       button.pick:hover { background: var(--sf3); }
       button.pick[aria-pressed="true"] { background: var(--acc); color: var(--onacc); border-color: var(--acc); }
       button.pick .sic { width: 24px; height: 24px; }
-      .sug button.pick { height: 56px; grid-template-rows: 24px auto; gap: 2px; padding: 4px 2px 2px; }
-      .sug button.pick .nm { font-size: 9.5px; line-height: 1.1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .sug button.pick { height: 56px; grid-template-rows: 24px auto; grid-template-columns: minmax(0, 1fr); min-width: 0; overflow: hidden; gap: 2px; padding: 4px 2px 2px; }
+      .sug button.pick .nm { font-size: 9.5px; line-height: 1.1; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .new::after { content: 'new'; position: absolute; top: -5px; right: -4px; font-size: 9px; line-height: 1; padding: 2px 4px; border-radius: 6px; background: var(--acc); color: var(--onacc); }
       .none { margin: 8px 0 0; }
     `,

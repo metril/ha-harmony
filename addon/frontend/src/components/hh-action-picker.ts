@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { commandNames } from '../lib/bt';
-import { shared } from '../lib/styles';
+import { shared, switchStyles } from '../lib/styles';
 import type { StudioHost } from '../lib/studio-state';
 import { HA_DOMAINS } from '../lib/studio-state';
 import { ACTION_DOMAINS, haProblem } from '../lib/ha-rules';
@@ -18,6 +18,7 @@ const KINDS: [Kind, string][] = [['command', 'Command'], ['input', 'Input'], ['a
 export class HhActionPicker extends LitElement {
   static override styles = [
     shared,
+    switchStyles,
     css`
       :host { display: grid; gap: 10px; min-width: 0; font-size: 13px; }
       .cur { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--r1); background: var(--sf2); }
@@ -36,7 +37,6 @@ export class HhActionPicker extends LitElement {
       .sug button:hover { background: var(--sf2); }
       hh-ha-browser { max-height: 340px; overflow: auto; }
       .why { color: var(--tx3); font-size: 12px; }
-      .chk { display: flex; gap: 8px; align-items: center; font-weight: 500; color: var(--tx); }
     `,
   ];
   @property({ attribute: false }) host!: StudioHost;
@@ -172,7 +172,7 @@ export class HhActionPicker extends LitElement {
       ${st.entities === null && st.haLoaded ? html`<p class="why">Home Assistant could not be read, so type the entity id.</p>` : nothing}
       ${this.entity && !HA_ENTITY_ID.test(this.entity) ? html`<p class="why" role="alert">Entity ids look like light.living_room.</p>` : this.haIssue() ? html`<p class="why" role="alert">${this.haIssue()}</p>` : nothing}
       ${this.serviceFields().map((f) => html`<label>${f}<input type="text" aria-label="Field ${f}" placeholder="optional" .value=${this.fields[f] ?? ''} @input=${(e: Event) => (this.fields = { ...this.fields, [f]: (e.target as HTMLInputElement).value })} /></label>`)}
-      ${this.mode === 'key' ? html`<label class="chk"><input type="checkbox" .checked=${this.repeatHeld} @change=${(e: Event) => (this.repeatHeld = (e.target as HTMLInputElement).checked)} /> Repeat While Held</label>` : nothing}`;
+      ${this.mode === 'key' ? html`<label class="tgl"><span>Repeat While Held</span><input type="checkbox" role="switch" .checked=${this.repeatHeld} @change=${(e: Event) => (this.repeatHeld = (e.target as HTMLInputElement).checked)} /></label>` : nothing}`;
   }
 
   protected override render() {

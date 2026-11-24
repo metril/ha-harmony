@@ -46,7 +46,8 @@ export const btCss = css`
   @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
   .opts { display: grid; gap: 8px; text-align: left; width: min(520px, 100%); }
   .opt { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: start; padding: 10px 14px; border: 1.5px solid var(--line); border-radius: var(--r2); background: var(--sf); cursor: pointer; }
-  .opt:has(input:checked) { border-color: var(--acc); background: var(--accs); }
+  .opt:has(input:checked), .opt[aria-pressed="true"] { border-color: var(--acc); background: var(--accs); }
+  button.opt { grid-template-columns: 1fr; color: var(--tx); font: inherit; text-align: left; }
   .opt input { grid-row: span 2; margin-top: 3px; }
   .opt small { color: var(--tx3); font-size: 12.5px; }
   .cands { display: grid; gap: 8px; width: min(620px, 100%); margin: 0; padding: 0; list-style: none; text-align: left; }

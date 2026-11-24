@@ -190,6 +190,17 @@ describe('remote studio', () => {
     await tick(insp);
   };
 
+  it('Exit Button: Auto, Back and Device write undefined, true and false', async () => {
+    const { insp, store } = await inspectorFor({ kind: 'page', page: 0 });
+    await press(insp, 'Back');
+    expect(store.config.pages?.[0]?.back).toBe(true);
+    await press(insp, 'Device');
+    expect(store.config.pages?.[0]?.back).toBe(false);
+    expect(insp.shadowRoot.textContent).toMatch(/Sends Exit to the device/);
+    await press(insp, 'Auto');
+    expect(store.config.pages?.[0]?.back).toBeUndefined();
+  });
+
   it('Align: a three-way icon toggle; Center is the default and clears the key', async () => {
     const { insp, store } = await inspectorFor({ kind: 'widget', page: 0, index: 0 });
     store.edit((c) => void (c.pages![0]!.widgets[0]!.shape = 'row'));
@@ -251,7 +262,7 @@ describe('remote studio', () => {
     const field = root.querySelector('input[aria-label="Field brightness_pct"]') as HTMLInputElement;
     field.value = '50';
     field.dispatchEvent(new Event('input'));
-    const rep = root.querySelector('.chk input') as HTMLInputElement;
+    const rep = root.querySelector('.tgl input') as HTMLInputElement;
     rep.checked = true;
     rep.dispatchEvent(new Event('change'));
     await tick(picker);

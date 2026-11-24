@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { ApiError, type ApplyStatus, type HubsResponse } from '../lib/api';
 import { hubLabel, linkInfo, linkProblem, pickHub } from '../lib/hubs';
 import { icon } from '../lib/icons';
-import { shared } from '../lib/styles';
+import { shared, switchStyles } from '../lib/styles';
 import { StoreElement } from './base';
 import './hh-dialog';
 import './hh-page-diff';
@@ -17,6 +17,7 @@ type Step = { label: string; state: 'done' | 'pending' | 'active' | 'todo' };
 export class HhApplyDialog extends StoreElement {
   static override styles = [
     shared,
+    switchStyles,
     css`
       ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
       .diff li { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: var(--r1); background: var(--sf2); flex-wrap: wrap; }
@@ -189,7 +190,7 @@ export class HhApplyDialog extends StoreElement {
         ${this.rev === null && s.hash ? html`<div class="hash">Config hash ${s.hash}</div>` : nothing}
         ${cut.length
           ? html`<div class="banner ir" role="alert">${cut.length} label${cut.length === 1 ? '' : 's'} will be cut off on the remote: ${cut.slice(0, 3).map((c) => `${c.page}: ${c.label}`).join('; ')}${cut.length > 3 ? '…' : ''}
-              <label class="chk"><input type="checkbox" .checked=${this.cutOk} @change=${(e: Event) => (this.cutOk = (e.target as HTMLInputElement).checked)} /> Apply anyway</label></div>`
+              <label class="tgl"><span>Apply Anyway</span><input type="checkbox" role="switch" .checked=${this.cutOk} @change=${(e: Event) => (this.cutOk = (e.target as HTMLInputElement).checked)} /></label></div>`
           : nothing}
         ${this.message ? html`<div class="banner bad" role="alert">${this.message}</div>` : nothing}
         <button slot="footer" class="btn" @click=${() => this.close()}>Cancel</button>

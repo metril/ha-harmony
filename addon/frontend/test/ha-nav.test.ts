@@ -235,7 +235,7 @@ describe('hh-ha-browser', () => {
     await el.updateComplete;
     const lights = [...el.shadowRoot.querySelectorAll<HTMLElement>('.opt')].find((o) => o.textContent?.includes('Lights'))!;
     expect(lights.textContent).toContain('300');
-    lights.querySelector('input')!.click();
+    lights.click();
     await el.updateComplete;
     expect(el.shadowRoot.querySelector('.pills')?.textContent).toContain('1 filter');
     expect(el.shadowRoot.querySelector('[role="status"][aria-live]')?.textContent).toContain('300 of 3,000');
@@ -253,7 +253,7 @@ describe('hh-ha-browser', () => {
     await el.updateComplete;
     const names = [...el.shadowRoot.querySelectorAll('.opt span')].map((s) => s.textContent);
     expect(names).toEqual(['Hall · Down', 'Hall · Up']);
-    el.shadowRoot.querySelector<HTMLInputElement>('.opt input')!.click();
+    el.shadowRoot.querySelector<HTMLButtonElement>('.opt')!.click();
     await el.updateComplete;
     expect(el.shadowRoot.querySelector('[role="status"][aria-live]')?.textContent).toContain('1 of 2');
   });

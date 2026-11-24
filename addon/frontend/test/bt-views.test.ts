@@ -261,7 +261,7 @@ describe('hh-bt-pair Use For Activity', () => {
     const el = await mount('hh-bt-pair', { mode: 'host', addr: host.addr });
     fakeLive.push({ t: 'bt', ...status({ state: { state: 'ready', discoverable: false, hosts: [host], remotes: [], gen: 5 } as never }) });
     await vi_waitFor(() => !!el.shadowRoot.querySelector('.twocol'));
-    const boxes = el.shadowRoot.querySelectorAll<HTMLInputElement>('.side input[type=checkbox]');
+    const boxes = el.shadowRoot.querySelectorAll<HTMLButtonElement>('.side button.opt');
     expect(boxes).toHaveLength(2);
     boxes[1]!.click();
     await el.updateComplete;

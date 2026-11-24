@@ -271,7 +271,7 @@ export class HhBtPair extends BtElement {
       this.useActs = n;
     };
     return html`<fieldset class="opts bare"><legend>Use For Activity…</legend>
-      ${acts.map((a) => html`<label class="opt"><input type="checkbox" .checked=${this.useActs.has(a.id)} @change=${(e: Event) => toggle(a.id, (e.target as HTMLInputElement).checked)} /><b>${a.name ?? a.id}</b></label>`)}
+      ${acts.map((a) => html`<button type="button" class="opt" aria-pressed=${this.useActs.has(a.id)} @click=${() => toggle(a.id, !this.useActs.has(a.id))}><b>${a.name ?? a.id}</b></button>`)}
       <span class="hint">Adds the device to the chosen activities and binds its navigation and transport keys where none is set yet.</span></fieldset>`;
   }
   private setupStep() {

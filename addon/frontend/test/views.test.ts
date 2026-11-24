@@ -121,7 +121,7 @@ describe('screens render with a realistic config', () => {
       await settle(dv as HTMLElement);
       return { dv, store };
     };
-    const box = (dv: HTMLElement) => dv.shadowRoot!.querySelector('input[aria-label="Ends the activity when it turns off by itself"]') as HTMLInputElement | null;
+    const box = (dv: HTMLElement) => dv.shadowRoot!.querySelector('input[role="switch"][type="checkbox"]:not([aria-label])') as HTMLInputElement | null;
     const dev = (store: { config: { devices?: { id: string }[] } }) => store.config.devices!.find((d) => d.id === 'shield') as Record<string, unknown>;
 
     it('renders for HA devices only', async () => {

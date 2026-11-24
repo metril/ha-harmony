@@ -16,7 +16,7 @@ import { icon } from '../lib/icons';
 import { LIMITS, type Device, type IrAction } from '../lib/model';
 import { deleteDevice, deleteItem, describeRef, findRefs, refHref, renameItem, type Ref } from '../lib/refs';
 import { hashFor } from '../lib/router';
-import { shared } from '../lib/styles';
+import { shared, switchStyles } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import { GROUPS, derivedInputs, derivedInputsNote, materializeInputs, pretty, sourceAction, groupCommand, type Group, type Source } from '../lib/studio-model';
 import { byteCounter } from '../lib/codes';
@@ -29,6 +29,7 @@ const HOST = (state: StudioState): StudioHost => ({ state }) as unknown as Studi
 @customElement('hh-devices')
 export class HhDevices extends StoreElement {
   static override styles = [
+    switchStyles,
     shared,
     css`
       :host { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -93,7 +94,8 @@ export class HhDevices extends StoreElement {
       .row .l b { font-weight: 600; font-size: 13px; }
       .row .l small { color: var(--tx3); font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .f { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--tx2); }
-      .f.chk input { margin: 0 6px 0 0; }
+      .selm { width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--line); background: var(--sf2); padding: 0; cursor: pointer; }
+      .selm[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); box-shadow: inset 0 0 0 3px var(--sf); }
       input[type="number"], input[type="text"], input[type="search"], select { height: 34px; border: 1px solid var(--line); border-radius: var(--r1); background: var(--bg); color: var(--tx); padding: 0 8px; min-width: 0; width: 100%; }
       .ports { display: flex; gap: 6px; }
       .ports button { width: 44px; height: 34px; border-radius: var(--r1); border: 1px solid var(--line); background: var(--sf); color: var(--tx2); font-weight: 700; cursor: pointer; }
@@ -312,7 +314,7 @@ export class HhDevices extends StoreElement {
     const next = materializeInputs(this.store.config, d.id, ed.rows);
     return html`<section class="card" aria-label="Derived inputs"><h2>Inputs</h2><p class="why">${note}. Rename or hide each, then save.</p>
       ${ed.rows.map((r, i) => html`<div class="haact"><label class="f">${r.label}<input type="text" aria-label="Name of ${r.label}" .value=${r.name} ?disabled=${r.hidden} @input=${(e: Event) => set(i, { name: (e.target as HTMLInputElement).value })} /></label>
-        <label class="f"><span><input type="checkbox" aria-label="Hide ${r.label}" .checked=${r.hidden} @change=${(e: Event) => set(i, { hidden: (e.target as HTMLInputElement).checked })} /> Hide</span></label></div>`)}
+        <label class="tgl"><span>Shown</span><input type="checkbox" role="switch" aria-label="Shown: ${r.label}" .checked=${!r.hidden} @change=${(e: Event) => set(i, { hidden: !(e.target as HTMLInputElement).checked })} /></label></div>`)}
       <div class="row"><button class="btn sm pri" ?disabled=${!next} @click=${() => { if (next) { this.put(next, undefined, `Save inputs of ${d.name ?? d.id}`); this.derived = null; } }}>Save As Inputs</button>
         <button class="btn sm" @click=${() => (this.derived = null)}>Cancel</button>${next ? nothing : html`<span class="hint" role="alert">Each shown input needs its own name</span>`}</div></section>`;
   }
@@ -332,11 +334,11 @@ export class HhDevices extends StoreElement {
             <button class="btn sm danger" @click=${() => void this.bulkDelete(d)}>Delete</button></div>`
         : nothing}
       <div class="scroll"><table aria-label="Commands of ${d.name ?? d.id}">
-        <thead><tr><th><input type="checkbox" aria-label="Select all" .checked=${all} @change=${(e: Event) => (this.sel = (e.target as HTMLInputElement).checked ? rows.map((r) => r[0]) : [])} /></th><th>Name</th><th>Code</th><th>Ports</th>${ha ? html`<th>Repeats</th>` : nothing}<th></th></tr></thead>
+        <thead><tr><th><button type="button" class="btn sm ghost" @click=${() => (this.sel = all ? [] : rows.map((r) => r[0]))}>${all ? 'Clear' : 'Select All'}</button></th><th>Name</th><th>Code</th><th>Ports</th>${ha ? html`<th>Repeats</th>` : nothing}<th></th></tr></thead>
         <tbody>${rows.map(([n, c]) => {
           const prob = this.rowName?.[0] === n ? nameProblem(d, this.rowName[1], n) : null;
           return html`<tr>
-            <td><input type="checkbox" aria-label="Select ${n}" .checked=${this.sel.includes(n)} @change=${(e: Event) => (this.sel = (e.target as HTMLInputElement).checked ? [...this.sel, n] : this.sel.filter((x) => x !== n))} /></td>
+            <td><button type="button" class="selm" aria-label="Select ${n}" aria-pressed=${this.sel.includes(n)} @click=${() => (this.sel = this.sel.includes(n) ? this.sel.filter((x) => x !== n) : [...this.sel, n])}></button></td>
             <td><input type="text" aria-label="Name of ${n}" .value=${n} @input=${(e: Event) => (this.rowName = [n, (e.target as HTMLInputElement).value])} @change=${(e: Event) => this.renameRow(d, n, (e.target as HTMLInputElement).value)} />${prob ? html`<span class="hint" role="alert">${prob}</span>` : nothing}<span class="hint">${byteCounter(this.rowName?.[0] === n ? this.rowName[1] : n).used}/31 B</span></td>
             <td class="mono">${summarize(c)}</td><td class="mono">${c.port_mask ?? 'all'}</td>${ha ? html`<td class="mono">${c.repeats ?? 1}</td>` : nothing}
             <td><button class="btn sm" @click=${() => (this.edit = { where: 'commands', name: n, code: JSON.parse(JSON.stringify(c)) as IrAction })}>Edit</button> <hh-send-ir ?ha=${d.kind === 'ha'} .code=${c} name=${n}></hh-send-ir></td></tr>`;
@@ -409,8 +411,8 @@ export class HhDevices extends StoreElement {
         <label class="f">Where Its State Comes From<input type="text" list="hh-dev-ents" aria-label="Entity" .value=${d.entity ?? ''} placeholder="media_player.shield" ?disabled=${!ok} @change=${(e: Event) => { const entity = (e.target as HTMLInputElement).value.trim() || undefined; set(patchDevice(this.store.config, d.id, entity ? { entity } : { entity, off_ends_activity: undefined })); }} />
           <datalist id="hh-dev-ents">${(st.entities ?? []).slice(0, 300).map((e) => html`<option value=${e.entity_id}>${e.name ?? ''}</option>`)}</datalist>
           <span class="hint">Power shows as on unless this entity is off, standby, unavailable or unknown.</span></label>
-        <label class="f chk"><span><input type="checkbox" aria-label="Ends the activity when it turns off by itself" .checked=${!!d.entity && d.off_ends_activity === true} ?disabled=${!ok || !d.entity} @change=${(e: Event) => set(patchDevice(this.store.config, d.id, { off_ends_activity: (e.target as HTMLInputElement).checked || undefined }))} /> Ends the Activity When It Turns Off by Itself</span>
-          <span class="hint">Use for a device that sleeps by itself (e.g. the Shield): its own off ends the running activity so the TV is really switched off.</span></label></section>
+        <div class="f"><label class="tgl"><span>Turning Off Ends the Activity</span><input type="checkbox" role="switch" .checked=${!!d.entity && d.off_ends_activity === true} ?disabled=${!ok || !d.entity} @change=${(e: Event) => set(patchDevice(this.store.config, d.id, { off_ends_activity: (e.target as HTMLInputElement).checked || undefined }))} /></label>
+          <span class="hint">Use for a device that sleeps by itself (e.g. the Shield): its own off ends the running activity so the TV is really switched off</span></div></section>
       <section class="card" aria-label="Power control"><h2>Power</h2>
         ${(['on', 'off'] as const).map((k) => this.haAction(`Power ${k === 'on' ? 'On' : 'Off'}`, d.power?.[k], (a) => set(setPowerCode(this.store.config, d.id, k, a))))}</section>
       ${(['inputs', 'commands'] as const).map((where) => html`<section class="card" aria-label=${pretty(where)}><h2>${pretty(where)}</h2>
