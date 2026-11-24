@@ -50,6 +50,7 @@ export class HhDraftBar extends StoreElement {
         .meters, .state .muted, .long { display: none; }
         .short { display: inline; }
         .chip.ok { display: none; }
+        .issues .pop { top: auto; bottom: calc(100% + 6px); }
         .state { overflow: hidden; white-space: nowrap; }
         .state { flex: 1; font-size: 13px; }
       }
@@ -187,17 +188,17 @@ export class HhDraftBar extends StoreElement {
     if (!issues.length) return statusChip('ok', 'Valid', { check: true });
     const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
     const label = errs ? `✗ ${plural(errs, 'error')}${warns ? ` · ${plural(warns, 'warning')}` : ''}` : `⚠ ${plural(warns, 'warning')}`;
-    return html`<div class="issues">
+    return html`<div class="issues" @keydown=${(e: KeyboardEvent) => e.key === 'Escape' && this.issuesOpen && this.closeIssues(true)}>
       <button class=${classMap({ chip: true, chipbtn: true, bad: errs > 0, warn: errs === 0 })} id="issues-chip" aria-expanded=${this.issuesOpen} aria-controls="issues-pop" aria-haspopup="dialog" @click=${() => (this.issuesOpen = !this.issuesOpen)}>${label}</button>
       ${this.issuesOpen
-        ? html`<div class="pop" id="issues-pop" role="dialog" aria-label="Issues" @keydown=${(e: KeyboardEvent) => e.key === 'Escape' && this.closeIssues(true)}>
+        ? html`<div class="pop" id="issues-pop" role="dialog" aria-label="Issues">
             ${issues.map((i) => this.issueRow(i))}
           </div>`
         : nothing}
     </div>`;
   }
   private issueRow(i: Issue) {
-    return html`<div class="row"><span class="lvl ${i.level}" aria-label=${i.level}>${i.level === 'error' ? '✗' : '⚠'}</span><span class="msg">${i.text}</span>${i.target
+    return html`<div class="row"><span class="lvl ${i.level}" role="img" aria-label=${i.level}>${i.level === 'error' ? '✗' : '⚠'}</span><span class="msg">${i.text}</span>${i.target
       ? html`<button class="btn sm" @click=${() => { this.closeIssues(false); this.store.showIssue(i); }}>Show</button>`
       : nothing}</div>`;
   }

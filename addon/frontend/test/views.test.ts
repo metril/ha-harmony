@@ -523,16 +523,20 @@ describe('draft bar issues chip', () => {
     expect(chip.classList.contains('warn')).toBe(true);
     chip.click();
     await settle(b);
-    b.shadowRoot!.querySelector('#issues-pop')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true }));
+    chip.focus();
+    chip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true }));
     await settle(b);
     expect(b.shadowRoot!.querySelector('#issues-pop')).toBeNull();
     expect(b.shadowRoot!.activeElement).toBe(chip);
     chip.click();
     await settle(b);
-    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    const other = document.createElement('button');
+    document.body.append(other);
+    other.focus();
+    other.click();
     await settle(b);
     expect(b.shadowRoot!.querySelector('#issues-pop')).toBeNull();
-    expect(b.shadowRoot!.activeElement).toBe(chip);
+    expect(document.activeElement).toBe(other);
   });
   it('Show on a check for a deleted page does not throw', async () => {
     const { app, store } = await boot();
