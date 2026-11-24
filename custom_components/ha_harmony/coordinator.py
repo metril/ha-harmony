@@ -1938,8 +1938,10 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                 call = table.get(code) if table else None
                 if call and call.domain == "media_player" and call.entities:
                     return self._cur(call.entities[0])
-        shield = self.now_playing.shield
-        return shield if shield.startswith("media_player.") else None
+        for ent in (self.now_playing.shield, self.now_playing.plex):
+            if ent.startswith("media_player.") and self.hass.states.get(ent) is not None:
+                return ent  # a configured player that exists (not a removed default, not the apps sensor)
+        return None
 
     def _log_unmapped_key(self, key: int, action: str) -> None:
         """A key event with no Home Assistant action (the hub handles most keys itself, so this is

@@ -861,6 +861,7 @@ async def test_card_toggle_key_runs_play_pause_on_the_shield_unless_mapped(hass,
     fired = []
     c._fire = lambda call, **kw: fired.append(call)
     key = coord_mod.KEY_PLAY_PAUSE
+    hass.states.async_set(c.now_playing.shield, "on")  # the player exists
     c._dispatch_ha(key, "press")
     c._dispatch_ha(key, "release")
     c._dispatch_ha(key, "hold")  # only the press fires
@@ -973,6 +974,27 @@ async def test_play_pause_resolve_in_the_hub_layer_and_the_card_toggles_that_pla
         ("media_player.media_play", ("media_player.shield",)),
         ("media_player.media_pause", ("media_player.shield",)),
         ("media_player.media_play_pause", ("media_player.shield",)),
+    ]
+
+
+async def test_card_toggles_the_configured_player_when_play_pause_are_scripts(hass, rig, clock):
+    import dataclasses
+
+    _hub, c = await rig()
+    ids = c.compiled.activity_ids
+    fired = []
+    c._fire = lambda call, **kw: fired.append(call)
+    scr = HaCall("script.turn_on", ("script.shield_play",))
+    c.compiled = dataclasses.replace(c.compiled, ha_keys={ids[1]: {14: scr, 15: scr}, None: {}})
+    c.now_playing.shield = "sensor.shield_3fd3_app"
+    c.now_playing.plex = "media_player.gone"  # removed entity: never a target
+    c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 36, "action": 0, "activity": 1})
+    assert fired == []
+    hass.states.async_set("media_player.shield_tv", "playing")
+    c.now_playing.plex = "media_player.shield_tv"
+    c._on_push(MsgType.KEY_EVENT, {"remote": 1, "key": 36, "action": 0, "activity": 1})
+    assert [(f.service, f.entities) for f in fired] == [
+        ("media_player.media_play_pause", ("media_player.shield_tv",))
     ]
 
 
