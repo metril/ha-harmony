@@ -1,0 +1,90 @@
+# Shield TV: one media_player (core template media_player, HA 2026.11+) built from the
+# Shield launcher's push MQTT entities, with the TV's IR volume via the Harmony hub.
+# Replaces the polled androidtv ADB player. Reload with Developer tools > YAML > Template entities.
+template:
+  # Shield power: screen state pushed by the launcher; wake/sleep through the launcher.
+  # Replaces the old legacy `switch: - platform: template` shield_tv (remove that one).
+  - switch:
+      - name: Shield TV
+        unique_id: shield_tv_power_switch
+        icon: mdi:nvidia
+        state: "{{ is_state('binary_sensor.shield_3fd3_screen', 'on') }}"
+        availability: "{{ has_value('binary_sensor.shield_3fd3_screen') }}"
+        turn_on:
+          - action: script.turn_on
+            target: {entity_id: script.shield_wake}
+        turn_off:
+          - action: script.turn_on
+            target: {entity_id: script.shield_sleep}
+
+  - media_player:
+      - name: Shield TV
+        unique_id: shield_tv_template
+        device_class: tv
+        # off / on / playing / paused, computed by the launcher (foreground app + screen + media session).
+        state: >-
+          {% set s = states('sensor.shield_3fd3_app') %}
+          {{ s if s in ['off', 'on', 'playing', 'paused'] else 'off' }}
+        app_id: "{{ state_attr('sensor.shield_3fd3_app', 'app_id') }}"
+        app_name: "{{ state_attr('sensor.shield_3fd3_app', 'app_name') }}"
+        # Media fields only while the foreground app owns the playing session.
+        media_title: >-
+          {{ state_attr('sensor.shield_3fd3_now_playing', 'media_title')
+             if states('sensor.shield_3fd3_app') in ['playing', 'paused'] else none }}
+        media_artist: >-
+          {{ state_attr('sensor.shield_3fd3_now_playing', 'media_artist')
+             if states('sensor.shield_3fd3_app') in ['playing', 'paused'] else none }}
+        media_content_id: >-
+          {{ state_attr('sensor.shield_3fd3_now_playing', 'media_content_id')
+             if states('sensor.shield_3fd3_app') in ['playing', 'paused'] else none }}
+        media_content_type: video
+        media_duration: >-
+          {{ state_attr('sensor.shield_3fd3_now_playing', 'media_duration')
+             if states('sensor.shield_3fd3_app') in ['playing', 'paused'] else none }}
+        media_position: >-
+          {{ state_attr('sensor.shield_3fd3_now_playing', 'media_position')
+             if states('sensor.shield_3fd3_app') in ['playing', 'paused'] else none }}
+        media_image_url: >-
+          {{ state_attr('sensor.shield_3fd3_now_playing', 'media_image_url')
+             if states('sensor.shield_3fd3_app') in ['playing', 'paused'] else none }}
+        source: "{{ states('select.shield_3fd3_launch_app') }}"
+        source_list: "{{ state_attr('select.shield_3fd3_launch_app', 'options') }}"
+        turn_on:
+          - action: script.turn_on
+            target: {entity_id: script.shield_wake}
+        turn_off:
+          - action: script.turn_on
+            target: {entity_id: script.shield_sleep}
+        select_source:
+          - action: select.select_option
+            target: {entity_id: select.shield_3fd3_launch_app}
+            data: {option: "{{ source }}"}
+        # Play/pause go straight to the Shield (verified 2026-11-24); the old
+        # script.shield_play/shield_pause gated on a removed Plex entity and never sent anything.
+        media_play:
+          - action: media_player.media_play
+            target: {entity_id: media_player.shield}
+        media_pause:
+          - action: media_player.media_pause
+            target: {entity_id: media_player.shield}
+        media_next_track:
+          - action: remote.send_command
+            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            data: {device: bluetooth_device, command: SkipForward}
+        media_previous_track:
+          - action: remote.send_command
+            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            data: {device: bluetooth_device, command: SkipBack}
+        # Volume is the TV's (IR through the Harmony hub); the Shield's HDMI output is fixed-volume.
+        volume_up:
+          - action: remote.send_command
+            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            data: {device: tv, command: Volume Up}
+        volume_down:
+          - action: remote.send_command
+            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            data: {device: tv, command: Volume Down}
+        volume_mute:
+          - action: remote.send_command
+            target: {entity_id: remote.harmony_hub_ha_harmony_pimentoblue}
+            data: {device: tv, command: Mute}
