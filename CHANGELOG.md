@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.10 (2026-11-24)
+
+- Fix: the add-on's hub firmware image was truncated when fetched by the integration (a single read returned a partial body); it now reads the whole image, so the Firmware update entity installs correctly.
+
 ## 0.5.9 (2026-11-24)
 
 - Hub firmware updates from Home Assistant (no polling): a new Firmware update entity installs the signed hub image bundled in the add-on (checked against the add-on's hub.json, then the usual signed upload with automatic rollback). Release tags now build and sign the hub in CI and attach `hub-X.Y.Z.img` to the GitHub release.
