@@ -29,6 +29,8 @@ export interface Device {
   transport?: 'auto' | 'classic' | 'le';
   /** where an HA-backed device's state comes from */
   entity?: string;
+  /** `ha` only, needs `entity`: the device turning itself off ends the running activity */
+  off_ends_activity?: boolean;
   id: string;
   name?: string;
   /** stock icon name (proto/icons.yaml): shown for the device and the default icon of widgets that target it */
