@@ -333,6 +333,21 @@ static void test_off_during_transition(void) {
     CT_CHECK(!strcmp(pw(0), "off") && !strcmp(pw(1), "off"));
 }
 
+static void test_off_while_off_plan_runs_is_ignored(void) {
+    setup();
+    hp_actsm_start(&sm, "watch");
+    settle_all();
+    nrec = nev = 0;
+    CT_EQ(hp_actsm_off(&sm), 0);
+    advance(g_now + 20); /* the Off plan is still running */
+    CT_CHECK(hp_actsm_busy(&sm));
+    CT_EQ(hp_actsm_off(&sm), 0); /* a second Off (HA ending the activity) must not restart the plan */
+    settle_all();
+    EXPECT(NEC(4, 2), NEC(9, 1), NEC(7, 1)); /* one tv off, amp toggle, off steps */
+    CT_EQ(count_ev(HP_ACTSM_EVT_ACTIVITY), 1);
+    CT_EQ(hp_actsm_reported(&sm), -1);
+}
+
 static void test_set_device_during_transition_skips_redundant(void) {
     setup();
     hp_actsm_start(&sm, "watch");
@@ -1223,6 +1238,7 @@ int main(void) {
     CT_RUN(test_interrupted_transition);
     CT_RUN(test_interrupt_keeps_settle);
     CT_RUN(test_off_during_transition);
+    CT_RUN(test_off_while_off_plan_runs_is_ignored);
     CT_RUN(test_set_device_during_transition_skips_redundant);
     CT_RUN(test_drops_are_logged);
     CT_RUN(test_set_device_errors);

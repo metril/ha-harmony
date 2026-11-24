@@ -469,6 +469,9 @@ int hp_actsm_off(hp_actsm_t *e) {
         mark_dirty(e);
         return rc;
     }
+    /* Idempotent while an Off plan runs: a second Off (e.g. HA ending the activity when the Shield
+     * sleeps on the TV's CEC standby) would cancel and restart it, sending the IR off codes twice. */
+    if (e->running && e->target < 0) return m->current < 0 ? 0 : m->current;
     int prev = m->current; /* the activity (or interrupted target) whose off steps run */
     cancel_plan(e);
     e->off_press = true;
