@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.5.9 (2026-11-24)
 
-- Hub firmware updates from Home Assistant: a new Firmware update entity installs the signed hub image bundled in the add-on (checked against the add-on's hub.json, then the usual signed upload with automatic rollback). Release tags now build and sign the hub in CI and attach `hub-X.Y.Z.img` to the GitHub release.
+- Hub firmware updates from Home Assistant (no polling): a new Firmware update entity installs the signed hub image bundled in the add-on (checked against the add-on's hub.json, then the usual signed upload with automatic rollback). Release tags now build and sign the hub in CI and attach `hub-X.Y.Z.img` to the GitHub release.
 - The hub reports its firmware version in `hello_ack` (`fw_version`); the add-on announces its bundled image after `hello` (`fw` frame) and serves it at `/api/v1/firmware/hub.img`.
 - First install from a release: `tools/deploy_hub.py push --release X.Y.Z` (or `--image FILE`) verifies the signed image offline against the release key and installs it. See `docs/runbooks/install-hub.md`.
 - A dev-signed or self-built hub cannot take release updates (different key); install from a release image once.
+- `deploy_hub.py push` records the binary's build in `ota-build` (as the OTA apply does) and clears `ota-rollback`.
 
 ## 0.5.8 (2026-11-24)
 
