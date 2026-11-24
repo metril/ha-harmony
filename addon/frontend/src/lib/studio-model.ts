@@ -520,6 +520,7 @@ export function assign(cfg: Config, layer: Layer, s: Source, t: Target, haOk = t
     if (cap) return { refused: cap };
     let at = { x: t.x, y: t.y };
     const bigger = s.kind === 'widget' && s.type === 'label' ? Math.min(2, pageDims(page).cols) : Math.min(2, pageDims(page).cols);
+    if (!page.list && at.y >= MAX_ROWS) return { refused: 'This page is full.' };
     const append = !page.list && at.y === pageDims(page).rows; // a drop under the last row grows the page by one row
     const room = append ? { ...page, rows: at.y + 1 } : page;
     if (!page.list && !fits(room, { ...at, w: 1, h: 1 })) {
@@ -1089,6 +1090,16 @@ export function errorTarget(path: (string | number)[]): ErrorTarget {
   if (a === 'activities' && c === 'keys' && typeof d === 'string') return { kind: 'key', layer: `#${String(b)}`, key: d };
   return null;
 }
+
+/** Which compiled screen a just-dropped widget landed on. 'stale': the config is no longer the one the drop made (undo, a later edit); 'wait': the preview predates the drop. */
+export function placedScreen(current: unknown, made: unknown, pl: { page: number; index: number }, pp: PreviewPage | null): 'stale' | 'wait' | { screen: number; total: number } {
+  if (current !== made) return 'stale';
+  const pg = (current as Config).pages?.[pl.page];
+  const loc = pg ? wireLocate(pg, pp, pl.index) : null;
+  return loc && pp ? { screen: loc.screen, total: pp.wire_pages.length } : 'wait';
+}
+/** Most rows a page grid can have (the compiler's cap). */
+export const MAX_ROWS = 16;
 
 // ---------------------------------------------------------------- config widgets <-> wire widgets
 /** For each compiled screen, the config widget index behind each compiled widget (the compiler reorders and splits; `src` says where each came from). */

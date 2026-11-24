@@ -6,7 +6,7 @@ import { cellAt, pageGroup, widgetRect } from '../lib/page-renderer';
 import { activeTheme } from '../lib/theme-model';
 import { BODY, DPAD, GLASS, GRIP_Y, JOINED, PLATED, PLATES, KEYS, PHYSICAL_KEYS, PRINTED, SCREEN, VIEW, bodyPath, gripPath, keyPath, keyTitle, tintPath, type KeyGeom } from '../lib/remote-layout';
 import type { StudioHost } from '../lib/studio-state';
-import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, promotedIndex, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
+import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, MAX_ROWS, pageDims, promotedIndex, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
 import type { Page } from '../lib/model';
 import { collectIssues, widgetIssues } from '../lib/issues';
@@ -252,7 +252,7 @@ export class HhRemote extends LitElement {
     const nextFirst = next ? Math.min(Infinity, ...page.widgets.flatMap((w, i) => ((next[i] ?? -1) >= 0 ? [boxOf(w).y] : []))) : rows;
     const covered = (y: number) => page.widgets.some((w) => { const b = boxOf(w); return y >= b.y && y < b.y + b.h; });
     for (let y = last + 1; y < Math.min(nextFirst, rows); y++) if (!covered(y)) return { y, y1: bottom, y2: 319 };
-    return next ? null : { y: rows, y1: bottom, y2: 319 };
+    return next || rows >= MAX_ROWS ? null : { y: rows, y1: bottom, y2: 319 };
   }
   private isFreeCell(page: Page, x: number, y: number): boolean {
     return !page.widgets.some((w) => {

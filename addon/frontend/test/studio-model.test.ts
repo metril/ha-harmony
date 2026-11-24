@@ -3,7 +3,7 @@ import { Assigner, moveCursor, type Spot } from '../src/lib/assigner';
 import type { Config, Device, Page } from '../src/lib/model';
 import {
   assign, deviceChips, duplicatePage, errorTarget, firstFree, fits, groupCommand, isRefusal, labelRoom, movePage, moveBox, pageBytes, pageIndexForLayer,
-  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, studioChecks, labelMeter, describeSource, sourceLabel, wireMap, wireLocate, templatePage, trimToBytes, defaultService, type Source, type Target,
+  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, studioChecks, labelMeter, describeSource, sourceLabel, wireMap, wireLocate, placedScreen, templatePage, trimToBytes, defaultService, type Source, type Target,
 } from '../src/lib/studio-model';
 
 const cfg = (): Config => ({
@@ -341,5 +341,28 @@ describe("hard-key messages", () => {
     expect((a as { message: string }).message).toContain("to Volume Up");
     const d = assign(c, "default" as never, { kind: "default" } as Source, { kind: "key", name: "volume_up" });
     expect((d as { message: string }).message).toMatch(/^Volume Up .*now uses Default/);
+  });
+});
+
+describe('placedScreen (which screen a dropped widget compiled onto)', () => {
+  const made = { devices: [], activities: [], pages: [{ id: 'p', widgets: [{}, {}, {}] }] } as unknown as Config;
+  const wp = (srcs: number[]) => ({ page: { widgets: srcs.map((src) => ({ src })) } });
+  const pre = { wire_pages: [wp([0, 1]), wp([])] } as never;
+  const post = { wire_pages: [wp([0, 1]), wp([2])] } as never;
+  const pl = { page: 0, index: 2 };
+  it('waits while the preview predates the drop, then reports the screen', () => {
+    expect(placedScreen(made, made, pl, pre)).toBe('wait');
+    expect(placedScreen(made, made, pl, post)).toEqual({ screen: 1, total: 2 });
+  });
+  it('is stale once the config is no longer the one the drop made (undo, further edits)', () => {
+    expect(placedScreen({ ...made } as Config, made, pl, post)).toBe('stale');
+  });
+});
+
+describe('row cap', () => {
+  it('refuses an append past 16 rows', () => {
+    const c = { devices: [{ id: 'tv', name: 'TV', commands: { up: {} } }], activities: [], pages: [{ id: 'p', title: 'P', rows: 16, widgets: [] }] } as unknown as Config;
+    const r = assign(c, 'default' as never, { kind: 'command', device: 'tv', name: 'up' } as Source, { kind: 'cell', page: 0, x: 0, y: 16 });
+    expect('refused' in r).toBe(true);
   });
 });
