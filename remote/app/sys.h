@@ -18,6 +18,7 @@
 #define RA_PATH_FB "/dev/fb0"
 #define RA_PATH_KEYS "/dev/input/event0"
 #define RA_PATH_TOUCH "/dev/input/event2"
+#define RA_PATH_MOTION "/dev/input/event1" /* LIS3DH accelerometer, INT1 on GPIO 108: one report per motion interrupt */
 #define RA_PATH_BACKLIGHT "/sys/class/backlight/ap3156_backlight/brightness"
 #define RA_PATH_LED "/sys/class/leds/tps6507x:white/brightness"
 #define RA_PATH_SOC "/sys/bus/i2c/devices/1-0070/soc"

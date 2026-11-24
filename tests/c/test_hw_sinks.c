@@ -12,6 +12,7 @@
 #include "hub/bt_link.h"
 #include "hub/hp_errors.h"
 #include "hub/io/hw_sinks.h"
+#include "hub/net/hublog.h"
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
@@ -338,6 +339,40 @@ static void test_stubs(void) {
     CHECK(g_h->sinks.rf->claim(g_h->sinks.rf->self) == -HP_E_BUSY);
 }
 
+/* One log line per frame: ports, hz, dur_ms, whether DRAIN ran, and now - line_free. */
+static void test_send_log(void) {
+    char path[] = "/tmp/hwsinks_logXXXXXX";
+    int fd = mkstemp(path);
+    CHECK(fd >= 0);
+    static hp_hublog_t l;
+    CHECK(hp_hublog_init(&l, NULL, NULL) == 0);
+    l.out_fd = fd;
+    hp_hublog_install(&l);
+    setup();
+    CHECK(open_hw(0) == 0);
+    F.now = 1000;
+    CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 38000)) == 0); /* nothing pending */
+    F.now += 5; /* the line is still busy: DRAIN is called */
+    CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 38000)) == 0);
+    F.now += 100000; /* long played out: DRAIN skipped */
+    CHECK(send_ir(0, mk(SYN100, LEN(SYN100), 38000)) == 0);
+    hp_hublog_install(NULL);
+    char buf[2048] = {0};
+    CHECK(lseek(fd, 0, SEEK_SET) == 0);
+    ssize_t n = read(fd, buf, sizeof buf - 1);
+    CHECK(n > 0);
+    close(fd);
+    unlink(path);
+    char *a = strstr(buf, "hub: ir sent ports=");
+    CHECK(a != NULL);
+    CHECK(a && strstr(a, "hz=38000 dur_ms=") && strstr(a, "drain=none now-line_free=0ms"));
+    char *b = a ? strchr(a, '\n') : NULL;
+    CHECK(b && strstr(b, "drain=called now-line_free=-"));
+    char *c = b ? strstr(b + 1, "hub: ir sent") : NULL;
+    c = c ? strstr(c + 1, "hub: ir sent") : NULL;
+    CHECK(c && strstr(c, "drain=skipped now-line_free=") && !strstr(c, "now-line_free=-"));
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: test_hw_sinks IR_BENCH\n"); return 2; }
     g_bench = argv[1];
@@ -350,6 +385,7 @@ int main(int argc, char **argv) {
     test_oversize();
     test_adopt();
     test_stubs();
+    test_send_log();
     free(F.wbuf);
     free(g_h);
     if (fails) { printf("%d failure(s)\n", fails); return 1; }

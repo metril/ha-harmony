@@ -28,7 +28,7 @@ int ra_open_fb(ra_sys_t *s) {
 }
 
 int ra_open_input(ra_sys_t *s, const char *p) {
-  if (!path_is(p, RA_PATH_KEYS) && !path_is(p, RA_PATH_TOUCH)) return eperm();
+  if (!path_is(p, RA_PATH_KEYS) && !path_is(p, RA_PATH_TOUCH) && !path_is(p, RA_PATH_MOTION)) return eperm();
   return s->ops.open(s->ops.ctx, p, O_RDONLY, 0);
 }
 

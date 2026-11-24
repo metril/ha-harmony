@@ -49,7 +49,22 @@ bool ra_power_input(ra_power_t *p, uint64_t now, bool touch) {
   p->last_input_ms = now;
   if (was != RA_PW_ACTIVE) set_state(p, RA_PW_ACTIVE, now);
   /* A dimmed screen is readable: everything acts. Off: hard keys act too, only a touch is swallowed. */
-  return was != RA_PW_OFF || !touch;
+  bool swallow = was == RA_PW_OFF && touch;
+  if (swallow && (!p->swallow_logged || now - p->swallow_log_ms >= RA_SWALLOW_LOG_MS)) {
+    p->swallow_logged = true;
+    p->swallow_log_ms = now;
+    ra_logf(p->sys, "power: touch on dark screen woke it (not sent)");
+  }
+  return !swallow;
+}
+
+bool ra_power_lift(ra_power_t *p, uint64_t now) {
+  if (p->state == RA_PW_ACTIVE || p->poweroff_requested) return false;
+  if (p->state == RA_PW_OFF && now - p->off_since_ms < RA_LIFT_SETTLE_MS) return false;
+  p->last_input_ms = now;
+  p->lifts++;
+  set_state(p, RA_PW_ACTIVE, now);
+  return true;
 }
 
 void ra_power_activity(ra_power_t *p, uint64_t now) {

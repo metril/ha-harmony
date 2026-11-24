@@ -17,6 +17,8 @@
 #define RA_DIM_AFTER_MS 10000 /* idle time to dim */
 #define RA_OFF_AFTER_MS 30000 /* idle time to switch the backlight off */
 #define RA_BATT_POLL_MS 60000
+#define RA_LIFT_SETTLE_MS 3000 /* after the screen goes off, lift is ignored this long: setting the remote down is motion too */
+#define RA_SWALLOW_LOG_MS 5000 /* rate limit of the dark-touch log line */
 #define RA_BATT_SOC_MAX 3.0 /* percent: at or below this, on battery and not charging, power off */
 
 #define RA_SUSPEND_AFTER_MS 10000   /* screen off (fade done) this long, then suspend to RAM */
@@ -46,6 +48,9 @@ typedef struct {
   int soc;
   bool external_power;
   unsigned batt_polls;
+  uint64_t swallow_log_ms; /* last dark-touch log line (valid when swallow_logged) */
+  bool swallow_logged;
+  unsigned lifts; /* screen wakes by lift */
 } ra_power_t;
 
 /* Backlight to normal and LEDs on immediately; first battery poll on the first tick. */
@@ -53,6 +58,9 @@ void ra_power_init(ra_power_t *p, ra_sys_t *sys, uint64_t now);
 /* A press / touch-down arrived; it always wakes the screen. True: the event goes on (any press while active or
  * dimmed, a hard key while off). False: a touch that woke an off screen, to be consumed. */
 bool ra_power_input(ra_power_t *p, uint64_t now, bool touch);
+/* The remote was lifted or moved: a dim or dark screen goes to full brightness and the idle timers restart. Never a key.
+ * False (nothing done): already active, off for less than RA_LIFT_SETTLE_MS, or powering off. */
+bool ra_power_lift(ra_power_t *p, uint64_t now);
 /* Other accepted input: restart the idle timer (never wakes). */
 void ra_power_activity(ra_power_t *p, uint64_t now);
 void ra_power_tick(ra_power_t *p, uint64_t now);

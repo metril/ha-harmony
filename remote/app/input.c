@@ -9,20 +9,22 @@ int ra_input_open(ra_input_t *in, ra_sys_t *sys, const ra_input_sink_t *sink) {
   memset(in, 0, sizeof *in);
   in->sys = sys;
   in->sink = *sink;
-  in->fd[0] = in->fd[1] = -1;
+  in->fd[0] = in->fd[1] = in->fd[2] = -1;
   in->fd[0] = ra_open_input(sys, RA_PATH_KEYS);
   if (in->fd[0] >= 0) in->fd[1] = ra_open_input(sys, RA_PATH_TOUCH);
   if (in->fd[0] < 0 || in->fd[1] < 0) {
     ra_input_close(in);
     return -1;
   }
+  in->fd[2] = ra_open_input(sys, RA_PATH_MOTION);
+  if (in->fd[2] < 0) ra_logf(sys, "motion sensor not opened: no wake on lift");
   return 0;
 }
 
 void ra_input_close(ra_input_t *in) {
-  for (int i = 0; i < 2; i++)
+  for (int i = 0; i < 3; i++)
     if (in->fd[i] >= 0) ra_close(in->sys, in->fd[i]);
-  in->fd[0] = in->fd[1] = -1;
+  in->fd[0] = in->fd[1] = in->fd[2] = -1;
 }
 
 static ra_held_t *find(ra_input_t *in, uint16_t evdev) {
@@ -94,6 +96,17 @@ void ra_input_feed(ra_input_t *in, const struct input_event *ev, uint64_t now) {
   }
 }
 
+void ra_input_motion(ra_input_t *in, uint64_t now) {
+  if (!in->sink.lift) return;
+  if (in->lift_n == 0 || now - in->lift_t0 > RA_LIFT_WINDOW_MS) {
+    in->lift_n = 0;
+    in->lift_t0 = now;
+  }
+  if (++in->lift_n < RA_LIFT_REPORTS) return;
+  in->lift_n = 0;
+  in->sink.lift(in->sink.ctx, now);
+}
+
 void ra_input_read(ra_input_t *in, int idx, uint64_t now) {
   struct input_event evs[16];
   ssize_t n = ra_read(in->sys, in->fd[idx], evs, sizeof evs);
@@ -101,7 +114,13 @@ void ra_input_read(ra_input_t *in, int idx, uint64_t now) {
     if (n < 0 && errno != EINTR && errno != EAGAIN) ra_logf(in->sys, "input read failed: %s", strerror(errno));
     return;
   }
-  for (size_t i = 0; i < (size_t)n / sizeof evs[0]; i++) ra_input_feed(in, &evs[i], now);
+  for (size_t i = 0; i < (size_t)n / sizeof evs[0]; i++) {
+    if (idx == 2) {
+      if (evs[i].type == EV_SYN) ra_input_motion(in, now); /* the sensor's own events never reach the key / touch parser */
+    } else {
+      ra_input_feed(in, &evs[i], now);
+    }
+  }
 }
 
 void ra_input_tick(ra_input_t *in, uint64_t now) {

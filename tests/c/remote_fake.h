@@ -44,12 +44,12 @@ typedef struct {
 typedef struct {
   char log[FK_MAXLOG][112]; /* "open <path> <flags>", "ioctl <req>", "mmap", "exec <path>", ... */
   int nlog;
-  struct { int used, dev; char path[96]; } fds[32]; /* dev: 0/1 for event0/event2, -1 otherwise */
+  struct { int used, dev; char path[96]; } fds[32]; /* dev: 0/1/2 for event0/event2/event1, -1 otherwise */
   struct fb_var_screeninfo var;
   struct fb_fix_screeninfo fix;
   uint8_t fb[FK_FB_BYTES];
-  struct input_event q[2][512];
-  int qn[2], qh[2];
+  struct input_event q[3][512];
+  int qn[3], qh[3];
   fk_file_t files[16];
   int nfiles;
   int bl_w[2048], nbl, led_w[64], nled;
@@ -102,6 +102,7 @@ static __attribute__((unused)) int fk_open(void *c, const char *p, int fl, int m
   if (!strcmp(p, "/dev/fb0")) dev = -1;
   else if (!strcmp(p, "/dev/input/event0")) dev = 0;
   else if (!strcmp(p, "/dev/input/event2")) dev = 1;
+  else if (!strcmp(p, "/dev/input/event1")) dev = 2;
   else {
     fk_file_t *x = fk_file(f, p);
     if (!x || (!x->exists && !(fl & O_CREAT))) { errno = ENOENT; return -1; }
@@ -339,6 +340,7 @@ static __attribute__((unused)) int fk_log_is_safe(const fk_t *f, const char *boo
       int good = (!strcmp(path, "/dev/fb0") && fl == O_RDWR) ||
                  (!strcmp(path, "/dev/input/event0") && fl == O_RDONLY) ||
                  (!strcmp(path, "/dev/input/event2") && fl == O_RDONLY) ||
+                 (!strcmp(path, "/dev/input/event1") && fl == O_RDONLY) ||
                  (!strcmp(path, "/sys/class/backlight/ap3156_backlight/brightness") && fl == O_WRONLY) ||
                  (!strcmp(path, "/sys/class/leds/tps6507x:white/brightness") && fl == O_WRONLY) ||
                  (!strcmp(path, "/sys/bus/i2c/devices/1-0070/soc") && fl == O_RDONLY) ||

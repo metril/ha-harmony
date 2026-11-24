@@ -98,7 +98,9 @@ static int ioc(hp_hw_t *h, unsigned long req, unsigned long arg) {
 
 /* DRAIN the previous waveform. The fd is never closed: closing a speaker fd frees the DMA ring while IRQ 23 can
  * still fire (hard lockup), and the boot hook holds the file open anyway. */
-static int drain_prev(hp_hw_t *h) {
+static int drain_prev(hp_hw_t *h, const char **how, int64_t *gap_ms) {
+    *how = "none"; /* nothing was pending */
+    *gap_ms = 0;
     if (h->flush_ports) { /* a failed send left bytes queued: no reset/flush ioctl exists, so play them out */
         int rc = ioc(h, HP_I2S_START, (unsigned long)((uint32_t)h->flush_ports << 16));
         if (rc < 0) return rc; /* keep flush_ports: DRAIN without a START can sleep forever; retry next time */
@@ -107,10 +109,14 @@ static int drain_prev(hp_hw_t *h) {
         h->line_free = UINT64_MAX; /* length of what was queued is unknown: really DRAIN */
     }
     if (!h->pending) return 0;
-    if (h->ops.now_ms(h->ops.ctx) >= h->line_free) { /* played out already: DRAIN would be a no-op syscall */
+    uint64_t now = h->ops.now_ms(h->ops.ctx);
+    *gap_ms = h->line_free == UINT64_MAX ? 0 : /* unknown length: really drained */ (int64_t)now - (int64_t)h->line_free; /* >= 0: line already free */
+    if (now >= h->line_free) { /* played out already: DRAIN would be a no-op syscall */
+        *how = "skipped";
         h->pending = false;
         return 0;
     }
+    *how = "called";
     uint32_t t0 = hp_mono_ms();
     (void)ioc(h, HP_I2S_DRAIN, 0); /* normally returns at once: irout books the line for the waveform */
     hp_stall_end("i2s drain", t0);
@@ -136,7 +142,9 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     if (rc < 0) return rc; /* too big for the ring: reject, nothing touches the device */
 
     if (h->fd < 0) return -HP_E_IO; /* after hp_hw_sinks_close */
-    if ((rc = drain_prev(h)) < 0) return rc;
+    const char *drain;
+    int64_t gap;
+    if ((rc = drain_prev(h, &drain, &gap)) < 0) return rc;
     if (!h->configured) {
         if ((rc = ioc(h, HP_I2S_DSIZE, 16)) < 0 || (rc = ioc(h, HP_I2S_MODE, 2)) < 0 ||
             (rc = ioc(h, HP_I2S_VOLUME, 15)) < 0)
@@ -159,6 +167,9 @@ static int ir_send(void *self, uint8_t port_mask, const hp_ir_signal_t *sig) {
     }
     h->pending = true;
     h->line_free = h->ops.now_ms(h->ops.ctx) + w.dur_ms;
+    /* One line per frame; hp_log's token bucket keeps a hold repeat from flooding what ships. */
+    hp_log("hub: ir sent ports=%d hz=%u dur_ms=%u drain=%s now-line_free=%lldms", ports, (unsigned)sig->carrier_hz,
+           (unsigned)w.dur_ms, drain, (long long)gap);
     return 0; /* DRAIN is deferred to the next send / hp_hw_sinks_close, so the loop never blocks */
 }
 
@@ -202,7 +213,11 @@ int hp_hw_sinks_open(const hp_hw_cfg_t *cfg, hp_hw_t *h) {
 
 void hp_hw_sinks_close(hp_hw_t *h) {
     if (!h) return;
-    if (h->fd >= 0) drain_prev(h);
+    if (h->fd >= 0) {
+        const char *how;
+        int64_t gap;
+        drain_prev(h, &how, &gap);
+    }
     h->fd = -1; /* deliberately not closed: the boot hook holds the file */
     hp_rf_spi_destroy(h->rfspi);
     h->rfspi = NULL;

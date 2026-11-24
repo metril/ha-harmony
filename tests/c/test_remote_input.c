@@ -216,7 +216,64 @@ static void test_read_path(void) {
   CT_CHECK(fk_log_is_safe(&fk, NULL));
 }
 
+static int lifts;
+static uint64_t lift_at;
+static void r_lift(void *c, uint64_t now) { (void)c; lifts++; lift_at = now; }
+
+static void motion_reports(int n) {
+  for (int i = 0; i < n; i++) {
+    fk_push(&fk, 2, EV_ABS, ABS_X, 100 * i);
+    fk_push(&fk, 2, EV_ABS, ABS_MISC, 1);
+    fk_push(&fk, 2, EV_SYN, SYN_REPORT, 0);
+  }
+}
+
+/* Wake on lift through the fake motion node: reports are counted per EV_SYN, never reach the key/touch parser. */
+static void test_lift_detector(void) {
+  begin();
+  CT_CHECK(in.fd[2] >= 0);
+  CT_EQ(fk.fds[in.fd[2]].dev, 2);
+  in.sink.lift = r_lift;
+  lifts = 0;
+  motion_reports(RA_LIFT_REPORTS - 1); /* a bump: not enough */
+  ra_input_read(&in, 2, 1000);
+  CT_EQ(lifts, 0);
+  fk.qh[2] = fk.qn[2] = 0;
+  motion_reports(1); /* the window has passed: the count restarted */
+  ra_input_read(&in, 2, 1000 + RA_LIFT_WINDOW_MS + 1);
+  CT_EQ(lifts, 0);
+  fk.qh[2] = fk.qn[2] = 0;
+  motion_reports(RA_LIFT_REPORTS); /* a lift */
+  ra_input_read(&in, 2, 5000);
+  CT_EQ(lifts, 1);
+  CT_EQ(lift_at, 5000);
+  CT_EQ(rec.n, 0); /* never a key */
+  CT_EQ(rec.gates, 0);
+  motion_reports(RA_LIFT_REPORTS - 1); /* the count restarts after a lift */
+  ra_input_read(&in, 2, 5100);
+  CT_EQ(lifts, 1);
+  ra_input_close(&in);
+  CT_CHECK(fk_log_is_safe(&fk, NULL));
+}
+
+/* No sink.lift or no motion node: the app still runs. */
+static void test_lift_absent(void) {
+  begin();
+  motion_reports(5);
+  ra_input_read(&in, 2, 1000); /* no lift callback: ignored */
+  ra_input_close(&in);
+  fk_init(&fk);
+  ra_ops_t ops = fk_ops(&fk);
+  ra_sys_init(&sys, &ops, NULL);
+  fk.fds[1].used = 0;
+  ra_input_sink_t s = {.ctx = &rec, .emit = r_emit, .gate = r_gate, .activity = r_act, .page = r_page};
+  CT_EQ(ra_input_open(&in, &sys, &s), 0);
+  ra_input_close(&in);
+}
+
 int main(void) {
+  CT_RUN(test_lift_detector);
+  CT_RUN(test_lift_absent);
   CT_RUN(test_all_36_keys);
   CT_RUN(test_unknown_dropped);
   CT_RUN(test_touch);
