@@ -48,6 +48,8 @@
 #define HP_I2S_DRAIN 0x80044e31u
 
 /* Syscall seam. Failures return -1 with errno set, as the real calls do. */
+#define HP_HW_RUN_GAP_MS 150 /* a frame this soon after the last one played out continues the run (log summary) */
+
 typedef struct hp_hw_ops {
     void *ctx;
     ssize_t (*write)(void *ctx, int fd, const void *buf, size_t n);
@@ -79,6 +81,7 @@ typedef struct {
     hp_hw_ops_t ops;
     bool rf_claimed;
     hp_rf_transport *rfspi; /* the real radio when cfg.rf was given; sinks.rf then points at it */
+    unsigned run_n, run_skipped; /* frames in the current repeat run, and how many skipped DRAIN (log summary) */
     bool pending;          /* START issued, DRAIN owed */
     uint64_t line_free;    /* ops.now_ms when the last waveform has played out: no DRAIN is owed after it */
     uint8_t flush_ports;   /* nonzero: a failed send left queued bytes; START+DRAIN them before the next use */
