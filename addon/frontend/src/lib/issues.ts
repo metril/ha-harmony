@@ -1,13 +1,13 @@
 // One list of what is wrong with the config: server errors, add-on warnings, Studio checks.
 import type { Config, ValidationError } from './model';
 import { summarizeErrors } from './errors';
-import type { StudioCheck } from './studio-model';
+import { errorTarget, type StudioCheck } from './studio-model';
 
 export type IssueLevel = 'error' | 'warning';
 export interface Issue {
   level: IssueLevel;
   text: string;
-  target?: { kind: 'route'; route: string } | { kind: 'widget'; page: number; index?: number };
+  target?: { kind: 'route'; route: string } | { kind: 'error'; path: (string | number)[] } | { kind: 'widget'; page: number; index?: number };
   fix?: { label: string; value: string }; // label overflow only: value = the short label
 }
 
@@ -16,7 +16,10 @@ export function issueText(c: StudioCheck): string {
 }
 
 const fromServer = (list: ValidationError[], level: IssueLevel, config: Config | null): Issue[] =>
-  summarizeErrors(list, config).located.map((l) => ({ level, text: l.msg, target: { kind: 'route', route: l.route } }));
+  summarizeErrors(list, config).located.map((l, i): Issue => {
+    const path = list[i]?.path ?? [];
+    return { level, text: l.msg, target: errorTarget(path) ? { kind: 'error', path } : { kind: 'route', route: l.route } };
+  });
 
 export function collectIssues(errors: ValidationError[], warnings: ValidationError[], checks: StudioCheck[], config: Config | null): Issue[] {
   const out = [...fromServer(errors, 'error', config), ...fromServer(warnings, 'warning', config)];

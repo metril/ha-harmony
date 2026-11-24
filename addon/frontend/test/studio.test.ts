@@ -296,4 +296,11 @@ describe('studio checks in the store', () => {
     store.showIssue({ level: 'warning', text: 'x', target: { kind: 'widget', page: 9, index: 0 } });
     expect(st.sel).toEqual({ kind: 'widget', page: 0, index: 1 });
   });
+  it('Show on an error with a key path selects that key', async () => {
+    const { studio, store } = await boot();
+    const st = (studio as unknown as { st: { sel: unknown } }).st;
+    store.showIssue({ level: 'error', text: 'x', target: { kind: 'error', path: ['keys', 'menu'] } });
+    await tick(studio);
+    expect(st.sel).toEqual({ kind: 'key', name: 'menu' });
+  });
 });

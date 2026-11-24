@@ -12,6 +12,12 @@ describe('issues', () => {
     expect(i.map((x) => x.text)).toEqual(['bad key', 'warn', issueText(label), issueText(glyph)]);
     expect(i[0]?.target).toEqual({ kind: 'route', route: 'keys' });
   });
+  it('errors with a widget or key path target it; others fall back to the route', () => {
+    const [a, b, c] = collectIssues([{ path: ['keys', 'menu'], msg: 'k' }, { path: ['pages', 0, 'widgets', 1, 'x'], msg: 'w' }, { path: ['devices', 0], msg: 'd' }], [], [], null);
+    expect(a?.target).toEqual({ kind: 'error', path: ['keys', 'menu'] });
+    expect(b?.target).toEqual({ kind: 'error', path: ['pages', 0, 'widgets', 1, 'x'] });
+    expect(c?.target?.kind).toBe('route');
+  });
   it('label checks carry a fix; glyph checks have no target', () => {
     const [l, g] = collectIssues([], [], [label, glyph], null);
     expect(l?.fix).toEqual({ label: 'Use "Power"', value: 'Power' });

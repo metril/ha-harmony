@@ -10,7 +10,7 @@ import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import {
-  DEFAULT_LAYER, studioChecks, pageCap, addPage, assign, deletePage, describeSource, duplicatePage, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePages, MAX_PAGES,
+  DEFAULT_LAYER, studioChecks, pageCap, addPage, assign, deletePage, describeSource, errorTarget, duplicatePage, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePages, MAX_PAGES,
   type Source, type Target,
 } from '../lib/studio-model';
 import { StoreElement, confirmAction } from '../components/base';
@@ -173,6 +173,7 @@ export class HhStudio extends StoreElement implements StudioHost {
   }
   private onShowIssue = (e: CustomEvent<Issue>) => {
     const t = e.detail.target;
+    if (t?.kind === 'error') return this.showError(t.path);
     if (t?.kind !== 'widget' || t.page < 0 || t.page >= (this.store.config.pages?.length ?? 0)) return;
     this.showCheck(t.page, t.index);
   };
@@ -618,6 +619,21 @@ export class HhStudio extends StoreElement implements StudioHost {
       <div class="vh" role="status" aria-live="polite" aria-atomic="true">${st.announcement}</div>`;
   }
 
+  private showError(path: (string | number)[]): void {
+    const t = errorTarget(path);
+    if (!t) return;
+    this.pop = null;
+    if (t.kind === 'key') {
+      const idx = t.layer.startsWith('#') ? Number(t.layer.slice(1)) : -1;
+      const layer = idx >= 0 ? ((this.store.config.activities ?? [])[idx]?.id ?? DEFAULT_LAYER) : DEFAULT_LAYER;
+      this.st.setLayer(layer);
+      this.st.set({ sel: { kind: 'key', name: t.key } });
+    } else if (t.kind === 'widget') {
+      this.st.setPage(t.page, false);
+      this.st.set({ sel: { kind: 'widget', page: t.page, index: t.index } });
+    } else this.st.setPage(t.page);
+    this.st.say('Showing the problem');
+  }
   private showCheck(page: number, index: number | undefined): void {
     this.pop = null;
     this.st.setPage(page, false);

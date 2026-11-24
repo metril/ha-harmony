@@ -149,7 +149,8 @@ export class Store extends EventTarget {
 
   /** Publish the Studio's checks; notifies only when their text changed. */
   setChecks(next: StudioCheck[]): void {
-    if (next.length === this.checks.length && next.every((c, i) => issueText(c) === issueText(this.checks[i] as StudioCheck))) return;
+    const key = (c: StudioCheck) => `${c.page}:${c.index}:${issueText(c)}`;
+    if (next.length === this.checks.length && next.every((c, i) => key(c) === key(this.checks[i] as StudioCheck))) return;
     this.checks = next;
     this.emit();
   }
