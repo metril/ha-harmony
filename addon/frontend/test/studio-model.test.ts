@@ -333,3 +333,13 @@ describe("drag ghost text", () => {
     expect(describeSource(c, { kind: "input", device: "sh", name: "input_hdmi1" } as Source)).toBe("Shield · HDMI 1");
   });
 });
+
+describe("hard-key messages", () => {
+  it("name the key as a person reads it", () => {
+    const c = { devices: [{ id: "tv", name: "TV", commands: { up: {} } }], activities: [], pages: [] } as unknown as Config;
+    const a = assign(c, "default" as never, { kind: "command", device: "tv", name: "up" } as Source, { kind: "key", name: "volume_up" });
+    expect((a as { message: string }).message).toContain("to Volume Up");
+    const d = assign(c, "default" as never, { kind: "default" } as Source, { kind: "key", name: "volume_up" });
+    expect((d as { message: string }).message).toMatch(/^Volume Up .*now uses Default/);
+  });
+});

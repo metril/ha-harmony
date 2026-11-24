@@ -10,7 +10,7 @@ import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import {
-  DEFAULT_LAYER, studioChecks, pageCap, addPage, assign, deletePage, describeSource, errorTarget, duplicatePage, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePages, MAX_PAGES,
+  DEFAULT_LAYER, studioChecks, pageCap, addPage, assign, deletePage, describeSource, errorTarget, duplicatePage, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, wireLocate, removeWidget, resizeBox, templatePages, MAX_PAGES,
   type Source, type Target,
 } from '../lib/studio-model';
 import { StoreElement, confirmAction } from '../components/base';
@@ -193,9 +193,26 @@ export class HhStudio extends StoreElement implements StudioHost {
     if (t?.kind !== 'widget' || t.page < 0 || t.page >= (this.store.config.pages?.length ?? 0)) return;
     this.showCheck(t.page, t.index);
   }
+  /** a widget dropped on a multi-screen page: once the recompiled preview arrives, say which screen it landed on */
+  private placed: { page: number; index: number; pages: unknown; from: number; message: string } | null = null;
+  private announcePlaced(): void {
+    const pl = this.placed;
+    const s = this.store;
+    if (!pl || s.pages === pl.pages) return;
+    this.placed = null;
+    const pg = s.config.pages?.[pl.page];
+    const pp = this.st.previewOf(pl.page);
+    const loc = pg ? wireLocate(pg, pp, pl.index) : null;
+    if (!loc || !pp) return;
+    if (this.st.page === pl.page) this.st.set({ wire: loc.screen });
+    const where = `${pl.message} It is drawn on screen ${loc.screen + 1} of ${pp.wire_pages.length}.`;
+    this.st.say(where);
+    if (loc.screen !== pl.from) this.store.toast(`Drawn on screen ${loc.screen + 1} of ${pp.wire_pages.length}`, 'info', true);
+  }
   private onStore = () => {
     const s = this.store;
     if (!s.loaded) return;
+    this.announcePlaced();
     if (!this.inited) {
       this.inited = true;
       this.state0.page = pageIndexForLayer(s.config, this.state0.layer);
@@ -247,6 +264,7 @@ export class HhStudio extends StoreElement implements StudioHost {
       this.st.sel = { kind: 'widget', page: r.widget.page, index: r.widget.index };
     }
     this.sheet = '';
+    if (target.kind === 'cell' && r.widget && (this.store.pages[r.widget.page]?.wire_pages.length ?? 0) > 1) this.placed = { page: r.widget.page, index: r.widget.index, pages: this.store.pages, from: this.st.wire, message: r.message };
     this.st.say(r.message);
     this.store.toast(r.message, 'info', true);
     this.pop = null;

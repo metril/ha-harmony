@@ -28,6 +28,7 @@ const tid = (t: Target): string => (t.kind === 'key' ? `k:${t.name}` : t.kind ==
 export { tid };
 
 /** Where the inherited-from-default dot sits: inside the key. Rect keys use the bbox top-right; path keys use their top-right vertex pulled toward the centroid. */
+const MIN_BAND = 24; // least free pixel rows under the drawn rows that can take an empty config row
 const DOTS = new Map<string, [number, number]>();
 /** D-pad wedges: angle (deg, y down) of the dot on the ring, toward the wedge's top-right. */
 const DPAD_DOT: Record<string, number> = { up: -62, right: -28, down: 62, left: 208 };
@@ -231,32 +232,27 @@ export class HhRemote extends LitElement {
     });
     return rows;
   }
-  /** Empty config rows of a multi-screen page. The compiler collapses them, so they have no drawn rows: each belongs to the screen whose first drawn row precedes it and gets a band in the free space below that screen's drawn rows (stacked up from the bottom when it is tight). */
-  private emptyBands(page: Page): Map<number, { y1: number; y2: number }> {
-    const out = new Map<number, { y1: number; y2: number }>();
+  /** The one empty config row a multi-screen screen can take a drop for. The compiler collapses empty rows, so the only room is the free strip under the screen's last drawn row: its row is the smallest empty one between this screen's last drawn row and the next screen's first (on the last screen the first trailing empty row, else a new row appended). Null when the strip cannot hold a row. */
+  private tailBand(page: Page): { y: number; y1: number; y2: number } | null {
     const pp = this.st.previewOf(this.st.page);
-    if (!pp || !this.multiScreen() || isList(page)) return out;
-    const { rows } = pageDims(page);
-    const empty: number[] = [];
-    for (let y = 0; y < rows; y++) if (!page.widgets.some((w) => { const b = boxOf(w); return y >= b.y && y < b.y + b.h; })) empty.push(y);
-    if (!empty.length) return out;
-    const first = pp.wire_pages.map((_, k) => {
-      const m = wireMap(page, pp, k);
-      return Math.min(Infinity, ...page.widgets.flatMap((w, i) => ((m[i] ?? -1) >= 0 ? [boxOf(w).y] : [])));
-    });
-    const owner = (y: number) => first.reduce((best, a, k) => (a <= y && a >= (first[best] ?? -1) ? k : best), 0);
-    const mine = empty.filter((y) => owner(y) === this.st.wire);
-    if (!mine.length) return out;
+    if (!pp || !this.multiScreen() || isList(page)) return null;
     const v2 = this.v2();
     const map = wireMap(page, pp, this.st.wire);
-    let bottom = 32;
-    page.widgets.forEach((_, i) => { if ((map[i] ?? -1) >= 0) bottom = Math.max(bottom, this.rectOf(page, i, v2, map).y2 + 1); });
-    const each = Math.max(20, Math.floor((320 - bottom) / mine.length));
-    mine.forEach((y, k) => {
-      const y1 = Math.min(bottom + k * each, 320 - each);
-      out.set(y, { y1, y2: y1 + each - 1 });
+    let bottom = 0;
+    let last = -1;
+    page.widgets.forEach((w, i) => {
+      if ((map[i] ?? -1) < 0) return;
+      bottom = Math.max(bottom, this.rectOf(page, i, v2, map).y2 + 1);
+      const b = boxOf(w);
+      last = Math.max(last, b.y + b.h - 1);
     });
-    return out;
+    if (last < 0 || 320 - bottom < MIN_BAND) return null;
+    const { rows } = pageDims(page);
+    const next = this.st.wire + 1 < pp.wire_pages.length ? wireMap(page, pp, this.st.wire + 1) : null;
+    const nextFirst = next ? Math.min(Infinity, ...page.widgets.flatMap((w, i) => ((next[i] ?? -1) >= 0 ? [boxOf(w).y] : []))) : rows;
+    const covered = (y: number) => page.widgets.some((w) => { const b = boxOf(w); return y >= b.y && y < b.y + b.h; });
+    for (let y = last + 1; y < Math.min(nextFirst, rows); y++) if (!covered(y)) return { y, y1: bottom, y2: 319 };
+    return next ? null : { y: rows, y1: bottom, y2: 319 };
   }
   private isFreeCell(page: Page, x: number, y: number): boolean {
     return !page.widgets.some((w) => {
@@ -280,7 +276,7 @@ export class HhRemote extends LitElement {
     return { x1: r.x1, x2: r.x2 };
   }
   private cellRect(page: Page, x: number, y: number) {
-    const row = (this.fixedCells(page) ? this.shownRows(page).get(y) : undefined) ?? this.emptyBands(page).get(y);
+    const row = (this.fixedCells(page) ? this.shownRows(page).get(y) : undefined) ?? (this.tailBand(page)?.y === y ? this.tailBand(page) ?? undefined : undefined);
     if (row) return { ...this.columnOf(page, x), y1: row.y1, y2: row.y2 };
     const g = gridOf(page);
     return widgetRect({ cols: g.cols, rows: g.rows, version: 2 } as V2Page, { x, y: y - g.shift, w: 1, h: 1 });
@@ -306,12 +302,12 @@ export class HhRemote extends LitElement {
     if (!page || isList(page)) return null;
     if (this.multiScreen()) {
       const cols = pageDims(page).cols;
-      const bands = this.emptyBands(page);
+      const band = this.tailBand(page);
       for (let x = 0; x < cols; x++) {
         const c = this.columnOf(page, x);
         if (px < c.x1 || px > c.x2) continue;
         if (this.fixedCells(page)) for (const [y, r] of this.shownRows(page)) if (py >= r.y1 && py <= r.y2 && this.isFreeCell(page, x, y)) return { x, y };
-        for (const [y, r] of bands) if (py >= r.y1 && py <= r.y2) return { x, y };
+        if (band && py >= band.y1 && py <= band.y2) return { x, y: band.y };
       }
       return null;
     }
@@ -371,7 +367,7 @@ export class HhRemote extends LitElement {
     });
     if (this.multiScreen()) {
       // explicit fixed pages: the free cells of the rows this screen draws (converted pages have no compiled cells), and every empty config row that lands on this screen
-      const ys = [...(this.fixedCells(page) ? this.shownRows(page).keys() : []), ...this.emptyBands(page).keys()].sort((a, b) => a - b);
+      const ys = [...(this.fixedCells(page) ? this.shownRows(page).keys() : []), ...(this.tailBand(page) ? [this.tailBand(page)?.y as number] : [])].sort((a, b) => a - b);
       for (const y of ys)
         for (let x = 0; x < cols; x++)
           if (this.isFreeCell(page, x, y)) {

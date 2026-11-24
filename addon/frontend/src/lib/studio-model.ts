@@ -7,6 +7,7 @@ import { tileDefaultTap } from './permissions';
 import { colourBytes } from './theme-model';
 import { bestIcon } from './icon-suggest';
 import { abbreviate, displayName, dn, fitName } from './key-names';
+import { keyTitle } from './remote-layout';
 import { stockIconByName, stockIconId } from './stock-icons';
 import type { PreviewPage } from './api';
 import { labelBudget, textPx, type FitWidget, type Font } from './text-fit';
@@ -506,10 +507,10 @@ export function assign(cfg: Config, layer: Layer, s: Source, t: Target, haOk = t
     const verb = layer === DEFAULT_LAYER ? 'Default' : 'this layer';
     if (s.kind === 'default' || s.kind === 'none') {
       const config = setKey(cfg, layer, t.name, s.kind);
-      return { config, key: t.name, message: s.kind === 'default' ? `${t.name} now uses Default` : `${t.name} does nothing in ${verb}` };
+      return { config, key: t.name, message: s.kind === 'default' ? `${keyTitle(t.name)} now uses Default` : `${keyTitle(t.name)} does nothing in ${verb}` };
     }
     const action = sourceAction(s) as Action;
-    return { config: setKey(cfg, layer, t.name, action), key: t.name, message: `Assigned ${describeSource(cfg, s)} to ${t.name}${layer === DEFAULT_LAYER ? '' : ', overriding Default'}` };
+    return { config: setKey(cfg, layer, t.name, action), key: t.name, message: `Assigned ${describeSource(cfg, s)} to ${keyTitle(t.name)}${layer === DEFAULT_LAYER ? '' : ', overriding Default'}` };
   }
   const page = cfg.pages?.[t.page];
   if (!page) return { refused: 'There is no page to put that on.' };
@@ -519,7 +520,9 @@ export function assign(cfg: Config, layer: Layer, s: Source, t: Target, haOk = t
     if (cap) return { refused: cap };
     let at = { x: t.x, y: t.y };
     const bigger = s.kind === 'widget' && s.type === 'label' ? Math.min(2, pageDims(page).cols) : Math.min(2, pageDims(page).cols);
-    if (!page.list && !fits(page, { ...at, w: 1, h: 1 })) {
+    const append = !page.list && at.y === pageDims(page).rows; // a drop under the last row grows the page by one row
+    const room = append ? { ...page, rows: at.y + 1 } : page;
+    if (!page.list && !fits(room, { ...at, w: 1, h: 1 })) {
       const free = firstFree(page, 1, 1, at);
       if (!free) return { refused: 'This page is full.' };
       at = free;
@@ -530,11 +533,12 @@ export function assign(cfg: Config, layer: Layer, s: Source, t: Target, haOk = t
     if (!page.list) {
       // shrink to what fits at the spot
       let width = Math.min(w.w ?? 1, bigger);
-      while (width > 1 && !fits(page, { x: at.x, y: at.y, w: width, h: w.h ?? 1 })) width--;
+      while (width > 1 && !fits(room, { x: at.x, y: at.y, w: width, h: w.h ?? 1 })) width--;
       w.w = width;
     }
     const next = clone(cfg);
     const pg = next.pages?.[t.page] as Page;
+    if (append) pg.rows = at.y + 1;
     pg.widgets.push(w);
     const taps = w.type === 'tile' && typeof w.entity === 'string' ? tileDefaultTap(w.entity) : null;
     return { config: next, widget: { page: t.page, index: pg.widgets.length - 1 }, message: `Added ${w.type} ${w.label ?? ''}${taps ? ` (a tap runs ${taps})` : ''} to page ${page.title || page.id} at column ${(w.x ?? 0) + 1}, row ${(w.y ?? 0) + 1}` };
