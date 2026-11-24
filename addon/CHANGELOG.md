@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.8 (2026-11-24)
+
+- Editor: empty rows on pages that span several screens accept drops: one spot per screen with room, and the last screen can add a row (up to 16). A notice says which screen the widget landed on.
+- Editor: the drag preview and the assign messages use readable names.
+- New HA-device option `off_ends_activity`, with an editor toggle: when the device turns off by itself (for example the Shield sleeping), the running activity ends, so the TV gets a real power-off and the next start works.
+- Hub: an Off pressed while an Off is already running is ignored.
+
 ## 0.5.7 (2026-11-24)
 
 - Editor: pages that span several screens line up with what the remote draws. No false "too wide" warnings, the markers sit on the right widgets, Show jumps to the widget's screen, and clicking, dragging and dropping on screen 2+ use the drawn layout.
