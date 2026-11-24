@@ -3,7 +3,7 @@ import { Assigner, moveCursor, type Spot } from '../src/lib/assigner';
 import type { Config, Device, Page } from '../src/lib/model';
 import {
   assign, deviceChips, duplicatePage, errorTarget, firstFree, fits, groupCommand, isRefusal, labelRoom, movePage, moveBox, pageBytes, pageIndexForLayer,
-  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, studioChecks, labelMeter, sourceLabel, wireMap, wireLocate, templatePage, trimToBytes, defaultService, type Source, type Target,
+  placeWidget, resizeBox, setKey, setWidget, wireIconOnly, studioChecks, labelMeter, describeSource, sourceLabel, wireMap, wireLocate, templatePage, trimToBytes, defaultService, type Source, type Target,
 } from '../src/lib/studio-model';
 
 const cfg = (): Config => ({
@@ -323,5 +323,13 @@ describe('config index -> compiled widget (src)', () => {
     expect(wireMap(pg, one, 0)).toEqual([2, 1, 0]);
     expect(labelMeter(pg, one, 0)?.over).toBe(0);
     expect(labelMeter(pg, one, 1)?.over).toBe(0);
+  });
+});
+
+describe("drag ghost text", () => {
+  it("reads the command as a name, not the raw identifier", () => {
+    const c = { devices: [{ id: "sh", name: "Shield" }], activities: [], pages: [] } as unknown as Config;
+    expect(describeSource(c, { kind: "command", device: "sh", name: "context_menu" } as Source)).toBe("Shield · Context Menu");
+    expect(describeSource(c, { kind: "input", device: "sh", name: "input_hdmi1" } as Source)).toBe("Shield · HDMI 1");
   });
 });

@@ -231,6 +231,33 @@ export class HhRemote extends LitElement {
     });
     return rows;
   }
+  /** Empty config rows of a multi-screen page. The compiler collapses them, so they have no drawn rows: each belongs to the screen whose first drawn row precedes it and gets a band in the free space below that screen's drawn rows (stacked up from the bottom when it is tight). */
+  private emptyBands(page: Page): Map<number, { y1: number; y2: number }> {
+    const out = new Map<number, { y1: number; y2: number }>();
+    const pp = this.st.previewOf(this.st.page);
+    if (!pp || !this.multiScreen() || isList(page)) return out;
+    const { rows } = pageDims(page);
+    const empty: number[] = [];
+    for (let y = 0; y < rows; y++) if (!page.widgets.some((w) => { const b = boxOf(w); return y >= b.y && y < b.y + b.h; })) empty.push(y);
+    if (!empty.length) return out;
+    const first = pp.wire_pages.map((_, k) => {
+      const m = wireMap(page, pp, k);
+      return Math.min(Infinity, ...page.widgets.flatMap((w, i) => ((m[i] ?? -1) >= 0 ? [boxOf(w).y] : [])));
+    });
+    const owner = (y: number) => first.reduce((best, a, k) => (a <= y && a >= (first[best] ?? -1) ? k : best), 0);
+    const mine = empty.filter((y) => owner(y) === this.st.wire);
+    if (!mine.length) return out;
+    const v2 = this.v2();
+    const map = wireMap(page, pp, this.st.wire);
+    let bottom = 32;
+    page.widgets.forEach((_, i) => { if ((map[i] ?? -1) >= 0) bottom = Math.max(bottom, this.rectOf(page, i, v2, map).y2 + 1); });
+    const each = Math.max(20, Math.floor((320 - bottom) / mine.length));
+    mine.forEach((y, k) => {
+      const y1 = Math.min(bottom + k * each, 320 - each);
+      out.set(y, { y1, y2: y1 + each - 1 });
+    });
+    return out;
+  }
   private isFreeCell(page: Page, x: number, y: number): boolean {
     return !page.widgets.some((w) => {
       const b = boxOf(w);
@@ -253,7 +280,7 @@ export class HhRemote extends LitElement {
     return { x1: r.x1, x2: r.x2 };
   }
   private cellRect(page: Page, x: number, y: number) {
-    const row = this.fixedCells(page) ? this.shownRows(page).get(y) : undefined;
+    const row = (this.fixedCells(page) ? this.shownRows(page).get(y) : undefined) ?? this.emptyBands(page).get(y);
     if (row) return { ...this.columnOf(page, x), y1: row.y1, y2: row.y2 };
     const g = gridOf(page);
     return widgetRect({ cols: g.cols, rows: g.rows, version: 2 } as V2Page, { x, y: y - g.shift, w: 1, h: 1 });
@@ -278,12 +305,13 @@ export class HhRemote extends LitElement {
     const page = this.cfgPage();
     if (!page || isList(page)) return null;
     if (this.multiScreen()) {
-      if (!this.fixedCells(page)) return null;
       const cols = pageDims(page).cols;
+      const bands = this.emptyBands(page);
       for (let x = 0; x < cols; x++) {
         const c = this.columnOf(page, x);
         if (px < c.x1 || px > c.x2) continue;
-        for (const [y, r] of this.shownRows(page)) if (py >= r.y1 && py <= r.y2 && this.isFreeCell(page, x, y)) return { x, y };
+        if (this.fixedCells(page)) for (const [y, r] of this.shownRows(page)) if (py >= r.y1 && py <= r.y2 && this.isFreeCell(page, x, y)) return { x, y };
+        for (const [y, r] of bands) if (py >= r.y1 && py <= r.y2) return { x, y };
       }
       return null;
     }
@@ -342,9 +370,9 @@ export class HhRemote extends LitElement {
       out.push({ id: `w:${this.st.page}:${i}`, target: { kind: 'widget', page: this.st.page, index: i }, x: SCREEN.x + (r.x1 + r.x2) / 2, y: SCREEN.y + (r.y1 + r.y2) / 2 });
     });
     if (this.multiScreen()) {
-      // explicit fixed pages: the free cells of the rows this screen draws; converted pages have no compiled cells
-      if (!this.fixedCells(page)) return out;
-      for (const [y] of this.shownRows(page))
+      // explicit fixed pages: the free cells of the rows this screen draws (converted pages have no compiled cells), and every empty config row that lands on this screen
+      const ys = [...(this.fixedCells(page) ? this.shownRows(page).keys() : []), ...this.emptyBands(page).keys()].sort((a, b) => a - b);
+      for (const y of ys)
         for (let x = 0; x < cols; x++)
           if (this.isFreeCell(page, x, y)) {
             const r = this.cellRect(page, x, y);

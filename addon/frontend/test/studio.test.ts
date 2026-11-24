@@ -325,7 +325,7 @@ describe('remote studio', () => {
       expect(wireOf(remote)).toBe(1);
       expect(remote.shadowRoot.querySelector('[data-widget="20"]')).toBeTruthy();
     });
-    it('offers no empty-cell spots on any screen, and rects exist only for the widgets drawn', async () => {
+    it('offers no empty-cell spots on a page with no empty rows, and rects exist only for the widgets drawn', async () => {
       const { remote, store } = await boot();
       twoScreens(store);
       (remote as unknown as { st: { wire: number } }).st.wire = 1;
@@ -436,9 +436,9 @@ describe('remote studio', () => {
         const { remote, store } = await boot();
         const { s1 } = fixture(store);
         await tick(remote);
-        // free cells of the drawn rows only (config rows 0 and 2); the rows between them are not drawn
-        expect(cellSpots(remote).filter((c) => c.startsWith('c:0:3:'))).toEqual(['c:0:3:0', 'c:0:3:2']);
-        expect(cellSpots(remote).some((c) => /^c:0:\d+:(1|3|4|6)$/.test(c))).toBe(false);
+        // free cells of the drawn rows (config rows 0 and 2) plus the empty config rows that fall on this screen (1, 3)
+        expect(cellSpots(remote).filter((c) => c.startsWith('c:0:3:'))).toEqual(['c:0:3:0', 'c:0:3:1', 'c:0:3:2', 'c:0:3:3']);
+        expect(cellSpots(remote).some((c) => /^c:0:\d+:(4|5|6|7|8)$/.test(c))).toBe(false);
         const row = widgetRect(s1 as never, s1.widgets[0] as never); // compiled row of config row 0
         const t = dropAt(remote, 3.5 * 20, (row.y1 + row.y2) / 2);
         expect(t).toEqual({ kind: 'cell', page: 0, x: 3, y: 0 });
@@ -451,7 +451,7 @@ describe('remote studio', () => {
         const { s2 } = fixture(store);
         (remote as unknown as R).st.set({ wire: 1 });
         await tick(remote);
-        expect(cellSpots(remote).filter((c) => c.startsWith('c:0:3:'))).toEqual(['c:0:3:4', 'c:0:3:6']);
+        expect(cellSpots(remote).filter((c) => c.startsWith('c:0:3:'))).toEqual(['c:0:3:4', 'c:0:3:5', 'c:0:3:6', 'c:0:3:7', 'c:0:3:8']);
         const row = widgetRect(s2 as never, s2.widgets[3] as never); // compiled row 1 = config row 6
         const spot = (remote as unknown as R).spots().find((x) => x.id === 'c:0:3:6')!;
         expect(spot.y).toBeCloseTo(SCREEN.y + (row.y1 + row.y2) / 2, 0);
@@ -492,13 +492,36 @@ describe('remote studio', () => {
         expect(dropAt(remote, d7.x1 - 2, widgetRect(s2 as never, s2.widgets[3] as never).y1 + 1)).not.toEqual({ kind: 'cell', page: 0, x: 4, y: 6 });
         expect(spot.x).toBeCloseTo(SCREEN.x + d7.x1 + (d7.x2 - d7.x1 + 1) / 6, -1); // the first third of D7's three columns
       });
-      it('a converted page (config cells are not compiled cells) offers no cell spots and no cell drops', async () => {
+      it('an empty config row is a drop target on its screen, below the drawn rows, and the drop lands in that row', async () => {
+        const { remote, store } = await boot();
+        const { s2 } = fixture(store);
+        (remote as unknown as R).st.set({ wire: 1 });
+        await tick(remote);
+        const last = widgetRect(s2 as never, s2.widgets[3] as never);
+        const sp = (id: string) => (remote as unknown as R).spots().find((x) => x.id === id)!;
+        expect(sp('c:0:0:7').y).toBeGreaterThan(SCREEN.y + last.y2);
+        expect(sp('c:0:0:8').y).toBeGreaterThan(sp('c:0:0:7').y);
+        expect(dropAt(remote, 30, sp('c:0:0:8').y - SCREEN.y)).toEqual({ kind: 'cell', page: 0, x: 1, y: 8 });
+        const r = assign(store.config, 'default' as never, { kind: 'command', device: 'tv', name: 'up' } as never, { kind: 'cell', page: 0, x: 1, y: 8 } as never);
+        expect((r as { config: { pages: { widgets: { x: number; y: number }[] }[] } }).config.pages[0]!.widgets[12]).toMatchObject({ x: 1, y: 8 });
+      });
+      it('a single-screen page accepts a drop in an empty row', async () => {
+        const { remote, store } = await boot();
+        fixture(store);
+        store.pages = [{ ...(store.pages![0] as object), wire_pages: [(store.pages![0] as { wire_pages: unknown[] }).wire_pages[0]] }] as never;
+        store.dispatchEvent(new Event('change'));
+        await tick(remote);
+        expect(cellSpots(remote)).toContain('c:0:3:5');
+        expect(dropAt(remote, 3.5 * 20, 32 + 5.5 * 32)).toEqual({ kind: 'cell', page: 0, x: 3, y: 5 });
+      });
+      it('a converted page (config cells are not compiled cells) offers no free cells in drawn rows, only empty rows', async () => {
         const { remote, store } = await boot();
         const { s2 } = fixture(store);
         delete (store.config.pages![0] as { layout?: string }).layout;
         (remote as unknown as R).st.set({ wire: 1 });
         await tick(remote);
-        expect(cellSpots(remote)).toEqual([]);
+        expect(cellSpots(remote).some((c) => /^c:0:\d+:(4|6)$/.test(c))).toBe(false);
+        expect(cellSpots(remote)).toContain('c:0:3:5');
         const row = widgetRect(s2 as never, s2.widgets[3] as never);
         expect(dropAt(remote, 3.5 * 20, (row.y1 + row.y2) / 2)).toBeNull();
       });

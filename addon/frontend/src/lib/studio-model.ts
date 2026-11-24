@@ -186,7 +186,7 @@ export function describeSource(cfg: Config, s: Source): string {
   switch (s.kind) {
     case 'command':
     case 'input':
-      return `${(cfg.devices ?? []).find((d) => d.id === s.device)?.name ?? s.device} · ${s.name}`;
+      return `${(cfg.devices ?? []).find((d) => d.id === s.device)?.name ?? s.device} · ${displayName(s.name)}`;
     case 'activity':
       return `Start ${(cfg.activities ?? []).find((a) => a.id === s.id)?.name ?? s.id}`;
     case 'alloff':
