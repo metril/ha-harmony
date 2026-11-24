@@ -47,6 +47,11 @@ def btn(i, label, cmd, x=0, y=0, w=1, extra=""):
         ("Disney+", "disney_plus"),
         ("PS5", "playstation"),
         ("Spotify", "spotify"),
+        ("SkipBack", "skip_prev"),
+        ("Skip Back", "skip_prev"),
+        ("skip_back", "skip_prev"),
+        ("Back", "back"),
+        ("SkipForward", "skip_next"),
     ],
 )
 def test_icon_for_text(text, icon):

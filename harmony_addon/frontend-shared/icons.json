@@ -316,6 +316,7 @@
    "keywords": [
     "skip",
     "next",
+    "forward",
     "track"
    ],
    "svg": "<path d=\"M6 5l10 7-10 7zM19 5v14\"/>"
@@ -327,6 +328,7 @@
     "skip",
     "previous",
     "prev",
+    "back",
     "track"
    ],
    "svg": "<path d=\"M18 5L8 12l10 7zM5 5v14\"/>"

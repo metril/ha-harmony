@@ -19,6 +19,10 @@ describe('brand logos', () => {
   it('labels and commands named Plex / YouTube suggest the logos', () => {
     expect(suggestIcons('', 'Plex')[0]?.icon.name).toBe('plex');
     expect(suggestIcons('YouTube')[0]?.icon.name).toBe('youtube');
+    expect(suggestIcons('SkipForward')[0]?.icon.name).toBe('skip_next');
+    expect(suggestIcons('Fast Forward')[0]?.icon.name).toBe('ffwd');
+    for (const n of ['SkipBack', 'Skip Back', 'skip_back']) expect(suggestIcons(n)[0]?.icon.name).toBe('skip_prev');
+    expect(suggestIcons('Back')[0]?.icon.name).toBe('back');
     expect(suggestIcons('', 'You Tube')[0]?.icon.name).toBe('youtube');
   });
 });

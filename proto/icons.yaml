@@ -30,8 +30,8 @@ icons:
   - {id: 28, name: stop, keywords: [stop]}
   - {id: 29, name: rewind, keywords: [rewind, rw]}
   - {id: 30, name: ffwd, keywords: [fast, forward, ffwd, ff]}
-  - {id: 31, name: skip_next, keywords: [skip, next, track]}
-  - {id: 32, name: skip_prev, keywords: [skip, previous, prev, track]}
+  - {id: 31, name: skip_next, keywords: [skip, next, forward, track]}
+  - {id: 32, name: skip_prev, keywords: [skip, previous, prev, back, track]}
   - {id: 33, name: record, keywords: [record, rec, dvr]}
   - {id: 34, name: vol_up, keywords: [vol+, volume, up, louder]}
   - {id: 35, name: vol_down, keywords: [vol-, volume, down, quieter]}
