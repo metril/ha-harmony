@@ -281,6 +281,17 @@ describe('remote studio', () => {
     expect(palette.shadowRoot.querySelectorAll('.chip2 svg.sic').length).toBeGreaterThan(5);
   });
 
+  it('the Red chip carries a swatch in the remote key colour, not an icon', async () => {
+    const { palette, store } = await boot();
+    (store.config.devices![0]!.commands as Record<string, unknown>)['Red'] = { proto: 'nec', addr: 4, cmd: 77 };
+    store.dispatchEvent(new Event('change'));
+    await tick(palette);
+    const chip = [...palette.shadowRoot.querySelectorAll('.chip2')].find((c) => c.textContent?.trim() === 'Red')!;
+    expect(chip.querySelector('svg')).toBeNull();
+    const sw = chip.querySelector<HTMLElement>('i.sw')!;
+    expect(sw.style.background).toBe('#e0584c');
+  });
+
   describe('issue markers and the inspector line', () => {
     const msg = 'Main: "Go" is 4 px too wide for its b13 slot; use "Power"';
     const check = (extra: object = {}) => ({ kind: 'label' as const, page: 0, index: 0, msg, short: 'Power', ...extra });
@@ -322,6 +333,26 @@ describe('remote studio', () => {
       expect(Number(rect.getAttribute('y'))).toBe(r.y1);
       expect(Number(m[0]!.getAttribute('cx'))).toBe(r.x2 - 3);
       expect(Number(m[0]!.getAttribute('cy'))).toBe(r.y1 + 4);
+    });
+    it('on screen 2 only screen-2 widgets have rects, at their compiled position, and pressing one selects it', async () => {
+      const { remote, store } = await boot();
+      const cfgPage = { id: 'main', title: 'Main', layout: 'fixed', cols: 12, rows: 7, widgets: Array.from({ length: 20 }, (_, i) => ({ type: 'button', id: `b${i}`, x: (i % 3) * 4, y: Math.floor(i / 3), w: 4, h: 1, label: `B${i}`, action: { none: true } })) };
+      const wpage = (n: number, rows: number, off: number) => ({ ...(page as object), version: 2, cols: 12, rows, fixed: true, widgets: Array.from({ length: n }, (_, k) => ({ kind: 'button', x: (k % 3) * 4, y: Math.floor(k / 3), w: 4, h: 1, label: `B${off + k}`, shape: 'card', icon: 0, icon_only: false })) });
+      const s1 = wpage(15, 5, 0);
+      const s2 = wpage(5, 2, 15);
+      store.config.pages = [cfgPage] as never;
+      store.pages = [{ index: 0, id: 'main', ok: true, error: null, page: s1, wire_pages: [{ page_id: 0, seq: null, bytes: 1, bytes_v1: 1, widgets: 15, page: s1 }, { page_id: 1, seq: null, bytes: 1, bytes_v1: 1, widgets: 5, page: s2 }], bytes: 1, bytes_v1: 1, limit: 251, widgets: 20, widget_limit: 32 }] as never;
+      (remote as unknown as { st: { wire: number } }).st.wire = 1;
+      store.dispatchEvent(new Event('change'));
+      await tick(remote);
+      const rects = [...remote.shadowRoot.querySelectorAll('[data-widget]')].map((e) => Number(e.getAttribute('data-widget')));
+      expect(rects).toEqual([15, 16, 17, 18, 19]);
+      const r = widgetRect(s2 as never, s2.widgets[1] as never);
+      const el = remote.shadowRoot.querySelector('[data-widget="16"]')!;
+      expect([Number(el.getAttribute('x')), Number(el.getAttribute('y'))]).toEqual([r.x1, r.y1]);
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      await tick(remote);
+      expect((remote as unknown as { st: { sel: unknown } }).st.sel).toMatchObject({ kind: 'widget', page: 0, index: 16 });
     });
     it('a widget with a marker says it has a warning in its label', async () => {
       const { remote, store } = await boot();

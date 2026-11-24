@@ -73,5 +73,6 @@ export const chipStyles = css`
   .chip2.used { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
   .chip2[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); color: var(--onacc); }
   .chip2 .sic { width: 15px; height: 15px; flex: none; }
+  .chip2 .sw { width: 15px; height: 9px; border-radius: 5px; flex: none; }
   @media (max-width: 720px) { .chip2 { height: 36px; } }
 `;

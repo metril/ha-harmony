@@ -11,12 +11,15 @@ import { chipStyles, shared } from '../lib/styles';
 import { permissions } from '../lib/permissions';
 import { HA_DOMAINS, type PaletteTab, type StudioHost } from '../lib/studio-state';
 import { GROUPS, HA_ENTITY_ID, deviceChips, layerKeys, pretty, sourceKey, type Source } from '../lib/studio-model';
+import { setStyle } from '../lib/set-style';
+import { keyByName } from '../lib/remote-layout';
 import { stockIconByName } from '../lib/stock-icons';
 import type { Config } from '../lib/model';
 
 const TABS: [PaletteTab, string, string][] = [['devices', 'Devices', 'tv'], ['activities', 'Activities', 'play'], ['ha', 'Home Assistant', 'scene'], ['widgets', 'Widgets', 'list']];
 
 /** Left pane: sources to drag onto keys and the screen, or to click and then click a target. */
+const COLOUR_KEYS = new Set(['red', 'green', 'yellow', 'blue']);
 @customElement('hh-palette')
 export class HhPalette extends LitElement {
   static override styles = [
@@ -150,6 +153,11 @@ export class HhPalette extends LitElement {
     return html`<button class="chip2 ${used ? 'used' : ''} " aria-pressed=${this.pressed(source)} title=${used ? `${label} (already on a key of this layer)` : label}
       @pointerdown=${(e: PointerEvent) => this.down(e, source)} @keydown=${(e: KeyboardEvent) => this.key(e, source)} @click=${(e: MouseEvent) => e.preventDefault()}>${extra}<span>${label}</span></button>`;
   }
+  /** Colour keys get a swatch in the remote's key colour; everything else its icon. */
+  private glyph(name: string, group: Parameters<typeof chipIconId>[1]) {
+    const color = COLOUR_KEYS.has(name.toLowerCase()) ? keyByName.get(name.toLowerCase())?.color : undefined;
+    return color ? html`<i class="sw" style=${setStyle({ background: color })}></i>` : stockIconSvg(chipIconId(name, group));
+  }
   private match(...s: string[]): boolean {
     const q = this.st.query.trim().toLowerCase();
     return !q || s.some((x) => x.toLowerCase().includes(q));
@@ -166,7 +174,7 @@ export class HhPalette extends LitElement {
         const chips = g[grp].filter((c) => !q || this.match(c.name, d.name ?? d.id, d.id));
         return chips.length
           ? html`<h2>${pretty(grp)}</h2><div class="cells" role="group" aria-label=${`${d.name ?? d.id} ${grp}`}>
-              ${orderedCells(chips, (c) => c.name, (c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${stockIconSvg(chipIconId(c.name, c.group))}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
+              ${orderedCells(chips, (c) => c.name, (c) => this.chip(c.name, { kind: c.kind, device: c.device, name: c.name }, used.has(c.kind === 'input' ? `${d.id}:input:${c.name}` : `${d.id}:${c.name}`), html`${this.glyph(c.name, c.group)}${d.kind === 'ha' ? html`<i class="hab" title="Home Assistant action">HA</i>` : nothing}`))}
             </div>`
           : nothing;
       });
