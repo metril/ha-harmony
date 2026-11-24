@@ -3,13 +3,14 @@ import { customElement, state } from 'lit/decorators.js';
 import { classMap } from 'lit/directives/class-map.js';
 import { Assigner, moveCursor } from '../lib/assigner';
 import { icon } from '../lib/icons';
+import type { Issue } from '../lib/issues';
 import { keyByName, keyTitle } from '../lib/remote-layout';
 import { parseHash } from '../lib/router';
 import { setStyle } from '../lib/set-style';
 import { shared } from '../lib/styles';
 import { StudioState, type StudioHost } from '../lib/studio-state';
 import {
-  DEFAULT_LAYER, studioChecks, pageCap, addPage, assign, deletePage, describeSource, duplicatePage, errorTarget, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePages, MAX_PAGES,
+  DEFAULT_LAYER, studioChecks, pageCap, addPage, assign, deletePage, describeSource, duplicatePage, firstFree, isRefusal, moveBox, movePage, pageIndexForLayer, placeWidget, removeWidget, resizeBox, templatePages, MAX_PAGES,
   type Source, type Target,
 } from '../lib/studio-model';
 import { StoreElement, confirmAction } from '../components/base';
@@ -82,14 +83,6 @@ export class HhStudio extends StoreElement implements StudioHost {
       .first { flex: none; max-width: 420px; margin: 0 auto 14px; padding: 14px 16px; background: var(--sf); border: 1px solid var(--line); border-radius: var(--r2); display: grid; gap: 6px; justify-items: start; box-shadow: var(--sh); }
       .first h2 { margin: 0; font-size: 16px; }
       .first p { margin: 0; color: var(--tx2); }
-      .errbar { flex: none; margin: 0 0 10px; padding: 8px 12px; border-radius: var(--r2); background: var(--bads); border: 1px solid var(--bad); color: var(--tx); display: grid; gap: 4px; font-size: 13px; max-width: 520px; align-self: center; width: 100%; }
-      .warnbar { flex: none; margin: 0 0 10px; padding: 8px 12px; border-radius: var(--r2); background: var(--sf); border: 1px solid var(--warn, var(--line)); color: var(--tx); display: grid; gap: 4px; font-size: 13px; max-width: 520px; align-self: center; width: 100%; }
-      .warnbar div { display: flex; gap: 10px; align-items: center; }
-      .warnbar span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-      .warnbar button { height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--line); background: var(--sf); color: var(--tx); cursor: pointer; font-weight: 600; flex: none; }
-      .errbar div { display: flex; gap: 10px; align-items: center; }
-      .errbar span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-      .errbar button { height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--bad); background: var(--sf); color: var(--tx); cursor: pointer; font-weight: 600; flex: none; }
       .pager { display: inline-flex; align-items: center; gap: 2px; }
       .sheetbtns { display: none; }
       .scrim { display: none; }
@@ -136,6 +129,7 @@ export class HhStudio extends StoreElement implements StudioHost {
   private pillRo?: ResizeObserver;
   private resetPills = () => { this.pillCap = LAYER_PILLS; this.requestUpdate(); };
   protected override updated(): void {
+    this.store.setChecks(studioChecks(this.store.config, (i) => this.st.previewOf(i), true));
     if (this.sheet) this.setAttribute('sheet', this.sheet);
     else this.removeAttribute('sheet');
     const sig = (this.store.config.activities ?? []).map((a) => a.name ?? a.id).join('\u0001');
@@ -156,6 +150,7 @@ export class HhStudio extends StoreElement implements StudioHost {
     this.state0.addEventListener('change', this.rerender);
     this.assigner.addEventListener('change', this.rerender);
     this.store.addEventListener('change', this.onStore);
+    this.store.addEventListener('hh-show-issue', this.onShowIssue as EventListener);
     window.addEventListener('keydown', this.onKey);
     this.addEventListener('hh-chip-down', ((e: CustomEvent) => this.chipDown(e.detail.source, e.detail.ev)) as EventListener);
     this.addEventListener('hh-chip-pick', ((e: CustomEvent) => this.keyboardPick(e.detail.source)) as EventListener);
@@ -169,11 +164,18 @@ export class HhStudio extends StoreElement implements StudioHost {
     this.state0.removeEventListener('change', this.rerender);
     this.assigner.removeEventListener('change', this.rerender);
     this.store.removeEventListener('change', this.onStore);
+    this.store.removeEventListener('hh-show-issue', this.onShowIssue as EventListener);
+    this.store.setChecks([]);
     window.removeEventListener('keydown', this.onKey);
     this.pillRo?.disconnect();
     this.endPress();
     super.disconnectedCallback();
   }
+  private onShowIssue = (e: CustomEvent<Issue>) => {
+    const t = e.detail.target;
+    if (t?.kind !== 'widget' || t.page < 0 || t.page >= (this.store.config.pages?.length ?? 0)) return;
+    this.showCheck(t.page, t.index);
+  };
   private onStore = () => {
     const s = this.store;
     if (!s.loaded) return;
@@ -596,7 +598,6 @@ export class HhStudio extends StoreElement implements StudioHost {
             ${picked
               ? html`<div class="banner2" role="status"><span>Click a key or the screen for ${describeSource(s.config, picked)}</span><span class="sp"></span><button @click=${() => this.assigner.cancel()}>Cancel</button></div>`
               : nothing}
-            ${this.errorBar()}${this.checkBar()}
             ${s.isFirstRun
               ? html`<div class="first" role="status">
                   <h2>Set Up Your First Hub Config</h2>
@@ -617,36 +618,6 @@ export class HhStudio extends StoreElement implements StudioHost {
       <div class="vh" role="status" aria-live="polite" aria-atomic="true">${st.announcement}</div>`;
   }
 
-  private showError(path: (string | number)[]): void {
-    const t = errorTarget(path);
-    if (!t) return;
-    this.pop = null;
-    if (t.kind === 'key') {
-      const idx = t.layer.startsWith('#') ? Number(t.layer.slice(1)) : -1;
-      const layer = idx >= 0 ? ((this.store.config.activities ?? [])[idx]?.id ?? DEFAULT_LAYER) : DEFAULT_LAYER;
-      this.st.setLayer(layer);
-      this.st.set({ sel: { kind: 'key', name: t.key } });
-    } else if (t.kind === 'widget') {
-      this.st.setPage(t.page, false);
-      this.st.set({ sel: { kind: 'widget', page: t.page, index: t.index } });
-    } else this.st.setPage(t.page);
-    this.st.say('Showing the problem');
-  }
-  private errorBar() {
-    const errs = this.store.errors;
-    if (!errs.length) return nothing;
-    const shown = errs.slice(0, 2);
-    return html`<div class="errbar" role="alert">${shown.map((e) => html`<div><span>${e.msg}</span>${errorTarget(e.path) ? html`<button @click=${() => this.showError(e.path)}>Show</button>` : nothing}</div>`)}
-      ${errs.length > 2 ? html`<span class="muted">and ${errs.length - 2} more in the draft bar</span>` : nothing}</div>`;
-  }
-  /** Warnings that are not errors: a label over its class budget, a device with no glyph, a row with no action. */
-  private checkBar() {
-    const checks = studioChecks(this.store.config, (i) => this.st.previewOf(i), true);
-    if (!checks.length) return nothing;
-    const shown = checks.slice(0, 3);
-    return html`<div class="warnbar" role="status" aria-label="Checks">${shown.map((c) => html`<div><span>${c.msg}</span>${c.page !== undefined ? html`<button @click=${() => this.showCheck(c.page as number, c.index)}>Show</button>` : nothing}</div>`)}
-      ${checks.length > 3 ? html`<span class="muted">and ${checks.length - 3} more</span>` : nothing}</div>`;
-  }
   private showCheck(page: number, index: number | undefined): void {
     this.pop = null;
     this.st.setPage(page, false);

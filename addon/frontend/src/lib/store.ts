@@ -5,6 +5,8 @@ import { boundEditor } from './activity-edit';
 import { primeBtDefaults } from './bt';
 import { diffConfig, type DiffRow } from './diff';
 import { summarizeErrors } from './errors';
+import { issueText, type Issue } from './issues';
+import type { StudioCheck } from './studio-model';
 import { applyUsageLimits, type Config, type ValidationError } from './model';
 
 export type SaveState = 'clean' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
@@ -48,6 +50,8 @@ export class Store extends EventTarget {
   errors: ValidationError[] = [];
   /** non-blocking warnings of the last check (the add-on sends them among `errors`, marked `severity: warning`) */
   warnings: ValidationError[] = [];
+  /** the Studio's own checks (label too wide, no glyph, row with no action); published by the open Studio */
+  checks: StudioCheck[] = [];
   usage: Usage | null = null;
   hash: string | null = null;
   /** per-page preview results from the last check (error tolerant: good pages decode even when others fail) */
@@ -141,6 +145,25 @@ export class Store extends EventTarget {
     this.stashed = null;
     this.clearStash();
     this.emit();
+  }
+
+  /** Publish the Studio's checks; notifies only when their text changed. */
+  setChecks(next: StudioCheck[]): void {
+    if (next.length === this.checks.length && next.every((c, i) => issueText(c) === issueText(this.checks[i] as StudioCheck))) return;
+    this.checks = next;
+    this.emit();
+  }
+  /** Take the user to an issue: a route, or a Studio widget (the Studio listens for `hh-show-issue`). */
+  showIssue(i: Issue): void {
+    const t = i.target;
+    if (!t) return;
+    if (t.kind === 'route') {
+      location.hash = '#/' + t.route;
+      requestAnimationFrame(() => document.querySelector('hh-app')?.shadowRoot?.querySelector('main')?.focus());
+      return;
+    }
+    location.hash = '#/remote';
+    this.dispatchEvent(new CustomEvent('hh-show-issue', { detail: i }));
   }
 
   private emit() {

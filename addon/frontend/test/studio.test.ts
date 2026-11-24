@@ -280,3 +280,20 @@ describe('remote studio', () => {
     expect(palette.shadowRoot.querySelectorAll('.chip2 svg.sic').length).toBeGreaterThan(5);
   });
 });
+
+describe('studio checks in the store', () => {
+  it('publishes checks, shows one on request, and has no floating boxes', async () => {
+    const { studio, store } = await boot();
+    store.edit((c) => void c.pages![0]!.widgets.push({ type: 'button', shape: 'row', id: 'r', x: 0, y: 1, w: 4, h: 1, label: 'Dead' }));
+    await tick(studio);
+    expect(store.checks).toHaveLength(1);
+    expect(studio.shadowRoot.querySelector('.warnbar, .errbar')).toBeNull();
+    const st = (studio as unknown as { st: { sel: unknown } }).st;
+    store.showIssue({ level: 'warning', text: 'x', target: { kind: 'widget', page: 0, index: 1 } });
+    await tick(studio);
+    expect(st.sel).toEqual({ kind: 'widget', page: 0, index: 1 });
+    expect(location.hash).toBe('#/remote');
+    store.showIssue({ level: 'warning', text: 'x', target: { kind: 'widget', page: 9, index: 0 } });
+    expect(st.sel).toEqual({ kind: 'widget', page: 0, index: 1 });
+  });
+});
