@@ -9,7 +9,7 @@ import { fitCells, watchCells } from '../lib/fit-cells';
 import { abbreviate, displayCommand, displayKey, displayName, gridStyle, FREE_CAP, dn } from '../lib/key-names';
 import { KEYS, keyTitle } from '../lib/remote-layout';
 import { shared } from '../lib/styles';
-import type { PreviewPage } from '../lib/api';
+import { collectIssues, widgetIssues } from '../lib/issues';
 import type { StudioHost } from '../lib/studio-state';
 import { meter, orderedCells } from './parts';
 import { confirmAction } from './base';
@@ -17,11 +17,11 @@ import type { AddPaletteDetail } from './hh-colour-field';
 import { PALETTE_NAMES } from '../lib/themes';
 import { PRESETS, activeName, activeTheme, colourBytes, widgetColors } from '../lib/theme-model';
 import {
-  DEFAULT_LAYER, LABEL_MAX, PAGE_BUDGET, describeAction, errorTarget, gridOf, isList, labelBytes, labelMeter, labelRoom, pageBytes, pageOverflow, setPage, setWidget, trimToBytes, wireIconOnly,
+  DEFAULT_LAYER, LABEL_MAX, PAGE_BUDGET, describeAction, errorTarget, gridOf, isList, labelBytes, labelMeter, labelRoom, pageBytes, setPage, setWidget, trimToBytes, wireIconOnly,
   sourceAction, type Source,
 } from '../lib/studio-model';
 import type { Page, Widget } from '../lib/model';
-import { clip, textPx } from '../lib/text-fit';
+import { textPx } from '../lib/text-fit';
 import { tileDefaultTap } from '../lib/permissions';
 
 const ROLES = ['default', 'primary', 'secondary', 'danger'] as const;
@@ -49,11 +49,11 @@ export class HhInspector extends LitElement {
       .cnt { display: flex; justify-content: space-between; font-weight: 500; color: var(--tx3); }
       .cnt.warn { color: var(--ir); } .cnt.full { color: var(--bad); }
       .pxm { margin: -4px 0 8px; font-size: 12px; }
-      .pxm .over { color: var(--bad); margin: 2px 0; }
+      .issue { margin: 2px 0; font-size: 12px; overflow-wrap: anywhere; white-space: normal; padding: 6px 8px; border-radius: var(--r2); background: var(--sf2); border: 1px solid var(--line); }
+      .issue.warning { border-left: 3px solid var(--ir); } .issue.error { border-left: 3px solid var(--bad); }
+      .issue .chip { margin-top: 4px; }
       .pxm .chips { display: flex; flex-wrap: wrap; gap: 4px; }
       .pxm .chip { border: 1px solid var(--line); background: var(--sf2); color: var(--tx); border-radius: 12px; padding: 2px 10px; cursor: pointer; }
-      .issues { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
-      .linkbtn { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
       .seg { display: flex; flex-wrap: wrap; gap: 4px; }
       .seg button { height: 30px; padding: 0 10px; border-radius: 15px; border: 1px solid var(--line); background: var(--sf); color: var(--tx2); cursor: pointer; font-size: 12px; font-weight: 600; text-transform: capitalize; }
       .seg button[aria-pressed="true"] { background: var(--accs); border-color: var(--acc); color: var(--tx); }
@@ -351,22 +351,16 @@ export class HhInspector extends LitElement {
     if (!m) return nothing;
     const cmd = String((w['action'] as { command?: string } | undefined)?.command ?? '');
     const label = w.label ?? '';
-    const options = [...new Set([abbreviate(label), cmd ? abbreviate(displayName(cmd)) : ''])].filter((o) => o && o !== label && textPx(o, m.font) <= m.px);
+    const issue = widgetIssues(collectIssues(this.st.store.errors, this.st.store.warnings, this.st.store.checks, this.cfg), pi).get(wi);
+    const fix = issue?.fix;
+    const options = fix ? [] : [...new Set([abbreviate(label), cmd ? abbreviate(displayName(cmd)) : ''])].filter((o) => o && o !== label && textPx(o, m.font) <= m.px);
     const state = m.over > 0 ? 'full' : m.px - m.used <= 6 ? 'warn' : '';
     return html`<div class="pxm">
       <div class="cnt ${state}"><span>Fits the Remote</span><span aria-live="polite">${m.used} / ${m.px} px · ${m.font}</span></div>
-      ${m.over > 0 ? html`<div class="over" role="alert">${m.over} px too wide: the remote will show "${clip(label, m.font, m.px).text}"</div>` : nothing}
+      ${issue ? html`<div class="issue ${issue.level}"><div>${issue.text}</div>${fix ? html`<button type="button" class="chip" @click=${() => this.widgetPatch(pi, wi, { label: fix.value }, 'label')}>${fix.label}</button>` : nothing}</div>` : nothing}
       ${m.over > 0 && options.length ? html`<div class="chips" role="group" aria-label="Shorter labels">${options.map((o) => html`<button type="button" class="chip" @click=${() => this.widgetPatch(pi, wi, { label: o }, 'label')}>${o}</button>`)}</div>` : nothing}
     </div>`;
   }
-  /** Labels the remote will cut on this page, each selectable. */
-  private issues(pi: number, page: Page, pp: PreviewPage | null) {
-    const list = pageOverflow(page, pp);
-    if (!list.length) return nothing;
-    return html`<div class="errs" role="status"><div class="err">${list.length} label${list.length === 1 ? '' : 's'} will be cut off on the remote${list.length > 4 ? ' (top 4 shown)' : ''}</div>
-      <ul class="issues">${list.slice(0, 4).map((o) => html`<li><button type="button" class="linkbtn" @click=${() => this.host.activateWidget(pi, o.index)}>${o.label}</button>: needs ${o.px + o.over} px, has ${o.px}; ${o.advice}</li>`)}</ul></div>`;
-  }
-
   private pageView(pi: number) {
     const page = this.cfg.pages?.[pi] as (Page & { activity?: string }) | undefined;
     if (!page) return this.layerSummary();
@@ -378,7 +372,6 @@ export class HhInspector extends LitElement {
       <h2>Page <span class="chip">${page.id}</span></h2>
       ${this.errorsFor((t) => t.kind === 'page' && t.page === pi)}
       ${pp?.error ? html`<div class="errs" role="alert"><div class="err">${pp.error}</div></div>` : nothing}
-      ${this.issues(pi, page, pp)}
       ${meter('Page size', `${bytes} / ${limit} B`, bytes, limit)}
       ${meter('Widgets', `${page.widgets.length} / ${pp?.widget_limit ?? 32}`, page.widgets.length, pp?.widget_limit ?? 32)}
       <label>Title <span class="cnt"><span>Top Bar</span><span>${titleB}/24 B</span></span>

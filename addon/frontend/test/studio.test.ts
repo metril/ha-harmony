@@ -279,6 +279,50 @@ describe('remote studio', () => {
     await tick(palette);
     expect(palette.shadowRoot.querySelectorAll('.chip2 svg.sic').length).toBeGreaterThan(5);
   });
+
+  describe('issue markers and the inspector line', () => {
+    const msg = 'Main: "Go" is 4 px too wide for its b13 slot; use "Power"';
+    const check = (extra: object = {}) => ({ kind: 'label' as const, page: 0, index: 0, msg, short: 'Power', ...extra });
+    // the open Studio republishes its own checks on every render; pin the store's so the fixture stays
+    const inject = (store: Store, checks: object[]) => {
+      store.setChecks = () => {};
+      store.checks = checks as Store['checks'];
+      store.dispatchEvent(new Event('change'));
+    };
+    it('a checked widget gets a circle.mark.warn with the issue text as its title', async () => {
+      const { remote, store } = await boot();
+      inject(store, [check()]);
+      await tick(remote);
+      const m = remote.shadowRoot.querySelectorAll('circle.mark');
+      expect(m).toHaveLength(1);
+      expect(m[0]!.classList.contains('warn')).toBe(true);
+      expect(m[0]!.querySelector('title')?.textContent).toBe(msg);
+      const r = remote.shadowRoot.querySelector('[data-widget="0"]')!;
+      expect(Number(m[0]!.getAttribute('cx'))).toBeGreaterThan(Number(r.getAttribute('x')) + Number(r.getAttribute('width')) - 10);
+      expect(Number(m[0]!.getAttribute('cy'))).toBeLessThan(Number(r.getAttribute('y')) + 10);
+    });
+    it('the inspector shows one issue line with a fix button, and the page view has no issue list', async () => {
+      const { insp, store } = await inspectorFor({ kind: 'widget', page: 0, index: 0 });
+      inject(store, [check({ msg: 'x'.repeat(200) + ' use "Power"' })]);
+      await tick(insp);
+      const lines = insp.shadowRoot.querySelectorAll('.issue');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]!.textContent).toContain('x'.repeat(200));
+      expect(insp.shadowRoot.querySelector('.pxm [role=alert]')).toBeNull();
+      expect(insp.shadowRoot.querySelector('.pxm .chips')).toBeNull();
+      const cs = getComputedStyle(lines[0]!);
+      expect(cs.whiteSpace).not.toBe('nowrap');
+      expect(cs.textOverflow).not.toBe('ellipsis');
+      await press(insp, 'Use "Power"');
+      expect(store.config.pages?.[0]?.widgets[0]?.label).toBe('Power');
+    });
+    it('the page view lists no issues', async () => {
+      const { insp, store } = await inspectorFor({ kind: 'page', page: 0 });
+      inject(store, [check()]);
+      await tick(insp);
+      expect(insp.shadowRoot.querySelector('.issues, .issue')).toBeNull();
+    });
+  });
 });
 
 describe('studio checks in the store', () => {
@@ -319,4 +363,3 @@ describe('Show while the Studio is not mounted', () => {
     expect(store.pendingIssue).toBeNull();
   });
 });
-

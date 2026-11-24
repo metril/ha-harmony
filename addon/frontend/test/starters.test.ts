@@ -352,6 +352,16 @@ describe('visual pass: FIXED templates, checks and input editing', () => {
     expect(studioChecks(c, () => null, true).map((k) => k.kind)).not.toContain('label');
   });
 
+  it('a label check carries the abbreviation as short only when the advice is one', () => {
+    const mk = (title: string, label: string) => ({ devices: [], activities: [], pages: [{ id: 'p', cols: 4, rows: 5, title, widgets: [{ type: 'button', id: 'a', x: 0, y: 0, w: 2, h: 1, label, action: { device: 'shield', command: 'YouTube' } }] }] }) as unknown as Config;
+    const abbr = studioChecks(mk('Zed', 'Previous Channel Favourites Settings')).find((k) => k.kind === 'label');
+    expect(abbr?.short).toBe('Prev Ch Favs Setup');
+    expect(abbr?.msg).toContain('use "Prev Ch Favs Setup"');
+    const other = studioChecks(mk('Zed', 'Shield TV YouTube Premium Music Player Edition')).find((k) => k.kind === 'label');
+    expect(other?.msg).toBeTruthy();
+    expect(other?.short).toBeUndefined();
+  });
+
   it("derived inputs can be renamed or hidden: they become the device's own inputs", () => {
     const d = cfgInputs().devices![0] as Device;
     expect(derivedInputs(d).map((i) => i.label)).toEqual(['HDMI 1', 'HDMI 2', 'HDMI 3']);

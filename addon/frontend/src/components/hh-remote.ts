@@ -9,6 +9,7 @@ import type { StudioHost } from '../lib/studio-state';
 import { DEFAULT_LAYER, activityIndex, boxOf, clip, errorTarget, fits, gridOf, isList, pageDims, wireMap, type Box, type Source, type Target } from '../lib/studio-model';
 import { XRAY_PAD, xrayLabels } from '../lib/xray';
 import type { Page } from '../lib/model';
+import { collectIssues, issueText, widgetIssues } from '../lib/issues';
 
 interface Session {
   kind: 'move' | 'resize';
@@ -129,6 +130,8 @@ export class HhRemote extends LitElement {
     .wh.sel { stroke: #fff; stroke-width: 2.6; filter: drop-shadow(0 0 3px #20c8b0); }
     .wh:focus-visible { stroke: #5fe3cf; stroke-width: 2.2; }
     .wh.bad { stroke: #f85848; stroke-width: 1.8; stroke-dasharray: 4 2; }
+    .mark { stroke: var(--sf); stroke-width: 1.2; cursor: pointer; }
+    .mark.warn { fill: var(--ir); } .mark.bad { fill: var(--bad); }
     .wh.tgt { stroke: rgba(32, 200, 176, 0.7); stroke-dasharray: 4 3; stroke-width: 1.4; }
     .wh.over { stroke: #5fe3cf; stroke-width: 2; fill: rgba(32, 200, 176, 0.18); stroke-dasharray: none; }
     .cell { fill: transparent; }
@@ -453,6 +456,7 @@ export class HhRemote extends LitElement {
       const t = errorTarget(er.path);
       if (t && (t.kind === 'widget') && t.page === st.page) errs.add(t.index);
     }
+    const marks = widgetIssues(collectIssues(this.store.errors, this.store.warnings, this.store.checks, this.store.config), st.page);
     const lines: TemplateResult[] = [];
     if (showGrid) {
       const edge = (i: number, n: number, total: number) => Math.ceil((i * total) / n);
@@ -473,6 +477,10 @@ export class HhRemote extends LitElement {
         @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, i)}
         @focus=${() => { if (!(st.sel?.kind === 'widget' && st.sel.index === i && st.sel.page === st.page)) this.host.activateWidget(st.page, i); }}></rect>`;
     });
+    const markers = [...marks].map(([i, is]) => {
+      const r = this.rectOf(page, i, v2, map);
+      return svg`<circle class="mark ${is.level === 'error' ? 'bad' : 'warn'}" cx=${r.x2 - 3} cy=${r.y1 + 4} r="5" @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, i)}><title>${issueText({ kind: 'label', msg: is.text })}</title></circle>`;
+    });
     let handle: TemplateResult | typeof nothing = nothing;
     if (sel >= 0 && !list && !this.assigner.active) {
       const r = this.rectOf(page, sel, v2, map);
@@ -490,7 +498,7 @@ export class HhRemote extends LitElement {
       const r = widgetRect({ cols: g.cols, rows: g.rows, version: 2 } as V2Page, { x: Math.max(0, Math.min(g.cols - 1, b.x)), y: Math.max(0, Math.min(g.rows - 1, b.y - g.shift)), w: Math.max(1, Math.min(b.w, g.cols - Math.max(0, b.x))), h: Math.max(1, Math.min(b.h, g.rows - Math.max(0, b.y - g.shift))) });
       ghost = svg`<rect class=${s.valid ? 'ghost' : 'ghost invalid'} x=${r.x1} y=${r.y1} width=${r.x2 - r.x1 + 1} height=${r.y2 - r.y1 + 1} rx="10"></rect>`;
     }
-    return svg`<g class="grid">${lines}</g>${cell}<g role="application" aria-label="Remote screen editor" @keydown=${(e: KeyboardEvent) => this.onScreenKey(e)}>${widgets}</g>${handle}${ghost}`;
+    return svg`<g class="grid">${lines}</g>${cell}<g role="application" aria-label="Remote screen editor" @keydown=${(e: KeyboardEvent) => this.onScreenKey(e)}>${widgets}</g>${markers}${handle}${ghost}`;
   }
 
   private xray(rows: KeymapRow[]): TemplateResult {
