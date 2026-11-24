@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.12 (2026-11-24)
+
+- Editor: switches and selectable chips replace every checkbox.
+- Editor: Hide Label (icon only) now sits under the Label field and needs an icon; toggling it no longer makes the panel jump.
+- Editor: new Exit Button setting per page (Auto, Back, Device) for what the remote's Exit key does; Device is now kept instead of reverting to Auto.
+- Fix: long Suggested icon names no longer overlap their neighbours.
+
 ## 0.5.11 (2026-11-24)
 
 - Fix: the Firmware update entity stays available while the hub restarts after an install, and reports a clear error if the hub does not reconnect or comes back on the previous firmware.
