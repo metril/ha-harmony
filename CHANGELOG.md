@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.11 (2026-11-24)
+
+- Fix: the Firmware update entity stays available while the hub restarts after an install, and reports a clear error if the hub does not reconnect or comes back on the previous firmware.
+- Polish: single-sentence error and abort messages no longer end with a period.
+
 ## 0.5.10 (2026-11-24)
 
 - Fix: the add-on's hub firmware image was truncated when fetched by the integration (a single read returned a partial body); it now reads the whole image, so the Firmware update entity installs correctly.
