@@ -77,6 +77,7 @@ static const hp_field_desc_t hp_fields_key_event[] = {
 static const hp_field_desc_t hp_fields_state_update[] = {
     {"activity", HP_T_U8, false, NULL},
     {"power", HP_T_BOOL, false, NULL},
+    {"off_press", HP_T_BOOL, true, NULL},
 };
 
 static const hp_field_desc_t hp_fields_page_push[] = {
@@ -266,7 +267,7 @@ static const hp_msg_desc_t hp_msgs[] = {
     {"command", HP_MSG_COMMAND, HP_TRANSPORT_WS, 3, hp_fields_command},
     {"command_result", HP_MSG_COMMAND_RESULT, HP_TRANSPORT_WS, 2, hp_fields_command_result},
     {"key_event", HP_MSG_KEY_EVENT, HP_TRANSPORT_BOTH, 4, hp_fields_key_event},
-    {"state_update", HP_MSG_STATE_UPDATE, HP_TRANSPORT_BOTH, 2, hp_fields_state_update},
+    {"state_update", HP_MSG_STATE_UPDATE, HP_TRANSPORT_BOTH, 3, hp_fields_state_update},
     {"page_push", HP_MSG_PAGE_PUSH, HP_TRANSPORT_BOTH, 3, hp_fields_page_push},
     {"battery", HP_MSG_BATTERY, HP_TRANSPORT_BOTH, 3, hp_fields_battery},
     {"device_state", HP_MSG_DEVICE_STATE, HP_TRANSPORT_WS, 3, hp_fields_device_state},

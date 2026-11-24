@@ -110,7 +110,7 @@ async def test_transition_order_and_pushes(hub_process):
         r = await call(ws, "command", {"device": "hub", "command": "power_off"}, id=9)
         assert r["d"] == {"ok": True}
         msgs = await until(ws)
-        assert msgs[-1]["d"] == {"activity": 0, "power": False}
+        assert msgs[-1]["d"] == {"activity": 0, "power": False, "off_press": True}
         assert [m["d"] for m in msgs[:-1]] == [dev("tv", False), dev("amp", False)]
         assert read_lines(hub_process, 2) == [ir_line(c) for c in (TV_OFF, AMP_TOGGLE)]
 
@@ -240,7 +240,7 @@ async def test_key_starts_activity_through_state_machine(hub_rf, run_remote):
         assert read_lines(hub_rf, 4) == [ir_line(c) for c in (TV_ON, AMP_TOGGLE, TV_H1, AMP_OPT)]
         assert run_remote(hub_rf.rf, "--press", "2").returncode == 0
         msgs = await until(ws)
-        assert msgs[-1]["d"] == {"activity": 0, "power": False}
+        assert msgs[-1]["d"] == {"activity": 0, "power": False, "off_press": True}
         assert read_lines(hub_rf, 2) == [ir_line(c) for c in (TV_OFF, AMP_TOGGLE)]
 
 

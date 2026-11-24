@@ -99,6 +99,8 @@ typedef struct hp_actsm {
     hp_actstep_t plan[HP_ACT_PLAN_MAX];
     uint16_t nplan, pos;
     bool running;
+    bool off_press; /* an Off command's plan is pending */
+    bool off_emit;  /* set only while the ACTIVITY event of an Off press is delivered */
     bool resync; /* plan of a re-pressed current activity: discrete steps ignore the tracked state */
     int target;   /* activity being started, -1 = off */
     char tgt_key[HP_MAP_NAME_MAX];      /* its identity ("" = off) and, for off, the activity whose off steps run: to restart the plan after a reload */
@@ -143,6 +145,8 @@ void hp_actsm_reloaded(hp_actsm_t *);
 int hp_actsm_start(hp_actsm_t *, const char *name);
 int hp_actsm_start_idx(hp_actsm_t *, int idx);
 int hp_actsm_off(hp_actsm_t *);
+/* Inside the ACTIVITY notify: true when the report is the result of an Off command (not a resync/reload). */
+bool hp_actsm_off_press(const hp_actsm_t *);
 bool hp_actsm_busy(const hp_actsm_t *);
 /* Reported (last completed) activity, -1 none. */
 int hp_actsm_reported(const hp_actsm_t *);

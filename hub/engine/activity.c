@@ -313,7 +313,10 @@ static void finish(hp_actsm_t *e) {
     e->nplan = e->pos = 0;
     set_reported(e, e->target);
     e->map->current = e->target;
+    e->off_emit = e->off_press && e->target < 0; /* an actual Off press, not a resync / reload */
+    e->off_press = false;
     emit(e, HP_ACTSM_EVT_ACTIVITY, e->reported);
+    e->off_emit = false;
     mark_dirty(e); /* the transition's one state write */
     after_finish(e);
 }
@@ -322,6 +325,7 @@ static void finish(hp_actsm_t *e) {
 static void abort_plan(hp_actsm_t *e, int rc) {
     hp_log("hub: activity transition aborted (%d)\n", rc);
     cancel_plan(e);
+    e->off_press = false;
     e->map->current = e->reported;
     e->target = e->reported;
     emit(e, HP_ACTSM_EVT_ACTIVITY, e->reported);
@@ -429,6 +433,7 @@ int hp_actsm_start_idx(hp_actsm_t *e, int idx) {
     hp_map_t *m = e->map;
     if (idx < 0 || idx >= m->nacts) return -HP_E_INVAL;
     emit(e, HP_ACTSM_EVT_START, idx);
+    e->off_press = false; /* a start supersedes a pending Off */
     if (m->format != 2) {
         int rc = hp_activity_set(m, m->acts[idx].name, e->sinks);
         if (rc < 0) return rc;
@@ -458,18 +463,22 @@ int hp_actsm_off(hp_actsm_t *e) {
         int rc = hp_activity_off(m, e->sinks);
         if (rc < 0) return rc;
         set_reported(e, -1);
+        e->off_emit = true;
         emit(e, HP_ACTSM_EVT_ACTIVITY, -1);
+        e->off_emit = false;
         mark_dirty(e);
         return rc;
     }
     int prev = m->current; /* the activity (or interrupted target) whose off steps run */
     cancel_plan(e);
+    e->off_press = true;
     hp_irout_cancel(m->out);
     hp_map_bt_release(m, e->sinks);
     int rc = begin(e, -1, prev, false);
     return rc < 0 ? rc : (prev < 0 ? 0 : prev);
 }
 
+bool hp_actsm_off_press(const hp_actsm_t *e) { return e->off_emit; }
 bool hp_actsm_busy(const hp_actsm_t *e) { return e->running; }
 int hp_actsm_reported(const hp_actsm_t *e) { return e->reported; }
 

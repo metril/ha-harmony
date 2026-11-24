@@ -157,7 +157,7 @@ async def test_format2_activity_and_device_commands(hub_process):
         r = await call(ws, "command", {"device": "hub", "command": "power_off"}, id=4)
         assert r["d"]["ok"] is True
         msgs = await until(ws)
-        assert msgs[-1]["d"] == {"activity": 0, "power": False}
+        assert msgs[-1]["d"] == {"activity": 0, "power": False, "off_press": True}
         assert [m["d"] for m in msgs[:-1]] == [{"device": "tv", "power": False}]
         off1, off2 = read_lines(hub_process, 2)  # power-down, then the activity's own off step
         assert off1 == off2 and off1.startswith("ir port=255 hz=38000 n=68 ")
@@ -215,7 +215,7 @@ async def test_activity_from_key_starts_and_powers_down(hub_rf, run_remote):
         assert read_lines(hub_rf, 1) == [PR]
         assert run_remote(hub_rf.rf, "--press", "2").returncode == 0
         assert (await recv(ws))["t"] == "key_event"
-        assert (await until(ws))[-1]["d"] == {"activity": 0, "power": False}
+        assert (await until(ws))[-1]["d"] == {"activity": 0, "power": False, "off_press": True}
         assert read_lines(hub_rf, 2)[0].startswith("ir port=255 hz=38000 n=68")
         # key 7 is no longer mapped now that no activity runs
         assert run_remote(hub_rf.rf, "--press", "7").returncode == 0

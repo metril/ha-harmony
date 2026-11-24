@@ -74,7 +74,7 @@ MESSAGES: dict[str, tuple[int, str, tuple[tuple[str, str, bool], ...]]] = {
     'command': (8, 'ws', (('device', 'str', False), ('command', 'str', False), ('args', 'json', True), )),
     'command_result': (9, 'ws', (('ok', 'bool', False), ('message', 'str', True), )),
     'key_event': (10, 'both', (('remote', 'u8', False), ('key', 'u8', False), ('action', 'enum:key_action', False), ('activity', 'u8', True), )),
-    'state_update': (11, 'both', (('activity', 'u8', False), ('power', 'bool', False), )),
+    'state_update': (11, 'both', (('activity', 'u8', False), ('power', 'bool', False), ('off_press', 'bool', True), )),
     'page_push': (12, 'both', (('remote', 'u8', False), ('page', 'u8', False), ('data', 'bytes', False), )),
     'battery': (13, 'both', (('remote', 'u8', False), ('percent', 'u8', False), ('millivolts', 'u16', False), )),
     'device_state': (14, 'ws', (('device', 'str', False), ('power', 'bool', False), ('input', 'str', True), )),
