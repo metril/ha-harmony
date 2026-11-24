@@ -9,3 +9,4 @@
 **/__pycache__
 addon/frontend/node_modules
 addon/frontend/dist
+!addon/firmware

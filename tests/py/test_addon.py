@@ -197,7 +197,7 @@ def router_routes(app) -> list[tuple[str, str]]:
 
 
 def _is_channel(path: str) -> bool:
-    return path == "/api/v1/channel" or path.startswith("/api/v1/channel/")
+    return path.startswith(("/api/v1/channel", "/api/v1/firmware"))
 
 
 def all_routes() -> list[tuple[str, str]]:

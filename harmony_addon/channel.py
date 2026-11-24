@@ -17,7 +17,7 @@ from typing import Any
 import voluptuous as vol
 from aiohttp import WSMsgType, web
 
-from . import bt_routes, live, schemas
+from . import bt_routes, firmware, live, schemas
 from .linked import clean_name
 from .sockopts import set_keepalive
 from .store import HUB_ID
@@ -343,6 +343,11 @@ async def channel(request: web.Request) -> web.StreamResponse:
         adopt = _identity(app, hub, f, new=new)
         if adopt is not None:
             await conn.send({"t": "adopt", "result": adopt})
+        meta = await asyncio.get_running_loop().run_in_executor(
+            None, firmware.read_meta, app[firmware.FIRMWARE_KEY]
+        )
+        if meta is not None:  # the bundled hub image, learnt on every (re)connect: nothing polls
+            await conn.send({"t": "fw", "fw": firmware.announce(meta)})
         conn.ready = (
             True  # pushes now queue behind conn.lock, so a bundle applied from here on is not lost
         )

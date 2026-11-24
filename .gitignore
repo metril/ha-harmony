@@ -28,3 +28,7 @@ dist/
 # Local tooling scratch
 .playwright-mcp/
 /image.png
+
+# CI drops the signed hub image + hub.json here for the add-on image (addon-publish.yml)
+/addon/firmware/*
+!/addon/firmware/.gitkeep

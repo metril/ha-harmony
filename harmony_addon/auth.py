@@ -27,6 +27,9 @@ USER_HEADER = "X-Remote-User-Id"  # set by the Supervisor from the ingress sessi
 USER_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 HASSIO_NETWORK = "172.30.32.0/23"
 CHANNEL_PREFIX = "/api/v1/channel"
+FIRMWARE_PREFIX = (
+    "/api/v1/firmware"  # bearer-only like the channel (the integration fetches the hub image)
+)
 TOKEN_FILE = "bundle_token"
 
 
@@ -153,7 +156,7 @@ class RouteAuth:
 
     def check(self, request: web.Request) -> None:
         path = request.path
-        if path == CHANNEL_PREFIX or path.startswith(CHANNEL_PREFIX + "/"):
+        if any(path == p or path.startswith(p + "/") for p in (CHANNEL_PREFIX, FIRMWARE_PREFIX)):
             self.bundle.check(request)
         else:
             self.ingress.check(request)

@@ -21,4 +21,4 @@ def test_every_route_is_in_the_api_doc_with_the_right_auth_class():
         f"documented but not served: {sorted(documented - set(served))}"
     )
     for method, path, auth in rows:
-        assert auth == ("bearer" if path.startswith("/api/v1/channel") else "ingress"), path
+        assert auth == ("bearer" if path.startswith(("/api/v1/channel", "/api/v1/firmware")) else "ingress"), path

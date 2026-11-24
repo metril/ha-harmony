@@ -7,7 +7,7 @@ the table below. There is no polling anywhere: the add-on pushes over two WebSoc
 ## Conventions
 
 - **Ingress** routes are reachable only through Home Assistant ingress (the Supervisor gateway
-  peer). Pages additionally need `X-Ingress-Path`. **Bearer** routes (`/api/v1/channel`) need
+  peer). Pages additionally need `X-Ingress-Path`. **Bearer** routes (`/api/v1/channel`, `/api/v1/firmware/hub.img`) need
   `Authorization: Bearer <token>` from the Supervisor network, and are refused via ingress.
 - Every ingress request that changes state (POST/PUT/PATCH/DELETE; a DELETE sends `{}`) needs `Content-Type: application/json`
   (`text/yaml` or `application/yaml` for `import_yaml`), the header `X-HH-CSRF: 1`, and a same-origin
@@ -61,6 +61,7 @@ the table below. There is no polling anywhere: the add-on pushes over two WebSoc
 | POST | `/api/v1/bt/key` | ingress | Bluetooth: test-fire a key at a paired host |
 | GET | `/api/v1/live` | ingress | WebSocket push to the editor: hubs, config status, Bluetooth state, remote keys |
 | GET | `/api/v1/channel` | bearer | WebSocket to the integration: bundle push, acks, Bluetooth relay |
+| GET | `/api/v1/firmware/hub.img` | bearer | The signed hub image bundled into the add-on image (404 when none is bundled) |
 
 Query/body details follow. `hub` is a query parameter on `config/validate|preview|keymap` (it selects the hub limits the integration reported) and a path
 segment on `hubs/{hub}/...`. Config ids are `[A-Za-z0-9][A-Za-z0-9._-]{0,62}` (generated lowercase slugs).
@@ -295,6 +296,7 @@ Add-on -> integration:
 | `t` | Fields | Meaning |
 | --- | --- | --- |
 | `bundle` | `rev`, `body` | `body` = `{schema, core_version, hub_id, applied_at, rev, config, ...}` (`config` never contains `editor`); sent when a config is applied, and right after `hello` when `rev != known_rev` |
+| `fw` | `fw: {version, build, size, sha512}` | the signed hub image bundled in this add-on (`GET /api/v1/firmware/hub.img`); sent after `hello`, only when an image is bundled, so the integration learns of it on every (re)connect |
 | `nothing_applied` | | answer to `hello` when no config is applied (sent once; a later apply sends `bundle`) |
 | `bt_cmd` | `id`, `op: "pair"\|"pair_stop"\|"pick"\|"forget"\|"key"`, op fields | a validated editor command, delivered once. `id` matches `[A-Za-z0-9_-]{1,16}` |
 | `listen` | `on: bool` | opt the hub's remote keys in or out (sent after `hello` when a `keys:<hub>` subscriber exists, then on change) |

@@ -39,7 +39,7 @@ from harmony_core.page_codec import MAX_BYTES, MAX_WIDGETS, page_to_dict
 from harmony_core.theme_build import theme_warnings
 from harmony_irdb.archive import IrdbArchive
 
-from . import __version__, bt_routes, channel, ir_routes, live, schemas
+from . import __version__, bt_routes, channel, firmware, ir_routes, live, schemas
 from .auth import (
     CHANNEL_PREFIX,
     HASSIO_NETWORK,
@@ -1073,6 +1073,7 @@ def create_app(
     send_clock: Callable[[], float] = time.monotonic,
     irdb_dir: Path | str | None = None,
     static_dir: Path | str | None = None,
+    firmware_dir: Path | str | None = None,
 ) -> web.Application:
     """`auth` guards the ingress routes; the bundle routes always need `bundle_token` (default:
     the 0600 token file under data_dir) from a peer in `bundle_networks` (None: any, for tests)."""
@@ -1092,6 +1093,7 @@ def create_app(
     app[LIB_KEY] = Library(data_dir)
     migrate_v1(data_dir, app[LIB_KEY])
     app[CLOCK_KEY] = clock
+    app[firmware.FIRMWARE_KEY] = Path(firmware_dir) if firmware_dir else firmware.DEFAULT_DIR
     app[NOTIFIER_KEY] = ApplyNotifier()
     app[CATALOG_KEY] = Catalog(ha_api, clock, ha_registry)
     app[BUS_KEY] = Bus()
@@ -1160,6 +1162,7 @@ def create_app(
     ir_routes.add_routes(app, api)
     bt_routes.add_routes(app, api, bt_result_wait)
     channel.add_routes(app, api)
+    firmware.add_routes(app, api)
     live.add_routes(app, api)
     app.router.add_post(f"{api}/ir/test", ir_test)
     app.router.add_get(f"{api}/hubs", list_hubs)

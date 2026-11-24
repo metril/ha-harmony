@@ -26,6 +26,8 @@ COPY --from=deps /opt/deps /opt/deps
 COPY harmony_core /opt/app/harmony_core
 COPY harmony_irdb /opt/app/harmony_irdb
 COPY harmony_addon /opt/app/harmony_addon
+# The signed hub image + hub.json when CI bundled one (addon/firmware/ otherwise holds only .gitkeep).
+COPY addon/firmware/ /opt/app/firmware/
 COPY --from=frontend /repo/addon/frontend/dist /opt/app/frontend
 # s6-overlay (the base image's init) stays root; only the server drops to this user.
 RUN adduser -D -H -u 10001 -s /sbin/nologin app \
