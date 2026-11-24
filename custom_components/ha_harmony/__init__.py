@@ -44,7 +44,7 @@ from .coordinator import (
 )
 from .errors import invalid
 from .harmony_core.config_model import validate_ir
-from .ota import parse_image, path_allowed, read_image
+from .ota import path_allowed, read_image
 from .rename import (
     RenameError,
     async_migrate_entry,
@@ -61,6 +61,7 @@ PLATFORMS = [
     Platform.REMOTE,
     Platform.SELECT,
     Platform.SENSOR,
+    Platform.UPDATE,
 ]
 
 type HarmonyConfigEntry = ConfigEntry[HarmonyCoordinator]
@@ -146,7 +147,7 @@ async def _install_firmware(
     if real is None:
         raise invalid("ota_path_not_allowed", path=path)
     data = await hass.async_add_executor_job(read_image, real)
-    await coord.async_install_firmware(parse_image(data), allow_dev_key=allow_dev_key)
+    await coord.async_install_image(data, allow_dev_key=allow_dev_key)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:

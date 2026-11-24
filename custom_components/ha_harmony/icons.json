@@ -62,6 +62,11 @@
       "command": {
         "default": "mdi:gesture-tap-button"
       }
+    },
+    "update": {
+      "hub_firmware": {
+        "default": "mdi:chip"
+      }
     }
   },
   "services": {

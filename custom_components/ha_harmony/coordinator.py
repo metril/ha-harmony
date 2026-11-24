@@ -38,9 +38,11 @@ from .addon_link import (
     AddonUnreachable,
     Bundle,
     BundleRejected,
+    FwInfo,
     NothingApplied,
     compile_source,
     parse_bundle,
+    parse_fw,
 )
 from .api import (
     HarmonyAuthError,
@@ -83,7 +85,7 @@ from .harmony_core.harmony_proto import KEY_BY_NAME, MsgType
 from .harmony_core.hub_limits import bt_fit_error
 from .now_playing import NowPlayingFeed
 from .now_playing import options as now_playing_options
-from .ota import CHUNK, TARGET_HUB, UPLOAD_ATTEMPTS, Image, encode_chunk
+from .ota import CHUNK, TARGET_HUB, UPLOAD_ATTEMPTS, Image, encode_chunk, parse_image
 from .tile_format import tile_state, tile_text
 
 _LOGGER = logging.getLogger(__name__)
@@ -320,6 +322,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         ] = {}  # last compile / set_config round trip, in ms (diagnostics)
         # firmware update (ota.py): idle | uploading | applying | restarting | installed | failed | rolled_back
         self.ota_state = "idle"
+        # the hub image the add-on bundles (its `fw` frame); None: no link, or none bundled
+        self.addon_fw: FwInfo | None = None
         self.ota_progress = 0  # percent of the image the hub holds
         self.ota_build: int | None = None
         self.ota_error: str | None = None
@@ -469,7 +473,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         ids = {f"{h}_remote", f"{h}_activity"}
         if self.has_addon_link:
             ids.add(f"{h}_addon_link")
-        ids.add(f"{h}_firmware")
+        ids |= {f"{h}_firmware", f"{h}_firmware_image"}
         ids |= self.btm.expected_unique_ids()
         for r in self.remotes:
             ids |= {f"{h}_key_{r}", f"{h}_battery_{r}", f"{h}_voltage_{r}", f"{h}_pagefmt_{r}"}
@@ -809,6 +813,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         finally:
             self._channel = None
             self._channel_ready.clear()
+            self._set_addon_fw(None)  # re-learnt from the next hello
             self.btm.on_addon_gone()
             await channel.close()
         code = channel.close_code
@@ -857,6 +862,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             self._settle_refresh(
                 NothingApplied(f"no config has been applied for hub {self.hub_id} in the add-on")
             )
+        elif t == "fw":
+            self._set_addon_fw(parse_fw(msg.get("fw")))
         elif t == "adopt":
             res = msg.get("result")
             client.last_adopt = res if isinstance(res, str) else None
@@ -1817,6 +1824,32 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             )
         else:
             ir.async_delete_issue(self.hass, DOMAIN, iid)
+
+    def _set_addon_fw(self, fw: FwInfo | None) -> None:
+        if fw != self.addon_fw:
+            self.addon_fw = fw
+            self._notify(TOPIC_OTA)
+
+    async def async_install_image(self, data: bytes, *, allow_dev_key: bool = False) -> None:
+        """The raw bytes of a signed image (a file, or the add-on's bundle): client-side checks, then the upload."""
+        await self.async_install_firmware(parse_image(data), allow_dev_key=allow_dev_key)
+
+    async def async_install_addon_firmware(self) -> None:
+        """Install the hub image the add-on bundles. Everything the add-on says is re-checked against the image
+        itself; the hub's signature check stays the authority."""
+        fw, link = self.addon_fw, self._link
+        if fw is None or link is None:
+            raise invalid("ota_no_addon_image")
+        if self.client.ota_key == "dev":
+            raise invalid("ota_dev_key")
+        try:
+            data = await link.fetch_firmware()
+        except AddonError as exc:
+            raise ha_error("ota_failed", error=exc) from exc
+        image = parse_image(data)
+        if (image.build, image.size, image.sha512) != (fw.build, fw.size, fw.sha512):
+            raise invalid("ota_image_mismatch")
+        await self.async_install_firmware(image)
 
     async def async_install_firmware(self, image: Image, *, allow_dev_key: bool = False) -> None:
         """Upload a (client-checked) signed image; the hub verifies, applies and restarts itself.

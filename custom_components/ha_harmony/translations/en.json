@@ -316,6 +316,11 @@
       "command": {
         "name": "Command"
       }
+    },
+    "update": {
+      "hub_firmware": {
+        "name": "Firmware"
+      }
     }
   },
   "exceptions": {
@@ -405,6 +410,12 @@
     },
     "ota_dev_key": {
       "message": "This hub trusts the public dev OTA key, so any image signed with it would be accepted. Rebuild the hub with a release key, or set allow_dev_key to install anyway."
+    },
+    "ota_no_addon_image": {
+      "message": "The add-on has not announced a hub firmware image. Update the add-on, or install a file with ha_harmony.install_firmware."
+    },
+    "ota_image_mismatch": {
+      "message": "The add-on image does not match what it announced (build, size or checksum). Nothing was sent to the hub."
     }
   },
   "options": {

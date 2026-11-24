@@ -139,3 +139,33 @@ async def test_hub_without_tcp_keepalive_is_refused_at_setup(hass, fake_hub, add
     entry = make_entry("127.0.0.1", hub.port)
     entry.add_to_hass(hass)
     assert not await hass.config_entries.async_setup(entry.entry_id)
+
+
+async def test_the_bundled_hub_image_is_learnt_on_connect_and_fetched(
+    hass, fake_hub, aiohttp_client, tmp_path
+):
+    import hashlib
+
+    img = b"HOTA" + bytes(200)
+    fw = tmp_path / "fw"
+    fw.mkdir()
+    (fw / "hub.img").write_bytes(img)
+    meta = {
+        "version": "0.5.9",
+        "build": 99,
+        "size": len(img),
+        "sha512": hashlib.sha512(img).hexdigest(),
+    }
+    (fw / "hub.json").write_text(json.dumps(meta))
+    app = create_app(
+        tmp_path / "addon2",
+        auth=NoAuth(),
+        bundle_token=ADDON_TOKEN,
+        bundle_networks=None,
+        firmware_dir=fw,
+    )
+    addon2 = await aiohttp_client(app)
+    _entry, c = await start(hass, fake_hub, addon2, BtHub())
+    await until(hass, lambda: c.addon_fw is not None)
+    assert (c.addon_fw.version, c.addon_fw.build, c.addon_fw.size) == ("0.5.9", 99, len(img))
+    assert await c._link.fetch_firmware() == img

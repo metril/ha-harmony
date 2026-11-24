@@ -139,6 +139,38 @@ def parse_bundle(
     return Bundle(rev, applied_at, data["config"], compiled)
 
 
+FW_MAX_BYTES = 8 << 20
+_FW_SHA = re.compile(r"[0-9a-f]{1,128}")
+
+
+@dataclass(frozen=True)
+class FwInfo:
+    """The hub image bundled in the add-on, as its `fw` frame announces it (hub.json)."""
+
+    version: str
+    build: int
+    size: int
+    sha512: str
+
+
+def _uint(v: Any, limit: int) -> bool:
+    return type(v) is int and 0 <= v <= limit
+
+
+def parse_fw(raw: Any) -> FwInfo | None:
+    """The `fw` of a channel frame, or None when absent or malformed (the add-on is never trusted)."""
+    if not isinstance(raw, dict):
+        return None
+    ver, build, size, sha = (raw.get(k) for k in ("version", "build", "size", "sha512"))
+    if not (isinstance(ver, str) and 0 < len(ver) <= 64):
+        return None
+    if not (_uint(build, 0xFFFFFFFF) and _uint(size, FW_MAX_BYTES) and size > 0):
+        return None
+    if not (isinstance(sha, str) and _FW_SHA.fullmatch(sha)):
+        return None
+    return FwInfo(ver, build, size, sha)
+
+
 REMOTES_MAX_BYTES = 4000
 
 
@@ -202,6 +234,7 @@ class AddonClient:
     def __init__(self, session: aiohttp.ClientSession, host: str, port: int, token: str) -> None:
         self._session = session
         self._url = f"http://{host}:{port}/api/v1/channel"
+        self._fw_url = f"http://{host}:{port}/api/v1/firmware/hub.img"
         self._headers = {"Authorization": f"Bearer {token}"}
         # the connected hub's limits (hello_ack.limits), sent in `hello` so the editor shows ITS caps
         self.limits_provider: Callable[[], HubLimits | None] | None = None
@@ -265,6 +298,27 @@ class AddonClient:
                 await channel.close()
                 raise
         return channel
+
+    async def fetch_firmware(self) -> bytes:
+        """The bundled hub image, into memory (size-capped). The caller checks it against the announced `fw`."""
+        try:
+            async with self._session.get(
+                self._fw_url, headers=self._headers, timeout=aiohttp.ClientTimeout(total=60)
+            ) as resp:
+                if resp.status in (401, 403):
+                    raise AddonAuthError("the add-on refused the token")
+                if resp.status == 404:
+                    raise AddonRejected("the add-on has no firmware image")
+                if resp.status != 200:
+                    raise AddonUnreachable(f"the add-on answered HTTP {resp.status}")
+                if (resp.content_length or 0) > FW_MAX_BYTES:
+                    raise AddonRejected("the firmware image is too large")
+                data = await resp.content.read(FW_MAX_BYTES + 1)
+        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
+            raise AddonUnreachable(f"cannot reach the add-on ({type(exc).__name__})") from None
+        if len(data) > FW_MAX_BYTES:
+            raise AddonRejected("the firmware image is too large")
+        return data
 
     async def probe(self, hub_id: str) -> None:
         """Does the add-on answer at this address and token? (config flow). No hello: it is closed at once."""
