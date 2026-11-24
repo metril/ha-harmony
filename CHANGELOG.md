@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4 (2026-11-23)
+
+- The Now Playing card's play/pause works again: it toggles the activity's media player.
+- Remote keys work right after an integration reload.
+- Update the add-on in HA. No hub or remote update is needed.
+
 ## 0.5.3 (2026-11-23)
 
 - Pressing Off on the Harmony remote now puts the Shield (and any HA-controlled device that is on) to sleep, even when the activity already shows Off. For example, after the Shield was woken by its own remote.
