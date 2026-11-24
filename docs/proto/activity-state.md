@@ -39,7 +39,7 @@ end any key hold. The line-free time (like `bus_free`, per-device settle and the
 debounce stamp) is only trusted within the span it was set with, so a hub idle for >= 2^31 ms
 (32-bit ms clock) never reads a stale stamp as a future deadline.
 
-**Interruption.** A new start/Off while a transition runs cancels its remaining steps. Frames
+**Interruption.** A new start, or an Off while no Off plan is running, cancels the remaining steps; an Off arriving while an Off plan is already running is ignored (an idle Off still resends the discrete offs). Frames
 already sent stay in the tracked state; the new plan is built from that state, and pending
 settle times are kept (a device powered on 20 ms ago is not sent an input yet). The activity
 whose `off` steps run is the last requested one (the interrupted target counts as current).

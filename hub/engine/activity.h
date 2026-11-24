@@ -20,7 +20,7 @@
  * Sequencing: one step per timer; the next step is not before (previous frame time incl. SIRC
  * copies + HP_ACT_GUARD_MS), so frames never overlap. The bus-free time persists across plans.
  *
- * Interruption rule: a new start/off while a transition runs cancels the remaining plan steps
+ * Interruption rule: a new start, or an off while no Off plan is running, cancels the remaining plan steps
  * (frames already sent stay applied in the tracked state), then plans from the tracked state.
  * Pending settle times survive, so a half-powered device is not sent an input too early.
  * IR key presses and the ir_send / device_command verbs that arrive while busy are queued (small FIFOs) and
@@ -140,7 +140,7 @@ void hp_actsm_reloaded(hp_actsm_t *);
 
 /* Start the named activity / a power-down. Return the activity index (off: the activity that was
  * current, 0 when none), -HP_E_INVAL (unknown activity), or the error of a synchronous first send.
- * Off is never a no-op: nothing tracked on still resends the discrete power-off codes of the
+ * An Off while an Off plan is already running is ignored; an idle Off is never a no-op: nothing tracked on still resends the discrete power-off codes of the
  * current / last activity's devices (all devices when none is known). */
 int hp_actsm_start(hp_actsm_t *, const char *name);
 int hp_actsm_start_idx(hp_actsm_t *, int idx);
