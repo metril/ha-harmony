@@ -1135,14 +1135,14 @@ def _ended(hub):
 
 
 async def test_self_off_ends_the_activity(hass, rig, clock):
-    hub, c = await _stream_running(hass, rig)
+    hub, _c = await _stream_running(hass, rig)
     hass.states.async_set("media_player.shield", "off")
     await settle(hass, lambda: _ended(hub))
     assert len(_ended(hub)) == 1
 
 
 async def test_self_off_within_the_first_minute_does_nothing(hass, rig, clock):
-    hub, c = await _stream_running(hass, rig, age=const.OFF_ENDS_ACTIVITY_AGE - 5)
+    hub, _c = await _stream_running(hass, rig, age=const.OFF_ENDS_ACTIVITY_AGE - 5)
     hass.states.async_set("media_player.shield", "off")
     await settle(hass)
     assert _ended(hub) == []
@@ -1170,7 +1170,7 @@ async def test_off_caused_by_our_own_power_off_does_nothing(hass, rig, clock):
 
 
 async def test_self_off_without_the_option_does_nothing(hass, rig, clock):
-    hub, c = await _stream_running(hass, rig, yaml=YAML)
+    hub, _c = await _stream_running(hass, rig, yaml=YAML)
     hass.states.async_set("media_player.shield", "off")
     await settle(hass)
     assert _ended(hub) == []

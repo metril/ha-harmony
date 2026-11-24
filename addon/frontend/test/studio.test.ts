@@ -361,6 +361,7 @@ describe('remote studio', () => {
       const s2 = wpage([6, 7, 8, 9, 10, 11]);
       store.config.pages = [{ id: 'main', title: 'Main', layout: 'fixed', cols: 12, rows: 9, widgets }] as never;
       store.pages = [{ index: 0, id: 'main', ok: true, error: null, page: s1, wire_pages: [{ page_id: 0, seq: null, bytes: 1, bytes_v1: 1, widgets: 6, page: s1 }, { page_id: 1, seq: null, bytes: 1, bytes_v1: 1, widgets: 6, page: s2 }], bytes: 1, bytes_v1: 1, limit: 251, widgets: 12, widget_limit: 32 }] as never;
+      (store as unknown as { check: () => Promise<void> }).check = async () => {}; // the debounced preview must not swap the fixture's pages
       store.dispatchEvent(new Event('change'));
       return { s1, s2 };
     }
@@ -380,8 +381,7 @@ describe('remote studio', () => {
       pt = { x: 100 + dx, y: 100 + dy };
       el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1 }));
       el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
-      await remote.updateComplete; // short on purpose: the store's 150 ms preview debounce must not fire and swap the fixture's pages
-      await new Promise((r) => setTimeout(r, 10));
+      await tick(remote);
     }
     const wireOf = (remote: El) => (remote as unknown as { st: { wire: number } }).st.wire;
     it('dragging one cell right and one row down on screen 2 changes x and y by exactly 1 and the widget stays on screen 2', async () => {
