@@ -2,7 +2,6 @@
 
 import asyncio
 
-import aiohttp
 from aiohttp import web
 
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
