@@ -279,6 +279,31 @@ def test_push_happy_path(artifacts):
     assert ["mv", dh.REMOTE_HUB + ".new", dh.REMOTE_HUB] in hub.log
 
 
+def test_push_records_the_binary_build_like_ota(tmp_path):
+    hub_bin = tmp_path / "hub"
+    hub_bin.write_bytes(b"x" * 100 + b"HPBUILDID=752;" + b"y" * 100)
+    d, hub, _ = make()
+    hub.files[f"{dh.REMOTE_DIR}/ota-build"] = b"497\n"
+    hub.files[f"{dh.REMOTE_DIR}/ota-rollback"] = b"build=9\n"
+    assert d.push(hub_bin, check_space=False) == 0
+    assert hub.files[f"{dh.REMOTE_DIR}/ota-build"] == b"752\n"
+    assert f"{dh.REMOTE_DIR}/ota-rollback" not in hub.files  # a good update clears the report
+    assert not any(p.endswith(".new") and "ota-build" in p for p in hub.files)
+
+
+def test_push_without_build_tag_leaves_ota_build_alone(artifacts):
+    d, hub, _ = make()
+    hub.files[f"{dh.REMOTE_DIR}/ota-build"] = b"497\n"
+    assert d.push(artifacts["hub"], check_space=False) == 0
+    assert hub.files[f"{dh.REMOTE_DIR}/ota-build"] == b"497\n"
+
+
+def test_parse_build_id():
+    assert dh.parse_build_id(b"..HPBUILDID=752;..") == 752
+    assert dh.parse_build_id(b"HPBUILDID=;") is None
+    assert dh.parse_build_id(b"nothing") is None
+
+
 def test_push_rf_probe_is_md5_verified_and_executable(artifacts, tmp_path):
     """rf_probe rides the same verified path as the other binaries, not a hand scp."""
     probe = tmp_path / "rf_probe"

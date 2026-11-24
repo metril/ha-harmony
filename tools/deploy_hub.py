@@ -40,6 +40,8 @@ RESTART_SCRIPT = (
     f'read u _ </proc/uptime; echo "${{u%%.*}}" >{PLANNED_MARKER} || exit 5; '
     f'kill "$p" || {{ rm -f {PLANNED_MARKER}; exit 4; }}; echo "$p"'
 )
+REMOTE_BUILD = f"{REMOTE_DIR}/ota-build"  # the OTA downgrade floor, written by the daemon on apply
+REMOTE_ROLLBACK = f"{REMOTE_DIR}/ota-rollback"
 REMOTE_RF_PROBE = f"{REMOTE_DIR}/rf_probe"
 REMOTE_CONFIG = f"{REMOTE_DIR}/config.json"
 # tmpfs: gone after reboot. The basename MUST be "busybox": this build dispatches on argv[0] and
@@ -132,6 +134,12 @@ class Proc:
     @property
     def alive(self) -> bool:
         return not self.stat.startswith("Z")  # zombie `[hal]` children hold nothing
+
+
+def parse_build_id(data: bytes) -> int | None:
+    """The build id compiled into a hub binary (`HPBUILDID=N;`, hub/ota/hub_ota.c), or None."""
+    m = re.search(rb"HPBUILDID=(\d+);", data)
+    return int(m[1]) if m else None
 
 
 def parse_ps(text: str) -> list[Proc]:
@@ -325,6 +333,23 @@ class Deployer:
                 )
         self.out(f"  ok  {remote}  {len(data)} B  md5 {want}")
 
+    def _record_build(self, build: int) -> None:
+        """Mirror the OTA apply: ota-build = the installed build (tmp + rename, `N\\n`, 0644) and drop
+        any stale ota-rollback report, so the downgrade floor and fw_build match the running binary."""
+        tmp = _need_write_path(f"{REMOTE_BUILD}.new")
+        rc, _, err = self.r.run_input(
+            ["sh", "-c", f"cat > {shlex.quote(tmp)}"], f"{build}\n".encode()
+        )
+        if rc == 0:
+            rc, _, err = self.r.run(["chmod", "644", tmp])
+        if rc == 0:
+            rc, _, err = self.r.run(["mv", tmp, REMOTE_BUILD])
+        if rc != 0:
+            self.r.run(["rm", "-f", tmp])
+            raise DeployError(f"{REMOTE_BUILD}: write failed: {err.decode('utf-8', 'replace')}")
+        self.r.run(["rm", "-f", _need_write_path(REMOTE_ROLLBACK)])
+        self.out(f"  ok  {REMOTE_BUILD}  build {build}")
+
     def push(
         self,
         hub: Path,
@@ -374,6 +399,9 @@ class Deployer:
         for local, remote, mode in items:
             # The hub binary is what boot persistence runs: replace it atomically.
             self._put(local, remote, mode, atomic=remote == REMOTE_HUB)
+        build = parse_build_id(hub.read_bytes())
+        if build is not None:
+            self._record_build(build)
         self.out(f"push complete: {len(items)} file(s) verified by md5 on both ends")
         return 0
 
