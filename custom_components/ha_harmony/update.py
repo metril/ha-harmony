@@ -64,6 +64,12 @@ class HarmonyHubUpdate(HarmonyEntity, UpdateEntity):
         return bool(a and b and int(a.group(1)) > int(b.group(1)))
 
     @property
+    def available(self) -> bool:
+        """Mid-install the hub reboots and drops off: this entity stays up (in_progress) until it returns on the
+        new build or the coordinator gives up; every other hub entity follows the connection."""
+        return self.in_progress or super().available
+
+    @property
     def in_progress(self) -> bool:
         return self.coordinator.ota_state in _BUSY
 

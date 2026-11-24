@@ -303,24 +303,30 @@ async def test_a_lost_ota_end_reply_never_uploads_or_applies_twice(hass, rig, fw
     assert c.ota_state == "installed" and c.client.fw_build == 12
 
 
-async def test_never_confirmed_build_fails_the_update_without_resending(
-    hass, rig, fw_dir, monkeypatch
-):
-    hub = ScriptedHub(lose_end_reply=True)
+class GoneHub(ScriptedHub):
+    """After ota_end the hub never completes a hello again."""
+
+    async def __call__(self, ws, env):
+        if env["t"] == "hello" and self.ends:
+            await ws.close()
+            return
+        await super().__call__(ws, env)
+
+
+async def test_unconfirmed_build_ends_the_install_without_resending(hass, rig, fw_dir, monkeypatch):
+    hub = GoneHub(lose_end_reply=True)
     c = await rig(hub)
-    hub.pending_build = 0
-    monkeypatch.setattr(
-        type(c), "_await_build", lambda self, build, tries=480: _never(self, build), raising=True
-    )
+    orig = type(c)._await_build
+
+    async def short(self, build, timeout=0.5):
+        return await orig(self, build, 0.5)
+
+    monkeypatch.setattr(type(c), "_await_build", short)
     f = fw_dir / "x.img"
     f.write_bytes(make_image(b"k" * 300, build=12))
     with pytest.raises(HomeAssistantError):
         await install(hass, f)
-    assert hub.ends == 1 and c.ota_state == "failed"
-
-
-async def _never(self, build):
-    return False
+    assert hub.ends == 1 and c.ota_state == "idle"  # no verdict: the hub never reconnected
 
 
 async def test_dev_key_hub_needs_an_explicit_opt_in(hass, rig, fw_dir):

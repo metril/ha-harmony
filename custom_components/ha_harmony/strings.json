@@ -408,6 +408,12 @@
     "ota_failed": {
       "message": "The firmware update failed: {error}"
     },
+    "ota_hub_no_reconnect": {
+      "message": "The hub didn't reconnect after the update"
+    },
+    "ota_previous_firmware": {
+      "message": "The hub restarted on the previous firmware"
+    },
     "ota_dev_key": {
       "message": "This hub trusts the public dev OTA key, so any image signed with it would be accepted. Rebuild the hub with a release key, or set allow_dev_key to install anyway."
     },

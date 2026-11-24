@@ -99,6 +99,9 @@ TOPIC_AVAILABLE = "available"  # the hub connection went up or down
 TOPIC_ACTIVITY = "activity"  # the running activity or the activity list
 TOPIC_CONFIG = "config"  # a new applied config (devices, key names)
 TOPIC_OTA = "ota"  # firmware update state or progress
+FW_RECONNECT_WAIT = (
+    300.0  # seconds to wait for the hub to reconnect on the new build after the update
+)
 TOPIC_LINK = "link"  # the add-on link state, revision or last error
 UNMAPPED_LOG_S = 5.0  # at most one "key has no Home Assistant mapping" line per this many seconds
 
@@ -330,6 +333,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
         self.ota_reason: str | None = None  # why the hub rolled back (its boot hook's text)
         self._ota_lock = asyncio.Lock()
         self._ota_wake = asyncio.Event()  # set on connection / OTA-status events: wakes _wait_for
+        self._ota_dropped = False  # the link dropped after ota_end: the hub really restarted
         self._rolled_back: set[int] = set()  # builds the hub reported rolling back
         self.page_pushes = 0  # page_push requests sent
         self.theme_pushes = 0  # theme_push requests sent
@@ -1640,6 +1644,8 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
     @callback
     def _on_state(self, connected: bool, err: HarmonyError | None) -> None:
         self.available = connected
+        if not connected and self.ota_state == "applying":
+            self._ota_dropped = True
         self._ota_wake.set()
         self.addon_send("hub", online=connected)
         self.btm.send_state()
@@ -1880,6 +1886,7 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
                     self._set_ota("failed", error=f"{exc.code}: {exc.message}")
                     raise ha_error("ota_failed", error=f"{exc.code}: {exc.message}") from exc
             self._set_ota("applying", progress=100)
+            self._ota_dropped = False
             try:
                 await self.client.async_send(MsgType.OTA_END, {})
             except HarmonyCommandError as exc:  # the hub answered: it refused, nothing was applied
@@ -1888,18 +1895,27 @@ class HarmonyCoordinator(DataUpdateCoordinator[None]):
             except HarmonyConnectionError:
                 pass  # outcome unknown: judged below by what the hub reports after it comes back
             if not await self._await_build(image.build):
-                self._set_ota("failed", error="the hub did not report the new build")
-                raise ha_error("ota_failed", error="the hub did not report the new build")
+                if not self.client.connected:
+                    # no verdict: a slow hub may still reconnect on the new build (installed_version then
+                    # follows by itself), so this is not a failed update
+                    self._set_ota("idle", error="the hub didn't reconnect after the update")
+                    raise ha_error("ota_hub_no_reconnect")
+                if not self._ota_dropped:  # it never restarted: the image was not applied
+                    self._set_ota("failed", error="the hub did not restart")
+                    raise ha_error("ota_failed", error="the hub did not restart")
+                self._set_ota("failed", error="the hub restarted on the previous firmware")
+                raise ha_error("ota_previous_firmware")
             self._clear_ota_issues()
             self._set_ota("installed", progress=100)
 
-    async def _await_build(self, build: int, timeout: float = 240.0) -> bool:
-        """Wait (generously: apply + restart is a minute or two) for a connected hub reporting `build`;
-        a rollback of that build reported meanwhile ends it."""
+    async def _await_build(self, build: int, timeout: float = FW_RECONNECT_WAIT) -> bool:
+        """Wait (generously: apply + restart is a minute or two; FW_RECONNECT_WAIT) for a connected hub reporting `build`;
+        a rollback of that build, or a reconnect on another build after the link dropped, ends it."""
         await self._wait_for(
             lambda: (
                 (self.client.connected and self.client.fw_build == build)
                 or build in self._rolled_back
+                or (self._ota_dropped and self.client.connected)
             ),
             timeout,
         )

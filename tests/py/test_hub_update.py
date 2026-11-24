@@ -1,10 +1,11 @@
 """The hub firmware update entity: the add-on's `fw` announcement, version compare by build, the install flow."""
 
+import asyncio
 import hashlib
 from types import SimpleNamespace
 
 import pytest
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from test_ota_ha import ScriptedHub, make_image, rig  # noqa: F401  (rig is a fixture)
 
 import custom_components.ha_harmony  # noqa: F401  (before the HA plugin shadows it)
@@ -154,3 +155,192 @@ async def test_install_without_an_addon_image_is_refused(hass, rig):  # noqa: F8
         await c.async_install_addon_firmware()
     assert e.value.translation_key == "ota_no_addon_image"
     assert not any(t.startswith("ota_") for t in hub.seen)
+
+
+async def _install_with_trace(hass, c, img):
+    """Run the install; record (update entity, a sibling entity) states at every connection change."""
+    c.addon_fw = fw_for(img, 12)
+
+    async def fetch():
+        return img
+
+    c._link = SimpleNamespace(fetch_firmware=fetch)
+    trace = []
+
+    def on_avail():
+        up = hass.states.get(EID)
+        others = [
+            s.state
+            for s in hass.states.async_all()
+            if s.entity_id != EID
+            and s.entity_id.startswith(("sensor.harmony_hub", "binary_sensor.harmony_hub"))
+        ]
+        trace.append((c.available, up.state, up.attributes.get("in_progress"), others))
+
+    c.async_subscribe_topics(("available",), on_avail)
+    return trace
+
+
+async def test_update_entity_stays_available_in_progress_while_the_hub_reboots(hass, rig):  # noqa: F811
+    hub = ScriptedHub()
+    c = await rig(hub)
+    img = make_image(b"z" * 600, build=12)
+    trace = await _install_with_trace(hass, c, img)
+    await hass.services.async_call("update", "install", {"entity_id": EID}, blocking=True)
+    offline = [t for t in trace if t[0] is False]
+    assert offline, trace
+    for _, state, in_progress, others in offline:
+        assert state != "unavailable" and in_progress is True
+        assert others and set(others) == {"unavailable"}  # every other hub entity goes unavailable
+    st = entity_state(hass)
+    assert st.attributes["in_progress"] is False
+    assert st.attributes["installed_version"].endswith("(12)")
+
+
+async def test_update_entity_clears_on_the_reconnect_itself(hass, rig):  # noqa: F811
+    hub = ScriptedHub()
+    c = await rig(hub)
+    img = make_image(b"z" * 600, build=12)
+    c.addon_fw = fw_for(img, 12)
+
+    async def fetch():
+        return img
+
+    c._link = SimpleNamespace(fetch_firmware=fetch)
+    seen = []  # (connected, update state, in_progress, installed_version) per push
+
+    def note():
+        st = hass.states.get(EID)
+        seen.append(
+            (
+                c.available,
+                st.state,
+                st.attributes.get("in_progress"),
+                st.attributes.get("installed_version"),
+            )
+        )
+
+    c.async_subscribe_topics(("available", "ota"), note)
+    await hass.services.async_call("update", "install", {"entity_id": EID}, blocking=True)
+    first_off = next(i for i, t in enumerate(seen) if t[0] is False)
+    after = seen[first_off:]
+    assert all(t[1] != "unavailable" for t in after)  # never "unavailable" across the reboot
+    assert all(t[2] is True for t in after[:-1])  # in_progress until the last push
+    assert after[-1][0] is True and after[-1][2] is False and after[-1][3].endswith("(12)")
+
+
+class StuckHub(ScriptedHub):
+    """Applies nothing: after ota_end the hub reconnects still on its old build."""
+
+    async def __call__(self, ws, env):
+        await super().__call__(ws, env)
+        self.fw_build = 11
+
+
+class GoneHub(ScriptedHub):
+    """After ota_end the hub never completes a hello again."""
+
+    async def __call__(self, ws, env):
+        if env["t"] == "hello" and self.ends:
+            await ws.close()
+            return
+        await super().__call__(ws, env)
+
+
+class NoDropHub(ScriptedHub):
+    """Accepts ota_end but never restarts: the link stays up on the old build."""
+
+    async def __call__(self, ws, env):
+        if env["t"] == "ota_end":
+            self.ends += 1
+            await ws.send_json({"v": 1, "id": env["id"], "t": "ota_status", "d": {"state": "applied", "offset": 0, "size": 0, "build": 12}})  # fmt: skip
+            return
+        await super().__call__(ws, env)
+
+
+def _short_wait(monkeypatch, c, secs=0.5):
+    orig = type(c)._await_build
+
+    async def short(self, build, timeout=secs):
+        return await orig(self, build, secs)
+
+    monkeypatch.setattr(type(c), "_await_build", short)
+
+
+async def test_reconnect_on_the_previous_firmware_is_a_failed_update(hass, rig, monkeypatch):  # noqa: F811
+    c = await rig(StuckHub())
+    await _install_with_trace(hass, c, make_image(b"z" * 600, build=12))
+    _short_wait(monkeypatch, c)
+    with pytest.raises(HomeAssistantError) as e:
+        await hass.services.async_call("update", "install", {"entity_id": EID}, blocking=True)
+    assert e.value.translation_key == "ota_previous_firmware"
+    assert str(e.value) == "The hub restarted on the previous firmware"
+    assert c.ota_state == "failed"
+    st = entity_state(hass)
+    assert st.attributes["in_progress"] is False
+    assert st.attributes["installed_version"].endswith("(11)")
+
+
+async def test_previous_firmware_verdict_comes_at_the_reconnect_not_after_the_wait(
+    hass,
+    rig,  # noqa: F811
+    monkeypatch,
+):
+    import time
+
+    c = await rig(StuckHub())
+    await _install_with_trace(hass, c, make_image(b"z" * 600, build=12))
+    _short_wait(monkeypatch, c, 30.0)
+    t0 = time.monotonic()
+    with pytest.raises(HomeAssistantError) as e:
+        await hass.services.async_call("update", "install", {"entity_id": EID}, blocking=True)
+    assert e.value.translation_key == "ota_previous_firmware"
+    assert time.monotonic() - t0 < 10  # far under the 30 s wait
+
+
+async def test_a_hub_that_never_restarts_is_a_plain_failed_install(
+    hass,
+    rig,  # noqa: F811
+    monkeypatch,
+):
+    c = await rig(NoDropHub())
+    await _install_with_trace(hass, c, make_image(b"z" * 600, build=12))
+    _short_wait(monkeypatch, c)
+    with pytest.raises(HomeAssistantError) as e:
+        await hass.services.async_call("update", "install", {"entity_id": EID}, blocking=True)
+    assert e.value.translation_key == "ota_failed"
+    assert c.ota_state == "failed"
+    assert entity_state(hass).attributes["in_progress"] is False
+
+
+async def test_hub_not_reconnecting_clears_progress_without_calling_it_failed(
+    hass,
+    rig,  # noqa: F811
+    monkeypatch,
+):
+    hub = GoneHub()
+    c = await rig(hub)
+    await _install_with_trace(hass, c, make_image(b"z" * 600, build=12))
+    _short_wait(monkeypatch, c)
+    with pytest.raises(HomeAssistantError) as e:
+        await hass.services.async_call("update", "install", {"entity_id": EID}, blocking=True)
+    assert e.value.translation_key == "ota_hub_no_reconnect"
+    assert str(e.value) == "The hub didn't reconnect after the update"
+    assert c.ota_state == "idle"
+    assert entity_state(hass).state == "unavailable"  # offline again: normal availability applies
+    hub.ends = 0  # the hub now accepts hellos: it is on the new build
+    up = asyncio.Event()
+    c.async_subscribe_topics(("available",), lambda: up.set() if c.available else None)
+    await asyncio.wait_for(up.wait(), 10)
+    await hass.async_block_till_done()
+    st = entity_state(hass)
+    assert st.attributes["in_progress"] is False
+    assert st.attributes["installed_version"].endswith("(12)")
+
+
+async def test_update_entity_is_unavailable_when_the_hub_is_offline_and_no_install_runs(hass, rig):  # noqa: F811
+    c = await rig(ScriptedHub())
+    c.available = False
+    c._set_ota("failed", error="x")
+    await hass.async_block_till_done()
+    assert entity_state(hass).state == "unavailable"
