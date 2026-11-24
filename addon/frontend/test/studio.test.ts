@@ -350,6 +350,95 @@ describe('remote studio', () => {
     });
   });
 
+  describe('drag and resize on screen 2 of a multi-screen fixed page', () => {
+    // 12 buttons, 3 per row on even rows (odd rows free), w 3 with a free column between; screen 1 draws 0..5, screen 2 draws 6..11
+    function fixture(store: Store) {
+      const widgets = Array.from({ length: 12 }, (_, i) => ({ type: 'button', id: `d${i}`, x: (i % 3) * 4, y: 2 * Math.floor(i / 3), w: 3, h: 1, label: `D${i}`, action: { none: true } }));
+      const wpage = (srcs: number[]) => ({ ...(page as object), version: 2, cols: 12, rows: 4, fixed: true, widgets: srcs.map((src, k) => ({ kind: 'button', x: (k % 3) * 4, y: Math.floor(k / 3), w: 3, h: 1, label: `D${src}`, shape: 'card', icon: 0, icon_only: false, src })) });
+      const s1 = wpage([0, 1, 2, 3, 4, 5]);
+      const s2 = wpage([6, 7, 8, 9, 10, 11]);
+      store.config.pages = [{ id: 'main', title: 'Main', layout: 'fixed', cols: 12, rows: 9, widgets }] as never;
+      store.pages = [{ index: 0, id: 'main', ok: true, error: null, page: s1, wire_pages: [{ page_id: 0, seq: null, bytes: 1, bytes_v1: 1, widgets: 6, page: s1 }, { page_id: 1, seq: null, bytes: 1, bytes_v1: 1, widgets: 6, page: s2 }], bytes: 1, bytes_v1: 1, limit: 251, widgets: 12, widget_limit: 32 }] as never;
+      store.dispatchEvent(new Event('change'));
+      return { s1, s2 };
+    }
+    const CW = 240 / 12;
+    const CH = 288 / 9; // one config cell in screen pixels
+    async function drag(remote: El, index: number, dx: number, dy: number, resize = false) {
+      const r = remote as unknown as { screenPoint: unknown };
+      let pt = { x: 100, y: 100 };
+      r.screenPoint = () => pt;
+      const sel = resize ? '.handle' : `[data-widget="${index}"]`;
+      if (resize) {
+        remote.shadowRoot.querySelector(`[data-widget="${index}"]`)!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1 }));
+        await tick(remote);
+      }
+      const el = remote.shadowRoot.querySelector(sel)!;
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1 }));
+      pt = { x: 100 + dx, y: 100 + dy };
+      el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1 }));
+      el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+      await tick(remote);
+    }
+    const wireOf = (remote: El) => (remote as unknown as { st: { wire: number } }).st.wire;
+    it('dragging one cell right and one row down on screen 2 changes x and y by exactly 1 and the widget stays on screen 2', async () => {
+      const { remote, store } = await boot();
+      const { s2 } = fixture(store);
+      (remote as unknown as { st: { wire: number } }).st.wire = 1;
+      await tick(remote);
+      const before = { ...(store.config.pages![0]!.widgets[7] as { x: number; y: number }) };
+      await drag(remote, 7, CW, CH);
+      const w = store.config.pages![0]!.widgets[7] as { x: number; y: number; w: number };
+      expect([w.x - before.x, w.y - before.y]).toEqual([1, 1]);
+      expect(wireOf(remote)).toBe(1);
+      const r = widgetRect(s2 as never, s2.widgets[1] as never); // the recompile still draws it as compiled widget 1 of screen 2
+      const el = remote.shadowRoot.querySelector('[data-widget="7"]')!;
+      expect([Number(el.getAttribute('x')), Number(el.getAttribute('y'))]).toEqual([r.x1, r.y1]);
+      expect(remote.shadowRoot.querySelector('[data-widget="1"]')).toBeNull();
+    });
+    it('resizing by one column on screen 2 changes w by exactly 1', async () => {
+      const { remote, store } = await boot();
+      fixture(store);
+      (remote as unknown as { st: { wire: number } }).st.wire = 1;
+      await tick(remote);
+      await drag(remote, 7, CW, 0, true);
+      expect((store.config.pages![0]!.widgets[7] as { w: number }).w).toBe(4);
+    });
+    it('while dragging on screen 2 the ghost sits at the widget moved by the cell delta, not at the config grid row', async () => {
+      const { remote, store } = await boot();
+      const { s2 } = fixture(store);
+      (remote as unknown as { st: { set(p: object): void } }).st.set({ wire: 1 });
+      await tick(remote);
+      let pt = { x: 100, y: 100 };
+      (remote as unknown as { screenPoint: unknown }).screenPoint = () => pt;
+      const el = remote.shadowRoot.querySelector('[data-widget="7"]')!;
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1 }));
+      pt = { x: 100 + CW, y: 100 + CH };
+      el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1 }));
+      await tick(remote);
+      const g = remote.shadowRoot.querySelector('rect.ghost')!;
+      const r = widgetRect(s2 as never, s2.widgets[1] as never);
+      expect([Number(g.getAttribute('x')), Number(g.getAttribute('y'))]).toEqual([r.x1 + CW, r.y1 + CH]);
+      expect(Number(g.getAttribute('width'))).toBe(r.x2 - r.x1 + 1);
+    });
+    it('dragging past the bottom is refused on screen 2 exactly as on screen 1: nothing changes and it says so', async () => {
+      const { remote, store, studio } = await boot();
+      fixture(store);
+      await tick(remote);
+      const said = () => (studio as unknown as { st: { announcement: string } }).st.announcement.trim();
+      const snap = JSON.stringify(store.config.pages);
+      await drag(remote, 4, 0, CH * 8); // screen 1
+      const first = said();
+      expect(JSON.stringify(store.config.pages)).toBe(snap);
+      (remote as unknown as { st: { set(p: object): void } }).st.set({ wire: 1 });
+      await tick(remote);
+      await drag(remote, 10, 0, CH * 8); // screen 2
+      expect(JSON.stringify(store.config.pages)).toBe(snap);
+      expect(said()).toBe(first);
+      expect(first).toBe('That spot is taken or off the grid');
+    });
+  });
+
   describe('issue markers and the inspector line', () => {
     const msg = 'Main: "Go" is 4 px too wide for its b13 slot; use "Power"';
     const check = (extra: object = {}) => ({ kind: 'label' as const, page: 0, index: 0, msg, short: 'Power', ...extra });

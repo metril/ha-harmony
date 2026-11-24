@@ -514,7 +514,9 @@ export class HhRemote extends LitElement {
     const s = this.session;
     if (s?.moved) {
       const b = s.ghost;
-      const r = widgetRect({ cols: g.cols, rows: g.rows, version: 2 } as V2Page, { x: Math.max(0, Math.min(g.cols - 1, b.x)), y: Math.max(0, Math.min(g.rows - 1, b.y - g.shift)), w: Math.max(1, Math.min(b.w, g.cols - Math.max(0, b.x))), h: Math.max(1, Math.min(b.h, g.rows - Math.max(0, b.y - g.shift))) });
+      const at = this.multiScreen() ? this.rectOf(page, s.index, v2, map) : null;
+      // a multi-screen page is drawn in compiled geometry: move the drawn widget by the cell delta instead of using the config grid's rows
+      const r = at ? { x1: at.x1 + (b.x - s.box.x) * (240 / g.cols), y1: at.y1 + (b.y - s.box.y) * (288 / g.rows), x2: at.x2 + (b.x + b.w - s.box.x - s.box.w) * (240 / g.cols), y2: at.y2 + (b.y + b.h - s.box.y - s.box.h) * (288 / g.rows) } : widgetRect({ cols: g.cols, rows: g.rows, version: 2 } as V2Page, { x: Math.max(0, Math.min(g.cols - 1, b.x)), y: Math.max(0, Math.min(g.rows - 1, b.y - g.shift)), w: Math.max(1, Math.min(b.w, g.cols - Math.max(0, b.x))), h: Math.max(1, Math.min(b.h, g.rows - Math.max(0, b.y - g.shift))) });
       ghost = svg`<rect class=${s.valid ? 'ghost' : 'ghost invalid'} x=${r.x1} y=${r.y1} width=${r.x2 - r.x1 + 1} height=${r.y2 - r.y1 + 1} rx="10"></rect>`;
     }
     return svg`<g class="grid">${lines}</g>${cell}<g role="application" aria-label="Remote screen editor" @keydown=${(e: KeyboardEvent) => this.onScreenKey(e)}>${widgets}</g>${markers}${handle}${ghost}`;
