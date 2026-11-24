@@ -48,7 +48,7 @@ export interface RenderOpts {
   /** back stack depth of the page (the remote's chevron shows above 1); default: Home 1, every other page 2 */
   depth?: number;
   /** studio: outline every label the remote would cut, with a -N px badge */
-  flagOverflow?: boolean;
+  flagOverflow?: boolean; // the Studio no longer sets this (the amber issue dot replaces it); kept for renderer-fit tests and re-enable
 }
 export interface Scene {
   w: number;
@@ -394,6 +394,7 @@ export function layoutPage(p: V2Page, opts: RenderOpts = {}): Scene {
   barPrims(p, opts, T, prims);
   p.widgets.forEach((w, i) => {
     widgetPrims(p, w, i, opts, T, prims);
+    // not enabled by the Studio any more (amber issue dot); kept for renderer-fit tests and re-enable
     if (opts.flagOverflow) flagPrims(p, w, i, prims);
   });
   return { w: SCREEN_W, h: SCREEN_H, prims };

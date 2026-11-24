@@ -174,7 +174,17 @@ export class HhStudio extends StoreElement implements StudioHost {
   private onShowIssue = (e: CustomEvent<Issue>) => {
     this.store.pendingIssue = null;
     this.applyIssue(e.detail);
+    void this.focusAfterIssue();
   };
+  /** The popover that held focus is gone: land on the selected widget's rect, else the page's main region. */
+  private async focusAfterIssue(): Promise<void> {
+    await this.updateComplete;
+    await this.remote?.updateComplete;
+    const sel = this.st.sel;
+    const rect = sel?.kind === 'widget' ? this.remote?.shadowRoot?.querySelector<SVGElement>(`[data-widget="${sel.index}"]`) : null;
+    if (rect) rect.focus();
+    else (document.querySelector('hh-app')?.shadowRoot?.querySelector('main') as HTMLElement | null)?.focus();
+  }
   private applyIssue(i: Issue): void {
     const t = i.target;
     if (t?.kind === 'error') return this.showError(t.path);
@@ -203,6 +213,7 @@ export class HhStudio extends StoreElement implements StudioHost {
     if (pend) {
       s.pendingIssue = null;
       this.applyIssue(pend);
+      void this.focusAfterIssue();
     }
     if (s.config !== this.lastCfg) {
       this.lastCfg = s.config;

@@ -185,9 +185,13 @@ export class HhDraftBar extends StoreElement {
     const issues = collectIssues(s.errors, s.warnings, s.checks, s.config);
     const errs = issues.filter((i) => i.level === 'error').length;
     const warns = issues.length - errs;
-    if (!issues.length) return statusChip('ok', 'Valid', { check: true });
+    if (!issues.length) {
+      this.issuesOpen = false;
+      return statusChip('ok', 'Valid', { check: true });
+    }
     const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
-    const label = errs ? `✗ ${plural(errs, 'error')}${warns ? ` · ${plural(warns, 'warning')}` : ''}` : `⚠ ${plural(warns, 'warning')}`;
+    const words = errs ? `${plural(errs, 'error')}${warns ? ` · ${plural(warns, 'warning')}` : ''}` : plural(warns, 'warning');
+    const label = html`<span aria-hidden="true">${errs ? '✗' : '⚠'}</span> ${words}`;
     return html`<div class="issues" @keydown=${(e: KeyboardEvent) => e.key === 'Escape' && this.issuesOpen && this.closeIssues(true)}>
       <button class=${classMap({ chip: true, chipbtn: true, bad: errs > 0, warn: errs === 0 })} id="issues-chip" aria-expanded=${this.issuesOpen} aria-controls="issues-pop" aria-haspopup="dialog" @click=${() => (this.issuesOpen = !this.issuesOpen)}>${label}</button>
       ${this.issuesOpen
@@ -199,7 +203,7 @@ export class HhDraftBar extends StoreElement {
   }
   private issueRow(i: Issue) {
     return html`<div class="row"><span class="lvl ${i.level}" role="img" aria-label=${i.level}>${i.level === 'error' ? '✗' : '⚠'}</span><span class="msg">${i.text}</span>${i.target
-      ? html`<button class="btn sm" @click=${() => { this.closeIssues(false); this.store.showIssue(i); }}>Show</button>`
+      ? html`<button class="btn sm" aria-label=${`Show: ${i.text}`} @click=${() => { this.closeIssues(false); this.store.showIssue(i); }}>Show</button>`
       : nothing}</div>`;
   }
 }

@@ -537,6 +537,31 @@ describe('draft bar issues chip', () => {
     await settle(b);
     expect(b.shadowRoot!.querySelector('#issues-pop')).toBeNull();
     expect(document.activeElement).toBe(other);
+    other.remove();
+  });
+  it('chip glyph is aria-hidden, Show buttons are labelled', async () => {
+    const { app, store } = await boot();
+    store.setChecks([chk('device glyph', 0, 1)]);
+    const b = await bar(app);
+    const chip = b.shadowRoot!.querySelector('#issues-chip') as HTMLButtonElement;
+    expect(chip.querySelector('[aria-hidden="true"]')?.textContent).toBe('⚠');
+    expect(chip.textContent?.replace(/\s+/g, ' ').trim()).toContain('1 warning');
+    chip.click();
+    await settle(b);
+    expect(b.shadowRoot!.querySelector('#issues-pop .row button')?.getAttribute('aria-label')).toMatch(/^Show: .*device glyph/);
+  });
+  it('popover stays closed when issues clear then reappear', async () => {
+    const { app, store } = await boot();
+    store.setChecks([chk('a')]);
+    const b = await bar(app);
+    (b.shadowRoot!.querySelector('#issues-chip') as HTMLElement).click();
+    await settle(b);
+    expect(b.shadowRoot!.querySelector('#issues-pop')).not.toBeNull();
+    store.setChecks([]);
+    await settle(b);
+    store.setChecks([chk('b')]);
+    await settle(b);
+    expect(b.shadowRoot!.querySelector('#issues-pop')).toBeNull();
   });
   it('Show on a check for a deleted page does not throw', async () => {
     const { app, store } = await boot();

@@ -301,6 +301,12 @@ describe('remote studio', () => {
       expect(Number(m[0]!.getAttribute('cx'))).toBeGreaterThan(Number(r.getAttribute('x')) + Number(r.getAttribute('width')) - 10);
       expect(Number(m[0]!.getAttribute('cy'))).toBeLessThan(Number(r.getAttribute('y')) + 10);
     });
+    it('a widget with a marker says it has a warning in its label', async () => {
+      const { remote, store } = await boot();
+      inject(store, [check()]);
+      await tick(remote);
+      expect(remote.shadowRoot.querySelector('[data-widget="0"]')!.getAttribute('aria-label')).toContain(', has a warning');
+    });
     it('the inspector shows one issue line with a fix button, and the page view has no issue list', async () => {
       const { insp, store } = await inspectorFor({ kind: 'widget', page: 0, index: 0 });
       inject(store, [check({ msg: 'x'.repeat(200) + ' use "Power"' })]);

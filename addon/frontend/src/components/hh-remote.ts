@@ -471,7 +471,7 @@ export class HhRemote extends LitElement {
       if (errs.has(i)) cls.push('bad');
       if (sc && w.type !== 'label') cls.push('tgt');
       if (over?.kind === 'widget' && over.page === st.page && over.index === i) cls.push('over');
-      const label = `${w.type} ${w.label ?? ''}${errs.has(i) ? ', has an error' : ''}`.trim();
+      const label = `${w.type} ${w.label ?? ''}${errs.has(i) ? ', has an error' : ''}${marks.has(i) ? ', has a warning' : ''}`.trim();
       return svg`<rect class=${cls.join(' ')} data-widget=${i} x=${r.x1} y=${r.y1} width=${r.x2 - r.x1 + 1} height=${r.y2 - r.y1 + 1} rx="10"
         role="button" tabindex="0" aria-label=${label} aria-pressed=${i === sel ? 'true' : 'false'}
         @pointerdown=${(e: PointerEvent) => this.onWidgetDown(e, st.page, i)}
