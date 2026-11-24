@@ -11,7 +11,19 @@ permissions:
   contents: read
 
 jobs:
+  # The signed hub image, built once for both architectures. Only on a version tag (the release key is an
+  # environment secret restricted to v* tags); anywhere else (a manual run from a branch) the image is built without it.
+  firmware:
+    if: github.ref_type == 'tag'
+    uses: ./.github/workflows/hub-firmware.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
   publish:
+    needs: firmware
+    # run when the firmware job succeeded or was skipped, never after it failed
+    if: ${{ !cancelled() && (needs.firmware.result == 'success' || needs.firmware.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -27,6 +39,12 @@ jobs:
             platform: linux/arm64
     steps:
       - uses: actions/checkout@v4
+      - name: Bundle the signed hub image
+        if: needs.firmware.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-firmware
+          path: addon/firmware
       - name: Read the add-on version and refuse a tag mismatch
         id: v
         run: |

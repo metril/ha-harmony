@@ -1,0 +1,93 @@
+name: hub-firmware
+
+# Builds the hub once (big-endian MIPS, MinSizeRel), signs it with the RELEASE key and uploads the artifact
+# `hub-firmware` (hub.img + hub.json {version, build, size, sha512}). Only called on a vX.Y.Z tag (addon-publish.yml
+# bundles it into the add-on images, release.yml attaches it to the GitHub release). The dev key is never used here:
+# the build compiles in common/ota/ota_pubkey_release.h and the key file is checked against that header before any
+# signing. The secret lives in the GitHub Environment `release` (restricted to v* tags).
+on:
+  workflow_call:
+    secrets:
+      OTA_SIGNING_KEY:
+        required: false  # supplied by `secrets: inherit`; the environment's value wins; an empty one fails below
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    env:
+      HP_TOOLCHAIN_ROOT: ${{ github.workspace }}/vendor/toolchains/mips_24kc
+      STAGING_DIR: ${{ github.workspace }}/vendor/toolchains/mips_24kc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the build id is the commit count
+      - name: Full history, and a build id above the floor
+        run: |
+          [ "$(git rev-parse --is-shallow-repository)" = false ] || { echo "shallow checkout: the build id would be wrong"; exit 1; }
+          count=$(git rev-list --count HEAD)
+          floor=$(head -n1 cmake/build_id_floor.txt)
+          echo "commits=$count floor=$floor"
+          [ "$count" -ge "$floor" ] || { echo "commit count $count is below cmake/build_id_floor.txt ($floor): history was rewritten"; exit 1; }
+      - name: Cache toolchain
+        uses: actions/cache@v4
+        with:
+          path: vendor/toolchains
+          key: tc-hub-${{ hashFiles('tools/fetch_toolchains.sh') }}
+      - name: Cross toolchain (pinned by sha256)
+        run: tools/fetch_toolchains.sh hub
+      - name: Host ota_sign
+        run: |
+          cmake -S . -B build-host
+          cmake --build build-host -j --target ota_sign
+      - name: Release key matches the committed public header
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          [ -n "$OTA_SIGNING_KEY" ] || { echo "OTA_SIGNING_KEY is empty (environment release)"; exit 1; }
+          umask 077
+          printf '%s\n' "$OTA_SIGNING_KEY" > "$RUNNER_TEMP/k"
+          derived=$(build-host/ota_sign pubkey -k "$RUNNER_TEMP/k")
+          # the header spells the key as 0xNN, ... bytes: reduce it to the same hex string
+          committed=$(sed -n 's/.*{ *\(0x.*\) *}.*/\1/p' common/ota/ota_pubkey_release.h | sed 's/0x//g; s/[ ,]//g')
+          echo "public key: $derived"
+          if [ -z "$committed" ] || [ "$derived" != "$committed" ]; then
+            echo "the signing key does not match common/ota/ota_pubkey_release.h"
+            exit 1
+          fi
+          grep -q 'OTA_PUBKEY_IS_DEV 0' common/ota/ota_pubkey_release.h
+      - name: Cross-build the hub with the release public key
+        run: |
+          cmake -S . -B build-cross -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DHP_OTA_PUBKEY_HEADER="$PWD/common/ota/ota_pubkey_release.h" \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/hub-mips.cmake"
+          cmake --build build-cross -j --target hub
+      - name: Size budget, sign, verify
+        run: |
+          file build-cross/hub | grep -E 'ELF 32-bit MSB.*MIPS.*statically linked'
+          python3 tools/check_hub_size.py build-cross/hub
+          mkdir -p out
+          build-host/ota_sign sign -k "$RUNNER_TEMP/k" -t hub build-cross/hub out/hub.img
+          pub=$(build-host/ota_sign pubkey -k "$RUNNER_TEMP/k")
+          verified=$(build-host/ota_sign verify -t hub -p "$pub" out/hub.img)
+          echo "$verified"
+          build=$(echo "$verified" | sed -n 's/.*build=\([0-9]*\).*/\1/p')
+          [ -n "$build" ] || { echo "no build id in the signed image"; exit 1; }
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' harmony_core/__init__.py)
+          sha=$(sha512sum out/hub.img | cut -d' ' -f1)
+          size=$(stat -c %s out/hub.img)
+          printf '{"version":"%s","build":%s,"size":%s,"sha512":"%s"}\n' "$version" "$build" "$size" "$sha" > out/hub.json
+          cat out/hub.json
+      - name: Remove the key file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/k"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hub-firmware
+          path: out/
+          if-no-files-found: error
+          retention-days: 7

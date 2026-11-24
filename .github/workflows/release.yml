@@ -3,7 +3,8 @@ name: release
 # One tag does everything: push `vX.Y.Z` (matching harmony_core.__version__, manifest.json and
 # addon/config.yaml). The workflow checks the versions, runs the full ci suite, builds and pushes the
 # add-on image (addon-publish, via workflow_call: tags pushed with GITHUB_TOKEN trigger nothing), verifies
-# the image manifests exist on ghcr, and only then creates the GitHub release with ha_harmony.zip.
+# the image manifests exist on ghcr, and only then creates the GitHub release with ha_harmony.zip and the signed
+# hub-X.Y.Z.img (built and signed once by hub-firmware.yml with the release key, the same image the add-on bundles).
 # There is no separate addon-v* tag. addon-publish stays runnable by hand (workflow_dispatch).
 on:
   push:
@@ -38,6 +39,7 @@ jobs:
   addon-image:
     needs: ci
     uses: ./.github/workflows/addon-publish.yml
+    secrets: inherit  # OTA_SIGNING_KEY (environment `release`) reaches hub-firmware.yml
     permissions:
       contents: read
       packages: write
@@ -67,6 +69,11 @@ jobs:
             docker buildx imagetools inspect "ghcr.io/metril/ha-harmony-editor-${arch}:${v}" > /dev/null \
               || { echo "missing ghcr image ${arch}:${v}"; exit 1; }
           done
+      - name: Signed hub image from this run
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-firmware
+          path: hub-firmware
       - name: Install Python deps
         run: uv sync --locked
       - name: Build package
@@ -75,5 +82,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/ha_harmony.zip \
+          cp hub-firmware/hub.img "dist/hub-${GITHUB_REF_NAME#v}.img"
+          gh release create "$GITHUB_REF_NAME" dist/ha_harmony.zip "dist/hub-${GITHUB_REF_NAME#v}.img" \
             --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
